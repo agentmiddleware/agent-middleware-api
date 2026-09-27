@@ -67,7 +67,11 @@ from app.services.upstream_mcp import (
     UpstreamMcpDeliveryUncertainError,
     UpstreamMcpResult,
 )
-from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
+from tests.test_trust_helpers import (
+    BOOTSTRAP_HEADERS,
+    create_tool_permit,
+    provision_agent_wallet,
+)
 
 
 @dataclass(frozen=True)
@@ -2224,7 +2228,9 @@ async def test_concurrent_reclaims_credit_the_parent_once_in_postgres() -> None:
     assert all(
         "already closed" in str(exc).lower() or "balance changed" in str(exc).lower()
         for exc in refused
-    )
+    ), refused
+    assert await _wallet_balance(parent.wallet_id) == parent_before + Decimal("150")
+    assert await _wallet_balance(child.wallet_id) == Decimal("0")
 
 
 # ============================================================================
@@ -2232,25 +2238,46 @@ async def test_concurrent_reclaims_credit_the_parent_once_in_postgres() -> None:
 # ============================================================================
 
 
-@pytest.mark.asyncio(loop_scope="session")
-async def test_concurrent_remote_cap_1_allows_exactly_one_dispatch() -> None:
-    """10 parallel new-key calls on cap=1 remote tool: exactly 1 dispatch.
-    
-    This test proves that per-tool call caps work correctly under concurrent load:
-    the row lock on the permit serializes reservation attempts, so exactly one
-    succeeds and dispatches while the rest are denied with permit_max_calls_exceeded.
-    
-    This test FAILS on pre-fix code (before max_calls_per_tool support for remote tools).
-    """
-    _require_opted_in_postgres()
-    
-    # Register upstream tool
-    tool_name = "test.concurrent.cap1"
-    executor = PausedUpstreamExecutor()
-    
-    def make_result(args: dict[str, Any]) -> UpstreamMcpResult:
-        payload = {"content": [{"type": "text", "text": "ok"}], "isError": False}
-        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+@dataclass
+class ConcurrentUpstreamExecutor:
+    """Fake partner executor whose dispatch can be delayed so calls overlap."""
+
+    mode: str = "success"
+    calls: list[dict[str, Any]] = field(default_factory=list)
+    dispatch_count: int = 0
+    delay_seconds: float = 0.0
+
+    async def call_tool(
+        self,
+        arguments: dict[str, Any],
+        *,
+        invocation_id: str,
+        idempotency_key: str,
+        before_dispatch: Callable[[], Awaitable[None]],
+    ) -> UpstreamMcpResult:
+        self.calls.append(
+            {
+                "arguments": arguments,
+                "invocation_id": invocation_id,
+                "idempotency_key": idempotency_key,
+            }
+        )
+        if self.delay_seconds > 0:
+            await asyncio.sleep(self.delay_seconds)
+        await before_dispatch()
+        self.dispatch_count += 1
+        if self.mode == "delivery_uncertain":
+            raise UpstreamMcpDeliveryUncertainError()
+        payload = {
+            "content": [{"type": "text", "text": "success"}],
+            "isError": False,
+        }
+        canonical = json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
         return UpstreamMcpResult(
             payload=payload,
             canonical_json=canonical,
@@ -2258,254 +2285,259 @@ async def test_concurrent_remote_cap_1_allows_exactly_one_dispatch() -> None:
             size_bytes=len(canonical.encode()),
             is_error=False,
         )
-    
+
+
+def _register_cap_test_upstream(
+    tool_name: str,
+    executor: ConcurrentUpstreamExecutor,
+) -> None:
     get_service_registry().register_upstream(
         service_id=tool_name,
-        name="Concurrent Cap Test Tool",
-        description="Test tool for concurrent cap enforcement",
+        name="PostgreSQL Capped Partner Tool",
+        description="Controlled remote MCP per-tool cap concurrency test tool",
         category=ServiceCategory.AGENT_COMMS,
         executor=executor,
-        input_schema={"type": "object"},
+        input_schema={
+            "type": "object",
+            "properties": {"message": {"type": "string"}},
+        },
         output_schema={"type": "object"},
-        credits_per_unit=Decimal("2"),
+        credits_per_unit=2.0,
         upstream_tool_name=tool_name,
-        upstream_origin="https://test.example",
+        upstream_origin="https://partner.example",
     )
-    
-    try:
-        # Create sponsor and agent wallets
-        sponsor_id = f"sponsor-{uuid.uuid4().hex[:16]}"
-        factory = get_session_factory()
-        async with factory() as session:
-            async with session.begin():
-                sponsor = WalletModel(
-                    wallet_id=sponsor_id,
-                    name="Concurrent Test Sponsor",
-                    wallet_type="sponsor",
-                    balance=Decimal("1000"),
+
+
+def _cap_test_call_body(
+    *,
+    tool_name: str,
+    wallet_id: str,
+    permit_id: str,
+    idempotency_key: str,
+    message: str = "test",
+) -> dict[str, Any]:
+    return {
+        "jsonrpc": "2.0",
+        "id": f"call-{idempotency_key}",
+        "method": "tools/call",
+        "params": {
+            "name": tool_name,
+            "arguments": {"message": message},
+            "mcpContext": {
+                "wallet_id": wallet_id,
+                "permit_id": permit_id,
+                "idempotency_key": idempotency_key,
+            },
+        },
+    }
+
+
+async def _create_cap_test_permit(
+    client: AsyncClient,
+    *,
+    wallet_id: str,
+    key_id: str,
+    tool_name: str,
+    max_calls: int,
+) -> str:
+    """Create a permit whose ``max_calls_per_tool`` caps ``tool_name``."""
+    permit_resp = await client.post(
+        "/v1/permits",
+        json={
+            "issuer_wallet_id": wallet_id,
+            "subject_wallet_id": wallet_id,
+            "subject_key_id": key_id,
+            "allowed_tools": [tool_name],
+            "scopes": [f"tool:{tool_name}:invoke", "billing:charge"],
+            "max_credits": 100,
+            "max_calls_per_tool": {tool_name: max_calls},
+            "expires_at": (utc_now() + timedelta(hours=1)).isoformat(),
+        },
+        headers={**BOOTSTRAP_HEADERS, "Idempotency-Key": f"permit-cap-{tool_name}"},
+    )
+    assert permit_resp.status_code == 201
+    return str(permit_resp.json()["permit_id"])
+
+
+async def _load_cap_test_state(
+    *,
+    permit_id: str,
+) -> tuple[dict[str, Any], list[McpDispatchAttemptModel]]:
+    """Return the permit's tool call counters and its dispatch attempts."""
+    factory = get_session_factory()
+    async with factory() as session:
+        permit = await session.get(PermitModel, permit_id)
+        assert permit is not None
+        counts = json.loads(permit.tool_call_counts_json or "{}")
+        attempts = list(
+            (
+                await session.execute(
+                    select(McpDispatchAttemptModel).where(
+                        McpDispatchAttemptModel.permit_id == permit_id
+                    )
                 )
-                session.add(sponsor)
-        
-        money = get_agent_money()
-        agent_wallet = await money.create_agent_wallet(
-            sponsor_wallet_id=sponsor_id,
-            agent_name="concurrent-test-agent",
+            )
+            .scalars()
+            .all()
         )
-        agent_id = agent_wallet["wallet_id"]
-        
-        # Create signing key
-        private_key = Ed25519PrivateKey.generate()
-        public_key_bytes = private_key.public_key().public_bytes(
-            encoding=Encoding.Raw, format=PublicFormat.Raw
-        )
-        key_id = f"key-{uuid.uuid4().hex[:16]}"
-        
-        async with factory() as session:
-            async with session.begin():
-                key_model = SigningKeyModel(
-                    key_id=key_id,
-                    wallet_id=agent_id,
-                    public_key=base64.b64encode(public_key_bytes).decode(),
-                    status="active",
-                    retired_at=None,
-                )
-                session.add(key_model)
-        
-        # Create permit with max_calls_per_tool=1
-        permit_service = PermitService()
-        permit = await permit_service.create(
-            issuer_wallet_id=agent_id,
-            subject_wallet_id=agent_id,
-            subject_key_id=key_id,
-            allowed_tools=[tool_name],
-            scopes=[f"tool:{tool_name}:invoke", "billing:charge"],
-            max_credits=Decimal("100"),
-            max_calls_per_tool={tool_name: 1},
-            expires_at=utc_now() + timedelta(hours=1),
-        )
-        permit_id = permit.permit_id
-        
-        # Launch 10 concurrent calls with different idempotency keys
-        async def make_call(idx: int) -> tuple[int, dict[str, Any]]:
-            idempotency_key = f"concurrent-cap-{idx}"
-            
-            async with factory() as session:
-                attempt_service = McpDispatchAttemptService()
-                validation, attempt = await attempt_service.authorize_reserve_and_prepare(
-                    session=session,
-                    wallet_id=agent_id,
-                    permit_id=permit_id,
-                    key_id=key_id,
-                    approval_id=None,
-                    public_tool_id=tool_name,
-                    upstream_tool_name=tool_name,
-                    upstream_origin="https://test.example",
-                    request_hash=hashlib.sha256(f"req-{idx}".encode()).hexdigest(),
-                    idempotency_key=idempotency_key,
-                    credits_authorized=Decimal("2"),
-                )
-                
-                if not validation.is_valid:
-                    return (idx, {"denied": True, "reason": validation.reason})
-                
-                # Claim and release the dispatch to complete
-                if attempt:
-                    claimed = await attempt_service.claim_dispatch(attempt.attempt_id)
-                    executor.release.set()
-                    return (idx, {"success": True, "attempt_id": attempt.attempt_id})
-                
-                return (idx, {"error": "no_attempt"})
-        
-        # Execute concurrently
-        results = await asyncio.gather(*[make_call(i) for i in range(10)])
-        
-        # Exactly one should succeed, 9 should be denied with permit_max_calls_exceeded
-        successes = [r for _, r in results if r.get("success")]
-        denials = [r for _, r in results if r.get("denied") and r.get("reason") == "permit_max_calls_exceeded"]
-        
-        assert len(successes) == 1, f"Expected 1 success, got {len(successes)}"
-        assert len(denials) == 9, f"Expected 9 denials, got {len(denials)}"
-        
-    finally:
-        get_service_registry().unregister_local(tool_name)
-        executor.release.set()
+    return counts, attempts
+
+
+def _classify_cap_test_responses(
+    responses: list[Any],
+) -> tuple[list[int], list[int], list[tuple[int, Any]]]:
+    """Split call responses into successes, cap denials, and anything else."""
+    successes: list[int] = []
+    cap_denials: list[int] = []
+    other: list[tuple[int, Any]] = []
+    for index, response in enumerate(responses):
+        assert response.status_code == 200, (index, response.text)
+        body = response.json()
+        if "result" in body:
+            successes.append(index)
+        elif body.get("error", {}).get("message") == "permit_max_calls_exceeded":
+            cap_denials.append(index)
+        else:
+            other.append((index, body))
+    return successes, cap_denials, other
 
 
 @pytest.mark.asyncio(loop_scope="session")
-async def test_concurrent_remote_cap_1_with_delivery_uncertain_holds_slot() -> None:
-    """Cap=1 held by delivery_uncertain attempt blocks all new calls.
-    
-    Tests that a delivery_uncertain attempt keeps its slot (never released),
-    so subsequent calls are correctly denied.
-    
-    This test FAILS on pre-fix code (slots weren't tracked for remote tools).
+async def test_concurrent_remote_cap_1_allows_exactly_one_dispatch() -> None:
+    """Ten overlapping new-key calls on a cap=1 remote tool dispatch once.
+
+    The permit row lock serialises the reservations: the first reservation
+    takes the single call slot and dispatches, and the other nine observe the
+    consumed counter and are denied with ``permit_max_calls_exceeded`` before
+    any attempt row is created or any upstream send happens.
     """
     _require_opted_in_postgres()
-    
-    tool_name = "test.concurrent.uncertain"
-    
-    # Executor that simulates delivery_uncertain
-    class UncertainExecutor:
-        def __init__(self):
-            self.calls = []
-            self.dispatch_count = 0
-        
-        async def call_tool(
-            self, arguments, *, invocation_id, idempotency_key, before_dispatch
-        ):
-            self.calls.append(idempotency_key)
-            await before_dispatch()
-            self.dispatch_count += 1
-            raise UpstreamMcpDeliveryUncertainError()
-    
-    executor = UncertainExecutor()
-    
-    get_service_registry().register_upstream(
-        service_id=tool_name,
-        name="Uncertain Test Tool",
-        description="Test tool that raises delivery uncertain",
-        category=ServiceCategory.AGENT_COMMS,
-        executor=executor,
-        input_schema={"type": "object"},
-        output_schema={"type": "object"},
-        credits_per_unit=Decimal("2"),
-        upstream_tool_name=tool_name,
-        upstream_origin="https://test.example",
-    )
-    
+    suffix = uuid.uuid4().hex[:12]
+    tool_name = f"partner-cap-one-pg-{suffix}"
+    executor = ConcurrentUpstreamExecutor("success", delay_seconds=0.05)
+    _register_cap_test_upstream(tool_name, executor)
     try:
-        # Setup wallets and permit (same as previous test)
-        sponsor_id = f"sponsor-{uuid.uuid4().hex[:16]}"
-        factory = get_session_factory()
-        async with factory() as session:
-            async with session.begin():
-                sponsor = WalletModel(
-                    wallet_id=sponsor_id,
-                    name="Uncertain Test Sponsor",
-                    wallet_type="sponsor",
-                    balance=Decimal("1000"),
-                )
-                session.add(sponsor)
-        
-        money = get_agent_money()
-        agent_wallet = await money.create_agent_wallet(
-            sponsor_wallet_id=sponsor_id,
-            agent_name="uncertain-test-agent",
-        )
-        agent_id = agent_wallet["wallet_id"]
-        
-        private_key = Ed25519PrivateKey.generate()
-        public_key_bytes = private_key.public_key().public_bytes(
-            encoding=Encoding.Raw, format=PublicFormat.Raw
-        )
-        key_id = f"key-{uuid.uuid4().hex[:16]}"
-        
-        async with factory() as session:
-            async with session.begin():
-                key_model = SigningKeyModel(
-                    key_id=key_id,
-                    wallet_id=agent_id,
-                    public_key=base64.b64encode(public_key_bytes).decode(),
-                    status="active",
-                    retired_at=None,
-                )
-                session.add(key_model)
-        
-        permit_service = PermitService()
-        permit = await permit_service.create(
-            issuer_wallet_id=agent_id,
-            subject_wallet_id=agent_id,
-            subject_key_id=key_id,
-            allowed_tools=[tool_name],
-            scopes=[f"tool:{tool_name}:invoke", "billing:charge"],
-            max_credits=Decimal("100"),
-            max_calls_per_tool={tool_name: 1},
-            expires_at=utc_now() + timedelta(hours=1),
-        )
-        permit_id = permit.permit_id
-        
-        # First call: will result in delivery_uncertain
-        attempt_service = McpDispatchAttemptService()
-        async with factory() as session:
-            validation1, attempt1 = await attempt_service.authorize_reserve_and_prepare(
-                session=session,
-                wallet_id=agent_id,
-                permit_id=permit_id,
-                key_id=key_id,
-                approval_id=None,
-                public_tool_id=tool_name,
-                upstream_tool_name=tool_name,
-                upstream_origin="https://test.example",
-                request_hash=hashlib.sha256(b"req-uncertain").hexdigest(),
-                idempotency_key="uncertain-1",
-                credits_authorized=Decimal("2"),
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            provisioned = await provision_agent_wallet(client)
+            wallet_id = provisioned["agent_wallet_id"]
+            permit_id = await _create_cap_test_permit(
+                client,
+                wallet_id=wallet_id,
+                key_id=provisioned["key_id"],
+                tool_name=tool_name,
+                max_calls=1,
             )
-        
-        assert validation1.is_valid
-        assert attempt1 is not None
-        
-        # Claim and trigger delivery_uncertain
-        claimed1 = await attempt_service.claim_dispatch(attempt1.attempt_id)
-        # (In real flow, the router would catch the exception and mark it delivery_uncertain)
-        
-        # Second call: should be denied because slot is held
-        async with factory() as session:
-            validation2, attempt2 = await attempt_service.authorize_reserve_and_prepare(
-                session=session,
-                wallet_id=agent_id,
-                permit_id=permit_id,
-                key_id=key_id,
-                approval_id=None,
-                public_tool_id=tool_name,
-                upstream_tool_name=tool_name,
-                upstream_origin="https://test.example",
-                request_hash=hashlib.sha256(b"req-2").hexdigest(),
-                idempotency_key="uncertain-2",
-                credits_authorized=Decimal("2"),
+
+            async def make_call(index: int) -> Any:
+                return await client.post(
+                    "/mcp/messages",
+                    json=_cap_test_call_body(
+                        tool_name=tool_name,
+                        wallet_id=wallet_id,
+                        permit_id=permit_id,
+                        idempotency_key=f"cap-one-{suffix}-{index}",
+                        message=f"call-{index}",
+                    ),
+                    headers=provisioned["agent_headers"],
+                )
+
+            responses = await asyncio.wait_for(
+                asyncio.gather(*(make_call(index) for index in range(10))),
+                timeout=60,
             )
-        
-        assert not validation2.is_valid
-        assert validation2.reason == "permit_max_calls_exceeded"
-        
+
+        successes, cap_denials, other = _classify_cap_test_responses(responses)
+        assert other == [], other
+        assert len(successes) == 1, (successes, cap_denials)
+        assert len(cap_denials) == 9, (successes, cap_denials)
+        winner = responses[successes[0]].json()["result"]
+        assert winner["receipt"]["outcome"] == "success"
+        assert executor.dispatch_count == 1
+        assert len(executor.calls) == 1
+
+        counts, attempts = await _load_cap_test_state(permit_id=permit_id)
+        assert counts == {tool_name: 1}
+        assert len(attempts) == 1
+        assert attempts[0].call_slot_reserved is True
+        assert attempts[0].state == "succeeded"
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_concurrent_remote_cap_1_with_delivery_uncertain_blocks_all() -> None:
+    """A slot held by a delivery-uncertain attempt denies every overlapping call.
+
+    The uncertain attempt may have had its effect upstream, so its slot is
+    never released. Ten later calls that overlap each other all observe the
+    consumed counter and are denied; none creates an attempt or dispatches.
+    """
+    _require_opted_in_postgres()
+    suffix = uuid.uuid4().hex[:12]
+    tool_name = f"partner-cap-uncertain-pg-{suffix}"
+    executor = ConcurrentUpstreamExecutor("delivery_uncertain", delay_seconds=0.05)
+    _register_cap_test_upstream(tool_name, executor)
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            provisioned = await provision_agent_wallet(client)
+            wallet_id = provisioned["agent_wallet_id"]
+            permit_id = await _create_cap_test_permit(
+                client,
+                wallet_id=wallet_id,
+                key_id=provisioned["key_id"],
+                tool_name=tool_name,
+                max_calls=1,
+            )
+
+            first = await client.post(
+                "/mcp/messages",
+                json=_cap_test_call_body(
+                    tool_name=tool_name,
+                    wallet_id=wallet_id,
+                    permit_id=permit_id,
+                    idempotency_key=f"cap-uncertain-{suffix}-first",
+                ),
+                headers=provisioned["agent_headers"],
+            )
+            assert first.status_code == 200, first.text
+            first_body = first.json()
+            assert first_body["error"]["message"] == "delivery_uncertain"
+            assert (
+                first_body["error"]["data"]["receipt"]["outcome"]
+                == "delivery_uncertain"
+            )
+            assert executor.dispatch_count == 1
+
+            async def make_call(index: int) -> Any:
+                return await client.post(
+                    "/mcp/messages",
+                    json=_cap_test_call_body(
+                        tool_name=tool_name,
+                        wallet_id=wallet_id,
+                        permit_id=permit_id,
+                        idempotency_key=f"cap-uncertain-{suffix}-{index}",
+                    ),
+                    headers=provisioned["agent_headers"],
+                )
+
+            responses = await asyncio.wait_for(
+                asyncio.gather(*(make_call(index) for index in range(10))),
+                timeout=60,
+            )
+
+        successes, cap_denials, other = _classify_cap_test_responses(responses)
+        assert other == [], other
+        assert successes == []
+        assert len(cap_denials) == 10
+        assert executor.dispatch_count == 1
+        assert len(executor.calls) == 1
+
+        counts, attempts = await _load_cap_test_state(permit_id=permit_id)
+        assert counts == {tool_name: 1}
+        assert len(attempts) == 1
+        assert attempts[0].call_slot_reserved is True
+        assert attempts[0].state == "delivery_uncertain"
     finally:
         get_service_registry().unregister_local(tool_name)
