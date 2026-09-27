@@ -762,10 +762,11 @@ class PermitModel(SQLModel, table=True):
     aggregate_value_cap: Optional[Decimal] = Field(default=None, decimal_places=8)
     forbidden_fields_json: Optional[str] = Field(default=None)
     recipient_domain: Optional[str] = Field(default=None, max_length=255)
+    # Opt-out from cross-key duplicate detection. When true, identical requests
+    # under different idempotency keys are allowed.
+    allow_identical_repeats: bool = Field(default=False)
     # Atomic call-count tracking for local max_calls_per_tool enforcement.
     # Maps tool name -> reserved local call count (e.g., {"partner.echo": 2}).
-    # The configured upstream path fails closed on this constraint until it
-    # owns an equivalent atomic reservation-and-release lifecycle.
     tool_call_counts_json: Optional[str] = Field(default=None)
 
     model_config = {"arbitrary_types_allowed": True}
@@ -1072,6 +1073,10 @@ class McpDispatchAttemptModel(SQLModel, table=True):
     # Hash of the process-local dispatch claim. The raw claim is never stored.
     # NULL preserves attempts created before claim fencing was introduced.
     dispatch_claim_hash: Optional[str] = Field(default=None, max_length=64)
+    # Tracks whether this attempt holds a per-tool call slot from the permit's
+    # max_calls_per_tool cap. The slot is reserved atomically with budget at
+    # preparation and released only when compensated before dispatch.
+    call_slot_reserved: bool = Field(default=False)
     # Canonical JSON is capped by McpDispatchAttemptService before persistence.
     result_json: Optional[str] = Field(
         default=None,

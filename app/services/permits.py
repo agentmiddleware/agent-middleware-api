@@ -218,6 +218,7 @@ def permit_model_to_response(model: PermitModel) -> PermitResponse:
         aggregate_value_cap=model.aggregate_value_cap,
         forbidden_fields=_loads_list(model.forbidden_fields_json or "[]"),
         recipient_domain=model.recipient_domain,
+        allow_identical_repeats=model.allow_identical_repeats,
     )
 
 
@@ -385,6 +386,7 @@ class PermitService:
             if request.forbidden_fields
             else None,
             recipient_domain=request.recipient_domain,
+            allow_identical_repeats=request.allow_identical_repeats,
         )
         # Sign the same dict verify reconstructs. Building it twice let a
         # field added on one path only keep verifying in tests that never
@@ -1354,6 +1356,44 @@ class PermitService:
                         # Another caller claimed it first; its transaction owns
                         # the single decrement.
                         return False
+                    # If this attempt holds a call slot, release it by decrementing
+                    # the tool_call_counts_json counter. This happens in the same
+                    # transaction as the budget release, so it's once-only.
+                    permit_update_values: dict[str, Any] = {
+                        "spent_credits": case(
+                            (
+                                cast(
+                                    ColumnElement[bool],
+                                    PermitModel.spent_credits
+                                    - attempt.credits_authorized
+                                    < Decimal("0"),
+                                ),
+                                Decimal("0"),
+                            ),
+                            else_=PermitModel.spent_credits
+                            - attempt.credits_authorized,
+                        ),
+                        "updated_at": now,
+                    }
+                    
+                    if attempt.call_slot_reserved:
+                        # Decrement the call counter for this tool. Read the permit
+                        # first to get the current counts.
+                        permit = await session.get(PermitModel, attempt.permit_id)
+                        if permit is not None:
+                            current_counts = _loads_dict(
+                                permit.tool_call_counts_json or "{}"
+                            )
+                            tool_name = attempt.public_tool_id
+                            if tool_name in current_counts:
+                                current_count = current_counts[tool_name]
+                                if isinstance(current_count, int) and current_count > 0:
+                                    updated_counts = dict(current_counts)
+                                    updated_counts[tool_name] = current_count - 1
+                                    permit_update_values["tool_call_counts_json"] = (
+                                        json.dumps(updated_counts)
+                                    )
+                    
                     # Atomic clamped decrement so a concurrent reservation on the
                     # same permit is not clobbered by a read-modify-write here.
                     released = await session.execute(
@@ -1364,22 +1404,7 @@ class PermitService:
                                 PermitModel.permit_id == attempt.permit_id,
                             )
                         )
-                        .values(
-                            spent_credits=case(
-                                (
-                                    cast(
-                                        ColumnElement[bool],
-                                        PermitModel.spent_credits
-                                        - attempt.credits_authorized
-                                        < Decimal("0"),
-                                    ),
-                                    Decimal("0"),
-                                ),
-                                else_=PermitModel.spent_credits
-                                - attempt.credits_authorized,
-                            ),
-                            updated_at=now,
-                        )
+                        .values(**permit_update_values)
                         .execution_options(synchronize_session=False)
                     )
                     if (cast(Any, released).rowcount or 0) == 0:
@@ -1838,6 +1863,8 @@ class PermitService:
             payload["forbidden_fields"] = forbidden
         if model.recipient_domain:
             payload["recipient_domain"] = model.recipient_domain
+        if model.allow_identical_repeats:
+            payload["allow_identical_repeats"] = True
         return payload
 
     @staticmethod

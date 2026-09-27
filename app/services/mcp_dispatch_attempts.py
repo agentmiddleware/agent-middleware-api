@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import logging
 import math
 import secrets
 import uuid
@@ -17,6 +19,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
+from app.core.config import get_settings
 from app.core.resilience import run_with_write_conflict_retry
 from app.core.time import to_naive_utc, utc_now
 from app.db.database import get_session_factory
@@ -30,6 +33,8 @@ from app.db.models import (
 )
 from app.services.permits import PermitService, PermitValidation, get_permit_service
 from app.services.signing_keys import canonical_json, sha256_hex
+
+logger = logging.getLogger(__name__)
 
 DISPATCH_PREPARED = "prepared"
 DISPATCH_LEGACY_DISPATCHED = "dispatched"
@@ -152,23 +157,24 @@ async def _claim_debit_is_valid(
     )
 
 
-def _unsupported_upstream_constraints(permit: PermitModel) -> list[str]:
+def _unsupported_upstream_constraints(
+    permit: PermitModel, tool_name: str | None = None
+) -> list[str]:
     """Return constraints the atomic upstream reservation cannot yet enforce.
 
-    The prepare path can atomically reserve a flat per-call cost, but the
-    per-tool call cap and the aggregate value cap are not yet enforceable
-    inside that single guarded reservation. When either is configured, a
-    prepared row must be treated as commit-uncertain rather than adopted as a
-    clean success or turned into a denial receipt.
+    The aggregate value cap requires folding in-flight reservations, which the
+    atomic reservation does not yet support. Per-tool call caps are now enforced
+    atomically for each tool, so they're only unsupported when checking a permit
+    without a specific tool context (e.g., during reconciliation of old rows).
     """
-    return [
-        name
-        for name, configured in (
-            ("max_calls_per_tool", permit.max_calls_per_tool_json is not None),
-            ("aggregate_value_cap", permit.aggregate_value_cap is not None),
-        )
-        if configured
-    ]
+    unsupported = []
+    if permit.aggregate_value_cap is not None:
+        unsupported.append("aggregate_value_cap")
+    # Legacy: if tool_name is None (reconciliation of old prepared rows), treat
+    # any max_calls_per_tool as unsupported to preserve existing behavior.
+    if tool_name is None and permit.max_calls_per_tool_json is not None:
+        unsupported.append("max_calls_per_tool")
+    return unsupported
 
 
 def _assert_sha256(value: str) -> str:
@@ -194,6 +200,17 @@ def _assert_origin(value: str) -> str:
     ):
         raise DispatchAttemptError("dispatch_upstream_origin_invalid")
     return value
+
+
+def _loads_dict(json_str: str | None) -> dict[str, Any]:
+    """Parse JSON dict, returning empty dict on None or invalid JSON."""
+    if not json_str:
+        return {}
+    try:
+        result = json.loads(json_str)
+        return result if isinstance(result, dict) else {}
+    except (json.JSONDecodeError, TypeError):
+        return {}
 
 
 def _bounded_result(
@@ -527,7 +544,9 @@ class McpDispatchAttemptService:
                         wallet_id=wallet_id,
                         public_tool_id=public_tool_id,
                     )
-                    unsupported_constraints = _unsupported_upstream_constraints(permit)
+                    unsupported_constraints = _unsupported_upstream_constraints(
+                        permit, tool_name=public_tool_id
+                    )
 
                     existing = await self._get_by_idempotency_record(
                         session,
@@ -579,13 +598,103 @@ class McpDispatchAttemptService:
                     )
                     if not validation.allowed:
                         return validation, None
+                    
+                    # Cross-key duplicate detection: check for prior attempts with the
+                    # same (permit_id, public_tool_id, request_hash) that are still
+                    # active or succeeded. This catches new-key retries with identical
+                    # arguments.
+                    settings = get_settings()
+                    duplicate_mode = settings.MCP_UPSTREAM_DUPLICATE_GUARD
+                    if (
+                        duplicate_mode in ("log", "enforce")
+                        and not permit.allow_identical_repeats
+                    ):
+                        window_seconds = settings.MCP_UPSTREAM_DUPLICATE_WINDOW_SECONDS
+                        cutoff = utc_now() - timedelta(seconds=window_seconds)
+                        # States that block a duplicate: prepared, dispatched, claimed,
+                        # succeeded, and delivery_uncertain (the call may have taken
+                        # effect). returned_error after dispatch also blocks. We exclude
+                        # returned_error rows that never dispatched (dispatched_at is NULL).
+                        blocking_states = {
+                            DISPATCH_PREPARED,
+                            *DISPATCH_SENT_STATES,
+                            *DISPATCH_TERMINAL_STATES,
+                        }
+                        prior = (
+                            await session.execute(
+                                select(McpDispatchAttemptModel)
+                                .where(
+                                    cast(
+                                        ColumnElement[bool],
+                                        McpDispatchAttemptModel.permit_id == permit_id,
+                                    ),
+                                    cast(
+                                        ColumnElement[bool],
+                                        McpDispatchAttemptModel.public_tool_id
+                                        == public_tool_id,
+                                    ),
+                                    cast(
+                                        ColumnElement[bool],
+                                        McpDispatchAttemptModel.request_hash
+                                        == request_hash,
+                                    ),
+                                    cast(
+                                        ColumnElement[bool],
+                                        McpDispatchAttemptModel.created_at >= cutoff,
+                                    ),
+                                    cast(
+                                        ColumnElement[bool],
+                                        McpDispatchAttemptModel.state.in_(
+                                            blocking_states
+                                        ),
+                                    ),
+                                )
+                                .order_by(McpDispatchAttemptModel.created_at.desc())
+                                .limit(1)
+                            )
+                        ).scalar_one_or_none()
+                        
+                        if prior is not None:
+                            # Exclude returned_error rows that never dispatched
+                            blocks = True
+                            if (
+                                prior.state == "returned_error"
+                                and prior.dispatched_at is None
+                            ):
+                                blocks = False
+                            
+                            if blocks:
+                                msg = (
+                                    f"Duplicate request detected: new idempotency key with "
+                                    f"identical request hash (permit={permit_id}, "
+                                    f"tool={public_tool_id}, request_hash={request_hash[:16]}..., "
+                                    f"prior_attempt={prior.attempt_id}, "
+                                    f"prior_state={prior.state})"
+                                )
+                                if duplicate_mode == "log":
+                                    logger.warning(
+                                        f"{msg} - allowing in observe mode"
+                                    )
+                                else:  # enforce
+                                    logger.info(msg)
+                                    return (
+                                        PermitValidation(
+                                            False,
+                                            "duplicate_request_new_key",
+                                            permit,
+                                            {
+                                                "prior_attempt_id": prior.attempt_id,
+                                                "prior_state": prior.state,
+                                                "request_hash": request_hash,
+                                            },
+                                        ),
+                                        None,
+                                    )
+                    
                     if unsupported_constraints:
-                        # The remote path atomically enforces max_credits below,
-                        # but it does not yet reserve per-tool call slots or fold
-                        # in-flight reservations into aggregate_value_cap. A
-                        # read-time check would let concurrent calls overshoot;
-                        # refuse the constrained permit before creating any
-                        # attempt or moving budget instead.
+                        # aggregate_value_cap requires folding in-flight reservations,
+                        # which the atomic reservation does not yet support. Refuse
+                        # constrained permits before creating any attempt or moving budget.
                         return (
                             PermitValidation(
                                 False,
@@ -598,6 +707,42 @@ class McpDispatchAttemptService:
                             ),
                             None,
                         )
+
+                    # Compute the updated call counter for max_calls_per_tool enforcement.
+                    # This mirrors the logic in PermitService.authorize_and_reserve for
+                    # local tools. The counter is atomically incremented via optimistic
+                    # concurrency control (CAS on the JSON column).
+                    max_calls_config = _loads_dict(permit.max_calls_per_tool_json or "{}")
+                    call_limit = max_calls_config.get(public_tool_id)
+                    original_counts_json = permit.tool_call_counts_json
+                    updated_counts_json = None
+                    call_slot_reserved = False
+                    if call_limit is not None and type(call_limit) is int:
+                        current_counts = _loads_dict(original_counts_json or "{}")
+                        current_tool_count = current_counts.get(public_tool_id, 0)
+                        if not isinstance(current_tool_count, int):
+                            current_tool_count = 0
+                        new_tool_count = current_tool_count + 1
+                        if new_tool_count > call_limit:
+                            # This attempt would exceed the limit. Deny without
+                            # mutating anything.
+                            return (
+                                PermitValidation(
+                                    False,
+                                    "permit_max_calls_exceeded",
+                                    permit,
+                                    {
+                                        "tool": public_tool_id,
+                                        "limit": call_limit,
+                                        "calls_made": current_tool_count,
+                                    },
+                                ),
+                                None,
+                            )
+                        updated_counts = dict(current_counts)
+                        updated_counts[public_tool_id] = new_tool_count
+                        updated_counts_json = json.dumps(updated_counts)
+                        call_slot_reserved = True
 
                     # Reserve with the same guarded UPDATE that
                     # PermitService.authorize_and_reserve() uses. The cap
@@ -618,40 +763,57 @@ class McpDispatchAttemptService:
                     # One `now` is used for both the predicate and the denial
                     # classification below, so the two cannot disagree.
                     now = utc_now()
+                    
+                    # Build the UPDATE values and WHERE predicates.
+                    update_values: dict[str, Any] = {
+                        "spent_credits": PermitModel.spent_credits + credits_authorized,
+                        "updated_at": now,
+                    }
+                    where_conditions: list[ColumnElement[bool]] = [
+                        cast(ColumnElement[bool], PermitModel.permit_id == permit_id),
+                        cast(ColumnElement[bool], PermitModel.status == "active"),
+                        cast(ColumnElement[bool], PermitModel.expires_at > now),
+                        cast(
+                            ColumnElement[bool],
+                            PermitModel.spent_credits + credits_authorized
+                            <= PermitModel.max_credits,
+                        ),
+                    ]
+                    
+                    # If max_calls_per_tool is set for this tool, add the optimistic
+                    # lock on tool_call_counts_json to the WHERE predicate and the
+                    # updated counter to the values.
+                    if updated_counts_json is not None:
+                        update_values["tool_call_counts_json"] = updated_counts_json
+                        if original_counts_json is None:
+                            where_conditions.append(
+                                cast(
+                                    ColumnElement[bool],
+                                    cast(Any, PermitModel.tool_call_counts_json).is_(
+                                        None
+                                    ),
+                                )
+                            )
+                        else:
+                            where_conditions.append(
+                                cast(
+                                    ColumnElement[bool],
+                                    PermitModel.tool_call_counts_json
+                                    == original_counts_json,
+                                )
+                            )
+                    
                     reserved = await session.execute(
                         sa_update(PermitModel)
-                        .where(
-                            cast(
-                                ColumnElement[bool],
-                                PermitModel.permit_id == permit_id,
-                            ),
-                            cast(
-                                ColumnElement[bool],
-                                PermitModel.status == "active",
-                            ),
-                            cast(
-                                ColumnElement[bool],
-                                PermitModel.expires_at > now,
-                            ),
-                            cast(
-                                ColumnElement[bool],
-                                PermitModel.spent_credits + credits_authorized
-                                <= PermitModel.max_credits,
-                            ),
-                        )
-                        .values(
-                            spent_credits=PermitModel.spent_credits
-                            + credits_authorized,
-                            updated_at=now,
-                        )
+                        .where(*where_conditions)
+                        .values(**update_values)
                         .execution_options(synchronize_session=False)
                     )
                     if (cast(Any, reserved).rowcount or 0) != 1:
                         # A concurrent reservation consumed the remaining budget,
-                        # or a concurrent revocation flipped the status, between
-                        # the validation read and this guarded write. Deny with
-                        # an accurate reason and create no prepared attempt --
-                        # no budget moved, so there is nothing to compensate.
+                        # flipped the status, or (when max_calls_per_tool is set)
+                        # incremented the call counter, breaking the optimistic
+                        # lock. Re-read for an accurate reason and deny.
                         await session.refresh(permit)
                         if permit.status != "active":
                             return (
@@ -681,6 +843,30 @@ class McpDispatchAttemptService:
                                 ),
                                 None,
                             )
+                        # Re-check max_calls_per_tool; a concurrent call may have
+                        # incremented the counter between our pre-check and the
+                        # failed optimistic UPDATE.
+                        if call_limit is not None and type(call_limit) is int:
+                            refreshed_counts = _loads_dict(
+                                permit.tool_call_counts_json or "{}"
+                            )
+                            refreshed_count = refreshed_counts.get(public_tool_id, 0)
+                            if not isinstance(refreshed_count, int):
+                                refreshed_count = 0
+                            if refreshed_count >= call_limit:
+                                return (
+                                    PermitValidation(
+                                        False,
+                                        "permit_max_calls_exceeded",
+                                        permit,
+                                        {
+                                            "tool": public_tool_id,
+                                            "limit": call_limit,
+                                            "calls_made": refreshed_count,
+                                        },
+                                    ),
+                                    None,
+                                )
                         return (
                             PermitValidation(
                                 False,
@@ -713,6 +899,7 @@ class McpDispatchAttemptService:
                         request_hash=request_hash,
                         credits_authorized=credits_authorized,
                         state=DISPATCH_PREPARED,
+                        call_slot_reserved=call_slot_reserved,
                     )
                     session.add(attempt)
                     await session.flush()
