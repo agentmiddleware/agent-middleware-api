@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.config import get_settings
-from app.core.resilience import run_with_write_conflict_retry
+from app.core.resilience import run_with_write_conflict_retry, WRITE_CONFLICT_MAX_ATTEMPTS
 from app.core.time import to_naive_utc, utc_now
 from app.db.database import get_session_factory
 from app.db.models import (
@@ -31,7 +31,7 @@ from app.db.models import (
     PermitModel,
     ReceiptModel,
 )
-from app.services.permits import PermitService, PermitValidation, get_permit_service
+from app.services.permits import PermitService, PermitValidation, PermitWriteContendedError, get_permit_service
 from app.services.signing_keys import canonical_json, sha256_hex
 
 logger = logging.getLogger(__name__)
@@ -874,6 +874,20 @@ class McpDispatchAttemptService:
                                     ),
                                     None,
                                 )
+                        # Final check: if we reserved a call slot and the CAS failed,
+                        # report it as a contention issue rather than budget_exceeded.
+                        # On SQLite this can happen when a concurrent call modifies
+                        # tool_call_counts_json between our read and the failed UPDATE.
+                        if updated_counts_json is not None:
+                            return (
+                                PermitValidation(
+                                    False,
+                                    "permit_write_contended",
+                                    permit,
+                                    {"detail": "Tool call count changed concurrently"},
+                                ),
+                                None,
+                            )
                         return (
                             PermitValidation(
                                 False,
@@ -1095,12 +1109,16 @@ class McpDispatchAttemptService:
         charge or send authority exists. The permit decrement and deletion
         share one transaction, so reconciliation can never observe a prepared
         row whose reservation was already released.
+        
+        The slot release uses the same CAS pattern as release_dispatch_budget_once,
+        so concurrent slot modifications are detected and retried.
         """
 
         if not attempt_id:
             raise DispatchAttemptError("dispatch_attempt_invalid")
         factory = get_session_factory()
-        try:
+        
+        async def _once() -> None:
             async with factory() as session:
                 async with session.begin():
                     # Acquire a SQLite writer transaction before inspecting the
@@ -1177,31 +1195,95 @@ class McpDispatchAttemptService:
                     if linked_receipt is not None:
                         raise DispatchClaimUnavailableError("dispatch_attempt_advanced")
 
+                    # If this attempt reserved a call slot, release it atomically
+                    # with the budget refund using the same CAS pattern as
+                    # release_dispatch_budget_once. The attempt has never dispatched
+                    # (dispatched_at is None is checked above), so the slot can be
+                    # safely returned.
+                    permit_update_values: dict[str, Any] = {
+                        "spent_credits": PermitModel.spent_credits
+                        - attempt.credits_authorized,
+                        "updated_at": utc_now(),
+                    }
+                    where_conditions = [
+                        cast(
+                            ColumnElement[bool],
+                            PermitModel.permit_id == attempt.permit_id,
+                        ),
+                        cast(
+                            ColumnElement[bool],
+                            PermitModel.spent_credits >= attempt.credits_authorized,
+                        ),
+                    ]
+                    
+                    original_counts_json = None
+                    if attempt.call_slot_reserved:
+                        # Fetch the permit to get current tool_call_counts_json
+                        permit = await session.get(
+                            PermitModel, attempt.permit_id, with_for_update=True
+                        )
+                        if permit is not None:
+                            original_counts_json = permit.tool_call_counts_json
+                            current_counts = _loads_dict(original_counts_json or "{}")
+                            tool_name = attempt.public_tool_id
+                            if tool_name in current_counts:
+                                current_count = current_counts[tool_name]
+                                if isinstance(current_count, int) and current_count > 0:
+                                    updated_counts = dict(current_counts)
+                                    updated_counts[tool_name] = current_count - 1
+                                    permit_update_values["tool_call_counts_json"] = (
+                                        json.dumps(updated_counts)
+                                    )
+                        
+                        # Add CAS condition on tool_call_counts_json
+                        if "tool_call_counts_json" in permit_update_values:
+                            if original_counts_json is None:
+                                where_conditions.append(
+                                    cast(
+                                        ColumnElement[bool],
+                                        cast(Any, PermitModel.tool_call_counts_json).is_(
+                                            None
+                                        ),
+                                    )
+                                )
+                            else:
+                                where_conditions.append(
+                                    cast(
+                                        ColumnElement[bool],
+                                        PermitModel.tool_call_counts_json
+                                        == original_counts_json,
+                                    )
+                                )
+                    
                     released = await session.execute(
                         sa_update(PermitModel)
-                        .where(
-                            cast(
-                                ColumnElement[bool],
-                                PermitModel.permit_id == attempt.permit_id,
-                            ),
-                            cast(
-                                ColumnElement[bool],
-                                PermitModel.spent_credits >= attempt.credits_authorized,
-                            ),
-                        )
-                        .values(
-                            spent_credits=PermitModel.spent_credits
-                            - attempt.credits_authorized,
-                            updated_at=utc_now(),
-                        )
+                        .where(*where_conditions)
+                        .values(**permit_update_values)
                         .execution_options(synchronize_session=False)
                     )
                     if (cast(Any, released).rowcount or 0) != 1:
+                        # If CAS failed on tool_call_counts_json, the slot might have
+                        # changed concurrently. Raise a retryable error.
+                        if (
+                            attempt.call_slot_reserved
+                            and "tool_call_counts_json" in permit_update_values
+                        ):
+                            raise PermitWriteContendedError()
                         raise DispatchAttemptConflictError(
                             "dispatch_budget_release_invalid"
                         )
                     await session.delete(attempt)
                     await session.flush()
+        
+        # Wrap in retry logic to handle CAS failures on slot release
+        try:
+            await run_with_write_conflict_retry(
+                _once,
+                max_attempts=WRITE_CONFLICT_MAX_ATTEMPTS,
+                on_exhausted=lambda exc: DispatchAttemptConflictError(
+                    "dispatch_budget_release_contended"
+                ),
+            )
         except DispatchAttemptError:
             raise
         except Exception as exc:

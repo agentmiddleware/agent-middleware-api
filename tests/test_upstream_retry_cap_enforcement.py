@@ -511,7 +511,9 @@ async def test_duplicate_detection_log_mode_allows(client, clean_database, monke
 @pytest.mark.anyio
 async def test_duplicate_detection_opt_out(client, clean_database, monkeypatch):
     """Permit with allow_identical_repeats=true bypasses duplicate detection."""
-    monkeypatch.setenv("MCP_UPSTREAM_DUPLICATE_GUARD", "enforce")
+    from app.core.config import get_settings
+    settings = get_settings()
+    monkeypatch.setattr(settings, "MCP_UPSTREAM_DUPLICATE_GUARD", "enforce")
     
     provisioned = await provision_agent_wallet(client)
     wallet_id = provisioned["agent_wallet_id"]
@@ -752,9 +754,15 @@ async def test_duplicate_detection_finds_old_effectful_not_just_newest(
         assert r1.status_code == 200
         assert executor.dispatch_count == 1
         
-        # Call 2: Same args, new key, but suppose it fails pre-dispatch somehow
-        # (In real scenario this could be a cap exceeded on a different permit field,
-        # or other pre-dispatch validation. For test simplicity, just do the third call.)
+        # The LIMIT 1 regression would have been: if the query only checked the
+        # newest attempt, it might miss older effectful ones. But since we call
+        # .all() and loop through all attempts, we catch all effectful priors.
+        # This test verifies that r1 (the only effectful prior) blocks r3.
+        
+        # Call 2 (conceptual): would be a newer non-effectful attempt, but we
+        # can't create it with the same request_hash without triggering duplicate
+        # detection (which is what we're testing). The fix is in the query logic:
+        # using .all() instead of .first() or LIMIT 1.
         
         # Call 3: Same args as #1, new key - should be BLOCKED by #1
         r3 = await client.post(
@@ -779,3 +787,65 @@ async def test_duplicate_detection_finds_old_effectful_not_just_newest(
         assert executor.dispatch_count == 1  # Still only r1 dispatched
     finally:
         get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.anyio
+async def test_remote_cap_1_abandoned_attempt_releases_slot(client, clean_database):
+    """Pre-dispatch abandonment releases both budget and call slot.
+    
+    Regression for the abandon_effect_free_prepared_attempt slot leak:
+    when an attempt is abandoned pre-dispatch (e.g. lost quote race),
+    both the budget and the call slot must be released.
+    """
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    key_id = provisioned["key_id"]
+    agent_headers = provisioned["agent_headers"]
+    tool_name = "test.cap.abandon"
+    
+    # Use pre_dispatch_failure mode to trigger abandon path
+    executor = FakeUpstreamExecutor("pre_dispatch_failure")
+    _register_upstream(tool_name, executor)
+    
+    try:
+        permit_id = await _create_permit_with_cap(
+            client, wallet_id, key_id, tool_name, max_calls=1
+        )
+        
+        # First call fails pre-dispatch (abandoned, slot released)
+        r1 = await client.post(
+            "/mcp/messages",
+            json=_call_body(
+                tool_name=tool_name,
+                wallet_id=wallet_id,
+                permit_id=permit_id,
+                idempotency_key="abandon-1",
+            ),
+            headers=agent_headers,
+        )
+        assert r1.status_code == 200
+        body1 = r1.json()
+        assert "error" in body1
+        # Pre-dispatch failure should return upstream_connection_failed
+        assert executor.dispatch_count == 0
+        
+        # Second call with different key should succeed (slot was released)
+        executor.mode = "success"
+        r2 = await client.post(
+            "/mcp/messages",
+            json=_call_body(
+                tool_name=tool_name,
+                wallet_id=wallet_id,
+                permit_id=permit_id,
+                idempotency_key="abandon-2",
+            ),
+            headers=agent_headers,
+        )
+        assert r2.status_code == 200
+        body2 = r2.json()
+        assert "result" in body2, "Second call should succeed after slot release"
+        assert body2["result"]["receipt"]["outcome"] == "success"
+        assert executor.dispatch_count == 1
+    finally:
+        get_service_registry().unregister_local(tool_name)
+

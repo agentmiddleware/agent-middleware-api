@@ -35,15 +35,34 @@ def upgrade() -> None:
         sa.Column('call_slot_reserved', sa.Boolean(), nullable=False, server_default='0')
     )
     
-    # Create index for duplicate detection
-    # (permit_id, public_tool_id, request_hash, created_at)
-    # Supports queries: find prior attempts with same permit, tool, and request hash
-    op.create_index(
-        'ix_mcp_dispatch_attempts_duplicate_detection',
-        'mcp_dispatch_attempts',
-        ['permit_id', 'public_tool_id', 'request_hash', 'created_at'],
-        unique=False
-    )
+    # Create index for duplicate detection.
+    # Use CONCURRENTLY on Postgres to avoid blocking writes during index build.
+    # SQLite doesn't support CONCURRENTLY, so check the connection type.
+    connection = op.get_bind()
+    if connection.dialect.name == 'postgresql':
+        # Postgres: use CONCURRENTLY in an autocommit block with if-not-exists guard
+        with op.get_context().autocommit_block():
+            # Check if index already exists to make this idempotent
+            index_exists = connection.execute(
+                sa.text(
+                    "SELECT 1 FROM pg_indexes WHERE indexname = 'ix_mcp_dispatch_attempts_duplicate_detection'"
+                )
+            ).scalar()
+            if not index_exists:
+                connection.execute(
+                    sa.text(
+                        "CREATE INDEX CONCURRENTLY ix_mcp_dispatch_attempts_duplicate_detection "
+                        "ON mcp_dispatch_attempts (permit_id, public_tool_id, request_hash, created_at)"
+                    )
+                )
+    else:
+        # SQLite: regular index creation
+        op.create_index(
+            'ix_mcp_dispatch_attempts_duplicate_detection',
+            'mcp_dispatch_attempts',
+            ['permit_id', 'public_tool_id', 'request_hash', 'created_at'],
+            unique=False
+        )
 
 
 def downgrade() -> None:
