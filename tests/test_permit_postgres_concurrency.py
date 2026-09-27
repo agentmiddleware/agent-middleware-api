@@ -14,7 +14,7 @@ import json
 import os
 import uuid
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from decimal import Decimal
 from typing import Any
@@ -63,7 +63,6 @@ from app.services.refund_reconciliation import (
 )
 from app.services.service_registry import get_service_registry
 from app.services.signing_keys import canonical_json, sha256_hex
-from app.services.upstream_mcp import UpstreamMcpResult
 from app.services.upstream_mcp import (
     UpstreamMcpDeliveryUncertainError,
     UpstreamMcpResult,
