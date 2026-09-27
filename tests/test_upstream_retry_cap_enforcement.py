@@ -706,7 +706,9 @@ async def test_duplicate_detection_finds_old_effectful_not_just_newest(
     2. Second call with new key fails pre-dispatch (non-effectful, newer)
     3. Third call with new key should be blocked by #1, not allowed by #2
     """
-    monkeypatch.setenv("MCP_UPSTREAM_DUPLICATE_GUARD", "enforce")
+    from app.core.config import get_settings
+    settings = get_settings()
+    monkeypatch.setattr(settings, "MCP_UPSTREAM_DUPLICATE_GUARD", "enforce")
     
     provisioned = await provision_agent_wallet(client)
     wallet_id = provisioned["agent_wallet_id"]
