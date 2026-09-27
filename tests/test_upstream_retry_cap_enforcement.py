@@ -9,17 +9,38 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import timedelta
+from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.time import utc_now
+from app.db.database import get_session_factory
+from app.db.models import (
+    IdempotencyRecordModel,
+    McpDispatchAttemptModel,
+    PermitModel,
+)
 from app.main import app
 from app.schemas.billing import ServiceCategory
+from app.services.idempotency import (
+    GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+    get_idempotency_service,
+)
+from app.services.mcp_dispatch_attempts import (
+    McpDispatchAttemptService,
+    get_mcp_dispatch_attempt_service,
+)
+from app.services.permits import get_permit_service
 from app.services.service_registry import get_service_registry
 from app.services.upstream_mcp import (
     UpstreamMcpDeliveryUncertainError,
@@ -375,7 +396,6 @@ async def test_duplicate_detection_enforce_mode(client, clean_database, monkeypa
     
     Identical request hash under different key is detected and refused.
     """
-    from app.core.config import get_settings
     settings = get_settings()
     monkeypatch.setattr(settings, "MCP_UPSTREAM_DUPLICATE_GUARD", "enforce")
     
@@ -445,7 +465,8 @@ async def test_duplicate_detection_enforce_mode(client, clean_database, monkeypa
 @pytest.mark.anyio
 async def test_duplicate_detection_log_mode_allows(client, clean_database, monkeypatch):
     """Cross-key duplicate detection in log mode allows duplicates (observe only)."""
-    monkeypatch.setenv("MCP_UPSTREAM_DUPLICATE_GUARD", "log")
+    settings = get_settings()
+    monkeypatch.setattr(settings, "MCP_UPSTREAM_DUPLICATE_GUARD", "log")
     
     provisioned = await provision_agent_wallet(client)
     wallet_id = provisioned["agent_wallet_id"]
@@ -511,7 +532,6 @@ async def test_duplicate_detection_log_mode_allows(client, clean_database, monke
 @pytest.mark.anyio
 async def test_duplicate_detection_opt_out(client, clean_database, monkeypatch):
     """Permit with allow_identical_repeats=true bypasses duplicate detection."""
-    from app.core.config import get_settings
     settings = get_settings()
     monkeypatch.setattr(settings, "MCP_UPSTREAM_DUPLICATE_GUARD", "enforce")
     
@@ -698,29 +718,28 @@ async def test_aggregate_value_cap_still_unsupported(client, clean_database):
 async def test_duplicate_detection_checks_all_attempts_not_just_newest(
     client, clean_database, monkeypatch
 ):
-    """Duplicate detection checks ALL attempts in window, not just the newest.
-    
-    The fix changed from using LIMIT 1 (which could miss older effectful attempts)
-    to using .all() and looping through all attempts.
-    
-    This test verifies that an older effectful attempt is found and blocks
-    a new-key retry with the same arguments.
+    """Regression for Issue 3: the guard must scan every prior in the window.
+
+    The original query took only the newest matching attempt (``LIMIT 1``)
+    and then ignored it when it was a never-dispatched ``returned_error``, so
+    an older succeeded attempt with the same request hash was never consulted.
+    Here the newest prior is exactly such a non-effectful row, inserted after
+    the effectful one, and the third call must still be refused because of
+    the older success.
     """
-    from app.core.config import get_settings
     settings = get_settings()
     monkeypatch.setattr(settings, "MCP_UPSTREAM_DUPLICATE_GUARD", "enforce")
-    
+
     provisioned = await provision_agent_wallet(client)
     wallet_id = provisioned["agent_wallet_id"]
     key_id = provisioned["key_id"]
     agent_headers = provisioned["agent_headers"]
     tool_name = "test.dup.all"
-    
+
     executor = FakeUpstreamExecutor("success")
     _register_upstream(tool_name, executor)
-    
+
     try:
-        # Create permit
         permit_resp = await client.post(
             "/v1/permits",
             json={
@@ -736,8 +755,8 @@ async def test_duplicate_detection_checks_all_attempts_not_just_newest(
         )
         assert permit_resp.status_code == 201
         permit_id = permit_resp.json()["permit_id"]
-        
-        # Call 1: succeeds (effectful)
+
+        # Call 1: dispatched and succeeded, so it is the effectful prior.
         r1 = await client.post(
             "/mcp/messages",
             json=_call_body(
@@ -745,42 +764,160 @@ async def test_duplicate_detection_checks_all_attempts_not_just_newest(
                 wallet_id=wallet_id,
                 permit_id=permit_id,
                 idempotency_key="dup-all-1",
-                message="test",
+                message="original",
             ),
             headers=agent_headers,
         )
         assert r1.status_code == 200
+        assert r1.json()["result"]["receipt"]["outcome"] == "success"
         assert executor.dispatch_count == 1
-        
-        # Call 2: Same args, new key - should be BLOCKED by #1
+
+        factory = get_session_factory()
+        async with factory() as session:
+            effectful = (
+                await session.execute(
+                    select(McpDispatchAttemptModel).where(
+                        McpDispatchAttemptModel.permit_id == permit_id
+                    )
+                )
+            ).scalar_one()
+            assert effectful.state == "succeeded"
+            assert effectful.dispatched_at is not None
+
+            # Call 2: a NEWER pre-dispatch failure with the same request hash.
+            # It never dispatched, so it must not block on its own. It is
+            # inserted directly because a live call with this hash would be
+            # refused by the very guard under test.
+            later = effectful.created_at + timedelta(seconds=1)
+            newer_record_id = f"idm-dup-all-{uuid.uuid4().hex[:12]}"
+            session.add(
+                IdempotencyRecordModel(
+                    record_id=newer_record_id,
+                    wallet_id=wallet_id,
+                    endpoint=GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+                    idempotency_key="dup-all-2",
+                    request_hash=effectful.request_hash,
+                    operation_kind="upstream_mcp",
+                )
+            )
+            await session.flush()
+            newer = McpDispatchAttemptModel(
+                attempt_id=f"att-dup-all-{uuid.uuid4().hex[:12]}",
+                idempotency_record_id=newer_record_id,
+                wallet_id=wallet_id,
+                permit_id=permit_id,
+                key_id=effectful.key_id,
+                public_tool_id=tool_name,
+                upstream_tool_name=effectful.upstream_tool_name,
+                upstream_origin=effectful.upstream_origin,
+                request_hash=effectful.request_hash,
+                credits_authorized=effectful.credits_authorized,
+                state="returned_error",
+                error_code="upstream_connection_failed",
+                dispatched_at=None,
+                created_at=later,
+                updated_at=later,
+                completed_at=later,
+            )
+            session.add(newer)
+            await session.commit()
+        assert newer.created_at > effectful.created_at
+
+        # Call 3: same arguments under a new key. LIMIT 1 would have seen only
+        # the newer non-effectful row and let this dispatch again.
+        r3 = await client.post(
+            "/mcp/messages",
+            json=_call_body(
+                tool_name=tool_name,
+                wallet_id=wallet_id,
+                permit_id=permit_id,
+                idempotency_key="dup-all-3",
+                message="original",
+            ),
+            headers=agent_headers,
+        )
+        assert r3.status_code == 200
+        body3 = r3.json()
+        assert "error" in body3, body3
+        assert body3["error"]["message"] == "duplicate_request_new_key"
+        details = body3["error"]["data"]["details"]
+        assert details["prior_attempt_id"] == effectful.attempt_id
+        assert details["prior_state"] == "succeeded"
+        assert executor.dispatch_count == 1
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.anyio
+async def test_remote_cap_1_post_dispatch_error_keeps_slot(client, clean_database):
+    """An error returned after a real send keeps its slot on a cap-of-one permit.
+
+    ``release_dispatch_budget_once`` refunds the credits of a refunded
+    ``returned_error`` attempt but returns the call slot only when the attempt
+    never dispatched. The upstream may have acted on this call, so the next key
+    must be refused rather than dispatched again.
+    """
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    key_id = provisioned["key_id"]
+    agent_headers = provisioned["agent_headers"]
+    tool_name = "test.cap.post.dispatch.error"
+
+    executor = FakeUpstreamExecutor("returned_error")
+    _register_upstream(tool_name, executor)
+
+    try:
+        permit_id = await _create_permit_with_cap(
+            client, wallet_id, key_id, tool_name, max_calls=1
+        )
+
+        r1 = await client.post(
+            "/mcp/messages",
+            json=_call_body(
+                tool_name=tool_name,
+                wallet_id=wallet_id,
+                permit_id=permit_id,
+                idempotency_key="post-error-1",
+            ),
+            headers=agent_headers,
+        )
+        assert r1.status_code == 200
+        body1 = r1.json()
+        assert "error" in body1, body1
+        assert body1["error"]["message"] == "upstream_returned_error"
+        assert executor.dispatch_count == 1
+        counts, spent = await _permit_slot_state(permit_id)
+        assert counts == {tool_name: 1}
+        assert spent == Decimal("0")
+
         r2 = await client.post(
             "/mcp/messages",
             json=_call_body(
                 tool_name=tool_name,
                 wallet_id=wallet_id,
                 permit_id=permit_id,
-                idempotency_key="dup-all-2",
-                message="test",  # Same as r1
+                idempotency_key="post-error-2",
             ),
             headers=agent_headers,
         )
         assert r2.status_code == 200
         body2 = r2.json()
-        # Should be blocked by duplicate detection finding r1
-        assert "error" in body2, "Duplicate detection should block r2 because r1 succeeded"
-        assert body2["error"]["message"] == "duplicate_request_new_key"
-        assert executor.dispatch_count == 1  # Still only r1 dispatched
+        assert "error" in body2, body2
+        assert body2["error"]["message"] == "permit_max_calls_exceeded"
+        assert executor.dispatch_count == 1
     finally:
         get_service_registry().unregister_local(tool_name)
 
 
 @pytest.mark.anyio
-async def test_remote_cap_1_abandoned_attempt_releases_slot(client, clean_database):
-    """Pre-dispatch abandonment releases both budget and call slot.
-    
-    Regression for the abandon_effect_free_prepared_attempt slot leak:
-    when an attempt is abandoned pre-dispatch (e.g. lost quote race),
-    both the budget and the call slot must be released.
+async def test_remote_cap_1_pre_dispatch_failure_releases_slot(client, clean_database):
+    """A pre-dispatch failure returns both the budget and the call slot.
+
+    Exercises the live route: the executor fails before ``before_dispatch``,
+    the attempt terminalises as a never-dispatched ``returned_error`` and
+    ``release_dispatch_budget_once`` gives the slot back, so the next key on
+    the same cap-of-one permit dispatches. The abandon path (lost quote or
+    ledger contention) is covered by the service-level tests below.
     """
     provisioned = await provision_agent_wallet(client)
     wallet_id = provisioned["agent_wallet_id"]
@@ -811,7 +948,8 @@ async def test_remote_cap_1_abandoned_attempt_releases_slot(client, clean_databa
         assert r1.status_code == 200
         body1 = r1.json()
         assert "error" in body1
-        # Pre-dispatch failure should return upstream_connection_failed
+        assert body1["error"]["message"] == "upstream_pre_dispatch_failed"
+        assert body1["error"]["data"]["receipt"]["outcome"] == "failed_refunded"
         assert executor.dispatch_count == 0
         
         # Second call with different key should succeed (slot was released)
@@ -835,183 +973,273 @@ async def test_remote_cap_1_abandoned_attempt_releases_slot(client, clean_databa
         get_service_registry().unregister_local(tool_name)
 
 
+# ---------------------------------------------------------------------------
+# Service-level slot lifecycle: abandon path, lost-CAS replay, lost-CAS reason
+# ---------------------------------------------------------------------------
+
+
+async def _reserve_capped_attempt(
+    client: AsyncClient,
+    *,
+    suffix: str,
+) -> tuple[McpDispatchAttemptService, McpDispatchAttemptModel, str, str]:
+    """Reserve one prepared attempt holding the only slot of a cap=1 permit."""
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    tool_name = f"test.cap.reserved.{suffix}"
+    permit_id = await _create_permit_with_cap(
+        client, wallet_id, provisioned["key_id"], tool_name, max_calls=1
+    )
+    begun = await get_idempotency_service().begin_with_record(
+        wallet_id=wallet_id,
+        endpoint=GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+        idempotency_key=f"reserved-{suffix}",
+        request_payload={"tool": tool_name, "arguments": {"message": suffix}},
+        operation_kind="upstream_mcp",
+    )
+    service = get_mcp_dispatch_attempt_service()
+    validation, attempt = await service.authorize_reserve_and_prepare(
+        idempotency_record_id=begun.record_id,
+        wallet_id=wallet_id,
+        permit_id=permit_id,
+        key_id=provisioned["key_id"],
+        public_tool_id=tool_name,
+        upstream_tool_name=tool_name,
+        upstream_origin="https://test.example",
+        request_hash=begun.request_hash,
+        credits_authorized=Decimal("2"),
+        arguments={"message": suffix},
+    )
+    assert validation.allowed is True, validation.reason
+    assert attempt is not None
+    assert attempt.call_slot_reserved is True
+    return service, attempt, permit_id, tool_name
+
+
+async def _permit_slot_state(permit_id: str) -> tuple[dict[str, Any], Decimal]:
+    """Return the permit's per-tool call counters and its reserved credits."""
+    factory = get_session_factory()
+    async with factory() as session:
+        permit = await session.get(PermitModel, permit_id)
+        assert permit is not None
+        return json.loads(permit.tool_call_counts_json or "{}"), permit.spent_credits
+
+
+def _inject_one_lost_counter_cas(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
+    """Make the first permit UPDATE that carries the counter CAS predicate miss.
+
+    Stands in for a concurrent counter change between the read and the guarded
+    UPDATE: the statement is not executed and reports ``rowcount`` 0, exactly
+    what the database returns when the ``tool_call_counts_json`` predicate no
+    longer matches. Every later statement runs normally, so a replayed
+    transaction succeeds and a non-replayed one surfaces the miss.
+    """
+    misses = {"count": 0}
+    original_execute = AsyncSession.execute
+
+    async def execute(self: AsyncSession, statement: Any, *args: Any, **kwargs: Any) -> Any:
+        rendered = str(statement) if misses["count"] == 0 else ""
+        if rendered.startswith("UPDATE permits") and "tool_call_counts_json" in rendered:
+            misses["count"] += 1
+            return SimpleNamespace(rowcount=0)
+        return await original_execute(self, statement, *args, **kwargs)
+
+    monkeypatch.setattr(AsyncSession, "execute", execute)
+    return misses
+
 
 @pytest.mark.anyio
-async def test_remote_cap_1_pre_dispatch_abandon_releases_slot_real_path(client, clean_database):
-    """Pre-dispatch abandon via abandon_effect_free_prepared_attempt releases slot.
-    
-    This test exercises the ACTUAL abandon_effect_free_prepared_attempt code path
-    by simulating a lost quote-consumption race condition. The slot must be released.
-    
-    This test FAILS on pre-fix code (slot not released in abandon path).
+async def test_abandon_effect_free_prepared_attempt_releases_call_slot(
+    client, clean_database
+):
+    """Abandoning a prepared attempt returns its budget and its call slot.
+
+    Regression for the slot leak: the lost-quote and ledger-contention
+    cleanups abandon the prepared attempt, and only ``spent_credits`` used to
+    come back, so a cap-of-one permit stayed exhausted although nothing was
+    dispatched or charged.
+    """
+    service, attempt, permit_id, tool_name = await _reserve_capped_attempt(
+        client, suffix="abandon-slot"
+    )
+    counts, spent = await _permit_slot_state(permit_id)
+    assert counts == {tool_name: 1}
+    assert spent == Decimal("2")
+
+    await service.abandon_effect_free_prepared_attempt(
+        attempt_id=attempt.attempt_id,
+        expected_updated_at=attempt.updated_at,
+    )
+
+    counts, spent = await _permit_slot_state(permit_id)
+    assert counts == {tool_name: 0}
+    assert spent == Decimal("0")
+    factory = get_session_factory()
+    async with factory() as session:
+        assert await session.get(McpDispatchAttemptModel, attempt.attempt_id) is None
+
+    # The freed slot is usable again by a fresh reservation on the same permit.
+    begun = await get_idempotency_service().begin_with_record(
+        wallet_id=attempt.wallet_id,
+        endpoint=GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+        idempotency_key="reserved-abandon-slot-again",
+        request_payload={"tool": tool_name, "arguments": {"message": "again"}},
+        operation_kind="upstream_mcp",
+    )
+    validation, again = await service.authorize_reserve_and_prepare(
+        idempotency_record_id=begun.record_id,
+        wallet_id=attempt.wallet_id,
+        permit_id=permit_id,
+        key_id=attempt.key_id,
+        public_tool_id=tool_name,
+        upstream_tool_name=tool_name,
+        upstream_origin="https://test.example",
+        request_hash=begun.request_hash,
+        credits_authorized=Decimal("2"),
+        arguments={"message": "again"},
+    )
+    assert validation.allowed is True, validation.reason
+    assert again is not None
+    assert again.call_slot_reserved is True
+    counts, spent = await _permit_slot_state(permit_id)
+    assert counts == {tool_name: 1}
+    assert spent == Decimal("2")
+
+
+@pytest.mark.anyio
+async def test_abandon_replays_a_lost_slot_cas(client, clean_database, monkeypatch):
+    """A lost slot CAS replays the abandon instead of failing it.
+
+    The CAS miss is raised inside the transaction as
+    ``PermitWriteContendedError``. Without a ``restart_on`` predicate it
+    escaped ``run_with_write_conflict_retry`` on the first attempt and the
+    recovery read reported the abandon as commit-uncertain, leaving the
+    reservation and the slot in place.
+    """
+    service, attempt, permit_id, tool_name = await _reserve_capped_attempt(
+        client, suffix="abandon-cas"
+    )
+    misses = _inject_one_lost_counter_cas(monkeypatch)
+
+    await service.abandon_effect_free_prepared_attempt(
+        attempt_id=attempt.attempt_id,
+        expected_updated_at=attempt.updated_at,
+    )
+
+    assert misses["count"] == 1
+    counts, spent = await _permit_slot_state(permit_id)
+    assert counts == {tool_name: 0}
+    assert spent == Decimal("0")
+    factory = get_session_factory()
+    async with factory() as session:
+        assert await session.get(McpDispatchAttemptModel, attempt.attempt_id) is None
+
+
+@pytest.mark.anyio
+async def test_pre_dispatch_release_replays_a_lost_slot_cas(
+    client, clean_database, monkeypatch
+):
+    """A lost slot CAS replays ``release_dispatch_budget_once``.
+
+    The permit read in that release is not row-locked, so a concurrent
+    reservation can move ``tool_call_counts_json`` between the read and the
+    guarded UPDATE. The miss must replay the whole transaction (it used to
+    escape ``_run_with_write_retry`` on the first attempt), so the budget and
+    the slot still come back, and still exactly once.
+    """
+    service, attempt, permit_id, tool_name = await _reserve_capped_attempt(
+        client, suffix="release-cas"
+    )
+    terminal = await service.complete_pre_dispatch_failure(
+        attempt_id=attempt.attempt_id,
+        expected_updated_at=attempt.updated_at,
+        result_payload={
+            "error": "failed_refunded",
+            "error_code": "upstream_connection_failed",
+        },
+        error_code="upstream_connection_failed",
+        max_result_bytes=get_settings().MCP_UPSTREAM_MAX_RESPONSE_BYTES,
+    )
+    assert terminal.state == "returned_error"
+    assert terminal.dispatched_at is None
+    counts, spent = await _permit_slot_state(permit_id)
+    assert counts == {tool_name: 1}
+    assert spent == Decimal("2")
+
+    misses = _inject_one_lost_counter_cas(monkeypatch)
+    permits = get_permit_service()
+    assert await permits.release_dispatch_budget_once(attempt.attempt_id) is True
+
+    assert misses["count"] == 1
+    counts, spent = await _permit_slot_state(permit_id)
+    assert counts == {tool_name: 0}
+    assert spent == Decimal("0")
+    # The guarded claim keeps the release once-only across replays too.
+    assert await permits.release_dispatch_budget_once(attempt.attempt_id) is False
+
+
+@pytest.mark.anyio
+async def test_reserve_reports_contention_not_budget_on_a_lost_cas(
+    client, clean_database, monkeypatch
+):
+    """A lost reservation CAS is reported as contention, never as budget.
+
+    The guarded reservation UPDATE carries the ``tool_call_counts_json``
+    predicate. When it matches no row although the permit is active, in date
+    and under both caps, the only explanation is a counter that moved between
+    the read and the write. That must surface as ``permit_write_contended``,
+    not as the terminal ``permit_budget_exceeded`` it used to fall through to,
+    and it must consume nothing: the next key reserves and dispatches.
     """
     provisioned = await provision_agent_wallet(client)
     wallet_id = provisioned["agent_wallet_id"]
     key_id = provisioned["key_id"]
     agent_headers = provisioned["agent_headers"]
-    tool_name = "test.abandon.real"
-    
+    tool_name = "test.cap.lost.cas"
+
     executor = FakeUpstreamExecutor("success")
     _register_upstream(tool_name, executor)
-    
+
     try:
         permit_id = await _create_permit_with_cap(
-            client, wallet_id, key_id, tool_name, max_calls=1
+            client, wallet_id, key_id, tool_name, max_calls=2
         )
-        
-        # Simplified: exercise abandon path by triggering it through router-level failure.
-        # The cleanest abandon trigger is a pre-dispatch error from authorize_reserve_and_prepare
-        # when the permit has insufficient budget AFTER slot reservation. We can simulate this
-        # by creating a permit with exactly enough credits for one call but setting cap=1,
-        # then making TWO concurrent calls with different keys - one succeeds reserving the slot,
-        # the other fails budget check AFTER reserving, triggering abandon.
-        #
-        # Even simpler: just verify the second call succeeds after we delete the first prepared attempt.
-        
-        # Make first call which reserves the cap=1 slot
+        misses = _inject_one_lost_counter_cas(monkeypatch)
+
         r1 = await client.post(
             "/mcp/messages",
             json=_call_body(
                 tool_name=tool_name,
                 wallet_id=wallet_id,
                 permit_id=permit_id,
-                idempotency_key="first-call",
+                idempotency_key="lost-cas-1",
             ),
             headers=agent_headers,
         )
         assert r1.status_code == 200
         body1 = r1.json()
-        assert "result" in body1
-        assert body1["result"]["receipt"]["outcome"] == "success"
-        
-        # Slot is now occupied, second call should be denied
-        r2_denied = await client.post(
-            "/mcp/messages",
-            json=_call_body(
-                tool_name=tool_name,
-                wallet_id=wallet_id,
-                permit_id=permit_id,
-                idempotency_key="second-call-denied",
-            ),
-            headers=agent_headers,
-        )
-        assert r2_denied.status_code == 200
-        body2_denied = r2_denied.json()
-        assert "error" in body2_denied
-        assert body2_denied["error"]["message"] == "permit_max_calls_exceeded"
-        
-        # Now manually release the slot by calling release_dispatch_budget_once
-        # on the first attempt to simulate abandon releasing the slot
-        from app.db.database import get_session_factory
-        from app.db.models import McpDispatchAttemptModel
-        from app.services.permits import get_permit_service
-        
-        factory = get_session_factory()
-        permit_service = get_permit_service()
-        
-        async with factory() as session:
-            # Find the first attempt
-            from sqlalchemy import select
-            stmt = select(McpDispatchAttemptModel).where(
-                McpDispatchAttemptModel.permit_id == permit_id,
-                McpDispatchAttemptModel.state == "succeeded",
-            )
-            result = await session.execute(stmt)
-            first_attempt = result.scalar_one()
-            attempt_id = first_attempt.attempt_id
-        
-        # The real abandon_effect_free_prepared_attempt test is implicit:
-        # if it didn't release the slot properly, the Postgres concurrency tests would fail.
-        # This test just verifies the overall flow works.
-        
-    finally:
-        get_service_registry().unregister_local(tool_name)
+        assert "error" in body1, body1
+        assert body1["error"]["message"] == "permit_write_contended"
+        assert misses["count"] == 1
+        assert executor.dispatch_count == 0
+        counts, spent = await _permit_slot_state(permit_id)
+        assert counts == {}
+        assert spent == Decimal("0")
 
-
-@pytest.mark.anyio
-async def test_remote_cap_concurrent_cas_miss_reports_write_contended(client, clean_database):
-    """Concurrent slot modification reports permit_write_contended, not permit_budget_exceeded.
-    
-    When the CAS fails because tool_call_counts_json changed concurrently,
-    the denial reason should be permit_write_contended.
-    
-    This test FAILS on pre-fix code (wrong denial reason reported).
-    """
-    provisioned = await provision_agent_wallet(client)
-    wallet_id = provisioned["agent_wallet_id"]
-    key_id = provisioned["key_id"]
-    agent_headers = provisioned["agent_headers"]
-    tool_name = "test.cas.contend"
-    
-    executor = FakeUpstreamExecutor("success")
-    _register_upstream(tool_name, executor)
-    
-    try:
-        # Create permit with sufficient budget but cap=2
-        permit_resp = await client.post(
-            "/v1/permits",
-            json={
-                "issuer_wallet_id": wallet_id,
-                "subject_wallet_id": wallet_id,
-                "subject_key_id": key_id,
-                "allowed_tools": [tool_name],
-                "scopes": [f"tool:{tool_name}:invoke", "billing:charge"],
-                "max_credits": 100,
-                "max_calls_per_tool": {tool_name: 2},
-                "expires_at": (utc_now() + timedelta(hours=1)).isoformat(),
-            },
-            headers={**BOOTSTRAP_HEADERS, "Idempotency-Key": f"permit-cas-test"},
-        )
-        assert permit_resp.status_code == 201
-        permit_id = permit_resp.json()["permit_id"]
-        
-        # Make first call to set counter to 1
-        r1 = await client.post(
-            "/mcp/messages",
-            json=_call_body(
-                tool_name=tool_name,
-                wallet_id=wallet_id,
-                permit_id=permit_id,
-                idempotency_key="cas-1",
-            ),
-            headers=agent_headers,
-        )
-        assert r1.status_code == 200
-        
-        # Manually break the counter to force a CAS miss
-        from app.db.database import get_session_factory
-        from app.db.models import PermitModel
-        factory = get_session_factory()
-        
-        async with factory() as session:
-            async with session.begin():
-                permit = await session.get(PermitModel, permit_id, with_for_update=True)
-                # Change the counter to force next reservation's CAS to fail
-                import json
-                counts = json.loads(permit.tool_call_counts_json or "{}")
-                counts[tool_name] = 5  # Change it so CAS will miss
-                permit.tool_call_counts_json = json.dumps(counts)
-        
-        # Second call will retry CAS after the first attempt fails. With retry working,
-        # it succeeds in reserving the broken count value we set (5), so the cap check
-        # sees count 5 >= limit 1 and correctly denies with permit_max_calls_exceeded.
-        # Before the retry fix, it would fall through and wrongly report permit_budget_exceeded.
         r2 = await client.post(
             "/mcp/messages",
             json=_call_body(
                 tool_name=tool_name,
                 wallet_id=wallet_id,
                 permit_id=permit_id,
-                idempotency_key="cas-2",
+                idempotency_key="lost-cas-2",
             ),
             headers=agent_headers,
         )
         assert r2.status_code == 200
-        body2 = r2.json()
-        assert "error" in body2
-        # After the retry fix: CAS retry succeeds, finds count 5 >= limit 1, reports correct denial
-        assert body2["error"]["message"] == "permit_max_calls_exceeded", \
-            f"With retry working, CAS succeeds and cap check denies, got: {body2['error']['message']}"
-        
+        assert r2.json()["result"]["receipt"]["outcome"] == "success"
+        assert executor.dispatch_count == 1
+        counts, _ = await _permit_slot_state(permit_id)
+        assert counts == {tool_name: 1}
     finally:
         get_service_registry().unregister_local(tool_name)
