@@ -1316,20 +1316,14 @@ class PermitService:
                     attempt = await session.get(McpDispatchAttemptModel, attempt_id)
                     if attempt is None:
                         raise PermitError("dispatch_attempt_not_found")
-                    # Only a terminal returned_error attempt that never dispatched
-                    # has a reservation to give back. A dispatched attempt (even one
-                    # that returned an error) consumed its slot and budget.
-                    # Releasing budget for a prepared or dispatched attempt frees
-                    # credits that attempt may still go on to spend, so the cap
-                    # would be enforced against a reservation that no longer exists.
-                    # This pre-check is the contract; the guarded claim below is
-                    # the once-only gate.
+                    # Only a terminal returned_error attempt has a reservation
+                    # to give back. Releasing budget for a prepared or
+                    # dispatched attempt frees credits that attempt may still
+                    # go on to spend, so the cap would be enforced against a
+                    # reservation that no longer exists. This pre-check is the
+                    # contract; the guarded claim below is the once-only gate.
                     if attempt.state != "returned_error":
                         raise PermitError("dispatch_budget_release_state_invalid")
-                    # If attempt was dispatched (dispatched_at is set), it consumed
-                    # its slot even if it later returned an error. Do not release.
-                    if attempt.dispatched_at is not None:
-                        return False
                     if attempt.budget_released_at is not None:
                         return False
                     now = utc_now()
@@ -1384,21 +1378,24 @@ class PermitService:
                     
                     original_counts_json = None
                     if attempt.call_slot_reserved:
-                        # Decrement the call counter for this tool. Read the permit
-                        # first to get the current counts.
-                        permit = await session.get(PermitModel, attempt.permit_id)
-                        if permit is not None:
-                            original_counts_json = permit.tool_call_counts_json
-                            current_counts = _loads_dict(original_counts_json or "{}")
-                            tool_name = attempt.public_tool_id
-                            if tool_name in current_counts:
-                                current_count = current_counts[tool_name]
-                                if isinstance(current_count, int) and current_count > 0:
-                                    updated_counts = dict(current_counts)
-                                    updated_counts[tool_name] = current_count - 1
-                                    permit_update_values["tool_call_counts_json"] = (
-                                        json.dumps(updated_counts)
-                                    )
+                        # Only release call slot if attempt never dispatched.
+                        # A dispatched attempt consumed its slot even if it later
+                        # errored and was refunded - the slot was used.
+                        if attempt.dispatched_at is None:
+                            # Pre-dispatch failure: release the call slot
+                            permit = await session.get(PermitModel, attempt.permit_id)
+                            if permit is not None:
+                                original_counts_json = permit.tool_call_counts_json
+                                current_counts = _loads_dict(original_counts_json or "{}")
+                                tool_name = attempt.public_tool_id
+                                if tool_name in current_counts:
+                                    current_count = current_counts[tool_name]
+                                    if isinstance(current_count, int) and current_count > 0:
+                                        updated_counts = dict(current_counts)
+                                        updated_counts[tool_name] = current_count - 1
+                                        permit_update_values["tool_call_counts_json"] = (
+                                            json.dumps(updated_counts)
+                                        )
                     
                     # Atomic clamped decrement so a concurrent reservation on the
                     # same permit is not clobbered by a read-modify-write here.
