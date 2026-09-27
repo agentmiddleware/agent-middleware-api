@@ -1205,23 +1205,24 @@ async def test_pre_dispatch_release_replays_a_lost_slot_cas(
 
 
 @pytest.mark.anyio
-async def test_reserve_reports_contention_not_budget_on_a_lost_cas(
+async def test_reserve_contention_is_retryable_and_frees_the_key(
     client, clean_database, monkeypatch
 ):
-    """A lost reservation CAS is reported as contention, never as budget.
+    """A lost reservation CAS with capacity remaining is retryable, not a verdict.
 
-    The guarded reservation UPDATE carries the ``tool_call_counts_json``
-    predicate. When it matches no row although the permit is active, in date
-    and under both caps, the only explanation is a counter that moved between
-    the read and the write. That must surface as ``permit_write_contended``,
-    not as the terminal ``permit_budget_exceeded`` it used to fall through to,
-    and it must consume nothing: the next key reserves and dispatches.
+    The guarded reservation UPDATE carries the counter predicate. When it
+    matches no row although the permit is active, in date, under its cap and
+    within budget, the counter moved between the read and the write. That used
+    to be completed against the idempotency key as a ``permit_write_contended``
+    denial, so a same-key retry replayed the denial forever. It is now the
+    retryable envelope (-32005) with nothing consumed and the in-progress
+    record released, so the same key retried dispatches.
     """
     provisioned = await provision_agent_wallet(client)
     wallet_id = provisioned["agent_wallet_id"]
     key_id = provisioned["key_id"]
     agent_headers = provisioned["agent_headers"]
-    tool_name = "test.cap.lost.cas"
+    tool_name = "test.cap.contended"
 
     executor = FakeUpstreamExecutor("success")
     _register_upstream(tool_name, executor)
@@ -1231,41 +1232,35 @@ async def test_reserve_reports_contention_not_budget_on_a_lost_cas(
             client, wallet_id, key_id, tool_name, max_calls=2
         )
         misses = _inject_one_lost_counter_cas(monkeypatch)
-
-        r1 = await client.post(
-            "/mcp/messages",
-            json=_call_body(
-                tool_name=tool_name,
-                wallet_id=wallet_id,
-                permit_id=permit_id,
-                idempotency_key="lost-cas-1",
-            ),
-            headers=agent_headers,
+        body = _call_body(
+            tool_name=tool_name,
+            wallet_id=wallet_id,
+            permit_id=permit_id,
+            idempotency_key="contended-1",
         )
+
+        r1 = await client.post("/mcp/messages", json=body, headers=agent_headers)
         assert r1.status_code == 200
         body1 = r1.json()
         assert "error" in body1, body1
+        assert body1["error"]["code"] == -32005
         assert body1["error"]["message"] == "permit_write_contended"
+        assert "data" not in body1["error"]
         assert misses["count"] == 1
         assert executor.dispatch_count == 0
         counts, spent = await _permit_slot_state(permit_id)
         assert counts == {}
         assert spent == Decimal("0")
 
-        r2 = await client.post(
-            "/mcp/messages",
-            json=_call_body(
-                tool_name=tool_name,
-                wallet_id=wallet_id,
-                permit_id=permit_id,
-                idempotency_key="lost-cas-2",
-            ),
-            headers=agent_headers,
-        )
+        # The same key, retried once the contention is gone: the released
+        # record lets the retry run instead of replaying a frozen denial.
+        r2 = await client.post("/mcp/messages", json=body, headers=agent_headers)
         assert r2.status_code == 200
-        assert r2.json()["result"]["receipt"]["outcome"] == "success"
+        body2 = r2.json()
+        assert "result" in body2, body2
+        assert body2["result"]["receipt"]["outcome"] == "success"
         assert executor.dispatch_count == 1
-        counts, _ = await _permit_slot_state(permit_id)
+        counts, spent = await _permit_slot_state(permit_id)
         assert counts == {tool_name: 1}
     finally:
         get_service_registry().unregister_local(tool_name)

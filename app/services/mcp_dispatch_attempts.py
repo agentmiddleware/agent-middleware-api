@@ -905,18 +905,17 @@ class McpDispatchAttemptService:
                         # A cap is configured, the row is active, in date, under
                         # its counter and within budget: the only predicate left
                         # that could have failed is the counter CAS, so the
-                        # counter moved between the read and the UPDATE. Report
-                        # it as contention, which the caller may retry.
+                        # counter moved between the read and the UPDATE. That is
+                        # contention, not a verdict on the call, and it must not
+                        # be recorded against the idempotency key: a denial
+                        # completed here would replay forever for a call that is
+                        # in budget and under its cap. Raise the contended type
+                        # instead; the transaction rolls back with nothing
+                        # durable, and the governed router releases the key and
+                        # answers the retryable envelope so the caller retries
+                        # the same key.
                         if updated_counts_json is not None:
-                            return (
-                                PermitValidation(
-                                    False,
-                                    "permit_write_contended",
-                                    permit,
-                                    {"detail": "Tool call count changed concurrently"},
-                                ),
-                                None,
-                            )
+                            raise PermitWriteContendedError()
                         return budget_denial
                     # Reflect the committed reservation on the returned model.
                     await session.refresh(permit)
@@ -939,6 +938,12 @@ class McpDispatchAttemptService:
                     await session.flush()
                 return validation, attempt
         except DispatchAttemptError:
+            raise
+        except PermitWriteContendedError:
+            # Raised inside the transaction by the lost counter CAS above, so
+            # the rollback is certain and nothing durable exists to recover or
+            # adopt: not a commit-uncertain case. The router classifies it as
+            # retryable and releases the in-progress idempotency record.
             raise
         except Exception as exc:
             # A database driver can report a failed COMMIT after the server
