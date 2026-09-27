@@ -669,34 +669,34 @@ class McpDispatchAttemptService:
                             blocking_prior = prior
                             blocks = True
                             break
-                            
-                            if blocks and blocking_prior is not None:
-                                msg = (
-                                    f"Duplicate request detected: new idempotency key with "
-                                    f"identical request hash (permit={permit_id}, "
-                                    f"tool={public_tool_id}, request_hash={request_hash[:16]}..., "
-                                    f"prior_attempt={blocking_prior.attempt_id}, "
-                                    f"prior_state={blocking_prior.state})"
+                        
+                        if blocks and blocking_prior is not None:
+                            msg = (
+                                f"Duplicate request detected: new idempotency key with "
+                                f"identical request hash (permit={permit_id}, "
+                                f"tool={public_tool_id}, request_hash={request_hash[:16]}..., "
+                                f"prior_attempt={blocking_prior.attempt_id}, "
+                                f"prior_state={blocking_prior.state})"
+                            )
+                            if duplicate_mode == "log":
+                                logger.warning(
+                                    f"{msg} - allowing in observe mode"
                                 )
-                                if duplicate_mode == "log":
-                                    logger.warning(
-                                        f"{msg} - allowing in observe mode"
-                                    )
-                                else:  # enforce
-                                    logger.info(msg)
-                                    return (
-                                        PermitValidation(
-                                            False,
-                                            "duplicate_request_new_key",
-                                            permit,
-                                            {
-                                                "prior_attempt_id": prior.attempt_id,
-                                                "prior_state": prior.state,
-                                                "request_hash": request_hash,
-                                            },
-                                        ),
-                                        None,
-                                    )
+                            else:  # enforce
+                                logger.info(msg)
+                                return (
+                                    PermitValidation(
+                                        False,
+                                        "duplicate_request_new_key",
+                                        permit,
+                                        {
+                                            "prior_attempt_id": blocking_prior.attempt_id,
+                                            "prior_state": blocking_prior.state,
+                                            "request_hash": request_hash,
+                                        },
+                                    ),
+                                    None,
+                                )
                     
                     if unsupported_constraints:
                         # aggregate_value_cap requires folding in-flight reservations,
