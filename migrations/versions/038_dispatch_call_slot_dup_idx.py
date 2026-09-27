@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '038_dispatch_call_slot_and_dup_index'
+revision: str = '038_dispatch_call_slot_dup_idx'
 down_revision: str = '037_mcp_dispatch_claim_hash'
 branch_labels = None
 depends_on = None

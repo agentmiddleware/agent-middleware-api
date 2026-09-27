@@ -10,8 +10,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '039_permit_allow_identical_repeats'
-down_revision: str = '038_dispatch_call_slot_and_dup_index'
+revision: str = '039_permit_allow_ident_repeats'
+down_revision: str = '038_dispatch_call_slot_dup_idx'
 branch_labels = None
 depends_on = None
 

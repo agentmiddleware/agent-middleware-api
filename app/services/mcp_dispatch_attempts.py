@@ -644,12 +644,12 @@ class McpDispatchAttemptService:
                                     ),
                                     cast(
                                         ColumnElement[bool],
-                                        McpDispatchAttemptModel.state.in_(
+                                        cast(Any, McpDispatchAttemptModel.state).in_(
                                             blocking_states
                                         ),
                                     ),
                                 )
-                                .order_by(McpDispatchAttemptModel.created_at.desc())
+                                .order_by(cast(Any, McpDispatchAttemptModel.created_at).desc())
                                 .limit(1)
                             )
                         ).scalar_one_or_none()
