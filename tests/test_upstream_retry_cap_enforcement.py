@@ -21,6 +21,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app.core.config import get_settings
 from app.core.time import utc_now
@@ -1025,17 +1026,29 @@ async def _permit_slot_state(permit_id: str) -> tuple[dict[str, Any], Decimal]:
         return json.loads(permit.tool_call_counts_json or "{}"), permit.spent_credits
 
 
-def _inject_one_lost_counter_cas(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
+def _inject_one_lost_counter_cas(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    budget_spent_on_refresh: bool = False,
+) -> dict[str, int]:
     """Make the first permit UPDATE that carries the counter CAS predicate miss.
 
-    Stands in for a concurrent counter change between the read and the guarded
-    UPDATE: the statement is not executed and reports ``rowcount`` 0, exactly
-    what the database returns when the ``tool_call_counts_json`` predicate no
-    longer matches. Every later statement runs normally, so a replayed
-    transaction succeeds and a non-replayed one surfaces the miss.
+    Stands in for a concurrent writer between the read and the guarded UPDATE:
+    the statement is not executed and reports ``rowcount`` 0, exactly what the
+    database returns when the predicate no longer matches. Every later
+    statement runs normally, so a replayed transaction succeeds and a
+    non-replayed one surfaces the miss.
+
+    With ``budget_spent_on_refresh`` the stand-in is a concurrent spend rather
+    than a counter move: the permit row re-read after the miss shows its
+    credits exhausted. The value is set as committed state on the loaded
+    instance (no dirty attribute, nothing is flushed), which is what the
+    classification sees when the row was changed by another transaction on an
+    engine that does not honour the row lock.
     """
-    misses = {"count": 0}
+    misses = {"count": 0, "refreshes": 0}
     original_execute = AsyncSession.execute
+    original_refresh = AsyncSession.refresh
 
     async def execute(self: AsyncSession, statement: Any, *args: Any, **kwargs: Any) -> Any:
         rendered = str(statement) if misses["count"] == 0 else ""
@@ -1044,7 +1057,20 @@ def _inject_one_lost_counter_cas(monkeypatch: pytest.MonkeyPatch) -> dict[str, i
             return SimpleNamespace(rowcount=0)
         return await original_execute(self, statement, *args, **kwargs)
 
+    async def refresh(self: AsyncSession, instance: Any, *args: Any, **kwargs: Any) -> Any:
+        result = await original_refresh(self, instance, *args, **kwargs)
+        if (
+            budget_spent_on_refresh
+            and misses["count"] == 1
+            and misses["refreshes"] == 0
+            and isinstance(instance, PermitModel)
+        ):
+            misses["refreshes"] += 1
+            set_committed_value(instance, "spent_credits", instance.max_credits)
+        return result
+
     monkeypatch.setattr(AsyncSession, "execute", execute)
+    monkeypatch.setattr(AsyncSession, "refresh", refresh)
     return misses
 
 
@@ -1241,5 +1267,75 @@ async def test_reserve_reports_contention_not_budget_on_a_lost_cas(
         assert executor.dispatch_count == 1
         counts, _ = await _permit_slot_state(permit_id)
         assert counts == {tool_name: 1}
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.anyio
+async def test_reserve_reports_budget_not_contention_when_credits_ran_out(
+    client, clean_database, monkeypatch
+):
+    """A lost reservation on an exhausted budget is a budget denial.
+
+    With a cap configured the guarded UPDATE carries both the counter and the
+    budget predicate. When it matches no row and the re-read permit shows the
+    credits gone, the reason is ``permit_budget_exceeded`` with its details,
+    never the retryable ``permit_write_contended`` the cap branch used to
+    return first. Nothing is consumed by the denial.
+    """
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    key_id = provisioned["key_id"]
+    agent_headers = provisioned["agent_headers"]
+    tool_name = "test.cap.budget.gone"
+
+    executor = FakeUpstreamExecutor("success")
+    _register_upstream(tool_name, executor)
+
+    try:
+        permit_id = await _create_permit_with_cap(
+            client, wallet_id, key_id, tool_name, max_calls=2
+        )
+        misses = _inject_one_lost_counter_cas(monkeypatch, budget_spent_on_refresh=True)
+
+        r1 = await client.post(
+            "/mcp/messages",
+            json=_call_body(
+                tool_name=tool_name,
+                wallet_id=wallet_id,
+                permit_id=permit_id,
+                idempotency_key="budget-gone-1",
+            ),
+            headers=agent_headers,
+        )
+        assert r1.status_code == 200
+        body1 = r1.json()
+        assert "error" in body1, body1
+        assert body1["error"]["message"] == "permit_budget_exceeded"
+        details = body1["error"]["data"]["details"]
+        assert Decimal(details["required_credits"]) == Decimal("2")
+        assert Decimal(details["remaining_credits"]) == Decimal("0")
+        assert Decimal(details["spent_credits"]) == Decimal(details["max_credits"])
+        assert misses == {"count": 1, "refreshes": 1}
+        assert executor.dispatch_count == 0
+
+        # The denial consumed nothing: the stored row is untouched and the
+        # next key reserves and dispatches.
+        counts, spent = await _permit_slot_state(permit_id)
+        assert counts == {}
+        assert spent == Decimal("0")
+        r2 = await client.post(
+            "/mcp/messages",
+            json=_call_body(
+                tool_name=tool_name,
+                wallet_id=wallet_id,
+                permit_id=permit_id,
+                idempotency_key="budget-gone-2",
+            ),
+            headers=agent_headers,
+        )
+        assert r2.status_code == 200
+        assert r2.json()["result"]["receipt"]["outcome"] == "success"
+        assert executor.dispatch_count == 1
     finally:
         get_service_registry().unregister_local(tool_name)

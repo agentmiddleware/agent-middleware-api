@@ -874,21 +874,7 @@ class McpDispatchAttemptService:
                                     ),
                                     None,
                                 )
-                        # Final check: if we reserved a call slot and the CAS failed,
-                        # report it as a contention issue rather than budget_exceeded.
-                        # On SQLite this can happen when a concurrent call modifies
-                        # tool_call_counts_json between our read and the failed UPDATE.
-                        if updated_counts_json is not None:
-                            return (
-                                PermitValidation(
-                                    False,
-                                    "permit_write_contended",
-                                    permit,
-                                    {"detail": "Tool call count changed concurrently"},
-                                ),
-                                None,
-                            )
-                        return (
+                        budget_denial = (
                             PermitValidation(
                                 False,
                                 "permit_budget_exceeded",
@@ -905,6 +891,33 @@ class McpDispatchAttemptService:
                             ),
                             None,
                         )
+                        # Budget is classified on the refreshed row before the
+                        # contention fallback. When a cap is configured the
+                        # predicate carries both the counter and the budget, so
+                        # a permit that ran out of credits under a concurrent
+                        # spend must be told so, not handed a retryable counter
+                        # race it would retry into forever.
+                        if (
+                            permit.spent_credits + credits_authorized
+                            > permit.max_credits
+                        ):
+                            return budget_denial
+                        # A cap is configured, the row is active, in date, under
+                        # its counter and within budget: the only predicate left
+                        # that could have failed is the counter CAS, so the
+                        # counter moved between the read and the UPDATE. Report
+                        # it as contention, which the caller may retry.
+                        if updated_counts_json is not None:
+                            return (
+                                PermitValidation(
+                                    False,
+                                    "permit_write_contended",
+                                    permit,
+                                    {"detail": "Tool call count changed concurrently"},
+                                ),
+                                None,
+                            )
+                        return budget_denial
                     # Reflect the committed reservation on the returned model.
                     await session.refresh(permit)
                     attempt = McpDispatchAttemptModel(
