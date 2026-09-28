@@ -472,6 +472,50 @@ def test_railway_source_check_rejects_malformed_output_without_echoing_it(
         assert stdout not in output
 
 
+@pytest.mark.parametrize(
+    ("field", "bound_value"),
+    [
+        ("repo", "PetrefiedThunder/agent-middleware-api"),
+        ("image", "ghcr.io/example/agent-middleware-api:latest"),
+    ],
+)
+def test_railway_source_check_rejects_duplicate_json_keys(
+    unbound_railway_status,
+    field,
+    bound_value,
+    monkeypatch,
+    capsys,
+):
+    status = json.dumps(unbound_railway_status)
+    status = status.replace(
+        f'"{field}": null',
+        f'"{field}": {json.dumps(bound_value)}, "{field}": null',
+        1,
+    )
+    monkeypatch.setattr(
+        preflight.subprocess,
+        "run",
+        lambda command, **_kwargs: preflight.subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=status,
+            stderr="",
+        ),
+    )
+
+    assert (
+        preflight.check_railway_source_unbound(
+            project_id=_RAILWAY_PROJECT,
+            environment=_RAILWAY_ENVIRONMENT,
+            service=_RAILWAY_SERVICE,
+        )
+        is False
+    )
+    output = capsys.readouterr().out
+    assert "could not be verified" in output
+    assert bound_value not in output
+
+
 def test_railway_source_check_hides_cli_failure_output(monkeypatch, capsys):
     secret = "railway_token=secret-token-shaped-value"
     monkeypatch.setattr(
