@@ -1,0 +1,38 @@
+{
+  "status": "Illustrative assumptions, not actual operating results or offered prices",
+  "as_of": "2026-09-05",
+  "source_commit": "ebe36d7baaf0978b2c8160bd46d5b3ff8556f91f",
+  "currency": "USD",
+  "days_per_month": 30,
+  "card_percent": 0.029,
+  "card_fixed": 0.30,
+  "reserve_percent": 0.01,
+  "base_monthly_fee": 1500,
+  "included_actions": 100000,
+  "overage_per_action": 0.001,
+  "enterprise_allocation": 0,
+  "enterprise_allocation_note": "ZERO IS A CONDITIONAL EXCLUSION, NOT A PRICE QUOTE. Add incremental Enterprise minimum, fee, and support allocation beyond resource spend. The deployment SOP requires Enterprise. Do not approve a customer quote without resolving this input.",
+  "target_margin": 0.70,
+  "setup_fee": 2500,
+  "setup_hours": 20,
+  "setup_other_cost": 100,
+  "founder_delivery_hourly_cost": 75,
+  "shared_monthly_overhead": 10000,
+  "cac": 8000,
+  "railway_rates": {
+    "cpu_vcpu_month": 20,
+    "memory_gb_month": 10,
+    "volume_gb_month": 0.15,
+    "egress_gb": 0.05,
+    "source": "https://docs.railway.com/pricing/plans",
+    "note": "Published monthly equivalents, not a quote; public per-second rounded rates differ slightly. Usage quantities below are unmeasured."
+  },
+  "scenarios": [
+    {"name":"Lean pilot","actions":100000,"infra_fixed":75,"machine_per_action":0.00003,"support_hours":1,"hourly_cost":75,"exception_rate":0.00001,"human_fraction":0.1,"hours_per_case":0.25},
+    {"name":"Base account","actions":1000000,"infra_fixed":150,"machine_per_action":0.0001,"support_hours":3,"hourly_cost":75,"exception_rate":0.00005,"human_fraction":0.1,"hours_per_case":0.25},
+    {"name":"Volume account","actions":10000000,"infra_fixed":500,"machine_per_action":0.0002,"support_hours":8,"hourly_cost":75,"exception_rate":0.00005,"human_fraction":0.1,"hours_per_case":0.25},
+    {"name":"Troubled account","actions":1000000,"infra_fixed":450,"machine_per_action":0.0005,"support_hours":12,"hourly_cost":100,"exception_rate":0.0005,"human_fraction":0.2,"hours_per_case":0.5}
+  ],
+  "traffic_note": "Actions are first-time governed logical attempts. Denials are conservatively included in allowance/overage; identical-key replays are not new billable units. A 20% replay rate and ancillary request mix are embedded in the illustrative machine-per-action allowance. This is a proposed commercial meter, not implemented subscription billing.",
+  "cost_note": "infra_fixed is baseline customer resources, backup/monitoring allowance and routine machine overhead at a stated retention age; machine_per_action is incremental usage above that baseline, including incremental compute, database, storage, network and observability. Do not add the separate storage and CPU diagnostic tables to these aggregate allowances. Support excludes exception handling and onboarding. Reserve is expected service concession/loss cost for planning, not a statutory accounting conclusion. No upstream execution or LLM resale cost is included."
+}
