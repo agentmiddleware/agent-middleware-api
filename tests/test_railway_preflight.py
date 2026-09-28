@@ -2,8 +2,9 @@
 
 The preflight only earns its place if it fails on the states that actually
 break a Railway deploy: a tree ahead of the deployed schema, a database
-bootstrapped by ``create_all`` and never stamped, and a service that came up
-with memory state or proof surfaces on.
+bootstrapped by ``create_all`` and never stamped, a service that came up
+with memory state or proof surfaces on, and a production service whose tool
+catalogs are readable without credentials.
 """
 
 import asyncio
@@ -11,6 +12,7 @@ import base64
 import importlib.util
 import json
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 from alembic import command
@@ -206,7 +208,8 @@ def test_private_pilot_sop_runs_schema_check_inside_api_container() -> None:
     assert sop.count('--project "$PROJECT_ID"') >= 7
     assert '--deployment-instance "$INSTANCE_ID"' in sop
     assert "python scripts/retire_owner_keys.py --private-db" in sop
-    assert "python scripts/railway_preflight.py --db --strict" in sop
+    assert "python scripts/railway_preflight.py --db --runtime-posture --strict" in sop
+    assert "python scripts/railway_preflight.py --db --strict" not in sop
     assert "PRIVATE_RELEASE_CHECKS_OK" in sop
     assert 'test "$sentinel_count" -eq 1' in sop
     assert 'test "$post_ready" = "true"' in sop
@@ -275,14 +278,36 @@ def test_customer_restore_sop_does_not_misstate_volume_restore_semantics() -> No
 
 
 class _Response:
-    def __init__(self, payload):
+    def __init__(self, payload, status_code=200):
         self._payload = payload
+        self.status_code = status_code
 
     def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
         return None
 
     def json(self):
         return self._payload
+
+
+# What a production-like boot answers an unauthenticated catalog read with
+# since the #444 lockdown (app.core.auth.reject_anonymous_production_catalog).
+_MISSING_CREDENTIALS = {
+    "detail": {
+        "error": "missing_credentials",
+        "message": "X-API-Key or Authorization: Bearer header is required.",
+        "docs": "/docs",
+    }
+}
+
+
+def _is_catalog(url):
+    return urlsplit(url).path in preflight._LOCKED_CATALOG_PATHS
+
+
+def _locked_catalog():
+    return _Response(_MISSING_CREDENTIALS, status_code=401)
 
 
 EXPECTED_COMMIT_SHA = "0123456789abcdef0123456789abcdef01234567"
@@ -351,13 +376,20 @@ def _trust_keys(*, kid=EXPECTED_SIGNING_KEY_ID, status="active"):
 def _patch_get(monkeypatch, payload):
     import httpx
 
-    monkeypatch.setattr(httpx, "get", lambda *a, **kw: _Response(payload))
+    def get(url, **_kwargs):
+        if _is_catalog(url):
+            return _locked_catalog()
+        return _Response(payload)
+
+    monkeypatch.setattr(httpx, "get", get)
 
 
 def _patch_endpoint_get(monkeypatch, dependencies_payload, liveness_payload):
     import httpx
 
     def get(url, **_kwargs):
+        if _is_catalog(url):
+            return _locked_catalog()
         payload = (
             dependencies_payload
             if url.endswith("/health/dependencies")
@@ -380,6 +412,8 @@ def _patch_manifest_get(
     key_payload = key_payload or _trust_keys()
 
     def get(url, **_kwargs):
+        if _is_catalog(url):
+            return _locked_catalog()
         if url.endswith("/health/dependencies"):
             return _Response(dependencies_payload)
         if url.endswith("/.well-known/trust-keys.json"):
@@ -667,6 +701,7 @@ def test_manifest_only_requires_manifest(capsys):
         ["--live"],
         ["--db"],
         ["--public-db"],
+        ["--runtime-posture"],
         ["--expected-version", "1.3.0"],
         ["--expected-commit-sha", EXPECTED_COMMIT_SHA],
     ],
@@ -819,6 +854,8 @@ def test_live_fails_closed_when_public_key_document_is_unreachable(monkeypatch):
     import httpx
 
     def get(url, **_kwargs):
+        if _is_catalog(url):
+            return _locked_catalog()
         if url.endswith("/.well-known/trust-keys.json"):
             raise httpx.ConnectError("no route")
         return _Response({**HEALTHY, "signing_key_id": EXPECTED_SIGNING_KEY_ID})
@@ -876,87 +913,182 @@ def test_live_fails_on_bad_posture(monkeypatch, override):
     assert preflight.check_live("https://api.example.com") is False
 
 
-def _patch_get_with_discovery(monkeypatch, payload, discovery_payload):
+# ---------------------------------------------------------------------------
+# Locked-down tool catalogs and the private dogfood posture.
+#
+# The public /health/dependencies projection omits enable_dogfood_tool (#348),
+# and since the #444 Narrow lockdown production-like boots refuse anonymous
+# tool catalogs with 401. The live gate therefore asserts the lockdown on every
+# catalog route and fails closed on anything else; the dogfood state, no longer
+# publicly observable, is asserted privately by --runtime-posture.
+# ---------------------------------------------------------------------------
+
+
+PUBLIC_PROJECTION = {
+    key: value for key, value in HEALTHY.items() if key != "enable_dogfood_tool"
+}
+
+
+def _patch_get_with_catalog(monkeypatch, payload, catalog_path, catalog_response):
     import httpx
 
     def get(url, **_kwargs):
-        if url.endswith("/v1/discover"):
-            return _Response(discovery_payload)
+        if urlsplit(url).path == catalog_path:
+            if isinstance(catalog_response, Exception):
+                raise catalog_response
+            return catalog_response
+        if _is_catalog(url):
+            return _locked_catalog()
         return _Response(payload)
 
     monkeypatch.setattr(httpx, "get", get)
 
 
-def test_live_passes_when_dogfood_flag_absent_and_discovery_clean(monkeypatch):
-    """The public projection stopped publishing the flag; a clean /v1/discover
-    (no dogfood tools) is the replacement evidence."""
-    payload = {
-        key: value for key, value in HEALTHY.items() if key != "enable_dogfood_tool"
+def test_live_catalog_paths_match_the_locked_production_catalogs():
+    """The gate probes every catalog SECURITY_LIMITATIONS.md says #444 locked."""
+    limitations = (REPO_ROOT / "SECURITY_LIMITATIONS.md").read_text()
+    locked = limitations[limitations.index("tool catalogs (") :]
+    locked = locked[: locked.index(")")]
+
+    assert set(preflight._LOCKED_CATALOG_PATHS) == {
+        "/v1/discover",
+        "/mcp/tools.json",
+        "/mcp/tools",
+        "/.well-known/mcp/tools.json",
     }
-    _patch_get_with_discovery(
-        monkeypatch,
-        payload,
-        {"mcp_tools": [{"service_id": "partner.echo"}]},
-    )
+    for path in preflight._LOCKED_CATALOG_PATHS:
+        assert f"`{path}`" in locked
+
+
+def test_live_passes_on_public_projection_with_locked_catalogs(monkeypatch, capsys):
+    """The current production posture: no published dogfood flag and every
+    tool catalog answering 401 without credentials."""
+    _patch_get(monkeypatch, PUBLIC_PROJECTION)
 
     assert preflight.check_live("https://api.example.com") is True
+    output = capsys.readouterr().out
+    assert "NOTE enable_dogfood_tool is not published" in output
+    assert "--runtime-posture" in output
+    assert "dogfood_tool=private" in output
+    assert "dogfood_tool=false" not in output
+    assert "tool catalogs 401 without credentials" in output
 
 
+def test_live_reports_published_dogfood_flag_as_verified(monkeypatch, capsys):
+    _patch_get(monkeypatch, HEALTHY)
+
+    assert preflight.check_live("https://api.example.com") is True
+    output = capsys.readouterr().out
+    assert "dogfood_tool=false" in output
+    assert "NOTE enable_dogfood_tool" not in output
+
+
+def test_live_sends_no_credentials_to_catalogs(monkeypatch):
+    import httpx
+
+    catalog_calls = []
+
+    def get(url, **kwargs):
+        if _is_catalog(url):
+            catalog_calls.append((urlsplit(url).path, kwargs))
+            return _locked_catalog()
+        return _Response(PUBLIC_PROJECTION)
+
+    monkeypatch.setattr(httpx, "get", get)
+
+    assert preflight.check_live("https://api.example.com") is True
+    assert sorted(path for path, _ in catalog_calls) == sorted(
+        preflight._LOCKED_CATALOG_PATHS
+    )
+    for _, kwargs in catalog_calls:
+        assert set(kwargs) == {"timeout"}
+
+
+@pytest.mark.parametrize("catalog_path", preflight._LOCKED_CATALOG_PATHS)
 @pytest.mark.parametrize(
-    "discovery_payload",
+    "catalog_body",
     [
+        {"mcp_tools": [{"service_id": "partner.echo"}]},
+        {"mcp_tools": [{"service_id": "partner.notes.write"}]},
+        {"mcp_tools": [{"service_id": "partner.echo", "name": "partner.notes.write"}]},
+        {"mcp_tools": [{"service_id": ["partner.notes.write"]}]},
         ["not", "a", "dict"],
-        {},
-        {"mcp_tools": "partner.echo"},
-        {"mcp_tools": ["partner.notes.write"]},
-        {"tools": [{"service_id": "partner.echo"}]},
+        {"tools": []},
+    ],
+    ids=[
+        "clean",
+        "dogfood_id",
+        "dogfood_name",
+        "non_string_id",
+        "not_a_dict",
+        "empty",
     ],
 )
-def test_live_fails_when_discovery_shape_is_unrecognized(
-    monkeypatch, discovery_payload
+@pytest.mark.parametrize(
+    "dependencies_payload",
+    [PUBLIC_PROJECTION, HEALTHY],
+    ids=["public_projection", "published_dogfood_false"],
+)
+def test_live_fails_when_a_catalog_is_publicly_readable(
+    monkeypatch,
+    capsys,
+    catalog_path,
+    catalog_body,
+    dependencies_payload,
 ):
-    """An unrecognized /v1/discover shape must fail closed, never read as
-    "no dogfood tools"."""
-    payload = {
-        key: value for key, value in HEALTHY.items() if key != "enable_dogfood_tool"
-    }
-    _patch_get_with_discovery(monkeypatch, payload, discovery_payload)
+    """The pre-#444 posture must fail the gate: an anonymous 200 catalog is a
+    failure whatever it lists, even when every other signal is healthy."""
+    _patch_get_with_catalog(
+        monkeypatch,
+        dependencies_payload,
+        catalog_path,
+        _Response(catalog_body),
+    )
 
     assert preflight.check_live("https://api.example.com") is False
+    output = capsys.readouterr().out
+    assert f"{catalog_path} is publicly readable (HTTP 200)" in output
+    assert "[preflight] PASS" not in output
 
 
-def test_live_fails_when_dogfood_tool_exposed_in_discovery(monkeypatch):
+@pytest.mark.parametrize("catalog_path", preflight._LOCKED_CATALOG_PATHS)
+@pytest.mark.parametrize("status_code", [204, 302, 403, 404, 429, 500, 503])
+def test_live_fails_closed_when_catalog_status_is_not_401(
+    monkeypatch,
+    capsys,
+    catalog_path,
+    status_code,
+):
+    """Only 401 proves the lockdown: a redirect, a different refusal, a
+    missing route, or an error page cannot, so each fails closed."""
+    _patch_get_with_catalog(
+        monkeypatch,
+        PUBLIC_PROJECTION,
+        catalog_path,
+        _Response(_MISSING_CREDENTIALS, status_code=status_code),
+    )
+
+    assert preflight.check_live("https://api.example.com") is False
+    assert catalog_path in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("catalog_path", preflight._LOCKED_CATALOG_PATHS)
+def test_live_fails_closed_when_catalog_is_unreachable(
+    monkeypatch,
+    capsys,
+    catalog_path,
+):
     import httpx
 
-    payload = {
-        key: value for key, value in HEALTHY.items() if key != "enable_dogfood_tool"
-    }
-
-    def get(url, **_kwargs):
-        if url.endswith("/v1/discover"):
-            return _Response({"mcp_tools": [{"service_id": "partner.notes.write"}]})
-        return _Response(payload)
-
-    monkeypatch.setattr(httpx, "get", get)
+    _patch_get_with_catalog(
+        monkeypatch,
+        PUBLIC_PROJECTION,
+        catalog_path,
+        httpx.ConnectError("boom"),
+    )
 
     assert preflight.check_live("https://api.example.com") is False
-
-
-def test_live_fails_when_dogfood_flag_absent_and_discovery_unreachable(monkeypatch):
-    import httpx
-
-    payload = {
-        key: value for key, value in HEALTHY.items() if key != "enable_dogfood_tool"
-    }
-
-    def get(url, **_kwargs):
-        if url.endswith("/v1/discover"):
-            raise httpx.ConnectError("boom")
-        return _Response(payload)
-
-    monkeypatch.setattr(httpx, "get", get)
-
-    assert preflight.check_live("https://api.example.com") is False
+    assert "could not be checked" in capsys.readouterr().out
 
 
 def test_live_fails_when_production_posture_is_missing(monkeypatch):
@@ -1087,43 +1219,155 @@ def test_live_fails_when_unreachable(monkeypatch):
 
 def test_live_fails_when_dogfood_flag_published_as_null(monkeypatch):
     """A *published* null is not the post-#348 omission: the exactly-false
-    requirement still applies, discovery fallback or not."""
-    _patch_get_with_discovery(
-        monkeypatch,
-        {**HEALTHY, "enable_dogfood_tool": None},
-        {"mcp_tools": []},
-    )
+    requirement still applies, even with every catalog locked."""
+    _patch_get(monkeypatch, {**HEALTHY, "enable_dogfood_tool": None})
 
     assert preflight.check_live("https://api.example.com") is False
 
 
-def test_live_fails_when_dogfood_name_hides_behind_benign_service_id(monkeypatch):
-    """service_id and name are checked independently: a benign service_id
-    must not mask a dogfood tool name."""
-    payload = {
-        key: value for key, value in HEALTHY.items() if key != "enable_dogfood_tool"
-    }
-    _patch_get_with_discovery(
-        monkeypatch,
-        payload,
-        {"mcp_tools": [{"service_id": "partner.echo", "name": "partner.notes.write"}]},
+# ---------------------------------------------------------------------------
+# Private runtime posture (--runtime-posture).
+#
+# The dogfood state is no longer publicly observable, so the private release
+# path asserts it inside the deployed API container from the same settings
+# the running service resolves. Outside a production-like runtime it must fail
+# closed rather than pass on a developer machine's defaults.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def runtime_settings(monkeypatch):
+    """Resolve settings from this test's environment only (no .env file)."""
+    from app.core import config
+
+    def configure(**environment):
+        values = {
+            "ENVIRONMENT": "production",
+            "ENABLE_DOGFOOD_TOOL": "false",
+            "ENABLE_DOGFOOD_SECOND_TOOL": "false",
+            **environment,
+        }
+        for name, value in values.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.setattr(
+            config, "get_settings", lambda: config.Settings(_env_file=None)
+        )
+
+    return configure
+
+
+def test_runtime_posture_passes_in_production_with_dogfood_off(
+    runtime_settings,
+    capsys,
+):
+    runtime_settings()
+
+    assert preflight.check_runtime_posture() is True
+    output = capsys.readouterr().out
+    assert "ENABLE_DOGFOOD_TOOL=false" in output
+    assert "ENABLE_DOGFOOD_SECOND_TOOL=false" in output
+
+
+@pytest.mark.parametrize(
+    "environment",
+    [
+        {"ENABLE_DOGFOOD_TOOL": "true"},
+        {"ENABLE_DOGFOOD_SECOND_TOOL": "true"},
+        {"ENABLE_DOGFOOD_TOOL": "1", "ENABLE_DOGFOOD_SECOND_TOOL": "yes"},
+    ],
+    ids=["dogfood_tool", "dogfood_second_tool", "both"],
+)
+def test_runtime_posture_fails_when_dogfood_tool_is_enabled(
+    runtime_settings,
+    capsys,
+    environment,
+):
+    runtime_settings(**environment)
+
+    assert preflight.check_runtime_posture() is False
+    output = capsys.readouterr().out
+    for flag in environment:
+        assert f"{flag} is enabled" in output
+    assert "[preflight] PASS" not in output
+
+
+@pytest.mark.parametrize("environment", ["local", "test", "development"])
+def test_runtime_posture_fails_closed_outside_production_runtime(
+    runtime_settings,
+    capsys,
+    environment,
+):
+    """Dogfood off by default on a laptop proves nothing about production."""
+    runtime_settings(ENVIRONMENT=environment)
+
+    assert preflight.check_runtime_posture() is False
+    assert "ENVIRONMENT is not production-like" in capsys.readouterr().out
+
+
+def test_runtime_posture_fails_closed_without_rendering_config_errors(
+    monkeypatch,
+    capsys,
+):
+    from app.core import config
+
+    secret = "postgresql://user:runtime-secret@postgres.railway.internal/db"
+
+    def unresolvable():
+        raise ValueError(f"invalid DATABASE_URL {secret}")
+
+    monkeypatch.setattr(config, "get_settings", unresolvable)
+
+    assert preflight.check_runtime_posture() is False
+    output = capsys.readouterr().out
+    assert "unable to resolve the runtime configuration (ValueError)" in output
+    assert "runtime-secret" not in output
+
+
+def test_cli_runtime_posture_runs_only_the_private_check(monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        preflight,
+        "check_runtime_posture",
+        lambda: seen.append("runtime") is None,
+    )
+    monkeypatch.setattr(
+        preflight,
+        "check_db",
+        lambda *_args, **_kwargs: pytest.fail("database must not be probed"),
+    )
+    monkeypatch.setattr(
+        preflight,
+        "check_live",
+        lambda *_args, **_kwargs: pytest.fail("live service must not be probed"),
     )
 
-    assert preflight.check_live("https://api.example.com") is False
+    assert preflight.main(["--runtime-posture", "--strict"]) == 0
+    assert seen == ["runtime"]
 
 
-def test_live_fails_on_non_string_tool_identifier(monkeypatch):
-    """A list-valued identifier must fail closed, not crash on set membership."""
-    payload = {
-        key: value for key, value in HEALTHY.items() if key != "enable_dogfood_tool"
-    }
-    _patch_get_with_discovery(
-        monkeypatch,
-        payload,
-        {"mcp_tools": [{"service_id": ["partner.notes.write"]}]},
+def test_cli_private_release_check_fails_when_runtime_posture_fails(monkeypatch):
+    """The in-container SOP command fails even when schema parity passes."""
+    monkeypatch.setenv("DATABASE_URL", "postgresql://user:pw@db.internal/app")
+    monkeypatch.setattr(preflight, "check_db", lambda _url: True)
+    monkeypatch.setattr(preflight, "check_runtime_posture", lambda: False)
+    monkeypatch.setattr(
+        preflight,
+        "check_live",
+        lambda *_args, **_kwargs: pytest.fail("live service must not be probed"),
     )
 
-    assert preflight.check_live("https://api.example.com") is False
+    assert preflight.main(["--db", "--runtime-posture", "--strict"]) == 1
+
+
+def test_cli_default_run_never_includes_runtime_posture(monkeypatch):
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setattr(
+        preflight,
+        "check_runtime_posture",
+        lambda: pytest.fail("runtime posture must be requested explicitly"),
+    )
+
+    assert preflight.main(["--url", ""]) == 0
 
 
 # ---------------------------------------------------------------------------

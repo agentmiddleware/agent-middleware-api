@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Railway deploy preflight: customer manifest + deploy posture checks.
 
-Two independent checks, each skipped when its ordinary input is absent.
-Explicit ``--public-db`` mode is an exception and fails closed when absent:
+Independent checks, each skipped when its ordinary input is absent.
+Explicit ``--public-db`` and ``--runtime-posture`` modes are exceptions and
+fail closed when their input is absent:
 
 ``--db`` (needs ``DATABASE_URL``)
     Compare the Alembic head revision in this tree against the
@@ -20,11 +21,21 @@ Explicit ``--public-db`` mode is an exception and fails closed when absent:
 
 ``--live`` (needs ``PUBLIC_URL`` or ``--url``)
     Probe the deployed service and assert the production posture the SOP
-    requires: healthy, no memory fallback, proof surfaces and dogfood off, no
-    dependency listed unhealthy. ``--expected-version`` and
+    requires: healthy, no memory fallback, proof surfaces off, a published
+    dogfood flag exactly false, no dependency listed unhealthy, and every
+    production tool catalog refusing unauthenticated reads with 401 (the #444
+    Narrow lockdown). Only unauthenticated GETs are sent.
+    ``--expected-version`` and
     ``--expected-commit-sha`` add exact release-identity checks against both
     ``/health`` and ``/health/dependencies`` for the post-deploy gate; the
     commit expectation must be a full 40-character SHA.
+
+``--runtime-posture`` (run inside the deployed API container)
+    Assert the dogfood posture that is no longer publicly observable: the
+    public health projection omits the dogfood flags and the tool catalogs
+    require credentials, so this reads the runtime configuration the running
+    service resolves. It requires a production-like ``ENVIRONMENT`` and both
+    dogfood flags false, so it fails closed anywhere but the deployed service.
 
 ``--manifest`` (optional non-secret JSON)
     Bind the checks to one managed single-tenant deployment. The manifest
@@ -58,6 +69,10 @@ Usage::
     python scripts/railway_preflight.py --live --url https://api.example.com \
       --expected-version 1.3.0 \
       --expected-commit-sha 0123456789abcdef0123456789abcdef01234567
+
+    # Private dogfood posture, inside the deployed API container:
+    railway ssh --service api-service --environment production -- \
+      python scripts/railway_preflight.py --db --runtime-posture --strict
 
     # Managed single-tenant gate (URL and commit come from the manifest):
     python scripts/railway_preflight.py --live --strict \
@@ -100,9 +115,20 @@ OK = "[preflight] PASS"
 BAD = "[preflight] FAIL"
 SKIP = "[preflight] SKIP"
 
-# Local proof-infrastructure tool ids that must never appear in a production
-# deployment's public discovery (see app/services/dogfood_tool.py).
-_DOGFOOD_TOOL_IDS = frozenset({"partner.notes.write", "partner.notes.count"})
+# Tool catalogs that production-like boots must refuse to unauthenticated
+# callers (#444 Narrow lockdown; see reject_anonymous_production_catalog in
+# app/core/auth.py and SECURITY_LIMITATIONS.md). A stranger must not learn
+# which tools exist.
+_LOCKED_CATALOG_PATHS = (
+    "/v1/discover",
+    "/mcp/tools.json",
+    "/mcp/tools",
+    "/.well-known/mcp/tools.json",
+)
+
+# Runtime flags that register local proof-infrastructure tools
+# (partner.notes.write / partner.notes.count; see app/services/dogfood_tool.py).
+_DOGFOOD_RUNTIME_FLAGS = ("ENABLE_DOGFOOD_TOOL", "ENABLE_DOGFOOD_SECOND_TOOL")
 
 MANIFEST_SCHEMA_VERSION = "1.0"
 _MANIFEST_FIELDS = frozenset(
@@ -486,73 +512,56 @@ def check_live(
             )
 
     # Key presence, not truthiness: a *published* null must still fail the
-    # exactly-false requirement below — only a genuinely absent key (the
-    # post-#348 public projection) earns the discovery fallback.
-    if "enable_dogfood_tool" not in body:
-        # The public /health/dependencies projection stopped publishing the
-        # dogfood flag when proof surfaces are unmounted (the flag described
-        # nothing a caller could reach — see build_public_dependency_report).
-        # Verify the observable posture instead: the dogfood tools must not
-        # be registered in public discovery.
-        try:
-            discover_resp = httpx.get(f"{base}/v1/discover", timeout=30)
-            discover_resp.raise_for_status()
-            discover_body = discover_resp.json()
-        except Exception as exc:
+    # exactly-false requirement.
+    dogfood_verified = False
+    if "enable_dogfood_tool" in body:
+        dogfood = body["enable_dogfood_tool"]
+        if dogfood is not False:
             failures.append(
-                "enable_dogfood_tool is absent from /health/dependencies and "
-                f"/v1/discover could not be checked instead: {exc}"
+                f"enable_dogfood_tool={dogfood!r} — must be explicitly false in "
+                "production"
             )
         else:
-            tools = (
-                discover_body.get("mcp_tools")
-                if isinstance(discover_body, dict)
-                else None
-            )
-            if not isinstance(tools, list) or not all(
-                isinstance(tool, dict) for tool in tools
-            ):
-                # Fail closed on an unrecognized shape: treating it as "no
-                # tools" would let a renamed field or an error page silently
-                # pass the release gate.
-                failures.append(
-                    "enable_dogfood_tool is absent from /health/dependencies "
-                    "and /v1/discover returned an unrecognized shape (no "
-                    "mcp_tools list) — cannot verify dogfood posture"
-                )
-            else:
-                # Check service_id and name independently: a benign
-                # service_id must not mask a dogfood name (or vice versa).
-                # Non-string identifiers are an unrecognized shape, not a
-                # clean catalog.
-                leaked_ids: set[str] = set()
-                malformed_identifier = False
-                for tool in tools:
-                    for field in ("service_id", "name"):
-                        value = tool.get(field)
-                        if value is None:
-                            continue
-                        if not isinstance(value, str):
-                            malformed_identifier = True
-                            continue
-                        if value in _DOGFOOD_TOOL_IDS:
-                            leaked_ids.add(value)
-                if malformed_identifier:
-                    failures.append(
-                        "/v1/discover tool identifiers must be strings — "
-                        "cannot verify dogfood posture"
-                    )
-                if leaked_ids:
-                    failures.append(
-                        "dogfood tools exposed in public discovery: "
-                        f"{sorted(leaked_ids)} — ENABLE_DOGFOOD_TOOL must be "
-                        "false in production"
-                    )
-    elif body["enable_dogfood_tool"] is not False:
-        dogfood = body["enable_dogfood_tool"]
-        failures.append(
-            f"enable_dogfood_tool={dogfood!r} — must be explicitly false in production"
+            dogfood_verified = True
+    else:
+        # The public projection omits the flag (#348), and since the #444
+        # lockdown the tool catalogs that used to stand in for it require
+        # credentials. The dogfood state is not publicly observable, so say
+        # so rather than report it as checked: --runtime-posture verifies it
+        # inside the deployed API container.
+        print(
+            "[preflight] NOTE enable_dogfood_tool is not published and tool "
+            "catalogs require credentials — the dogfood posture is private; "
+            "verify it with --runtime-posture inside the deployed API container"
         )
+
+    # Tool catalogs must refuse unauthenticated reads (#444). No credentials
+    # are sent. A 2xx is the pre-lockdown public catalog. Any other status
+    # (a redirect, 403, 404, 5xx) or an unreachable route cannot confirm the
+    # lockdown, so it fails closed too.
+    for path in _LOCKED_CATALOG_PATHS:
+        try:
+            catalog_status = httpx.get(f"{base}{path}", timeout=30).status_code
+        except Exception as exc:
+            failures.append(
+                f"{path} could not be checked for the locked-down catalog "
+                f"posture: {exc}"
+            )
+            continue
+        if catalog_status == 401:
+            continue
+        if 200 <= catalog_status < 300:
+            failures.append(
+                f"{path} is publicly readable (HTTP {catalog_status}) — "
+                "production tool catalogs must refuse unauthenticated "
+                "requests with 401"
+            )
+        else:
+            failures.append(
+                f"{path} answered an unauthenticated request with HTTP "
+                f"{catalog_status}, expected 401 — cannot confirm the "
+                "locked-down catalog posture"
+            )
 
     identity_reports = [("/health/dependencies", body)]
     if expected_version is not None or expected_commit_sha is not None:
@@ -667,9 +676,63 @@ def check_live(
     displayed_version = body.get("version") or "unknown"
     displayed_commit_sha = body.get("commit_sha")
     displayed_sha = f", sha={displayed_commit_sha}" if displayed_commit_sha else ""
+    displayed_dogfood = (
+        "dogfood_tool=false"
+        if dogfood_verified
+        else "dogfood_tool=private (not publicly observable)"
+    )
     print(
         f"{OK} {base} healthy (v{displayed_version}{displayed_sha}, "
-        "proof_surfaces=false, dogfood_tool=false, no memory fallback)"
+        f"proof_surfaces=false, {displayed_dogfood}, tool catalogs 401 "
+        "without credentials, no memory fallback)"
+    )
+    return True
+
+
+def check_runtime_posture() -> bool:
+    """Assert the dogfood posture from this process's runtime configuration.
+
+    Meant for the deployed API container (``railway ssh``), where
+    ``get_settings()`` resolves the same variables the running service does.
+    Fails closed anywhere else: a process whose ENVIRONMENT is not
+    production-like is not the deployed service, so a pass there would prove
+    nothing. Configuration errors are reported by type only, because a
+    validation message can echo a configured value.
+    """
+    try:
+        from app.core.config import get_settings
+        from app.core.trust_mode import is_production_like_environment
+
+        settings = get_settings()
+    except Exception as exc:
+        print(
+            f"{BAD} runtime posture: unable to resolve the runtime "
+            f"configuration ({type(exc).__name__})"
+        )
+        return False
+
+    failures: list[str] = []
+    if not is_production_like_environment(settings.ENVIRONMENT):
+        failures.append(
+            "runtime posture: ENVIRONMENT is not production-like in this "
+            "process — run --runtime-posture inside the deployed API "
+            "container, where the service's runtime configuration applies"
+        )
+    for flag in _DOGFOOD_RUNTIME_FLAGS:
+        if getattr(settings, flag) is not False:
+            failures.append(
+                f"runtime posture: {flag} is enabled — the dogfood tools are "
+                "local proof infrastructure and must be false in production"
+            )
+
+    if failures:
+        for item in failures:
+            print(f"{BAD} {item}")
+        return False
+
+    print(
+        f"{OK} runtime posture: production-like ENVIRONMENT, "
+        + ", ".join(f"{flag}=false" for flag in _DOGFOOD_RUNTIME_FLAGS)
     )
     return True
 
@@ -688,6 +751,15 @@ def main(argv: list[str] | None = None) -> int:
         help=(
             "use explicit $DATABASE_PUBLIC_URL for an off-platform DB check; "
             "missing or private values fail closed"
+        ),
+    )
+    parser.add_argument(
+        "--runtime-posture",
+        action="store_true",
+        help=(
+            "assert this process's runtime configuration is production-like "
+            "with the dogfood tools off; run inside the deployed API container "
+            "(this posture is not publicly observable)"
         ),
     )
     parser.add_argument(
@@ -735,18 +807,22 @@ def main(argv: list[str] | None = None) -> int:
         args.db
         or args.live
         or args.public_db
+        or args.runtime_posture
         or args.expected_version
         or args.expected_commit_sha
     ):
         print(
             f"{BAD} --manifest-only cannot be combined with --db, --live, "
-            "--public-db, or live release expectations"
+            "--public-db, --runtime-posture, or live release expectations"
         )
         return 1
 
-    # Neither flag given: run whatever the environment supports.
-    run_db = not args.manifest_only and (args.db or not (args.db or args.live))
-    run_live = not args.manifest_only and (args.live or not (args.db or args.live))
+    # No check selected: run whatever the environment supports. The runtime
+    # posture check only means something inside the deployed container, so it
+    # never runs by default.
+    selected = args.db or args.live or args.runtime_posture
+    run_db = not args.manifest_only and (args.db or not selected)
+    run_live = not args.manifest_only and (args.live or not selected)
 
     results: list[bool] = []
     manifest: CustomerManifest | None = None
@@ -828,6 +904,9 @@ def main(argv: list[str] | None = None) -> int:
         elif not database_url_load_failed:
             print(f"{SKIP} migration parity: DATABASE_URL not set")
             results.append(not args.strict)
+
+    if args.runtime_posture:
+        results.append(check_runtime_posture())
 
     if run_live:
         if effective_url:
