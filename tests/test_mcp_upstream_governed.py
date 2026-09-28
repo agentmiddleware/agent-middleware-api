@@ -2726,58 +2726,89 @@ async def test_upstream_usage_constraints_fail_closed_before_reservation(
             headers=provisioned["agent_headers"],
         )
 
-        first_error = first.json()["error"]
-        replay_error = replay.json()["error"]
-        assert first_error["code"] == -32003
-        assert first_error["message"] == ("permit_constraint_unsupported_for_upstream")
-        assert first_error["data"]["details"] == {
-            "execution_backend": "upstream_mcp",
-            "unsupported_constraints": [constraint_name],
-        }
-        assert replay_error["code"] == first_error["code"]
-        assert replay_error["message"] == first_error["message"]
-        assert replay_error["data"]["receipt"] == first_error["data"]["receipt"]
-        receipt = first_error["data"]["receipt"]
-        assert receipt["outcome"] == "denied"
-        assert receipt["reason_code"] == ("permit_constraint_unsupported_for_upstream")
-        assert receipt["ledger_entry_id"] is None
-        assert receipt["dispatch_attempt_id"] is None
-        assert executor.calls == []
-        assert executor.dispatch_count == 0
-
-        factory = get_session_factory()
-        async with factory() as session:
-            permit = await session.get(PermitModel, permit_id)
-            record = (
-                await session.execute(
-                    select(IdempotencyRecordModel).where(
-                        IdempotencyRecordModel.wallet_id
-                        == provisioned["agent_wallet_id"],
-                        IdempotencyRecordModel.idempotency_key == idempotency_key,
+        if constraint_name == "max_calls_per_tool":
+            # max_calls_per_tool is now SUPPORTED on upstream tools
+            first_result = first.json()["result"]
+            replay_result = replay.json()["result"]
+            assert first_result["receipt"]["outcome"] == "success"
+            assert replay_result["receipt"]["receipt_id"] == first_result["receipt"]["receipt_id"]
+            assert executor.dispatch_count == 1  # Only dispatched once
+            
+            factory = get_session_factory()
+            async with factory() as session:
+                permit = await session.get(PermitModel, permit_id)
+                record = (
+                    await session.execute(
+                        select(IdempotencyRecordModel).where(
+                            IdempotencyRecordModel.wallet_id
+                            == provisioned["agent_wallet_id"],
+                            IdempotencyRecordModel.idempotency_key == idempotency_key,
+                        )
+                    )
+                ).scalar_one()
+                attempt_count = await session.scalar(
+                    select(func.count())
+                    .select_from(McpDispatchAttemptModel)
+                    .where(
+                        McpDispatchAttemptModel.idempotency_record_id == record.record_id
                     )
                 )
-            ).scalar_one()
-            attempt_count = await session.scalar(
-                select(func.count())
-                .select_from(McpDispatchAttemptModel)
-                .where(
-                    McpDispatchAttemptModel.idempotency_record_id == record.record_id
+            assert permit is not None and permit.spent_credits > Decimal("0")
+            assert int(attempt_count or 0) == 1
+        else:
+            # aggregate_value_cap remains unsupported
+            first_error = first.json()["error"]
+            replay_error = replay.json()["error"]
+            assert first_error["code"] == -32003
+            assert first_error["message"] == ("permit_constraint_unsupported_for_upstream")
+            assert first_error["data"]["details"] == {
+                "execution_backend": "upstream_mcp",
+                "unsupported_constraints": [constraint_name],
+            }
+            assert replay_error["code"] == first_error["code"]
+            assert replay_error["message"] == first_error["message"]
+            assert replay_error["data"]["receipt"] == first_error["data"]["receipt"]
+            receipt = first_error["data"]["receipt"]
+            assert receipt["outcome"] == "denied"
+            assert receipt["reason_code"] == ("permit_constraint_unsupported_for_upstream")
+            assert receipt["ledger_entry_id"] is None
+            assert receipt["dispatch_attempt_id"] is None
+            assert executor.calls == []
+            assert executor.dispatch_count == 0
+
+            factory = get_session_factory()
+            async with factory() as session:
+                permit = await session.get(PermitModel, permit_id)
+                record = (
+                    await session.execute(
+                        select(IdempotencyRecordModel).where(
+                            IdempotencyRecordModel.wallet_id
+                            == provisioned["agent_wallet_id"],
+                            IdempotencyRecordModel.idempotency_key == idempotency_key,
+                        )
+                    )
+                ).scalar_one()
+                attempt_count = await session.scalar(
+                    select(func.count())
+                    .select_from(McpDispatchAttemptModel)
+                    .where(
+                        McpDispatchAttemptModel.idempotency_record_id == record.record_id
+                    )
                 )
-            )
-            debit_count = await session.scalar(
-                select(func.count())
-                .select_from(LedgerEntryModel)
-                .where(LedgerEntryModel.operation_key == record.record_id)
-            )
-            receipt_count = await session.scalar(
-                select(func.count())
-                .select_from(ReceiptModel)
-                .where(ReceiptModel.idempotency_record_id == record.record_id)
-            )
-        assert permit is not None and permit.spent_credits == Decimal("0")
-        assert int(attempt_count or 0) == 0
-        assert int(debit_count or 0) == 0
-        assert int(receipt_count or 0) == 1
+                debit_count = await session.scalar(
+                    select(func.count())
+                    .select_from(LedgerEntryModel)
+                    .where(LedgerEntryModel.operation_key == record.record_id)
+                )
+                receipt_count = await session.scalar(
+                    select(func.count())
+                    .select_from(ReceiptModel)
+                    .where(ReceiptModel.idempotency_record_id == record.record_id)
+                )
+            assert permit is not None and permit.spent_credits == Decimal("0")
+            assert int(attempt_count or 0) == 0
+            assert int(debit_count or 0) == 0
+            assert int(receipt_count or 0) == 1
     finally:
         get_service_registry().unregister_local(tool_name)
 
@@ -2787,9 +2818,10 @@ async def test_upstream_usage_constraint_rest_denial_keeps_call_slot_unreserved(
     client: AsyncClient,
     clean_database: None,
 ) -> None:
+    """max_calls_per_tool is now supported on upstream, so this test now expects success."""
     provisioned = await provision_agent_wallet(client)
-    tool_name = "partner-upstream-unsupported-rest-call-slot"
-    idempotency_key = "partner-upstream-unsupported-rest-call-slot-1"
+    tool_name = "partner-upstream-supported-rest-call-slot"
+    idempotency_key = "partner-upstream-supported-rest-call-slot-1"
     executor = FakeUpstreamExecutor("success")
     _register_upstream(tool_name, executor)
     try:
@@ -2807,19 +2839,14 @@ async def test_upstream_usage_constraint_rest_denial_keeps_call_slot_unreserved(
             },
             headers={
                 **BOOTSTRAP_HEADERS,
-                "Idempotency-Key": "permit-unsupported-rest-call-slot",
+                "Idempotency-Key": "permit-supported-rest-call-slot",
             },
         )
         assert permit_response.status_code == 201
         permit_id = permit_response.json()["permit_id"]
 
-        factory = get_session_factory()
-        async with factory() as session:
-            permit_before = await session.get(PermitModel, permit_id)
-        assert permit_before is not None
-        call_counts_before = permit_before.tool_call_counts_json
-
-        denied = await client.post(
+        # First call should succeed
+        first = await client.post(
             f"/mcp/tools/{tool_name}/invoke",
             json=_rest_call_body(
                 tool_name=tool_name,
@@ -2830,17 +2857,13 @@ async def test_upstream_usage_constraint_rest_denial_keeps_call_slot_unreserved(
             headers=provisioned["agent_headers"],
         )
 
-        assert denied.status_code == 403
-        detail = denied.json()["detail"]
-        assert detail["error"] == "permit_constraint_unsupported_for_upstream"
-        assert detail["details"] == {
-            "execution_backend": "upstream_mcp",
-            "unsupported_constraints": ["max_calls_per_tool"],
-        }
-        assert detail["receipt"]["outcome"] == "denied"
-        assert detail["receipt"]["dispatch_attempt_id"] is None
-        assert executor.calls == []
+        assert first.status_code == 200
+        first_result = first.json()
+        assert first_result["receipt"]["outcome"] == "success"
+        assert first_result["receipt"]["dispatch_attempt_id"] is not None
+        assert executor.dispatch_count == 1
 
+        factory = get_session_factory()
         async with factory() as session:
             permit = await session.get(PermitModel, permit_id)
             record = (
@@ -2865,10 +2888,13 @@ async def test_upstream_usage_constraint_rest_denial_keeps_call_slot_unreserved(
                 .where(LedgerEntryModel.operation_key == record.record_id)
             )
         assert permit is not None
-        assert permit.spent_credits == Decimal("0")
-        assert permit.tool_call_counts_json == call_counts_before
-        assert int(attempt_count or 0) == 0
-        assert int(debit_count or 0) == 0
+        assert permit.spent_credits > Decimal("0")
+        # Call slot was reserved
+        import json as json_lib
+        call_counts = json_lib.loads(permit.tool_call_counts_json or "{}")
+        assert call_counts.get(tool_name, 0) == 1
+        assert int(attempt_count or 0) == 1
+        assert int(debit_count or 0) == 1
     finally:
         get_service_registry().unregister_local(tool_name)
 

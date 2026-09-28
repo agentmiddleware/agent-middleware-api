@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import logging
 import math
 import secrets
 import uuid
@@ -17,7 +19,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.core.resilience import run_with_write_conflict_retry
+from app.core.config import get_settings
+from app.core.resilience import run_with_write_conflict_retry, WRITE_CONFLICT_MAX_ATTEMPTS
 from app.core.time import to_naive_utc, utc_now
 from app.db.database import get_session_factory
 from app.db.models import (
@@ -28,8 +31,10 @@ from app.db.models import (
     PermitModel,
     ReceiptModel,
 )
-from app.services.permits import PermitService, PermitValidation, get_permit_service
+from app.services.permits import PermitService, PermitValidation, PermitWriteContendedError, get_permit_service
 from app.services.signing_keys import canonical_json, sha256_hex
+
+logger = logging.getLogger(__name__)
 
 DISPATCH_PREPARED = "prepared"
 DISPATCH_LEGACY_DISPATCHED = "dispatched"
@@ -152,23 +157,24 @@ async def _claim_debit_is_valid(
     )
 
 
-def _unsupported_upstream_constraints(permit: PermitModel) -> list[str]:
+def _unsupported_upstream_constraints(
+    permit: PermitModel, tool_name: str | None = None
+) -> list[str]:
     """Return constraints the atomic upstream reservation cannot yet enforce.
 
-    The prepare path can atomically reserve a flat per-call cost, but the
-    per-tool call cap and the aggregate value cap are not yet enforceable
-    inside that single guarded reservation. When either is configured, a
-    prepared row must be treated as commit-uncertain rather than adopted as a
-    clean success or turned into a denial receipt.
+    The aggregate value cap requires folding in-flight reservations, which the
+    atomic reservation does not yet support. Per-tool call caps are now enforced
+    atomically for each tool, so they're only unsupported when checking a permit
+    without a specific tool context (e.g., during reconciliation of old rows).
     """
-    return [
-        name
-        for name, configured in (
-            ("max_calls_per_tool", permit.max_calls_per_tool_json is not None),
-            ("aggregate_value_cap", permit.aggregate_value_cap is not None),
-        )
-        if configured
-    ]
+    unsupported = []
+    if permit.aggregate_value_cap is not None:
+        unsupported.append("aggregate_value_cap")
+    # Legacy: if tool_name is None (reconciliation of old prepared rows), treat
+    # any max_calls_per_tool as unsupported to preserve existing behavior.
+    if tool_name is None and permit.max_calls_per_tool_json is not None:
+        unsupported.append("max_calls_per_tool")
+    return unsupported
 
 
 def _assert_sha256(value: str) -> str:
@@ -194,6 +200,17 @@ def _assert_origin(value: str) -> str:
     ):
         raise DispatchAttemptError("dispatch_upstream_origin_invalid")
     return value
+
+
+def _loads_dict(json_str: str | None) -> dict[str, Any]:
+    """Parse JSON dict, returning empty dict on None or invalid JSON."""
+    if not json_str:
+        return {}
+    try:
+        result = json.loads(json_str)
+        return result if isinstance(result, dict) else {}
+    except (json.JSONDecodeError, TypeError):
+        return {}
 
 
 def _bounded_result(
@@ -527,7 +544,9 @@ class McpDispatchAttemptService:
                         wallet_id=wallet_id,
                         public_tool_id=public_tool_id,
                     )
-                    unsupported_constraints = _unsupported_upstream_constraints(permit)
+                    unsupported_constraints = _unsupported_upstream_constraints(
+                        permit, tool_name=public_tool_id
+                    )
 
                     existing = await self._get_by_idempotency_record(
                         session,
@@ -579,13 +598,110 @@ class McpDispatchAttemptService:
                     )
                     if not validation.allowed:
                         return validation, None
+                    
+                    # Cross-key duplicate detection: check for prior attempts with the
+                    # same (permit_id, public_tool_id, request_hash) that are still
+                    # active or succeeded. This catches new-key retries with identical
+                    # arguments.
+                    settings = get_settings()
+                    duplicate_mode = settings.MCP_UPSTREAM_DUPLICATE_GUARD
+                    if (
+                        duplicate_mode in ("log", "enforce")
+                        and not permit.allow_identical_repeats
+                    ):
+                        window_seconds = settings.MCP_UPSTREAM_DUPLICATE_WINDOW_SECONDS
+                        cutoff = utc_now() - timedelta(seconds=window_seconds)
+                        # States that could block a duplicate if the attempt was
+                        # effectful (actually dispatched). We check all matching attempts,
+                        # not just the newest, because an older effectful attempt should
+                        # block even if newer non-effectful attempts exist.
+                        blocking_states = {
+                            DISPATCH_PREPARED,
+                            *DISPATCH_SENT_STATES,
+                            *DISPATCH_TERMINAL_STATES,
+                        }
+                        priors = (
+                            await session.execute(
+                                select(McpDispatchAttemptModel)
+                                .where(
+                                    cast(
+                                        ColumnElement[bool],
+                                        McpDispatchAttemptModel.permit_id == permit_id,
+                                    ),
+                                    cast(
+                                        ColumnElement[bool],
+                                        McpDispatchAttemptModel.public_tool_id
+                                        == public_tool_id,
+                                    ),
+                                    cast(
+                                        ColumnElement[bool],
+                                        McpDispatchAttemptModel.request_hash
+                                        == request_hash,
+                                    ),
+                                    cast(
+                                        ColumnElement[bool],
+                                        McpDispatchAttemptModel.created_at >= cutoff,
+                                    ),
+                                    cast(
+                                        ColumnElement[bool],
+                                        cast(Any, McpDispatchAttemptModel.state).in_(
+                                            blocking_states
+                                        ),
+                                    ),
+                                )
+                                .order_by(cast(Any, McpDispatchAttemptModel.created_at).desc())
+                            )
+                        ).scalars().all()
+                        
+                        # Check if ANY prior attempt in the window was effectful
+                        # (dispatched or terminal effectful state).
+                        blocking_prior = None
+                        blocks = False
+                        for prior in priors:
+                            # An attempt blocks if it's in an effectful state:
+                            # - prepared or dispatched/claimed (may still dispatch)
+                            # - succeeded or delivery_uncertain (known effectful)
+                            # - returned_error AFTER dispatch (was effectful)
+                            # Exclude returned_error that never dispatched (pre-dispatch failure).
+                            if prior.state == "returned_error" and prior.dispatched_at is None:
+                                continue  # Non-effectful, does not block
+                            # All other states in blocking_states are effectful
+                            blocking_prior = prior
+                            blocks = True
+                            break
+                        
+                        if blocks and blocking_prior is not None:
+                            msg = (
+                                f"Duplicate request detected: new idempotency key with "
+                                f"identical request hash (permit={permit_id}, "
+                                f"tool={public_tool_id}, request_hash={request_hash[:16]}..., "
+                                f"prior_attempt={blocking_prior.attempt_id}, "
+                                f"prior_state={blocking_prior.state})"
+                            )
+                            if duplicate_mode == "log":
+                                logger.warning(
+                                    f"{msg} - allowing in observe mode"
+                                )
+                            else:  # enforce
+                                logger.info(msg)
+                                return (
+                                    PermitValidation(
+                                        False,
+                                        "duplicate_request_new_key",
+                                        permit,
+                                        {
+                                            "prior_attempt_id": blocking_prior.attempt_id,
+                                            "prior_state": blocking_prior.state,
+                                            "request_hash": request_hash,
+                                        },
+                                    ),
+                                    None,
+                                )
+                    
                     if unsupported_constraints:
-                        # The remote path atomically enforces max_credits below,
-                        # but it does not yet reserve per-tool call slots or fold
-                        # in-flight reservations into aggregate_value_cap. A
-                        # read-time check would let concurrent calls overshoot;
-                        # refuse the constrained permit before creating any
-                        # attempt or moving budget instead.
+                        # aggregate_value_cap requires folding in-flight reservations,
+                        # which the atomic reservation does not yet support. Refuse
+                        # constrained permits before creating any attempt or moving budget.
                         return (
                             PermitValidation(
                                 False,
@@ -598,6 +714,42 @@ class McpDispatchAttemptService:
                             ),
                             None,
                         )
+
+                    # Compute the updated call counter for max_calls_per_tool enforcement.
+                    # This mirrors the logic in PermitService.authorize_and_reserve for
+                    # local tools. The counter is atomically incremented via optimistic
+                    # concurrency control (CAS on the JSON column).
+                    max_calls_config = _loads_dict(permit.max_calls_per_tool_json or "{}")
+                    call_limit = max_calls_config.get(public_tool_id)
+                    original_counts_json = permit.tool_call_counts_json
+                    updated_counts_json = None
+                    call_slot_reserved = False
+                    if call_limit is not None and type(call_limit) is int:
+                        current_counts = _loads_dict(original_counts_json or "{}")
+                        current_tool_count = current_counts.get(public_tool_id, 0)
+                        if not isinstance(current_tool_count, int):
+                            current_tool_count = 0
+                        new_tool_count = current_tool_count + 1
+                        if new_tool_count > call_limit:
+                            # This attempt would exceed the limit. Deny without
+                            # mutating anything.
+                            return (
+                                PermitValidation(
+                                    False,
+                                    "permit_max_calls_exceeded",
+                                    permit,
+                                    {
+                                        "tool": public_tool_id,
+                                        "limit": call_limit,
+                                        "calls_made": current_tool_count,
+                                    },
+                                ),
+                                None,
+                            )
+                        updated_counts = dict(current_counts)
+                        updated_counts[public_tool_id] = new_tool_count
+                        updated_counts_json = json.dumps(updated_counts)
+                        call_slot_reserved = True
 
                     # Reserve with the same guarded UPDATE that
                     # PermitService.authorize_and_reserve() uses. The cap
@@ -618,40 +770,57 @@ class McpDispatchAttemptService:
                     # One `now` is used for both the predicate and the denial
                     # classification below, so the two cannot disagree.
                     now = utc_now()
+                    
+                    # Build the UPDATE values and WHERE predicates.
+                    update_values: dict[str, Any] = {
+                        "spent_credits": PermitModel.spent_credits + credits_authorized,
+                        "updated_at": now,
+                    }
+                    where_conditions: list[ColumnElement[bool]] = [
+                        cast(ColumnElement[bool], PermitModel.permit_id == permit_id),
+                        cast(ColumnElement[bool], PermitModel.status == "active"),
+                        cast(ColumnElement[bool], PermitModel.expires_at > now),
+                        cast(
+                            ColumnElement[bool],
+                            PermitModel.spent_credits + credits_authorized
+                            <= PermitModel.max_credits,
+                        ),
+                    ]
+                    
+                    # If max_calls_per_tool is set for this tool, add the optimistic
+                    # lock on tool_call_counts_json to the WHERE predicate and the
+                    # updated counter to the values.
+                    if updated_counts_json is not None:
+                        update_values["tool_call_counts_json"] = updated_counts_json
+                        if original_counts_json is None:
+                            where_conditions.append(
+                                cast(
+                                    ColumnElement[bool],
+                                    cast(Any, PermitModel.tool_call_counts_json).is_(
+                                        None
+                                    ),
+                                )
+                            )
+                        else:
+                            where_conditions.append(
+                                cast(
+                                    ColumnElement[bool],
+                                    PermitModel.tool_call_counts_json
+                                    == original_counts_json,
+                                )
+                            )
+                    
                     reserved = await session.execute(
                         sa_update(PermitModel)
-                        .where(
-                            cast(
-                                ColumnElement[bool],
-                                PermitModel.permit_id == permit_id,
-                            ),
-                            cast(
-                                ColumnElement[bool],
-                                PermitModel.status == "active",
-                            ),
-                            cast(
-                                ColumnElement[bool],
-                                PermitModel.expires_at > now,
-                            ),
-                            cast(
-                                ColumnElement[bool],
-                                PermitModel.spent_credits + credits_authorized
-                                <= PermitModel.max_credits,
-                            ),
-                        )
-                        .values(
-                            spent_credits=PermitModel.spent_credits
-                            + credits_authorized,
-                            updated_at=now,
-                        )
+                        .where(*where_conditions)
+                        .values(**update_values)
                         .execution_options(synchronize_session=False)
                     )
                     if (cast(Any, reserved).rowcount or 0) != 1:
                         # A concurrent reservation consumed the remaining budget,
-                        # or a concurrent revocation flipped the status, between
-                        # the validation read and this guarded write. Deny with
-                        # an accurate reason and create no prepared attempt --
-                        # no budget moved, so there is nothing to compensate.
+                        # flipped the status, or (when max_calls_per_tool is set)
+                        # incremented the call counter, breaking the optimistic
+                        # lock. Re-read for an accurate reason and deny.
                         await session.refresh(permit)
                         if permit.status != "active":
                             return (
@@ -681,7 +850,31 @@ class McpDispatchAttemptService:
                                 ),
                                 None,
                             )
-                        return (
+                        # Re-check max_calls_per_tool; a concurrent call may have
+                        # incremented the counter between our pre-check and the
+                        # failed optimistic UPDATE.
+                        if call_limit is not None and type(call_limit) is int:
+                            refreshed_counts = _loads_dict(
+                                permit.tool_call_counts_json or "{}"
+                            )
+                            refreshed_count = refreshed_counts.get(public_tool_id, 0)
+                            if not isinstance(refreshed_count, int):
+                                refreshed_count = 0
+                            if refreshed_count >= call_limit:
+                                return (
+                                    PermitValidation(
+                                        False,
+                                        "permit_max_calls_exceeded",
+                                        permit,
+                                        {
+                                            "tool": public_tool_id,
+                                            "limit": call_limit,
+                                            "calls_made": refreshed_count,
+                                        },
+                                    ),
+                                    None,
+                                )
+                        budget_denial = (
                             PermitValidation(
                                 False,
                                 "permit_budget_exceeded",
@@ -698,6 +891,32 @@ class McpDispatchAttemptService:
                             ),
                             None,
                         )
+                        # Budget is classified on the refreshed row before the
+                        # contention fallback. When a cap is configured the
+                        # predicate carries both the counter and the budget, so
+                        # a permit that ran out of credits under a concurrent
+                        # spend must be told so, not handed a retryable counter
+                        # race it would retry into forever.
+                        if (
+                            permit.spent_credits + credits_authorized
+                            > permit.max_credits
+                        ):
+                            return budget_denial
+                        # A cap is configured, the row is active, in date, under
+                        # its counter and within budget: the only predicate left
+                        # that could have failed is the counter CAS, so the
+                        # counter moved between the read and the UPDATE. That is
+                        # contention, not a verdict on the call, and it must not
+                        # be recorded against the idempotency key: a denial
+                        # completed here would replay forever for a call that is
+                        # in budget and under its cap. Raise the contended type
+                        # instead; the transaction rolls back with nothing
+                        # durable, and the governed router releases the key and
+                        # answers the retryable envelope so the caller retries
+                        # the same key.
+                        if updated_counts_json is not None:
+                            raise PermitWriteContendedError()
+                        return budget_denial
                     # Reflect the committed reservation on the returned model.
                     await session.refresh(permit)
                     attempt = McpDispatchAttemptModel(
@@ -713,11 +932,18 @@ class McpDispatchAttemptService:
                         request_hash=request_hash,
                         credits_authorized=credits_authorized,
                         state=DISPATCH_PREPARED,
+                        call_slot_reserved=call_slot_reserved,
                     )
                     session.add(attempt)
                     await session.flush()
                 return validation, attempt
         except DispatchAttemptError:
+            raise
+        except PermitWriteContendedError:
+            # Raised inside the transaction by the lost counter CAS above, so
+            # the rollback is certain and nothing durable exists to recover or
+            # adopt: not a commit-uncertain case. The router classifies it as
+            # retryable and releases the in-progress idempotency record.
             raise
         except Exception as exc:
             # A database driver can report a failed COMMIT after the server
@@ -901,12 +1127,16 @@ class McpDispatchAttemptService:
         charge or send authority exists. The permit decrement and deletion
         share one transaction, so reconciliation can never observe a prepared
         row whose reservation was already released.
+        
+        The slot release uses the same CAS pattern as release_dispatch_budget_once,
+        so concurrent slot modifications are detected and retried.
         """
 
         if not attempt_id:
             raise DispatchAttemptError("dispatch_attempt_invalid")
         factory = get_session_factory()
-        try:
+        
+        async def _once() -> None:
             async with factory() as session:
                 async with session.begin():
                     # Acquire a SQLite writer transaction before inspecting the
@@ -983,31 +1213,96 @@ class McpDispatchAttemptService:
                     if linked_receipt is not None:
                         raise DispatchClaimUnavailableError("dispatch_attempt_advanced")
 
+                    # If this attempt reserved a call slot, release it atomically
+                    # with the budget refund using the same CAS pattern as
+                    # release_dispatch_budget_once. The attempt has never dispatched
+                    # (dispatched_at is None is checked above), so the slot can be
+                    # safely returned.
+                    permit_update_values: dict[str, Any] = {
+                        "spent_credits": PermitModel.spent_credits
+                        - attempt.credits_authorized,
+                        "updated_at": utc_now(),
+                    }
+                    where_conditions = [
+                        cast(
+                            ColumnElement[bool],
+                            PermitModel.permit_id == attempt.permit_id,
+                        ),
+                        cast(
+                            ColumnElement[bool],
+                            PermitModel.spent_credits >= attempt.credits_authorized,
+                        ),
+                    ]
+                    
+                    original_counts_json = None
+                    if attempt.call_slot_reserved:
+                        # Fetch the permit to get current tool_call_counts_json
+                        permit = await session.get(
+                            PermitModel, attempt.permit_id, with_for_update=True
+                        )
+                        if permit is not None:
+                            original_counts_json = permit.tool_call_counts_json
+                            current_counts = _loads_dict(original_counts_json or "{}")
+                            tool_name = attempt.public_tool_id
+                            if tool_name in current_counts:
+                                current_count = current_counts[tool_name]
+                                if isinstance(current_count, int) and current_count > 0:
+                                    updated_counts = dict(current_counts)
+                                    updated_counts[tool_name] = current_count - 1
+                                    permit_update_values["tool_call_counts_json"] = (
+                                        json.dumps(updated_counts)
+                                    )
+                        
+                        # Add CAS condition on tool_call_counts_json
+                        if "tool_call_counts_json" in permit_update_values:
+                            if original_counts_json is None:
+                                where_conditions.append(
+                                    cast(
+                                        ColumnElement[bool],
+                                        cast(Any, PermitModel.tool_call_counts_json).is_(
+                                            None
+                                        ),
+                                    )
+                                )
+                            else:
+                                where_conditions.append(
+                                    cast(
+                                        ColumnElement[bool],
+                                        PermitModel.tool_call_counts_json
+                                        == original_counts_json,
+                                    )
+                                )
+                    
                     released = await session.execute(
                         sa_update(PermitModel)
-                        .where(
-                            cast(
-                                ColumnElement[bool],
-                                PermitModel.permit_id == attempt.permit_id,
-                            ),
-                            cast(
-                                ColumnElement[bool],
-                                PermitModel.spent_credits >= attempt.credits_authorized,
-                            ),
-                        )
-                        .values(
-                            spent_credits=PermitModel.spent_credits
-                            - attempt.credits_authorized,
-                            updated_at=utc_now(),
-                        )
+                        .where(*where_conditions)
+                        .values(**permit_update_values)
                         .execution_options(synchronize_session=False)
                     )
                     if (cast(Any, released).rowcount or 0) != 1:
+                        # If CAS failed on tool_call_counts_json, the slot might have
+                        # changed concurrently. Raise a retryable error.
+                        if (
+                            attempt.call_slot_reserved
+                            and "tool_call_counts_json" in permit_update_values
+                        ):
+                            raise PermitWriteContendedError()
                         raise DispatchAttemptConflictError(
                             "dispatch_budget_release_invalid"
                         )
                     await session.delete(attempt)
                     await session.flush()
+        
+        # Wrap in retry logic to handle CAS failures on slot release
+        try:
+            await run_with_write_conflict_retry(
+                _once,
+                max_attempts=WRITE_CONFLICT_MAX_ATTEMPTS,
+                on_exhausted=lambda exc: DispatchAttemptConflictError(
+                    "dispatch_budget_release_contended"
+                ),
+                restart_on=lambda exc: isinstance(exc, PermitWriteContendedError),
+            )
         except DispatchAttemptError:
             raise
         except Exception as exc:
