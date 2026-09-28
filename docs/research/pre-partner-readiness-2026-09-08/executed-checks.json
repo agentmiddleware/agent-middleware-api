@@ -1,0 +1,57 @@
+[
+  {
+    "check": "pg17-crash",
+    "exit_code": 0,
+    "seconds": 129.78
+  },
+  {
+    "check": "pg17-permits",
+    "exit_code": 0,
+    "seconds": 2.9
+  },
+  {
+    "check": "pg17-trust",
+    "exit_code": 0,
+    "seconds": 4.88
+  },
+  {
+    "check": "pg17-datetime",
+    "exit_code": 0,
+    "seconds": 2.55
+  },
+  {
+    "check": "pg17-wallet-status",
+    "exit_code": 0,
+    "seconds": 2.45
+  },
+  {
+    "check": "pg17-security-fuzz",
+    "exit_code": 0,
+    "seconds": 2.46
+  },
+  {
+    "check": "production-posture",
+    "exit_code": 0,
+    "seconds": 2.8
+  },
+  {
+    "check": "release-gate",
+    "exit_code": 0,
+    "seconds": 53.23
+  },
+  {
+    "check": "red-team",
+    "exit_code": 0,
+    "seconds": 1.4
+  },
+  {
+    "check": "doc-references",
+    "exit_code": 0,
+    "seconds": 1.41
+  },
+  {
+    "check": "http-rehearsal",
+    "exit_code": 0,
+    "seconds": 8.88
+  }
+]

@@ -1,0 +1,118 @@
+{
+  "retrieved_at_utc": "2026-09-06T05:23:31Z",
+  "source": "Railway authenticated CLI, read-only project usage queries",
+  "classification": "Provider-reported metered usage; not invoice, payment, plan commitment, or customer-load benchmark",
+  "project": "agent-middleware-api",
+  "periods": [
+    {
+      "period": "previous",
+      "billing_period": {
+        "end": "2026-09-01T03:19:17+00:00",
+        "start": "2026-08-01T03:19:17+00:00"
+      },
+      "project_usage_usd": 3.677385096264563,
+      "services": [
+        {
+          "backupDollars": 0.10162632975136285,
+          "cpuDollars": 0.14528675909722222,
+          "egressDollars": 0.0367787673,
+          "memoryDollars": 1.3679455371061728,
+          "name": "Postgres",
+          "totalDollars": 1.677921215921348,
+          "volumeDollars": 0.026283822666590066
+        },
+        {
+          "backupDollars": 0,
+          "cpuDollars": 0.03503926140432099,
+          "egressDollars": 0.002993743,
+          "memoryDollars": 1.3388066450330864,
+          "name": "api-service",
+          "totalDollars": 1.3768396494374073,
+          "volumeDollars": 0
+        },
+        {
+          "backupDollars": 0,
+          "cpuDollars": 0.02148518914351852,
+          "egressDollars": 0.0000130341,
+          "memoryDollars": 0.41303842013234565,
+          "name": "partner-mcp-pilot",
+          "totalDollars": 0.4345366433758642,
+          "volumeDollars": 0
+        },
+        {
+          "backupDollars": 0,
+          "cpuDollars": 0.06796416778549383,
+          "egressDollars": 1.3600000000000001e-8,
+          "memoryDollars": 0.056145464936296303,
+          "name": "Redis",
+          "totalDollars": 0.1317614237400213,
+          "volumeDollars": 0.0076517774182311964
+        },
+        {
+          "backupDollars": 0,
+          "cpuDollars": 0.017521962314814815,
+          "egressDollars": 0,
+          "memoryDollars": 0.020785416501728396,
+          "name": "deleted service",
+          "totalDollars": 0.04532373151426983,
+          "volumeDollars": 0.007016352697726618
+        },
+        {
+          "backupDollars": 0,
+          "cpuDollars": 0.000015324236111111112,
+          "egressDollars": 0.00005370595,
+          "memoryDollars": 0.00003940408888888889,
+          "name": "deleted service",
+          "totalDollars": 0.011002432275652636,
+          "volumeDollars": 0.010893998000652636
+        }
+      ]
+    },
+    {
+      "period": "current",
+      "billing_period": {
+        "end": "2026-10-01T03:19:17+00:00",
+        "start": "2026-09-01T03:19:17+00:00"
+      },
+      "project_usage_usd": 0.7592786962047255,
+      "services": [
+        {
+          "backupDollars": 0.0428780311529853,
+          "cpuDollars": 0.03760975604938272,
+          "egressDollars": 0.010142313600000001,
+          "memoryDollars": 0.32017865454617284,
+          "name": "Postgres",
+          "totalDollars": 0.4160884504276833,
+          "volumeDollars": 0.00527969507914245
+        },
+        {
+          "backupDollars": 0,
+          "cpuDollars": 0.007122922615740741,
+          "egressDollars": 0.00016352305000000002,
+          "memoryDollars": 0.2295119485471605,
+          "name": "api-service",
+          "totalDollars": 0.23679839421290125,
+          "volumeDollars": 0
+        },
+        {
+          "backupDollars": 0,
+          "cpuDollars": 0.004514670169753087,
+          "egressDollars": 4.2100000000000006e-8,
+          "memoryDollars": 0.0794186315851852,
+          "name": "partner-mcp-pilot",
+          "totalDollars": 0.08393334385493828,
+          "volumeDollars": 0
+        },
+        {
+          "backupDollars": 0,
+          "cpuDollars": 0.011982694251543212,
+          "egressDollars": 0,
+          "memoryDollars": 0.009205575379753087,
+          "name": "Redis",
+          "totalDollars": 0.0224585077092028,
+          "volumeDollars": 0.0012702380779065008
+        }
+      ]
+    }
+  ]
+}
