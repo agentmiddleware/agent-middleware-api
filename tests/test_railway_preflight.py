@@ -1450,6 +1450,7 @@ def test_live_hides_rejected_operator_credential(monkeypatch, capsys):
             "https://api.example.com",
         ),
         ("https://127.0.0.1", "https://127.0.0.1"),
+        ("https://127.1", "https://127.1"),
         ("https://api.example.com/catalog", "https://api.example.com/catalog"),
         (
             "https://api.example.com?target=other",
