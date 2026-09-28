@@ -612,6 +612,27 @@ def test_railway_source_check_hides_cli_exception_details(
     assert secret not in output
 
 
+def test_railway_source_check_hides_cli_decode_failure(monkeypatch, capsys):
+    secret = b"\xffprovider-secret-output"
+
+    def fail(*_args, **_kwargs):
+        raise UnicodeDecodeError("utf-8", secret, 0, 1, "invalid start byte")
+
+    monkeypatch.setattr(preflight.subprocess, "run", fail)
+
+    assert (
+        preflight.check_railway_source_unbound(
+            project_id=_RAILWAY_PROJECT,
+            environment=_RAILWAY_ENVIRONMENT,
+            service=_RAILWAY_SERVICE,
+        )
+        is False
+    )
+    output = capsys.readouterr().out
+    assert "could not be verified" in output
+    assert "provider-secret-output" not in output
+
+
 @pytest.mark.parametrize("check_result, expected_exit", [(True, 0), (False, 1)])
 def test_railway_source_mode_runs_only_provider_guard(
     check_result,
