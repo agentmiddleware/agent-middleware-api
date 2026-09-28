@@ -1019,17 +1019,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--url",
-        default=os.getenv("PUBLIC_URL", ""),
+        default=None,
         help="service origin for --live (default: $PUBLIC_URL)",
     )
     parser.add_argument(
         "--expected-version",
-        default="",
+        default=None,
         help="exact application version required from --live",
     )
     parser.add_argument(
         "--expected-commit-sha",
-        default="",
+        default=None,
         help="full 40-character commit SHA required from --live",
     )
     parser.add_argument(
@@ -1051,7 +1051,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--manifest",
-        default="",
+        default=None,
         help=(
             "strict non-secret customer deployment manifest; supplies the live "
             "URL, commit SHA, Alembic revision, and signing key identity"
@@ -1091,6 +1091,10 @@ def main(argv: list[str] | None = None) -> int:
         help="treat a skipped check as a failure (for CI)",
     )
     args = parser.parse_args(argv)
+    url_given = args.url is not None
+    expected_version_given = args.expected_version is not None
+    expected_commit_sha_given = args.expected_commit_sha is not None
+    manifest_given = args.manifest is not None
 
     if args.manifest_only and not args.manifest:
         print(f"{BAD} --manifest-only requires --manifest")
@@ -1105,8 +1109,9 @@ def main(argv: list[str] | None = None) -> int:
         or args.public_db
         or args.runtime_posture
         or args.railway_source_unbound
-        or args.expected_version
-        or args.expected_commit_sha
+        or url_given
+        or expected_version_given
+        or expected_commit_sha_given
         or signing_expectation_given
     ):
         print(
@@ -1146,7 +1151,7 @@ def main(argv: list[str] | None = None) -> int:
     # gate run from another checkout. A present-but-empty value (a failed
     # substitution in a shell) is rejected rather than read as "not given".
     if signing_expectation_given:
-        if args.manifest:
+        if manifest_given:
             print(
                 f"{BAD} --expected-signing-key-id and "
                 "--expected-signing-public-key-sha256 cannot be combined with "
@@ -1180,18 +1185,27 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 1
 
-    # Release expectations and the manifest are inputs to the live check. An
-    # explicit non-live selector on its own deselects that check, so accepting
-    # them there would look like an identity check ran when it did not.
-    if (
-        (args.runtime_posture or args.railway_source_unbound)
-        and not args.live
-        and (args.expected_version or args.expected_commit_sha or args.manifest)
-    ):
-        print(
-            f"{BAD} --expected-version, --expected-commit-sha, and --manifest "
-            "apply only to --live; add --live or drop them from this run"
+    # These explicit inputs belong to the live check. A non-live selector on
+    # its own deselects that check, so accepting any of them there would look
+    # like a check ran when it did not. Keep environment defaults out of this
+    # validation: a Railway container may have PUBLIC_URL while running only
+    # the private runtime or provider-source gate.
+    live_only_options = [
+        flag
+        for flag, given in (
+            ("--url", url_given),
+            ("--expected-version", expected_version_given),
+            ("--expected-commit-sha", expected_commit_sha_given),
+            ("--manifest", manifest_given),
         )
+        if given
+    ]
+    if (
+        (args.db or args.runtime_posture or args.railway_source_unbound)
+        and not args.live
+        and live_only_options
+    ):
+        print(f"{BAD} live-only options require --live: {', '.join(live_only_options)}")
         return 1
 
     # No check selected: run whatever the environment supports. The runtime
@@ -1207,8 +1221,10 @@ def main(argv: list[str] | None = None) -> int:
 
     results: list[bool] = []
     manifest: CustomerManifest | None = None
-    effective_url = args.url.strip()
-    effective_commit_sha = args.expected_commit_sha.strip()
+    effective_url = (
+        args.url if args.url is not None else os.getenv("PUBLIC_URL", "")
+    ).strip()
+    effective_commit_sha = (args.expected_commit_sha or "").strip()
 
     if args.manifest:
         try:

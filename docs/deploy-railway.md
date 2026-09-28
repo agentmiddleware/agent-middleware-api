@@ -249,19 +249,26 @@ releases are operator-run from a clean exact-SHA checkout.**
 set -euo pipefail
 DEPLOY_SHA="$(git rev-parse HEAD)"
 PROJECT_ID="${PROJECT_ID:?set PROJECT_ID to the intended Railway project UUID}"
-python3 scripts/railway_preflight.py --railway-source-unbound \
-  --railway-project "$PROJECT_ID" --railway-environment production \
-  --railway-service api-service
 RELEASE_CONTEXT="$(python3 scripts/prepare_railway_release.py --ref "$DEPLOY_SHA")"
 test -d "$RELEASE_CONTEXT"
 test "$(cat "$RELEASE_CONTEXT/.build_commit_sha")" = "$DEPLOY_SHA"
+python3 scripts/railway_preflight.py --railway-source-unbound \
+  --railway-project "$PROJECT_ID" --railway-environment production \
+  --railway-service api-service
 railway up "$RELEASE_CONTEXT" --path-as-root --no-gitignore \
   --project "$PROJECT_ID" --service api-service --environment production --ci
+python3 scripts/railway_preflight.py --railway-source-unbound \
+  --railway-project "$PROJECT_ID" --railway-environment production \
+  --railway-service api-service
 ```
 
-The provider-source preflight is read-only: it does not disconnect or mutate
-the service. Any missing, malformed, ambiguous, repository-bound, or
-image-bound provider status stops the release.
+The provider-source checks are read-only: they do not disconnect or mutate the
+service. Any missing, malformed, ambiguous, repository-bound, or image-bound
+provider status stops the release. The checks immediately bracket the upload,
+so the recheck can detect some changes that are present afterward. The recheck
+does not prevent a source change during the upload or undo an upload.
+Only a provider-side compare-and-swap tied to the observed configuration
+version, or a provider-side lock held across the upload, fully closes this race.
 
 That abbreviated command is appropriate only after the pre-deploy gates below.
 For a stack that may hold customer data, follow the complete
@@ -593,11 +600,8 @@ test "$ci_conclusion" = "success"
 # its new SHA to the still-running old release. Check current service posture
 # separately without a candidate identity expectation.
 python3 scripts/railway_preflight.py --manifest-only \
-  --manifest "$MANIFEST" --url "$API_URL"
+  --manifest "$MANIFEST"
 python3 scripts/railway_preflight.py --live --strict --url "$API_URL"
-python3 scripts/railway_preflight.py --railway-source-unbound \
-  --railway-project "$PROJECT_ID" --railway-environment "$ENVIRONMENT" \
-  --railway-service "$SERVICE"
 control_plane="$(railway status \
   --project "$PROJECT_ID" --environment "$ENVIRONMENT" --json)"
 test "$(jq -r '.id' <<<"$control_plane")" = "$PROJECT_ID"
@@ -664,11 +668,17 @@ RELEASE_NONCE="$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
 RELEASE_MARKER="manual-exact-sha-$DEPLOY_SHA-$RELEASE_NONCE"
 RELEASE_CONTEXT="$(python3 scripts/prepare_railway_release.py --ref "$DEPLOY_SHA")"
 test "$(cat "$RELEASE_CONTEXT/.build_commit_sha")" = "$DEPLOY_SHA"
+python3 scripts/railway_preflight.py --railway-source-unbound \
+  --railway-project "$PROJECT_ID" --railway-environment "$ENVIRONMENT" \
+  --railway-service "$SERVICE"
 railway up "$RELEASE_CONTEXT" --path-as-root \
   --no-gitignore \
   --project "$PROJECT_ID" --service "$SERVICE" \
   --environment "$ENVIRONMENT" --ci \
   --message "$RELEASE_MARKER"
+python3 scripts/railway_preflight.py --railway-source-unbound \
+  --railway-project "$PROJECT_ID" --railway-environment "$ENVIRONMENT" \
+  --railway-service "$SERVICE"
 
 # Resolve and wait for the uniquely marked deployment just started above.
 DEPLOYMENT_ID="$(railway deployment list \
