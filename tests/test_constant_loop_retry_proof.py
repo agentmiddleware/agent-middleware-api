@@ -14,7 +14,7 @@ from scripts import constant_test_loop as loop
 PROJECT_URL = "https://api.example.test"
 TOOL = "partner.echo"
 PAYLOAD = {"message": "approved payload must not be persisted"}
-API_KEY = "amw_live_secret-canary"
+API_KEY = "fake-api-key-secret-canary"
 WALLET_ID = "wallet-secret-canary"
 KEY_ID = "key-secret-canary"
 
@@ -312,8 +312,15 @@ def test_retry_proof_proves_replay_and_cap_denial_without_secret_output(
     )
 
     evidence = json.loads(output.read_text(encoding="utf-8"))
+    assert output.stat().st_mode & 0o777 == 0o600
     assert evidence["status"] == "passed"
+    assert evidence["target"] == {
+        "origin": PROJECT_URL,
+        "tool": TOOL,
+        "payload_sha256": loop.retry_proof_payload_sha256(PAYLOAD),
+    }
     assert evidence["permit"]["max_calls_per_tool"] == 1
+    assert evidence["success"]["dispatch_evidence_valid"] is True
     assert evidence["same_key_replay"] == {
         "same_receipt": True,
         "same_dispatch_attempt": True,
@@ -325,7 +332,8 @@ def test_retry_proof_proves_replay_and_cap_denial_without_secret_output(
     assert evidence["fresh_key_denial"]["additional_debits"] == 0
     assert evidence["fresh_key_denial"]["additional_spend"] == "0"
 
-    serialized = output.read_text(encoding="utf-8") + capsys.readouterr().err
+    captured = capsys.readouterr()
+    serialized = output.read_text(encoding="utf-8") + captured.out + captured.err
     for forbidden in (
         API_KEY,
         WALLET_ID,
