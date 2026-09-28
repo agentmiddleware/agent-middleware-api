@@ -405,7 +405,7 @@ class PermitService:
         # field added on one path only keep verifying in tests that never
         # round-tripped a freshly minted permit.
         signature, key_id, _ = await get_signing_key_service().sign_payload(
-            self._unsigned_payload(model)
+            self._unsigned_payload(model, repeat_window_seconds=request.repeat_window_seconds)
         )
         model.signature = signature
         model.key_id = key_id
@@ -1915,8 +1915,8 @@ class PermitService:
             payload["recipient_domain"] = model.recipient_domain
         if model.allow_identical_repeats:
             payload["allow_identical_repeats"] = True
-        if model.repeat_window_seconds is not None:
-            payload["repeat_window_seconds"] = model.repeat_window_seconds
+        if repeat_window_seconds is not None:
+            payload["repeat_window_seconds"] = repeat_window_seconds
         return payload
 
     @staticmethod
