@@ -204,6 +204,36 @@ def test_retry_proof_requires_exact_target_tool_and_payload_confirmation(
     assert not (tmp_path / "proof.json").exists()
 
 
+@pytest.mark.parametrize("target", ["ftp://api.example.test", "https://"])
+def test_retry_proof_requires_http_origin_with_hostname(
+    tmp_path: Path,
+    target: str,
+) -> None:
+    values = _confirmation(tmp_path / "proof.json")
+    values["api_url"] = target
+    values["confirmed_target"] = target
+
+    with pytest.raises(loop.ConfigurationError, match="canonical API origin"):
+        loop.validate_retry_proof_confirmation(**values)
+
+
+def test_retry_proof_rejects_noncanonical_payload_and_output_paths(
+    tmp_path: Path,
+) -> None:
+    invalid_payload = _confirmation(tmp_path / "proof.json")
+    invalid_payload["tool_arguments"] = {"value": float("nan")}
+    with pytest.raises(loop.ConfigurationError, match="canonical JSON"):
+        loop.validate_retry_proof_confirmation(**invalid_payload)
+
+    wrong_suffix = _confirmation(tmp_path / "proof.txt")
+    with pytest.raises(loop.ConfigurationError, match=".json"):
+        loop.validate_retry_proof_confirmation(**wrong_suffix)
+
+    missing_parent = _confirmation(tmp_path / "missing" / "proof.json")
+    with pytest.raises(loop.ConfigurationError, match="directory does not exist"):
+        loop.validate_retry_proof_confirmation(**missing_parent)
+
+
 def test_retry_proof_refuses_to_overwrite_existing_evidence(tmp_path: Path) -> None:
     output = tmp_path / "proof.json"
     output.write_text("existing evidence\n", encoding="utf-8")
@@ -212,6 +242,20 @@ def test_retry_proof_refuses_to_overwrite_existing_evidence(tmp_path: Path) -> N
         loop.validate_retry_proof_confirmation(**_confirmation(output))
 
     assert output.read_text(encoding="utf-8") == "existing evidence\n"
+
+
+def test_retry_proof_evidence_write_loses_race_without_overwriting(
+    tmp_path: Path,
+) -> None:
+    output = loop.validate_retry_proof_confirmation(
+        **_confirmation(tmp_path / "proof.json")
+    )
+    output.write_text("racing writer\n", encoding="utf-8")
+
+    with pytest.raises(loop.SmokeTestFailure, match="could not be written"):
+        loop._write_retry_evidence(output, {"status": "passed"})
+
+    assert output.read_text(encoding="utf-8") == "racing writer\n"
 
 
 def test_retry_proof_cli_refuses_missing_confirmations_before_running(
@@ -243,6 +287,77 @@ def test_retry_proof_cli_refuses_missing_confirmations_before_running(
     assert exit_code == 2
     assert called is False
     assert "confirmation" in capsys.readouterr().err
+
+
+def test_retry_proof_cli_refuses_confirmation_flags_without_opt_in(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    called = False
+
+    def fail_if_called(*_args: object, **_kwargs: object) -> None:
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(loop, "run_constant_test", fail_if_called)
+
+    exit_code = loop.main(
+        [
+            "--api-url",
+            PROJECT_URL,
+            "--tool",
+            TOOL,
+            "--tool-args",
+            json.dumps(PAYLOAD),
+            "--confirm-retry-target",
+            PROJECT_URL,
+        ]
+    )
+
+    assert exit_code == 2
+    assert called is False
+    assert "require --retry-evidence-output" in capsys.readouterr().err
+
+
+def test_retry_proof_cli_disables_self_provisioning(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    output = tmp_path / "proof.json"
+    digest = loop.retry_proof_payload_sha256(PAYLOAD)
+    called = False
+    for name in ("CI_SMOKE_AGENT_KEY", "CI_SMOKE_WALLET_ID", "CI_SMOKE_KEY_ID"):
+        monkeypatch.delenv(name, raising=False)
+
+    def fail_if_called(*_args: object, **_kwargs: object) -> None:
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(loop, "run_constant_test", fail_if_called)
+
+    exit_code = loop.main(
+        [
+            "--api-url",
+            PROJECT_URL,
+            "--tool",
+            TOOL,
+            "--tool-args",
+            json.dumps(PAYLOAD),
+            "--retry-evidence-output",
+            str(output),
+            "--confirm-retry-target",
+            PROJECT_URL,
+            "--confirm-retry-tool",
+            TOOL,
+            "--confirm-retry-payload-sha256",
+            digest,
+        ]
+    )
+
+    assert exit_code == 2
+    assert called is False
+    assert "self-provisioning is disabled" in capsys.readouterr().err
 
 
 def test_retry_proof_cli_forwards_validated_output(
@@ -412,6 +527,46 @@ def test_retry_proof_rejects_denial_not_bound_to_signed_receipt(
     monkeypatch.setattr(loop.httpx, "Client", MismatchedVerifyClient)
 
     with pytest.raises(loop.SmokeTestFailure, match="signed denial receipt"):
+        loop.run_constant_test(
+            PROJECT_URL,
+            API_KEY,
+            WALLET_ID,
+            KEY_ID,
+            pinned_tool=TOOL,
+            tool_arguments=PAYLOAD,
+            retry_evidence_output=output,
+        )
+
+    assert not output.exists()
+
+
+def test_retry_proof_rejects_success_not_bound_to_signed_receipt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "proof.json"
+
+    class MismatchedSuccessVerifyClient(_ProofClient):
+        def post(
+            self,
+            path: str,
+            *,
+            json: dict[str, Any],
+            headers: dict[str, str] | None = None,
+        ) -> _Response:
+            if (
+                path == "/v1/receipts/verify"
+                and json["receipt_id"] == SUCCESS_RECEIPT["receipt_id"]
+            ):
+                return _Response(
+                    200,
+                    {"valid": True, "receipt": dict(DENIAL_RECEIPT)},
+                )
+            return super().post(path, json=json, headers=headers)
+
+    monkeypatch.setattr(loop.httpx, "Client", MismatchedSuccessVerifyClient)
+
+    with pytest.raises(loop.SmokeTestFailure, match="signed receipt"):
         loop.run_constant_test(
             PROJECT_URL,
             API_KEY,
