@@ -35,7 +35,7 @@ mcp>=1.29.0,<2         # MCP SDK; >=1.29.0 provides the pre-parse request-body g
 # 0.0.45 makes plain datetime columns UTCDateTime and rejects this repo's
 # naive-UTC values. Stay on the last release that stores TIMESTAMP WITHOUT
 # TIME ZONE for unannotated datetime fields.
-sqlmodel>=0.0.42,<0.0.45
+sqlmodel>=0.0.47,<0.0.48
 alembic>=1.20.0        # Database migrations
 aiosqlite>=0.22.1      # Async SQLite driver for testing
 
