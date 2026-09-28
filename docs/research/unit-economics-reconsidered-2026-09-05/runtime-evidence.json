@@ -1,0 +1,50 @@
+{
+  "retrieved_at_utc": "2026-09-06T05:33:51.720669+00:00",
+  "source_url": "https://api.thisisatest.tech/health/dependencies",
+  "method": "GET",
+  "status": "healthy",
+  "commit_sha": "2880ca706d2f4779876097e9414b6f1fab691a3e",
+  "build_provenance": "stamped",
+  "public_tool_id": "partner.echo",
+  "call_metrics": {
+    "calls_total": 0,
+    "latency_seconds_total": 0.0,
+    "latency_seconds_max": 0.0,
+    "latency_seconds_average": 0.0,
+    "outcomes": {
+      "succeeded": 0,
+      "returned_error": 0,
+      "delivery_uncertain": 0,
+      "response_rejected": 0,
+      "pre_dispatch_failure": 0,
+      "internal_failure": 0
+    }
+  },
+  "dispatch_metrics": {
+    "state_counts": {
+      "returned_error": 1,
+      "succeeded": 31
+    },
+    "failures": 1,
+    "uncertainty_count": 0,
+    "stale_active": 0,
+    "unfinalized_terminal": 0,
+    "terminal_idempotency_incomplete": 0,
+    "reconciliation_backlog": 0
+  },
+  "metric_scopes": {
+    "upstream_mcp.call_metrics": {
+      "scope": "process_local",
+      "durable": false,
+      "reset_on": "process_restart",
+      "description": "In-memory counters for this API process only."
+    },
+    "upstream_mcp.dispatch_metrics": {
+      "scope": "durable",
+      "durable": true,
+      "source": "mcp_dispatch_attempts",
+      "description": "Dispatch history summarized from the durable state backend."
+    }
+  },
+  "limitations": "Point-in-time demo state. No customer attribution or billing-period denominator. A health check is not a deployment qualification or load test."
+}
