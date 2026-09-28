@@ -245,6 +245,7 @@ to deny duplicates as `duplicate_request_new_key`, or disable it entirely
 | `permit_max_calls_exceeded` | B | Per-tool call cap hit / malformed cap |
 | `permit_aggregate_value_cap_exceeded` | B | Cumulative value cap hit |
 | `permit_constraint_unsupported_for_upstream` | B | Configured upstream call carries a usage constraint without an atomic remote enforcement lifecycle |
+| `duplicate_request_new_key` | B | Cross-key duplicate detection denied an identical new-key retry (remote tools, enforce mode only) |
 | `permit_forbidden_field:{field}` | B | Banned argument key present |
 | `permit_signature_invalid` | B | Permit signature failed verification |
 | `human_approval_required` | C | Wallet policy demands approval |
