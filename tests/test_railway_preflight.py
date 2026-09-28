@@ -10,6 +10,7 @@ import asyncio
 import base64
 import importlib.util
 import json
+import socket
 from pathlib import Path
 
 import pytest
@@ -37,6 +38,33 @@ preflight = _load_preflight()
 def clean_release_checkout(monkeypatch):
     """Manifest tests run in a shared worktree containing intended edits."""
     monkeypatch.setattr(preflight, "_tree_is_clean", lambda: True)
+
+
+@pytest.fixture(autouse=True)
+def deterministic_public_dns(monkeypatch):
+    """Keep credential-routing tests independent of the machine's DNS."""
+    answers = {
+        "api.example.com": ("93.184.216.34",),
+        "127.0.0.1.nip.io": ("127.0.0.1",),
+    }
+
+    def getaddrinfo(host, port, *_args, **_kwargs):
+        try:
+            addresses = answers[host]
+        except KeyError as exc:
+            raise socket.gaierror(f"unexpected test hostname: {host}") from exc
+        return [
+            (
+                socket.AF_INET,
+                socket.SOCK_STREAM,
+                socket.IPPROTO_TCP,
+                "",
+                (address, port),
+            )
+            for address in addresses
+        ]
+
+    monkeypatch.setattr(socket, "getaddrinfo", getaddrinfo)
 
 
 @pytest.fixture
@@ -1451,6 +1479,9 @@ def test_live_hides_rejected_operator_credential(monkeypatch, capsys):
         ),
         ("https://127.0.0.1", "https://127.0.0.1"),
         ("https://127.1", "https://127.1"),
+        ("https://foo.local", "https://foo.local"),
+        ("https://foo.localdomain", "https://foo.localdomain"),
+        ("https://127.0.0.1.nip.io", "https://127.0.0.1.nip.io"),
         ("https://api.example.com/catalog", "https://api.example.com/catalog"),
         (
             "https://api.example.com?target=other",
