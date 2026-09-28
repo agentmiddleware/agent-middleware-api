@@ -18,6 +18,24 @@ API_KEY = "fake-api-key-secret-canary"
 WALLET_ID = "wallet-secret-canary"
 KEY_ID = "key-secret-canary"
 
+SUCCESS_RECEIPT = {
+    "receipt_id": "receipt-success",
+    "dispatch_attempt_id": "dispatch-success",
+    "ledger_entry_id": "ledger-success",
+    "permit_id": "permit-proof",
+    "outcome": "success",
+    "credits_charged": "2",
+}
+DENIAL_RECEIPT = {
+    "receipt_id": "receipt-denied",
+    "dispatch_attempt_id": None,
+    "ledger_entry_id": None,
+    "permit_id": "permit-proof",
+    "outcome": "denied",
+    "reason_code": "permit_max_calls_exceeded",
+    "credits_charged": "0",
+}
+
 
 class _Response:
     def __init__(self, status_code: int, data: dict[str, Any]) -> None:
@@ -66,7 +84,12 @@ class _ProofClient:
                 },
             )
         if path == "/v1/receipts/verify":
-            return _Response(200, {"valid": True})
+            receipt_id = json["receipt_id"]
+            receipt = {
+                SUCCESS_RECEIPT["receipt_id"]: SUCCESS_RECEIPT,
+                DENIAL_RECEIPT["receipt_id"]: DENIAL_RECEIPT,
+            }[receipt_id]
+            return _Response(200, {"valid": True, "receipt": dict(receipt)})
         if path == "/mcp/messages":
             self.message_calls += 1
             if self.message_calls <= 2:
@@ -77,14 +100,7 @@ class _ProofClient:
                         "id": json["id"],
                         "result": {
                             "isError": False,
-                            "receipt": {
-                                "receipt_id": "receipt-success",
-                                "dispatch_attempt_id": "dispatch-success",
-                                "ledger_entry_id": "ledger-success",
-                                "permit_id": "permit-proof",
-                                "outcome": "success",
-                                "credits_charged": "2",
-                            },
+                            "receipt": dict(SUCCESS_RECEIPT),
                         },
                     },
                 )
@@ -98,15 +114,7 @@ class _ProofClient:
                         "message": "permit_max_calls_exceeded",
                         "data": {
                             "details": {"tool": TOOL, "limit": 1, "calls_made": 1},
-                            "receipt": {
-                                "receipt_id": "receipt-denied",
-                                "dispatch_attempt_id": None,
-                                "ledger_entry_id": None,
-                                "permit_id": "permit-proof",
-                                "outcome": "denied",
-                                "reason_code": "permit_max_calls_exceeded",
-                                "credits_charged": "0",
-                            },
+                            "receipt": dict(DENIAL_RECEIPT),
                         },
                     },
                 },
@@ -374,4 +382,44 @@ def test_retry_proof_does_not_echo_failed_response_or_write_evidence(
 
     captured = capsys.readouterr()
     assert secret not in captured.out + captured.err
+    assert not output.exists()
+
+
+def test_retry_proof_rejects_denial_not_bound_to_signed_receipt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "proof.json"
+
+    class MismatchedVerifyClient(_ProofClient):
+        def post(
+            self,
+            path: str,
+            *,
+            json: dict[str, Any],
+            headers: dict[str, str] | None = None,
+        ) -> _Response:
+            if (
+                path == "/v1/receipts/verify"
+                and json["receipt_id"] == DENIAL_RECEIPT["receipt_id"]
+            ):
+                return _Response(
+                    200,
+                    {"valid": True, "receipt": dict(SUCCESS_RECEIPT)},
+                )
+            return super().post(path, json=json, headers=headers)
+
+    monkeypatch.setattr(loop.httpx, "Client", MismatchedVerifyClient)
+
+    with pytest.raises(loop.SmokeTestFailure, match="signed denial receipt"):
+        loop.run_constant_test(
+            PROJECT_URL,
+            API_KEY,
+            WALLET_ID,
+            KEY_ID,
+            pinned_tool=TOOL,
+            tool_arguments=PAYLOAD,
+            retry_evidence_output=output,
+        )
+
     assert not output.exists()
