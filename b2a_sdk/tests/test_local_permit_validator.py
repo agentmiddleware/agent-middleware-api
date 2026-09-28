@@ -535,15 +535,15 @@ def test_permit_signature_covers_allow_identical_repeats():
     """allow_identical_repeats enters the signed payload when true."""
     permit_true, keys_true = _build_signed_permit(allow_identical_repeats=True)
     permit_false, keys_false = _build_signed_permit(allow_identical_repeats=False)
-    
+
     # True variant verifies with its own keys
     validator_true = _validator(permit_true, keys_true)
     assert validator_true.verify_permit()
-    
+
     # False variant verifies with its own keys
     validator_false = _validator(permit_false, keys_false)
     assert validator_false.verify_permit()
-    
+
     # Tampering: flipping the flag breaks the signature
     permit_true_tampered = dict(permit_true)
     permit_true_tampered["allow_identical_repeats"] = False
@@ -555,21 +555,21 @@ def test_permit_signature_covers_repeat_window_seconds():
     """repeat_window_seconds enters the signed payload when set."""
     permit_with, keys_with = _build_signed_permit(repeat_window_seconds=3600)
     permit_without, keys_without = _build_signed_permit(repeat_window_seconds=None)
-    
+
     # With-window variant verifies
     validator_with = _validator(permit_with, keys_with)
     assert validator_with.verify_permit()
-    
+
     # Without-window variant verifies
     validator_without = _validator(permit_without, keys_without)
     assert validator_without.verify_permit()
-    
+
     # Tampering: changing the window breaks the signature
     permit_tampered = dict(permit_with)
     permit_tampered["repeat_window_seconds"] = 7200
     validator_tampered = _validator(permit_tampered, keys_with)
     assert not validator_tampered.verify_permit()
-    
+
     # Tampering: removing the window breaks the signature
     permit_removed = dict(permit_with)
     permit_removed["repeat_window_seconds"] = None
@@ -585,10 +585,10 @@ def test_sdk_permit_validator_rebuilds_new_fields():
         repeat_window_seconds=7200,
     )
     validator = _validator(permit, keys)
-    
+
     # Verify the permit passes
     assert validator.verify_permit()
-    
+
     # Check the rebuilt payload includes the fields
     rebuilt = validator.permit_signing_payload(permit)
     assert rebuilt["allow_identical_repeats"] is True
