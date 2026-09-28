@@ -286,12 +286,20 @@ def _build_mcp_call(
 
 def _first_jsonrpc_result(response: dict[str, Any]) -> dict[str, Any]:
     """Extract result from JSON-RPC response, failing if error is present."""
+    require(
+        ("result" in response) != ("error" in response),
+        "expected exactly one JSON-RPC result or error",
+    )
     require("result" in response, "expected JSON-RPC result")
     return response["result"]
 
 
 def _first_jsonrpc_error(response: dict[str, Any]) -> dict[str, Any]:
     """Extract error from JSON-RPC response, failing if result is present."""
+    require(
+        ("result" in response) != ("error" in response),
+        "expected exactly one JSON-RPC result or error",
+    )
     require("error" in response, "expected JSON-RPC error")
     return response["error"]
 
