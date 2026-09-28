@@ -3002,7 +3002,8 @@ def test_cli_public_db_fails_closed_whatever_else_is_selected(
     )
 
     arguments = ["--public-db", *selectors, "--strict"]
-    arguments += ["--url", "https://api.example.com"]
+    if not selectors or "--live" in selectors:
+        arguments += ["--url", "https://api.example.com"]
     assert preflight.main(arguments) == 1
     output = capsys.readouterr().out
     assert "DATABASE_PUBLIC_URL is required" in output
@@ -3027,7 +3028,8 @@ def test_cli_public_db_checks_the_public_url_alongside_other_checks(
     monkeypatch.setattr(preflight, "check_live", lambda *_args, **_kwargs: True)
 
     arguments = ["--public-db", *selectors, "--strict"]
-    arguments += ["--url", "https://api.example.com"]
+    if "--live" in selectors:
+        arguments += ["--url", "https://api.example.com"]
     assert preflight.main(arguments) == 0
     assert seen == [public_url]
 
