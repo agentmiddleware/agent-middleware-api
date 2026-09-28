@@ -326,7 +326,9 @@ def validate_retry_proof_confirmation(
     """Require exact operator confirmation before the retry proof can run."""
     parsed = urlparse(api_url)
     if (
-        parsed.username is not None
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
         or parsed.password is not None
         or parsed.query
         or parsed.fragment
