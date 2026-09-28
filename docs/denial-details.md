@@ -68,7 +68,7 @@ revocation case.
 | `permit_aggregate_value_cap_exceeded` | `required_credits`, `reserved_credits`, `aggregate_value_cap`; `charged_to_date` when the denial came from the read-time check | Request a higher aggregate cap or a replacement permit. `reserved_credits` includes in-flight reservations that have not yet produced a receipt, floored to the permit's receipt total so it is never below `charged_to_date`. |
 | `permit_max_calls_exceeded` | `tool`, `limit`, `calls_made` | Request a replacement permit with a higher per-tool call limit, then retry with a new idempotency key. Replaying the denied key returns the stored denial receipt. |
 | `permit_constraint_unsupported_for_upstream` | `execution_backend`, `unsupported_constraints` | Returned only for `aggregate_value_cap` on remote tools. Request a replacement permit that omits the aggregate cap constraint and uses `max_credits` as the atomic ceiling, then invoke with a new idempotency key. Replaying the denied key returns the stored denial. |
-| `duplicate_request_new_key` | `prior_attempt_id`, `prior_state`, `request_hash` | A new idempotency key carried arguments identical to a prior effectful call on the same permit and tool. This denial is only returned when `MCP_UPSTREAM_DUPLICATE_GUARD=enforce`. Retrying is safe; the gateway prevents duplicate dispatch even if the same-key or new-key retry reaches the per-tool call cap. Use the prior attempt's outcome or intentionally retry with different arguments under a new key. |
+| `duplicate_request_new_key` | `prior_attempt_id`, `prior_state`, `request_hash` | A new idempotency key carried arguments identical to a prior effectful call on the same permit and tool. This denial is only returned when `MCP_UPSTREAM_DUPLICATE_GUARD=enforce`. A new-key retry with the same arguments is a new call that will dispatch again (bounded by the per-tool cap but not deduplicated). Use the prior attempt's outcome, or intentionally retry with different arguments under a new key, or retry with the same key to replay the stored result. |
 | `permit_tool_not_allowed` | `requested_tool`, `allowed_tools` | Use an allowed tool or request a permit that names the requested tool. |
 | `permit_scope_missing` | `required_scopes`, `missing_scopes` | Request a permit containing every listed missing scope. |
 | `permit_expired` | `expired_at`, `checked_at` | Request a new, unexpired permit; do not retry the expired one. |
@@ -152,13 +152,14 @@ moves, and no attempt row is created.
 
 The caller receives JSON-RPC error code **`-32005`** (from `POST /mcp/messages`)
 or HTTP **409** (from `POST /mcp/tools/{id}/invoke`), with the message
-`permit_write_contended`. **Retrying the same idempotency key is safe** because
-the rollback freed only its own idempotency record, leaving no persisted
-reservation or dispatch state. A same-key or new-key retry runs a fresh
-compare-and-swap and is bounded by the per-tool call cap, so neither can
-dispatch twice or exceed the limit. On Postgres, the permit row lock serializes
-concurrent reservations, making this contention path practically unreachable; it
-remains reachable on SQLite under high concurrency.
+`permit_write_contended`. **Retry with the same idempotency key** — the rollback
+freed that record, leaving no persisted reservation or dispatch state, so the
+same-key retry runs a fresh compare-and-swap without replaying a denial. A
+new-key retry is a new call that may dispatch again, bounded by the per-tool
+call cap. The cross-key duplicate guard (`MCP_UPSTREAM_DUPLICATE_GUARD`) runs
+in log-only mode by default and does not prevent new-key retries. On Postgres,
+the permit row lock serializes concurrent reservations, making this contention
+path practically unreachable; it remains reachable on SQLite under high concurrency.
 
 ## What details deliberately do not say
 
