@@ -879,11 +879,13 @@ def test_retry_proof_rejects_prior_ledger_entry_mutation_during_first_call(
     ("changed_message_count", "expected_failure"),
     [(2, "replay"), (3, "fresh-key denial")],
 )
-def test_retry_proof_rejects_a_new_debit_in_a_saturated_ledger_window(
+@pytest.mark.parametrize("existing_count", [49, 199])
+def test_retry_proof_rejects_a_new_debit_in_a_rotating_ledger_window(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     changed_message_count: int,
     expected_failure: str,
+    existing_count: int,
 ) -> None:
     output = tmp_path / "proof.json"
 
@@ -904,7 +906,7 @@ def test_retry_proof_rejects_a_new_debit_in_a_saturated_ledger_window(
                         "amount": "-1",
                         "description": f"governed call to {TOOL}",
                     }
-                    for index in range(199)
+                    for index in range(existing_count)
                 ]
                 entries = existing
                 if self.message_calls > 0:
