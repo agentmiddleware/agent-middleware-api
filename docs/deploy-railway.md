@@ -399,8 +399,8 @@ to `/mcp/public`. Until step 5, the source stays world-readable.
 
 ## Preflight — before you ship
 
-`scripts/railway_preflight.py` runs two checks and exits non-zero if either
-fails, so it works as a gate in a shell or in CI:
+`scripts/railway_preflight.py` runs the checks below and exits non-zero if
+any check it ran fails, so it works as a gate in a shell or in CI:
 
 - **Migration parity** (needs `DATABASE_URL`) — compares the Alembic head in
   this tree against the `alembic_version` row in the target database. A tree
@@ -411,7 +411,8 @@ fails, so it works as a gate in a shell or in CI:
 - **Off-platform migration parity** (`--public-db`, needs
   `DATABASE_PUBLIC_URL`) — uses only the explicit public PostgreSQL URL. It
   never falls back to the private `DATABASE_URL`; missing, local, or
-  private-looking values fail closed without printing the URL.
+  private-looking values fail closed without printing the URL. It always runs
+  the database check, even when `--live` or `--runtime-posture` is also given.
 - **Live posture** (needs `PUBLIC_URL` or `--url`) — sends only
   unauthenticated `GET`s and asserts the deployed service is healthy, reports
   `production_like=true`, has no unhealthy dependency, did **not** fall back
@@ -419,20 +420,38 @@ fails, so it works as a gate in a shell or in CI:
   [Narrow lockdown](#applying-the-narrow-lockdown-to-the-live-origin): every
   production tool catalog (`/v1/discover`, `/mcp/tools.json`, `/mcp/tools`,
   `/.well-known/mcp/tools.json`) must answer a request without credentials
-  with `401`. A publicly readable catalog fails, and so does any other status
-  or an unreachable route. A published `enable_dogfood_tool` must be exactly
-  `false`. The public projection does not publish it, and the catalogs that
-  once stood in for it now require a key, so the live check prints a `NOTE`
-  and leaves the dogfood posture to the runtime check below. Add
+  with the application's own `401` refusal, whose body is
+  `{"detail": {"error": "missing_credentials", ...}}`. A publicly readable
+  catalog fails, and so does any other status, a `401` with any other body
+  (an edge or proxy refusal proves nothing about the application), or an
+  unreachable route. A published `enable_dogfood_tool` or
+  `enable_dogfood_second_tool` must be exactly `false`. The public projection
+  publishes neither, and the catalogs that once stood in for them now require
+  a key, so **a `--live`-only run does not verify the dogfood posture**. That
+  includes the "Validate Railway Release" workflow,
+  `make railway-preflight-live`, and every `--live` example below. The live
+  check prints a `NOTE` and leaves the dogfood posture to the runtime check
+  below. Add
   `--expected-version` and `--expected-commit-sha` after deployment to require
   exact release identity from both `/health` and `/health/dependencies`; the
   SHA must be the full 40-character value.
 - **Runtime posture** (`--runtime-posture`, run inside the deployed API
-  container) — asserts what is no longer publicly observable: the runtime
-  configuration the running service resolves has `ENABLE_DOGFOOD_TOOL=false`
-  and `ENABLE_DOGFOOD_SECOND_TOOL=false`. It also requires a production-like
-  `ENVIRONMENT`, so it fails closed when run anywhere but the deployed service
-  instead of passing on local defaults. It never runs unless requested.
+  container) — asserts what is no longer publicly observable: the service's
+  configuration has `ENABLE_DOGFOOD_TOOL=false` and
+  `ENABLE_DOGFOOD_SECOND_TOOL=false`. It reads the process environment only,
+  never a `.env` file (`.dockerignore` keeps `.env` files out of the image, so
+  in the container this is what the service resolves). It also requires a
+  production-like `ENVIRONMENT` and at least one of the variables Railway
+  injects into a deployed service (`RAILWAY_ENVIRONMENT_ID`,
+  `RAILWAY_ENVIRONMENT`, `RAILWAY_PROJECT_ID`, `RAILWAY_SERVICE_ID`), so it
+  fails closed on a machine outside Railway instead of passing on local
+  defaults, a stray `.env`, or an arbitrary `ENVIRONMENT` value. `railway run`
+  also injects those variables; it then checks the service's configured
+  variables rather than the running process, which is why the SOP uses
+  `railway ssh`. It never runs unless requested, and it rejects
+  `--expected-version`, `--expected-commit-sha`, and `--manifest` unless
+  `--live` is also given. Images built before this flag existed reject it;
+  see [rolling back to an image without `--runtime-posture`](#rolling-back-to-an-image-without---runtime-posture).
 - **Customer deployment manifest** (`--manifest`) — validates the strict
   non-secret JSON record, requires its Alembic revision and commit SHA to equal
   this release checkout, and rejects tracked or ordinary untracked worktree
@@ -457,16 +476,17 @@ DATABASE_URL=postgresql://… python3 scripts/railway_preflight.py --db
 railway run --service Postgres --environment production -- \
   python3 scripts/railway_preflight.py --db --public-db --strict
 
-# Pre-deploy posture only, against the currently running release:
+# Pre-deploy public posture only, against the currently running release. It
+# does not verify the dogfood posture; the in-container check below does:
 python3 scripts/railway_preflight.py --live --url "$API_URL"
 
-# Post-deploy posture plus exact release identity:
+# Post-deploy public posture plus exact release identity (public checks only):
 python3 scripts/railway_preflight.py --live --strict --url "$API_URL" \
   --expected-version "1.3.0" \
   --expected-commit-sha "$(git rev-parse HEAD)"
 
 # Managed single-tenant post-deploy gate; URL, commit, revision, and key id
-# come from the non-secret manifest:
+# come from the non-secret manifest (public checks only):
 python3 scripts/railway_preflight.py --live --strict \
   --manifest /path/to/example-customer.production.json
 
@@ -487,7 +507,8 @@ manifest-bound live check as separate post-deploy gates; both must pass.
 
 A check whose input is absent is **skipped**, not failed; pass `--strict` to
 turn a skip into a failure (what CI and the deploy workflow use). Shorthands:
-`make railway-preflight` and `make railway-preflight-live`.
+`make railway-preflight` and `make railway-preflight-live`. Neither runs the
+in-container runtime posture check, so neither verifies the dogfood posture.
 
 ### Private operator release (required for customer data)
 
@@ -546,6 +567,43 @@ test "$(jq -r '.id' <<<"$control_plane")" = "$PROJECT_ID"
 test "$(jq -r --arg environment "$ENVIRONMENT" \
   '[.environments.edges[].node | select(.name == $environment)] | length' \
   <<<"$control_plane")" -eq 1
+
+# The public gate above cannot see the dogfood posture: the health projection
+# omits both flags and the tool catalogs require a key. Check it privately in
+# the instance serving traffic now, before anything changes. This inline check
+# reads the same settings as --runtime-posture and also runs on images built
+# before that flag existed, which reject the flag with a usage error. It
+# prints exception types only: a raw traceback can echo a configured value,
+# including a secret or a forged sentinel line.
+RUNTIME_POSTURE_CHECK='import sys
+try:
+    from app.core.config import get_settings
+    from app.core.trust_mode import is_production_like_environment
+    s = get_settings()
+    ok = is_production_like_environment(s.ENVIRONMENT) and s.ENABLE_DOGFOOD_TOOL is False and s.ENABLE_DOGFOOD_SECOND_TOOL is False
+except Exception as exc:
+    print("[preflight] FAIL runtime posture:", type(exc).__name__); sys.exit(1)
+print("[preflight] PASS runtime posture" if ok else "[preflight] FAIL runtime posture"); sys.exit(0 if ok else 1)'
+CURRENT_INSTANCE_ID="$(jq -er \
+  --arg environment "$ENVIRONMENT" --arg service "$SERVICE" '
+    [.environments.edges[].node
+      | select(.name == $environment)
+      | .serviceInstances.edges[].node
+      | select(.serviceName == $service)
+      | .activeDeployments[]
+      | .instances[]
+      | select(.status == "RUNNING")
+      | .id]
+    | if length == 1 then .[0] else error("expected exactly one running API instance") end
+  ' <<<"$control_plane")"
+current_output="$(railway ssh \
+  --project "$PROJECT_ID" --service "$SERVICE" \
+  --environment "$ENVIRONMENT" \
+  --deployment-instance "$CURRENT_INSTANCE_ID" -- \
+  sh -c 'python -c "$1" && printf "CURRENT_RUNTIME_POSTURE_OK\\n"' sh "$RUNTIME_POSTURE_CHECK")"
+printf '%s\n' "$current_output"
+current_count="$(printf '%s\n' "$current_output" | grep -c '^CURRENT_RUNTIME_POSTURE_OK$' || true)"
+test "$current_count" -eq 1
 
 # Migration 037 first-activation stop gate. Remove this hard stop only in the
 # separately reviewed customer-specific maintenance runbook described above.
@@ -608,7 +666,9 @@ INSTANCE_ID="$(jq -er \
 # Pin both private checks to that exact running instance. The post-drain scrub
 # runs first; schema parity, the dogfood runtime posture, and the sentinel must
 # then succeed in the same SSH invocation. Neither command prints DATABASE_URL
-# or stored credentials.
+# or stored credentials. When DEPLOY_SHA is a rollback to an image built before
+# --runtime-posture existed, use the form in "Rolling back to an image without
+# --runtime-posture" below instead: that image rejects the flag.
 remote_output="$(railway ssh \
   --project "$PROJECT_ID" --service "$SERVICE" \
   --environment "$ENVIRONMENT" \
@@ -655,6 +715,40 @@ same sequence; never reverse database migrations. For migration 037, first
 follow the [dispatch-claim rollback gate](#dispatch-claim-migration-and-rollback).
 Migrations used for a rolling release must remain compatible with that rollback
 release.
+
+#### Rolling back to an image without `--runtime-posture`
+
+An image built before `--runtime-posture` existed, including `8c95229`,
+rejects that flag with a usage error (exit 2). The post-deploy SSH command
+above therefore fails closed against such an image, which would also block an
+incident rollback to it. For that image only, replace the post-deploy SSH
+command with this form. It keeps the scrub, runs schema parity with
+`--db --strict`, and runs the inline `RUNTIME_POSTURE_CHECK` defined above in
+the same SSH call, before the sentinel:
+
+```bash
+remote_output="$(railway ssh \
+  --project "$PROJECT_ID" --service "$SERVICE" \
+  --environment "$ENVIRONMENT" \
+  --deployment-instance "$INSTANCE_ID" -- \
+  sh -c 'python scripts/retire_owner_keys.py --private-db && python scripts/railway_preflight.py --db --strict && python -c "$1" && printf "PRIVATE_RELEASE_CHECKS_OK\\n"' sh "$RUNTIME_POSTURE_CHECK")"
+```
+
+Keep the sentinel count, the post-check snapshot, and the public live gates.
+Never drop the inline check: `--db --strict` on its own no longer verifies the
+dogfood posture anywhere, because the public gate cannot see it.
+
+The local public gates hit the same problem. They run the rollback
+checkout's own `scripts/railway_preflight.py`, and at `8c95229` that script's
+`--live` gate predates the locked-down catalogs: it reads `/v1/discover`
+anonymously, receives `401`, and fails. For such a target, run the two
+`--live` gates from a checkout that contains the locked-down catalog check,
+pinned with `--expected-version "$EXPECTED_VERSION" --expected-commit-sha
+"$DEPLOY_SHA"` instead of `--manifest`, because the manifest binds to the
+checkout it runs from. That run does not verify the manifest's signing key, so
+confirm `/.well-known/trust-keys.json` against the manifest separately and
+record that in the deployment record. Once a release with this check is the
+previous green SHA, rollbacks use the unmodified sequence again.
 
 ### Customer operations manifest
 
@@ -738,9 +832,12 @@ owner-key columns only after this release can no longer be running.
 
 `.github/workflows/railway-deploy.yml` is a manual, **validation-only**
 `workflow_dispatch`. It checks out the selected ref, requires successful CI for
-that exact commit, verifies the current production posture, and records the
-candidate SHA and version. It never holds a Railway token or SSH key, changes a
-variable, runs `railway up`, or connects through `DATABASE_PUBLIC_URL`.
+that exact commit, verifies the current production's public posture with
+`--live --strict`, and records the candidate SHA and version. Its summary says
+so: the dogfood posture is private and is verified in-container by the
+operator release checklist, not by the workflow. It never holds a Railway
+token or SSH key, changes a variable, runs `railway up`, or connects through
+`DATABASE_PUBLIC_URL`.
 
 The workflow requires:
 
@@ -877,7 +974,9 @@ as local test evidence:
 make dogfood-trust-plane
 ```
 
-Operator checklist script (unauthenticated discovery only):
+Operator checklist script (unauthenticated `GET`s only; on a production-like
+service it expects the tool catalogs to answer `401` and skips the
+`/v1/discover` `agent_first` comparison, which needs a key):
 
 ```bash
 API_URL="$API_URL" bash scripts/human_preflight.sh

@@ -11,6 +11,10 @@ import asyncio
 import base64
 import importlib.util
 import json
+import os
+import re
+import subprocess
+import sys
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -178,6 +182,13 @@ def test_release_workflow_validates_without_production_mutation() -> None:
     summary = workflow.index("- name: Manual private release required")
     assert resolve < ci_gate < posture < clean < summary
     assert "deployment performed: **no**" in workflow
+    # A --live-only run cannot observe the dogfood posture, so the summary must
+    # not report it as checked.
+    assert (
+        "current production posture: public posture passed; dogfood posture is "
+        "private and verified in-container by the operator SOP"
+    ) in workflow
+    assert "current production posture: passed" not in workflow
     assert 'git merge-base --is-ancestor "$sha" origin/main' in workflow
     assert 'select(.event == "push"' in workflow
     assert "scripts/railway_preflight.py --live --strict" in workflow
@@ -209,7 +220,13 @@ def test_private_pilot_sop_runs_schema_check_inside_api_container() -> None:
     assert '--deployment-instance "$INSTANCE_ID"' in sop
     assert "python scripts/retire_owner_keys.py --private-db" in sop
     assert "python scripts/railway_preflight.py --db --runtime-posture --strict" in sop
-    assert "python scripts/railway_preflight.py --db --strict" not in sop
+    # Schema parity alone no longer covers the dogfood posture. The only place
+    # --db --strict may appear is the rollback form for images without
+    # --runtime-posture, and there the inline check must run before the
+    # sentinel in the same SSH call.
+    schema_only = "python scripts/railway_preflight.py --db --strict"
+    paired = f'{schema_only} && python -c "$1" && printf "PRIVATE_RELEASE_CHECKS_OK'
+    assert sop.count(schema_only) == sop.count(paired) == 1
     assert "PRIVATE_RELEASE_CHECKS_OK" in sop
     assert 'test "$sentinel_count" -eq 1' in sop
     assert 'test "$post_ready" = "true"' in sop
@@ -236,8 +253,169 @@ def test_private_pilot_sop_runs_schema_check_inside_api_container() -> None:
     post_gate = private_release.rindex(
         "python3 scripts/railway_preflight.py --live --strict"
     )
-    assert source_gate < current_gate < release_context < deploy < post_gate
+    current_private = private_release.index(
+        '--deployment-instance "$CURRENT_INSTANCE_ID"'
+    )
+    assert (
+        source_gate
+        < current_gate
+        < current_private
+        < release_context
+        < deploy
+        < post_gate
+    )
     assert "`railway run` executes locally" in sop
+    assert "a `--live`-only run does not verify the dogfood posture" in sop
+
+
+def test_verification_checklist_pairs_public_gate_with_private_posture() -> None:
+    """Step 5's --live gate is public-only; the step must say so and give the
+    in-container command that verifies the dogfood posture."""
+    checklist = (REPO_ROOT / "docs" / "deployment-verification-checklist.md").read_text()
+    step5 = checklist[
+        checklist.index("5. **Run the strict live preflight**") : checklist.index(
+            "6. **List what is still not live.**"
+        )
+    ]
+
+    assert "python3 scripts/railway_preflight.py --live --strict" in step5
+    assert "public-only" in step5
+    assert '--deployment-instance "$INSTANCE_ID"' in step5
+    assert "python scripts/railway_preflight.py --db --runtime-posture --strict" in step5
+    assert "#rolling-back-to-an-image-without---runtime-posture" in step5
+
+
+def _private_release_sop() -> str:
+    sop = (REPO_ROOT / "docs" / "deploy-railway.md").read_text()
+    return sop[
+        sop.index("### Private operator release") : sop.index(
+            "### Customer operations manifest"
+        )
+    ]
+
+
+def _documented_runtime_posture_check() -> str:
+    """The inline check the SOP defines for images without --runtime-posture."""
+    sop = (REPO_ROOT / "docs" / "deploy-railway.md").read_text()
+    definitions = re.findall(r"^RUNTIME_POSTURE_CHECK='([^']*)'$", sop, re.MULTILINE)
+    assert len(definitions) == 1
+    return definitions[0]
+
+
+def test_private_release_checks_current_instance_posture_before_deploying() -> None:
+    """The public gate cannot see the dogfood posture, so the SOP checks the
+    instance serving traffic privately before anything changes."""
+    private_release = _private_release_sop()
+
+    definition = private_release.index("RUNTIME_POSTURE_CHECK='import sys")
+    current_live = private_release.index(
+        'python3 scripts/railway_preflight.py --live --strict --url "$API_URL"'
+    )
+    current_private = private_release.index(
+        '--deployment-instance "$CURRENT_INSTANCE_ID"'
+    )
+    stop_gate = private_release.index('echo "blocked: migration 037')
+    deploy = private_release.index('railway up "$RELEASE_CONTEXT" --path-as-root')
+    assert current_live < definition < current_private < stop_gate < deploy
+
+    current_check = private_release[current_private:stop_gate]
+    assert (
+        r"""sh -c 'python -c "$1" && printf "CURRENT_RUNTIME_POSTURE_OK\\n"' """
+        r'sh "$RUNTIME_POSTURE_CHECK")"'
+    ) in current_check
+    assert "grep -c '^CURRENT_RUNTIME_POSTURE_OK$'" in current_check
+    assert 'test "$current_count" -eq 1' in current_check
+    # Exactly one running instance, or the check refuses to pick one.
+    assert 'error("expected exactly one running API instance")' in private_release
+
+
+def test_rollback_to_image_without_runtime_posture_keeps_private_posture() -> None:
+    """An older image rejects --runtime-posture (argparse exit 2). The rollback
+    form must still run the scrub, schema parity, and the inline posture check
+    before the sentinel, pinned to the new instance."""
+    sop = (REPO_ROOT / "docs" / "deploy-railway.md").read_text()
+    rollback_paragraph = sop.index(
+        "Roll back by deploying the previously green exact SHA"
+    )
+    note = sop.index("#### Rolling back to an image without `--runtime-posture`")
+    assert rollback_paragraph < note < sop.index("### Customer operations manifest")
+    rollback = sop[note : sop.index("### Customer operations manifest")]
+
+    assert "`8c95229`" in rollback
+    assert '--deployment-instance "$INSTANCE_ID"' in rollback
+    assert (
+        "sh -c 'python scripts/retire_owner_keys.py --private-db && "
+        "python scripts/railway_preflight.py --db --strict && "
+        r"""python -c "$1" && printf "PRIVATE_RELEASE_CHECKS_OK\\n"' """
+        r'sh "$RUNTIME_POSTURE_CHECK")"'
+    ) in rollback
+    # The SOP's post-deploy command points to the rollback form.
+    assert (
+        'use the form in "Rolling back to an image without\n# --runtime-posture"'
+        in _private_release_sop()
+    )
+
+
+def _run_documented_runtime_posture_check(tmp_path, **environment):
+    # A minimal environment, so nothing from the test runner leaks in, run
+    # from an empty directory the way the image has no .env file.
+    env = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(REPO_ROOT)}
+    env.update(environment)
+    return subprocess.run(
+        [sys.executable, "-c", _documented_runtime_posture_check()],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+
+
+def test_documented_runtime_posture_check_passes_in_production(tmp_path) -> None:
+    result = _run_documented_runtime_posture_check(
+        tmp_path,
+        ENVIRONMENT="production",
+        ENABLE_DOGFOOD_TOOL="false",
+        ENABLE_DOGFOOD_SECOND_TOOL="false",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "[preflight] PASS runtime posture\n"
+
+
+@pytest.mark.parametrize(
+    "environment",
+    [
+        {"ENVIRONMENT": "production", "ENABLE_DOGFOOD_TOOL": "true"},
+        {"ENVIRONMENT": "production", "ENABLE_DOGFOOD_SECOND_TOOL": "true"},
+        {"ENVIRONMENT": "local"},
+        {},
+    ],
+    ids=["dogfood_tool", "dogfood_second_tool", "local", "environment_unset"],
+)
+def test_documented_runtime_posture_check_fails_closed(tmp_path, environment) -> None:
+    result = _run_documented_runtime_posture_check(tmp_path, **environment)
+
+    assert result.returncode == 1
+    assert result.stdout == "[preflight] FAIL runtime posture\n"
+
+
+def test_documented_runtime_posture_check_never_echoes_config_values(tmp_path) -> None:
+    """A traceback would print the malformed value; one that carries a
+    sentinel line must not reach the output as that line (or at all)."""
+    malformed = "runtime-secret\nPRIVATE_RELEASE_CHECKS_OK"
+    result = _run_documented_runtime_posture_check(
+        tmp_path,
+        ENVIRONMENT="production",
+        ENABLE_DOGFOOD_TOOL=malformed,
+    )
+
+    assert result.returncode == 1
+    assert result.stdout == "[preflight] FAIL runtime posture: ValidationError\n"
+    assert result.stderr == ""
+    assert "runtime-secret" not in result.stdout + result.stderr
+    assert "PRIVATE_RELEASE_CHECKS_OK" not in result.stdout + result.stderr
 
 
 def test_canonical_railway_sop_uses_immutable_release_context() -> None:
@@ -1091,6 +1269,100 @@ def test_live_fails_closed_when_catalog_is_unreachable(
     assert "could not be checked" in capsys.readouterr().out
 
 
+class _NonJSONResponse(_Response):
+    def json(self):
+        raise ValueError("response body is not JSON")
+
+
+def test_catalog_refusal_body_matches_the_application_code(monkeypatch):
+    """The body the gate requires is the one #444's code actually returns."""
+    from fastapi import HTTPException
+    from starlette.requests import Request
+
+    from app.core import auth, config
+
+    production = config.Settings(_env_file=None, ENVIRONMENT="production")
+    monkeypatch.setattr(auth, "get_settings", lambda: production)
+    anonymous = Request(
+        {"type": "http", "method": "GET", "path": "/v1/discover", "headers": []}
+    )
+
+    with pytest.raises(HTTPException) as refused:
+        asyncio.run(auth.reject_anonymous_production_catalog(anonymous))
+
+    assert refused.value.status_code == 401
+    body = {"detail": refused.value.detail}
+    assert body == _MISSING_CREDENTIALS
+    assert preflight._is_catalog_refusal(_Response(body, status_code=401))
+
+
+@pytest.mark.parametrize("catalog_path", preflight._LOCKED_CATALOG_PATHS)
+@pytest.mark.parametrize(
+    "response",
+    [
+        _NonJSONResponse(None, status_code=401),
+        _Response({"detail": "Not authenticated"}, status_code=401),
+        _Response({"detail": {"error": "invalid_credentials"}}, status_code=401),
+        _Response({"error": "missing_credentials"}, status_code=401),
+        _Response({"detail": {"message": "Unauthorized"}}, status_code=401),
+        _Response(["missing_credentials"], status_code=401),
+    ],
+    ids=[
+        "non_json",
+        "string_detail",
+        "other_error_code",
+        "no_detail_wrapper",
+        "no_error_code",
+        "not_an_object",
+    ],
+)
+def test_live_fails_closed_when_catalog_401_is_not_the_application_refusal(
+    monkeypatch,
+    capsys,
+    catalog_path,
+    response,
+):
+    """An edge, proxy, or platform 401 in front of a public catalog must not
+    satisfy the gate: only #444's own missing_credentials refusal does."""
+    _patch_get_with_catalog(monkeypatch, PUBLIC_PROJECTION, catalog_path, response)
+
+    assert preflight.check_live("https://api.example.com") is False
+    output = capsys.readouterr().out
+    assert f"{catalog_path} answered 401 without the application's" in output
+    assert "[preflight] PASS" not in output
+
+
+@pytest.mark.parametrize(
+    "value",
+    [True, None, "false", 0],
+    ids=["true", "null", "string_false", "zero"],
+)
+@pytest.mark.parametrize(
+    "dependencies_payload",
+    [HEALTHY, PUBLIC_PROJECTION],
+    ids=["published_dogfood_false", "public_projection"],
+)
+def test_live_fails_when_published_second_dogfood_flag_is_not_false(
+    monkeypatch,
+    capsys,
+    dependencies_payload,
+    value,
+):
+    _patch_get(
+        monkeypatch,
+        {**dependencies_payload, "enable_dogfood_second_tool": value},
+    )
+
+    assert preflight.check_live("https://api.example.com") is False
+    assert "enable_dogfood_second_tool=" in capsys.readouterr().out
+
+
+def test_live_passes_when_published_second_dogfood_flag_is_false(monkeypatch):
+    _patch_get(monkeypatch, {**HEALTHY, "enable_dogfood_second_tool": False})
+
+    assert preflight.check_live("https://api.example.com") is True
+
+
 def test_live_fails_when_production_posture_is_missing(monkeypatch):
     payload = {key: value for key, value in HEALTHY.items() if key != "production_like"}
     _patch_get(monkeypatch, payload)
@@ -1236,22 +1508,31 @@ def test_live_fails_when_dogfood_flag_published_as_null(monkeypatch):
 
 
 @pytest.fixture
-def runtime_settings(monkeypatch):
-    """Resolve settings from this test's environment only (no .env file)."""
-    from app.core import config
+def runtime_settings(monkeypatch, tmp_path):
+    """A deployed Railway container's variables, from this test only.
+
+    Every Railway marker is cleared first and the check runs from an empty
+    working directory. A value of None unsets that variable.
+    """
+    from app.core.trust_mode import HOSTED_RUNTIME_MARKER_VARS
+
+    monkeypatch.chdir(tmp_path)
+    for marker in HOSTED_RUNTIME_MARKER_VARS:
+        monkeypatch.delenv(marker, raising=False)
 
     def configure(**environment):
         values = {
+            "RAILWAY_SERVICE_ID": "0f0e0d0c-api-service",
             "ENVIRONMENT": "production",
             "ENABLE_DOGFOOD_TOOL": "false",
             "ENABLE_DOGFOOD_SECOND_TOOL": "false",
             **environment,
         }
         for name, value in values.items():
-            monkeypatch.setenv(name, value)
-        monkeypatch.setattr(
-            config, "get_settings", lambda: config.Settings(_env_file=None)
-        )
+            if value is None:
+                monkeypatch.delenv(name, raising=False)
+            else:
+                monkeypatch.setenv(name, value)
 
     return configure
 
@@ -1304,22 +1585,80 @@ def test_runtime_posture_fails_closed_outside_production_runtime(
     assert "ENVIRONMENT is not production-like" in capsys.readouterr().out
 
 
-def test_runtime_posture_fails_closed_without_rendering_config_errors(
-    monkeypatch,
+@pytest.mark.parametrize("environment", ["production", "banana"])
+@pytest.mark.parametrize(
+    "marker_value",
+    [None, "", "   "],
+    ids=["unset", "empty", "blank"],
+)
+def test_runtime_posture_fails_closed_without_railway_runtime_marker(
+    runtime_settings,
     capsys,
+    environment,
+    marker_value,
 ):
-    from app.core import config
-
-    secret = "postgresql://user:runtime-secret@postgres.railway.internal/db"
-
-    def unresolvable():
-        raise ValueError(f"invalid DATABASE_URL {secret}")
-
-    monkeypatch.setattr(config, "get_settings", unresolvable)
+    """A production-like ENVIRONMENT alone (any unrecognized value counts)
+    proves nothing about the deployed service."""
+    runtime_settings(ENVIRONMENT=environment, RAILWAY_SERVICE_ID=marker_value)
 
     assert preflight.check_runtime_posture() is False
     output = capsys.readouterr().out
-    assert "unable to resolve the runtime configuration (ValueError)" in output
+    assert "no Railway runtime marker" in output
+    assert "[preflight] PASS" not in output
+
+
+def _hosted_runtime_marker_vars():
+    from app.core.trust_mode import HOSTED_RUNTIME_MARKER_VARS
+
+    return HOSTED_RUNTIME_MARKER_VARS
+
+
+@pytest.mark.parametrize("marker", _hosted_runtime_marker_vars())
+def test_runtime_posture_accepts_each_railway_runtime_marker(runtime_settings, marker):
+    runtime_settings(**{"RAILWAY_SERVICE_ID": None, marker: "railway-value"})
+
+    assert preflight.check_runtime_posture() is True
+
+
+def test_runtime_posture_ignores_dotenv_in_working_directory(
+    runtime_settings,
+    tmp_path,
+    capsys,
+):
+    """A scratch .env must not be able to vouch for production."""
+    (tmp_path / ".env").write_text(
+        "ENVIRONMENT=production\n"
+        "ENABLE_DOGFOOD_TOOL=false\n"
+        "ENABLE_DOGFOOD_SECOND_TOOL=false\n"
+    )
+    runtime_settings(ENVIRONMENT=None)
+
+    assert preflight.check_runtime_posture() is False
+    assert "ENVIRONMENT is not production-like" in capsys.readouterr().out
+
+
+def test_runtime_image_never_contains_a_dotenv_file():
+    """Ignoring .env equals what the service resolves only because the image
+    build context never includes one."""
+    patterns = {
+        line.strip()
+        for line in (REPO_ROOT / ".dockerignore").read_text().splitlines()
+    }
+
+    assert {".env", ".env.*"} <= patterns
+
+
+def test_runtime_posture_fails_closed_without_rendering_config_errors(
+    runtime_settings,
+    capsys,
+):
+    """A malformed value fails validation; its message would echo the value."""
+    secret = "postgresql://user:runtime-secret@postgres.railway.internal/db"
+    runtime_settings(ENABLE_DOGFOOD_TOOL=secret)
+
+    assert preflight.check_runtime_posture() is False
+    output = capsys.readouterr().out
+    assert "unable to resolve the runtime configuration (ValidationError)" in output
     assert "runtime-secret" not in output
 
 
@@ -1368,6 +1707,121 @@ def test_cli_default_run_never_includes_runtime_posture(monkeypatch):
     )
 
     assert preflight.main(["--url", ""]) == 0
+
+
+@pytest.mark.parametrize(
+    "selectors",
+    [[], ["--db"], ["--live"], ["--runtime-posture"], ["--live", "--runtime-posture"]],
+    ids=["alone", "db", "live", "runtime_posture", "live_and_runtime_posture"],
+)
+def test_cli_public_db_fails_closed_whatever_else_is_selected(
+    monkeypatch,
+    capsys,
+    selectors,
+):
+    """--public-db must never be switched off by another selector: with no
+    DATABASE_PUBLIC_URL the run fails, as `--public-db --strict` always has."""
+    private_secret = "postgresql://user:private-secret@postgres.railway.internal/db"
+    monkeypatch.setenv("DATABASE_URL", private_secret)
+    monkeypatch.delenv("DATABASE_PUBLIC_URL", raising=False)
+    monkeypatch.setattr(preflight, "check_runtime_posture", lambda: True)
+    monkeypatch.setattr(preflight, "check_live", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        preflight,
+        "check_db",
+        lambda *_args, **_kwargs: pytest.fail("no public URL, nothing to probe"),
+    )
+
+    arguments = ["--public-db", *selectors, "--strict"]
+    arguments += ["--url", "https://api.example.com"]
+    assert preflight.main(arguments) == 1
+    output = capsys.readouterr().out
+    assert "DATABASE_PUBLIC_URL is required" in output
+    assert "all checks passed" not in output
+    assert "private-secret" not in output
+
+
+@pytest.mark.parametrize(
+    "selectors",
+    [["--runtime-posture"], ["--live"]],
+    ids=["runtime_posture", "live"],
+)
+def test_cli_public_db_checks_the_public_url_alongside_other_checks(
+    monkeypatch,
+    selectors,
+):
+    public_url = "postgresql://user:public-secret@switchback.proxy.rlwy.net:5432/db"
+    seen = []
+    monkeypatch.setenv("DATABASE_PUBLIC_URL", public_url)
+    monkeypatch.setattr(preflight, "check_db", lambda url: seen.append(url) is None)
+    monkeypatch.setattr(preflight, "check_runtime_posture", lambda: True)
+    monkeypatch.setattr(preflight, "check_live", lambda *_args, **_kwargs: True)
+
+    arguments = ["--public-db", *selectors, "--strict"]
+    arguments += ["--url", "https://api.example.com"]
+    assert preflight.main(arguments) == 0
+    assert seen == [public_url]
+
+
+@pytest.mark.parametrize(
+    "live_only_option",
+    [
+        ["--expected-version", "1.3.0"],
+        ["--expected-commit-sha", EXPECTED_COMMIT_SHA],
+        ["--manifest", "MANIFEST"],
+    ],
+    ids=["expected_version", "expected_commit_sha", "manifest"],
+)
+@pytest.mark.parametrize(
+    "selectors",
+    [["--runtime-posture"], ["--db", "--runtime-posture"]],
+    ids=["runtime_posture", "db_and_runtime_posture"],
+)
+def test_cli_runtime_posture_rejects_live_only_options_without_live(
+    tmp_path,
+    monkeypatch,
+    capsys,
+    live_only_option,
+    selectors,
+):
+    """Without --live these would be dropped silently while the run looked
+    like it had checked the release identity."""
+    manifest = _write_manifest(tmp_path, _manifest_document())
+    option = [str(manifest) if arg == "MANIFEST" else arg for arg in live_only_option]
+    for check in ("check_runtime_posture", "check_db", "check_live"):
+        monkeypatch.setattr(
+            preflight,
+            check,
+            lambda *_args, **_kwargs: pytest.fail("a usage error runs no check"),
+        )
+
+    assert preflight.main([*selectors, "--strict", *option]) == 1
+    assert "apply only to --live" in capsys.readouterr().out
+
+
+def test_cli_runtime_posture_with_live_keeps_release_expectations(monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        preflight,
+        "check_runtime_posture",
+        lambda: seen.append("runtime") is None,
+    )
+
+    def check_live(url, *, expected_version=None, expected_commit_sha=None):
+        seen.append((url, expected_version, expected_commit_sha))
+        return True
+
+    monkeypatch.setattr(preflight, "check_live", check_live)
+
+    arguments = ["--live", "--runtime-posture", "--strict"]
+    arguments += ["--url", "https://api.example.com"]
+    arguments += ["--expected-version", "1.3.0"]
+    arguments += ["--expected-commit-sha", EXPECTED_COMMIT_SHA]
+    assert preflight.main(arguments) == 0
+    assert seen == [
+        "runtime",
+        ("https://api.example.com", "1.3.0", EXPECTED_COMMIT_SHA),
+    ]
 
 
 # ---------------------------------------------------------------------------
