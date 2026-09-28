@@ -331,6 +331,21 @@ def validate_railway_source_unbound(
     )
 
 
+def _strict_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    """Build one JSON object while rejecting ambiguous duplicate keys."""
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON object key")
+        result[key] = value
+    return result
+
+
+def _reject_json_constant(_value: str) -> object:
+    """Reject Python JSON's non-standard NaN and infinity constants."""
+    raise ValueError("non-standard JSON constant")
+
+
 def check_railway_source_unbound(
     *, project_id: str, environment: str, service: str
 ) -> bool:
@@ -354,7 +369,7 @@ def check_railway_source_unbound(
             timeout=15,
             check=False,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except (OSError, subprocess.TimeoutExpired, UnicodeError):
         print(f"{BAD} Railway service source could not be verified")
         return False
 
@@ -362,8 +377,12 @@ def check_railway_source_unbound(
         print(f"{BAD} Railway service source could not be verified")
         return False
     try:
-        document = json.loads(result.stdout)
-    except (TypeError, json.JSONDecodeError):
+        document = json.loads(
+            result.stdout,
+            object_pairs_hook=_strict_json_object,
+            parse_constant=_reject_json_constant,
+        )
+    except (TypeError, ValueError):
         print(f"{BAD} Railway service source could not be verified")
         return False
     if not validate_railway_source_unbound(
