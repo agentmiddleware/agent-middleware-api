@@ -187,6 +187,7 @@ async def test_parallel_identical_new_keys_enforce_mode_one_dispatch(monkeypatch
             assert executor.dispatch_count == 1
             
             # Verify database state: 1 debit, N receipts (1 success + N-1 denials)
+            factory = get_session_factory()
             async with factory() as session:
                 debits = (
                     await session.execute(
