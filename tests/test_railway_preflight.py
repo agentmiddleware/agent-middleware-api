@@ -730,6 +730,39 @@ def test_railway_source_selector_rejects_live_only_options_without_live(
     assert "apply only to --live" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize(
+    ("target_flag", "wrong_value"),
+    [
+        ("--railway-project", "22222222-2222-4222-8222-222222222222"),
+        ("--railway-environment", "staging"),
+    ],
+    ids=["project", "environment"],
+)
+def test_manifest_binds_railway_source_target_before_any_check(
+    tmp_path,
+    monkeypatch,
+    capsys,
+    target_flag,
+    wrong_value,
+):
+    manifest = _write_manifest(tmp_path, _manifest_document())
+    arguments = [*_RAILWAY_SOURCE_ARGUMENTS, "--live", "--manifest", str(manifest)]
+    arguments[arguments.index(target_flag) + 1] = wrong_value
+    for check in ("check_railway_source_unbound", "check_live"):
+        monkeypatch.setattr(
+            preflight,
+            check,
+            lambda *_args, **_kwargs: pytest.fail(
+                "a mismatched manifest target must run no check"
+            ),
+        )
+
+    assert preflight.main(arguments) == 1
+    assert "Railway source target does not match the customer manifest" in (
+        capsys.readouterr().out
+    )
+
+
 def test_release_workflow_validates_without_production_mutation() -> None:
     workflow = (REPO_ROOT / ".github" / "workflows" / "railway-deploy.yml").read_text()
 
