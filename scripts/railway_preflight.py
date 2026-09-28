@@ -24,7 +24,9 @@ Explicit ``--public-db`` mode is an exception and fails closed when absent:
     dependency listed unhealthy. ``--expected-version`` and
     ``--expected-commit-sha`` add exact release-identity checks against both
     ``/health`` and ``/health/dependencies`` for the post-deploy gate; the
-    commit expectation must be a full 40-character SHA.
+    commit expectation must be a full 40-character SHA. If public health omits
+    the dogfood flag, ``BOOTSTRAP_KEY`` supplies the operator credential for an
+    authenticated discovery check; it is never accepted as a CLI argument.
 
 ``--manifest`` (optional non-secret JSON)
     Bind the checks to one managed single-tenant deployment. The manifest
@@ -611,62 +613,73 @@ def check_live(
         # The public /health/dependencies projection stopped publishing the
         # dogfood flag when proof surfaces are unmounted (the flag described
         # nothing a caller could reach — see build_public_dependency_report).
-        # Verify the observable posture instead: the dogfood tools must not
-        # be registered in public discovery.
-        try:
-            discover_resp = httpx.get(f"{base}/v1/discover", timeout=30)
-            discover_resp.raise_for_status()
-            discover_body = discover_resp.json()
-        except Exception as exc:
+        # Verify the operator-visible posture instead: the dogfood tools must
+        # not be registered in authenticated production discovery.
+        bootstrap_key = os.getenv("BOOTSTRAP_KEY", "").strip()
+        if not bootstrap_key:
             failures.append(
                 "enable_dogfood_tool is absent from /health/dependencies and "
-                f"/v1/discover could not be checked instead: {exc}"
+                "BOOTSTRAP_KEY is required for authenticated /v1/discover"
             )
         else:
-            tools = (
-                discover_body.get("mcp_tools")
-                if isinstance(discover_body, dict)
-                else None
-            )
-            if not isinstance(tools, list) or not all(
-                isinstance(tool, dict) for tool in tools
-            ):
-                # Fail closed on an unrecognized shape: treating it as "no
-                # tools" would let a renamed field or an error page silently
-                # pass the release gate.
+            try:
+                discover_resp = httpx.get(
+                    f"{base}/v1/discover",
+                    headers={"X-API-Key": bootstrap_key},
+                    timeout=30,
+                )
+                discover_resp.raise_for_status()
+                discover_body = discover_resp.json()
+            except Exception:
                 failures.append(
                     "enable_dogfood_tool is absent from /health/dependencies "
-                    "and /v1/discover returned an unrecognized shape (no "
-                    "mcp_tools list) — cannot verify dogfood posture"
+                    "and authenticated /v1/discover could not be checked"
                 )
             else:
-                # Check service_id and name independently: a benign
-                # service_id must not mask a dogfood name (or vice versa).
-                # Non-string identifiers are an unrecognized shape, not a
-                # clean catalog.
-                leaked_ids: set[str] = set()
-                malformed_identifier = False
-                for tool in tools:
-                    for field in ("service_id", "name"):
-                        value = tool.get(field)
-                        if value is None:
-                            continue
-                        if not isinstance(value, str):
-                            malformed_identifier = True
-                            continue
-                        if value in _DOGFOOD_TOOL_IDS:
-                            leaked_ids.add(value)
-                if malformed_identifier:
+                tools = (
+                    discover_body.get("mcp_tools")
+                    if isinstance(discover_body, dict)
+                    else None
+                )
+                if not isinstance(tools, list) or not all(
+                    isinstance(tool, dict) for tool in tools
+                ):
+                    # Fail closed on an unrecognized shape: treating it as "no
+                    # tools" would let a renamed field or an error page silently
+                    # pass the release gate.
                     failures.append(
-                        "/v1/discover tool identifiers must be strings — "
-                        "cannot verify dogfood posture"
+                        "enable_dogfood_tool is absent from /health/dependencies "
+                        "and /v1/discover returned an unrecognized shape (no "
+                        "mcp_tools list) — cannot verify dogfood posture"
                     )
-                if leaked_ids:
-                    failures.append(
-                        "dogfood tools exposed in public discovery: "
-                        f"{sorted(leaked_ids)} — ENABLE_DOGFOOD_TOOL must be "
-                        "false in production"
-                    )
+                else:
+                    # Check service_id and name independently: a benign
+                    # service_id must not mask a dogfood name (or vice versa).
+                    # Non-string identifiers are an unrecognized shape, not a
+                    # clean catalog.
+                    leaked_ids: set[str] = set()
+                    malformed_identifier = False
+                    for tool in tools:
+                        for field in ("service_id", "name"):
+                            value = tool.get(field)
+                            if value is None:
+                                continue
+                            if not isinstance(value, str):
+                                malformed_identifier = True
+                                continue
+                            if value in _DOGFOOD_TOOL_IDS:
+                                leaked_ids.add(value)
+                    if malformed_identifier:
+                        failures.append(
+                            "/v1/discover tool identifiers must be strings — "
+                            "cannot verify dogfood posture"
+                        )
+                    if leaked_ids:
+                        failures.append(
+                            "dogfood tools exposed in authenticated discovery: "
+                            f"{sorted(leaked_ids)} — ENABLE_DOGFOOD_TOOL must be "
+                            "false in production"
+                        )
     elif body["enable_dogfood_tool"] is not False:
         dogfood = body["enable_dogfood_tool"]
         failures.append(
