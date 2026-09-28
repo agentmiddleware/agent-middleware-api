@@ -111,12 +111,6 @@ async def test_parallel_identical_new_keys_enforce_mode_one_dispatch(monkeypatch
     settings = get_settings()
     monkeypatch.setattr(settings, "MCP_UPSTREAM_DUPLICATE_GUARD", DuplicateGuardMode.ENFORCE)
     
-    # Clean database
-    factory = get_session_factory()
-    async with factory() as session:
-        await session.execute(select(ReceiptModel).limit(1))
-        await session.commit()
-    
     # Provision agent
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -251,12 +245,6 @@ async def test_duplicate_guard_respects_permit_window_override(monkeypatch):
     # Set a very long global window
     monkeypatch.setattr(settings, "MCP_UPSTREAM_DUPLICATE_WINDOW_SECONDS", 86400)
     
-    # Clean database
-    factory = get_session_factory()
-    async with factory() as session:
-        await session.execute(select(ReceiptModel).limit(1))
-        await session.commit()
-    
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://test",
@@ -355,12 +343,6 @@ async def test_duplicate_guard_off_mode_allows_duplicates(monkeypatch):
     from app.core.config import get_settings
     settings = get_settings()
     monkeypatch.setattr(settings, "MCP_UPSTREAM_DUPLICATE_GUARD", DuplicateGuardMode.OFF)
-    
-    # Clean database
-    factory = get_session_factory()
-    async with factory() as session:
-        await session.execute(select(ReceiptModel).limit(1))
-        await session.commit()
     
     async with AsyncClient(
         transport=ASGITransport(app=app),
