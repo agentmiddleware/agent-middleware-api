@@ -28,6 +28,7 @@ Run against production (once CI_SMOKE_AGENT_KEY is set in CI)::
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -233,7 +234,7 @@ def _post_json(
     resp = client.post(path, json=body)
     require(
         resp.status_code == expected_status,
-        f"POST {path} → {resp.status_code}: {resp.text[:500]}",
+        f"POST {path} returned unexpected status {resp.status_code}",
     )
     data = resp.json()
     require(isinstance(data, dict), f"POST {path} returned non-object JSON")
@@ -250,7 +251,7 @@ def _get_json(
     resp = client.get(path)
     require(
         resp.status_code == expected_status,
-        f"GET {path} → {resp.status_code}: {resp.text[:500]}",
+        f"GET {path} returned unexpected status {resp.status_code}",
     )
     data = resp.json()
     require(isinstance(data, dict), f"GET {path} returned non-object JSON")
@@ -285,14 +286,83 @@ def _build_mcp_call(
 
 def _first_jsonrpc_result(response: dict[str, Any]) -> dict[str, Any]:
     """Extract result from JSON-RPC response, failing if error is present."""
-    require("result" in response, f"expected JSON-RPC result, got: {response}")
+    require("result" in response, "expected JSON-RPC result")
     return response["result"]
 
 
 def _first_jsonrpc_error(response: dict[str, Any]) -> dict[str, Any]:
     """Extract error from JSON-RPC response, failing if result is present."""
-    require("error" in response, f"expected JSON-RPC error, got: {response}")
+    require("error" in response, "expected JSON-RPC error")
     return response["error"]
+
+
+def retry_proof_payload_sha256(arguments: dict[str, Any]) -> str:
+    """Return a deterministic digest without retaining the approved payload."""
+    try:
+        canonical = json.dumps(
+            arguments,
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise ConfigurationError(
+            "retry proof payload must be canonical JSON"
+        ) from exc
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def validate_retry_proof_confirmation(
+    *,
+    api_url: str,
+    tool: str,
+    tool_arguments: dict[str, Any],
+    evidence_output: str | Path,
+    confirmed_target: str | None,
+    confirmed_tool: str | None,
+    confirmed_payload_sha256: str | None,
+) -> Path:
+    """Require exact operator confirmation before the retry proof can run."""
+    parsed = urlparse(api_url)
+    if (
+        parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in {"", "/"}
+    ):
+        raise ConfigurationError(
+            "retry proof target must be a credential-free canonical API origin"
+        )
+
+    expected_digest = retry_proof_payload_sha256(tool_arguments)
+    if confirmed_target != api_url:
+        raise ConfigurationError("retry proof target confirmation does not match")
+    if confirmed_tool != tool:
+        raise ConfigurationError("retry proof tool confirmation does not match")
+    if confirmed_payload_sha256 != expected_digest:
+        raise ConfigurationError("retry proof payload confirmation does not match")
+
+    output = Path(evidence_output)
+    if output.suffix.lower() != ".json":
+        raise ConfigurationError("retry evidence output must be a .json file")
+    if output.exists() or output.is_symlink():
+        raise ConfigurationError("retry evidence output already exists")
+    if not output.parent.is_dir():
+        raise ConfigurationError("retry evidence output directory does not exist")
+    return output
+
+
+def _write_retry_evidence(path: Path, document: dict[str, Any]) -> None:
+    """Create one private evidence file without replacing prior evidence."""
+    serialized = json.dumps(document, indent=2, sort_keys=True) + "\n"
+    try:
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(serialized)
+    except OSError as exc:
+        raise SmokeTestFailure("retry evidence file could not be written") from exc
 
 
 def run_constant_test(
@@ -304,6 +374,7 @@ def run_constant_test(
     pinned_tool: str | None = None,
     pinned_other_tool: str | None = None,
     tool_arguments: dict | None = None,
+    retry_evidence_output: Path | None = None,
 ) -> None:
     """Execute the constant test loop and assert all invariants."""
     print(f"[constant-test] target: {api_url}", file=sys.stderr)
@@ -413,25 +484,41 @@ def run_constant_test(
             **headers,
             "Idempotency-Key": f"constant-test-permit-{run_id}",
         }
+        permit_body: dict[str, Any] = {
+            "issuer_wallet_id": wallet_id,
+            "subject_wallet_id": wallet_id,
+            "subject_key_id": key_id,
+            "allowed_tools": [governed_tool],
+            "scopes": [f"tool:{governed_tool}:invoke", "billing:charge"],
+            "max_credits": max_credits,
+            "expires_at": expires_at,
+        }
+        if retry_evidence_output is not None:
+            # Bypass cross-key duplicate detection so the fresh-key request
+            # reaches the cap check even when duplicate enforcement is on.
+            # The one-call cap still prevents a second dispatch.
+            permit_body["max_calls_per_tool"] = {governed_tool: 1}
+            permit_body["allow_identical_repeats"] = True
         resp = client.post(
             "/v1/permits",
-            json={
-                "issuer_wallet_id": wallet_id,
-                "subject_wallet_id": wallet_id,
-                "subject_key_id": key_id,
-                "allowed_tools": [governed_tool],
-                "scopes": [f"tool:{governed_tool}:invoke", "billing:charge"],
-                "max_credits": max_credits,
-                "expires_at": expires_at,
-            },
+            json=permit_body,
             headers=permit_headers,
         )
         require(
             resp.status_code == 201,
-            f"POST /v1/permits → {resp.status_code}: {resp.text[:500]}",
+            f"POST /v1/permits returned unexpected status {resp.status_code}",
         )
         permit = resp.json()
         permit_id = permit["permit_id"]
+        if retry_evidence_output is not None:
+            require(
+                permit.get("max_calls_per_tool") == {governed_tool: 1},
+                "retry proof permit did not retain max_calls_per_tool=1",
+            )
+            require(
+                permit.get("allow_identical_repeats") is True,
+                "retry proof permit did not retain allow_identical_repeats=true",
+            )
         print(f"[constant-test] permit_id={permit_id}", file=sys.stderr)
         
         # Track initial spent_credits (should be 0 for new permit)
@@ -457,7 +544,7 @@ def run_constant_test(
             client, "/mcp/messages", call_body, expected_status=200
         )
         result = _first_jsonrpc_result(first_call)
-        require(result["isError"] is False, f"tool call failed: {result}")
+        require(result["isError"] is False, "tool call failed")
         receipt = result["receipt"]
         require(receipt["outcome"] == "success", "receipt outcome != success")
         require(
@@ -468,6 +555,11 @@ def run_constant_test(
             receipt["permit_id"] == permit_id,
             f"receipt permit_id {receipt.get('permit_id')} != used permit {permit_id}",
         )
+        if retry_evidence_output is not None:
+            require(
+                receipt.get("dispatch_attempt_id") is not None,
+                "retry proof success receipt has no dispatch attempt",
+            )
         charged = Decimal(str(receipt["credits_charged"]))
         require(charged > 0, f"success charged {charged} credits (expected > 0)")
         print(
@@ -486,12 +578,57 @@ def run_constant_test(
         )
         require(
             verify_resp.get("valid") is True,
-            f"receipt signature invalid: {verify_resp.get('reason')}",
+            "receipt signature is invalid",
         )
         print(
             "[constant-test] signature OK: receipt signature verified",
             file=sys.stderr,
         )
+
+        dispatch_evidence_valid = False
+        if retry_evidence_output is not None:
+            dispatch_evidence = _get_json(
+                client,
+                f"/v1/receipts/{receipt['receipt_id']}/evidence",
+                expected_status=200,
+            )
+            require(
+                dispatch_evidence.get("valid") is True,
+                "retry proof dispatch evidence is invalid",
+            )
+            checks = dispatch_evidence.get("checks")
+            require(
+                isinstance(checks, list)
+                and any(
+                    isinstance(check, dict)
+                    and check.get("name") == "dispatch_linkage"
+                    and check.get("status") == "passed"
+                    for check in checks
+                ),
+                "retry proof dispatch linkage check did not pass",
+            )
+            dispatch = dispatch_evidence.get("dispatch")
+            require(
+                isinstance(dispatch, dict),
+                "retry proof dispatch evidence is missing",
+            )
+            require(
+                dispatch.get("attempt_id") == receipt["dispatch_attempt_id"],
+                "retry proof dispatch attempt does not match the receipt",
+            )
+            require(
+                dispatch.get("state") == "succeeded",
+                "retry proof dispatch did not succeed",
+            )
+            require(
+                dispatch.get("ledger_entry_id") == receipt["ledger_entry_id"],
+                "retry proof dispatch ledger link does not match the receipt",
+            )
+            require(
+                dispatch.get("dispatched_at") is not None,
+                "retry proof dispatch evidence has no dispatch timestamp",
+            )
+            dispatch_evidence_valid = True
 
         # Verify permit spent_credits increased
         print("[constant-test] verifying permit spent_credits", file=sys.stderr)
@@ -537,6 +674,16 @@ def run_constant_test(
             replay_receipt["receipt_id"] == receipt["receipt_id"],
             "replay returned different receipt_id",
         )
+        if retry_evidence_output is not None:
+            require(
+                replay_receipt == receipt,
+                "replay returned a changed receipt",
+            )
+            require(
+                replay_receipt.get("dispatch_attempt_id")
+                == receipt["dispatch_attempt_id"],
+                "replay returned a different dispatch attempt",
+            )
         ledger_after_replay = _get_json(
             client, f"/v1/billing/ledger/{wallet_id}", expected_status=200
         )
@@ -551,10 +698,133 @@ def run_constant_test(
             debits_after_replay == debits_before_replay,
             "replay created a second debit",
         )
+        replay_spend_delta = Decimal("0")
+        if retry_evidence_output is not None:
+            permit_after_replay = _get_json(
+                client, f"/v1/permits/{permit_id}", expected_status=200
+            )
+            replay_spend_delta = (
+                Decimal(str(permit_after_replay["spent_credits"])) - spent_after
+            )
+            require(
+                replay_spend_delta == Decimal("0"),
+                "replay changed permit spend",
+            )
         print(
             "[constant-test] replay OK: same receipt_id, no second debit",
             file=sys.stderr,
         )
+
+        cap_denial_error: dict[str, Any] | None = None
+        cap_denial_receipt: dict[str, Any] | None = None
+        cap_denial_spend_delta = Decimal("0")
+        debits_after_cap_denial = debits_after_replay
+        if retry_evidence_output is not None:
+            print(
+                "[constant-test] proving fresh-key one-call cap denial",
+                file=sys.stderr,
+            )
+            fresh_key_body = _build_mcp_call(
+                request_id=f"constant-test-cap-{run_id}",
+                tool=governed_tool,
+                wallet_id=wallet_id,
+                permit_id=permit_id,
+                idempotency_key=f"constant-test-cap-{run_id}",
+                arguments=governed_arguments,
+            )
+            cap_denial_call = _post_json(
+                client, "/mcp/messages", fresh_key_body, expected_status=200
+            )
+            cap_denial_error = _first_jsonrpc_error(cap_denial_call)
+            require(
+                cap_denial_error.get("code") == -32003,
+                "fresh-key denial returned the wrong JSON-RPC code",
+            )
+            require(
+                cap_denial_error.get("message") == "permit_max_calls_exceeded",
+                "fresh-key request was not denied by the permit call cap",
+            )
+            denial_data = cap_denial_error.get("data")
+            require(
+                isinstance(denial_data, dict),
+                "fresh-key denial is missing structured data",
+            )
+            details = denial_data.get("details")
+            require(
+                details
+                == {"tool": governed_tool, "limit": 1, "calls_made": 1},
+                "fresh-key denial details do not prove the one-call cap",
+            )
+            cap_denial_receipt = denial_data.get("receipt")
+            require(
+                isinstance(cap_denial_receipt, dict),
+                "fresh-key denial is missing a receipt",
+            )
+            require(
+                cap_denial_receipt.get("outcome") == "denied",
+                "fresh-key denial receipt outcome is not denied",
+            )
+            require(
+                cap_denial_receipt.get("reason_code")
+                == "permit_max_calls_exceeded",
+                "fresh-key denial receipt has the wrong reason",
+            )
+            require(
+                cap_denial_receipt.get("permit_id") == permit_id,
+                "fresh-key denial receipt has the wrong permit",
+            )
+            require(
+                Decimal(str(cap_denial_receipt.get("credits_charged")))
+                == Decimal("0"),
+                "fresh-key denial charged credits",
+            )
+            require(
+                cap_denial_receipt.get("ledger_entry_id") is None,
+                "fresh-key denial created a ledger link",
+            )
+            require(
+                cap_denial_receipt.get("dispatch_attempt_id") is None,
+                "fresh-key denial created a dispatch link",
+            )
+            cap_denial_verify = _post_json(
+                client,
+                "/v1/receipts/verify",
+                {"receipt_id": cap_denial_receipt["receipt_id"]},
+                expected_status=200,
+            )
+            require(
+                cap_denial_verify.get("valid") is True,
+                "fresh-key denial receipt signature is invalid",
+            )
+            permit_after_cap_denial = _get_json(
+                client, f"/v1/permits/{permit_id}", expected_status=200
+            )
+            cap_denial_spend_delta = (
+                Decimal(str(permit_after_cap_denial["spent_credits"]))
+                - spent_after
+            )
+            require(
+                cap_denial_spend_delta == Decimal("0"),
+                "fresh-key denial changed permit spend",
+            )
+            ledger_after_cap_denial = _get_json(
+                client, f"/v1/billing/ledger/{wallet_id}", expected_status=200
+            )
+            debits_after_cap_denial = len(
+                [
+                    entry
+                    for entry in ledger_after_cap_denial["entries"]
+                    if governed_tool in entry.get("description", "")
+                ]
+            )
+            require(
+                debits_after_cap_denial == debits_before_replay,
+                "fresh-key denial created a debit",
+            )
+            print(
+                "[constant-test] fresh-key denial OK: permit cap, no debit or dispatch",
+                file=sys.stderr,
+            )
 
         # Out-of-scope tool denial check (optional).
         # A single-tool deployment exercises the core loop but cannot test
@@ -578,7 +848,7 @@ def run_constant_test(
             denial_error = _first_jsonrpc_error(denial_call)
             require(
                 denial_error["message"] == "permit_tool_not_allowed",
-                f"expected permit_tool_not_allowed, got {denial_error['message']}",
+                "out-of-scope request returned the wrong denial reason",
             )
             denial_receipt = denial_error["data"]["receipt"]
             require(
@@ -609,7 +879,7 @@ def run_constant_test(
             )
             require(
                 denial_verify_resp.get("valid") is True,
-                f"denial receipt signature invalid: {denial_verify_resp.get('reason')}",
+                "denial receipt signature is invalid",
             )
             print(
                 "[constant-test] denial signature OK: denial receipt signature verified",
@@ -619,6 +889,67 @@ def run_constant_test(
             print(
                 "[constant-test] SKIPPED out-of-scope tool check "
                 "(no registered tool outside the permit)",
+                file=sys.stderr,
+            )
+
+        if retry_evidence_output is not None:
+            require(
+                cap_denial_error is not None and cap_denial_receipt is not None,
+                "retry proof cap denial was not verified",
+            )
+            evidence = {
+                "schema_version": "1.0",
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "status": "passed",
+                "target": {
+                    "origin": api_url,
+                    "tool": governed_tool,
+                    "payload_sha256": retry_proof_payload_sha256(
+                        governed_arguments
+                    ),
+                },
+                "permit": {
+                    "max_calls_per_tool": 1,
+                    "allow_identical_repeats": True,
+                },
+                "success": {
+                    "receipt_id": receipt["receipt_id"],
+                    "dispatch_attempt_id": receipt["dispatch_attempt_id"],
+                    "ledger_entry_id": receipt["ledger_entry_id"],
+                    "credits_charged": str(charged),
+                    "dispatch_evidence_valid": dispatch_evidence_valid,
+                },
+                "same_key_replay": {
+                    "same_receipt": True,
+                    "same_dispatch_attempt": True,
+                    "additional_debits": (
+                        debits_after_replay - debits_before_replay
+                    ),
+                    "additional_spend": str(replay_spend_delta),
+                },
+                "fresh_key_denial": {
+                    "code": cap_denial_error["code"],
+                    "reason": cap_denial_error["message"],
+                    "receipt_id": cap_denial_receipt["receipt_id"],
+                    "outcome": cap_denial_receipt["outcome"],
+                    "credits_charged": str(
+                        Decimal(str(cap_denial_receipt["credits_charged"]))
+                    ),
+                    "ledger_entry_id": None,
+                    "dispatch_attempt_id": None,
+                    "additional_debits": (
+                        debits_after_cap_denial - debits_before_replay
+                    ),
+                    "additional_spend": str(cap_denial_spend_delta),
+                },
+                "limitations": [
+                    "Gateway evidence proves receipt, ledger, and dispatch linkage; "
+                    "it does not independently prove downstream side effects."
+                ],
+            }
+            _write_retry_evidence(retry_evidence_output, evidence)
+            print(
+                "[constant-test] sanitized retry evidence written",
                 file=sys.stderr,
             )
 
@@ -632,6 +963,14 @@ def _validate_api_url(url: str) -> str:
     url = url.rstrip("/")
     parsed = urlparse(url)
     is_loopback = parsed.hostname in ("localhost", "127.0.0.1", "::1")
+
+    if (
+        parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ConfigurationError("API URL must not contain credentials or parameters")
     
     if parsed.scheme == "http" and not is_loopback:
         raise ConfigurationError(
@@ -742,6 +1081,29 @@ def main(argv: list[str] | None = None) -> int:
             "needs none."
         ),
     )
+    parser.add_argument(
+        "--retry-evidence-output",
+        default=None,
+        help=(
+            "Opt in to the retry proof and create a private sanitized JSON "
+            "evidence file. Requires all three --confirm-retry-* flags."
+        ),
+    )
+    parser.add_argument(
+        "--confirm-retry-target",
+        default=None,
+        help="Exact canonical API origin approved for the retry proof.",
+    )
+    parser.add_argument(
+        "--confirm-retry-tool",
+        default=None,
+        help="Exact tool name approved for the retry proof.",
+    )
+    parser.add_argument(
+        "--confirm-retry-payload-sha256",
+        default=None,
+        help="SHA-256 of the canonical approved tool arguments.",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -751,7 +1113,35 @@ def main(argv: list[str] | None = None) -> int:
         # Validate API URL (applies to both --api-url and $API_URL)
         api_url = _validate_api_url(args.api_url or _get_api_url())
         _require_deliberate_production_target(api_url, args)
+        confirmation_values = (
+            args.confirm_retry_target,
+            args.confirm_retry_tool,
+            args.confirm_retry_payload_sha256,
+        )
+        if args.retry_evidence_output is None and any(confirmation_values):
+            raise ConfigurationError(
+                "retry proof confirmations require --retry-evidence-output"
+            )
+        retry_evidence_output = None
+        if args.retry_evidence_output is not None:
+            if not args.tool or args.tool_args is None:
+                raise ConfigurationError(
+                    "retry proof requires an explicit tool and tool payload"
+                )
+            retry_evidence_output = validate_retry_proof_confirmation(
+                api_url=api_url,
+                tool=args.tool,
+                tool_arguments=args.tool_args,
+                evidence_output=args.retry_evidence_output,
+                confirmed_target=args.confirm_retry_target,
+                confirmed_tool=args.confirm_retry_tool,
+                confirmed_payload_sha256=args.confirm_retry_payload_sha256,
+            )
         agent_key, wallet_id, key_id = _get_agent_key()
+        if retry_evidence_output is not None and not agent_key:
+            raise ConfigurationError(
+                "retry proof requires CI_SMOKE_AGENT_KEY; self-provisioning is disabled"
+            )
         run_constant_test(
             api_url,
             agent_key,
@@ -760,6 +1150,7 @@ def main(argv: list[str] | None = None) -> int:
             pinned_tool=args.tool,
             pinned_other_tool=args.other_tool,
             tool_arguments=args.tool_args,
+            retry_evidence_output=retry_evidence_output,
         )
     except ConfigurationError as config_error:
         print(f"\n[constant-test] configuration error: {config_error}", file=sys.stderr)
