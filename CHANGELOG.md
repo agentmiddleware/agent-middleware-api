@@ -170,11 +170,13 @@ full release gate; do not backfill a final `v1.2.0` tag.
   stop the other half from running.
 
   Two neighbouring paths were checked and deliberately left alone. The remote
-  reservation never holds a per-tool use to give back — `authorize_reserve_and_prepare`
-  reserves credits alone, and a permit configuring `max_calls_per_tool` is
-  refused that backend outright as `permit_constraint_unsupported_for_upstream`.
-  And the refund-after-tool-error path keeps its use consumed on purpose: the
-  tool did run there, and the counter counts invocations, not charges.
+  reservation now holds a per-tool use via `call_slot_reserved`. The slot is
+  released only when the attempt was never dispatched (`dispatched_at IS NULL`):
+  a pre-dispatch error that abandons the prepared attempt or a post-dispatch
+  `returned_error` refund both release the slot, but only if no confirmed send
+  occurred. A confirmed send holds the use consumed. And the
+  refund-after-tool-error path keeps its use consumed on purpose: the tool did
+  run there, and the counter counts invocations, not charges.
 
 - **An enterprise use is given back only once the refusal is proven to have
   dispatched nothing.** `enforce_tool_call` records a use atomically with its

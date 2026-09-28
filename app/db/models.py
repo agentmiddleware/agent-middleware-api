@@ -52,15 +52,15 @@ class WalletModel(SQLModel, table=True):
     # Spending controls
     daily_limit: Optional[Decimal] = Field(default=None, decimal_places=8)
     daily_spent: Decimal = Field(default=Decimal("0"), decimal_places=8)
-    daily_reset_at: Optional[datetime] = Field(default=None)
+    daily_reset_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
 
     # Velocity monitoring (spend per hour for anomaly detection)
     hourly_limit: Optional[Decimal] = Field(default=None, decimal_places=8)
     hourly_spent: Decimal = Field(default=Decimal("0"), decimal_places=8)
-    hourly_reset_at: Optional[datetime] = Field(default=None)
+    hourly_reset_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
 
     # Velocity anomaly detection
-    last_charge_at: Optional[datetime] = Field(default=None)
+    last_charge_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
     velocity_alerts_triggered: int = Field(default=0)
 
     # Auto-refill settings
@@ -71,12 +71,12 @@ class WalletModel(SQLModel, table=True):
     # Status and metadata
     status: str = Field(default="active", max_length=20)
     kyc_status: str = Field(default="not_required", max_length=30)
-    kyc_verified_at: Optional[datetime] = Field(default=None)
+    kyc_verified_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
     metadata_json: Optional[str] = Field(default=None)
 
     # Timestamps
-    created_at: datetime = Field(default_factory=utc_now)
-    updated_at: datetime = Field(default_factory=utc_now)
+    created_at: datetime = Field(sa_type=NaiveUTCDateTime, default_factory=utc_now)
+    updated_at: datetime = Field(sa_type=NaiveUTCDateTime, default_factory=utc_now)
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -145,7 +145,9 @@ class LedgerEntryModel(SQLModel, table=True):
     )
 
     # Timestamp
-    timestamp: datetime = Field(default_factory=utc_now, index=True)
+    timestamp: datetime = Field(
+        sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
+    )
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -165,7 +167,9 @@ class BillingAlertModel(SQLModel, table=True):
     message: str = Field(max_length=500)
     severity: str = Field(default="info", max_length=20)
     acknowledged: bool = Field(default=False)
-    created_at: datetime = Field(default_factory=utc_now, index=True)
+    created_at: datetime = Field(
+        sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
+    )
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -211,8 +215,12 @@ class ServiceRegistryModel(SQLModel, table=True):
     mcp_manifest: Optional[str] = Field(default=None)
     is_active: bool = Field(default=True)
     metadata_json: Optional[str] = Field(default=None)
-    created_at: datetime = Field(default_factory=utc_now)
-    updated_at: datetime = Field(default_factory=utc_now)
+    created_at: datetime = Field(
+        sa_type=NaiveUTCDateTime, default_factory=utc_now
+    )
+    updated_at: datetime = Field(
+        sa_type=NaiveUTCDateTime, default_factory=utc_now
+    )
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -238,15 +246,19 @@ class KYCVerificationModel(SQLModel, table=True):
 
     document_type: Optional[str] = Field(default=None, max_length=30)
 
-    first_verified_at: Optional[datetime] = Field(default=None)
-    last_verified_at: Optional[datetime] = Field(default=None)
+    first_verified_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
+    last_verified_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
 
     rejection_reason: Optional[str] = Field(default=None, max_length=500)
 
     metadata_json: Optional[str] = Field(default=None)
 
-    created_at: datetime = Field(default_factory=utc_now, index=True)
-    updated_at: datetime = Field(default_factory=utc_now)
+    created_at: datetime = Field(
+        sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
+    )
+    updated_at: datetime = Field(
+        sa_type=NaiveUTCDateTime, default_factory=utc_now
+    )
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -325,8 +337,12 @@ class TelemetryEventModel(SQLModel, table=True):
 
     # Two timestamps: when the event actually happened (from the client)
     # vs when we stored it (authoritative for retention).
-    event_timestamp: Optional[datetime] = Field(default=None, index=True)
-    ingested_at: datetime = Field(default_factory=utc_now, index=True)
+    event_timestamp: Optional[datetime] = Field(
+        sa_type=NaiveUTCDateTime, default=None, index=True
+    )
+    ingested_at: datetime = Field(
+        sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
+    )
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -342,8 +358,10 @@ class IoTDeviceModel(SQLModel, table=True):
     topic_acl_json: Optional[str] = Field(default=None)
     metadata_json: Optional[str] = Field(default=None)
     status: str = Field(default="registered", max_length=30, index=True)
-    registered_at: datetime = Field(default_factory=utc_now, index=True)
-    last_message_at: Optional[datetime] = Field(default=None)
+    registered_at: datetime = Field(
+        sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
+    )
+    last_message_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
     message_count: int = Field(default=0)
 
     model_config = {"arbitrary_types_allowed": True}
@@ -359,7 +377,9 @@ class IoTDeviceEventModel(SQLModel, table=True):
     event_type: str = Field(max_length=30, index=True)
     topic: Optional[str] = Field(default=None, max_length=500)
     payload_json: Optional[str] = Field(default=None)
-    timestamp: datetime = Field(default_factory=utc_now, index=True)
+    timestamp: datetime = Field(
+        sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
+    )
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -374,8 +394,10 @@ class OracleCrawlTargetModel(SQLModel, table=True):
     directory_type: str = Field(max_length=30, index=True)
     status: str = Field(max_length=20, index=True)
     api_id: Optional[str] = Field(default=None, max_length=64, index=True)
-    queued_at: datetime = Field(default_factory=utc_now, index=True)
-    crawled_at: Optional[datetime] = Field(default=None)
+    queued_at: datetime = Field(
+        sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
+    )
+    crawled_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
     raw_payload_hash: Optional[str] = Field(default=None, max_length=128)
 
     model_config = {"arbitrary_types_allowed": True}
@@ -396,7 +418,9 @@ class OracleIndexedAPIModel(SQLModel, table=True):
     capabilities_json: Optional[str] = Field(default=None)
     tags_json: Optional[str] = Field(default=None)
     status: str = Field(max_length=20)
-    last_crawled: datetime = Field(default_factory=utc_now, index=True)
+    last_crawled: datetime = Field(
+        sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
+    )
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -411,7 +435,9 @@ class OracleRegistrationModel(SQLModel, table=True):
     directory_type: str = Field(max_length=30, index=True)
     status: str = Field(max_length=20, index=True)
     message: str = Field(default="", max_length=2000)
-    created_at: datetime = Field(default_factory=utc_now, index=True)
+    created_at: datetime = Field(
+        sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
+    )
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -423,7 +449,9 @@ class OracleDiscoveryHitModel(SQLModel, table=True):
 
     hit_id: str = Field(primary_key=True, max_length=64)
     referrer: str = Field(default="direct", max_length=2048, index=True)
-    timestamp: datetime = Field(default_factory=utc_now, index=True)
+    timestamp: datetime = Field(
+        sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
+    )
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -444,8 +472,10 @@ class AgentCommsMessageModel(SQLModel, table=True):
     reply_to: Optional[str] = Field(default=None, max_length=64)
     status: str = Field(max_length=20, index=True)
     payload_hash: Optional[str] = Field(default=None, max_length=128)
-    created_at: datetime = Field(default_factory=utc_now, index=True)
-    delivered_at: Optional[datetime] = Field(default=None)
+    created_at: datetime = Field(
+        sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
+    )
+    delivered_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -471,9 +501,11 @@ class SecurityScanModel(SQLModel, table=True):
 
     recommendations_json: Optional[str] = Field(default=None)
 
-    started_at: Optional[datetime] = Field(default=None)
-    completed_at: Optional[datetime] = Field(default=None)
-    created_at: datetime = Field(default_factory=utc_now, index=True)
+    started_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
+    completed_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
+    created_at: datetime = Field(
+        sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
+    )
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -503,7 +535,9 @@ class SecurityVulnerabilityModel(SQLModel, table=True):
     remediation_status: str = Field(default="open", max_length=30)
     cwe_id: Optional[str] = Field(default=None, max_length=20)
 
-    discovered_at: datetime = Field(default_factory=utc_now, index=True)
+    discovered_at: datetime = Field(
+        sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
+    )
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -526,7 +560,9 @@ class ContentPipelineModel(SQLModel, table=True):
     hook_json: Optional[str] = Field(default=None)
     caption_style: str = Field(default="bold_impact", max_length=30)
     aspect_ratio: str = Field(default="9:16", max_length=10)
-    created_at: datetime = Field(default_factory=utc_now, index=True)
+    created_at: datetime = Field(
+        sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
+    )
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -552,7 +588,9 @@ class ContentPieceModel(SQLModel, table=True):
     file_size_bytes: Optional[int] = Field(default=None)
     status: str = Field(max_length=20, index=True)
     metadata_json: Optional[str] = Field(default=None)
-    generated_at: datetime = Field(default_factory=utc_now, index=True)
+    generated_at: datetime = Field(
+        sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
+    )
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -569,7 +607,9 @@ class ContentCampaignModel(SQLModel, table=True):
     pipeline_ids_json: Optional[str] = Field(default=None)
     status: str = Field(default="running", max_length=30, index=True)
     owner_key: str = Field(default="", max_length=255, index=True)
-    created_at: datetime = Field(default_factory=utc_now, index=True)
+    created_at: datetime = Field(
+        sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
+    )
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -590,7 +630,9 @@ class ContentScheduleModel(SQLModel, table=True):
     confidence: float = Field(default=0.0)
     reasoning: str = Field(default="", max_length=2000)
     estimated_views: Optional[int] = Field(default=None)
-    created_at: datetime = Field(default_factory=utc_now, index=True)
+    created_at: datetime = Field(
+        sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
+    )
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -606,8 +648,10 @@ class ContentFactoryGenerationModel(SQLModel, table=True):
     model: Optional[str] = Field(default=None, max_length=128)
     provenance_json: Optional[str] = Field(default=None)
     output_text: Optional[str] = Field(default=None)
-    created_at: datetime = Field(default_factory=utc_now, index=True)
-    updated_at: Optional[datetime] = Field(default=None)
+    created_at: datetime = Field(
+        sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
+    )
+    updated_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -636,7 +680,9 @@ class KeyRotationLogModel(SQLModel, table=True):
     ip_address: Optional[str] = Field(default=None, max_length=45)
     user_agent: Optional[str] = Field(default=None, max_length=500)
 
-    created_at: datetime = Field(default_factory=utc_now, index=True)
+    created_at: datetime = Field(
+        sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
+    )
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -647,7 +693,9 @@ class ControlPlaneAuditEventModel(SQLModel, table=True):
     __tablename__ = "control_plane_audit_events"
 
     event_id: str = Field(primary_key=True, max_length=50)
-    created_at: datetime = Field(default_factory=utc_now, index=True)
+    created_at: datetime = Field(
+        sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
+    )
     # Per-wallet monotonic sequence: a stable ordering key for the hash chain so
     # equal/clock-skewed created_at values can't reorder the chain on read.
     seq: int = Field(default=0, index=True)
@@ -693,7 +741,9 @@ class AuditChainHeadModel(SQLModel, table=True):
     wallet_key: str = Field(primary_key=True, max_length=64)
     last_chain_hash: Optional[str] = Field(default=None, max_length=64)
     last_seq: int = Field(default=0)
-    updated_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(
+        sa_type=NaiveUTCDateTime, default_factory=utc_now
+    )
 
 
 class SigningKeyModel(SQLModel, table=True):
@@ -705,9 +755,11 @@ class SigningKeyModel(SQLModel, table=True):
     alg: str = Field(default="Ed25519", max_length=20)
     public_key_b64: str
     status: str = Field(default="active", max_length=20, index=True)
-    created_at: datetime = Field(default_factory=utc_now, index=True)
-    activated_at: Optional[datetime] = Field(default=None)
-    retired_at: Optional[datetime] = Field(default=None)
+    created_at: datetime = Field(
+        sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
+    )
+    activated_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
+    retired_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
 
 
 class PermitModel(SQLModel, table=True):
@@ -762,10 +814,11 @@ class PermitModel(SQLModel, table=True):
     aggregate_value_cap: Optional[Decimal] = Field(default=None, decimal_places=8)
     forbidden_fields_json: Optional[str] = Field(default=None)
     recipient_domain: Optional[str] = Field(default=None, max_length=255)
+    # Opt-out from cross-key duplicate detection. When true, identical requests
+    # under different idempotency keys are allowed.
+    allow_identical_repeats: bool = Field(default=False)
     # Atomic call-count tracking for local max_calls_per_tool enforcement.
     # Maps tool name -> reserved local call count (e.g., {"partner.echo": 2}).
-    # The configured upstream path fails closed on this constraint until it
-    # owns an equivalent atomic reservation-and-release lifecycle.
     tool_call_counts_json: Optional[str] = Field(default=None)
 
     model_config = {"arbitrary_types_allowed": True}
@@ -1020,8 +1073,10 @@ class IdempotencyRecordModel(SQLModel, table=True):
     response_reference: Optional[str] = Field(default=None, max_length=128)
     response_json: Optional[str] = Field(default=None)
     status_code: int = Field(default=200)
-    created_at: datetime = Field(default_factory=utc_now, index=True)
-    expires_at: Optional[datetime] = Field(default=None)
+    created_at: datetime = Field(
+        sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
+    )
+    expires_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
     # Set right after a governed invoke charges a wallet, before the
     # receipt/audit/complete finalization sequence runs. Lets a reconciliation
     # sweep tell "never charged" apart from "charged but never finalized".
@@ -1072,6 +1127,10 @@ class McpDispatchAttemptModel(SQLModel, table=True):
     # Hash of the process-local dispatch claim. The raw claim is never stored.
     # NULL preserves attempts created before claim fencing was introduced.
     dispatch_claim_hash: Optional[str] = Field(default=None, max_length=64)
+    # Tracks whether this attempt holds a per-tool call slot from the permit's
+    # max_calls_per_tool cap. The slot is reserved atomically with budget at
+    # preparation and released only when compensated before dispatch.
+    call_slot_reserved: bool = Field(default=False)
     # Canonical JSON is capped by McpDispatchAttemptService before persistence.
     result_json: Optional[str] = Field(
         default=None,
@@ -1083,12 +1142,16 @@ class McpDispatchAttemptModel(SQLModel, table=True):
     # Compensation checkpoints make reconciliation retry-safe. A ledger
     # refund is independently idempotent by correlation_id; permit budget
     # release is not, so that release and this marker are committed together.
-    debit_refunded_at: Optional[datetime] = Field(default=None, index=True)
-    budget_released_at: Optional[datetime] = Field(default=None, index=True)
-    created_at: datetime = Field(default_factory=utc_now, index=True)
-    updated_at: datetime = Field(default_factory=utc_now, index=True)
-    dispatched_at: Optional[datetime] = Field(default=None, index=True)
-    completed_at: Optional[datetime] = Field(default=None, index=True)
+    debit_refunded_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None, index=True)
+    budget_released_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None, index=True)
+    created_at: datetime = Field(
+        sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
+    )
+    updated_at: datetime = Field(
+        sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
+    )
+    dispatched_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None, index=True)
+    completed_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None, index=True)
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -1127,7 +1190,11 @@ class PolicyBundleModel(SQLModel, table=True):
     risk_tier: str = Field(default="medium", max_length=20)
     human_approval_required: bool = Field(default=False)
     is_active: bool = Field(default=True, index=True)
-    created_at: datetime = Field(default_factory=utc_now, index=True)
-    updated_at: datetime = Field(default_factory=utc_now)
+    created_at: datetime = Field(
+        sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
+    )
+    updated_at: datetime = Field(
+        sa_type=NaiveUTCDateTime, default_factory=utc_now
+    )
 
     model_config = {"arbitrary_types_allowed": True}

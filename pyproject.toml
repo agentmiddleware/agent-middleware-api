@@ -34,3 +34,11 @@ filterwarnings = [
     # still surfaces.
     "ignore::DeprecationWarning:pydantic._internal._fields",
 ]
+
+[tool.coverage.run]
+# SQLAlchemy's asyncio bridge switches greenlets on every awaited statement
+# inside a session. Without greenlet-aware tracing, coverage's tracer is
+# dropped after the first such switch, so every line that follows it in a
+# session body is reported as never executed even though the tests ran it.
+# The trust coverage gate measures exactly those bodies.
+concurrency = ["greenlet"]

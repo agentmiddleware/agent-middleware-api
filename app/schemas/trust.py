@@ -26,6 +26,10 @@ class PermitCreateRequest(BaseModel):
     aggregate_value_cap: Decimal | None = None
     forbidden_fields: list[str] = Field(default_factory=list)
     recipient_domain: str | None = None
+    # Opt-out from cross-key duplicate detection. When true, identical requests
+    # under different idempotency keys are allowed (for tools that legitimately
+    # repeat identical calls, e.g. repeated purchases of the same item).
+    allow_identical_repeats: bool = False
 
 
 class PermitResponse(BaseModel):
@@ -50,6 +54,7 @@ class PermitResponse(BaseModel):
     aggregate_value_cap: Decimal | None = None
     forbidden_fields: list[str] = Field(default_factory=list)
     recipient_domain: str | None = None
+    allow_identical_repeats: bool = False
 
 
 class QuoteCreateRequest(BaseModel):

@@ -7001,6 +7001,11 @@
               }
             ],
             "title": "Recipient Domain"
+          },
+          "allow_identical_repeats": {
+            "type": "boolean",
+            "title": "Allow Identical Repeats",
+            "default": false
           }
         },
         "type": "object",
@@ -7463,6 +7468,11 @@
               }
             ],
             "title": "Recipient Domain"
+          },
+          "allow_identical_repeats": {
+            "type": "boolean",
+            "title": "Allow Identical Repeats",
+            "default": false
           }
         },
         "type": "object",
