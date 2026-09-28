@@ -343,6 +343,10 @@ class LocalPermitValidator:
             payload["forbidden_fields"] = [str(name) for name in forbidden]
         if permit.get("recipient_domain"):
             payload["recipient_domain"] = str(permit["recipient_domain"])
+        if permit.get("allow_identical_repeats"):
+            payload["allow_identical_repeats"] = True
+        if permit.get("repeat_window_seconds") is not None:
+            payload["repeat_window_seconds"] = int(permit["repeat_window_seconds"])
         payload["payload_hash"] = hashlib.sha256(
             canonical_json(payload).encode("utf-8")
         ).hexdigest()

@@ -34,7 +34,8 @@ class PermitCreateRequest(BaseModel):
     # When set, identical requests under new keys are blocked for this duration
     # after an effectful prior attempt. Only enforced when duplicate guard is
     # enabled and allow_identical_repeats is false.
-    repeat_window_seconds: int | None = None
+    # Must be positive and <= 31536000 (365 days).
+    repeat_window_seconds: int | None = Field(default=None, gt=0, le=31536000)
 
 
 class PermitResponse(BaseModel):
@@ -60,7 +61,7 @@ class PermitResponse(BaseModel):
     forbidden_fields: list[str] = Field(default_factory=list)
     recipient_domain: str | None = None
     allow_identical_repeats: bool = False
-    repeat_window_seconds: int | None = None
+    repeat_window_seconds: int | None = Field(default=None, gt=0, le=31536000)
 
 
 class QuoteCreateRequest(BaseModel):

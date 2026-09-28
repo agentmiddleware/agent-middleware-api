@@ -98,12 +98,12 @@ def _call_body(*, tool_name, wallet_id, permit_id, idempotency_key, message):
 
 @pytest.mark.anyio
 async def test_parallel_identical_new_keys_enforce_mode_one_dispatch(monkeypatch):
-    """N parallel identical new-key calls produce 1 dispatch, 1 charge, N-1 denials.
+    """N concurrent identical new-key calls produce 1 dispatch, 1 charge, N-1 denials.
     
-    This is the PostgreSQL concurrency proof: under enforce mode, parallel calls
-    with different idempotency keys but identical arguments produce exactly one
-    upstream dispatch and exactly one ledger debit, even when they race at the
-    database level. The permit row lock ensures serialization.
+    PostgreSQL concurrency proof: under enforce mode, concurrent calls with
+    different idempotency keys but identical arguments produce exactly one
+    upstream dispatch and exactly one ledger debit. The permit row lock and
+    duplicate detection query serialize access.
     """
     _require_opted_in_postgres()
     

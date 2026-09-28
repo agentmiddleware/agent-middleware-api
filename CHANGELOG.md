@@ -11,6 +11,19 @@ The next release consolidates the accumulated trust-plane and public-product
 work as `v1.3.0`. Create that tag only from the exact commit that passes the
 full release gate; do not backfill a final `v1.2.0` tag.
 
+### Fixed
+- **Duplicate guard hardening**: The cross-key duplicate guard (`MCP_UPSTREAM_DUPLICATE_GUARD`) now validates its mode at startup using a strict enum (`off`, `log`, `enforce`). Typos such as "enforced" are rejected at boot rather than silently falling back to permissive behavior. Invalid modes raise `ValidationError` during config construction.
+- **Duplicate guard observability**: Added `/health/duplicate-guard` endpoint (admin-only) exposing the current mode, configured window, and counters tracking how often log mode would have blocked a request (`log_mode_blocks`) and how often enforce mode actually blocked one (`enforce_mode_blocks`). Does not expose request contents or secrets. Requires bootstrap admin authentication.
+- **Per-permit duplicate window**: Permits can now specify `repeat_window_seconds` to override the global `MCP_UPSTREAM_DUPLICATE_WINDOW_SECONDS` for that permit. The field is validated (must be positive and ≤ 365 days), nullable, optional, and included in the permit signature when set. Existing permit signatures remain valid.
+- **PostgreSQL concurrency proof**: Parallel identical new-key calls under `enforce` mode now produce exactly one dispatch and one charge, verified by a new concurrency test (`test_duplicate_guard_postgres_concurrency.py`) running in the `postgres_permit_concurrency` CI job. The test proves N racing calls yield 1 success receipt, N-1 `duplicate_request_new_key` denials, 1 ledger debit, and 1 upstream dispatch.
+- **SECURITY_LIMITATIONS.md correction**: Corrected the claim that remote tools refuse `max_calls_per_tool`. That constraint has been supported since 8c95229 (PR #476). Only `aggregate_value_cap` is still rejected on the upstream path.
+
+### Changed
+- **Default duplicate guard mode unchanged**: The default remains `log` (observe-only). Operators wishing to enforce duplicate blocking must explicitly set `MCP_UPSTREAM_DUPLICATE_GUARD=enforce`.
+
+### Migration
+- **Migration 040**: Adds nullable `repeat_window_seconds` column to the `permits` table for efficient query access during duplicate detection. The field is denormalized from the signed payload to avoid parsing signatures on every invocation. Upgrade and downgrade tested. No data migration required.
+
 ### 🧪 Failure lab: the lost-response fault measured against a correct baseline
 
 - **`make failure-lab`** runs one vendor-payout workflow against one injected
