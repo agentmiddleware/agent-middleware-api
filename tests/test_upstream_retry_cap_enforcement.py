@@ -1267,6 +1267,74 @@ async def test_reserve_contention_is_retryable_and_frees_the_key(
 
 
 @pytest.mark.anyio
+async def test_reserve_contention_returns_409_on_rest_invoke(
+    client, clean_database, monkeypatch
+):
+    """The REST invoke endpoint returns HTTP 409 for permit_write_contended.
+
+    When a permit reservation's CAS loses to a concurrent writer, the JSON-RPC
+    endpoint returns error code -32005. The REST /mcp/tools/{id}/invoke
+    endpoint must return HTTP 409 for the same error, allowing the caller to
+    retry the same idempotency key.
+    """
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    key_id = provisioned["key_id"]
+    agent_headers = provisioned["agent_headers"]
+    tool_name = "test.cap.contended.rest"
+
+    executor = FakeUpstreamExecutor("success")
+    _register_upstream(tool_name, executor)
+
+    try:
+        permit_id = await _create_permit_with_cap(
+            client, wallet_id, key_id, tool_name, max_calls=2
+        )
+        misses = _inject_one_lost_counter_cas(monkeypatch)
+
+        # REST endpoint: /mcp/tools/{id}/invoke
+        invoke_body = {
+            "name": tool_name,
+            "arguments": {"message": "test"},
+            "mcp_context": {
+                "wallet_id": wallet_id,
+                "permit_id": permit_id,
+                "idempotency_key": "rest-contended-1",
+            },
+        }
+
+        r1 = await client.post(
+            f"/mcp/tools/{tool_name}/invoke",
+            json=invoke_body,
+            headers=agent_headers,
+        )
+        assert r1.status_code == 409, r1.json()
+        body1 = r1.json()
+        assert body1["detail"]["error"] == "permit_write_contended"
+        assert misses["count"] == 1
+        assert executor.dispatch_count == 0
+        counts, spent = await _permit_slot_state(permit_id)
+        assert counts == {}
+        assert spent == Decimal("0")
+
+        # Retry the same key once contention is gone
+        r2 = await client.post(
+            f"/mcp/tools/{tool_name}/invoke",
+            json=invoke_body,
+            headers=agent_headers,
+        )
+        assert r2.status_code == 200, r2.json()
+        body2 = r2.json()
+        assert body2["isError"] is False
+        assert body2["receipt"]["outcome"] == "success"
+        assert executor.dispatch_count == 1
+        counts, spent = await _permit_slot_state(permit_id)
+        assert counts == {tool_name: 1}
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.anyio
 async def test_reserve_reports_budget_not_contention_when_credits_ran_out(
     client, clean_database, monkeypatch
 ):

@@ -172,9 +172,9 @@ full release gate; do not backfill a final `v1.2.0` tag.
   Two neighbouring paths were checked and deliberately left alone. The remote
   reservation now holds a per-tool use via `call_slot_reserved`. The slot is
   released only when the attempt was never dispatched (`dispatched_at IS NULL`):
-  a pre-dispatch error that abandons the prepared attempt or a post-dispatch
-  `returned_error` refund both release the slot, but only if no confirmed send
-  occurred. A confirmed send holds the use consumed. And the
+  a pre-dispatch error that abandons the prepared attempt releases the slot,
+  but any attempt that claimed dispatch keeps its slot consumed, including
+  `delivery_uncertain` and post-dispatch `returned_error` states. The
   refund-after-tool-error path keeps its use consumed on purpose: the tool did
   run there, and the counter counts invocations, not charges.
 
