@@ -219,6 +219,7 @@ def permit_model_to_response(model: PermitModel) -> PermitResponse:
         forbidden_fields=_loads_list(model.forbidden_fields_json or "[]"),
         recipient_domain=model.recipient_domain,
         allow_identical_repeats=model.allow_identical_repeats,
+        repeat_window_seconds=model.repeat_window_seconds,
     )
 
 
@@ -387,6 +388,7 @@ class PermitService:
             else None,
             recipient_domain=request.recipient_domain,
             allow_identical_repeats=request.allow_identical_repeats,
+            repeat_window_seconds=request.repeat_window_seconds,
         )
         # Sign the same dict verify reconstructs. Building it twice let a
         # field added on one path only keep verifying in tests that never
@@ -1902,6 +1904,8 @@ class PermitService:
             payload["recipient_domain"] = model.recipient_domain
         if model.allow_identical_repeats:
             payload["allow_identical_repeats"] = True
+        if model.repeat_window_seconds is not None:
+            payload["repeat_window_seconds"] = model.repeat_window_seconds
         return payload
 
     @staticmethod

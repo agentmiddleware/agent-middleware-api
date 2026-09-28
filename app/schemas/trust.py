@@ -30,6 +30,11 @@ class PermitCreateRequest(BaseModel):
     # under different idempotency keys are allowed (for tools that legitimately
     # repeat identical calls, e.g. repeated purchases of the same item).
     allow_identical_repeats: bool = False
+    # Override the global duplicate detection window for this permit (seconds).
+    # When set, identical requests under new keys are blocked for this duration
+    # after an effectful prior attempt. Only enforced when duplicate guard is
+    # enabled and allow_identical_repeats is false.
+    repeat_window_seconds: int | None = None
 
 
 class PermitResponse(BaseModel):
@@ -55,6 +60,7 @@ class PermitResponse(BaseModel):
     forbidden_fields: list[str] = Field(default_factory=list)
     recipient_domain: str | None = None
     allow_identical_repeats: bool = False
+    repeat_window_seconds: int | None = None
 
 
 class QuoteCreateRequest(BaseModel):
