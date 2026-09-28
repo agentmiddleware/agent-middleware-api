@@ -1441,17 +1441,27 @@ def test_live_hides_rejected_operator_credential(monkeypatch, capsys):
 
 
 @pytest.mark.parametrize(
-    "target_url",
+    ("target_url", "approved_url"),
     [
-        "http://api.example.com",
-        "https://untrusted.example.com",
-        "https://api.example.com@untrusted.example.com",
+        ("http://api.example.com", "https://api.example.com"),
+        ("https://untrusted.example.com", "https://api.example.com"),
+        (
+            "https://api.example.com@untrusted.example.com",
+            "https://api.example.com",
+        ),
+        ("https://127.0.0.1", "https://127.0.0.1"),
+        ("https://api.example.com/catalog", "https://api.example.com/catalog"),
+        (
+            "https://api.example.com?target=other",
+            "https://api.example.com?target=other",
+        ),
     ],
 )
 def test_live_never_sends_operator_credential_to_unapproved_origin(
     monkeypatch,
     capsys,
     target_url,
+    approved_url,
 ):
     import httpx
 
@@ -1461,7 +1471,7 @@ def test_live_never_sends_operator_credential_to_unapproved_origin(
     }
     calls = []
     monkeypatch.setenv("BOOTSTRAP_KEY", secret)
-    monkeypatch.setenv("PUBLIC_URL", "https://api.example.com")
+    monkeypatch.setenv("PUBLIC_URL", approved_url)
 
     def get(url, **kwargs):
         calls.append((url, kwargs))
@@ -1713,6 +1723,8 @@ def test_live_fails_when_dogfood_name_hides_behind_benign_service_id(monkeypatch
         {"service_id": "partner.echo", "name": None},
         {"service_id": "", "name": "partner.echo"},
         {"service_id": "partner.echo", "name": ""},
+        {"service_id": " ", "name": "partner.echo"},
+        {"service_id": "partner.echo", "name": "\t"},
         {"service_id": ["partner.echo"], "name": "partner.echo"},
         {"service_id": "partner.echo", "name": ["partner.echo"]},
     ],
