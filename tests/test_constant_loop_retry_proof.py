@@ -734,6 +734,52 @@ def test_retry_proof_rejects_replay_result_marked_as_error(
     assert not output.exists()
 
 
+@pytest.mark.parametrize("dual_member_call", [1, 2, 3])
+def test_retry_proof_rejects_dual_member_jsonrpc_envelopes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    dual_member_call: int,
+) -> None:
+    output = tmp_path / "proof.json"
+
+    class DualMemberEnvelopeClient(_ProofClient):
+        def post(
+            self,
+            path: str,
+            *,
+            json: dict[str, Any],
+            headers: dict[str, str] | None = None,
+        ) -> _Response:
+            response = super().post(path, json=json, headers=headers)
+            if path == "/mcp/messages" and self.message_calls == dual_member_call:
+                if dual_member_call <= 2:
+                    response._data["error"] = {
+                        "code": -32000,
+                        "message": "conflicting error",
+                    }
+                else:
+                    response._data["result"] = {
+                        "isError": False,
+                        "receipt": dict(SUCCESS_RECEIPT),
+                    }
+            return response
+
+    monkeypatch.setattr(loop.httpx, "Client", DualMemberEnvelopeClient)
+
+    with pytest.raises(loop.SmokeTestFailure, match="exactly one.*result.*error"):
+        loop.run_constant_test(
+            PROJECT_URL,
+            API_KEY,
+            WALLET_ID,
+            KEY_ID,
+            pinned_tool=TOOL,
+            tool_arguments=PAYLOAD,
+            retry_evidence_output=output,
+        )
+
+    assert not output.exists()
+
+
 def test_retry_proof_refuses_a_saturated_pre_invocation_ledger(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
