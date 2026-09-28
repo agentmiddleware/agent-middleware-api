@@ -50,8 +50,8 @@ python scripts/constant_test_loop.py \
   --tool-args '{"text": "constant test loop"}'
 ```
 
-Every flag has an environment equivalent, so a CI job can be configured
-entirely through secrets without putting anything in argv:
+Routine monitoring flags have environment equivalents, so a CI job can be
+configured without putting its credential in argv:
 
 | Flag | Environment variable |
 |---|---|
@@ -64,6 +64,56 @@ A flag beats the corresponding variable when both are set. A malformed
 `CI_SMOKE_TOOL_ARGS` — invalid JSON, or valid JSON that is not an object —
 exits 2 as a configuration error rather than 1, so a payload typo never
 looks like the trust plane failing.
+
+## Opt-in Retry Evidence
+
+`--retry-evidence-output` adds a deliberately manual proof to one constant-loop
+run. The generated permit has `max_calls_per_tool` set to one and
+`allow_identical_repeats` enabled. The script then verifies all of the
+following before it creates the evidence file:
+
+1. The first call succeeds, has one debit, and has valid receipt-to-dispatch
+   evidence.
+2. Replaying the exact same idempotency key returns the unchanged receipt and
+   dispatch attempt without changing permit spend or debit count.
+3. Repeating the approved payload with a fresh key is denied with
+   `permit_max_calls_exceeded`, a signed zero-charge receipt, no ledger link,
+   and no dispatch link.
+
+The proof is not a scheduled CI mode. It makes one billable upstream dispatch
+and leaves a permit and receipts on the selected deployment, so production use
+requires explicit owner approval. It also requires `CI_SMOKE_AGENT_KEY`; proof
+mode never self-provisions a credential.
+
+The target, tool, and canonical payload SHA-256 must be repeated as CLI
+confirmations. They intentionally have no environment-variable fallback. The
+target is a credential-free API origin with no path, query, or fragment, and
+the evidence path must be a new `.json` file in an existing directory.
+
+```bash
+TARGET=https://api.thisisatest.tech
+TOOL=partner.echo
+TOOL_ARGS='{"text":"approved retry proof"}'
+PAYLOAD_SHA256="$(python3 -c \
+  'import json,sys; from scripts.constant_test_loop import retry_proof_payload_sha256; print(retry_proof_payload_sha256(json.loads(sys.argv[1])))' \
+  "$TOOL_ARGS")"
+
+python3 scripts/constant_test_loop.py \
+  --api-url "$TARGET" \
+  --tool "$TOOL" \
+  --tool-args "$TOOL_ARGS" \
+  --retry-evidence-output retry-proof.json \
+  --confirm-retry-target "$TARGET" \
+  --confirm-retry-tool "$TOOL" \
+  --confirm-retry-payload-sha256 "$PAYLOAD_SHA256"
+```
+
+The evidence file is created exclusively with mode `0600`. It contains the
+origin, tool name, payload digest, permit policy, receipt/dispatch/ledger
+identifiers, and zero-delta assertions. It omits credentials, wallet and key
+identifiers, raw payloads, idempotency keys, and raw provider responses. The
+dispatch linkage is gateway evidence; it does not independently prove that a
+downstream system applied a side effect exactly once.
 
 Set `CI_SMOKE_AGENT_KEY` for a pre-provisioned agent credential. Optionally provide `CI_SMOKE_WALLET_ID` and `CI_SMOKE_KEY_ID` for faster startup (the script will fetch them from the API if not provided):
 
