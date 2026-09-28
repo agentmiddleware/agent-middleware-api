@@ -426,10 +426,11 @@ any check it ran fails, so it works as a gate in a shell or in CI:
   reads `railway status --json` without mutating provider settings, selects
   exactly one environment and service, and requires both `source.repo` and
   `source.image` to be present and null. Missing, malformed, ambiguous, or
-  bound provider state fails closed. It composes with the database, live, and
-  runtime-posture selectors; by itself it runs only this provider check. When
-  combined with `--manifest --live`, its project and environment must match
-  the manifest before any provider or service check runs.
+  bound provider state fails closed, including JSON with duplicate object keys
+  or non-standard `NaN`/infinity constants. It composes with the database,
+  live, and runtime-posture selectors; by itself it runs only this provider
+  check. When combined with `--manifest --live`, its project and environment
+  must match the manifest before any provider or service check runs.
 - **Live posture** (needs `PUBLIC_URL` or `--url`) — sends only
   unauthenticated `GET`s and asserts the deployed service is healthy, reports
   `production_like=true`, has no unhealthy dependency, did **not** fall back
