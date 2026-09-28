@@ -41,6 +41,21 @@ fail closed when their input is absent:
     as a rollback to a release whose own preflight predates the locked
     catalogs.
 
+    Limitation (manifest or flags alike): this proves the key is *published*
+    as active, not that the process *signs* with it. The public health
+    report's signing_key entry carries only status and state; the key the
+    process signs with is exposed only on the authenticated
+    ``GET /v1/signing-keys/active``. A rotation by redeploy (new
+    ``TRUST_SIGNING_PRIVATE_KEY_B64`` and ``TRUST_SIGNING_KEY_ID``) activates
+    the new key id without retiring the old one
+    (``SigningKeyService.ensure_active_key``), so both stay active and a
+    stale expectation naming the old key still passes. After a rotation the
+    old key must be retired before this check means anything, and the
+    repository has no operator command for that yet: docs/key-management.md
+    names ``POST /v1/admin/signing-keys/rotate``, which does not exist, and
+    ``retire_key_metadata`` / ``rotate_active_key_metadata`` are service
+    methods only. See the rollback section of docs/deploy-railway.md.
+
 ``--runtime-posture`` (run inside the deployed API container)
     Assert the dogfood posture that is no longer publicly observable: the
     public health projection omits the dogfood flags and the tool catalogs
@@ -1117,8 +1132,31 @@ def main(argv: list[str] | None = None) -> int:
                 )
             results.append(live_result)
         else:
-            print(f"{SKIP} live posture: no PUBLIC_URL and no --url")
-            results.append(not args.strict)
+            # An explicit expectation with nothing to check it against is a
+            # failure even without --strict: skipping would report a release
+            # identity or signing key as passed without a single request.
+            unchecked = [
+                flag
+                for flag, value in (
+                    ("--expected-version", args.expected_version),
+                    ("--expected-commit-sha", args.expected_commit_sha),
+                    ("--expected-signing-key-id", args.expected_signing_key_id),
+                    (
+                        "--expected-signing-public-key-sha256",
+                        args.expected_signing_public_key_sha256,
+                    ),
+                )
+                if value
+            ]
+            if unchecked:
+                print(
+                    f"{BAD} live posture: no PUBLIC_URL and no --url, so "
+                    f"{', '.join(unchecked)} cannot be checked"
+                )
+                results.append(False)
+            else:
+                print(f"{SKIP} live posture: no PUBLIC_URL and no --url")
+                results.append(not args.strict)
 
     if all(results):
         print("[preflight] all checks passed")
