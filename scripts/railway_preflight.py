@@ -340,6 +340,7 @@ def _canonical_public_url(value: str) -> str:
         or hostname == "localhost"
         or hostname.endswith(".localhost")
         or hostname.endswith(".internal")
+        or all(label.isdigit() for label in labels)
         or (address is not None and not address.is_global)
     ):
         raise ManifestError(
