@@ -365,11 +365,11 @@ def _write_retry_evidence(path: Path, document: dict[str, Any]) -> None:
         raise SmokeTestFailure("retry evidence file could not be written") from exc
 
 
-def _ledger_entry_ids(ledger: dict[str, Any]) -> frozenset[str]:
-    """Return a validated ledger-window identity snapshot."""
+def _ledger_entry_snapshots(ledger: dict[str, Any]) -> dict[str, str]:
+    """Return immutable canonical snapshots keyed by validated ledger ID."""
     entries = ledger.get("entries")
     require(isinstance(entries, list), "wallet ledger has no entry list")
-    entry_ids: set[str] = set()
+    snapshots: dict[str, str] = {}
     for entry in entries:
         require(isinstance(entry, dict), "wallet ledger contains a malformed entry")
         entry_id = entry.get("entry_id")
@@ -377,9 +377,40 @@ def _ledger_entry_ids(ledger: dict[str, Any]) -> frozenset[str]:
             isinstance(entry_id, str) and bool(entry_id),
             "wallet ledger contains an entry without an id",
         )
-        require(entry_id not in entry_ids, "wallet ledger contains duplicate entry ids")
-        entry_ids.add(entry_id)
-    return frozenset(entry_ids)
+        require(entry_id not in snapshots, "wallet ledger contains duplicate entry ids")
+        try:
+            snapshots[entry_id] = json.dumps(
+                entry,
+                ensure_ascii=False,
+                allow_nan=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        except (TypeError, ValueError) as exc:
+            raise SmokeTestFailure(
+                "wallet ledger contains a noncanonical entry"
+            ) from exc
+    return snapshots
+
+
+def _require_single_ledger_entry_added(
+    before: dict[str, str],
+    after: dict[str, str],
+    expected_entry_id: str,
+) -> None:
+    """Prove the first invocation added only its receipted ledger entry."""
+    require(
+        expected_entry_id not in before,
+        "receipt ledger entry existed before the first call",
+    )
+    require(
+        set(after) - set(before) == {expected_entry_id} and set(before).issubset(after),
+        "first call did not add exactly one receipt ledger entry",
+    )
+    require(
+        all(after[entry_id] == snapshot for entry_id, snapshot in before.items()),
+        "prior ledger entry changed during the first call",
+    )
 
 
 def run_constant_test(
@@ -559,7 +590,6 @@ def run_constant_test(
 
         # Invoke the governed tool (unique idempotency key per run)
         invoke_idempotency_key = f"constant-test-invoke-{run_id}"
-        print(f"[constant-test] invoking {governed_tool}", file=sys.stderr)
         governed_arguments = (
             tool_arguments
             if tool_arguments is not None
@@ -573,6 +603,20 @@ def run_constant_test(
             idempotency_key=invoke_idempotency_key,
             arguments=governed_arguments,
         )
+        ledger_path = f"/v1/billing/ledger/{wallet_id}"
+        ledger_snapshot_before_invoke: dict[str, str] | None = None
+        if retry_evidence_output is not None:
+            ledger_path += "?limit=200"
+            print("[constant-test] capturing pre-invocation ledger", file=sys.stderr)
+            ledger_before_invoke = _get_json(client, ledger_path, expected_status=200)
+            ledger_snapshot_before_invoke = _ledger_entry_snapshots(
+                ledger_before_invoke
+            )
+            require(
+                len(ledger_snapshot_before_invoke) < 200,
+                "retry proof ledger baseline is saturated",
+            )
+        print(f"[constant-test] invoking {governed_tool}", file=sys.stderr)
         first_call = _post_json(client, "/mcp/messages", call_body, expected_status=200)
         result = _first_jsonrpc_result(first_call)
         require(result["isError"] is False, "tool call failed")
@@ -683,13 +727,23 @@ def run_constant_test(
 
         # Check ledger debit
         print("[constant-test] verifying ledger debit", file=sys.stderr)
-        ledger_path = f"/v1/billing/ledger/{wallet_id}"
-        if retry_evidence_output is not None:
-            ledger_path += "?limit=200"
         ledger = _get_json(client, ledger_path, expected_status=200)
-        ledger_ids_before_replay = (
-            _ledger_entry_ids(ledger) if retry_evidence_output is not None else None
+        ledger_snapshot_after_success = (
+            _ledger_entry_snapshots(ledger)
+            if retry_evidence_output is not None
+            else None
         )
+        if retry_evidence_output is not None:
+            require(
+                ledger_snapshot_before_invoke is not None
+                and ledger_snapshot_after_success is not None,
+                "retry proof ledger snapshots are missing",
+            )
+            _require_single_ledger_entry_added(
+                ledger_snapshot_before_invoke,
+                ledger_snapshot_after_success,
+                str(receipt["ledger_entry_id"]),
+            )
         matching = [
             e for e in ledger["entries"] if e["entry_id"] == receipt["ledger_entry_id"]
         ]
@@ -709,6 +763,7 @@ def run_constant_test(
             client, "/mcp/messages", call_body, expected_status=200
         )
         replay_result = _first_jsonrpc_result(replay_call)
+        require(replay_result.get("isError") is False, "replay tool call failed")
         replay_receipt = replay_result["receipt"]
         require(
             replay_receipt["receipt_id"] == receipt["receipt_id"],
@@ -725,8 +780,8 @@ def run_constant_test(
                 "replay returned a different dispatch attempt",
             )
         ledger_after_replay = _get_json(client, ledger_path, expected_status=200)
-        ledger_ids_after_replay = (
-            _ledger_entry_ids(ledger_after_replay)
+        ledger_snapshot_after_replay = (
+            _ledger_entry_snapshots(ledger_after_replay)
             if retry_evidence_output is not None
             else None
         )
@@ -744,7 +799,7 @@ def run_constant_test(
         replay_spend_delta = Decimal("0")
         if retry_evidence_output is not None:
             require(
-                ledger_ids_after_replay == ledger_ids_before_replay,
+                ledger_snapshot_after_replay == ledger_snapshot_after_success,
                 "replay changed the wallet ledger",
             )
             permit_after_replay = _get_json(
@@ -861,7 +916,9 @@ def run_constant_test(
             ledger_after_cap_denial = _get_json(
                 client, ledger_path, expected_status=200
             )
-            ledger_ids_after_cap_denial = _ledger_entry_ids(ledger_after_cap_denial)
+            ledger_snapshot_after_cap_denial = _ledger_entry_snapshots(
+                ledger_after_cap_denial
+            )
             debits_after_cap_denial = len(
                 [
                     entry
@@ -874,7 +931,7 @@ def run_constant_test(
                 "fresh-key denial created a debit",
             )
             require(
-                ledger_ids_after_cap_denial == ledger_ids_before_replay,
+                ledger_snapshot_after_cap_denial == ledger_snapshot_after_success,
                 "fresh-key denial changed the wallet ledger",
             )
             print(
@@ -1094,8 +1151,27 @@ def _require_deliberate_production_target(
         )
 
 
+def _contains_credential_cli_option(argv: list[str]) -> bool:
+    """Detect credential-shaped options without parsing or echoing values."""
+    forbidden_options = ("--api-key", "--wallet-id", "--key-id")
+    return any(
+        argument == option or argument.startswith(f"{option}=")
+        for argument in argv
+        for option in forbidden_options
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point."""
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    if _contains_credential_cli_option(raw_argv):
+        print(
+            "\n[constant-test] configuration error: credential options are not "
+            "accepted; use CI_SMOKE_* environment variables",
+            file=sys.stderr,
+        )
+        return 2
+
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
         "--api-url",
@@ -1156,7 +1232,7 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="SHA-256 of the canonical approved tool arguments.",
     )
-    args = parser.parse_args(argv)
+    args = parser.parse_args(raw_argv)
 
     try:
         # Resolved before the production guard reads args.tool_args, so an
