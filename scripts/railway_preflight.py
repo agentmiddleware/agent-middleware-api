@@ -1161,9 +1161,9 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 1
 
-    # Release expectations and the manifest are inputs to the live check.
-    # --runtime-posture on its own deselects that check, so accepting them
-    # there would drop them silently and look like an identity check ran.
+    # Release expectations and the manifest are inputs to the live check. An
+    # explicit non-live selector on its own deselects that check, so accepting
+    # them there would look like an identity check ran when it did not.
     if (
         (args.runtime_posture or args.railway_source_unbound)
         and not args.live
@@ -1194,6 +1194,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.manifest:
         try:
             manifest = _load_customer_manifest(args.manifest)
+            if args.railway_source_unbound and (
+                args.railway_project.strip() != manifest.railway_project_id
+                or args.railway_environment.strip() != manifest.environment
+            ):
+                print(
+                    f"{BAD} Railway source target does not match the customer manifest"
+                )
+                return 1
             tree_head = _tree_head()
             tree_commit_sha = _tree_commit_sha()
             tree_is_clean = _tree_is_clean()
