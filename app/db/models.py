@@ -183,7 +183,7 @@ class DailyBalanceSnapshot(SQLModel, table=True):
 
     snapshot_id: str = Field(primary_key=True, max_length=50)
     wallet_id: str = Field(max_length=50, foreign_key="wallets.wallet_id", index=True)
-    date: datetime = Field(index=True)
+    date: datetime = Field(sa_type=NaiveUTCDateTime, index=True)
     opening_balance: Decimal = Field(decimal_places=8)
     closing_balance: Decimal = Field(decimal_places=8)
     total_credits: Decimal = Field(default=Decimal("0"), decimal_places=8)
@@ -626,7 +626,7 @@ class ContentScheduleModel(SQLModel, table=True):
         index=True,
     )
     platform: str = Field(max_length=50, index=True)
-    recommended_time: datetime = Field(index=True)
+    recommended_time: datetime = Field(sa_type=NaiveUTCDateTime, index=True)
     confidence: float = Field(default=0.0)
     reasoning: str = Field(default="", max_length=2000)
     estimated_views: Optional[int] = Field(default=None)
