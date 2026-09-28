@@ -1,0 +1,12 @@
+[
+  {
+    "version": "8.2.1",
+    "url": "https://download.redis.io/releases/redis-8.2.1.tar.gz",
+    "sha256": "e2c1cb9dd4180a35b943b85dfc7dcdd42566cdbceca37d0d0b14c21731582d3e"
+  },
+  {
+    "version": "8.2.9",
+    "url": "https://download.redis.io/releases/redis-8.2.9.tar.gz",
+    "sha256": "531b314e5557ad76d941f605b3e3162ac61dc141f37c407e1f91fcfe17ea8c30"
+  }
+]
