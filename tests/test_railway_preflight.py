@@ -516,6 +516,43 @@ def test_railway_source_check_rejects_duplicate_json_keys(
     assert bound_value not in output
 
 
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_railway_source_check_rejects_nonstandard_json_constants(
+    unbound_railway_status,
+    constant,
+    monkeypatch,
+    capsys,
+):
+    status = json.dumps(unbound_railway_status)
+    status = status.replace(
+        '"image": null',
+        f'"image": null, "providerMeta": {constant}',
+        1,
+    )
+    monkeypatch.setattr(
+        preflight.subprocess,
+        "run",
+        lambda command, **_kwargs: preflight.subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=status,
+            stderr="",
+        ),
+    )
+
+    assert (
+        preflight.check_railway_source_unbound(
+            project_id=_RAILWAY_PROJECT,
+            environment=_RAILWAY_ENVIRONMENT,
+            service=_RAILWAY_SERVICE,
+        )
+        is False
+    )
+    output = capsys.readouterr().out
+    assert "could not be verified" in output
+    assert constant not in output
+
+
 def test_railway_source_check_hides_cli_failure_output(monkeypatch, capsys):
     secret = "railway_token=secret-token-shaped-value"
     monkeypatch.setattr(
