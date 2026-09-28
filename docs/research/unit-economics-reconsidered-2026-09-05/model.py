@@ -223,12 +223,12 @@ def validate(evidence: dict, results: list) -> list[str]:
 
 
 def main() -> None:
-    evidence = json.loads((ROOT / "provider-usage-evidence.json").read_text())
+    evidence = json.loads((ROOT / "resource-cost-input.json").read_text())
     results = [account(s) for s in SCENARIOS]
     checks = validate(evidence, results)
     t = {}
     old, current = evidence["periods"]
-    names = ["Postgres", "api-service", "Redis", "partner-mcp-pilot", "deleted service"]
+    names = ["database", "API", "cache", "pilot tool", "retired service"]
     t["OBSERVED"] = table(
         ["Service", "Previous period usage", "Current partial period usage"],
         [

@@ -9,10 +9,10 @@ packages were not moved, deleted, or modified during curation.
 | Directory | Disposition | Curated contents |
 | --- | --- | --- |
 | `paid-pilot-2026-09-08` | Retain as a reproducible pilot source package. | Offer, validation record, workbook generator, and document renderer. |
-| `pre-partner-readiness-2026-09-08` | Retain only the compact index layer. | Readiness and release decisions, check index, compact validation summaries, and secret-scan result. |
-| `release-followup-2026-09-09` | Retain only the portable Redis rehearsal core. | Redis source checksums, synthetic upgrade rehearsal, and its compact validation result. |
-| `unit-economics-2026-09-05` | Retain as superseded historical analysis. | Report, validation record, model and presentation source, inputs, and text/JSON/CSV outputs. |
-| `unit-economics-reconsidered-2026-09-05` | Retain as the canonical economics analysis. | Report, validation record, model and presentation source, inputs, sanitized provider observation, public runtime observation, and text/JSON/CSV outputs. |
+| `pre-partner-readiness-2026-09-08` | Retain only the authored index layer. | Readiness and release decisions with private evidence references removed. |
+| `release-followup-2026-09-09` | Retain only the portable Redis rehearsal core. | Redis source checksums and the synthetic upgrade rehearsal. |
+| `unit-economics-2026-09-05` | Retain as superseded historical analysis. | Report, validation record, model and presentation source, and editable assumptions. |
+| `unit-economics-reconsidered-2026-09-05` | Retain as the canonical economics analysis. | Report, validation record, model and presentation source, and a coarse sanitized resource-cost input. |
 
 The reconsidered economics report supersedes the original report's weighting
 and recommendation. The original remains useful for provenance and comparison.
@@ -22,8 +22,9 @@ and recommendation. The original remains useful for provenance and comparison.
 The curation intentionally excludes generated PDF, HTML, and XLSX files;
 bytecode; raw logs and JUnit XML; screenshots and browser snapshots; local
 temporary paths; provider deployment/configuration readbacks; and artifacts
-containing point-in-time provider object identifiers. Generated presentation
-files can be rebuilt from the retained source when needed. Filled pilot
+containing point-in-time provider object identifiers. Generated model outputs
+and presentation files are not tracked; they can be rebuilt from the retained
+source when needed. Filled pilot
 trackers, customer data, credentials, and private correspondence must remain
 outside the repository.
 

@@ -6,12 +6,10 @@ This curated subset retains the portable, synthetic Redis upgrade rehearsal:
   checksums.
 - `redis_upgrade_rehearsal.py` runs the local, loopback-only persistence and
   reconnect exercise.
-- `redis-upgrade-validation.json` records the historical result and its limits.
 
 The source archives and built Redis binaries are not vendored. The rehearsal
 expects them under `/tmp/amw-redis-upgrade-20260909/`, as documented by the
-script. Its JSON output overwrites `redis-upgrade-validation.json`; preserve the
-historical result before rerunning if the comparison matters.
+script. Its generated JSON result is intentionally untracked.
 
 Provider readbacks, deployment/configuration identifiers, production state,
 staged-change snapshots, logs, and JUnit XML are intentionally excluded. This

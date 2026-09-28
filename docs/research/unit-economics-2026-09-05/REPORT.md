@@ -617,7 +617,7 @@ Do not weaken idempotency, dispatch fencing, receipts, tenant boundaries, or evi
 
 ## 26. Model files, reproducibility, and interpretation
 
-The companion model uses the Python standard library and no application imports. It never reads credentials, customer records, or live services. Every scenario input is editable in [assumptions.json](../../../docs/research/unit-economics-2026-09-05/assumptions.json). The calculations are in [model.py](../../../docs/research/unit-economics-2026-09-05/model.py), with [scenario CSV](../../../docs/research/unit-economics-2026-09-05/scenarios.csv), [JSON results](../../../docs/research/unit-economics-2026-09-05/model-results.json), and [generated tables](../../../docs/research/unit-economics-2026-09-05/calculated-tables.md).
+The companion model uses the Python standard library and no application imports. It never reads credentials, customer records, or live services. Every scenario input is editable in [assumptions.json](../../../docs/research/unit-economics-2026-09-05/assumptions.json), and the calculations are in [model.py](../../../docs/research/unit-economics-2026-09-05/model.py). The scenario CSV, JSON results, and calculated tables are generated on demand and intentionally untracked.
 
 From the repository root:
 
