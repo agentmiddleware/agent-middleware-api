@@ -20,7 +20,11 @@ From the repository root:
 
     .venv/bin/python docs/research/unit-economics-reconsidered-2026-09-05/model.py
 
-The model reads the saved, sanitized provider usage observation and writes assumptions.json, model-results.json, scenarios.csv, and calculated-tables.md. It neither queries customer data nor imports the application.
+The model reads `resource-cost-input.json`, a coarse curated derivative with
+generic service categories, rounded amounts, and no provider object identifiers
+or exact billing timestamps. It writes `assumptions.json`, `model-results.json`,
+`scenarios.csv`, and `calculated-tables.md`; those outputs are intentionally
+untracked. It neither queries customer data nor imports the application.
 
 The generated HTML/PDF presentation files are intentionally excluded from this
 curated source set. Rebuild them with the retained scripts by passing installed

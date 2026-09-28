@@ -64,20 +64,26 @@ The repository already sets that partner milestone and requires a commercial com
 
 ## 4. Actual resource usage: what the current project costs
 
-The read-only Railway project usage query returned the following values. The previous period runs **August 1, 2026 at 03:19:17 UTC through September 1 at 03:19:17 UTC**. The current period begins September 1 and ends October 1 at the same time; the current numbers are a partial-period snapshot retrieved September 6 around 05:23 UTC.
+The read-only provider usage query returned the following values. The curated
+model input keeps only coarse period labels, generic service categories, and
+amounts rounded to four decimals; it omits account, project, service, and exact
+billing-window identifiers.
 
 <!-- BEGIN OBSERVED -->
 | Service | Previous period usage | Current partial period usage |
 | --- | --- | --- |
-| Postgres | $1.68 | $0.42 |
-| api-service | $1.38 | $0.24 |
-| Redis | $0.13 | $0.02 |
-| partner-mcp-pilot | $0.43 | $0.08 |
-| deleted service | $0.06 | $0.00 |
+| database | $1.68 | $0.42 |
+| API | $1.38 | $0.24 |
+| cache | $0.13 | $0.02 |
+| pilot tool | $0.43 | $0.08 |
+| retired service | $0.06 | $0.00 |
 | Project total | $3.68 | $0.76 |
 <!-- END OBSERVED -->
 
-The exact previous total is **$3.6773850963**; the current partial total is **$0.7592786962**. Rounding displayed service totals can cause a one-cent difference from the displayed project sum. The saved evidence retains the original precision and the model reconciles every service subtotal.
+The curated previous total is **$3.6773**; the current partial total is
+**$0.7593**. Rounding displayed service totals can cause a one-cent difference
+from the displayed project sum. The model reconciles every retained service
+subtotal.
 
 The core active API, PostgreSQL, and Redis services account for approximately **$3.19** of the previous period. The separate demonstration upstream contributes approximately **$0.43**; deleted services contribute approximately **$0.06**. That upstream is part of demonstrating the product, whereas a commercial buyer may pay for its own actual tool. Keeping those categories separate prevents accidental tool-cost resale assumptions.
 
@@ -87,7 +93,7 @@ Memory dominates the active API and database resource charges in this observatio
 
 The observation also contains varying service lifetimes and activity within the month. It should not be advertised as a normalized monthly quote for a fresh always-on customer stack. The next commercial pilot should reconcile its actual invoice and resource period, including backups and any restored sibling service used during qualification.
 
-[Sanitized provider evidence](../../../docs/research/unit-economics-reconsidered-2026-09-05/provider-usage-evidence.json).
+[Curated resource-cost input](../../../docs/research/unit-economics-reconsidered-2026-09-05/resource-cost-input.json).
 
 ## 5. Why there is still no measured cost per action
 
@@ -103,7 +109,8 @@ A seven-day resource query returned current CPU and memory summaries. A seven-da
 
 The live deployment reports commit **2880ca706d2f4779876097e9414b6f1fab691a3e**; the reviewed local source is **795cd9b3c691a2c697bfef364546940dd5780e93**. This is why the report treats current source behavior and current live observations as separate evidence.
 
-[Saved runtime response with metric scopes](../../../docs/research/unit-economics-reconsidered-2026-09-05/runtime-evidence.json), [public health endpoint](https://api.thisisatest.tech/health/dependencies).
+The raw runtime response is intentionally not retained. Historical observation:
+[public health endpoint](https://api.thisisatest.tech/health/dependencies).
 
 ## 6. Enterprise hosting: a decision to justify
 
@@ -552,16 +559,16 @@ Primary-source research and provider observations were collected September 5 Pac
 
 | Source group | Primary references | Status |
 | --- | --- | --- |
-| Provider usage | Saved project-period CLI results with identifiers removed | Verified provider-reported usage; full invoice not verified |
-| Live demo | Saved public health response and metric scopes | Verified at timestamp; no customer-load inference |
+| Provider usage | Coarse curated model input with identifiers removed and amounts rounded | Derived from provider-reported usage; full invoice not verified |
+| Live demo | Public health response and metric scopes observed at the time | Historical observation; raw response omitted; no customer-load inference |
 | Product contract | Pricing, billing engine, failure semantics, deployment SOP, license | Inspected local source at stated commit; different observed live commit |
 | Problem evidence | Stripe 402, CrewAI 5802, LangGraph 7417, OpenBB 7455 | Attributed reports; independence and buying intent qualified |
 | Alternatives | AWS, Portkey, Bindfort, Permission Protocol, AgentOracle, ABOM | Published prices/status; behavior and paid adoption not tested |
-| Scenarios | Python model, JSON inputs, CSV and generated tables | Reproducible arithmetic; not financial actuals |
+| Scenarios | Python model and curated JSON input | Reproducible arithmetic; generated outputs untracked; not financial actuals |
 
 Reproduction uses the standalone model, report builder, and browser export script. These helpers import no application code and change no customer billing, infrastructure, or release settings. HTML includes an editable calculator; PDF preserves the report and tables for sharing.
 
-[Model](../../../docs/research/unit-economics-reconsidered-2026-09-05/model.py), [assumptions](../../../docs/research/unit-economics-reconsidered-2026-09-05/assumptions.json), [scenario CSV](../../../docs/research/unit-economics-reconsidered-2026-09-05/scenarios.csv), [validation record](../../../docs/research/unit-economics-reconsidered-2026-09-05/VALIDATION.md).
+[Model](../../../docs/research/unit-economics-reconsidered-2026-09-05/model.py), [curated resource-cost input](../../../docs/research/unit-economics-reconsidered-2026-09-05/resource-cost-input.json), [validation record](../../../docs/research/unit-economics-reconsidered-2026-09-05/VALIDATION.md). The model generates assumptions, scenario CSV, JSON results, and calculated tables on demand; those derived files are intentionally untracked.
 
 **Files changed:** a new reconsidered research package; the earlier report is retained as historical context.
 

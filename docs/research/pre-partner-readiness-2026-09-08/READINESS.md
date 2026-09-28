@@ -11,7 +11,8 @@ The critical distinction is between a tested source tree and the service a partn
 - Corrected candidate: `ff8182bcc9011c052b412e23eff20875d6f650b8`.
 - [Draft PR #417](https://github.com/PetrefiedThunder/agent-middleware-api/pull/417): 23 successful hosted checks, none failed or pending at final readback. The PR remains a draft and is not merged or deployed.
 - Isolated checkout: historical disposable checkout, not retained in this curated set.
-- Packaged evidence: the raw JUnit and provider evidence directories are not retained here. [validation.json](validation.json) and [checks.csv](checks.csv) preserve the compact result index and JUnit hashes.
+- Packaged evidence: the raw JUnit, provider evidence, and generated validation
+  indexes are not retained in this curated source set.
 - Existing economics reports and the pilot workbook remain in the original checkout. No customer actuals or partner acceptance rows were filled using synthetic results.
 
 The implementation is limited to validation tooling and documentation. No application route, billing rule, database schema, authorization behavior, deployed configuration, or product capability was changed by this PR. Main advanced during preparation; the candidate was rebased and the full application suite, PostgreSQL checks, release gate, dependency audit, HTTP replay, restore, and site checks were repeated in a fresh application environment. SDK and wrapper source trees were unchanged, and hosted CI repeated those package checks. The maintenance work fits the existing customer-validation freeze.
@@ -70,7 +71,8 @@ The SDK and wrapper counts prove installation and their automated contracts. The
 
 The 16 opt-in crash cases, 17 row-lock cases, five PostgreSQL datetime cases, and one PostgreSQL rapid-fire accounting case were subsequently exercised with real PostgreSQL. The opt-in constant-loop case was subsequently exercised over live local HTTP. The Linux-only YAML check was covered locally with direct parsing plus actionlint, and the workflow ran in hosted CI. One optional Playwright bridge test remains outside the local run; it belongs to a dormant/proof browser capability outside this pilot. The marketing site's real browser checks were executed separately. Five production-posture cases were deselected from the ordinary suite and passed in their dedicated posture.
 
-No skipped case is counted as a passing test. Local runtime versions and individual result files are listed in [validation.json](validation.json).
+No skipped case is counted as a passing test. The generated validation index and
+individual result files are intentionally not retained in this curated source set.
 
 ## Live HTTP handoff and restart rehearsal
 

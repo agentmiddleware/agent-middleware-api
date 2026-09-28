@@ -1,0 +1,107 @@
+{
+  "classification": "Curated rounded planning input derived from authenticated provider observations; not a raw provider response, invoice, or customer benchmark",
+  "periods": [
+    {
+      "period": "previous",
+      "services": [
+        {
+          "name": "database",
+          "backupDollars": 0.1016,
+          "cpuDollars": 0.1453,
+          "egressDollars": 0.0368,
+          "memoryDollars": 1.3679,
+          "volumeDollars": 0.0263,
+          "totalDollars": 1.6779
+        },
+        {
+          "name": "API",
+          "backupDollars": 0,
+          "cpuDollars": 0.035,
+          "egressDollars": 0.003,
+          "memoryDollars": 1.3388,
+          "volumeDollars": 0,
+          "totalDollars": 1.3768
+        },
+        {
+          "name": "pilot tool",
+          "backupDollars": 0,
+          "cpuDollars": 0.0215,
+          "egressDollars": 0,
+          "memoryDollars": 0.413,
+          "volumeDollars": 0,
+          "totalDollars": 0.4345
+        },
+        {
+          "name": "cache",
+          "backupDollars": 0,
+          "cpuDollars": 0.068,
+          "egressDollars": 0,
+          "memoryDollars": 0.0561,
+          "volumeDollars": 0.0077,
+          "totalDollars": 0.1318
+        },
+        {
+          "name": "retired service",
+          "backupDollars": 0,
+          "cpuDollars": 0.0175,
+          "egressDollars": 0,
+          "memoryDollars": 0.0208,
+          "volumeDollars": 0.007,
+          "totalDollars": 0.0453
+        },
+        {
+          "name": "retired service",
+          "backupDollars": 0,
+          "cpuDollars": 0,
+          "egressDollars": 0.0001,
+          "memoryDollars": 0,
+          "volumeDollars": 0.0109,
+          "totalDollars": 0.011
+        }
+      ],
+      "project_usage_usd": 3.6773
+    },
+    {
+      "period": "current",
+      "services": [
+        {
+          "name": "database",
+          "backupDollars": 0.0429,
+          "cpuDollars": 0.0376,
+          "egressDollars": 0.0101,
+          "memoryDollars": 0.3202,
+          "volumeDollars": 0.0053,
+          "totalDollars": 0.4161
+        },
+        {
+          "name": "API",
+          "backupDollars": 0,
+          "cpuDollars": 0.0071,
+          "egressDollars": 0.0002,
+          "memoryDollars": 0.2295,
+          "volumeDollars": 0,
+          "totalDollars": 0.2368
+        },
+        {
+          "name": "pilot tool",
+          "backupDollars": 0,
+          "cpuDollars": 0.0045,
+          "egressDollars": 0,
+          "memoryDollars": 0.0794,
+          "volumeDollars": 0,
+          "totalDollars": 0.0839
+        },
+        {
+          "name": "cache",
+          "backupDollars": 0,
+          "cpuDollars": 0.012,
+          "egressDollars": 0,
+          "memoryDollars": 0.0092,
+          "volumeDollars": 0.0013,
+          "totalDollars": 0.0225
+        }
+      ],
+      "project_usage_usd": 0.7593
+    }
+  ]
+}
