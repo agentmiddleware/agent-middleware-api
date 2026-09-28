@@ -67,6 +67,11 @@ fail closed when their input is absent:
     Release expectations and ``--manifest`` belong to ``--live`` and are
     rejected unless ``--live`` is also given.
 
+``--railway-source-unbound`` (requires explicit target arguments)
+    Read Railway's provider status and fail closed unless exactly one target
+    environment and service report explicit null repository and image sources.
+    This check does not change or disconnect provider settings.
+
 ``--manifest`` (optional non-secret JSON)
     Bind the checks to one managed single-tenant deployment. The manifest
     supplies the public origin, expected commit, Alembic revision, and signing
@@ -105,6 +110,11 @@ Usage::
     # docs/deploy-railway.md instead):
     railway ssh --service api-service --environment production -- \
       python scripts/railway_preflight.py --db --runtime-posture --strict
+
+    # Read-only provider-source gate immediately before deployment:
+    python scripts/railway_preflight.py --railway-source-unbound \
+      --railway-project 11111111-1111-4111-8111-111111111111 \
+      --railway-environment production --railway-service api-service
 
     # Managed single-tenant gate (URL and commit come from the manifest):
     python scripts/railway_preflight.py --live --strict \
@@ -258,6 +268,115 @@ def _tree_is_clean() -> bool:
     except (OSError, subprocess.CalledProcessError) as exc:
         raise RuntimeError("unable to inspect the release checkout") from exc
     return not status.strip()
+
+
+def validate_railway_source_unbound(
+    document: object,
+    *,
+    project_id: str,
+    environment: str,
+    service: str,
+) -> bool:
+    """Return whether one exact Railway service has no provider source."""
+    if not isinstance(document, Mapping) or document.get("id") != project_id:
+        return False
+
+    environments = document.get("environments")
+    if not isinstance(environments, Mapping):
+        return False
+    environment_edges = environments.get("edges")
+    if not isinstance(environment_edges, list):
+        return False
+
+    matching_environments: list[Mapping[str, object]] = []
+    for edge in environment_edges:
+        if not isinstance(edge, Mapping):
+            return False
+        node = edge.get("node")
+        if not isinstance(node, Mapping) or not isinstance(node.get("name"), str):
+            return False
+        if node["name"] == environment:
+            matching_environments.append(node)
+    if len(matching_environments) != 1:
+        return False
+
+    service_instances = matching_environments[0].get("serviceInstances")
+    if not isinstance(service_instances, Mapping):
+        return False
+    service_edges = service_instances.get("edges")
+    if not isinstance(service_edges, list):
+        return False
+
+    matching_services: list[Mapping[str, object]] = []
+    for edge in service_edges:
+        if not isinstance(edge, Mapping):
+            return False
+        node = edge.get("node")
+        if not isinstance(node, Mapping) or not isinstance(
+            node.get("serviceName"), str
+        ):
+            return False
+        if node["serviceName"] == service:
+            matching_services.append(node)
+    if len(matching_services) != 1:
+        return False
+
+    source = matching_services[0].get("source")
+    return (
+        isinstance(source, Mapping)
+        and "repo" in source
+        and "image" in source
+        and source["repo"] is None
+        and source["image"] is None
+    )
+
+
+def check_railway_source_unbound(
+    *, project_id: str, environment: str, service: str
+) -> bool:
+    """Fail closed unless Railway reports one explicitly unbound service."""
+    command = [
+        "railway",
+        "status",
+        "--project",
+        project_id,
+        "--environment",
+        environment,
+        "--json",
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            cwd=REPO_ROOT,
+            shell=False,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        print(f"{BAD} Railway service source could not be verified")
+        return False
+
+    if result.returncode != 0:
+        print(f"{BAD} Railway service source could not be verified")
+        return False
+    try:
+        document = json.loads(result.stdout)
+    except (TypeError, json.JSONDecodeError):
+        print(f"{BAD} Railway service source could not be verified")
+        return False
+    if not validate_railway_source_unbound(
+        document,
+        project_id=project_id,
+        environment=environment,
+        service=service,
+    ):
+        print(f"{BAD} Railway service source could not be verified")
+        return False
+
+    print(f"{OK} Railway service source is unbound")
+    return True
 
 
 def _canonical_public_url(value: str) -> str:
@@ -928,6 +1047,26 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--railway-source-unbound",
+        action="store_true",
+        help="verify the target Railway service has no repository or image source",
+    )
+    parser.add_argument(
+        "--railway-project",
+        default="",
+        help="exact Railway project id for --railway-source-unbound",
+    )
+    parser.add_argument(
+        "--railway-environment",
+        default="",
+        help="exact Railway environment for --railway-source-unbound",
+    )
+    parser.add_argument(
+        "--railway-service",
+        default="",
+        help="exact Railway service for --railway-source-unbound",
+    )
+    parser.add_argument(
         "--strict",
         action="store_true",
         help="treat a skipped check as a failure (for CI)",
@@ -946,13 +1085,41 @@ def main(argv: list[str] | None = None) -> int:
         or args.live
         or args.public_db
         or args.runtime_posture
+        or args.railway_source_unbound
         or args.expected_version
         or args.expected_commit_sha
         or signing_expectation_given
     ):
         print(
             f"{BAD} --manifest-only cannot be combined with --db, --live, "
-            "--public-db, --runtime-posture, or live release expectations"
+            "--public-db, --runtime-posture, --railway-source-unbound, or live "
+            "release expectations"
+        )
+        return 1
+
+    railway_target_given = any(
+        (
+            args.railway_project,
+            args.railway_environment,
+            args.railway_service,
+        )
+    )
+    if railway_target_given and not args.railway_source_unbound:
+        print(
+            f"{BAD} --railway-project, --railway-environment, and "
+            "--railway-service apply only to --railway-source-unbound"
+        )
+        return 1
+    if args.railway_source_unbound and not all(
+        (
+            args.railway_project.strip(),
+            args.railway_environment.strip(),
+            args.railway_service.strip(),
+        )
+    ):
+        print(
+            f"{BAD} --railway-source-unbound requires --railway-project, "
+            "--railway-environment, and --railway-service"
         )
         return 1
 
@@ -998,14 +1165,13 @@ def main(argv: list[str] | None = None) -> int:
     # --runtime-posture on its own deselects that check, so accepting them
     # there would drop them silently and look like an identity check ran.
     if (
-        args.runtime_posture
+        (args.runtime_posture or args.railway_source_unbound)
         and not args.live
         and (args.expected_version or args.expected_commit_sha or args.manifest)
     ):
         print(
             f"{BAD} --expected-version, --expected-commit-sha, and --manifest "
-            "apply only to --live; add --live or drop them from a "
-            "--runtime-posture run"
+            "apply only to --live; add --live or drop them from this run"
         )
         return 1
 
@@ -1014,7 +1180,9 @@ def main(argv: list[str] | None = None) -> int:
     # never runs by default. --public-db configures the database check, so it
     # always runs that check: combining it with another selector must never
     # switch off the fail-closed public-URL requirement.
-    selected = args.db or args.live or args.runtime_posture
+    selected = (
+        args.db or args.live or args.runtime_posture or args.railway_source_unbound
+    )
     run_db = not args.manifest_only and (args.db or args.public_db or not selected)
     run_live = not args.manifest_only and (args.live or not selected)
 
@@ -1071,6 +1239,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.manifest_only:
         print(f"{OK} customer manifest matches clean release checkout")
         return 0
+
+    if args.railway_source_unbound:
+        results.append(
+            check_railway_source_unbound(
+                project_id=args.railway_project.strip(),
+                environment=args.railway_environment.strip(),
+                service=args.railway_service.strip(),
+            )
+        )
 
     if run_db:
         database_url_load_failed = False

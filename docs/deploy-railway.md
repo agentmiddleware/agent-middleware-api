@@ -248,12 +248,20 @@ releases are operator-run from a clean exact-SHA checkout.**
 # From repository root, linked to the Railway service:
 set -euo pipefail
 DEPLOY_SHA="$(git rev-parse HEAD)"
+PROJECT_ID="${PROJECT_ID:?set PROJECT_ID to the intended Railway project UUID}"
+python3 scripts/railway_preflight.py --railway-source-unbound \
+  --railway-project "$PROJECT_ID" --railway-environment production \
+  --railway-service api-service
 RELEASE_CONTEXT="$(python3 scripts/prepare_railway_release.py --ref "$DEPLOY_SHA")"
 test -d "$RELEASE_CONTEXT"
 test "$(cat "$RELEASE_CONTEXT/.build_commit_sha")" = "$DEPLOY_SHA"
 railway up "$RELEASE_CONTEXT" --path-as-root --no-gitignore \
-  --service api-service --environment production --ci
+  --project "$PROJECT_ID" --service api-service --environment production --ci
 ```
+
+The provider-source preflight is read-only: it does not disconnect or mutate
+the service. Any missing, malformed, ambiguous, repository-bound, or
+image-bound provider status stops the release.
 
 That abbreviated command is appropriate only after the pre-deploy gates below.
 For a stack that may hold customer data, follow the complete
@@ -413,6 +421,13 @@ any check it ran fails, so it works as a gate in a shell or in CI:
   never falls back to the private `DATABASE_URL`; missing, local, or
   private-looking values fail closed without printing the URL. It always runs
   the database check, even when `--live` or `--runtime-posture` is also given.
+- **Railway provider source** (`--railway-source-unbound`, with explicit
+  `--railway-project`, `--railway-environment`, and `--railway-service`) —
+  reads `railway status --json` without mutating provider settings, selects
+  exactly one environment and service, and requires both `source.repo` and
+  `source.image` to be present and null. Missing, malformed, ambiguous, or
+  bound provider state fails closed. It composes with the database, live, and
+  runtime-posture selectors; by itself it runs only this provider check.
 - **Live posture** (needs `PUBLIC_URL` or `--url`) — sends only
   unauthenticated `GET`s and asserts the deployed service is healthy, reports
   `production_like=true`, has no unhealthy dependency, did **not** fall back
@@ -577,6 +592,9 @@ test "$ci_conclusion" = "success"
 python3 scripts/railway_preflight.py --manifest-only \
   --manifest "$MANIFEST" --url "$API_URL"
 python3 scripts/railway_preflight.py --live --strict --url "$API_URL"
+python3 scripts/railway_preflight.py --railway-source-unbound \
+  --railway-project "$PROJECT_ID" --railway-environment "$ENVIRONMENT" \
+  --railway-service "$SERVICE"
 control_plane="$(railway status \
   --project "$PROJECT_ID" --environment "$ENVIRONMENT" --json)"
 test "$(jq -r '.id' <<<"$control_plane")" = "$PROJECT_ID"
