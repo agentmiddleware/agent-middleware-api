@@ -1352,12 +1352,17 @@ def test_live_fails_on_bad_posture(monkeypatch, override):
 def _patch_get_with_discovery(monkeypatch, payload, discovery_payload):
     import httpx
 
-    def get(url, **_kwargs):
+    calls = []
+    monkeypatch.setenv("BOOTSTRAP_KEY", "operator-test-key")
+
+    def get(url, **kwargs):
+        calls.append((url, kwargs))
         if url.endswith("/v1/discover"):
             return _Response(discovery_payload)
         return _Response(payload)
 
     monkeypatch.setattr(httpx, "get", get)
+    return calls
 
 
 def test_live_passes_when_dogfood_flag_absent_and_discovery_clean(monkeypatch):
@@ -1366,13 +1371,67 @@ def test_live_passes_when_dogfood_flag_absent_and_discovery_clean(monkeypatch):
     payload = {
         key: value for key, value in HEALTHY.items() if key != "enable_dogfood_tool"
     }
-    _patch_get_with_discovery(
+    calls = _patch_get_with_discovery(
         monkeypatch,
         payload,
         {"mcp_tools": [{"service_id": "partner.echo"}]},
     )
 
     assert preflight.check_live("https://api.example.com") is True
+    assert calls == [
+        ("https://api.example.com/health/dependencies", {"timeout": 30}),
+        (
+            "https://api.example.com/v1/discover",
+            {"headers": {"X-API-Key": "operator-test-key"}, "timeout": 30},
+        ),
+    ]
+
+
+def test_live_fails_closed_without_operator_credential(monkeypatch, capsys):
+    import httpx
+
+    payload = {
+        key: value for key, value in HEALTHY.items() if key != "enable_dogfood_tool"
+    }
+    calls = []
+    monkeypatch.delenv("BOOTSTRAP_KEY", raising=False)
+
+    def get(url, **kwargs):
+        calls.append((url, kwargs))
+        return _Response(payload)
+
+    monkeypatch.setattr(httpx, "get", get)
+
+    assert preflight.check_live("https://api.example.com") is False
+    assert calls == [("https://api.example.com/health/dependencies", {"timeout": 30})]
+    assert "BOOTSTRAP_KEY is required" in capsys.readouterr().out
+
+
+def test_live_hides_rejected_operator_credential(monkeypatch, capsys):
+    import httpx
+
+    secret = "operator-secret-token-shaped-value"
+    payload = {
+        key: value for key, value in HEALTHY.items() if key != "enable_dogfood_tool"
+    }
+    monkeypatch.setenv("BOOTSTRAP_KEY", secret)
+
+    class _RejectedResponse:
+        def raise_for_status(self):
+            raise RuntimeError(f"rejected credential {secret}")
+
+    def get(url, **kwargs):
+        if url.endswith("/v1/discover"):
+            assert kwargs["headers"] == {"X-API-Key": secret}
+            return _RejectedResponse()
+        return _Response(payload)
+
+    monkeypatch.setattr(httpx, "get", get)
+
+    assert preflight.check_live("https://api.example.com") is False
+    output = capsys.readouterr().out
+    assert "authenticated /v1/discover could not be checked" in output
+    assert secret not in output
 
 
 @pytest.mark.parametrize(
@@ -1404,6 +1463,7 @@ def test_live_fails_when_dogfood_tool_exposed_in_discovery(monkeypatch):
     payload = {
         key: value for key, value in HEALTHY.items() if key != "enable_dogfood_tool"
     }
+    monkeypatch.setenv("BOOTSTRAP_KEY", "operator-test-key")
 
     def get(url, **_kwargs):
         if url.endswith("/v1/discover"):
@@ -1421,6 +1481,7 @@ def test_live_fails_when_dogfood_flag_absent_and_discovery_unreachable(monkeypat
     payload = {
         key: value for key, value in HEALTHY.items() if key != "enable_dogfood_tool"
     }
+    monkeypatch.setenv("BOOTSTRAP_KEY", "operator-test-key")
 
     def get(url, **_kwargs):
         if url.endswith("/v1/discover"):
