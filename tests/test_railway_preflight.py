@@ -40,29 +40,32 @@ def clean_release_checkout(monkeypatch):
     monkeypatch.setattr(preflight, "_tree_is_clean", lambda: True)
 
 
+def _dns_answer(address, *, port=443):
+    family = socket.AF_INET6 if ":" in address else socket.AF_INET
+    socket_address = (
+        (address, port, 0, 0) if family == socket.AF_INET6 else (address, port)
+    )
+    return (family, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", socket_address)
+
+
 @pytest.fixture(autouse=True)
 def deterministic_public_dns(monkeypatch):
     """Keep credential-routing tests independent of the machine's DNS."""
     answers = {
-        "api.example.com": ("93.184.216.34",),
-        "127.0.0.1.nip.io": ("127.0.0.1",),
+        "api.example.com": (
+            _dns_answer("93.184.216.34"),
+            _dns_answer("2606:2800:220:1:248:1893:25c8:1946"),
+        ),
+        "127.0.0.1.nip.io": (_dns_answer("127.0.0.1"),),
     }
 
     def getaddrinfo(host, port, *_args, **_kwargs):
         try:
-            addresses = answers[host]
+            records = answers[host]
         except KeyError as exc:
             raise socket.gaierror(f"unexpected test hostname: {host}") from exc
-        return [
-            (
-                socket.AF_INET,
-                socket.SOCK_STREAM,
-                socket.IPPROTO_TCP,
-                "",
-                (address, port),
-            )
-            for address in addresses
-        ]
+        assert port == 443
+        return records
 
     monkeypatch.setattr(socket, "getaddrinfo", getaddrinfo)
 
@@ -1380,6 +1383,206 @@ def test_live_fails_on_bad_posture(monkeypatch, override):
     assert preflight.check_live("https://api.example.com") is False
 
 
+def test_public_dns_resolution_accepts_global_ipv4_and_ipv6(monkeypatch):
+    records = [
+        _dns_answer("93.184.216.34"),
+        _dns_answer("2606:2800:220:1:248:1893:25c8:1946"),
+    ]
+    seen = []
+
+    def getaddrinfo(host, port, **kwargs):
+        seen.append((host, port, kwargs))
+        return records
+
+    monkeypatch.setattr(socket, "getaddrinfo", getaddrinfo)
+
+    assert preflight._resolve_global_hostname("api.example.com") == "93.184.216.34"
+    assert seen == [
+        (
+            "api.example.com",
+            443,
+            {
+                "family": socket.AF_UNSPEC,
+                "type": socket.SOCK_STREAM,
+                "proto": socket.IPPROTO_TCP,
+            },
+        )
+    ]
+
+
+def test_public_dns_resolution_accepts_global_ipv6_only(monkeypatch):
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: [
+            _dns_answer("2606:4700:4700::1111"),
+        ],
+    )
+
+    assert (
+        preflight._resolve_global_hostname("ipv6.example.com") == "2606:4700:4700::1111"
+    )
+
+
+@pytest.mark.parametrize(
+    "records",
+    [
+        [],
+        [_dns_answer("93.184.216.34"), _dns_answer("10.0.0.7")],
+        [_dns_answer("fe80::1")],
+        [
+            _dns_answer("2606:4700:4700::1111"),
+            _dns_answer("::1"),
+        ],
+        [_dns_answer("224.0.0.1")],
+        [_dns_answer("ff02::1")],
+        [(socket.AF_UNIX, socket.SOCK_STREAM, 0, "", ("ignored", 443))],
+        [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ())],
+        [
+            (
+                socket.AF_INET,
+                socket.SOCK_STREAM,
+                socket.IPPROTO_TCP,
+                "",
+                ("2606:4700:4700::1111", 443),
+            )
+        ],
+        [
+            (
+                socket.AF_INET6,
+                socket.SOCK_STREAM,
+                socket.IPPROTO_TCP,
+                "",
+                ("93.184.216.34", 443, 0, 0),
+            )
+        ],
+    ],
+    ids=[
+        "no_answers",
+        "mixed_public_private",
+        "link_local_ipv6",
+        "mixed_global_ipv6_loopback",
+        "multicast_ipv4",
+        "multicast_ipv6",
+        "unsupported_family",
+        "malformed_socket_address",
+        "ipv4_family_with_ipv6_address",
+        "ipv6_family_with_ipv4_address",
+    ],
+)
+def test_public_dns_resolution_rejects_unsafe_or_malformed_answers(
+    monkeypatch,
+    records,
+):
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: records,
+    )
+
+    assert preflight._resolve_global_hostname("api.example.com") is None
+
+
+def test_public_dns_resolution_fails_closed_on_resolver_error(monkeypatch):
+    def getaddrinfo(*_args, **_kwargs):
+        raise socket.gaierror("resolver unavailable")
+
+    monkeypatch.setattr(socket, "getaddrinfo", getaddrinfo)
+
+    assert preflight._resolve_global_hostname("api.example.com") is None
+
+
+def test_authenticated_discovery_pins_address_and_preserves_host_and_sni():
+    import httpx
+
+    captured = []
+
+    def handler(request):
+        captured.append(request)
+        return httpx.Response(200, json={"mcp_tools": []})
+
+    body = preflight._fetch_authenticated_discovery(
+        "https://api.example.com",
+        "2606:4700:4700::1111",
+        "operator-test-key",
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert body == {"mcp_tools": []}
+    assert len(captured) == 1
+    request = captured[0]
+    assert request.url == httpx.URL("https://[2606:4700:4700::1111]/v1/discover")
+    assert request.headers["Host"] == "api.example.com"
+    assert request.headers["X-API-Key"] == "operator-test-key"
+    assert request.extensions["sni_hostname"] == "api.example.com"
+
+
+def test_authenticated_discovery_rejects_redirect_without_following_it():
+    import httpx
+
+    captured = []
+
+    def handler(request):
+        captured.append(request)
+        return httpx.Response(
+            302,
+            headers={"Location": "https://attacker.example/v1/discover"},
+        )
+
+    with pytest.raises(RuntimeError, match="redirect"):
+        preflight._fetch_authenticated_discovery(
+            "https://api.example.com",
+            "93.184.216.34",
+            "operator-test-key",
+            transport=httpx.MockTransport(handler),
+        )
+
+    assert len(captured) == 1
+
+
+def test_live_resolves_once_and_uses_the_validated_address(monkeypatch):
+    import httpx
+
+    payload = {
+        key: value for key, value in HEALTHY.items() if key != "enable_dogfood_tool"
+    }
+    resolver_calls = 0
+    fetch_calls = []
+    monkeypatch.setenv("BOOTSTRAP_KEY", "operator-test-key")
+    monkeypatch.setenv("PUBLIC_URL", "https://api.example.com")
+
+    def getaddrinfo(*_args, **_kwargs):
+        nonlocal resolver_calls
+        resolver_calls += 1
+        if resolver_calls == 1:
+            return [_dns_answer("93.184.216.34")]
+        return [_dns_answer("127.0.0.1")]
+
+    def get(url, **_kwargs):
+        if url.endswith("/v1/discover"):
+            pytest.fail("discovery must use the pinned transport")
+        return _Response(payload)
+
+    def fetch(origin, pinned_address, bootstrap_key, **_kwargs):
+        fetch_calls.append((origin, pinned_address, bootstrap_key))
+        return {"mcp_tools": []}
+
+    monkeypatch.setattr(socket, "getaddrinfo", getaddrinfo)
+    monkeypatch.setattr(httpx, "get", get)
+    monkeypatch.setattr(
+        preflight,
+        "_fetch_authenticated_discovery",
+        fetch,
+        raising=False,
+    )
+
+    assert preflight.check_live("https://api.example.com") is True
+    assert resolver_calls == 1
+    assert fetch_calls == [
+        ("https://api.example.com", "93.184.216.34", "operator-test-key")
+    ]
+
+
 def _patch_get_with_discovery(monkeypatch, payload, discovery_payload):
     import httpx
 
@@ -1393,7 +1596,23 @@ def _patch_get_with_discovery(monkeypatch, payload, discovery_payload):
             return _Response(discovery_payload)
         return _Response(payload)
 
+    def fetch(origin, pinned_address, bootstrap_key, **_kwargs):
+        assert pinned_address == "93.184.216.34"
+        calls.append(
+            (
+                f"{origin}/v1/discover",
+                {"headers": {"X-API-Key": bootstrap_key}, "timeout": 30},
+            )
+        )
+        return discovery_payload
+
     monkeypatch.setattr(httpx, "get", get)
+    monkeypatch.setattr(
+        preflight,
+        "_fetch_authenticated_discovery",
+        fetch,
+        raising=False,
+    )
     return calls
 
 
@@ -1460,7 +1679,17 @@ def test_live_hides_rejected_operator_credential(monkeypatch, capsys):
             return _RejectedResponse()
         return _Response(payload)
 
+    def fetch(_origin, _pinned_address, bootstrap_key, **_kwargs):
+        assert bootstrap_key == secret
+        raise RuntimeError(f"rejected credential {secret}")
+
     monkeypatch.setattr(httpx, "get", get)
+    monkeypatch.setattr(
+        preflight,
+        "_fetch_authenticated_discovery",
+        fetch,
+        raising=False,
+    )
 
     assert preflight.check_live("https://api.example.com") is False
     output = capsys.readouterr().out
@@ -1481,6 +1710,9 @@ def test_live_hides_rejected_operator_credential(monkeypatch, capsys):
         ("https://127.1", "https://127.1"),
         ("https://foo.local", "https://foo.local"),
         ("https://foo.localdomain", "https://foo.localdomain"),
+        ("https://foo.localhost", "https://foo.localhost"),
+        ("https://foo.internal", "https://foo.internal"),
+        ("https://foo.home.arpa", "https://foo.home.arpa"),
         ("https://127.0.0.1.nip.io", "https://127.0.0.1.nip.io"),
         ("https://api.example.com/catalog", "https://api.example.com/catalog"),
         (
@@ -1514,12 +1746,49 @@ def test_live_never_sends_operator_credential_to_unapproved_origin(
         return _Response(payload)
 
     monkeypatch.setattr(httpx, "get", get)
+    monkeypatch.setattr(
+        preflight,
+        "_fetch_authenticated_discovery",
+        lambda *_args, **_kwargs: pytest.fail("authenticated discovery must not run"),
+        raising=False,
+    )
 
     assert preflight.check_live(target_url) is False
     assert calls == [(f"{target_url}/health/dependencies", {"timeout": 30})]
     output = capsys.readouterr().out
     assert "approved canonical HTTPS origin" in output
     assert secret not in output
+
+
+def test_live_rejects_private_dns_before_reading_operator_credential(
+    monkeypatch,
+    capsys,
+):
+    import httpx
+
+    target_url = "https://127.0.0.1.nip.io"
+    payload = {
+        key: value for key, value in HEALTHY.items() if key != "enable_dogfood_tool"
+    }
+    calls = []
+    monkeypatch.setenv("PUBLIC_URL", target_url)
+    original_getenv = preflight.os.getenv
+
+    def getenv(name, default=None):
+        if name == "BOOTSTRAP_KEY":
+            pytest.fail("BOOTSTRAP_KEY must not be read for an unsafe origin")
+        return original_getenv(name, default)
+
+    def get(url, **kwargs):
+        calls.append((url, kwargs))
+        return _Response(payload)
+
+    monkeypatch.setattr(preflight.os, "getenv", getenv)
+    monkeypatch.setattr(httpx, "get", get)
+
+    assert preflight.check_live(target_url) is False
+    assert calls == [(f"{target_url}/health/dependencies", {"timeout": 30})]
+    assert "approved canonical HTTPS origin" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(
@@ -1569,6 +1838,19 @@ def test_live_fails_when_dogfood_tool_exposed_in_discovery(monkeypatch):
         return _Response(payload)
 
     monkeypatch.setattr(httpx, "get", get)
+    monkeypatch.setattr(
+        preflight,
+        "_fetch_authenticated_discovery",
+        lambda *_args, **_kwargs: {
+            "mcp_tools": [
+                {
+                    "service_id": "partner.notes.write",
+                    "name": "partner.notes.write",
+                }
+            ]
+        },
+        raising=False,
+    )
 
     assert preflight.check_live("https://api.example.com") is False
 
@@ -1587,7 +1869,16 @@ def test_live_fails_when_dogfood_flag_absent_and_discovery_unreachable(monkeypat
             raise httpx.ConnectError("boom")
         return _Response(payload)
 
+    def fetch(*_args, **_kwargs):
+        raise httpx.ConnectError("boom")
+
     monkeypatch.setattr(httpx, "get", get)
+    monkeypatch.setattr(
+        preflight,
+        "_fetch_authenticated_discovery",
+        fetch,
+        raising=False,
+    )
 
     assert preflight.check_live("https://api.example.com") is False
 
