@@ -206,6 +206,76 @@ def test_retry_proof_refuses_to_overwrite_existing_evidence(tmp_path: Path) -> N
     assert output.read_text(encoding="utf-8") == "existing evidence\n"
 
 
+def test_retry_proof_cli_refuses_missing_confirmations_before_running(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    called = False
+
+    def fail_if_called(*_args: object, **_kwargs: object) -> None:
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(loop, "run_constant_test", fail_if_called)
+
+    exit_code = loop.main(
+        [
+            "--api-url",
+            PROJECT_URL,
+            "--tool",
+            TOOL,
+            "--tool-args",
+            json.dumps(PAYLOAD),
+            "--retry-evidence-output",
+            str(tmp_path / "proof.json"),
+        ]
+    )
+
+    assert exit_code == 2
+    assert called is False
+    assert "confirmation" in capsys.readouterr().err
+
+
+def test_retry_proof_cli_forwards_validated_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "proof.json"
+    digest = loop.retry_proof_payload_sha256(PAYLOAD)
+    seen: dict[str, object] = {}
+    monkeypatch.setenv("CI_SMOKE_AGENT_KEY", API_KEY)
+    monkeypatch.setenv("CI_SMOKE_WALLET_ID", WALLET_ID)
+    monkeypatch.setenv("CI_SMOKE_KEY_ID", KEY_ID)
+    monkeypatch.setattr(
+        loop,
+        "run_constant_test",
+        lambda *_args, **kwargs: seen.update(kwargs),
+    )
+
+    exit_code = loop.main(
+        [
+            "--api-url",
+            PROJECT_URL,
+            "--tool",
+            TOOL,
+            "--tool-args",
+            json.dumps(PAYLOAD),
+            "--retry-evidence-output",
+            str(output),
+            "--confirm-retry-target",
+            PROJECT_URL,
+            "--confirm-retry-tool",
+            TOOL,
+            "--confirm-retry-payload-sha256",
+            digest,
+        ]
+    )
+
+    assert exit_code == 0
+    assert seen["retry_evidence_output"] == output
+
+
 def test_retry_proof_proves_replay_and_cap_denial_without_secret_output(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
