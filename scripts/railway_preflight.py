@@ -33,14 +33,22 @@ fail closed when their input is absent:
     ``--expected-commit-sha`` add exact release-identity checks against both
     ``/health`` and ``/health/dependencies`` for the post-deploy gate; the
     commit expectation must be a full 40-character SHA.
+    ``--expected-signing-key-id`` and ``--expected-signing-public-key-sha256``
+    (given together, only with ``--live``, never with ``--manifest``, which
+    already carries both) require the trust-key document to publish that key
+    id exactly once as an active Ed25519 key with that public-key fingerprint.
+    They serve a live gate run from a checkout other than the release, such
+    as a rollback to a release whose own preflight predates the locked
+    catalogs.
 
 ``--runtime-posture`` (run inside the deployed API container)
     Assert the dogfood posture that is no longer publicly observable: the
     public health projection omits the dogfood flags and the tool catalogs
     require credentials, so this reads the service's configuration from the
-    process environment (never a ``.env`` file). It requires a Railway
-    runtime marker variable, a production-like ``ENVIRONMENT`` and both
-    dogfood flags false, so it fails closed on a machine outside Railway.
+    process environment (never a ``.env`` file, and it fails when one exists
+    where the service would read it). It requires a Railway runtime marker
+    variable, a production-like ``ENVIRONMENT`` and both dogfood flags false,
+    so it fails closed on a machine outside Railway.
     Release expectations and ``--manifest`` belong to ``--live`` and are
     rejected unless ``--live`` is also given.
 
@@ -664,7 +672,7 @@ def check_live(
         if health_signing_key_id is not None:
             if health_signing_key_id != expected_signing_key_id:
                 failures.append(
-                    "live health signing key id does not match the customer manifest"
+                    "live health signing key id does not match the expected signing key id"
                 )
 
         try:
@@ -677,7 +685,7 @@ def check_live(
         except Exception:
             failures.append(
                 "public trust-key document is unavailable; cannot verify the "
-                "manifest signing key id"
+                "expected signing key id"
             )
         else:
             published_keys = (
@@ -701,9 +709,7 @@ def check_live(
                 else []
             )
             if issuer != base:
-                failures.append(
-                    "public trust-key issuer does not match the customer manifest URL"
-                )
+                failures.append("public trust-key issuer does not match the live URL")
             if document_alg != "Ed25519":
                 failures.append("public trust-key document must use Ed25519")
             if len(active_matches) != 1 or not _matches_ed25519_public_key(
@@ -711,7 +717,7 @@ def check_live(
                 expected_signing_public_key_sha256 or "",
             ):
                 failures.append(
-                    "manifest signing key id is not published exactly once as an "
+                    "expected signing key id is not published exactly once as an "
                     "active Ed25519 key with valid public material"
                 )
 
@@ -728,12 +734,31 @@ def check_live(
         if dogfood_verified
         else "dogfood_tool=private (not publicly observable)"
     )
+    displayed_signing_key = (
+        f", signing key {expected_signing_key_id} published with the expected "
+        "public-key fingerprint"
+        if expected_signing_key_id is not None
+        else ""
+    )
     print(
         f"{OK} {base} healthy (v{displayed_version}{displayed_sha}, "
         f"proof_surfaces=false, {displayed_dogfood}, tool catalogs 401 "
-        "without credentials, no memory fallback)"
+        f"without credentials, no memory fallback{displayed_signing_key})"
     )
     return True
+
+
+def _service_dotenv_files() -> list[Path]:
+    """``.env`` files the running service could read, if any exist.
+
+    ``get_settings()`` reads ``.env`` relative to the process working
+    directory. The image runs the service from ``WORKDIR /app`` (the
+    entrypoint execs uvicorn without changing directory), which is this
+    script's ``REPO_ROOT`` inside the image. The current directory is checked
+    as well, in case the check runs from the same place as the service.
+    """
+    candidates = {REPO_ROOT / ".env", Path.cwd() / ".env"}
+    return sorted(path for path in candidates if path.exists())
 
 
 def check_runtime_posture() -> bool:
@@ -744,7 +769,9 @@ def check_runtime_posture() -> bool:
     image cannot contain one (``.dockerignore`` excludes ``.env`` and
     ``.env.*``), so inside the container this is exactly what the running
     service resolves, and a ``.env`` in some other working directory cannot
-    stand in for it.
+    stand in for it. If a ``.env`` file does exist where the service would
+    read it, the check fails: the service's configuration could then differ
+    from this process environment.
 
     Fails closed off Railway. A production-like ENVIRONMENT alone proves
     nothing, because every unrecognized value (``ENVIRONMENT=banana``
@@ -780,6 +807,12 @@ def check_runtime_posture() -> bool:
             "runtime posture: no Railway runtime marker "
             f"({', '.join(HOSTED_RUNTIME_MARKER_VARS)}) in this process — run "
             "--runtime-posture inside the deployed API container"
+        )
+    for dotenv in _service_dotenv_files():
+        failures.append(
+            f"runtime posture: {dotenv} exists and the service would read it "
+            "— this check reads only the process environment, so it cannot "
+            "vouch for that configuration; remove the file from the image"
         )
     if not is_production_like_environment(settings.ENVIRONMENT):
         failures.append(
@@ -847,6 +880,23 @@ def main(argv: list[str] | None = None) -> int:
         help="full 40-character commit SHA required from --live",
     )
     parser.add_argument(
+        "--expected-signing-key-id",
+        default=None,
+        help=(
+            "signing key id --live requires to be published exactly once as an "
+            "active Ed25519 key (with --expected-signing-public-key-sha256; not "
+            "with --manifest)"
+        ),
+    )
+    parser.add_argument(
+        "--expected-signing-public-key-sha256",
+        default=None,
+        help=(
+            "lowercase SHA-256 of that key's raw 32-byte public key, from the "
+            "key-generation record (with --expected-signing-key-id)"
+        ),
+    )
+    parser.add_argument(
         "--manifest",
         default="",
         help=(
@@ -872,6 +922,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.manifest_only and not args.manifest:
         print(f"{BAD} --manifest-only requires --manifest")
         return 1
+    signing_expectation_given = (
+        args.expected_signing_key_id is not None
+        or args.expected_signing_public_key_sha256 is not None
+    )
     if args.manifest_only and (
         args.db
         or args.live
@@ -879,12 +933,51 @@ def main(argv: list[str] | None = None) -> int:
         or args.runtime_posture
         or args.expected_version
         or args.expected_commit_sha
+        or signing_expectation_given
     ):
         print(
             f"{BAD} --manifest-only cannot be combined with --db, --live, "
             "--public-db, --runtime-posture, or live release expectations"
         )
         return 1
+
+    # Explicit signing-key expectations stand in for a manifest's, for a live
+    # gate run from another checkout. A present-but-empty value (a failed
+    # substitution in a shell) is rejected rather than read as "not given".
+    if signing_expectation_given:
+        if args.manifest:
+            print(
+                f"{BAD} --expected-signing-key-id and "
+                "--expected-signing-public-key-sha256 cannot be combined with "
+                "--manifest, which already supplies the signing key"
+            )
+            return 1
+        if not args.live:
+            print(
+                f"{BAD} --expected-signing-key-id and "
+                "--expected-signing-public-key-sha256 apply only to --live"
+            )
+            return 1
+        if (
+            args.expected_signing_key_id is None
+            or args.expected_signing_public_key_sha256 is None
+        ):
+            print(
+                f"{BAD} --expected-signing-key-id and "
+                "--expected-signing-public-key-sha256 must be given together"
+            )
+            return 1
+        if _SAFE_ID_RE.fullmatch(args.expected_signing_key_id) is None:
+            print(
+                f"{BAD} --expected-signing-key-id must be a lowercase safe identifier"
+            )
+            return 1
+        if _SHA256_RE.fullmatch(args.expected_signing_public_key_sha256) is None:
+            print(
+                f"{BAD} --expected-signing-public-key-sha256 must be a lowercase "
+                "SHA-256 digest"
+            )
+            return 1
 
     # Release expectations and the manifest are inputs to the live check.
     # --runtime-posture on its own deselects that check, so accepting them
@@ -1004,6 +1097,16 @@ def main(argv: list[str] | None = None) -> int:
                     expected_signing_key_id=manifest.signing_key_id,
                     expected_signing_public_key_sha256=(
                         manifest.signing_public_key_sha256
+                    ),
+                )
+            elif signing_expectation_given:
+                live_result = check_live(
+                    effective_url,
+                    expected_version=args.expected_version or None,
+                    expected_commit_sha=effective_commit_sha or None,
+                    expected_signing_key_id=args.expected_signing_key_id,
+                    expected_signing_public_key_sha256=(
+                        args.expected_signing_public_key_sha256
                     ),
                 )
             else:
