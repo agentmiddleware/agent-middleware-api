@@ -15,6 +15,7 @@ TRUST_COVERAGE_TESTS=(
   tests/test_mcp_dispatch_reconciliation.py
   tests/test_mcp_upstream_governed.py
   tests/test_upstream_mcp.py
+  tests/test_upstream_retry_cap_enforcement.py
   tests/test_refund_reconciliation.py
   tests/test_mcp_trust_mode.py
   tests/test_trust_operator_inspection.py

@@ -275,17 +275,17 @@ were refused pre-dispatch, with zero downstream executions and no net charge.
 Two details are worth stating plainly, because a reader would otherwise assume
 the opposite.
 
-**Two permit constraints are fail-closed on the upstream path rather than
-enforced.** A permit carrying `aggregate_value_cap` or `max_calls_per_tool` is
-refused for a configured upstream tool as
-`permit_constraint_unsupported_for_upstream`, not as
-`permit_aggregate_value_cap_exceeded` or `permit_max_calls_exceeded`. That is
-deliberate, and it is the safe direction: the remote path reserves credits
-atomically but does not reserve per-tool call slots or fold in-flight
-reservations into an aggregate cap, so a read-time check would let concurrent
-calls overshoot. Refusing the permit outright is the right call. It also means
-those two constraints do not do, on a remote tool, what their names suggest —
-so do not size a remote deployment around them.
+**One permit constraint is fail-closed on the upstream path rather than
+enforced.** A permit carrying `aggregate_value_cap` is refused for a configured
+upstream tool as `permit_constraint_unsupported_for_upstream`, not as
+`permit_aggregate_value_cap_exceeded`. That is deliberate, and it is the safe
+direction: the remote path reserves credits atomically but does not fold
+in-flight reservations into an aggregate cap, so a read-time check would let
+concurrent calls overshoot. Refusing the permit outright is the right call.
+Per-tool call caps (`max_calls_per_tool`) are now enforced atomically on remote
+tools via a durable `call_slot_reserved` marker linked to the prepared dispatch
+attempt, so cross-key retries are denied `permit_max_calls_exceeded` and
+same-key retries replay the stored receipt.
 
 **Argument shape is not part of the pre-dispatch check.** A call with `amount`
 missing, or with `amount` sent as the string `"5000"` instead of the integer,

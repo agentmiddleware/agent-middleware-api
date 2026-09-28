@@ -344,7 +344,6 @@ class WalletEngine:
             email=email,
             balance=initial_credits,
             lifetime_credits=initial_credits,
-            currency=currency,
             metadata_json=self._metadata_to_json(metadata),
             kyc_status=(
                 KYCStatus.PENDING.value if kyc_required else KYCStatus.NOT_REQUIRED.value

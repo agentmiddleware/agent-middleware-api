@@ -86,21 +86,23 @@ async def record_audit_event(
 ) -> AuditEvent:
     if event_id is not None and (not event_id or len(event_id) > 50):
         raise ValueError("audit_event_id_invalid")
-    model = ControlPlaneAuditEventModel(
-        event_id=event_id or f"audit-{uuid.uuid4().hex[:16]}",
-        **({"created_at": to_naive_utc(created_at)} if created_at is not None else {}),
-        event=event,
-        wallet_id=wallet_id,
-        tool=tool,
-        endpoint=endpoint,
-        auth_source=auth_source,
-        key_id=key_id,
-        policy_decision_id=policy_decision_id,
-        request_id=request_id,
-        ok=ok,
-        error=error,
-        metadata_json=json.dumps(metadata or {}, default=str),
-    )
+    model_kwargs: dict[str, Any] = {
+        "event_id": event_id or f"audit-{uuid.uuid4().hex[:16]}",
+        "event": event,
+        "wallet_id": wallet_id,
+        "tool": tool,
+        "endpoint": endpoint,
+        "auth_source": auth_source,
+        "key_id": key_id,
+        "policy_decision_id": policy_decision_id,
+        "request_id": request_id,
+        "ok": ok,
+        "error": error,
+        "metadata_json": json.dumps(metadata or {}, default=str),
+    }
+    if created_at is not None:
+        model_kwargs["created_at"] = to_naive_utc(created_at)
+    model = ControlPlaneAuditEventModel(**model_kwargs)
     from app.services.audit_chain import append_chained_audit_event
 
     # Sign + persist against the per-wallet chain head, which is advanced by an

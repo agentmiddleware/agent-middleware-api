@@ -1687,6 +1687,16 @@ async def _execute_registered_tool_inner(
                 # its owner/reconciler may classify it; this activation must
                 # not write a competing receipt or complete idempotency.
                 raise IdempotencyInProgressError("idempotency_in_progress") from None
+            except PermitWriteContendedError:
+                # The reservation's counter predicate lost to a concurrent
+                # move and its transaction rolled back: no attempt, no
+                # reservation, nothing to compensate. This is not a prepare
+                # failure to complete against the key (that would replay a
+                # transient loss forever for a call that is in budget and
+                # under its cap). It reaches the governed wrapper, which
+                # releases the in-progress record and answers -32005 so the
+                # caller retries the same key.
+                raise
             except Exception as exc:
                 reason = "upstream_prepare_failed"
                 audit_event = await _audit_mcp_invocation(

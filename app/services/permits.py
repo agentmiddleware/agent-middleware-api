@@ -218,6 +218,7 @@ def permit_model_to_response(model: PermitModel) -> PermitResponse:
         aggregate_value_cap=model.aggregate_value_cap,
         forbidden_fields=_loads_list(model.forbidden_fields_json or "[]"),
         recipient_domain=model.recipient_domain,
+        allow_identical_repeats=model.allow_identical_repeats,
     )
 
 
@@ -385,6 +386,7 @@ class PermitService:
             if request.forbidden_fields
             else None,
             recipient_domain=request.recipient_domain,
+            allow_identical_repeats=request.allow_identical_repeats,
         )
         # Sign the same dict verify reconstructs. Building it twice let a
         # field added on one path only keep verifying in tests that never
@@ -735,6 +737,7 @@ class PermitService:
             operation,
             max_attempts=_PERMIT_WRITE_MAX_ATTEMPTS,
             on_exhausted=lambda exc: PermitWriteContendedError(),
+            restart_on=lambda exc: isinstance(exc, PermitWriteContendedError),
         )
 
     async def _validate_model_for_action(
@@ -1354,36 +1357,95 @@ class PermitService:
                         # Another caller claimed it first; its transaction owns
                         # the single decrement.
                         return False
+                    # If this attempt holds a call slot, release it by decrementing
+                    # the tool_call_counts_json counter. This happens in the same
+                    # transaction as the budget release, so it's once-only.
+                    permit_update_values: dict[str, Any] = {
+                        "spent_credits": case(
+                            (
+                                cast(
+                                    ColumnElement[bool],
+                                    PermitModel.spent_credits
+                                    - attempt.credits_authorized
+                                    < Decimal("0"),
+                                ),
+                                Decimal("0"),
+                            ),
+                            else_=PermitModel.spent_credits
+                            - attempt.credits_authorized,
+                        ),
+                        "updated_at": now,
+                    }
+                    
+                    original_counts_json = None
+                    if attempt.call_slot_reserved:
+                        # Only release call slot if attempt never dispatched.
+                        # A dispatched attempt consumed its slot even if it later
+                        # errored and was refunded - the slot was used.
+                        if attempt.dispatched_at is None:
+                            # Pre-dispatch failure: release the call slot
+                            permit = await session.get(PermitModel, attempt.permit_id)
+                            if permit is not None:
+                                original_counts_json = permit.tool_call_counts_json
+                                current_counts = _loads_dict(original_counts_json or "{}")
+                                tool_name = attempt.public_tool_id
+                                if tool_name in current_counts:
+                                    current_count = current_counts[tool_name]
+                                    if isinstance(current_count, int) and current_count > 0:
+                                        updated_counts = dict(current_counts)
+                                        updated_counts[tool_name] = current_count - 1
+                                        permit_update_values["tool_call_counts_json"] = (
+                                            json.dumps(updated_counts)
+                                        )
+                    
                     # Atomic clamped decrement so a concurrent reservation on the
                     # same permit is not clobbered by a read-modify-write here.
+                    # Add CAS on tool_call_counts_json when releasing a slot to
+                    # prevent concurrent releases from clobbering each other.
+                    where_conditions = [
+                        cast(
+                            ColumnElement[bool],
+                            PermitModel.permit_id == attempt.permit_id,
+                        )
+                    ]
+                    if (
+                        attempt.call_slot_reserved
+                        and "tool_call_counts_json" in permit_update_values
+                    ):
+                        # Add optimistic lock: only succeed if counts haven't changed
+                        if original_counts_json is None:
+                            where_conditions.append(
+                                cast(
+                                    ColumnElement[bool],
+                                    cast(Any, PermitModel.tool_call_counts_json).is_(
+                                        None
+                                    ),
+                                )
+                            )
+                        else:
+                            where_conditions.append(
+                                cast(
+                                    ColumnElement[bool],
+                                    PermitModel.tool_call_counts_json
+                                    == original_counts_json,
+                                )
+                            )
+                    
                     released = await session.execute(
                         sa_update(PermitModel)
-                        .where(
-                            cast(
-                                ColumnElement[bool],
-                                PermitModel.permit_id == attempt.permit_id,
-                            )
-                        )
-                        .values(
-                            spent_credits=case(
-                                (
-                                    cast(
-                                        ColumnElement[bool],
-                                        PermitModel.spent_credits
-                                        - attempt.credits_authorized
-                                        < Decimal("0"),
-                                    ),
-                                    Decimal("0"),
-                                ),
-                                else_=PermitModel.spent_credits
-                                - attempt.credits_authorized,
-                            ),
-                            updated_at=now,
-                        )
+                        .where(*where_conditions)
+                        .values(**permit_update_values)
                         .execution_options(synchronize_session=False)
                     )
                     if (cast(Any, released).rowcount or 0) == 0:
-                        raise PermitError("permit_not_found")
+                        # CAS failed - either permit doesn't exist or counts changed.
+                        # Check if permit exists to distinguish the cases.
+                        check_permit = await session.get(PermitModel, attempt.permit_id)
+                        if check_permit is None:
+                            raise PermitError("permit_not_found")
+                        # Permit exists but CAS failed - counts changed concurrently.
+                        # Raise a retryable error so _run_with_write_retry retries.
+                        raise PermitWriteContendedError()
                     # budget_released_at was already set by the guarded claim
                     # above; refresh the identity-mapped instance so callers
                     # holding it observe the committed value.
@@ -1838,6 +1900,8 @@ class PermitService:
             payload["forbidden_fields"] = forbidden
         if model.recipient_domain:
             payload["recipient_domain"] = model.recipient_domain
+        if model.allow_identical_repeats:
+            payload["allow_identical_repeats"] = True
         return payload
 
     @staticmethod
