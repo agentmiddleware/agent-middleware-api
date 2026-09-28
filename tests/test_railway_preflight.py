@@ -1053,6 +1053,7 @@ def test_manifest_supplies_live_url_commit_and_signing_key(
         expected_commit_sha=None,
         expected_signing_key_id=None,
         expected_signing_public_key_sha256=None,
+        approved_public_url=None,
     ):
         seen.append(
             (
@@ -1061,6 +1062,7 @@ def test_manifest_supplies_live_url_commit_and_signing_key(
                 expected_commit_sha,
                 expected_signing_key_id,
                 expected_signing_public_key_sha256,
+                approved_public_url,
             )
         )
         return True
@@ -1075,6 +1077,7 @@ def test_manifest_supplies_live_url_commit_and_signing_key(
             TREE_COMMIT_SHA,
             EXPECTED_SIGNING_KEY_ID,
             EXPECTED_SIGNING_PUBLIC_KEY_SHA256,
+            "https://api.example.com",
         )
     ]
 
@@ -1354,6 +1357,7 @@ def _patch_get_with_discovery(monkeypatch, payload, discovery_payload):
 
     calls = []
     monkeypatch.setenv("BOOTSTRAP_KEY", "operator-test-key")
+    monkeypatch.setenv("PUBLIC_URL", "https://api.example.com")
 
     def get(url, **kwargs):
         calls.append((url, kwargs))
@@ -1374,7 +1378,7 @@ def test_live_passes_when_dogfood_flag_absent_and_discovery_clean(monkeypatch):
     calls = _patch_get_with_discovery(
         monkeypatch,
         payload,
-        {"mcp_tools": [{"service_id": "partner.echo"}]},
+        {"mcp_tools": [{"service_id": "partner.echo", "name": "partner.echo"}]},
     )
 
     assert preflight.check_live("https://api.example.com") is True
@@ -1395,6 +1399,7 @@ def test_live_fails_closed_without_operator_credential(monkeypatch, capsys):
     }
     calls = []
     monkeypatch.delenv("BOOTSTRAP_KEY", raising=False)
+    monkeypatch.setenv("PUBLIC_URL", "https://api.example.com")
 
     def get(url, **kwargs):
         calls.append((url, kwargs))
@@ -1415,6 +1420,7 @@ def test_live_hides_rejected_operator_credential(monkeypatch, capsys):
         key: value for key, value in HEALTHY.items() if key != "enable_dogfood_tool"
     }
     monkeypatch.setenv("BOOTSTRAP_KEY", secret)
+    monkeypatch.setenv("PUBLIC_URL", "https://api.example.com")
 
     class _RejectedResponse:
         def raise_for_status(self):
@@ -1431,6 +1437,46 @@ def test_live_hides_rejected_operator_credential(monkeypatch, capsys):
     assert preflight.check_live("https://api.example.com") is False
     output = capsys.readouterr().out
     assert "authenticated /v1/discover could not be checked" in output
+    assert secret not in output
+
+
+@pytest.mark.parametrize(
+    "target_url",
+    [
+        "http://api.example.com",
+        "https://untrusted.example.com",
+        "https://api.example.com@untrusted.example.com",
+    ],
+)
+def test_live_never_sends_operator_credential_to_unapproved_origin(
+    monkeypatch,
+    capsys,
+    target_url,
+):
+    import httpx
+
+    secret = "operator-secret-token-shaped-value"
+    payload = {
+        key: value for key, value in HEALTHY.items() if key != "enable_dogfood_tool"
+    }
+    calls = []
+    monkeypatch.setenv("BOOTSTRAP_KEY", secret)
+    monkeypatch.setenv("PUBLIC_URL", "https://api.example.com")
+
+    def get(url, **kwargs):
+        calls.append((url, kwargs))
+        if url.endswith("/v1/discover"):
+            return _Response(
+                {"mcp_tools": [{"service_id": "partner.echo", "name": "partner.echo"}]}
+            )
+        return _Response(payload)
+
+    monkeypatch.setattr(httpx, "get", get)
+
+    assert preflight.check_live(target_url) is False
+    assert calls == [(f"{target_url}/health/dependencies", {"timeout": 30})]
+    output = capsys.readouterr().out
+    assert "approved canonical HTTPS origin" in output
     assert secret not in output
 
 
@@ -1464,10 +1510,20 @@ def test_live_fails_when_dogfood_tool_exposed_in_discovery(monkeypatch):
         key: value for key, value in HEALTHY.items() if key != "enable_dogfood_tool"
     }
     monkeypatch.setenv("BOOTSTRAP_KEY", "operator-test-key")
+    monkeypatch.setenv("PUBLIC_URL", "https://api.example.com")
 
     def get(url, **_kwargs):
         if url.endswith("/v1/discover"):
-            return _Response({"mcp_tools": [{"service_id": "partner.notes.write"}]})
+            return _Response(
+                {
+                    "mcp_tools": [
+                        {
+                            "service_id": "partner.notes.write",
+                            "name": "partner.notes.write",
+                        }
+                    ]
+                }
+            )
         return _Response(payload)
 
     monkeypatch.setattr(httpx, "get", get)
@@ -1482,6 +1538,7 @@ def test_live_fails_when_dogfood_flag_absent_and_discovery_unreachable(monkeypat
         key: value for key, value in HEALTHY.items() if key != "enable_dogfood_tool"
     }
     monkeypatch.setenv("BOOTSTRAP_KEY", "operator-test-key")
+    monkeypatch.setenv("PUBLIC_URL", "https://api.example.com")
 
     def get(url, **_kwargs):
         if url.endswith("/v1/discover"):
@@ -1646,18 +1703,37 @@ def test_live_fails_when_dogfood_name_hides_behind_benign_service_id(monkeypatch
     assert preflight.check_live("https://api.example.com") is False
 
 
-def test_live_fails_on_non_string_tool_identifier(monkeypatch):
-    """A list-valued identifier must fail closed, not crash on set membership."""
+@pytest.mark.parametrize(
+    "tool",
+    [
+        {},
+        {"service_id": "partner.echo"},
+        {"name": "partner.echo"},
+        {"service_id": None, "name": "partner.echo"},
+        {"service_id": "partner.echo", "name": None},
+        {"service_id": "", "name": "partner.echo"},
+        {"service_id": "partner.echo", "name": ""},
+        {"service_id": ["partner.echo"], "name": "partner.echo"},
+        {"service_id": "partner.echo", "name": ["partner.echo"]},
+    ],
+)
+def test_live_fails_on_missing_or_invalid_tool_identifier(
+    monkeypatch,
+    capsys,
+    tool,
+):
+    """Every catalog entry must carry both non-empty string identifiers."""
     payload = {
         key: value for key, value in HEALTHY.items() if key != "enable_dogfood_tool"
     }
     _patch_get_with_discovery(
         monkeypatch,
         payload,
-        {"mcp_tools": [{"service_id": ["partner.notes.write"]}]},
+        {"mcp_tools": [tool]},
     )
 
     assert preflight.check_live("https://api.example.com") is False
+    assert "tool identifiers must be non-empty strings" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------
