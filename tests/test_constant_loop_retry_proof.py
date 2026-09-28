@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 import json
 from pathlib import Path
+import sys
 from typing import Any
 
 import pytest
@@ -145,18 +146,19 @@ class _ProofClient:
             f"/v1/billing/ledger/{WALLET_ID}",
             f"/v1/billing/ledger/{WALLET_ID}?limit=200",
         }:
+            entries = []
+            if self.message_calls > 0:
+                entries.append(
+                    {
+                        "entry_id": "ledger-success",
+                        "action": "debit",
+                        "amount": "-2",
+                        "description": f"governed call to {TOOL}",
+                    }
+                )
             return _Response(
                 200,
-                {
-                    "entries": [
-                        {
-                            "entry_id": "ledger-success",
-                            "action": "debit",
-                            "amount": "-2",
-                            "description": f"governed call to {TOOL}",
-                        }
-                    ]
-                },
+                {"entries": entries},
             )
         if path == "/v1/receipts/receipt-success/evidence":
             return _Response(
@@ -538,22 +540,41 @@ def test_retry_proof_allows_optional_lookup_ids_to_be_missing_independently(
 
 
 @pytest.mark.parametrize("flag", ["--api-key", "--wallet-id", "--key-id"])
-def test_retry_proof_cli_rejects_credential_flags(
+@pytest.mark.parametrize("argument_style", ["separate", "equals"])
+def test_retry_proof_cli_rejects_credential_flags_without_echoing_values(
     flag: str,
+    argument_style: str,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    with pytest.raises(SystemExit) as exc_info:
-        loop.main(
-            [
-                "--api-url",
-                PROJECT_URL,
-                flag,
-                "credential-must-stay-out-of-argv",
-            ]
-        )
+    canary = "credential-value-canary"
+    credential_args = (
+        [flag, canary] if argument_style == "separate" else [f"{flag}={canary}"]
+    )
 
-    assert exc_info.value.code == 2
-    assert "unrecognized arguments" in capsys.readouterr().err
+    try:
+        exit_code = loop.main(["--api-url", PROJECT_URL, *credential_args])
+    except SystemExit as exc:
+        exit_code = exc.code
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "credential options are not accepted" in captured.err
+    assert canary not in captured.out + captured.err
+
+
+def test_retry_proof_cli_prescans_process_argv_without_echoing_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    canary = "process-argv-credential-canary"
+    monkeypatch.setattr(sys, "argv", ["constant_test_loop.py", f"--api-key={canary}"])
+
+    exit_code = loop.main()
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "credential options are not accepted" in captured.err
+    assert canary not in captured.out + captured.err
 
 
 def test_retry_proof_cli_forwards_validated_output(
@@ -678,14 +699,190 @@ def test_retry_proof_proves_replay_and_cap_denial_without_secret_output(
         assert forbidden not in serialized
 
 
+def test_retry_proof_rejects_replay_result_marked_as_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "proof.json"
+
+    class ReplayErrorClient(_ProofClient):
+        def post(
+            self,
+            path: str,
+            *,
+            json: dict[str, Any],
+            headers: dict[str, str] | None = None,
+        ) -> _Response:
+            response = super().post(path, json=json, headers=headers)
+            if path == "/mcp/messages" and self.message_calls == 2:
+                response._data["result"]["isError"] = True
+            return response
+
+    monkeypatch.setattr(loop.httpx, "Client", ReplayErrorClient)
+
+    with pytest.raises(loop.SmokeTestFailure, match="replay.*failed"):
+        loop.run_constant_test(
+            PROJECT_URL,
+            API_KEY,
+            WALLET_ID,
+            KEY_ID,
+            pinned_tool=TOOL,
+            tool_arguments=PAYLOAD,
+            retry_evidence_output=output,
+        )
+
+    assert not output.exists()
+
+
+def test_retry_proof_refuses_a_saturated_pre_invocation_ledger(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "proof.json"
+
+    class SaturatedBaselineClient(_ProofClient):
+        def get(self, path: str) -> _Response:
+            if (
+                path.startswith(f"/v1/billing/ledger/{WALLET_ID}")
+                and self.message_calls == 0
+            ):
+                self.gets.append(path)
+                return _Response(
+                    200,
+                    {
+                        "entries": [
+                            {
+                                "entry_id": f"ledger-existing-{index}",
+                                "action": "debit",
+                                "amount": "-1",
+                                "description": "existing debit",
+                            }
+                            for index in range(200)
+                        ]
+                    },
+                )
+            return super().get(path)
+
+    monkeypatch.setattr(loop.httpx, "Client", SaturatedBaselineClient)
+
+    with pytest.raises(loop.SmokeTestFailure, match="baseline.*saturated"):
+        loop.run_constant_test(
+            PROJECT_URL,
+            API_KEY,
+            WALLET_ID,
+            KEY_ID,
+            pinned_tool=TOOL,
+            tool_arguments=PAYLOAD,
+            retry_evidence_output=output,
+        )
+
+    client = SaturatedBaselineClient.instances[-1]
+    assert client.message_calls == 0
+    assert [path for path in client.gets if "/billing/ledger/" in path] == [
+        f"/v1/billing/ledger/{WALLET_ID}?limit=200"
+    ]
+    assert not output.exists()
+
+
+def test_retry_proof_rejects_duplicate_debits_from_the_first_call(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "proof.json"
+
+    class DuplicateFirstDebitClient(_ProofClient):
+        def get(self, path: str) -> _Response:
+            if path.startswith(f"/v1/billing/ledger/{WALLET_ID}"):
+                self.gets.append(path)
+                entries: list[dict[str, Any]] = []
+                if self.message_calls > 0:
+                    entries = [
+                        {
+                            "entry_id": "ledger-success",
+                            "action": "debit",
+                            "amount": "-2",
+                            "description": f"governed call to {TOOL}",
+                        },
+                        {
+                            "entry_id": "ledger-duplicate-debit",
+                            "action": "debit",
+                            "amount": "-2",
+                            "description": f"governed call to {TOOL}",
+                        },
+                    ]
+                return _Response(200, {"entries": entries})
+            return super().get(path)
+
+    monkeypatch.setattr(loop.httpx, "Client", DuplicateFirstDebitClient)
+
+    with pytest.raises(loop.SmokeTestFailure, match="exactly one.*ledger entry"):
+        loop.run_constant_test(
+            PROJECT_URL,
+            API_KEY,
+            WALLET_ID,
+            KEY_ID,
+            pinned_tool=TOOL,
+            tool_arguments=PAYLOAD,
+            retry_evidence_output=output,
+        )
+
+    assert not output.exists()
+
+
+def test_retry_proof_rejects_prior_ledger_entry_mutation_during_first_call(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "proof.json"
+
+    class MutatedBaselineClient(_ProofClient):
+        def get(self, path: str) -> _Response:
+            if path.startswith(f"/v1/billing/ledger/{WALLET_ID}"):
+                self.gets.append(path)
+                prior = {
+                    "entry_id": "ledger-prior",
+                    "action": "credit",
+                    "amount": "10",
+                    "description": "prior funding",
+                }
+                entries = [prior]
+                if self.message_calls > 0:
+                    entries = [
+                        {**prior, "amount": "9"},
+                        {
+                            "entry_id": "ledger-success",
+                            "action": "debit",
+                            "amount": "-2",
+                            "description": f"governed call to {TOOL}",
+                        },
+                    ]
+                return _Response(200, {"entries": entries})
+            return super().get(path)
+
+    monkeypatch.setattr(loop.httpx, "Client", MutatedBaselineClient)
+
+    with pytest.raises(loop.SmokeTestFailure, match="prior ledger entry changed"):
+        loop.run_constant_test(
+            PROJECT_URL,
+            API_KEY,
+            WALLET_ID,
+            KEY_ID,
+            pinned_tool=TOOL,
+            tool_arguments=PAYLOAD,
+            retry_evidence_output=output,
+        )
+
+    assert not output.exists()
+
+
 @pytest.mark.parametrize(
-    ("changed_read", "expected_failure"),
+    ("changed_message_count", "expected_failure"),
     [(2, "replay"), (3, "fresh-key denial")],
 )
 def test_retry_proof_rejects_a_new_debit_in_a_saturated_ledger_window(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    changed_read: int,
+    changed_message_count: int,
     expected_failure: str,
 ) -> None:
     output = tmp_path / "proof.json"
@@ -695,32 +892,32 @@ def test_retry_proof_rejects_a_new_debit_in_a_saturated_ledger_window(
             self, *, base_url: str, headers: dict[str, str], timeout: float
         ) -> None:
             super().__init__(base_url=base_url, headers=headers, timeout=timeout)
-            self.ledger_reads = 0
 
         def get(self, path: str) -> _Response:
             ledger_path = f"/v1/billing/ledger/{WALLET_ID}"
             if path.startswith(ledger_path):
                 self.gets.append(path)
-                self.ledger_reads += 1
-                window_size = 200 if path.endswith("?limit=200") else 50
-                entries = [
+                existing = [
                     {
-                        "entry_id": "ledger-success",
+                        "entry_id": f"ledger-existing-{index}",
                         "action": "debit",
-                        "amount": "-2",
+                        "amount": "-1",
                         "description": f"governed call to {TOOL}",
-                    },
-                    *[
-                        {
-                            "entry_id": f"ledger-existing-{index}",
-                            "action": "debit",
-                            "amount": "-1",
-                            "description": f"governed call to {TOOL}",
-                        }
-                        for index in range(window_size - 1)
-                    ],
+                    }
+                    for index in range(199)
                 ]
-                if self.ledger_reads == changed_read:
+                entries = existing
+                if self.message_calls > 0:
+                    entries = [
+                        {
+                            "entry_id": "ledger-success",
+                            "action": "debit",
+                            "amount": "-2",
+                            "description": f"governed call to {TOOL}",
+                        },
+                        *existing,
+                    ]
+                if self.message_calls == changed_message_count:
                     entries = [
                         {
                             "entry_id": "ledger-unexpected",
@@ -757,6 +954,57 @@ def test_retry_proof_rejects_a_new_debit_in_a_saturated_ledger_window(
 
 
 @pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("amount", "-999"),
+        ("action", "credit"),
+        ("description", f"governed call to {TOOL} mutated"),
+    ],
+)
+@pytest.mark.parametrize(
+    ("changed_message_count", "expected_failure"),
+    [(2, "replay"), (3, "fresh-key denial")],
+)
+def test_retry_proof_rejects_same_id_ledger_entry_mutations(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    replacement: str,
+    changed_message_count: int,
+    expected_failure: str,
+) -> None:
+    output = tmp_path / "proof.json"
+
+    class SameIdLedgerMutationClient(_ProofClient):
+        def get(self, path: str) -> _Response:
+            response = super().get(path)
+            if (
+                path.startswith(f"/v1/billing/ledger/{WALLET_ID}")
+                and self.message_calls == changed_message_count
+            ):
+                response._data["entries"][0][field] = replacement
+            return response
+
+    monkeypatch.setattr(loop.httpx, "Client", SameIdLedgerMutationClient)
+
+    with pytest.raises(
+        loop.SmokeTestFailure,
+        match=rf"{expected_failure}.*ledger",
+    ):
+        loop.run_constant_test(
+            PROJECT_URL,
+            API_KEY,
+            WALLET_ID,
+            KEY_ID,
+            pinned_tool=TOOL,
+            tool_arguments=PAYLOAD,
+            retry_evidence_output=output,
+        )
+
+    assert not output.exists()
+
+
+@pytest.mark.parametrize(
     "entries",
     [
         [None],
@@ -765,7 +1013,7 @@ def test_retry_proof_rejects_a_new_debit_in_a_saturated_ledger_window(
         [{"entry_id": "duplicate"}, {"entry_id": "duplicate"}],
     ],
 )
-@pytest.mark.parametrize("malformed_read", [1, 2, 3])
+@pytest.mark.parametrize("malformed_read", [1, 2, 3, 4])
 def test_retry_proof_fails_cleanly_on_malformed_ledger_entries(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
