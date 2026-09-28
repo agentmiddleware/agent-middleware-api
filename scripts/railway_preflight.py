@@ -24,7 +24,10 @@ Explicit ``--public-db`` mode is an exception and fails closed when absent:
     dependency listed unhealthy. ``--expected-version`` and
     ``--expected-commit-sha`` add exact release-identity checks against both
     ``/health`` and ``/health/dependencies`` for the post-deploy gate; the
-    commit expectation must be a full 40-character SHA.
+    commit expectation must be a full 40-character SHA. If public health omits
+    the dogfood flag, ``BOOTSTRAP_KEY`` supplies the operator credential for an
+    authenticated discovery check against the canonical ``PUBLIC_URL`` (or
+    manifest origin); it is never accepted as a CLI argument.
 
 ``--manifest`` (optional non-secret JSON)
     Bind the checks to one managed single-tenant deployment. The manifest
@@ -37,6 +40,11 @@ Explicit ``--public-db`` mode is an exception and fails closed when absent:
     Validate the candidate manifest against this clean checkout without probing
     the currently deployed release. Use this before an upgrade, because the
     running service still reports the previous commit until deployment.
+
+``--railway-source-unbound`` (requires project and environment arguments)
+    Read Railway's provider status and fail closed unless exactly one target
+    service reports explicit null repository and image sources. This check does
+    not change or disconnect provider settings.
 
 Exit code is non-zero if any *executed* check fails, so this works as a
 release gate. Skipped checks never fail the run; ``--strict`` turns a skip
@@ -66,6 +74,11 @@ Usage::
     # Candidate source/manifest binding before deployment (no network checks):
     python scripts/railway_preflight.py --manifest-only \
       --manifest /path/to/customer.production.json
+
+    # Read-only provider-source gate immediately before deployment:
+    python scripts/railway_preflight.py --railway-source-unbound \
+      --railway-project 11111111-1111-4111-8111-111111111111 \
+      --railway-environment production --railway-service api-service
 
 See docs/deploy-railway.md.
 """
@@ -188,6 +201,115 @@ def _tree_is_clean() -> bool:
     return not status.strip()
 
 
+def validate_railway_source_unbound(
+    document: object,
+    *,
+    project_id: str,
+    environment: str,
+    service: str,
+) -> bool:
+    """Return whether one Railway service has no repository or image source."""
+    if not isinstance(document, Mapping) or document.get("id") != project_id:
+        return False
+
+    environments = document.get("environments")
+    if not isinstance(environments, Mapping):
+        return False
+    environment_edges = environments.get("edges")
+    if not isinstance(environment_edges, list):
+        return False
+
+    matching_environments: list[Mapping[str, object]] = []
+    for edge in environment_edges:
+        if not isinstance(edge, Mapping):
+            return False
+        node = edge.get("node")
+        if not isinstance(node, Mapping) or not isinstance(node.get("name"), str):
+            return False
+        if node["name"] == environment:
+            matching_environments.append(node)
+    if len(matching_environments) != 1:
+        return False
+
+    service_instances = matching_environments[0].get("serviceInstances")
+    if not isinstance(service_instances, Mapping):
+        return False
+    service_edges = service_instances.get("edges")
+    if not isinstance(service_edges, list):
+        return False
+
+    matching_services: list[Mapping[str, object]] = []
+    for edge in service_edges:
+        if not isinstance(edge, Mapping):
+            return False
+        node = edge.get("node")
+        if not isinstance(node, Mapping) or not isinstance(
+            node.get("serviceName"), str
+        ):
+            return False
+        if node["serviceName"] == service:
+            matching_services.append(node)
+    if len(matching_services) != 1:
+        return False
+
+    source = matching_services[0].get("source")
+    return (
+        isinstance(source, Mapping)
+        and "repo" in source
+        and "image" in source
+        and source["repo"] is None
+        and source["image"] is None
+    )
+
+
+def check_railway_source_unbound(
+    *, project_id: str, environment: str, service: str
+) -> bool:
+    """Fail closed unless Railway reports one explicitly unbound service source."""
+    command = [
+        "railway",
+        "status",
+        "--project",
+        project_id,
+        "--environment",
+        environment,
+        "--json",
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            cwd=REPO_ROOT,
+            shell=False,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        print(f"{BAD} Railway service source could not be verified")
+        return False
+
+    if result.returncode != 0:
+        print(f"{BAD} Railway service source could not be verified")
+        return False
+    try:
+        document = json.loads(result.stdout)
+    except (TypeError, json.JSONDecodeError):
+        print(f"{BAD} Railway service source could not be verified")
+        return False
+    if not isinstance(document, Mapping) or not validate_railway_source_unbound(
+        document,
+        project_id=project_id,
+        environment=environment,
+        service=service,
+    ):
+        print(f"{BAD} Railway service source could not be verified")
+        return False
+
+    print(f"{OK} Railway service source is unbound")
+    return True
+
+
 def _canonical_public_url(value: str) -> str:
     """Validate and return a canonical public HTTPS origin."""
     try:
@@ -198,6 +320,10 @@ def _canonical_public_url(value: str) -> str:
 
     hostname = parsed.hostname or ""
     labels = hostname.split(".")
+    try:
+        address = ipaddress.ip_address(hostname)
+    except ValueError:
+        address = None
     if (
         parsed.scheme != "https"
         or not hostname
@@ -212,7 +338,10 @@ def _canonical_public_url(value: str) -> str:
         or len(labels) < 2
         or any(_DNS_LABEL_RE.fullmatch(label) is None for label in labels)
         or hostname == "localhost"
+        or hostname.endswith(".localhost")
         or hostname.endswith(".internal")
+        or all(label.isdigit() for label in labels)
+        or (address is not None and not address.is_global)
     ):
         raise ManifestError(
             "manifest public_url must be a canonical public HTTPS origin"
@@ -224,6 +353,16 @@ def _canonical_public_url(value: str) -> str:
             "manifest public_url must be a canonical public HTTPS origin"
         )
     return canonical
+
+
+def _approved_live_origin(url: str, approved_public_url: str) -> str | None:
+    """Return the canonical origin only when it exactly matches approval."""
+    try:
+        origin = _canonical_public_url(url)
+        approved_origin = _canonical_public_url(approved_public_url)
+    except ManifestError:
+        return None
+    return origin if origin == approved_origin else None
 
 
 def _load_customer_manifest(path: str | Path) -> CustomerManifest:
@@ -410,6 +549,7 @@ def check_live(
     expected_commit_sha: str | None = None,
     expected_signing_key_id: str | None = None,
     expected_signing_public_key_sha256: str | None = None,
+    approved_public_url: str | None = None,
 ) -> bool:
     import httpx
 
@@ -492,62 +632,83 @@ def check_live(
         # The public /health/dependencies projection stopped publishing the
         # dogfood flag when proof surfaces are unmounted (the flag described
         # nothing a caller could reach — see build_public_dependency_report).
-        # Verify the observable posture instead: the dogfood tools must not
-        # be registered in public discovery.
-        try:
-            discover_resp = httpx.get(f"{base}/v1/discover", timeout=30)
-            discover_resp.raise_for_status()
-            discover_body = discover_resp.json()
-        except Exception as exc:
+        # Verify the operator-visible posture instead: the dogfood tools must
+        # not be registered in authenticated production discovery.
+        configured_origin = (
+            approved_public_url
+            if approved_public_url is not None
+            else os.getenv("PUBLIC_URL", "").strip()
+        )
+        credential_origin = _approved_live_origin(base, configured_origin)
+        if credential_origin is None:
             failures.append(
                 "enable_dogfood_tool is absent from /health/dependencies and "
-                f"/v1/discover could not be checked instead: {exc}"
+                "authenticated /v1/discover requires an approved canonical "
+                "HTTPS origin"
             )
         else:
-            tools = (
-                discover_body.get("mcp_tools")
-                if isinstance(discover_body, dict)
-                else None
-            )
-            if not isinstance(tools, list) or not all(
-                isinstance(tool, dict) for tool in tools
-            ):
-                # Fail closed on an unrecognized shape: treating it as "no
-                # tools" would let a renamed field or an error page silently
-                # pass the release gate.
+            bootstrap_key = os.getenv("BOOTSTRAP_KEY", "").strip()
+            if not bootstrap_key:
                 failures.append(
-                    "enable_dogfood_tool is absent from /health/dependencies "
-                    "and /v1/discover returned an unrecognized shape (no "
-                    "mcp_tools list) — cannot verify dogfood posture"
+                    "enable_dogfood_tool is absent from /health/dependencies and "
+                    "BOOTSTRAP_KEY is required for authenticated /v1/discover"
                 )
             else:
-                # Check service_id and name independently: a benign
-                # service_id must not mask a dogfood name (or vice versa).
-                # Non-string identifiers are an unrecognized shape, not a
-                # clean catalog.
-                leaked_ids: set[str] = set()
-                malformed_identifier = False
-                for tool in tools:
-                    for field in ("service_id", "name"):
-                        value = tool.get(field)
-                        if value is None:
-                            continue
-                        if not isinstance(value, str):
-                            malformed_identifier = True
-                            continue
-                        if value in _DOGFOOD_TOOL_IDS:
-                            leaked_ids.add(value)
-                if malformed_identifier:
-                    failures.append(
-                        "/v1/discover tool identifiers must be strings — "
-                        "cannot verify dogfood posture"
+                try:
+                    discover_resp = httpx.get(
+                        f"{credential_origin}/v1/discover",
+                        headers={"X-API-Key": bootstrap_key},
+                        timeout=30,
                     )
-                if leaked_ids:
+                    discover_resp.raise_for_status()
+                    discover_body = discover_resp.json()
+                except Exception:
                     failures.append(
-                        "dogfood tools exposed in public discovery: "
-                        f"{sorted(leaked_ids)} — ENABLE_DOGFOOD_TOOL must be "
-                        "false in production"
+                        "enable_dogfood_tool is absent from /health/dependencies "
+                        "and authenticated /v1/discover could not be checked"
                     )
+                else:
+                    tools = (
+                        discover_body.get("mcp_tools")
+                        if isinstance(discover_body, dict)
+                        else None
+                    )
+                    if not isinstance(tools, list) or not all(
+                        isinstance(tool, dict) for tool in tools
+                    ):
+                        # Fail closed on an unrecognized shape: treating it as "no
+                        # tools" would let a renamed field or an error page silently
+                        # pass the release gate.
+                        failures.append(
+                            "enable_dogfood_tool is absent from /health/dependencies "
+                            "and /v1/discover returned an unrecognized shape (no "
+                            "mcp_tools list) — cannot verify dogfood posture"
+                        )
+                    else:
+                        # Check service_id and name independently: a benign
+                        # service_id must not mask a dogfood name (or vice versa).
+                        # Both identifiers are required non-empty strings.
+                        leaked_ids: set[str] = set()
+                        malformed_identifier = False
+                        for tool in tools:
+                            for field in ("service_id", "name"):
+                                value = tool.get(field)
+                                if not isinstance(value, str) or not value.strip():
+                                    malformed_identifier = True
+                                    continue
+                                if value in _DOGFOOD_TOOL_IDS:
+                                    leaked_ids.add(value)
+                        if malformed_identifier:
+                            failures.append(
+                                "/v1/discover tool identifiers must be non-empty "
+                                "strings — cannot verify dogfood posture"
+                            )
+                        if leaked_ids:
+                            failures.append(
+                                "dogfood tools exposed in authenticated discovery: "
+                                f"{sorted(leaked_ids)} — ENABLE_DOGFOOD_TOOL must be "
+                                "false in production"
+                            )
     elif body["enable_dogfood_tool"] is not False:
         dogfood = body["enable_dogfood_tool"]
         failures.append(
@@ -722,6 +883,26 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--railway-source-unbound",
+        action="store_true",
+        help="verify the target Railway service has no repository or image source",
+    )
+    parser.add_argument(
+        "--railway-project",
+        default="",
+        help="exact Railway project id for --railway-source-unbound",
+    )
+    parser.add_argument(
+        "--railway-environment",
+        default="",
+        help="exact Railway environment for --railway-source-unbound",
+    )
+    parser.add_argument(
+        "--railway-service",
+        default="api-service",
+        help="exact Railway service for --railway-source-unbound",
+    )
+    parser.add_argument(
         "--strict",
         action="store_true",
         help="treat a skipped check as a failure (for CI)",
@@ -737,16 +918,26 @@ def main(argv: list[str] | None = None) -> int:
         or args.public_db
         or args.expected_version
         or args.expected_commit_sha
+        or args.railway_source_unbound
     ):
         print(
             f"{BAD} --manifest-only cannot be combined with --db, --live, "
-            "--public-db, or live release expectations"
+            "--public-db, --railway-source-unbound, or live release expectations"
+        )
+        return 1
+    if args.railway_source_unbound and not (
+        args.railway_project.strip() and args.railway_environment.strip()
+    ):
+        print(
+            f"{BAD} --railway-source-unbound requires --railway-project and "
+            "--railway-environment"
         )
         return 1
 
     # Neither flag given: run whatever the environment supports.
-    run_db = not args.manifest_only and (args.db or not (args.db or args.live))
-    run_live = not args.manifest_only and (args.live or not (args.db or args.live))
+    selected_check = args.db or args.live or args.railway_source_unbound
+    run_db = not args.manifest_only and (args.db or not selected_check)
+    run_live = not args.manifest_only and (args.live or not selected_check)
 
     results: list[bool] = []
     manifest: CustomerManifest | None = None
@@ -802,6 +993,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{OK} customer manifest matches clean release checkout")
         return 0
 
+    if args.railway_source_unbound:
+        results.append(
+            check_railway_source_unbound(
+                project_id=args.railway_project.strip(),
+                environment=args.railway_environment.strip(),
+                service=args.railway_service.strip(),
+            )
+        )
+
     if run_db:
         database_url_load_failed = False
         try:
@@ -840,6 +1040,7 @@ def main(argv: list[str] | None = None) -> int:
                     expected_signing_public_key_sha256=(
                         manifest.signing_public_key_sha256
                     ),
+                    approved_public_url=manifest.public_url,
                 )
             else:
                 live_result = check_live(
