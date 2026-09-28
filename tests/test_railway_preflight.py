@@ -398,9 +398,6 @@ def test_rollback_live_gates_verify_the_signing_key_from_a_gate_checkout() -> No
     assert post_deploy in rollback
     assert rollback.index(pre_deploy) < rollback.index(post_deploy)
     assert "separately" not in rollback
-    # Without a manifest the values come from a record, never the live key.
-    assert "controlled key-generation record" in rollback
-    assert "Never fill them from the live `/.well-known/trust-keys.json`" in rollback
 
 
 def _railway_cli_version_guard() -> str:
@@ -477,6 +474,218 @@ def test_railway_cli_version_guard_fails_closed(
 
     assert (result.returncode == 0) is allowed, result.stderr
     assert ("reached" in result.stdout) is allowed
+
+
+def _rollback_section() -> str:
+    sop = (REPO_ROOT / "docs" / "deploy-railway.md").read_text()
+    return sop[
+        sop.index("#### Rolling back to an image without `--runtime-posture`") : sop.index(
+            "### Customer operations manifest"
+        )
+    ]
+
+
+def test_signing_key_check_documents_what_it_does_not_prove() -> None:
+    """The check proves publication, not the key the process signs with; the
+    script and the rollback section both say so, with the rotation steps."""
+    rollback = _rollback_section()
+    docstring = preflight.__doc__
+
+    for described in (rollback, " ".join(docstring.split())):
+        assert "GET /v1/signing-keys/active" in described
+        assert "SigningKeyService.ensure_active_key" in described
+        assert "POST /v1/admin/signing-keys/rotate" in described
+    assert "not that the process\n*signs* with it" in rollback
+    assert "not that the process *signs* with it" in " ".join(docstring.split())
+    assert "Retire the old key's metadata" in rollback
+    assert "treat the signing-key check as unverified until it is done" in rollback
+
+
+def test_signing_key_limitation_claims_match_the_code() -> None:
+    """Pin the facts the limitation text relies on, so the text goes stale
+    loudly: no rotation route exists, the active-key route needs credentials,
+    and the public signing_key entry names no key."""
+    app_sources = [path.read_text() for path in (REPO_ROOT / "app").rglob("*.py")]
+    assert not any("signing-keys/rotate" in source for source in app_sources)
+
+    keys_router = (REPO_ROOT / "app" / "routers" / "keys.py").read_text()
+    active = keys_router[keys_router.index('@router.get("/active"') :]
+    active = active[: active.index("@router.get(", 1)]
+    assert "Depends(get_auth_context)" in active
+
+    health = (REPO_ROOT / "app" / "core" / "health.py").read_text()
+    check = health[health.index("async def _check_signing_key") :]
+    check = check[: check.index("\nasync def ", 1)]
+    assert "key_id" not in check
+    assert '"loaded"' in check
+
+
+def _first_party_block() -> str:
+    blocks = re.findall(r"```bash\n(.*?)```", _rollback_section(), re.S)
+    first_party = [block for block in blocks if "FIRST_PARTY_PROJECT_ID" in block]
+    assert len(first_party) == 1
+    return first_party[0]
+
+
+def test_first_party_rollback_variant_replaces_every_manifest_input() -> None:
+    rollback = _rollback_section()
+    variant = rollback[rollback.index("##### First-party stack without a customer manifest") :]
+    block = _first_party_block()
+
+    # The manifest-derived variables all have a named, non-live source.
+    assert 'API_URL="https://api.thisisatest.tech"' in block
+    assert 'ENVIRONMENT="production"' in block
+    assert 'PROJECT_ID="${FIRST_PARTY_PROJECT_ID:?' in block
+    assert 'SIGNING_KEY_ID="${FIRST_PARTY_SIGNING_KEY_ID:?' in block
+    assert 'SIGNING_PUBLIC_KEY_SHA256="${FIRST_PARTY_SIGNING_PUBLIC_KEY_SHA256:?' in block
+    assert "first-party operations record" in block
+    assert "first-party key-generation record" in block
+    assert "stop and escalate" in block
+    assert "MANIFEST" not in block
+    # The steps it replaces or skips are named.
+    assert "Replace the `MANIFEST=` line and the three `jq` assignments" in variant
+    assert "Skip the `--manifest-only` step" in variant
+    assert "drop the two `SIGNING_*` lines" in variant
+    assert "If no\nfingerprint was ever recorded, stop and escalate." in variant
+    assert "Never copy it from\n`/.well-known/trust-keys.json`" in variant
+
+
+def _run_first_party_block(**environment):
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("needs bash")
+    script = (
+        "set -euo pipefail\n"
+        + _first_party_block()
+        + 'printf "%s|%s|%s|%s|%s\\n" "$API_URL" "$ENVIRONMENT" "$PROJECT_ID" '
+        + '"$SIGNING_KEY_ID" "$SIGNING_PUBLIC_KEY_SHA256"\n'
+    )
+    return subprocess.run(
+        [bash, "-c", script],
+        env={"PATH": os.environ.get("PATH", ""), **environment},
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+
+_FIRST_PARTY_RECORDS = {
+    "FIRST_PARTY_PROJECT_ID": "123e4567-e89b-42d3-a456-426614174000",
+    "FIRST_PARTY_SIGNING_KEY_ID": "first-party-production-ed25519-v2",
+    "FIRST_PARTY_SIGNING_PUBLIC_KEY_SHA256": "ab" * 32,
+}
+
+
+def test_first_party_rollback_variant_sets_the_gate_inputs() -> None:
+    result = _run_first_party_block(**_FIRST_PARTY_RECORDS)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == (
+        "https://api.thisisatest.tech|production|"
+        + "|".join(_FIRST_PARTY_RECORDS.values())
+        + "\n"
+    )
+
+
+@pytest.mark.parametrize(
+    ("missing", "message"),
+    [
+        ("FIRST_PARTY_SIGNING_PUBLIC_KEY_SHA256", "stop and escalate"),
+        ("FIRST_PARTY_SIGNING_KEY_ID", "first-party key-generation record"),
+        ("FIRST_PARTY_PROJECT_ID", "first-party operations record"),
+    ],
+)
+def test_first_party_rollback_variant_stops_without_a_record(missing, message) -> None:
+    records = {k: v for k, v in _FIRST_PARTY_RECORDS.items() if k != missing}
+    result = _run_first_party_block(**records)
+
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert message in result.stderr
+
+
+def _ssh_assignments() -> list[tuple[str, str]]:
+    """Every `<name>_output="$(railway ssh ...)"` block in the SOP."""
+    sop = (REPO_ROOT / "docs" / "deploy-railway.md").read_text()
+    return re.findall(
+        r'^((\w+_output)="\$\(railway ssh \\\n.*?\)" \\\n  \|\| \{[^\n]*\})$',
+        sop,
+        re.MULTILINE | re.DOTALL,
+    )
+
+
+def test_every_ssh_check_prints_its_output_before_failing() -> None:
+    sop = (REPO_ROOT / "docs" / "deploy-railway.md").read_text()
+    assignments = _ssh_assignments()
+
+    assert sop.count('_output="$(railway ssh') == len(assignments) == 3
+    for block, name in assignments:
+        assert block.endswith(f"|| {{ printf '%s\\n' \"${name}\"; exit 1; }}")
+
+
+@pytest.mark.parametrize(
+    ("ssh_output", "ssh_status", "passes"),
+    [
+        ("[preflight] PASS runtime posture\nSENTINEL", 0, True),
+        ("[preflight] FAIL runtime posture: no Railway runtime marker", 1, False),
+        ("[preflight] FAIL runtime posture", 1, False),
+    ],
+    ids=["check_passes", "check_fails_with_reason", "check_fails"],
+)
+@pytest.mark.parametrize("which", ["current_output", "remote_output"])
+def test_failed_ssh_check_output_reaches_the_operator(
+    tmp_path,
+    ssh_output,
+    ssh_status,
+    passes,
+    which,
+) -> None:
+    """Under set -euo pipefail the SOP block must still show why the private
+    check failed, and must still stop."""
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("needs bash")
+    sop = (REPO_ROOT / "docs" / "deploy-railway.md").read_text()
+    counter = "current_count" if which == "current_output" else "sentinel_count"
+    sentinel = (
+        "CURRENT_RUNTIME_POSTURE_OK"
+        if which == "current_output"
+        else "PRIVATE_RELEASE_CHECKS_OK"
+    )
+    block = re.search(
+        rf'^{which}="\$\(railway ssh \\\n.*?^test "\${counter}" -eq 1$',
+        sop,
+        re.MULTILINE | re.DOTALL,
+    ).group(0)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    railway = bin_dir / "railway"
+    railway.write_text(
+        "#!/bin/sh\n"
+        f"printf '%s\\n' \"{ssh_output.replace('SENTINEL', sentinel)}\"\n"
+        f"exit {ssh_status}\n"
+    )
+    railway.chmod(0o755)
+    # The variables the SOP sets before these blocks.
+    context = (
+        "PROJECT_ID=p SERVICE=api-service ENVIRONMENT=production "
+        "INSTANCE_ID=i CURRENT_INSTANCE_ID=i RUNTIME_POSTURE_CHECK=check\n"
+    )
+    script = f"set -euo pipefail\n{context}{block}\necho REACHED_AFTER_CHECK\n"
+    result = subprocess.run(
+        [bash, "-c", script],
+        env={"PATH": f"{bin_dir}:{os.environ.get('PATH', '')}"},
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+    first_line = ssh_output.splitlines()[0]
+    assert first_line in result.stdout
+    assert (result.returncode == 0) is passes
+    assert ("REACHED_AFTER_CHECK" in result.stdout) is passes
 
 
 def _run_documented_runtime_posture_check(tmp_path, *, dotenv_in=None, **environment):
@@ -2210,6 +2419,63 @@ def test_cli_rejects_invalid_signing_key_expectations(
 
     assert preflight.main([*arguments, "--url", "https://api.example.com"]) == 1
     assert message in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "expectations",
+    [
+        _SIGNING_ARGUMENTS,
+        ["--expected-version", "1.3.0"],
+        ["--expected-commit-sha", EXPECTED_COMMIT_SHA],
+        ["--expected-version", "1.3.0", "--expected-commit-sha", EXPECTED_COMMIT_SHA],
+    ],
+    ids=["signing_key", "version", "commit_sha", "release_identity"],
+)
+@pytest.mark.parametrize(
+    "url_arguments",
+    [["--url", ""], ["--url", "   "], []],
+    ids=["empty_url", "blank_url", "no_url"],
+)
+@pytest.mark.parametrize("strict", [[], ["--strict"]], ids=["lenient", "strict"])
+def test_cli_fails_when_live_expectations_have_no_url(
+    monkeypatch,
+    capsys,
+    expectations,
+    url_arguments,
+    strict,
+):
+    """An expectation that is never checked must not pass, --strict or not."""
+    monkeypatch.delenv("PUBLIC_URL", raising=False)
+    monkeypatch.setattr(
+        preflight,
+        "check_live",
+        lambda *_args, **_kwargs: pytest.fail("there is no URL to probe"),
+    )
+
+    assert preflight.main(["--live", *strict, *url_arguments, *expectations]) == 1
+    output = capsys.readouterr().out
+    assert "cannot be checked" in output
+    assert "all checks passed" not in output
+
+
+@pytest.mark.parametrize(
+    ("strict", "expected_rc"),
+    [([], 0), (["--strict"], 1)],
+    ids=["lenient_skip_passes", "strict_skip_fails"],
+)
+def test_cli_live_without_url_or_expectations_still_skips(
+    monkeypatch,
+    capsys,
+    strict,
+    expected_rc,
+):
+    """Negative control: with nothing expected, a missing URL stays a skip."""
+    monkeypatch.delenv("PUBLIC_URL", raising=False)
+
+    assert preflight.main(["--live", *strict, "--url", ""]) == expected_rc
+    output = capsys.readouterr().out
+    assert "SKIP live posture: no PUBLIC_URL and no --url" in output
+    assert "cannot be checked" not in output
 
 
 # ---------------------------------------------------------------------------

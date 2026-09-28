@@ -592,7 +592,9 @@ test "$(jq -r --arg environment "$ENVIRONMENT" \
 # production-like ENVIRONMENT with both dogfood flags false. It also runs on
 # images built before that flag existed, which reject the flag with a usage
 # error. It prints exception types only: a raw traceback can echo a configured
-# value, including a secret or a forged sentinel line.
+# value, including a secret or a forged sentinel line. Under set -e a failed
+# SSH command would stop the script before its output is shown, so each SSH
+# assignment below prints what the check said before exiting non-zero.
 RUNTIME_POSTURE_CHECK='import os, sys
 from pathlib import Path
 try:
@@ -624,7 +626,8 @@ current_output="$(railway ssh \
   --project "$PROJECT_ID" --service "$SERVICE" \
   --environment "$ENVIRONMENT" \
   --deployment-instance "$CURRENT_INSTANCE_ID" -- \
-  sh -c 'python -c "$1" && printf "CURRENT_RUNTIME_POSTURE_OK\\n"' sh "$RUNTIME_POSTURE_CHECK")"
+  sh -c 'python -c "$1" && printf "CURRENT_RUNTIME_POSTURE_OK\\n"' sh "$RUNTIME_POSTURE_CHECK")" \
+  || { printf '%s\n' "$current_output"; exit 1; }
 printf '%s\n' "$current_output"
 current_count="$(printf '%s\n' "$current_output" | grep -c '^CURRENT_RUNTIME_POSTURE_OK$' || true)"
 test "$current_count" -eq 1
@@ -697,7 +700,8 @@ remote_output="$(railway ssh \
   --project "$PROJECT_ID" --service "$SERVICE" \
   --environment "$ENVIRONMENT" \
   --deployment-instance "$INSTANCE_ID" -- \
-  sh -c 'python scripts/retire_owner_keys.py --private-db && python scripts/railway_preflight.py --db --runtime-posture --strict && printf "PRIVATE_RELEASE_CHECKS_OK\\n"')"
+  sh -c 'python scripts/retire_owner_keys.py --private-db && python scripts/railway_preflight.py --db --runtime-posture --strict && printf "PRIVATE_RELEASE_CHECKS_OK\\n"')" \
+  || { printf '%s\n' "$remote_output"; exit 1; }
 printf '%s\n' "$remote_output"
 sentinel_count="$(printf '%s\n' "$remote_output" | grep -c '^PRIVATE_RELEASE_CHECKS_OK$' || true)"
 test "$sentinel_count" -eq 1
@@ -755,7 +759,8 @@ remote_output="$(railway ssh \
   --project "$PROJECT_ID" --service "$SERVICE" \
   --environment "$ENVIRONMENT" \
   --deployment-instance "$INSTANCE_ID" -- \
-  sh -c 'python scripts/retire_owner_keys.py --private-db && python scripts/railway_preflight.py --db --strict && python -c "$1" && printf "PRIVATE_RELEASE_CHECKS_OK\\n"' sh "$RUNTIME_POSTURE_CHECK")"
+  sh -c 'python scripts/retire_owner_keys.py --private-db && python scripts/railway_preflight.py --db --strict && python -c "$1" && printf "PRIVATE_RELEASE_CHECKS_OK\\n"' sh "$RUNTIME_POSTURE_CHECK")" \
+  || { printf '%s\n' "$remote_output"; exit 1; }
 ```
 
 Keep the sentinel count, the post-check snapshot, and the public live gates.
@@ -799,16 +804,64 @@ python3 "$GATE_DIR/scripts/railway_preflight.py" --live --strict --url "$API_URL
 The post-deploy gate then requires `/.well-known/trust-keys.json`, under the
 `$API_URL` issuer, to publish the manifest's key id exactly once as an active
 Ed25519 key with the manifest's public-key fingerprint, exactly as `--manifest`
-would. A stack
-without a customer manifest, such as the first-party `api.thisisatest.tech`
-service, sets `SIGNING_KEY_ID` and `SIGNING_PUBLIC_KEY_SHA256` from its
-controlled key-generation record instead. That record is the one described
-under [Customer operations manifest](#customer-operations-manifest): the key id
-and the SHA-256 of the raw 32-byte public key, recorded when the key was
-generated, or the previous green release's deployment record if it recorded
-them. Never fill them from the live `/.well-known/trust-keys.json`: the gate
-would then compare the deployed key with itself. Once a release with this check
-is the previous green SHA, rollbacks use the unmodified sequence again.
+would. Once a release with this check is the previous green SHA, rollbacks use
+the unmodified sequence again.
+
+What the signing-key check proves, with the flags or with `--manifest`: that
+the key is *published* as active with that fingerprint, not that the process
+*signs* with it. The public `/health/dependencies` `signing_key` entry reports
+only status and state. The key the process signs with is exposed only on the
+authenticated `GET /v1/signing-keys/active`. A rotation by redeploy (a new
+`TRUST_SIGNING_PRIVATE_KEY_B64` with a new `TRUST_SIGNING_KEY_ID`) activates
+the new key id without retiring the old one (`SigningKeyService.ensure_active_key`
+in `app/services/signing_keys.py`). Both then stay active, and a stale
+expectation naming the old key still passes. After any rotation:
+
+1. Update the expected key id and fingerprint, in the manifest or the
+   first-party record below, from the new key's key-generation record.
+2. Retire the old key's metadata. The repository has no operator command for
+   this yet. `docs/key-management.md` describes
+   `POST /v1/admin/signing-keys/rotate`, but that route does not exist; it is
+   an open item in `docs/GAP_CLOSURE_PLAN.md`. `retire_key_metadata` and
+   `rotate_active_key_metadata` in `app/services/signing_keys.py` are service
+   methods with no route or script. Do the retirement as its own reviewed
+   change, and treat the signing-key check as unverified until it is done.
+3. With an operator key, confirm that the authenticated
+   `GET /v1/signing-keys/active` returns the expected key id, and record the
+   result with the release.
+
+##### First-party stack without a customer manifest
+
+The first-party `https://api.thisisatest.tech` service has no customer
+manifest, but the private release script requires `MANIFEST` and derives
+`PROJECT_ID`, `ENVIRONMENT`, and `API_URL` from it. For a first-party
+rollback:
+
+1. Replace the `MANIFEST=` line and the three `jq` assignments (`PROJECT_ID`,
+   `ENVIRONMENT`, `API_URL`) at the top of the script with the block below.
+2. Skip the `--manifest-only` step. There is no manifest to bind to the
+   checkout.
+3. In the rollback gate block above, drop the two `SIGNING_*` lines that read
+   `$MANIFEST`. The block below sets both variables. Keep both `--live` gates,
+   which already take explicit expectations instead of `--manifest`.
+
+Each value comes from a named controlled record, never from the live service.
+The fingerprint is the SHA-256 of the raw 32-byte public key, recorded when
+the key was generated (see
+[Customer operations manifest](#customer-operations-manifest)), or in the
+previous green release's deployment record if that recorded it. If no
+fingerprint was ever recorded, stop and escalate. Never copy it from
+`/.well-known/trust-keys.json`: the gate would then compare the deployed key
+with itself.
+
+```bash
+# First-party values, exported by the operator from the named records.
+API_URL="https://api.thisisatest.tech"
+ENVIRONMENT="production"
+PROJECT_ID="${FIRST_PARTY_PROJECT_ID:?set from the first-party operations record: the Railway project id of agent-middleware-api}"
+SIGNING_KEY_ID="${FIRST_PARTY_SIGNING_KEY_ID:?set from the first-party key-generation record: the current signing key id}"
+SIGNING_PUBLIC_KEY_SHA256="${FIRST_PARTY_SIGNING_PUBLIC_KEY_SHA256:?no recorded public-key fingerprint: stop and escalate; never copy it from /.well-known/trust-keys.json}"
+```
 
 ### Customer operations manifest
 
