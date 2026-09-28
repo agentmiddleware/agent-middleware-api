@@ -329,7 +329,7 @@ in committed defaults.
 | `ENABLE_PROOF_SURFACES` | `false` | Mount only core trust routers + MCP |
 | `ENABLE_PUBLIC_MCP_ENDPOINT` | `false` | Anonymous MCP discovery is local-only. Production-like boots **refuse to start** if this is true. Live `api.thisisatest.tech` historically had it on; set it false **before** deploying the Narrow lockdown commit or the new image will not boot. Receipt verification stays on `/.well-known/trust-keys.json`. |
 | `ENABLE_STANDARD_MCP_ENDPOINT` | `false` or unset | Auto-minted permits on `POST /mcp`. Do not turn this on. |
-| `ENABLE_DOGFOOD_TOOL` | `false` | The simulated `partner.notes.write` tool is local proof infrastructure, not a production integration. The live posture gate fails unless this is explicitly false. |
+| `ENABLE_DOGFOOD_TOOL` | `false` | The simulated `partner.notes.write` tool is local proof infrastructure, not a production integration. The public health projection does not publish this flag and production tool catalogs require a key, so it is not publicly observable: the private in-container `--runtime-posture` check fails unless it (and `ENABLE_DOGFOOD_SECOND_TOOL`) resolves to false, and the live gate fails if a published value is anything but `false`. |
 | `TRUST_MODE_ENABLED` | `true` | Shipped default; keep it |
 | `ALLOW_LEGACY_UNPERMITTED_MCP` | `false` | Shipped default; keep it |
 | `TRUST_SIGNING_PRIVATE_KEY_B64` | strict base64 of exactly 32 raw bytes | Required when trust mode is on in prod-like; PEM, hex, 64-byte concatenations, and double-encoded base64 are invalid |
@@ -412,14 +412,27 @@ fails, so it works as a gate in a shell or in CI:
   `DATABASE_PUBLIC_URL`) — uses only the explicit public PostgreSQL URL. It
   never falls back to the private `DATABASE_URL`; missing, local, or
   private-looking values fail closed without printing the URL.
-- **Live posture** (needs `PUBLIC_URL` or `--url`) — asserts the deployed
-  service is healthy, reports `production_like=true`, has no unhealthy
-  dependency, did **not** fall back to memory state, and has both
-  `ENABLE_PROOF_SURFACES=false` and
-  `ENABLE_DOGFOOD_TOOL=false`. Add `--expected-version` and
-  `--expected-commit-sha` after deployment to require exact release identity
-  from both `/health` and `/health/dependencies`; the SHA must be the full
-  40-character value.
+- **Live posture** (needs `PUBLIC_URL` or `--url`) — sends only
+  unauthenticated `GET`s and asserts the deployed service is healthy, reports
+  `production_like=true`, has no unhealthy dependency, did **not** fall back
+  to memory state, and has `ENABLE_PROOF_SURFACES=false`. It also asserts the
+  [Narrow lockdown](#applying-the-narrow-lockdown-to-the-live-origin): every
+  production tool catalog (`/v1/discover`, `/mcp/tools.json`, `/mcp/tools`,
+  `/.well-known/mcp/tools.json`) must answer a request without credentials
+  with `401`. A publicly readable catalog fails, and so does any other status
+  or an unreachable route. A published `enable_dogfood_tool` must be exactly
+  `false`. The public projection does not publish it, and the catalogs that
+  once stood in for it now require a key, so the live check prints a `NOTE`
+  and leaves the dogfood posture to the runtime check below. Add
+  `--expected-version` and `--expected-commit-sha` after deployment to require
+  exact release identity from both `/health` and `/health/dependencies`; the
+  SHA must be the full 40-character value.
+- **Runtime posture** (`--runtime-posture`, run inside the deployed API
+  container) — asserts what is no longer publicly observable: the runtime
+  configuration the running service resolves has `ENABLE_DOGFOOD_TOOL=false`
+  and `ENABLE_DOGFOOD_SECOND_TOOL=false`. It also requires a production-like
+  `ENVIRONMENT`, so it fails closed when run anywhere but the deployed service
+  instead of passing on local defaults. It never runs unless requested.
 - **Customer deployment manifest** (`--manifest`) — validates the strict
   non-secret JSON record, requires its Alembic revision and commit SHA to equal
   this release checkout, and rejects tracked or ordinary untracked worktree
@@ -457,18 +470,19 @@ python3 scripts/railway_preflight.py --live --strict --url "$API_URL" \
 python3 scripts/railway_preflight.py --live --strict \
   --manifest /path/to/example-customer.production.json
 
-# Managed single-tenant schema parity, run inside the deployed API container
-# where private DATABASE_URL is reachable. This DB-only check intentionally
-# omits --manifest because the image does not contain .git or the external
-# customer operations record:
+# Managed single-tenant schema parity and private dogfood posture, run inside
+# the deployed API container where private DATABASE_URL is reachable and the
+# service's runtime configuration applies. This check intentionally omits
+# --manifest because the image does not contain .git or the external customer
+# operations record:
 railway ssh --service api-service --environment production -- \
-  python scripts/railway_preflight.py --db --strict
+  python scripts/railway_preflight.py --db --runtime-posture --strict
 ```
 
 [`railway ssh`](https://docs.railway.com/cli/ssh) requires an operator SSH key
 registered with Railway. Copy the exact SSH target command from the Railway
 service dashboard if the local CLI is not already linked. Run the in-container
-DB check and the local
+DB and runtime-posture check and the local
 manifest-bound live check as separate post-deploy gates; both must pass.
 
 A check whose input is absent is **skipped**, not failed; pass `--strict` to
@@ -592,13 +606,14 @@ INSTANCE_ID="$(jq -er \
   ' <<<"$snapshot")"
 
 # Pin both private checks to that exact running instance. The post-drain scrub
-# runs first; schema parity and the sentinel must then succeed in the same SSH
-# invocation. Neither command prints DATABASE_URL or stored credentials.
+# runs first; schema parity, the dogfood runtime posture, and the sentinel must
+# then succeed in the same SSH invocation. Neither command prints DATABASE_URL
+# or stored credentials.
 remote_output="$(railway ssh \
   --project "$PROJECT_ID" --service "$SERVICE" \
   --environment "$ENVIRONMENT" \
   --deployment-instance "$INSTANCE_ID" -- \
-  sh -c 'python scripts/retire_owner_keys.py --private-db && python scripts/railway_preflight.py --db --strict && printf "PRIVATE_RELEASE_CHECKS_OK\\n"')"
+  sh -c 'python scripts/retire_owner_keys.py --private-db && python scripts/railway_preflight.py --db --runtime-posture --strict && printf "PRIVATE_RELEASE_CHECKS_OK\\n"')"
 printf '%s\n' "$remote_output"
 sentinel_count="$(printf '%s\n' "$remote_output" | grep -c '^PRIVATE_RELEASE_CHECKS_OK$' || true)"
 test "$sentinel_count" -eq 1
@@ -747,7 +762,7 @@ export API_URL="${PUBLIC_URL:-https://api.thisisatest.tech}"
 curl -sS "$API_URL/health"
 curl -sS "$API_URL/health/dependencies"   # fell_back_to_memory=false; postgres up
 curl -sS "$API_URL/.well-known/agent.json"  # proof_surfaces_enabled=false
-curl -sS "$API_URL/mcp/tools.json"        # no awi_* / marketplace stubs when proof off
+curl -sS -o /dev/null -w '%{http_code}\n' "$API_URL/mcp/tools.json"  # 401 without a key
 curl -sS "$API_URL/llms.txt"              # Base URL = PUBLIC_URL
 ```
 
@@ -761,8 +776,11 @@ Expect:
   `build_provenance: "stamped"` on both. Then follow the
   [deployment verification checklist](deployment-verification-checklist.md)
   before describing any commit as live.
-- `ENABLE_DOGFOOD_TOOL=false`; `/mcp/tools.json` contains no simulated dogfood
-  tool ids.
+- Tool catalogs answer `401` without a key (the live preflight checks all
+  four). With an operator key, `/mcp/tools.json` lists no simulated dogfood
+  tool ids and no `awi_*` / marketplace stubs.
+- `ENABLE_DOGFOOD_TOOL=false`: not publicly observable. The in-container
+  `--runtime-posture` check proves it for the running service.
 
 ## Pilot qualification and rollout
 
