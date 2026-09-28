@@ -12,11 +12,13 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-# 1. Install uv (to ~/.local/bin, already on PATH) if it is not present.
+# 1. Install uv (to ~/.local/bin) if it is not present. Login shells already
+#    include that directory; non-login shells often do not, so export it
+#    before the presence check. Otherwise every re-run re-invokes the installer.
+export PATH="$HOME/.local/bin:$PATH"
 if ! command -v uv >/dev/null 2>&1; then
   curl -LsSf https://astral.sh/uv/install.sh | sh
 fi
-export PATH="$HOME/.local/bin:$PATH"
 
 # 2. Create the .venv only if missing (keeps re-runs idempotent), then always
 #    refresh runtime + dev deps plus ruff. uv resolves the interpreter,
