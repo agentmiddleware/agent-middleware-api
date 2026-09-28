@@ -173,6 +173,563 @@ def test_public_db_connection_failure_does_not_render_url(
     assert "public-secret" not in output
 
 
+_RAILWAY_PROJECT = "11111111-1111-4111-8111-111111111111"
+_RAILWAY_ENVIRONMENT = "production"
+_RAILWAY_SERVICE = "api-service"
+_RAILWAY_SOURCE_ARGUMENTS = [
+    "--railway-source-unbound",
+    "--railway-project",
+    _RAILWAY_PROJECT,
+    "--railway-environment",
+    _RAILWAY_ENVIRONMENT,
+    "--railway-service",
+    _RAILWAY_SERVICE,
+]
+
+
+@pytest.fixture
+def unbound_railway_status():
+    return {
+        "id": _RAILWAY_PROJECT,
+        "environments": {
+            "edges": [
+                {
+                    "node": {
+                        "name": _RAILWAY_ENVIRONMENT,
+                        "serviceInstances": {
+                            "edges": [
+                                {
+                                    "node": {
+                                        "serviceName": _RAILWAY_SERVICE,
+                                        "source": {"repo": None, "image": None},
+                                    }
+                                }
+                            ]
+                        },
+                    }
+                }
+            ]
+        },
+    }
+
+
+def _railway_source(unbound_railway_status):
+    return unbound_railway_status["environments"]["edges"][0]["node"][
+        "serviceInstances"
+    ]["edges"][0]["node"]["source"]
+
+
+def _validate_railway_source(document):
+    return preflight.validate_railway_source_unbound(
+        document,
+        project_id=_RAILWAY_PROJECT,
+        environment=_RAILWAY_ENVIRONMENT,
+        service=_RAILWAY_SERVICE,
+    )
+
+
+def test_railway_source_gate_accepts_only_explicitly_unbound_target(
+    unbound_railway_status,
+):
+    assert _validate_railway_source(unbound_railway_status) is True
+    assert _railway_source(unbound_railway_status) == {"repo": None, "image": None}
+
+
+def test_railway_source_gate_selects_one_exact_environment_and_service(
+    unbound_railway_status,
+):
+    unbound_railway_status["environments"]["edges"].append(
+        {
+            "node": {
+                "name": "staging",
+                "serviceInstances": {
+                    "edges": [
+                        {
+                            "node": {
+                                "serviceName": "worker",
+                                "source": {"repo": "example/worker", "image": None},
+                            }
+                        }
+                    ]
+                },
+            }
+        }
+    )
+    services = unbound_railway_status["environments"]["edges"][0]["node"][
+        "serviceInstances"
+    ]["edges"]
+    services.append(
+        {
+            "node": {
+                "serviceName": "Postgres",
+                "source": {"repo": None, "image": "postgres:17"},
+            }
+        }
+    )
+
+    assert _validate_railway_source(unbound_railway_status) is True
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        {"repo": "PetrefiedThunder/agent-middleware-api", "image": None},
+        {"repo": None, "image": "ghcr.io/example/agent-middleware-api:latest"},
+        {"repo": "", "image": None},
+        {"repo": None, "image": ""},
+        {},
+        {"repo": None},
+        {"image": None},
+        [],
+        None,
+    ],
+)
+def test_railway_source_gate_rejects_bound_or_implicit_source(
+    unbound_railway_status,
+    source,
+):
+    service = unbound_railway_status["environments"]["edges"][0]["node"][
+        "serviceInstances"
+    ]["edges"][0]["node"]
+    service["source"] = source
+
+    assert _validate_railway_source(unbound_railway_status) is False
+
+
+def test_railway_source_gate_rejects_wrong_project(unbound_railway_status):
+    unbound_railway_status["id"] = "22222222-2222-4222-8222-222222222222"
+
+    assert _validate_railway_source(unbound_railway_status) is False
+
+
+@pytest.mark.parametrize("environment_name", [None, "staging"])
+def test_railway_source_gate_rejects_missing_or_wrong_environment(
+    unbound_railway_status,
+    environment_name,
+):
+    environments = unbound_railway_status["environments"]["edges"]
+    if environment_name is None:
+        environments.clear()
+    else:
+        environments[0]["node"]["name"] = environment_name
+
+    assert _validate_railway_source(unbound_railway_status) is False
+
+
+def test_railway_source_gate_rejects_duplicate_environment(unbound_railway_status):
+    environments = unbound_railway_status["environments"]["edges"]
+    environments.append(json.loads(json.dumps(environments[0])))
+
+    assert _validate_railway_source(unbound_railway_status) is False
+
+
+@pytest.mark.parametrize("service_name", [None, "worker"])
+def test_railway_source_gate_rejects_missing_or_wrong_service(
+    unbound_railway_status,
+    service_name,
+):
+    services = unbound_railway_status["environments"]["edges"][0]["node"][
+        "serviceInstances"
+    ]["edges"]
+    if service_name is None:
+        services.clear()
+    else:
+        services[0]["node"]["serviceName"] = service_name
+
+    assert _validate_railway_source(unbound_railway_status) is False
+
+
+def test_railway_source_gate_rejects_duplicate_service(unbound_railway_status):
+    services = unbound_railway_status["environments"]["edges"][0]["node"][
+        "serviceInstances"
+    ]["edges"]
+    services.append(json.loads(json.dumps(services[0])))
+
+    assert _validate_railway_source(unbound_railway_status) is False
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        [],
+        {},
+        {"id": _RAILWAY_PROJECT, "environments": None},
+        {"id": _RAILWAY_PROJECT, "environments": {"edges": "not-a-list"}},
+        {"id": _RAILWAY_PROJECT, "environments": {"edges": [{}]}},
+        {
+            "id": _RAILWAY_PROJECT,
+            "environments": {"edges": [{"node": {"name": 7}}]},
+        },
+        {
+            "id": _RAILWAY_PROJECT,
+            "environments": {"edges": [{"node": {"name": "production"}}]},
+        },
+        {
+            "id": _RAILWAY_PROJECT,
+            "environments": {
+                "edges": [
+                    {
+                        "node": {
+                            "name": "production",
+                            "serviceInstances": {"edges": "not-a-list"},
+                        }
+                    }
+                ]
+            },
+        },
+        {
+            "id": _RAILWAY_PROJECT,
+            "environments": {
+                "edges": [
+                    {
+                        "node": {
+                            "name": "production",
+                            "serviceInstances": {"edges": [{}]},
+                        }
+                    }
+                ]
+            },
+        },
+    ],
+)
+def test_railway_source_gate_rejects_malformed_status(document):
+    assert _validate_railway_source(document) is False
+
+
+def test_railway_source_check_uses_exact_read_only_command(
+    unbound_railway_status,
+    monkeypatch,
+):
+    seen = {}
+
+    def fake_run(command, **kwargs):
+        seen["command"] = command
+        seen["kwargs"] = kwargs
+        return preflight.subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=json.dumps(unbound_railway_status),
+            stderr="",
+        )
+
+    monkeypatch.setattr(preflight.subprocess, "run", fake_run)
+
+    assert (
+        preflight.check_railway_source_unbound(
+            project_id=_RAILWAY_PROJECT,
+            environment=_RAILWAY_ENVIRONMENT,
+            service=_RAILWAY_SERVICE,
+        )
+        is True
+    )
+    assert seen["command"] == [
+        "railway",
+        "status",
+        "--project",
+        _RAILWAY_PROJECT,
+        "--environment",
+        _RAILWAY_ENVIRONMENT,
+        "--json",
+    ]
+    assert seen["kwargs"] == {
+        "cwd": preflight.REPO_ROOT,
+        "shell": False,
+        "capture_output": True,
+        "text": True,
+        "timeout": 15,
+        "check": False,
+    }
+
+
+@pytest.mark.parametrize("stdout", ["", "{", "{}{}", "[]", '"text"'])
+def test_railway_source_check_rejects_malformed_output_without_echoing_it(
+    stdout,
+    monkeypatch,
+    capsys,
+):
+    monkeypatch.setattr(
+        preflight.subprocess,
+        "run",
+        lambda command, **_kwargs: preflight.subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=stdout,
+            stderr="",
+        ),
+    )
+
+    assert (
+        preflight.check_railway_source_unbound(
+            project_id=_RAILWAY_PROJECT,
+            environment=_RAILWAY_ENVIRONMENT,
+            service=_RAILWAY_SERVICE,
+        )
+        is False
+    )
+    output = capsys.readouterr().out
+    assert "could not be verified" in output
+    if stdout:
+        assert stdout not in output
+
+
+def test_railway_source_check_hides_cli_failure_output(monkeypatch, capsys):
+    secret = "railway_token=secret-token-shaped-value"
+    monkeypatch.setattr(
+        preflight.subprocess,
+        "run",
+        lambda command, **_kwargs: preflight.subprocess.CompletedProcess(
+            command,
+            1,
+            stdout=secret,
+            stderr=secret,
+        ),
+    )
+
+    assert (
+        preflight.check_railway_source_unbound(
+            project_id=_RAILWAY_PROJECT,
+            environment=_RAILWAY_ENVIRONMENT,
+            service=_RAILWAY_SERVICE,
+        )
+        is False
+    )
+    output = capsys.readouterr().out
+    assert "could not be verified" in output
+    assert secret not in output
+
+
+@pytest.mark.parametrize("failure", ["os_error", "timeout"])
+def test_railway_source_check_hides_cli_exception_details(
+    failure,
+    monkeypatch,
+    capsys,
+):
+    secret = "railway_token=secret-token-shaped-value"
+
+    def fail(command, **_kwargs):
+        if failure == "timeout":
+            raise preflight.subprocess.TimeoutExpired(
+                command,
+                timeout=15,
+                output=secret,
+                stderr=secret,
+            )
+        raise OSError(secret)
+
+    monkeypatch.setattr(preflight.subprocess, "run", fail)
+
+    assert (
+        preflight.check_railway_source_unbound(
+            project_id=_RAILWAY_PROJECT,
+            environment=_RAILWAY_ENVIRONMENT,
+            service=_RAILWAY_SERVICE,
+        )
+        is False
+    )
+    output = capsys.readouterr().out
+    assert "could not be verified" in output
+    assert secret not in output
+
+
+@pytest.mark.parametrize("check_result, expected_exit", [(True, 0), (False, 1)])
+def test_railway_source_mode_runs_only_provider_guard(
+    check_result,
+    expected_exit,
+    monkeypatch,
+):
+    seen = []
+    monkeypatch.setattr(
+        preflight,
+        "check_railway_source_unbound",
+        lambda **kwargs: seen.append(("source", kwargs)) is None and check_result,
+    )
+    for check in ("check_db", "check_live", "check_runtime_posture"):
+        monkeypatch.setattr(
+            preflight,
+            check,
+            lambda *_args, **_kwargs: pytest.fail("an unselected check must not run"),
+        )
+
+    assert preflight.main(_RAILWAY_SOURCE_ARGUMENTS) == expected_exit
+    assert seen == [
+        (
+            "source",
+            {
+                "project_id": _RAILWAY_PROJECT,
+                "environment": _RAILWAY_ENVIRONMENT,
+                "service": _RAILWAY_SERVICE,
+            },
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        [
+            "--railway-environment",
+            _RAILWAY_ENVIRONMENT,
+            "--railway-service",
+            _RAILWAY_SERVICE,
+        ],
+        ["--railway-project", _RAILWAY_PROJECT, "--railway-service", _RAILWAY_SERVICE],
+        [
+            "--railway-project",
+            _RAILWAY_PROJECT,
+            "--railway-environment",
+            _RAILWAY_ENVIRONMENT,
+        ],
+        [
+            "--railway-project",
+            _RAILWAY_PROJECT,
+            "--railway-environment",
+            _RAILWAY_ENVIRONMENT,
+            "--railway-service",
+            " ",
+        ],
+    ],
+    ids=["project", "environment", "service", "blank_service"],
+)
+def test_railway_source_mode_requires_exact_target(
+    arguments,
+    monkeypatch,
+    capsys,
+):
+    monkeypatch.setattr(
+        preflight,
+        "check_railway_source_unbound",
+        lambda **_kwargs: pytest.fail("an incomplete target must not be checked"),
+        raising=False,
+    )
+
+    assert preflight.main(["--railway-source-unbound", *arguments]) == 1
+    output = capsys.readouterr().out
+    assert (
+        "requires --railway-project, --railway-environment, and --railway-service"
+        in output
+    )
+
+
+@pytest.mark.parametrize(
+    ("selectors", "database_variable", "expected"),
+    [
+        (["--runtime-posture"], None, ["source", "runtime"]),
+        (["--live", "--url", "https://api.example.com"], None, ["source", "live"]),
+        (["--db"], "DATABASE_URL", ["source", "db"]),
+        (["--public-db"], "DATABASE_PUBLIC_URL", ["source", "db"]),
+        (
+            ["--live", "--runtime-posture", "--url", "https://api.example.com"],
+            None,
+            ["source", "runtime", "live"],
+        ),
+    ],
+    ids=["runtime", "live", "db", "public_db", "runtime_and_live"],
+)
+def test_railway_source_selector_composes_with_pr482_checks(
+    selectors,
+    database_variable,
+    expected,
+    monkeypatch,
+):
+    seen = []
+    if database_variable:
+        monkeypatch.setenv(
+            database_variable,
+            "postgresql://user:password@switchback.proxy.rlwy.net:5432/db",
+        )
+    monkeypatch.setattr(
+        preflight,
+        "check_railway_source_unbound",
+        lambda **_kwargs: seen.append("source") is None,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        preflight,
+        "check_db",
+        lambda *_args, **_kwargs: seen.append("db") is None,
+    )
+    monkeypatch.setattr(
+        preflight,
+        "check_runtime_posture",
+        lambda: seen.append("runtime") is None,
+    )
+    monkeypatch.setattr(
+        preflight,
+        "check_live",
+        lambda *_args, **_kwargs: seen.append("live") is None,
+    )
+
+    assert preflight.main([*_RAILWAY_SOURCE_ARGUMENTS, *selectors, "--strict"]) == 0
+    assert seen == expected
+
+
+@pytest.mark.parametrize(
+    "target_arguments",
+    [
+        ["--railway-project", _RAILWAY_PROJECT],
+        ["--railway-environment", _RAILWAY_ENVIRONMENT],
+        ["--railway-service", _RAILWAY_SERVICE],
+    ],
+)
+def test_railway_target_arguments_require_source_selector(
+    target_arguments,
+    monkeypatch,
+    capsys,
+):
+    for check in (
+        "check_railway_source_unbound",
+        "check_db",
+        "check_live",
+        "check_runtime_posture",
+    ):
+        monkeypatch.setattr(
+            preflight,
+            check,
+            lambda *_args, **_kwargs: pytest.fail("a usage error runs no check"),
+            raising=False,
+        )
+
+    assert preflight.main(target_arguments) == 1
+    assert "apply only to --railway-source-unbound" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "live_only_option",
+    [
+        ["--expected-version", "1.3.0"],
+        [
+            "--expected-commit-sha",
+            "0123456789abcdef0123456789abcdef01234567",
+        ],
+        ["--manifest", "MANIFEST"],
+    ],
+    ids=["expected_version", "expected_commit_sha", "manifest"],
+)
+def test_railway_source_selector_rejects_live_only_options_without_live(
+    tmp_path,
+    monkeypatch,
+    capsys,
+    live_only_option,
+):
+    manifest = _write_manifest(tmp_path, _manifest_document())
+    option = [str(manifest) if arg == "MANIFEST" else arg for arg in live_only_option]
+    for check in (
+        "check_railway_source_unbound",
+        "check_db",
+        "check_live",
+        "check_runtime_posture",
+    ):
+        monkeypatch.setattr(
+            preflight,
+            check,
+            lambda *_args, **_kwargs: pytest.fail("a usage error runs no check"),
+            raising=False,
+        )
+
+    assert preflight.main([*_RAILWAY_SOURCE_ARGUMENTS, "--strict", *option]) == 1
+    assert "apply only to --live" in capsys.readouterr().out
+
+
 def test_release_workflow_validates_without_production_mutation() -> None:
     workflow = (REPO_ROOT / ".github" / "workflows" / "railway-deploy.yml").read_text()
 
@@ -232,24 +789,38 @@ def test_private_pilot_sop_runs_schema_check_inside_api_container() -> None:
     assert 'test "$sentinel_count" -eq 1' in sop
     assert 'test "$post_ready" = "true"' in sop
     assert sop.count('--manifest "$MANIFEST" --url "$API_URL"') == 2
-    assert 'RELEASE_CONTEXT="$(python3 scripts/prepare_railway_release.py --ref "$DEPLOY_SHA")"' in private_release
+    assert (
+        'RELEASE_CONTEXT="$(python3 scripts/prepare_railway_release.py --ref "$DEPLOY_SHA")"'
+        in private_release
+    )
     assert 'railway up "$RELEASE_CONTEXT" --path-as-root' in private_release
-    assert 'test "$(cat "$RELEASE_CONTEXT/.build_commit_sha")" = "$DEPLOY_SHA"' in private_release
+    assert (
+        'test "$(cat "$RELEASE_CONTEXT/.build_commit_sha")" = "$DEPLOY_SHA"'
+        in private_release
+    )
     assert "railway variable set COMMIT_SHA" not in private_release
     assert "--build-arg COMMIT_SHA" not in private_release
-    source_gate = private_release.index(
+    manifest_gate = private_release.index(
         "python3 scripts/railway_preflight.py --manifest-only"
     )
     current_gate = private_release.index(
         'python3 scripts/railway_preflight.py --live --strict --url "$API_URL"'
     )
+    source_gate = private_release.index(
+        "python3 scripts/railway_preflight.py --railway-source-unbound"
+    )
+    assert '--railway-project "$PROJECT_ID"' in private_release
+    assert '--railway-environment "$ENVIRONMENT"' in private_release
+    assert '--railway-service "$SERVICE"' in private_release
     release_context = private_release.index(
         'RELEASE_CONTEXT="$(python3 scripts/prepare_railway_release.py --ref "$DEPLOY_SHA")"'
     )
     deploy = private_release.index('railway up "$RELEASE_CONTEXT" --path-as-root')
-    private_deploy = private_release[deploy : private_release.index(
-        "# Resolve and wait for the uniquely marked deployment"
-    )]
+    private_deploy = private_release[
+        deploy : private_release.index(
+            "# Resolve and wait for the uniquely marked deployment"
+        )
+    ]
     assert "--no-gitignore" in private_deploy
     post_gate = private_release.rindex(
         "python3 scripts/railway_preflight.py --live --strict"
@@ -258,8 +829,9 @@ def test_private_pilot_sop_runs_schema_check_inside_api_container() -> None:
         '--deployment-instance "$CURRENT_INSTANCE_ID"'
     )
     assert (
-        source_gate
+        manifest_gate
         < current_gate
+        < source_gate
         < current_private
         < release_context
         < deploy
@@ -272,7 +844,9 @@ def test_private_pilot_sop_runs_schema_check_inside_api_container() -> None:
 def test_verification_checklist_pairs_public_gate_with_private_posture() -> None:
     """Step 5's --live gate is public-only; the step must say so and give the
     in-container command that verifies the dogfood posture."""
-    checklist = (REPO_ROOT / "docs" / "deployment-verification-checklist.md").read_text()
+    checklist = (
+        REPO_ROOT / "docs" / "deployment-verification-checklist.md"
+    ).read_text()
     step5 = checklist[
         checklist.index("5. **Run the strict live preflight**") : checklist.index(
             "6. **List what is still not live.**"
@@ -282,7 +856,9 @@ def test_verification_checklist_pairs_public_gate_with_private_posture() -> None
     assert "python3 scripts/railway_preflight.py --live --strict" in step5
     assert "public-only" in step5
     assert '--deployment-instance "$INSTANCE_ID"' in step5
-    assert "python scripts/railway_preflight.py --db --runtime-posture --strict" in step5
+    assert (
+        "python scripts/railway_preflight.py --db --runtime-posture --strict" in step5
+    )
     assert "#rolling-back-to-an-image-without---runtime-posture" in step5
 
 
@@ -363,9 +939,9 @@ def test_rollback_live_gates_verify_the_signing_key_from_a_gate_checkout() -> No
     still checked by the tool, from the manifest, not by hand."""
     sop = (REPO_ROOT / "docs" / "deploy-railway.md").read_text()
     rollback = sop[
-        sop.index("#### Rolling back to an image without `--runtime-posture`") : sop.index(
-            "### Customer operations manifest"
-        )
+        sop.index(
+            "#### Rolling back to an image without `--runtime-posture`"
+        ) : sop.index("### Customer operations manifest")
     ]
 
     assert 'GATE_SHA="$(git rev-parse origin/main)"' in rollback
@@ -376,7 +952,7 @@ def test_rollback_live_gates_verify_the_signing_key_from_a_gate_checkout() -> No
     ) in rollback
     assert '''SIGNING_KEY_ID="$(jq -er '.signing_key_id' "$MANIFEST")"''' in rollback
     assert (
-        '''SIGNING_PUBLIC_KEY_SHA256="$(jq -er '.signing_public_key_sha256' '''
+        """SIGNING_PUBLIC_KEY_SHA256="$(jq -er '.signing_public_key_sha256' """
         '''"$MANIFEST")"'''
     ) in rollback
     # The jq fields are the manifest's own field names.
@@ -479,9 +1055,9 @@ def test_railway_cli_version_guard_fails_closed(
 def _rollback_section() -> str:
     sop = (REPO_ROOT / "docs" / "deploy-railway.md").read_text()
     return sop[
-        sop.index("#### Rolling back to an image without `--runtime-posture`") : sop.index(
-            "### Customer operations manifest"
-        )
+        sop.index(
+            "#### Rolling back to an image without `--runtime-posture`"
+        ) : sop.index("### Customer operations manifest")
     ]
 
 
@@ -529,7 +1105,9 @@ def _first_party_block() -> str:
 
 def test_first_party_rollback_variant_replaces_every_manifest_input() -> None:
     rollback = _rollback_section()
-    variant = rollback[rollback.index("##### First-party stack without a customer manifest") :]
+    variant = rollback[
+        rollback.index("##### First-party stack without a customer manifest") :
+    ]
     block = _first_party_block()
 
     # The manifest-derived variables all have a named, non-live source.
@@ -537,7 +1115,9 @@ def test_first_party_rollback_variant_replaces_every_manifest_input() -> None:
     assert 'ENVIRONMENT="production"' in block
     assert 'PROJECT_ID="${FIRST_PARTY_PROJECT_ID:?' in block
     assert 'SIGNING_KEY_ID="${FIRST_PARTY_SIGNING_KEY_ID:?' in block
-    assert 'SIGNING_PUBLIC_KEY_SHA256="${FIRST_PARTY_SIGNING_PUBLIC_KEY_SHA256:?' in block
+    assert (
+        'SIGNING_PUBLIC_KEY_SHA256="${FIRST_PARTY_SIGNING_PUBLIC_KEY_SHA256:?' in block
+    )
     assert "first-party operations record" in block
     assert "first-party key-generation record" in block
     assert "stop and escalate" in block
@@ -764,7 +1344,9 @@ def test_documented_runtime_posture_check_fails_closed(tmp_path, environment) ->
     assert result.stdout == "[preflight] FAIL runtime posture\n"
 
 
-@pytest.mark.parametrize("marker_value", [None, "", "   "], ids=["unset", "empty", "blank"])
+@pytest.mark.parametrize(
+    "marker_value", [None, "", "   "], ids=["unset", "empty", "blank"]
+)
 def test_documented_runtime_posture_check_requires_railway_marker(
     tmp_path,
     marker_value,
@@ -825,10 +1407,16 @@ def test_canonical_railway_sop_uses_immutable_release_context() -> None:
         )
     ]
 
-    assert 'RELEASE_CONTEXT="$(python3 scripts/prepare_railway_release.py --ref "$DEPLOY_SHA")"' in canonical
+    assert (
+        'RELEASE_CONTEXT="$(python3 scripts/prepare_railway_release.py --ref "$DEPLOY_SHA")"'
+        in canonical
+    )
     assert "set -euo pipefail" in canonical
     assert 'test -d "$RELEASE_CONTEXT"' in canonical
-    assert 'test "$(cat "$RELEASE_CONTEXT/.build_commit_sha")" = "$DEPLOY_SHA"' in canonical
+    assert (
+        'test "$(cat "$RELEASE_CONTEXT/.build_commit_sha")" = "$DEPLOY_SHA"'
+        in canonical
+    )
     assert 'railway up "$RELEASE_CONTEXT" --path-as-root' in canonical
     canonical_deploy = canonical[canonical.index('railway up "$RELEASE_CONTEXT"') :]
     assert "--no-gitignore" in canonical_deploy
@@ -837,11 +1425,24 @@ def test_canonical_railway_sop_uses_immutable_release_context() -> None:
     assert "Do not set `COMMIT_SHA` or `BUILD_COMMIT_SHA`" in canonical
     assert "uses `Dockerfile.dev` through `docker-compose.yml`" in canonical
     assert "railway variables" not in sop
+    assert 'PROJECT_ID="${PROJECT_ID:?set PROJECT_ID' in canonical
+    source_gate = canonical.index(
+        "python3 scripts/railway_preflight.py --railway-source-unbound"
+    )
+    assert '--railway-project "$PROJECT_ID"' in canonical
+    assert "--railway-environment production" in canonical
+    assert "--railway-service api-service" in canonical
     canonical_prepare = canonical.index(
         'RELEASE_CONTEXT="$(python3 scripts/prepare_railway_release.py --ref "$DEPLOY_SHA")"'
     )
     canonical_deploy = canonical.index('railway up "$RELEASE_CONTEXT"')
-    assert canonical.index("set -euo pipefail") < canonical_prepare < canonical_deploy
+    assert '--project "$PROJECT_ID"' in canonical[canonical_deploy:]
+    assert (
+        canonical.index("set -euo pipefail")
+        < source_gate
+        < canonical_prepare
+        < canonical_deploy
+    )
 
 
 def test_customer_restore_sop_does_not_misstate_volume_restore_semantics() -> None:
@@ -1279,6 +1880,7 @@ def test_manifest_only_requires_manifest(capsys):
         ["--db"],
         ["--public-db"],
         ["--runtime-posture"],
+        _RAILWAY_SOURCE_ARGUMENTS,
         ["--expected-version", "1.3.0"],
         ["--expected-commit-sha", EXPECTED_COMMIT_SHA],
     ],
@@ -2080,8 +2682,7 @@ def test_runtime_image_never_contains_a_dotenv_file():
     """Ignoring .env equals what the service resolves only because the image
     build context never includes one."""
     patterns = {
-        line.strip()
-        for line in (REPO_ROOT / ".dockerignore").read_text().splitlines()
+        line.strip() for line in (REPO_ROOT / ".dockerignore").read_text().splitlines()
     }
 
     assert {".env", ".env.*"} <= patterns
