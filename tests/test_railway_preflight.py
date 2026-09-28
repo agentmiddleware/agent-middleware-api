@@ -166,6 +166,439 @@ def test_public_db_connection_failure_does_not_render_url(
     assert "public-secret" not in output
 
 
+@pytest.fixture
+def unbound_railway_status():
+    return {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "environments": {
+            "edges": [
+                {
+                    "node": {
+                        "name": "production",
+                        "serviceInstances": {
+                            "edges": [
+                                {
+                                    "node": {
+                                        "serviceName": "api-service",
+                                        "source": {"repo": None, "image": None},
+                                    }
+                                }
+                            ]
+                        },
+                    }
+                }
+            ]
+        },
+    }
+
+
+def test_railway_source_gate_accepts_unbound_service(unbound_railway_status):
+    assert (
+        preflight.validate_railway_source_unbound(
+            unbound_railway_status,
+            project_id="11111111-1111-4111-8111-111111111111",
+            environment="production",
+            service="api-service",
+        )
+        is True
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        {"repo": "PetrefiedThunder/agent-middleware-api", "image": None},
+        {"repo": None, "image": "ghcr.io/example/agent-middleware-api:latest"},
+    ],
+)
+def test_railway_source_gate_rejects_bound_service(unbound_railway_status, source):
+    service = unbound_railway_status["environments"]["edges"][0]["node"][
+        "serviceInstances"
+    ]["edges"][0]["node"]
+    service["source"] = source
+
+    assert (
+        preflight.validate_railway_source_unbound(
+            unbound_railway_status,
+            project_id="11111111-1111-4111-8111-111111111111",
+            environment="production",
+            service="api-service",
+        )
+        is False
+    )
+
+
+def test_railway_source_gate_rejects_wrong_project(unbound_railway_status):
+    unbound_railway_status["id"] = "22222222-2222-4222-8222-222222222222"
+
+    assert (
+        preflight.validate_railway_source_unbound(
+            unbound_railway_status,
+            project_id="11111111-1111-4111-8111-111111111111",
+            environment="production",
+            service="api-service",
+        )
+        is False
+    )
+
+
+@pytest.mark.parametrize("environment", ["missing", "staging"])
+def test_railway_source_gate_rejects_missing_or_wrong_environment(
+    unbound_railway_status, environment
+):
+    if environment == "missing":
+        unbound_railway_status["environments"]["edges"] = []
+    else:
+        unbound_railway_status["environments"]["edges"][0]["node"]["name"] = "staging"
+
+    assert (
+        preflight.validate_railway_source_unbound(
+            unbound_railway_status,
+            project_id="11111111-1111-4111-8111-111111111111",
+            environment="production",
+            service="api-service",
+        )
+        is False
+    )
+
+
+def test_railway_source_gate_rejects_duplicate_environment(unbound_railway_status):
+    duplicate = json.loads(
+        json.dumps(unbound_railway_status["environments"]["edges"][0])
+    )
+    unbound_railway_status["environments"]["edges"].append(duplicate)
+
+    assert (
+        preflight.validate_railway_source_unbound(
+            unbound_railway_status,
+            project_id="11111111-1111-4111-8111-111111111111",
+            environment="production",
+            service="api-service",
+        )
+        is False
+    )
+
+
+@pytest.mark.parametrize("service_name", [None, "worker"])
+def test_railway_source_gate_rejects_missing_or_wrong_service(
+    unbound_railway_status, service_name
+):
+    services = unbound_railway_status["environments"]["edges"][0]["node"][
+        "serviceInstances"
+    ]["edges"]
+    if service_name is None:
+        services.clear()
+    else:
+        services[0]["node"]["serviceName"] = service_name
+
+    assert (
+        preflight.validate_railway_source_unbound(
+            unbound_railway_status,
+            project_id="11111111-1111-4111-8111-111111111111",
+            environment="production",
+            service="api-service",
+        )
+        is False
+    )
+
+
+def test_railway_source_gate_rejects_duplicate_service(unbound_railway_status):
+    services = unbound_railway_status["environments"]["edges"][0]["node"][
+        "serviceInstances"
+    ]["edges"]
+    services.append(json.loads(json.dumps(services[0])))
+
+    assert (
+        preflight.validate_railway_source_unbound(
+            unbound_railway_status,
+            project_id="11111111-1111-4111-8111-111111111111",
+            environment="production",
+            service="api-service",
+        )
+        is False
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        {},
+        {"repo": None},
+        {"image": None},
+        [],
+    ],
+)
+def test_railway_source_gate_rejects_missing_or_malformed_source(
+    unbound_railway_status, source
+):
+    service = unbound_railway_status["environments"]["edges"][0]["node"][
+        "serviceInstances"
+    ]["edges"][0]["node"]
+    service["source"] = source
+
+    assert (
+        preflight.validate_railway_source_unbound(
+            unbound_railway_status,
+            project_id="11111111-1111-4111-8111-111111111111",
+            environment="production",
+            service="api-service",
+        )
+        is False
+    )
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        [],
+        {},
+        {"id": "11111111-1111-4111-8111-111111111111", "environments": None},
+        {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "environments": {"edges": "not-a-list"},
+        },
+        {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "environments": {"edges": [{}]},
+        },
+        {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "environments": {"edges": [{"node": {"name": "production"}}]},
+        },
+        {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "environments": {
+                "edges": [
+                    {
+                        "node": {
+                            "name": "production",
+                            "serviceInstances": {"edges": [{}]},
+                        }
+                    }
+                ]
+            },
+        },
+    ],
+)
+def test_railway_source_gate_rejects_malformed_status(document):
+    assert (
+        preflight.validate_railway_source_unbound(
+            document,
+            project_id="11111111-1111-4111-8111-111111111111",
+            environment="production",
+            service="api-service",
+        )
+        is False
+    )
+
+
+def test_railway_source_check_uses_exact_read_only_command(
+    unbound_railway_status, monkeypatch
+):
+    seen = {}
+
+    def fake_run(command, **kwargs):
+        seen["command"] = command
+        seen["kwargs"] = kwargs
+        return preflight.subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=json.dumps(unbound_railway_status),
+            stderr="",
+        )
+
+    monkeypatch.setattr(preflight.subprocess, "run", fake_run)
+
+    assert (
+        preflight.check_railway_source_unbound(
+            project_id="11111111-1111-4111-8111-111111111111",
+            environment="production",
+            service="api-service",
+        )
+        is True
+    )
+    assert seen["command"] == [
+        "railway",
+        "status",
+        "--project",
+        "11111111-1111-4111-8111-111111111111",
+        "--environment",
+        "production",
+        "--json",
+    ]
+    assert seen["kwargs"] == {
+        "cwd": preflight.REPO_ROOT,
+        "shell": False,
+        "capture_output": True,
+        "text": True,
+        "timeout": 15,
+        "check": False,
+    }
+
+
+@pytest.mark.parametrize("stdout", ["", "{", "{}{}", "[]", '"text"'])
+def test_railway_source_check_rejects_invalid_stdout(stdout, monkeypatch, capsys):
+    monkeypatch.setattr(
+        preflight.subprocess,
+        "run",
+        lambda command, **_kwargs: preflight.subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=stdout,
+            stderr="",
+        ),
+    )
+
+    assert (
+        preflight.check_railway_source_unbound(
+            project_id="11111111-1111-4111-8111-111111111111",
+            environment="production",
+            service="api-service",
+        )
+        is False
+    )
+    assert "could not be verified" in capsys.readouterr().out
+
+
+def test_railway_source_check_hides_nonzero_output(monkeypatch, capsys):
+    secret = "railway_token=secret-token-shaped-value"
+    monkeypatch.setattr(
+        preflight.subprocess,
+        "run",
+        lambda command, **_kwargs: preflight.subprocess.CompletedProcess(
+            command,
+            1,
+            stdout=secret,
+            stderr=secret,
+        ),
+    )
+
+    assert (
+        preflight.check_railway_source_unbound(
+            project_id="11111111-1111-4111-8111-111111111111",
+            environment="production",
+            service="api-service",
+        )
+        is False
+    )
+    output = capsys.readouterr().out
+    assert "could not be verified" in output
+    assert secret not in output
+
+
+def test_railway_source_check_hides_cli_os_error(monkeypatch, capsys):
+    secret = "railway_token=secret-token-shaped-value"
+
+    def fail(*_args, **_kwargs):
+        raise OSError(secret)
+
+    monkeypatch.setattr(preflight.subprocess, "run", fail)
+
+    assert (
+        preflight.check_railway_source_unbound(
+            project_id="11111111-1111-4111-8111-111111111111",
+            environment="production",
+            service="api-service",
+        )
+        is False
+    )
+    output = capsys.readouterr().out
+    assert "could not be verified" in output
+    assert secret not in output
+
+
+def test_railway_source_check_hides_cli_timeout(monkeypatch, capsys):
+    secret = "railway_token=secret-token-shaped-value"
+
+    def timeout(command, **_kwargs):
+        raise preflight.subprocess.TimeoutExpired(
+            command,
+            timeout=15,
+            output=secret,
+            stderr=secret,
+        )
+
+    monkeypatch.setattr(preflight.subprocess, "run", timeout)
+
+    assert (
+        preflight.check_railway_source_unbound(
+            project_id="11111111-1111-4111-8111-111111111111",
+            environment="production",
+            service="api-service",
+        )
+        is False
+    )
+    output = capsys.readouterr().out
+    assert "could not be verified" in output
+    assert secret not in output
+
+
+@pytest.mark.parametrize("check_result, expected_exit", [(True, 0), (False, 1)])
+def test_railway_source_mode_runs_only_provider_guard(
+    check_result, expected_exit, monkeypatch
+):
+    seen = []
+    monkeypatch.setattr(
+        preflight,
+        "check_railway_source_unbound",
+        lambda **kwargs: seen.append(kwargs) is None and check_result,
+    )
+    monkeypatch.setattr(
+        preflight,
+        "check_db",
+        lambda *_args, **_kwargs: pytest.fail("database check must not run"),
+    )
+    monkeypatch.setattr(
+        preflight,
+        "check_live",
+        lambda *_args, **_kwargs: pytest.fail("live check must not run"),
+    )
+
+    assert (
+        preflight.main(
+            [
+                "--railway-source-unbound",
+                "--railway-project",
+                "11111111-1111-4111-8111-111111111111",
+                "--railway-environment",
+                "production",
+                "--railway-service",
+                "api-service",
+            ]
+        )
+        == expected_exit
+    )
+    assert seen == [
+        {
+            "project_id": "11111111-1111-4111-8111-111111111111",
+            "environment": "production",
+            "service": "api-service",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["--railway-environment", "production"],
+        ["--railway-project", "11111111-1111-4111-8111-111111111111"],
+    ],
+)
+def test_railway_source_mode_requires_project_and_environment(
+    arguments, monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        preflight,
+        "check_railway_source_unbound",
+        lambda **_kwargs: pytest.fail("incomplete target must not be checked"),
+    )
+
+    assert preflight.main(["--railway-source-unbound", *arguments]) == 1
+    assert "requires --railway-project and --railway-environment" in (
+        capsys.readouterr().out
+    )
+
+
 def test_release_workflow_validates_without_production_mutation() -> None:
     workflow = (REPO_ROOT / ".github" / "workflows" / "railway-deploy.yml").read_text()
 
@@ -211,29 +644,50 @@ def test_private_pilot_sop_runs_schema_check_inside_api_container() -> None:
     assert 'test "$sentinel_count" -eq 1' in sop
     assert 'test "$post_ready" = "true"' in sop
     assert sop.count('--manifest "$MANIFEST" --url "$API_URL"') == 2
-    assert 'RELEASE_CONTEXT="$(python3 scripts/prepare_railway_release.py --ref "$DEPLOY_SHA")"' in private_release
+    assert (
+        'RELEASE_CONTEXT="$(python3 scripts/prepare_railway_release.py --ref "$DEPLOY_SHA")"'
+        in private_release
+    )
     assert 'railway up "$RELEASE_CONTEXT" --path-as-root' in private_release
-    assert 'test "$(cat "$RELEASE_CONTEXT/.build_commit_sha")" = "$DEPLOY_SHA"' in private_release
+    assert (
+        'test "$(cat "$RELEASE_CONTEXT/.build_commit_sha")" = "$DEPLOY_SHA"'
+        in private_release
+    )
     assert "railway variable set COMMIT_SHA" not in private_release
     assert "--build-arg COMMIT_SHA" not in private_release
-    source_gate = private_release.index(
+    manifest_gate = private_release.index(
         "python3 scripts/railway_preflight.py --manifest-only"
     )
     current_gate = private_release.index(
         'python3 scripts/railway_preflight.py --live --strict --url "$API_URL"'
     )
+    source_gate = private_release.index(
+        "python3 scripts/railway_preflight.py --railway-source-unbound"
+    )
+    assert '--railway-project "$PROJECT_ID"' in private_release
+    assert '--railway-environment "$ENVIRONMENT"' in private_release
+    assert '--railway-service "$SERVICE"' in private_release
     release_context = private_release.index(
         'RELEASE_CONTEXT="$(python3 scripts/prepare_railway_release.py --ref "$DEPLOY_SHA")"'
     )
     deploy = private_release.index('railway up "$RELEASE_CONTEXT" --path-as-root')
-    private_deploy = private_release[deploy : private_release.index(
-        "# Resolve and wait for the uniquely marked deployment"
-    )]
+    private_deploy = private_release[
+        deploy : private_release.index(
+            "# Resolve and wait for the uniquely marked deployment"
+        )
+    ]
     assert "--no-gitignore" in private_deploy
     post_gate = private_release.rindex(
         "python3 scripts/railway_preflight.py --live --strict"
     )
-    assert source_gate < current_gate < release_context < deploy < post_gate
+    assert (
+        manifest_gate
+        < current_gate
+        < source_gate
+        < release_context
+        < deploy
+        < post_gate
+    )
     assert "`railway run` executes locally" in sop
 
 
@@ -245,10 +699,16 @@ def test_canonical_railway_sop_uses_immutable_release_context() -> None:
         )
     ]
 
-    assert 'RELEASE_CONTEXT="$(python3 scripts/prepare_railway_release.py --ref "$DEPLOY_SHA")"' in canonical
+    assert (
+        'RELEASE_CONTEXT="$(python3 scripts/prepare_railway_release.py --ref "$DEPLOY_SHA")"'
+        in canonical
+    )
     assert "set -euo pipefail" in canonical
     assert 'test -d "$RELEASE_CONTEXT"' in canonical
-    assert 'test "$(cat "$RELEASE_CONTEXT/.build_commit_sha")" = "$DEPLOY_SHA"' in canonical
+    assert (
+        'test "$(cat "$RELEASE_CONTEXT/.build_commit_sha")" = "$DEPLOY_SHA"'
+        in canonical
+    )
     assert 'railway up "$RELEASE_CONTEXT" --path-as-root' in canonical
     canonical_deploy = canonical[canonical.index('railway up "$RELEASE_CONTEXT"') :]
     assert "--no-gitignore" in canonical_deploy
@@ -257,11 +717,24 @@ def test_canonical_railway_sop_uses_immutable_release_context() -> None:
     assert "Do not set `COMMIT_SHA` or `BUILD_COMMIT_SHA`" in canonical
     assert "uses `Dockerfile.dev` through `docker-compose.yml`" in canonical
     assert "railway variables" not in sop
+    assert 'PROJECT_ID="${PROJECT_ID:?set PROJECT_ID' in canonical
+    source_gate = canonical.index(
+        "python3 scripts/railway_preflight.py --railway-source-unbound"
+    )
+    assert '--railway-project "$PROJECT_ID"' in canonical
+    assert "--railway-environment production" in canonical
+    assert "--railway-service api-service" in canonical
     canonical_prepare = canonical.index(
         'RELEASE_CONTEXT="$(python3 scripts/prepare_railway_release.py --ref "$DEPLOY_SHA")"'
     )
     canonical_deploy = canonical.index('railway up "$RELEASE_CONTEXT"')
-    assert canonical.index("set -euo pipefail") < canonical_prepare < canonical_deploy
+    assert '--project "$PROJECT_ID"' in canonical[canonical_deploy:]
+    assert (
+        canonical.index("set -euo pipefail")
+        < source_gate
+        < canonical_prepare
+        < canonical_deploy
+    )
 
 
 def test_customer_restore_sop_does_not_misstate_volume_restore_semantics() -> None:
@@ -580,6 +1053,7 @@ def test_manifest_supplies_live_url_commit_and_signing_key(
         expected_commit_sha=None,
         expected_signing_key_id=None,
         expected_signing_public_key_sha256=None,
+        approved_public_url=None,
     ):
         seen.append(
             (
@@ -588,6 +1062,7 @@ def test_manifest_supplies_live_url_commit_and_signing_key(
                 expected_commit_sha,
                 expected_signing_key_id,
                 expected_signing_public_key_sha256,
+                approved_public_url,
             )
         )
         return True
@@ -602,6 +1077,7 @@ def test_manifest_supplies_live_url_commit_and_signing_key(
             TREE_COMMIT_SHA,
             EXPECTED_SIGNING_KEY_ID,
             EXPECTED_SIGNING_PUBLIC_KEY_SHA256,
+            "https://api.example.com",
         )
     ]
 
@@ -879,12 +1355,18 @@ def test_live_fails_on_bad_posture(monkeypatch, override):
 def _patch_get_with_discovery(monkeypatch, payload, discovery_payload):
     import httpx
 
-    def get(url, **_kwargs):
+    calls = []
+    monkeypatch.setenv("BOOTSTRAP_KEY", "operator-test-key")
+    monkeypatch.setenv("PUBLIC_URL", "https://api.example.com")
+
+    def get(url, **kwargs):
+        calls.append((url, kwargs))
         if url.endswith("/v1/discover"):
             return _Response(discovery_payload)
         return _Response(payload)
 
     monkeypatch.setattr(httpx, "get", get)
+    return calls
 
 
 def test_live_passes_when_dogfood_flag_absent_and_discovery_clean(monkeypatch):
@@ -893,13 +1375,120 @@ def test_live_passes_when_dogfood_flag_absent_and_discovery_clean(monkeypatch):
     payload = {
         key: value for key, value in HEALTHY.items() if key != "enable_dogfood_tool"
     }
-    _patch_get_with_discovery(
+    calls = _patch_get_with_discovery(
         monkeypatch,
         payload,
-        {"mcp_tools": [{"service_id": "partner.echo"}]},
+        {"mcp_tools": [{"service_id": "partner.echo", "name": "partner.echo"}]},
     )
 
     assert preflight.check_live("https://api.example.com") is True
+    assert calls == [
+        ("https://api.example.com/health/dependencies", {"timeout": 30}),
+        (
+            "https://api.example.com/v1/discover",
+            {"headers": {"X-API-Key": "operator-test-key"}, "timeout": 30},
+        ),
+    ]
+
+
+def test_live_fails_closed_without_operator_credential(monkeypatch, capsys):
+    import httpx
+
+    payload = {
+        key: value for key, value in HEALTHY.items() if key != "enable_dogfood_tool"
+    }
+    calls = []
+    monkeypatch.delenv("BOOTSTRAP_KEY", raising=False)
+    monkeypatch.setenv("PUBLIC_URL", "https://api.example.com")
+
+    def get(url, **kwargs):
+        calls.append((url, kwargs))
+        return _Response(payload)
+
+    monkeypatch.setattr(httpx, "get", get)
+
+    assert preflight.check_live("https://api.example.com") is False
+    assert calls == [("https://api.example.com/health/dependencies", {"timeout": 30})]
+    assert "BOOTSTRAP_KEY is required" in capsys.readouterr().out
+
+
+def test_live_hides_rejected_operator_credential(monkeypatch, capsys):
+    import httpx
+
+    secret = "operator-secret-token-shaped-value"
+    payload = {
+        key: value for key, value in HEALTHY.items() if key != "enable_dogfood_tool"
+    }
+    monkeypatch.setenv("BOOTSTRAP_KEY", secret)
+    monkeypatch.setenv("PUBLIC_URL", "https://api.example.com")
+
+    class _RejectedResponse:
+        def raise_for_status(self):
+            raise RuntimeError(f"rejected credential {secret}")
+
+    def get(url, **kwargs):
+        if url.endswith("/v1/discover"):
+            assert kwargs["headers"] == {"X-API-Key": secret}
+            return _RejectedResponse()
+        return _Response(payload)
+
+    monkeypatch.setattr(httpx, "get", get)
+
+    assert preflight.check_live("https://api.example.com") is False
+    output = capsys.readouterr().out
+    assert "authenticated /v1/discover could not be checked" in output
+    assert secret not in output
+
+
+@pytest.mark.parametrize(
+    ("target_url", "approved_url"),
+    [
+        ("http://api.example.com", "https://api.example.com"),
+        ("https://untrusted.example.com", "https://api.example.com"),
+        (
+            "https://api.example.com@untrusted.example.com",
+            "https://api.example.com",
+        ),
+        ("https://127.0.0.1", "https://127.0.0.1"),
+        ("https://127.1", "https://127.1"),
+        ("https://api.example.com/catalog", "https://api.example.com/catalog"),
+        (
+            "https://api.example.com?target=other",
+            "https://api.example.com?target=other",
+        ),
+    ],
+)
+def test_live_never_sends_operator_credential_to_unapproved_origin(
+    monkeypatch,
+    capsys,
+    target_url,
+    approved_url,
+):
+    import httpx
+
+    secret = "operator-secret-token-shaped-value"
+    payload = {
+        key: value for key, value in HEALTHY.items() if key != "enable_dogfood_tool"
+    }
+    calls = []
+    monkeypatch.setenv("BOOTSTRAP_KEY", secret)
+    monkeypatch.setenv("PUBLIC_URL", approved_url)
+
+    def get(url, **kwargs):
+        calls.append((url, kwargs))
+        if url.endswith("/v1/discover"):
+            return _Response(
+                {"mcp_tools": [{"service_id": "partner.echo", "name": "partner.echo"}]}
+            )
+        return _Response(payload)
+
+    monkeypatch.setattr(httpx, "get", get)
+
+    assert preflight.check_live(target_url) is False
+    assert calls == [(f"{target_url}/health/dependencies", {"timeout": 30})]
+    output = capsys.readouterr().out
+    assert "approved canonical HTTPS origin" in output
+    assert secret not in output
 
 
 @pytest.mark.parametrize(
@@ -931,10 +1520,21 @@ def test_live_fails_when_dogfood_tool_exposed_in_discovery(monkeypatch):
     payload = {
         key: value for key, value in HEALTHY.items() if key != "enable_dogfood_tool"
     }
+    monkeypatch.setenv("BOOTSTRAP_KEY", "operator-test-key")
+    monkeypatch.setenv("PUBLIC_URL", "https://api.example.com")
 
     def get(url, **_kwargs):
         if url.endswith("/v1/discover"):
-            return _Response({"mcp_tools": [{"service_id": "partner.notes.write"}]})
+            return _Response(
+                {
+                    "mcp_tools": [
+                        {
+                            "service_id": "partner.notes.write",
+                            "name": "partner.notes.write",
+                        }
+                    ]
+                }
+            )
         return _Response(payload)
 
     monkeypatch.setattr(httpx, "get", get)
@@ -948,6 +1548,8 @@ def test_live_fails_when_dogfood_flag_absent_and_discovery_unreachable(monkeypat
     payload = {
         key: value for key, value in HEALTHY.items() if key != "enable_dogfood_tool"
     }
+    monkeypatch.setenv("BOOTSTRAP_KEY", "operator-test-key")
+    monkeypatch.setenv("PUBLIC_URL", "https://api.example.com")
 
     def get(url, **_kwargs):
         if url.endswith("/v1/discover"):
@@ -1112,18 +1714,39 @@ def test_live_fails_when_dogfood_name_hides_behind_benign_service_id(monkeypatch
     assert preflight.check_live("https://api.example.com") is False
 
 
-def test_live_fails_on_non_string_tool_identifier(monkeypatch):
-    """A list-valued identifier must fail closed, not crash on set membership."""
+@pytest.mark.parametrize(
+    "tool",
+    [
+        {},
+        {"service_id": "partner.echo"},
+        {"name": "partner.echo"},
+        {"service_id": None, "name": "partner.echo"},
+        {"service_id": "partner.echo", "name": None},
+        {"service_id": "", "name": "partner.echo"},
+        {"service_id": "partner.echo", "name": ""},
+        {"service_id": " ", "name": "partner.echo"},
+        {"service_id": "partner.echo", "name": "\t"},
+        {"service_id": ["partner.echo"], "name": "partner.echo"},
+        {"service_id": "partner.echo", "name": ["partner.echo"]},
+    ],
+)
+def test_live_fails_on_missing_or_invalid_tool_identifier(
+    monkeypatch,
+    capsys,
+    tool,
+):
+    """Every catalog entry must carry both non-empty string identifiers."""
     payload = {
         key: value for key, value in HEALTHY.items() if key != "enable_dogfood_tool"
     }
     _patch_get_with_discovery(
         monkeypatch,
         payload,
-        {"mcp_tools": [{"service_id": ["partner.notes.write"]}]},
+        {"mcp_tools": [tool]},
     )
 
     assert preflight.check_live("https://api.example.com") is False
+    assert "tool identifiers must be non-empty strings" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------
