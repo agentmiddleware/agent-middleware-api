@@ -766,6 +766,58 @@ def test_railway_source_selector_composes_with_pr482_checks(
 
 
 @pytest.mark.parametrize(
+    "url",
+    ["https://api.example.com", "", "   "],
+    ids=["nonempty", "empty", "blank"],
+)
+def test_railway_source_selector_rejects_explicit_url_without_live(
+    url,
+    monkeypatch,
+    capsys,
+):
+    monkeypatch.delenv("PUBLIC_URL", raising=False)
+    for check in (
+        "check_railway_source_unbound",
+        "check_db",
+        "check_live",
+        "check_runtime_posture",
+    ):
+        monkeypatch.setattr(
+            preflight,
+            check,
+            lambda *_args, **_kwargs: pytest.fail("a usage error runs no check"),
+            raising=False,
+        )
+
+    assert preflight.main([*_RAILWAY_SOURCE_ARGUMENTS, "--url", url, "--strict"]) == 1
+    assert (
+        capsys.readouterr().out
+        == "[preflight] FAIL live-only options require --live: --url\n"
+    )
+
+
+def test_railway_source_selector_does_not_treat_public_url_env_as_explicit(
+    monkeypatch,
+):
+    seen = []
+    monkeypatch.setenv("PUBLIC_URL", "https://api.example.com")
+    monkeypatch.setattr(
+        preflight,
+        "check_railway_source_unbound",
+        lambda **_kwargs: seen.append("source") is None,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        preflight,
+        "check_live",
+        lambda *_args, **_kwargs: pytest.fail("source-only must not probe live"),
+    )
+
+    assert preflight.main([*_RAILWAY_SOURCE_ARGUMENTS, "--strict"]) == 0
+    assert seen == ["source"]
+
+
+@pytest.mark.parametrize(
     "target_arguments",
     [
         ["--railway-project", _RAILWAY_PROJECT],
@@ -799,13 +851,23 @@ def test_railway_target_arguments_require_source_selector(
     "live_only_option",
     [
         ["--expected-version", "1.3.0"],
+        ["--expected-version", ""],
         [
             "--expected-commit-sha",
             "0123456789abcdef0123456789abcdef01234567",
         ],
+        ["--expected-commit-sha", ""],
         ["--manifest", "MANIFEST"],
+        ["--manifest", ""],
     ],
-    ids=["expected_version", "expected_commit_sha", "manifest"],
+    ids=[
+        "expected_version",
+        "empty_expected_version",
+        "expected_commit_sha",
+        "empty_expected_commit_sha",
+        "manifest",
+        "empty_manifest",
+    ],
 )
 def test_railway_source_selector_rejects_live_only_options_without_live(
     tmp_path,
@@ -829,7 +891,7 @@ def test_railway_source_selector_rejects_live_only_options_without_live(
         )
 
     assert preflight.main([*_RAILWAY_SOURCE_ARGUMENTS, "--strict", *option]) == 1
-    assert "apply only to --live" in capsys.readouterr().out
+    assert "live-only options require --live" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(
@@ -923,7 +985,7 @@ def test_private_pilot_sop_runs_schema_check_inside_api_container() -> None:
     assert "PRIVATE_RELEASE_CHECKS_OK" in sop
     assert 'test "$sentinel_count" -eq 1' in sop
     assert 'test "$post_ready" = "true"' in sop
-    assert sop.count('--manifest "$MANIFEST" --url "$API_URL"') == 2
+    assert sop.count('--manifest "$MANIFEST" --url "$API_URL"') == 1
     assert (
         'RELEASE_CONTEXT="$(python3 scripts/prepare_railway_release.py --ref "$DEPLOY_SHA")"'
         in private_release
@@ -941,9 +1003,12 @@ def test_private_pilot_sop_runs_schema_check_inside_api_container() -> None:
     current_gate = private_release.index(
         'python3 scripts/railway_preflight.py --live --strict --url "$API_URL"'
     )
-    source_gate = private_release.index(
-        "python3 scripts/railway_preflight.py --railway-source-unbound"
+    source_command = (
+        "python3 scripts/railway_preflight.py --railway-source-unbound \\\n"
+        '  --railway-project "$PROJECT_ID" --railway-environment "$ENVIRONMENT" \\\n'
+        '  --railway-service "$SERVICE"'
     )
+    assert private_release.count(source_command) == 2
     assert '--railway-project "$PROJECT_ID"' in private_release
     assert '--railway-environment "$ENVIRONMENT"' in private_release
     assert '--railway-service "$SERVICE"' in private_release
@@ -951,6 +1016,20 @@ def test_private_pilot_sop_runs_schema_check_inside_api_container() -> None:
         'RELEASE_CONTEXT="$(python3 scripts/prepare_railway_release.py --ref "$DEPLOY_SHA")"'
     )
     deploy = private_release.index('railway up "$RELEASE_CONTEXT" --path-as-root')
+    source_before = private_release.index(source_command, release_context)
+    source_after = private_release.index(source_command, deploy)
+    assert (
+        f'{source_command}\nrailway up "$RELEASE_CONTEXT" --path-as-root'
+        in private_release
+    )
+    upload_command = (
+        'railway up "$RELEASE_CONTEXT" --path-as-root \\\n'
+        "  --no-gitignore \\\n"
+        '  --project "$PROJECT_ID" --service "$SERVICE" \\\n'
+        '  --environment "$ENVIRONMENT" --ci \\\n'
+        '  --message "$RELEASE_MARKER"'
+    )
+    assert f"{upload_command}\n{source_command}" in private_release
     private_deploy = private_release[
         deploy : private_release.index(
             "# Resolve and wait for the uniquely marked deployment"
@@ -966,12 +1045,15 @@ def test_private_pilot_sop_runs_schema_check_inside_api_container() -> None:
     assert (
         manifest_gate
         < current_gate
-        < source_gate
         < current_private
         < release_context
+        < source_before
         < deploy
+        < source_after
         < post_gate
     )
+    assert "Only a provider-side compare-and-swap" in sop
+    assert "does not prevent a source change during the upload" in sop
     assert "`railway run` executes locally" in sop
     assert "a `--live`-only run does not verify the dogfood posture" in sop
 
@@ -1561,9 +1643,12 @@ def test_canonical_railway_sop_uses_immutable_release_context() -> None:
     assert "uses `Dockerfile.dev` through `docker-compose.yml`" in canonical
     assert "railway variables" not in sop
     assert 'PROJECT_ID="${PROJECT_ID:?set PROJECT_ID' in canonical
-    source_gate = canonical.index(
-        "python3 scripts/railway_preflight.py --railway-source-unbound"
+    source_command = (
+        "python3 scripts/railway_preflight.py --railway-source-unbound \\\n"
+        '  --railway-project "$PROJECT_ID" --railway-environment production \\\n'
+        "  --railway-service api-service"
     )
+    assert canonical.count(source_command) == 2
     assert '--railway-project "$PROJECT_ID"' in canonical
     assert "--railway-environment production" in canonical
     assert "--railway-service api-service" in canonical
@@ -1571,13 +1656,23 @@ def test_canonical_railway_sop_uses_immutable_release_context() -> None:
         'RELEASE_CONTEXT="$(python3 scripts/prepare_railway_release.py --ref "$DEPLOY_SHA")"'
     )
     canonical_deploy = canonical.index('railway up "$RELEASE_CONTEXT"')
+    source_before = canonical.index(source_command, canonical_prepare)
+    source_after = canonical.index(source_command, canonical_deploy)
     assert '--project "$PROJECT_ID"' in canonical[canonical_deploy:]
+    canonical_upload = (
+        'railway up "$RELEASE_CONTEXT" --path-as-root --no-gitignore \\\n'
+        '  --project "$PROJECT_ID" --service api-service --environment production --ci'
+    )
+    assert f"{source_command}\n{canonical_upload}\n{source_command}" in canonical
     assert (
         canonical.index("set -euo pipefail")
-        < source_gate
         < canonical_prepare
+        < source_before
         < canonical_deploy
+        < source_after
     )
+    assert "Only a provider-side compare-and-swap" in canonical
+    assert "does not prevent a source change during the upload" in canonical
 
 
 def test_customer_restore_sop_does_not_misstate_volume_restore_semantics() -> None:
@@ -1994,8 +2089,6 @@ def test_manifest_only_validates_new_candidate_without_probing_old_release(
                 "--manifest-only",
                 "--manifest",
                 str(path),
-                "--url",
-                "https://api.example.com",
             ]
         )
         == 0
@@ -2016,6 +2109,7 @@ def test_manifest_only_requires_manifest(capsys):
         ["--public-db"],
         ["--runtime-posture"],
         _RAILWAY_SOURCE_ARGUMENTS,
+        ["--url", "https://api.example.com"],
         ["--expected-version", "1.3.0"],
         ["--expected-commit-sha", EXPECTED_COMMIT_SHA],
     ],
@@ -2941,16 +3035,30 @@ def test_cli_public_db_checks_the_public_url_alongside_other_checks(
 @pytest.mark.parametrize(
     "live_only_option",
     [
+        ["--url", "https://api.example.com"],
+        ["--url", ""],
         ["--expected-version", "1.3.0"],
+        ["--expected-version", ""],
         ["--expected-commit-sha", EXPECTED_COMMIT_SHA],
+        ["--expected-commit-sha", ""],
         ["--manifest", "MANIFEST"],
+        ["--manifest", ""],
     ],
-    ids=["expected_version", "expected_commit_sha", "manifest"],
+    ids=[
+        "url",
+        "empty_url",
+        "expected_version",
+        "empty_expected_version",
+        "expected_commit_sha",
+        "empty_expected_commit_sha",
+        "manifest",
+        "empty_manifest",
+    ],
 )
 @pytest.mark.parametrize(
     "selectors",
-    [["--runtime-posture"], ["--db", "--runtime-posture"]],
-    ids=["runtime_posture", "db_and_runtime_posture"],
+    [["--runtime-posture"], ["--db"], ["--db", "--runtime-posture"]],
+    ids=["runtime_posture", "db", "db_and_runtime_posture"],
 )
 def test_cli_runtime_posture_rejects_live_only_options_without_live(
     tmp_path,
@@ -2971,7 +3079,7 @@ def test_cli_runtime_posture_rejects_live_only_options_without_live(
         )
 
     assert preflight.main([*selectors, "--strict", *option]) == 1
-    assert "apply only to --live" in capsys.readouterr().out
+    assert "live-only options require --live" in capsys.readouterr().out
 
 
 def test_cli_runtime_posture_with_live_keeps_release_expectations(monkeypatch):
@@ -3118,6 +3226,7 @@ def test_cli_signing_key_expectations_verify_the_published_key(
         (_SIGNING_ARGUMENTS, "apply only to --live"),
         (["--db", *_SIGNING_ARGUMENTS], "apply only to --live"),
         (["--runtime-posture", *_SIGNING_ARGUMENTS], "apply only to --live"),
+        ([*_RAILWAY_SOURCE_ARGUMENTS, *_SIGNING_ARGUMENTS], "apply only to --live"),
         (
             ["--manifest-only", "--manifest", "MANIFEST", *_SIGNING_ARGUMENTS],
             "--manifest-only cannot be combined",
@@ -3134,6 +3243,7 @@ def test_cli_signing_key_expectations_verify_the_published_key(
         "default_run",
         "db_only",
         "runtime_posture_only",
+        "railway_source_only",
         "manifest_only",
     ],
 )
