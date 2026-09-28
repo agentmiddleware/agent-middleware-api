@@ -580,6 +580,11 @@ def run_constant_test(
             verify_resp.get("valid") is True,
             "receipt signature is invalid",
         )
+        if retry_evidence_output is not None:
+            require(
+                verify_resp.get("receipt") == receipt,
+                "success envelope does not match the signed receipt",
+            )
         print(
             "[constant-test] signature OK: receipt signature verified",
             file=sys.stderr,
@@ -786,6 +791,10 @@ def run_constant_test(
                 cap_denial_receipt.get("dispatch_attempt_id") is None,
                 "fresh-key denial created a dispatch link",
             )
+            require(
+                cap_denial_receipt.get("receipt_id") != receipt["receipt_id"],
+                "fresh-key denial reused the success receipt",
+            )
             cap_denial_verify = _post_json(
                 client,
                 "/v1/receipts/verify",
@@ -795,6 +804,10 @@ def run_constant_test(
             require(
                 cap_denial_verify.get("valid") is True,
                 "fresh-key denial receipt signature is invalid",
+            )
+            require(
+                cap_denial_verify.get("receipt") == cap_denial_receipt,
+                "denial envelope does not match the signed denial receipt",
             )
             permit_after_cap_denial = _get_json(
                 client, f"/v1/permits/{permit_id}", expected_status=200
