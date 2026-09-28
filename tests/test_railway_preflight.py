@@ -13,6 +13,7 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -307,7 +308,7 @@ def test_private_release_checks_current_instance_posture_before_deploying() -> N
     instance serving traffic privately before anything changes."""
     private_release = _private_release_sop()
 
-    definition = private_release.index("RUNTIME_POSTURE_CHECK='import sys")
+    definition = private_release.index("RUNTIME_POSTURE_CHECK='import os, sys")
     current_live = private_release.index(
         'python3 scripts/railway_preflight.py --live --strict --url "$API_URL"'
     )
@@ -356,14 +357,149 @@ def test_rollback_to_image_without_runtime_posture_keeps_private_posture() -> No
     )
 
 
-def _run_documented_runtime_posture_check(tmp_path, **environment):
-    # A minimal environment, so nothing from the test runner leaks in, run
-    # from an empty directory the way the image has no .env file.
-    env = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(REPO_ROOT)}
+def test_rollback_live_gates_verify_the_signing_key_from_a_gate_checkout() -> None:
+    """A rollback to a release whose own preflight predates the locked
+    catalogs runs the live gates from a gate checkout. The signing key is
+    still checked by the tool, from the manifest, not by hand."""
+    sop = (REPO_ROOT / "docs" / "deploy-railway.md").read_text()
+    rollback = sop[
+        sop.index("#### Rolling back to an image without `--runtime-posture`") : sop.index(
+            "### Customer operations manifest"
+        )
+    ]
+
+    assert 'GATE_SHA="$(git rev-parse origin/main)"' in rollback
+    assert 'git archive "$GATE_SHA" | tar -x -C "$GATE_DIR"' in rollback
+    assert (
+        "grep -q -- '--expected-signing-key-id' "
+        '"$GATE_DIR/scripts/railway_preflight.py"'
+    ) in rollback
+    assert '''SIGNING_KEY_ID="$(jq -er '.signing_key_id' "$MANIFEST")"''' in rollback
+    assert (
+        '''SIGNING_PUBLIC_KEY_SHA256="$(jq -er '.signing_public_key_sha256' '''
+        '''"$MANIFEST")"'''
+    ) in rollback
+    # The jq fields are the manifest's own field names.
+    for field in re.findall(r"jq -er '\.([a-z0-9_]+)' \"\$MANIFEST\"", rollback):
+        assert field in preflight._MANIFEST_FIELDS
+    pre_deploy = (
+        'python3 "$GATE_DIR/scripts/railway_preflight.py" --live --strict '
+        '--url "$API_URL"\n'
+    )
+    post_deploy = (
+        'python3 "$GATE_DIR/scripts/railway_preflight.py" --live --strict '
+        '--url "$API_URL" \\\n'
+        '  --expected-version "$EXPECTED_VERSION" '
+        '--expected-commit-sha "$DEPLOY_SHA" \\\n'
+        '  --expected-signing-key-id "$SIGNING_KEY_ID" \\\n'
+        '  --expected-signing-public-key-sha256 "$SIGNING_PUBLIC_KEY_SHA256"\n'
+    )
+    assert pre_deploy in rollback
+    assert post_deploy in rollback
+    assert rollback.index(pre_deploy) < rollback.index(post_deploy)
+    assert "separately" not in rollback
+    # Without a manifest the values come from a record, never the live key.
+    assert "controlled key-generation record" in rollback
+    assert "Never fill them from the live `/.well-known/trust-keys.json`" in rollback
+
+
+def _railway_cli_version_guard() -> str:
+    guards = re.findall(
+        r"^railway --version \| python3 -c '[^\n]*'$",
+        _private_release_sop(),
+        re.MULTILINE,
+    )
+    assert len(guards) == 1
+    return guards[0]
+
+
+def test_private_release_stops_on_an_old_railway_cli_before_using_it() -> None:
+    """The guard is the first Railway CLI call in the operator script."""
+    private_release = _private_release_sop()
+    script = private_release[private_release.index("set -euo pipefail") :]
+    first_railway_call = re.search(r"(?m)(^|\$\()railway ", script)
+
+    assert first_railway_call is not None
+    assert script.index(_railway_cli_version_guard()) == first_railway_call.start()
+
+
+@pytest.mark.parametrize(
+    ("version_output", "exit_status", "allowed"),
+    [
+        ("railway 5.43.0", 0, True),
+        ("railway 5.62.1", 0, True),
+        ("railway 6.0.0", 0, True),
+        ("railway 5.42.9", 0, False),
+        ("railway 4.99.99", 0, False),
+        ("railway dev", 0, False),
+        ("railway 5.62.1", 1, False),
+        (None, 0, False),
+    ],
+    ids=[
+        "5.43.0",
+        "5.62.1",
+        "6.0.0",
+        "5.42.9",
+        "4.99.99",
+        "unparseable",
+        "cli_error",
+        "no_cli",
+    ],
+)
+def test_railway_cli_version_guard_fails_closed(
+    tmp_path,
+    version_output,
+    exit_status,
+    allowed,
+) -> None:
+    """Run the SOP's guard line under set -euo pipefail with a stand-in CLI."""
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("needs bash")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    if version_output is not None:
+        railway = bin_dir / "railway"
+        railway.write_text(f'#!/bin/sh\necho "{version_output}"\nexit {exit_status}\n')
+        railway.chmod(0o755)
+    python_dir = tmp_path / "python"
+    python_dir.mkdir()
+    (python_dir / "python3").symlink_to(sys.executable)
+    script = f"set -euo pipefail\n{_railway_cli_version_guard()}\necho reached\n"
+    result = subprocess.run(
+        [bash, "-c", script],
+        env={"PATH": f"{bin_dir}:{python_dir}"},
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+    assert (result.returncode == 0) is allowed, result.stderr
+    assert ("reached" in result.stdout) is allowed
+
+
+def _run_documented_runtime_posture_check(tmp_path, *, dotenv_in=None, **environment):
+    """Run the SOP's inline check the way the container does.
+
+    The service root is a directory whose ``app`` package links to this
+    tree's, so the snippet locates the service's working directory from
+    ``app.__file__`` exactly as it does at ``/app``. The check itself runs
+    from a separate empty directory. A minimal environment keeps the test
+    runner's variables out.
+    """
+    service = tmp_path / "service"
+    cwd = tmp_path / "cwd"
+    service.mkdir()
+    cwd.mkdir()
+    (service / "app").symlink_to(REPO_ROOT / "app", target_is_directory=True)
+    if dotenv_in is not None:
+        (tmp_path / dotenv_in / ".env").write_text("ENABLE_DOGFOOD_TOOL=false\n")
+    env = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(service)}
     env.update(environment)
     return subprocess.run(
         [sys.executable, "-c", _documented_runtime_posture_check()],
-        cwd=tmp_path,
+        cwd=cwd,
         env=env,
         capture_output=True,
         text=True,
@@ -372,16 +508,32 @@ def _run_documented_runtime_posture_check(tmp_path, **environment):
     )
 
 
+# What a deployed Railway container carries besides the service's variables.
+_RAILWAY_MARKER = {"RAILWAY_SERVICE_ID": "0f0e0d0c-api-service"}
+
+
 def test_documented_runtime_posture_check_passes_in_production(tmp_path) -> None:
     result = _run_documented_runtime_posture_check(
         tmp_path,
         ENVIRONMENT="production",
         ENABLE_DOGFOOD_TOOL="false",
         ENABLE_DOGFOOD_SECOND_TOOL="false",
+        **_RAILWAY_MARKER,
     )
 
     assert result.returncode == 0, result.stderr
     assert result.stdout == "[preflight] PASS runtime posture\n"
+
+
+def test_documented_runtime_posture_check_matches_the_flag() -> None:
+    """The inline check carries the same guards as --runtime-posture."""
+    snippet = _documented_runtime_posture_check()
+
+    assert "HOSTED_RUNTIME_MARKER_VARS" in snippet
+    assert 'Path(".env")' in snippet
+    assert 'Path(os.path.abspath(app.__file__)).parents[1] / ".env"' in snippet
+    assert "except Exception as exc:" in snippet
+    assert "type(exc).__name__" in snippet
 
 
 @pytest.mark.parametrize(
@@ -395,10 +547,47 @@ def test_documented_runtime_posture_check_passes_in_production(tmp_path) -> None
     ids=["dogfood_tool", "dogfood_second_tool", "local", "environment_unset"],
 )
 def test_documented_runtime_posture_check_fails_closed(tmp_path, environment) -> None:
-    result = _run_documented_runtime_posture_check(tmp_path, **environment)
+    result = _run_documented_runtime_posture_check(
+        tmp_path, **_RAILWAY_MARKER, **environment
+    )
 
     assert result.returncode == 1
     assert result.stdout == "[preflight] FAIL runtime posture\n"
+
+
+@pytest.mark.parametrize("marker_value", [None, "", "   "], ids=["unset", "empty", "blank"])
+def test_documented_runtime_posture_check_requires_railway_marker(
+    tmp_path,
+    marker_value,
+) -> None:
+    environment = {"ENVIRONMENT": "production"}
+    if marker_value is not None:
+        environment["RAILWAY_SERVICE_ID"] = marker_value
+    result = _run_documented_runtime_posture_check(tmp_path, **environment)
+
+    assert result.returncode == 1
+    assert result.stdout == (
+        "[preflight] FAIL runtime posture: no Railway runtime marker\n"
+    )
+
+
+@pytest.mark.parametrize("location", ["service", "cwd"])
+def test_documented_runtime_posture_check_fails_on_service_dotenv(
+    tmp_path,
+    location,
+) -> None:
+    result = _run_documented_runtime_posture_check(
+        tmp_path,
+        dotenv_in=location,
+        ENVIRONMENT="production",
+        **_RAILWAY_MARKER,
+    )
+
+    assert result.returncode == 1
+    assert result.stdout == (
+        "[preflight] FAIL runtime posture: a .env file exists where the "
+        "service would read it\n"
+    )
 
 
 def test_documented_runtime_posture_check_never_echoes_config_values(tmp_path) -> None:
@@ -409,6 +598,7 @@ def test_documented_runtime_posture_check_never_echoes_config_values(tmp_path) -
         tmp_path,
         ENVIRONMENT="production",
         ENABLE_DOGFOOD_TOOL=malformed,
+        **_RAILWAY_MARKER,
     )
 
     assert result.returncode == 1
@@ -1511,12 +1701,17 @@ def test_live_fails_when_dogfood_flag_published_as_null(monkeypatch):
 def runtime_settings(monkeypatch, tmp_path):
     """A deployed Railway container's variables, from this test only.
 
-    Every Railway marker is cleared first and the check runs from an empty
-    working directory. A value of None unsets that variable.
+    Every Railway marker is cleared first. The check runs from an empty
+    working directory (``tmp_path / "cwd"``), and the service's own working
+    directory, which the image puts at the script's ``REPO_ROOT``, is an empty
+    ``tmp_path / "service"``. A value of None unsets that variable.
     """
     from app.core.trust_mode import HOSTED_RUNTIME_MARKER_VARS
 
-    monkeypatch.chdir(tmp_path)
+    (tmp_path / "cwd").mkdir()
+    (tmp_path / "service").mkdir()
+    monkeypatch.chdir(tmp_path / "cwd")
+    monkeypatch.setattr(preflight, "REPO_ROOT", tmp_path / "service")
     for marker in HOSTED_RUNTIME_MARKER_VARS:
         monkeypatch.delenv(marker, raising=False)
 
@@ -1625,8 +1820,9 @@ def test_runtime_posture_ignores_dotenv_in_working_directory(
     tmp_path,
     capsys,
 ):
-    """A scratch .env must not be able to vouch for production."""
-    (tmp_path / ".env").write_text(
+    """A scratch .env must not be able to vouch for production: it is never
+    read, and its presence alone fails the check."""
+    (tmp_path / "cwd" / ".env").write_text(
         "ENVIRONMENT=production\n"
         "ENABLE_DOGFOOD_TOOL=false\n"
         "ENABLE_DOGFOOD_SECOND_TOOL=false\n"
@@ -1634,7 +1830,41 @@ def test_runtime_posture_ignores_dotenv_in_working_directory(
     runtime_settings(ENVIRONMENT=None)
 
     assert preflight.check_runtime_posture() is False
-    assert "ENVIRONMENT is not production-like" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "ENVIRONMENT is not production-like" in output
+    assert "exists and the service would read it" in output
+
+
+@pytest.mark.parametrize("location", ["service", "cwd"])
+def test_runtime_posture_fails_when_the_service_would_read_a_dotenv(
+    runtime_settings,
+    tmp_path,
+    capsys,
+    location,
+):
+    """get_settings() reads .env from the service's working directory. The
+    check reads only the process environment, so a .env there (even one that
+    agrees) means the check cannot vouch for the service's configuration."""
+    dotenv = tmp_path / location / ".env"
+    dotenv.write_text("ENABLE_DOGFOOD_TOOL=false\n")
+    runtime_settings()
+
+    assert preflight.check_runtime_posture() is False
+    output = capsys.readouterr().out
+    assert f"{dotenv} exists and the service would read it" in output
+    assert "[preflight] PASS" not in output
+
+
+def test_runtime_posture_is_not_blocked_by_other_dotenv_files(
+    runtime_settings,
+    tmp_path,
+):
+    """Negative control: only a file named .env is read by the service."""
+    for location in ("service", "cwd"):
+        (tmp_path / location / ".env.example").write_text("ENVIRONMENT=local\n")
+    runtime_settings()
+
+    assert preflight.check_runtime_posture() is True
 
 
 def test_runtime_image_never_contains_a_dotenv_file():
@@ -1822,6 +2052,164 @@ def test_cli_runtime_posture_with_live_keeps_release_expectations(monkeypatch):
         "runtime",
         ("https://api.example.com", "1.3.0", EXPECTED_COMMIT_SHA),
     ]
+
+
+_SIGNING_ARGUMENTS = [
+    "--expected-signing-key-id",
+    EXPECTED_SIGNING_KEY_ID,
+    "--expected-signing-public-key-sha256",
+    EXPECTED_SIGNING_PUBLIC_KEY_SHA256,
+]
+
+
+def test_cli_forwards_explicit_signing_key_expectations(monkeypatch):
+    seen = []
+
+    def check_live(url, **expectations):
+        seen.append((url, expectations))
+        return True
+
+    monkeypatch.setattr(preflight, "check_live", check_live)
+
+    arguments = ["--live", "--strict", "--url", "https://api.example.com"]
+    arguments += ["--expected-version", "1.3.0"]
+    arguments += ["--expected-commit-sha", EXPECTED_COMMIT_SHA, *_SIGNING_ARGUMENTS]
+    assert preflight.main(arguments) == 0
+    assert seen == [
+        (
+            "https://api.example.com",
+            {
+                "expected_version": "1.3.0",
+                "expected_commit_sha": EXPECTED_COMMIT_SHA,
+                "expected_signing_key_id": EXPECTED_SIGNING_KEY_ID,
+                "expected_signing_public_key_sha256": (
+                    EXPECTED_SIGNING_PUBLIC_KEY_SHA256
+                ),
+            },
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    ("signing_arguments", "passes"),
+    [
+        (_SIGNING_ARGUMENTS, True),
+        (
+            ["--expected-signing-key-id", EXPECTED_SIGNING_KEY_ID]
+            + ["--expected-signing-public-key-sha256", "0" * 64],
+            False,
+        ),
+        (
+            ["--expected-signing-key-id", "another-production-ed25519-v1"]
+            + ["--expected-signing-public-key-sha256"]
+            + [EXPECTED_SIGNING_PUBLIC_KEY_SHA256],
+            False,
+        ),
+    ],
+    ids=["published_key_matches", "wrong_fingerprint", "wrong_key_id"],
+)
+def test_cli_signing_key_expectations_verify_the_published_key(
+    monkeypatch,
+    capsys,
+    signing_arguments,
+    passes,
+):
+    """The flags run the same trust-key check the manifest does (the
+    wrong-fingerprint and wrong-id cases are the negative controls)."""
+    _patch_manifest_get(monkeypatch)
+
+    arguments = ["--live", "--strict", "--url", "https://api.example.com"]
+    assert preflight.main([*arguments, *signing_arguments]) == (0 if passes else 1)
+    output = capsys.readouterr().out
+    verified = (
+        f"signing key {EXPECTED_SIGNING_KEY_ID} published with the expected "
+        "public-key fingerprint"
+    )
+    if passes:
+        assert verified in output
+    else:
+        assert "not published exactly once as an active Ed25519 key" in output
+        assert verified not in output
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        (
+            ["--live", "--expected-signing-key-id", EXPECTED_SIGNING_KEY_ID],
+            "must be given together",
+        ),
+        (
+            ["--live", "--expected-signing-public-key-sha256"]
+            + [EXPECTED_SIGNING_PUBLIC_KEY_SHA256],
+            "must be given together",
+        ),
+        (
+            ["--live", "--expected-signing-key-id", "Key With Spaces"]
+            + ["--expected-signing-public-key-sha256"]
+            + [EXPECTED_SIGNING_PUBLIC_KEY_SHA256],
+            "must be a lowercase safe identifier",
+        ),
+        (
+            ["--live", "--expected-signing-key-id", EXPECTED_SIGNING_KEY_ID]
+            + ["--expected-signing-public-key-sha256", "0" * 63],
+            "must be a lowercase SHA-256 digest",
+        ),
+        (
+            ["--live", "--expected-signing-key-id", EXPECTED_SIGNING_KEY_ID]
+            + ["--expected-signing-public-key-sha256"]
+            + [EXPECTED_SIGNING_PUBLIC_KEY_SHA256.upper()],
+            "must be a lowercase SHA-256 digest",
+        ),
+        (
+            ["--live", "--expected-signing-key-id", ""]
+            + ["--expected-signing-public-key-sha256", ""],
+            "must be a lowercase safe identifier",
+        ),
+        (
+            ["--live", "--manifest", "MANIFEST", *_SIGNING_ARGUMENTS],
+            "cannot be combined with --manifest",
+        ),
+        (_SIGNING_ARGUMENTS, "apply only to --live"),
+        (["--db", *_SIGNING_ARGUMENTS], "apply only to --live"),
+        (["--runtime-posture", *_SIGNING_ARGUMENTS], "apply only to --live"),
+        (
+            ["--manifest-only", "--manifest", "MANIFEST", *_SIGNING_ARGUMENTS],
+            "--manifest-only cannot be combined",
+        ),
+    ],
+    ids=[
+        "key_id_alone",
+        "fingerprint_alone",
+        "malformed_key_id",
+        "short_fingerprint",
+        "uppercase_fingerprint",
+        "empty_values",
+        "with_manifest",
+        "default_run",
+        "db_only",
+        "runtime_posture_only",
+        "manifest_only",
+    ],
+)
+def test_cli_rejects_invalid_signing_key_expectations(
+    tmp_path,
+    monkeypatch,
+    capsys,
+    arguments,
+    message,
+):
+    manifest = _write_manifest(tmp_path, _manifest_document())
+    arguments = [str(manifest) if arg == "MANIFEST" else arg for arg in arguments]
+    for check in ("check_runtime_posture", "check_db", "check_live"):
+        monkeypatch.setattr(
+            preflight,
+            check,
+            lambda *_args, **_kwargs: pytest.fail("a usage error runs no check"),
+        )
+
+    assert preflight.main([*arguments, "--url", "https://api.example.com"]) == 1
+    assert message in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------

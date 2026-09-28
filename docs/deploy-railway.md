@@ -445,10 +445,17 @@ any check it ran fails, so it works as a gate in a shell or in CI:
   injects into a deployed service (`RAILWAY_ENVIRONMENT_ID`,
   `RAILWAY_ENVIRONMENT`, `RAILWAY_PROJECT_ID`, `RAILWAY_SERVICE_ID`), so it
   fails closed on a machine outside Railway instead of passing on local
-  defaults, a stray `.env`, or an arbitrary `ENVIRONMENT` value. `railway run`
+  defaults, a stray `.env`, or an arbitrary `ENVIRONMENT` value. It also fails
+  when a `.env` file exists where the service would read it (the image's
+  `/app` working directory, or the current directory), because the service's
+  configuration could then differ from the process environment. `railway run`
   also injects those variables; it then checks the service's configured
   variables rather than the running process, which is why the SOP uses
-  `railway ssh`. It never runs unless requested, and it rejects
+  `railway ssh`. This check, and the SOP's inline equivalent, assume a
+  `railway ssh` session carries the service's `RAILWAY_*` variables, as it
+  carries the `DATABASE_URL` the schema check uses. If a session does not, the
+  check fails closed on the missing marker; it cannot pass without one. It
+  never runs unless requested, and it rejects
   `--expected-version`, `--expected-commit-sha`, and `--manifest` unless
   `--live` is also given. Images built before this flag existed reject it;
   see [rolling back to an image without `--runtime-posture`](#rolling-back-to-an-image-without---runtime-posture).
@@ -462,7 +469,10 @@ any check it ran fails, so it works as a gate in a shell or in CI:
   `/.well-known/trust-keys.json` must always publish that id exactly once as an
   active Ed25519 key with valid 32-byte public material under the manifest
   URL's issuer. The SHA-256 fingerprint of that raw public key must equal the
-  manifest's independently recorded fingerprint.
+  manifest's independently recorded fingerprint. Without a manifest,
+  `--expected-signing-key-id` and `--expected-signing-public-key-sha256`
+  (given together, with `--live` only, never with `--manifest`) apply the same
+  signing-key check; the rollback section below uses them.
 
 ```bash
 # Both checks for a deployment whose database is reachable from this machine:
@@ -536,6 +546,12 @@ while public traffic remains blocked, and only then resume ingress.
 ```bash
 set -euo pipefail
 
+# Every `railway ssh` below passes a multi-word command. Railway CLI 5.43 and
+# newer quote each word so the container runs exactly that argv; an older CLI
+# joins the words and the remote shell can run a different command line. Stop
+# on an older or unrecognized CLI.
+railway --version | python3 -c 'import re, sys; m = re.search(r"(\d+)\.(\d+)\.(\d+)", sys.stdin.read()); sys.exit(0 if m and tuple(map(int, m.groups())) >= (5, 43, 0) else "Railway CLI 5.43.0 or newer is required for argument quoting over railway ssh")'
+
 MANIFEST="${MANIFEST:?set MANIFEST to the controlled customer manifest path}"
 SERVICE="api-service"
 DEPLOY_SHA="$(git rev-parse HEAD)"
@@ -571,14 +587,22 @@ test "$(jq -r --arg environment "$ENVIRONMENT" \
 # The public gate above cannot see the dogfood posture: the health projection
 # omits both flags and the tool catalogs require a key. Check it privately in
 # the instance serving traffic now, before anything changes. This inline check
-# reads the same settings as --runtime-posture and also runs on images built
-# before that flag existed, which reject the flag with a usage error. It
-# prints exception types only: a raw traceback can echo a configured value,
-# including a secret or a forged sentinel line.
-RUNTIME_POSTURE_CHECK='import sys
+# matches --runtime-posture: it requires a Railway runtime marker, fails when a
+# .env file exists where the service would read it, and requires a
+# production-like ENVIRONMENT with both dogfood flags false. It also runs on
+# images built before that flag existed, which reject the flag with a usage
+# error. It prints exception types only: a raw traceback can echo a configured
+# value, including a secret or a forged sentinel line.
+RUNTIME_POSTURE_CHECK='import os, sys
+from pathlib import Path
 try:
+    import app
     from app.core.config import get_settings
-    from app.core.trust_mode import is_production_like_environment
+    from app.core.trust_mode import HOSTED_RUNTIME_MARKER_VARS, is_production_like_environment
+    if not any(os.environ.get(m, "").strip() for m in HOSTED_RUNTIME_MARKER_VARS):
+        print("[preflight] FAIL runtime posture: no Railway runtime marker"); sys.exit(1)
+    if any(p.exists() for p in (Path(".env"), Path(os.path.abspath(app.__file__)).parents[1] / ".env")):
+        print("[preflight] FAIL runtime posture: a .env file exists where the service would read it"); sys.exit(1)
     s = get_settings()
     ok = is_production_like_environment(s.ENVIRONMENT) and s.ENABLE_DOGFOOD_TOOL is False and s.ENABLE_DOGFOOD_SECOND_TOOL is False
 except Exception as exc:
@@ -741,14 +765,50 @@ dogfood posture anywhere, because the public gate cannot see it.
 The local public gates hit the same problem. They run the rollback
 checkout's own `scripts/railway_preflight.py`, and at `8c95229` that script's
 `--live` gate predates the locked-down catalogs: it reads `/v1/discover`
-anonymously, receives `401`, and fails. For such a target, run the two
-`--live` gates from a checkout that contains the locked-down catalog check,
-pinned with `--expected-version "$EXPECTED_VERSION" --expected-commit-sha
-"$DEPLOY_SHA"` instead of `--manifest`, because the manifest binds to the
-checkout it runs from. That run does not verify the manifest's signing key, so
-confirm `/.well-known/trust-keys.json` against the manifest separately and
-record that in the deployment record. Once a release with this check is the
-previous green SHA, rollbacks use the unmodified sequence again.
+anonymously, receives `401`, and fails. For such a target, run both `--live`
+gates with the preflight from a clean checkout of `origin/main` at or after
+#482, which has the locked-down catalog check and explicit signing-key
+expectations. Record that checkout's SHA with the release. `--manifest` cannot
+be used from that checkout, because the manifest binds to the checkout it runs
+from. The manifest's signing key id and public-key fingerprint are passed
+explicitly instead, so the gate still verifies the published key:
+
+```bash
+git fetch origin main --no-tags
+GATE_SHA="$(git rev-parse origin/main)"
+GATE_DIR="$(mktemp -d)"
+git archive "$GATE_SHA" | tar -x -C "$GATE_DIR"
+# The gate checkout must have the explicit signing-key expectations (#482).
+grep -q -- '--expected-signing-key-id' "$GATE_DIR/scripts/railway_preflight.py"
+echo "rollback live gates ran from origin/main $GATE_SHA"
+# Assignments stop the script under set -e if a field is missing; the preflight
+# also rejects an empty value.
+SIGNING_KEY_ID="$(jq -er '.signing_key_id' "$MANIFEST")"
+SIGNING_PUBLIC_KEY_SHA256="$(jq -er '.signing_public_key_sha256' "$MANIFEST")"
+
+# In place of the pre-deploy public gate:
+python3 "$GATE_DIR/scripts/railway_preflight.py" --live --strict --url "$API_URL"
+
+# In place of the post-deploy manifest-bound gate:
+python3 "$GATE_DIR/scripts/railway_preflight.py" --live --strict --url "$API_URL" \
+  --expected-version "$EXPECTED_VERSION" --expected-commit-sha "$DEPLOY_SHA" \
+  --expected-signing-key-id "$SIGNING_KEY_ID" \
+  --expected-signing-public-key-sha256 "$SIGNING_PUBLIC_KEY_SHA256"
+```
+
+The post-deploy gate then requires `/.well-known/trust-keys.json`, under the
+`$API_URL` issuer, to publish the manifest's key id exactly once as an active
+Ed25519 key with the manifest's public-key fingerprint, exactly as `--manifest`
+would. A stack
+without a customer manifest, such as the first-party `api.thisisatest.tech`
+service, sets `SIGNING_KEY_ID` and `SIGNING_PUBLIC_KEY_SHA256` from its
+controlled key-generation record instead. That record is the one described
+under [Customer operations manifest](#customer-operations-manifest): the key id
+and the SHA-256 of the raw 32-byte public key, recorded when the key was
+generated, or the previous green release's deployment record if it recorded
+them. Never fill them from the live `/.well-known/trust-keys.json`: the gate
+would then compare the deployed key with itself. Once a release with this check
+is the previous green SHA, rollbacks use the unmodified sequence again.
 
 ### Customer operations manifest
 
