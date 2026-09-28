@@ -187,7 +187,6 @@ async def test_parallel_identical_new_keys_enforce_mode_one_dispatch(monkeypatch
             assert executor.dispatch_count == 1
             
             # Verify database state: 1 debit, N receipts (1 success + N-1 denials)
-            factory = get_session_factory()
             async with factory() as session:
                 debits = (
                     await session.execute(
@@ -235,7 +234,7 @@ async def test_parallel_identical_new_keys_enforce_mode_one_dispatch(monkeypatch
             get_service_registry().unregister_local(tool_name)
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio(loop_scope="session")
 async def test_duplicate_guard_respects_permit_window_override(monkeypatch):
     """Permit repeat_window_seconds overrides global default."""
     _require_opted_in_postgres()
@@ -246,6 +245,7 @@ async def test_duplicate_guard_respects_permit_window_override(monkeypatch):
     # Set a very long global window
     monkeypatch.setattr(settings, "MCP_UPSTREAM_DUPLICATE_WINDOW_SECONDS", 86400)
     
+    factory = get_session_factory()
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://test",
@@ -336,7 +336,7 @@ async def test_duplicate_guard_respects_permit_window_override(monkeypatch):
             get_service_registry().unregister_local(tool_name)
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio(loop_scope="session")
 async def test_duplicate_guard_off_mode_allows_duplicates(monkeypatch):
     """OFF mode disables duplicate detection entirely."""
     _require_opted_in_postgres()
@@ -345,6 +345,7 @@ async def test_duplicate_guard_off_mode_allows_duplicates(monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "MCP_UPSTREAM_DUPLICATE_GUARD", DuplicateGuardMode.OFF)
     
+    factory = get_session_factory()
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://test",

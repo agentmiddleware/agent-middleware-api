@@ -21,8 +21,8 @@ full release gate; do not backfill a final `v1.2.0` tag.
 ### Changed
 - **Default duplicate guard mode unchanged**: The default remains `log` (observe-only). Operators wishing to enforce duplicate blocking must explicitly set `MCP_UPSTREAM_DUPLICATE_GUARD=enforce`.
 
-### Migration
-- **Migration 040**: Adds nullable `repeat_window_seconds` column to the `permits` table for efficient query access during duplicate detection. The field is denormalized from the signed payload to avoid parsing signatures on every invocation. Upgrade and downgrade tested. No data migration required.
+### Technical Note
+- **No migration required**: `repeat_window_seconds` is stored in the signed permit payload only, not in a separate column. This avoids denormalization drift and migration overhead. The field is extracted from the signature when needed.
 
 ### 🧪 Failure lab: the lost-response fault measured against a correct baseline
 

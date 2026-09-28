@@ -817,10 +817,6 @@ class PermitModel(SQLModel, table=True):
     # Opt-out from cross-key duplicate detection. When true, identical requests
     # under different idempotency keys are allowed.
     allow_identical_repeats: bool = Field(default=False)
-    # Override the global duplicate detection window for this permit (seconds).
-    # Nullable; None means use global window. Denormalized from signature for
-    # efficient query access during duplicate detection.
-    repeat_window_seconds: Optional[int] = Field(default=None)
     # Atomic call-count tracking for local max_calls_per_tool enforcement.
     # Maps tool name -> reserved local call count (e.g., {"partner.echo": 2}).
     tool_call_counts_json: Optional[str] = Field(default=None)
