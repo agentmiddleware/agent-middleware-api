@@ -430,8 +430,9 @@ fails, so it works as a gate in a shell or in CI:
   40-character value. Production health intentionally omits the dogfood flag,
   so load the existing operator credential into `BOOTSTRAP_KEY` from the
   approved secret store before this check. The preflight sends it only as the
-  `X-API-Key` header to `/v1/discover`; there is no CLI secret argument and the
-  value is never printed.
+  `X-API-Key` header to `/v1/discover` after the target matches the canonical
+  HTTPS `PUBLIC_URL` or customer-manifest origin; there is no CLI secret
+  argument and the value is never printed.
 - **Customer deployment manifest** (`--manifest`) — validates the strict
   non-secret JSON record, requires its Alembic revision and commit SHA to equal
   this release checkout, and rejects tracked or ordinary untracked worktree
