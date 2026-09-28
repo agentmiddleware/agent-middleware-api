@@ -82,6 +82,24 @@ be told apart from a stale stamp without the second request.
      --manifest "$MANIFEST"          # or: --expected-commit-sha "$DEPLOY_SHA"
    ```
 
+   That run is public-only. The public health report omits the dogfood flags
+   and the tool catalogs require a key, so it cannot see whether
+   `ENABLE_DOGFOOD_TOOL` or `ENABLE_DOGFOOD_SECOND_TOOL` is on; it prints a
+   `NOTE` saying so. Verify that privately, inside the running API instance
+   (`$PROJECT_ID`, `$ENVIRONMENT`, and `$INSTANCE_ID` as resolved in the
+   [private operator release](deploy-railway.md#private-operator-release-required-for-customer-data)):
+
+   ```bash
+   railway ssh --project "$PROJECT_ID" --service api-service \
+     --environment "$ENVIRONMENT" --deployment-instance "$INSTANCE_ID" -- \
+     python scripts/railway_preflight.py --db --runtime-posture --strict
+   ```
+
+   An image built before `--runtime-posture` existed rejects the flag with a
+   usage error; use the inline check from the
+   [rollback note](deploy-railway.md#rolling-back-to-an-image-without---runtime-posture)
+   for such an image.
+
 6. **List what is still not live.** Any output means those commits are not in
    production, whatever the test suite says about them:
 

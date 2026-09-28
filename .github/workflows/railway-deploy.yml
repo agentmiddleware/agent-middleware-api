@@ -72,6 +72,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # Public checks only. The public health projection omits the dogfood
+      # flags and the tool catalogs require a key, so this step cannot see
+      # the dogfood posture; the operator SOP verifies it in-container.
       - name: Preflight — current production posture
         env:
           PUBLIC_URL: ${{ vars.PUBLIC_URL }}
@@ -91,7 +94,7 @@ jobs:
             echo "- exact SHA: \`${{ steps.release.outputs.sha }}\`"
             echo "- version: \`${{ steps.release.outputs.version }}\`"
             echo "- exact-SHA CI: passed"
-            echo "- current production posture: passed"
+            echo "- current production posture: public posture passed; dogfood posture is private and verified in-container by the operator SOP"
             echo "- deployment performed: **no**"
             echo ""
             echo "Deploy only through the private operator checklist in \`docs/deploy-railway.md\`."

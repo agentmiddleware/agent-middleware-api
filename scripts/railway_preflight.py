@@ -17,14 +17,18 @@ fail closed when their input is absent:
 ``--public-db`` (needs ``DATABASE_PUBLIC_URL``)
     Select the explicit public PostgreSQL URL for an off-platform database
     check, such as GitHub Actions after ``railway up``. This never falls back
-    to ``DATABASE_URL``; a missing or private-looking value fails closed.
+    to ``DATABASE_URL``; a missing or private-looking value fails closed. It
+    always runs the database check, whatever other check is selected.
 
 ``--live`` (needs ``PUBLIC_URL`` or ``--url``)
     Probe the deployed service and assert the production posture the SOP
-    requires: healthy, no memory fallback, proof surfaces off, a published
+    requires: healthy, no memory fallback, proof surfaces off, any published
     dogfood flag exactly false, no dependency listed unhealthy, and every
-    production tool catalog refusing unauthenticated reads with 401 (the #444
-    Narrow lockdown). Only unauthenticated GETs are sent.
+    production tool catalog refusing unauthenticated reads with the
+    application's own 401 ``missing_credentials`` refusal (the #444 Narrow
+    lockdown). Only unauthenticated GETs are sent. The public projection does
+    not publish the dogfood flags, so a ``--live``-only run does not verify
+    the dogfood posture; ``--runtime-posture`` does, in the container.
     ``--expected-version`` and
     ``--expected-commit-sha`` add exact release-identity checks against both
     ``/health`` and ``/health/dependencies`` for the post-deploy gate; the
@@ -33,9 +37,12 @@ fail closed when their input is absent:
 ``--runtime-posture`` (run inside the deployed API container)
     Assert the dogfood posture that is no longer publicly observable: the
     public health projection omits the dogfood flags and the tool catalogs
-    require credentials, so this reads the runtime configuration the running
-    service resolves. It requires a production-like ``ENVIRONMENT`` and both
-    dogfood flags false, so it fails closed anywhere but the deployed service.
+    require credentials, so this reads the service's configuration from the
+    process environment (never a ``.env`` file). It requires a Railway
+    runtime marker variable, a production-like ``ENVIRONMENT`` and both
+    dogfood flags false, so it fails closed on a machine outside Railway.
+    Release expectations and ``--manifest`` belong to ``--live`` and are
+    rejected unless ``--live`` is also given.
 
 ``--manifest`` (optional non-secret JSON)
     Bind the checks to one managed single-tenant deployment. The manifest
@@ -70,7 +77,9 @@ Usage::
       --expected-version 1.3.0 \
       --expected-commit-sha 0123456789abcdef0123456789abcdef01234567
 
-    # Private dogfood posture, inside the deployed API container:
+    # Private dogfood posture, inside the deployed API container (an image
+    # built before this flag existed needs the inline check in
+    # docs/deploy-railway.md instead):
     railway ssh --service api-service --environment production -- \
       python scripts/railway_preflight.py --db --runtime-posture --strict
 
@@ -100,7 +109,7 @@ import subprocess
 import sys
 from collections.abc import Mapping
 from pathlib import Path
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -109,6 +118,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from app.core.db_urls import as_sqlalchemy_url  # noqa: E402
+
+if TYPE_CHECKING:
+    import httpx
 
 
 OK = "[preflight] PASS"
@@ -126,9 +138,20 @@ _LOCKED_CATALOG_PATHS = (
     "/.well-known/mcp/tools.json",
 )
 
+# The error code in the body of that refusal (get_auth_context in
+# app/core/auth.py raises {"detail": {"error": "missing_credentials", ...}}).
+# A 401 from an edge, proxy, or platform layer has a different body and does
+# not prove the application refused the read.
+_CATALOG_REFUSAL_ERROR = "missing_credentials"
+
 # Runtime flags that register local proof-infrastructure tools
 # (partner.notes.write / partner.notes.count; see app/services/dogfood_tool.py).
 _DOGFOOD_RUNTIME_FLAGS = ("ENABLE_DOGFOOD_TOOL", "ENABLE_DOGFOOD_SECOND_TOOL")
+
+# Their names in the full /health/dependencies report (gather_dependency_report
+# in app/core/health.py). The public projection omits both; when either is
+# published it must be exactly false.
+_PUBLISHED_DOGFOOD_FLAGS = ("enable_dogfood_tool", "enable_dogfood_second_tool")
 
 MANIFEST_SCHEMA_VERSION = "1.0"
 _MANIFEST_FIELDS = frozenset(
@@ -429,6 +452,22 @@ def _public_database_url(environment: Mapping[str, str] | None = None) -> str:
     return url
 
 
+def _is_catalog_refusal(response: "httpx.Response") -> bool:
+    """Whether a 401 carries the application's own anonymous-catalog refusal.
+
+    ``reject_anonymous_production_catalog`` (app/core/auth.py) refuses through
+    ``get_auth_context``, whose body is
+    ``{"detail": {"error": "missing_credentials", ...}}``. Anything else (no
+    JSON, another shape, another error code) did not come from that code path.
+    """
+    try:
+        body = response.json()
+    except Exception:
+        return False
+    detail = body.get("detail") if isinstance(body, dict) else None
+    return isinstance(detail, dict) and detail.get("error") == _CATALOG_REFUSAL_ERROR
+
+
 def check_live(
     url: str,
     *,
@@ -512,18 +551,16 @@ def check_live(
             )
 
     # Key presence, not truthiness: a *published* null must still fail the
-    # exactly-false requirement.
-    dogfood_verified = False
-    if "enable_dogfood_tool" in body:
-        dogfood = body["enable_dogfood_tool"]
-        if dogfood is not False:
+    # exactly-false requirement. The full report publishes both dogfood
+    # flags; each one that is published must be exactly false.
+    for published_flag in _PUBLISHED_DOGFOOD_FLAGS:
+        if published_flag in body and body[published_flag] is not False:
             failures.append(
-                f"enable_dogfood_tool={dogfood!r} — must be explicitly false in "
-                "production"
+                f"{published_flag}={body[published_flag]!r} — must be "
+                "explicitly false in production"
             )
-        else:
-            dogfood_verified = True
-    else:
+    dogfood_verified = body.get("enable_dogfood_tool") is False
+    if "enable_dogfood_tool" not in body:
         # The public projection omits the flag (#348), and since the #444
         # lockdown the tool catalogs that used to stand in for it require
         # credentials. The dogfood state is not publicly observable, so say
@@ -538,17 +575,27 @@ def check_live(
     # Tool catalogs must refuse unauthenticated reads (#444). No credentials
     # are sent. A 2xx is the pre-lockdown public catalog. Any other status
     # (a redirect, 403, 404, 5xx) or an unreachable route cannot confirm the
-    # lockdown, so it fails closed too.
+    # lockdown, so it fails closed too. A 401 counts only when its body is
+    # the application's own missing_credentials refusal: an edge or proxy
+    # 401 in front of a public catalog must not satisfy the gate.
     for path in _LOCKED_CATALOG_PATHS:
         try:
-            catalog_status = httpx.get(f"{base}{path}", timeout=30).status_code
+            catalog_resp = httpx.get(f"{base}{path}", timeout=30)
         except Exception as exc:
             failures.append(
                 f"{path} could not be checked for the locked-down catalog "
                 f"posture: {exc}"
             )
             continue
+        catalog_status = catalog_resp.status_code
         if catalog_status == 401:
+            if _is_catalog_refusal(catalog_resp):
+                continue
+            failures.append(
+                f"{path} answered 401 without the application's "
+                f"{_CATALOG_REFUSAL_ERROR!r} refusal body — cannot confirm the "
+                "locked-down catalog posture"
+            )
             continue
         if 200 <= catalog_status < 300:
             failures.append(
@@ -692,18 +739,32 @@ def check_live(
 def check_runtime_posture() -> bool:
     """Assert the dogfood posture from this process's runtime configuration.
 
-    Meant for the deployed API container (``railway ssh``), where
-    ``get_settings()`` resolves the same variables the running service does.
-    Fails closed anywhere else: a process whose ENVIRONMENT is not
-    production-like is not the deployed service, so a pass there would prove
-    nothing. Configuration errors are reported by type only, because a
-    validation message can echo a configured value.
+    Meant for the deployed API container (``railway ssh``). Settings are
+    built from the process environment only, never from a ``.env`` file: the
+    image cannot contain one (``.dockerignore`` excludes ``.env`` and
+    ``.env.*``), so inside the container this is exactly what the running
+    service resolves, and a ``.env`` in some other working directory cannot
+    stand in for it.
+
+    Fails closed off Railway. A production-like ENVIRONMENT alone proves
+    nothing, because every unrecognized value (``ENVIRONMENT=banana``
+    included) is production-like. One of the variables Railway injects into
+    a deployed service (``HOSTED_RUNTIME_MARKER_VARS`` in
+    app/core/trust_mode.py) must also be present. ``railway run`` injects
+    them into a local process too; that run still reads the service's
+    configured variables, not the running process.
+
+    Configuration errors are reported by type only, because a validation
+    message can echo a configured value.
     """
     try:
-        from app.core.config import get_settings
-        from app.core.trust_mode import is_production_like_environment
+        from app.core.config import Settings
+        from app.core.trust_mode import (
+            HOSTED_RUNTIME_MARKER_VARS,
+            is_production_like_environment,
+        )
 
-        settings = get_settings()
+        settings = Settings(_env_file=None)  # type: ignore[call-arg]
     except Exception as exc:
         print(
             f"{BAD} runtime posture: unable to resolve the runtime "
@@ -712,6 +773,14 @@ def check_runtime_posture() -> bool:
         return False
 
     failures: list[str] = []
+    if not any(
+        os.environ.get(marker, "").strip() for marker in HOSTED_RUNTIME_MARKER_VARS
+    ):
+        failures.append(
+            "runtime posture: no Railway runtime marker "
+            f"({', '.join(HOSTED_RUNTIME_MARKER_VARS)}) in this process — run "
+            "--runtime-posture inside the deployed API container"
+        )
     if not is_production_like_environment(settings.ENVIRONMENT):
         failures.append(
             "runtime posture: ENVIRONMENT is not production-like in this "
@@ -731,7 +800,7 @@ def check_runtime_posture() -> bool:
         return False
 
     print(
-        f"{OK} runtime posture: production-like ENVIRONMENT, "
+        f"{OK} runtime posture: Railway runtime, production-like ENVIRONMENT, "
         + ", ".join(f"{flag}=false" for flag in _DOGFOOD_RUNTIME_FLAGS)
     )
     return True
@@ -817,11 +886,28 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
+    # Release expectations and the manifest are inputs to the live check.
+    # --runtime-posture on its own deselects that check, so accepting them
+    # there would drop them silently and look like an identity check ran.
+    if (
+        args.runtime_posture
+        and not args.live
+        and (args.expected_version or args.expected_commit_sha or args.manifest)
+    ):
+        print(
+            f"{BAD} --expected-version, --expected-commit-sha, and --manifest "
+            "apply only to --live; add --live or drop them from a "
+            "--runtime-posture run"
+        )
+        return 1
+
     # No check selected: run whatever the environment supports. The runtime
     # posture check only means something inside the deployed container, so it
-    # never runs by default.
+    # never runs by default. --public-db configures the database check, so it
+    # always runs that check: combining it with another selector must never
+    # switch off the fail-closed public-URL requirement.
     selected = args.db or args.live or args.runtime_posture
-    run_db = not args.manifest_only and (args.db or not selected)
+    run_db = not args.manifest_only and (args.db or args.public_db or not selected)
     run_live = not args.manifest_only and (args.live or not selected)
 
     results: list[bool] = []

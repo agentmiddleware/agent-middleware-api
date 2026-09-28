@@ -165,6 +165,9 @@ adversarial-battery-live:
 
 # Railway deploy gate. Run under `railway run` (or with DATABASE_URL +
 # PUBLIC_URL exported) to check migration parity and live posture together.
+# Neither target verifies the dogfood posture: it is not publicly observable,
+# so the operator runs --runtime-posture inside the deployed API container
+# (docs/deploy-railway.md).
 railway-preflight:
 	uv run --with-requirements requirements.txt python scripts/railway_preflight.py
 
