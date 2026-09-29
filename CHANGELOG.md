@@ -22,7 +22,7 @@ full release gate; do not backfill a final `v1.2.0` tag.
 - **Default duplicate guard mode unchanged**: The default remains `log` (observe-only). Operators wishing to enforce duplicate blocking must explicitly set `MCP_UPSTREAM_DUPLICATE_GUARD=enforce`.
 
 ### Technical Note
-- **No migration required**: `repeat_window_seconds` is stored in the signed permit payload only, not in a separate column. This avoids denormalization drift and migration overhead. The field is extracted from the signature when needed.
+- **Migration required**: Alembic revision `040_permit_repeat_window` adds the nullable integer column `permits.repeat_window_seconds`. Upgrade the database with `alembic upgrade head` before starting the API. For an unstamped legacy database, first verify and stamp its exact existing revision; do not stamp `head` to bypass migration. The duplicate guard reads the persisted column, and permit signing includes its value only when set; existing permits with `NULL` retain their previous signed payload. Startup rejects existing schemas missing this column, including unstamped legacy databases.
 
 ### 🧪 Failure lab: the lost-response fault measured against a correct baseline
 

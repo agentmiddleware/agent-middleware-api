@@ -71,7 +71,7 @@ def test_duplicate_guard_window_default():
 def test_repeat_window_seconds_rejects_zero_and_negative():
     """repeat_window_seconds must be positive."""
     from app.schemas.trust import PermitCreateRequest
-    
+
     # Zero is rejected
     with pytest.raises(ValidationError) as exc_info:
         PermitCreateRequest(
@@ -84,7 +84,7 @@ def test_repeat_window_seconds_rejects_zero_and_negative():
             repeat_window_seconds=0,
         )
     assert "repeat_window_seconds" in str(exc_info.value)
-    
+
     # Negative is rejected
     with pytest.raises(ValidationError) as exc_info:
         PermitCreateRequest(
@@ -105,9 +105,10 @@ async def test_duplicate_guard_health_endpoint_requires_admin_auth(client):
     # Without auth header - should fail
     r = await client.get("/health/duplicate-guard")
     assert r.status_code == 401
-    
+
     # With bootstrap admin key - should succeed
     from tests.test_trust_helpers import BOOTSTRAP_HEADERS
+
     r = await client.get("/health/duplicate-guard", headers=BOOTSTRAP_HEADERS)
     assert r.status_code == 200
     body = r.json()
@@ -120,7 +121,7 @@ async def test_duplicate_guard_health_endpoint_requires_admin_auth(client):
 def test_repeat_window_seconds_rejects_excessive_values():
     """repeat_window_seconds has a maximum of 365 days."""
     from app.schemas.trust import PermitCreateRequest
-    
+
     # 365 days is accepted
     PermitCreateRequest(
         issuer_wallet_id="iss-1",
@@ -131,7 +132,7 @@ def test_repeat_window_seconds_rejects_excessive_values():
         expires_at="2026-12-31T23:59:59Z",
         repeat_window_seconds=31536000,
     )
-    
+
     # Over 365 days is rejected
     with pytest.raises(ValidationError) as exc_info:
         PermitCreateRequest(
@@ -144,3 +145,68 @@ def test_repeat_window_seconds_rejects_excessive_values():
             repeat_window_seconds=31536001,
         )
     assert "repeat_window_seconds" in str(exc_info.value)
+
+
+@pytest.mark.parametrize("value", [True, False])
+def test_repeat_window_seconds_rejects_booleans(value):
+    from app.schemas.trust import PermitCreateRequest
+
+    with pytest.raises(ValidationError) as exc_info:
+        PermitCreateRequest(
+            issuer_wallet_id="iss-1",
+            subject_wallet_id="sub-1",
+            max_credits=100,
+            expires_at="2026-12-31T23:59:59Z",
+            repeat_window_seconds=value,
+        )
+
+    error = exc_info.value.errors()[0]
+    assert error["loc"] == ("repeat_window_seconds",)
+    assert "not a boolean" in error["msg"]
+
+
+@pytest.mark.parametrize(
+    "fields, expected",
+    [
+        ({}, None),
+        ({"repeat_window_seconds": None}, None),
+        ({"repeat_window_seconds": 1}, 1),
+        ({"repeat_window_seconds": 31536000}, 31536000),
+        ({"repeat_window_seconds": "60"}, 60),
+        ({"repeat_window_seconds": 60.0}, 60),
+    ],
+)
+def test_repeat_window_seconds_preserves_valid_values(fields, expected):
+    from app.schemas.trust import PermitCreateRequest
+
+    request = PermitCreateRequest(
+        issuer_wallet_id="iss-1",
+        subject_wallet_id="sub-1",
+        max_credits=100,
+        expires_at="2026-12-31T23:59:59Z",
+        **fields,
+    )
+    assert request.repeat_window_seconds == expected
+    assert type(request.repeat_window_seconds) is type(expected)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("value", [True, False])
+async def test_permit_api_rejects_boolean_repeat_window(client, value):
+    from tests.test_trust_helpers import BOOTSTRAP_HEADERS
+
+    response = await client.post(
+        "/v1/permits",
+        json={
+            "issuer_wallet_id": "iss-1",
+            "subject_wallet_id": "sub-1",
+            "max_credits": 100,
+            "expires_at": "2026-12-31T23:59:59Z",
+            "repeat_window_seconds": value,
+        },
+        headers={**BOOTSTRAP_HEADERS, "Idempotency-Key": "boolean-repeat-window"},
+    )
+    assert response.status_code == 422
+    error = response.json()["detail"][0]
+    assert error["loc"] == ["body", "repeat_window_seconds"]
+    assert "not a boolean" in error["msg"]

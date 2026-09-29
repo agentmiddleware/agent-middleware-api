@@ -4,7 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.schemas.policies import PolicyBundleResponse
 
@@ -36,6 +36,13 @@ class PermitCreateRequest(BaseModel):
     # enabled and allow_identical_repeats is false.
     # Must be positive and <= 31536000 (365 days).
     repeat_window_seconds: int | None = Field(default=None, gt=0, le=31536000)
+
+    @field_validator("repeat_window_seconds", mode="before")
+    @classmethod
+    def _reject_boolean_repeat_window(cls, value: Any) -> Any:
+        if isinstance(value, bool):
+            raise ValueError("repeat_window_seconds must be an integer, not a boolean")
+        return value
 
 
 class PermitResponse(BaseModel):
