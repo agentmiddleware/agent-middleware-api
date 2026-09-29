@@ -55,6 +55,8 @@ GET /mcp/tools.json
 GET /openapi.json
 ```
 
+On production-like boots that GET requires an operator-issued key and returns 401 without one. Local quickstart stays anonymous.
+
 `GET /llm.txt` remains available as a backward-compatible alias.
 
 Use `/v1/discover` as an optional expanded catalog after the bootstrap sequence.
