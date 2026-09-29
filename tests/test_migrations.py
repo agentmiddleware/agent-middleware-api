@@ -597,7 +597,7 @@ def test_024_repairs_sqlite_boolean_backfill(tmp_path, monkeypatch):
 
 
 def test_040_repeat_window_seconds_column_upgrade_and_downgrade(tmp_path, monkeypatch):
-    """Verify migration 040 adds and removes repeat_window_seconds column."""
+    """Migration 040 preserves legacy permit data and adds a nullable window."""
     db_path = tmp_path / "repeat-window-migration.db"
     async_url = f"sqlite+aiosqlite:///{db_path}"
     sync_url = f"sqlite:///{db_path}"
@@ -613,18 +613,7 @@ def test_040_repeat_window_seconds_column_upgrade_and_downgrade(tmp_path, monkey
     permit_columns_before = {col["name"] for col in inspector.get_columns("permits")}
     assert "repeat_window_seconds" not in permit_columns_before
     assert "allow_identical_repeats" in permit_columns_before
-    engine.dispose()
-
-    # Upgrade to 040 (adds repeat_window_seconds)
-    command.upgrade(config, "040_permit_repeat_window")
-    asyncio.set_event_loop(asyncio.new_event_loop())
-
-    engine = create_engine(sync_url)
-    inspector = inspect(engine)
-    permit_columns_after = {col["name"] for col in inspector.get_columns("permits")}
-    assert "repeat_window_seconds" in permit_columns_after
-    
-    # Verify existing permits still work (null value)
+    # Persist the legacy permit before the schema upgrade, as on production 039.
     with engine.begin() as connection:
         connection.execute(
             text(
@@ -652,15 +641,48 @@ def test_040_repeat_window_seconds_column_upgrade_and_downgrade(tmp_path, monkey
                     permit_id, issuer_wallet_id, subject_wallet_id,
                     scopes_json, allowed_tools_json, max_credits,
                     spent_credits, expires_at, nonce, status, signature, key_id,
-                    issued_at, repeat_window_seconds
+                    issued_at
                 ) VALUES (
-                    'permit-with-window', 'agt-repeat-window', 'agt-repeat-window',
+                    'permit-without-window', 'agt-repeat-window', 'agt-repeat-window',
                     '[]', '[]', 10, 0, '2030-01-01 00:00:00',
-                    'nonce-with-window', 'active', 'signature', 'sig-repeat-window',
-                    '2026-01-01 00:00:00', 3600
+                    'nonce-without-window', 'active', 'signature', 'sig-repeat-window',
+                    '2026-01-01 00:00:00'
                 )
                 """
             )
+        )
+        legacy_before = (
+            connection.execute(
+                text("SELECT * FROM permits WHERE permit_id = 'permit-without-window'")
+            )
+            .mappings()
+            .one()
+        )
+    engine.dispose()
+
+    command.upgrade(config, "040_permit_repeat_window")
+    command.upgrade(config, "040_permit_repeat_window")  # Restart migration is a no-op.
+    asyncio.set_event_loop(asyncio.new_event_loop())
+
+    engine = create_engine(sync_url)
+    permit_columns_after = {
+        column["name"]: column for column in inspect(engine).get_columns("permits")
+    }
+    assert permit_columns_after["repeat_window_seconds"]["nullable"] is True
+    with engine.begin() as connection:
+        legacy_after = (
+            connection.execute(
+                text("SELECT * FROM permits WHERE permit_id = 'permit-without-window'")
+            )
+            .mappings()
+            .one()
+        )
+        assert dict(legacy_after) == {**legacy_before, "repeat_window_seconds": None}
+        assert (
+            connection.execute(
+                text("SELECT version_num FROM alembic_version")
+            ).scalar_one()
+            == "040_permit_repeat_window"
         )
         connection.execute(
             text(
@@ -671,23 +693,27 @@ def test_040_repeat_window_seconds_column_upgrade_and_downgrade(tmp_path, monkey
                     spent_credits, expires_at, nonce, status, signature, key_id,
                     issued_at, repeat_window_seconds
                 ) VALUES (
-                    'permit-without-window', 'agt-repeat-window', 'agt-repeat-window',
+                    'permit-with-window', 'agt-repeat-window', 'agt-repeat-window',
                     '[]', '[]', 10, 0, '2030-01-01 00:00:00',
-                    'nonce-without-window', 'active', 'signature', 'sig-repeat-window',
-                    '2026-01-01 00:00:00', NULL
+                    'nonce-with-window', 'active', 'signature', 'sig-repeat-window',
+                    '2026-01-01 00:00:00', 3600
                 )
                 """
             )
         )
-    
+
     with engine.connect() as connection:
         with_window = connection.execute(
-            text("SELECT repeat_window_seconds FROM permits WHERE permit_id = 'permit-with-window'")
+            text(
+                "SELECT repeat_window_seconds FROM permits WHERE permit_id = 'permit-with-window'"
+            )
         ).scalar_one()
         without_window = connection.execute(
-            text("SELECT repeat_window_seconds FROM permits WHERE permit_id = 'permit-without-window'")
+            text(
+                "SELECT repeat_window_seconds FROM permits WHERE permit_id = 'permit-without-window'"
+            )
         ).scalar_one()
-    
+
     assert with_window == 3600
     assert without_window is None
     engine.dispose()
@@ -698,7 +724,9 @@ def test_040_repeat_window_seconds_column_upgrade_and_downgrade(tmp_path, monkey
 
     engine = create_engine(sync_url)
     inspector = inspect(engine)
-    permit_columns_downgraded = {col["name"] for col in inspector.get_columns("permits")}
+    permit_columns_downgraded = {
+        col["name"] for col in inspector.get_columns("permits")
+    }
     assert "repeat_window_seconds" not in permit_columns_downgraded
     assert "allow_identical_repeats" in permit_columns_downgraded
     engine.dispose()

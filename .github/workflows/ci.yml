@@ -2,7 +2,7 @@ name: CI — Agent Middleware API
 
 on:
   push:
-    branches: [master, main, develop]
+    branches: [master, main, develop, openclaw/amw-schema040-bridge]
   pull_request:
     branches: [master, main]
 
@@ -498,6 +498,7 @@ jobs:
         run: |
           pytest tests/test_permit_postgres_concurrency.py -v --tb=short
           pytest tests/test_duplicate_guard_postgres_concurrency.py -v --tb=short
+          pytest tests/test_permit_repeat_window_rollout.py tests/test_repeat_window_compatibility.py -v --tb=short -o asyncio_default_fixture_loop_scope=session -o asyncio_default_test_loop_scope=session
 
   # Blocks credentials from being committed. A live production API key reached
   # main through scripts/stress_test_live.py because nothing scanned for this.

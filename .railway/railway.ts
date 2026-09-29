@@ -24,6 +24,7 @@ export default defineRailway(() =>
           DATABASE_URL: preserve(),
           DEBUG: preserve(),
           ENABLE_DOGFOOD_TOOL: preserve(),
+          ENABLE_PERMIT_REPEAT_WINDOW_ISSUANCE: preserve(),
           ENABLE_PROOF_SURFACES: preserve(),
           ENABLE_PUBLIC_MCP_ENDPOINT: preserve(),
           ENVIRONMENT: preserve(),

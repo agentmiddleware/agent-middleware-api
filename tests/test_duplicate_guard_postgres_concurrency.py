@@ -294,6 +294,7 @@ async def test_duplicate_guard_respects_permit_window_override(monkeypatch):
         settings, "MCP_UPSTREAM_DUPLICATE_GUARD", DuplicateGuardMode.ENFORCE
     )
     # Set a very long global window
+    monkeypatch.setattr(settings, "ENABLE_PERMIT_REPEAT_WINDOW_ISSUANCE", True)
     monkeypatch.setattr(settings, "MCP_UPSTREAM_DUPLICATE_WINDOW_SECONDS", 86400)
 
     async with AsyncClient(

@@ -218,6 +218,7 @@ def test_init_db_production_like_ok_after_alembic(tmp_path, monkeypatch):
         await close_db()
 
     asyncio.run(_verify_boot())
+    asyncio.run(_verify_boot())  # A later restart must accept the same migrated DB.
 
     sync = create_engine(f"sqlite:///{db_path}")
     tables = set(inspect(sync).get_table_names())
@@ -227,8 +228,14 @@ def test_init_db_production_like_ok_after_alembic(tmp_path, monkeypatch):
     get_settings.cache_clear()
 
 
-def test_init_db_production_like_rejects_stale_alembic_revision(tmp_path, monkeypatch):
-    """Stamped-but-behind Alembic revisions must fail closed at boot."""
+@pytest.mark.parametrize(
+    "revision",
+    ["016_trust_primitives", "039_permit_allow_ident_repeats", "999_unknown_schema"],
+)
+def test_init_db_production_like_rejects_stale_alembic_revision(
+    tmp_path, monkeypatch, revision
+):
+    """Old or unknown stamps must fail even when required columns exist."""
     import asyncio
 
     db_path = tmp_path / "stale_prod.db"
@@ -241,8 +248,13 @@ def test_init_db_production_like_rejects_stale_alembic_revision(tmp_path, monkey
     get_settings.cache_clear()
 
     config = Config("alembic.ini")
-    # Stop before latest trust-plane revisions so tables exist but stamp is stale.
-    command.upgrade(config, "016_trust_primitives")
+    command.upgrade(config, "head")
+    sync = create_engine(f"sqlite:///{db_path}")
+    with sync.begin() as connection:
+        connection.exec_driver_sql(
+            "UPDATE alembic_version SET version_num = ?", (revision,)
+        )
+    sync.dispose()
 
     async def _boot() -> None:
         await close_db()

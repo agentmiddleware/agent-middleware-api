@@ -12,6 +12,7 @@ from functools import lru_cache
 
 class DuplicateGuardMode(str, Enum):
     """Cross-key duplicate detection enforcement mode."""
+
     OFF = "off"
     LOG = "log"
     ENFORCE = "enforce"
@@ -139,8 +140,8 @@ class Settings(BaseSettings):
     MCP_UPSTREAM_CONNECT_TIMEOUT_SECONDS: float = 5.0
     MCP_UPSTREAM_CALL_TIMEOUT_SECONDS: float = 30.0
     MCP_UPSTREAM_MAX_RESPONSE_BYTES: int = 1_048_576
-    
-    # Cross-key duplicate detection for upstream tools.
+
+    # Cross-key duplicate detection for upstream tools. Modes:
     # - "off": disabled (new-key retries with identical request hashes are allowed)
     # - "log": detect and log duplicates but allow them (observe mode, default)
     # - "enforce": refuse duplicate requests with duplicate_request_new_key
@@ -148,6 +149,9 @@ class Settings(BaseSettings):
     # Default repeat detection window in seconds. Duplicates outside this window
     # are not detected.
     MCP_UPSTREAM_DUPLICATE_WINDOW_SECONDS: int = 86400  # 24 hours
+    # Enable only after all workers can verify and enforce repeat-window permits.
+    # Disabling issuance never disables validation of already-issued permits.
+    ENABLE_PERMIT_REPEAT_WINDOW_ISSUANCE: bool = False
 
     # --- Inbound request size ---
     # Ceiling on any request body the API will buffer, enforced for every

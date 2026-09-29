@@ -241,6 +241,9 @@ slice.
 
 ## Canonical deploy path
 
+For migration 040, follow [the compatibility rollout and rollback procedure](schema-040-rollout.md)
+before this upload sequence. The previous schema-039 image is not a valid rollback.
+
 **Build and ship from this repo with the in-repo Dockerfile. Production
 releases are operator-run from a clean exact-SHA checkout.**
 
