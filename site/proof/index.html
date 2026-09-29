@@ -114,8 +114,7 @@
             "inLanguage": "en",
             "totalTime": "PT5M",
             "tool": [
-              { "@type": "HowToTool", "name": "Python 3.11 or newer" },
-              { "@type": "HowToTool", "name": "git" }
+              { "@type": "HowToTool", "name": "Python 3.11 or newer" }
             ],
             "supply": [
               {
@@ -141,7 +140,7 @@
                 "@type": "HowToStep",
                 "position": 2,
                 "name": "Install the verifier",
-                "text": "Clone the public source repository, then install the b2a SDK with its verify extra.",
+                "text": "The source repository is private during the design-partner phase and is shared with pilot partners on request. The verifier is included there. A partner who already has the source installs it from that checkout's repository root with python -m pip install \"./b2a_sdk[verify]\". Save both downloaded files in the repository root before running b2a-verify-receipt.",
                 "url": "https://www.thisisatest.tech/proof/#verify-title"
               },
               {
@@ -261,17 +260,14 @@
             business-to-agent — it is the SDK's name, not a separate product.
           </p>
           <p>
-            The verifier ships inside the public
-            <a
-              href="https://github.com/PetrefiedThunder/agent-middleware-api"
-              target="_blank"
-              rel="noopener noreferrer"
-              >source repository</a
-            >. The commands below run as written; the receipt and key snapshot
-            above stay downloadable by anyone.
+            The source repository is private during the design-partner phase
+            and is shared with pilot partners on request. The verifier is
+            included there. A partner who already has the source installs it
+            from that checkout's repository root. Save both downloaded files
+            there before running the commands below. The receipt and trust-keys
+            files stay downloadable by anyone, with no credentials.
           </p>
-          <pre tabindex="0"><code>git clone --depth=1 https://github.com/PetrefiedThunder/agent-middleware-api.git
-python -m pip install "./agent-middleware-api/b2a_sdk[verify]"
+          <pre tabindex="0"><code>python -m pip install "./b2a_sdk[verify]"
 b2a-verify-receipt \
   --bundle receipt.json \
   --keys trust-keys.json \
