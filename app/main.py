@@ -16,10 +16,11 @@ import time
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
+from .core.auth import AuthContext, get_auth_context
 from .core.build_metadata import get_build_commit_sha, get_build_provenance
 from .core.config import get_settings
 from .core.durable_state import (
@@ -48,6 +49,7 @@ from .core.trust_mode import (
     warn_if_trust_mode_permissive,
 )
 from .db.database import SchemaInitError, init_db, close_db
+from .services.mcp_dispatch_attempts import get_duplicate_guard_metrics
 from .services.mcp_phase9_tools import sync_proof_surface_mcp_registration
 from .services.signing_keys import (
     SigningKeyError,
@@ -1196,3 +1198,22 @@ async def health_dependencies():
     # Production posture: report the wedge, not a billboard of unmounted
     # surfaces. Full truth stays in the startup log (phase="runtime_posture").
     return build_public_dependency_report(report)
+
+
+@app.get(
+    "/health/duplicate-guard",
+    tags=["Discovery"],
+    summary="Duplicate guard observability (admin-only)",
+    description=(
+        "Returns the current duplicate guard mode and observability metrics. "
+        "Exposes log_mode_blocks (how many times log mode detected but allowed "
+        "a duplicate) and enforce_mode_blocks (how many times enforce mode "
+        "blocked a duplicate). Does not expose request contents or secrets. "
+        "Requires bootstrap admin authentication."
+    ),
+)
+async def health_duplicate_guard(
+    auth: AuthContext = Depends(get_auth_context),
+):
+    auth.require_bootstrap_admin()
+    return get_duplicate_guard_metrics()

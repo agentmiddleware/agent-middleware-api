@@ -53,6 +53,7 @@ REQUIRED_TRUST_TABLES = frozenset(
 )
 REQUIRED_TRUST_COLUMNS = {
     "mcp_dispatch_attempts": frozenset({"dispatch_claim_hash"}),
+    "permits": frozenset({"repeat_window_seconds"}),
 }
 
 _engine: AsyncEngine | None = None
