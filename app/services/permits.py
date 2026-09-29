@@ -219,20 +219,8 @@ def permit_model_to_response(model: PermitModel) -> PermitResponse:
         forbidden_fields=_loads_list(model.forbidden_fields_json or "[]"),
         recipient_domain=model.recipient_domain,
         allow_identical_repeats=model.allow_identical_repeats,
-        repeat_window_seconds=_extract_repeat_window_from_signature(model),
+        repeat_window_seconds=model.repeat_window_seconds,
     )
-
-
-def _extract_repeat_window_from_signature(model: PermitModel) -> int | None:
-    """Extract repeat_window_seconds from the signed permit payload.
-    
-    The field is stored in the signature when set, not in a separate column.
-    This avoids denormalization drift and migration overhead.
-    """
-    # The unsigned payload reconstruction already includes repeat_window_seconds
-    # when it was in the original request, so we can parse it back out
-    payload = PermitService._unsigned_payload(model)
-    return payload.get("repeat_window_seconds")
 
 
 class PermitService:
@@ -400,12 +388,13 @@ class PermitService:
             else None,
             recipient_domain=request.recipient_domain,
             allow_identical_repeats=request.allow_identical_repeats,
+            repeat_window_seconds=request.repeat_window_seconds,
         )
         # Sign the same dict verify reconstructs. Building it twice let a
         # field added on one path only keep verifying in tests that never
         # round-tripped a freshly minted permit.
         signature, key_id, _ = await get_signing_key_service().sign_payload(
-            self._unsigned_payload(model, repeat_window_seconds=request.repeat_window_seconds)
+            self._unsigned_payload(model)
         )
         model.signature = signature
         model.key_id = key_id
@@ -1915,8 +1904,8 @@ class PermitService:
             payload["recipient_domain"] = model.recipient_domain
         if model.allow_identical_repeats:
             payload["allow_identical_repeats"] = True
-        if repeat_window_seconds is not None:
-            payload["repeat_window_seconds"] = repeat_window_seconds
+        if model.repeat_window_seconds is not None:
+            payload["repeat_window_seconds"] = model.repeat_window_seconds
         return payload
 
     @staticmethod
