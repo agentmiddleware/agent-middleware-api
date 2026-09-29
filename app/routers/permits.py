@@ -120,7 +120,10 @@ async def create_permit(
         )
     idem = get_idempotency_service()
     request_payload = request.model_dump(mode="json")
+    compatible_request_payload = None
     if request.repeat_window_seconds is None:
+        # Revision 040 also wrote this optional field as null into request hashes.
+        compatible_request_payload = dict(request_payload)
         # Preserve hashes written before repeat-window support was introduced.
         request_payload.pop("repeat_window_seconds")
     try:
@@ -129,6 +132,7 @@ async def create_permit(
             endpoint="/v1/permits",
             idempotency_key=idempotency_key,
             request_payload=request_payload,
+            compatible_request_payload=compatible_request_payload,
             allow_new_record=(
                 request.repeat_window_seconds is None
                 or get_settings().ENABLE_PERMIT_REPEAT_WINDOW_ISSUANCE

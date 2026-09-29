@@ -14,6 +14,13 @@ The `openclaw/amw-schema040-bridge` branch starts from the previously serving
 needed for a schema-040 fallback. Its new issuance gate is disabled by default.
 It does not bypass schema parity, signature validation, or duplicate policy.
 
+This particular fallback is qualified for the first-party instance still serving
+`8c95229` at schema 039. It is not a universal rollback for an instance that
+already served `84df9e7`: that version stored windowless creation hashes with
+an explicit null window. Such an instance needs a fallback that accepts both
+hash shapes. The merged release accepts both shapes but writes new windowless
+records in the pre-040 shape, keeping this first-party fallback compatible.
+
 1. Record the exact compatibility commit as `BRIDGE_SHA` before integrating
    later main changes. Require its own successful **push** CI run; the CI
    workflow explicitly includes this one branch. A PR merge-ref run or a green
