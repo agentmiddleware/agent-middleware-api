@@ -21,7 +21,7 @@ import runpy
 import pytest
 
 from app.core.product_positioning import get_product_positioning
-from app.routers.well_known import _local_try_it_manifest, get_agent_first_metadata
+from app.routers.well_known import get_agent_first_metadata
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -524,11 +524,31 @@ def test_marketing_manifest_points_to_custom_origins_and_local_proof() -> None:
     # Compatibility-only v1 aliases remain while clients migrate.
     assert manifest["product_wedge"] == "governed_mcp_trust_plane"
     assert manifest["product_loop"] == get_agent_first_metadata()["product_loop"]
-    assert manifest["try_it"] == _local_try_it_manifest()
-    # The repository is public, so agents can follow the clone instructions
-    # without a misleading access-request detour.
-    assert manifest["try_it"]["repository_access"] == "public"
-    assert manifest["github_access"] == "public"
+    assert manifest["try_it"] == {
+        "mode": "local_self_hosted",
+        "repository": "https://github.com/PetrefiedThunder/agent-middleware-api",
+        "repository_access": "private",
+        "command": "make prove-trust-plane",
+        "live_access": "operator_issued",
+        "requires_live_credentials": False,
+        "proves": [
+            "scoped_permit",
+            "metered_mcp_invoke",
+            "signed_receipt",
+            "replay_without_second_charge",
+            "out_of_scope_denial",
+            "offline_receipt_verification",
+        ],
+        "note": (
+            "Runs the real FastAPI transaction-integrity path against a throwaway "
+            "local SQLite database. This is a reproducible proof, not a production "
+            "or settlement claim. The source repository is private during the "
+            "design-partner phase and is shared with pilot partners on request. "
+            "Partners who already have the source need Python 3.11+, git, make, "
+            "curl, and uv before running the command from the repository root."
+        ),
+    }
+    assert manifest["github_access"] == "private"
     assert manifest["discovery"]["llms_txt"] == f"{CANONICAL_API}/llms.txt"
     assert f"{CANONICAL_API}/llms.txt" in manifest["bootstrap_sequence"]
     assert "transaction-integrity boundary" in manifest["description"]
@@ -547,7 +567,10 @@ def test_machine_pointer_copies_match_and_state_live_access_boundary() -> None:
     assert "Transaction integrity" in llm_txt
     assert "delivery_uncertain" in llm_txt
     assert "at most one gateway dispatch and debit" in " ".join(llm_txt.split())
-    assert "The source repository is public." in llm_txt
+    assert (
+        "The source repository is private during the design-partner phase "
+        "and is shared with pilot partners on request."
+    ) in " ".join(llm_txt.split())
     assert "make prove-trust-plane" in llm_txt
     assert "operator-issued" in llm_txt
     assert "no public self-serve key mint" in llm_txt
@@ -596,57 +619,59 @@ def test_customer_facing_outputs_do_not_publish_provider_origins(tmp_path) -> No
 REPO_URL = "https://github.com/PetrefiedThunder/agent-middleware-api"
 
 
-def test_public_surfaces_link_to_public_repo_without_stale_private_copy(
+def test_public_surfaces_state_private_source_access_and_partner_prerequisites(
     tmp_path,
 ) -> None:
-    """Public-facing copy must not leave agents expecting a private repository.
-
-    The repository became public on 2026-08-27. Its human and machine discovery
-    surfaces may link directly to the source of record, but cannot retain a
-    stale access-request warning.
-    """
+    """A stranger must see the source-access gate before local-run instructions."""
     output = tmp_path / "site"
     result = _render_site(output, VALID_TEST_CONTACTS)
     assert result.returncode == 0, result.stderr
 
     public_paths = (
         output / "index.html",
-        output / "proof" / "index.html",
         output / "compare" / "index.html",
         output / "llm.txt",
         output / "llms.txt",
         output / "llms-full.txt",
         output / ".well-known" / "agent.json",
         output / ".well-known" / "security.txt",
-        ROOT / "static" / "llm.txt",
     )
     for path in public_paths:
-        content = path.read_text(encoding="utf-8").casefold()
-        assert "source repository is private" not in content, (
-            f"{path} still marks the public repository as private"
-        )
-        assert "private —" not in content, (
-            f"{path} still marks the public repository as private"
-        )
-        assert "source access on request" not in content, (
-            f"{path} still asks for access to the public repository"
+        raw = path.read_text(encoding="utf-8")
+        content = " ".join((_page_text(raw) if path.suffix == ".html" else raw).split())
+        assert (
+            "The source repository is private during the design-partner phase "
+            "and is shared with pilot partners on request."
+        ) in content, path
+        assert "source repository is public" not in content.casefold(), path
+        assert not re.search(r"\bclone\b", content, re.I), (
+            f"{path} still directs an anonymous reader to clone the private source"
         )
 
-    source_reference_paths = (
-        output / "index.html",
-        output / "proof" / "index.html",
-        output / "compare" / "index.html",
-        output / "llm.txt",
-        output / "llms.txt",
-        output / "llms-full.txt",
-        output / ".well-known" / "agent.json",
-        ROOT / "static" / "llm.txt",
-    )
-    for path in source_reference_paths:
-        content = path.read_text(encoding="utf-8").casefold()
-        assert REPO_URL.casefold() in content, (
-            f"{path} does not link to the public source repository"
-        )
+    for pointer in ("llm.txt", "llms.txt", "llms-full.txt"):
+        content = " ".join((output / pointer).read_text(encoding="utf-8").split())
+        prerequisites = "Python 3.11+, git, make, curl, and uv"
+        assert "partners who already have the source" in content.casefold()
+        assert content.index(prerequisites) < content.index("make quickstart")
+        assert content.index(prerequisites) < content.index("make prove-trust-plane")
+
+
+def test_machine_discovery_distinguishes_public_gets_from_keyed_catalog(tmp_path):
+    output = tmp_path / "site"
+    result = _render_site(output, VALID_TEST_CONTACTS)
+    assert result.returncode == 0, result.stderr
+    page = (output / "index.html").read_text(encoding="utf-8")
+    section = page.split('id="machine-discovery"', 1)[1].split("</section>", 1)[0]
+    text = _page_text(section)
+    assert "Four unauthenticated GETs" not in text
+    assert "Three unauthenticated GETs" in text
+    for path in ("/.well-known/agent.json", "/llms.txt", "/health/dependencies"):
+        assert f'href="{CANONICAL_API}{path}"' in section
+    assert f'href="{CANONICAL_API}/mcp/tools.json"' in section
+    assert (
+        "The catalog at https://api.thisisatest.tech/mcp/tools.json requires "
+        "an operator-issued key and returns 401 without one."
+    ) in text
 
 
 def test_dynamic_routes_and_noncanonical_hosts_redirect_correctly() -> None:

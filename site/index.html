@@ -435,9 +435,9 @@
             govern. Here is the loop as the gateway actually ran it, shown in
             loop order: every request, every response, and the verifier's
             verdict, recorded from <code>make prove-trust-plane</code> and
-            reproducible from a clone. The tool in the recording is a stand-in
-            echo tool, not a refund tool; the permit, debit, receipt, and
-            replay steps are the same for any governed action, and a
+            reproducible by pilot partners with source access. The tool in the
+            recording is a stand-in echo tool, not a refund tool; the permit,
+            debit, receipt, and replay steps are the same for any governed action, and a
             configured upstream tool additionally gets a dispatch-claim record.
           </p>
         </div>
@@ -562,8 +562,11 @@
           <p class="constraint-line">
             One tool · one operator · one action. Email first; a call is
             available only when a scenario needs one. The source repository is
-            public; run <code>make prove-trust-plane</code> from a clone to
-            assert the whole loop locally. No API credentials, no signup.
+            private during the design-partner phase and is shared with pilot
+            partners on request. Partners who already have the source need
+            Python 3.11+, git, make, curl, and uv before running
+            <code>make prove-trust-plane</code> from the repository root to
+            assert the whole loop locally. No live API credentials are needed.
           </p>
           <div class="pilot-links">
             <a
@@ -660,7 +663,8 @@
           <h2 id="machine-title">Public pointers for agents and operators.</h2>
           <p>
             Machine-readable discovery — what an agent fetches before it ever
-            calls a tool. Discovery is public. Protected actions still require
+            calls a tool. Public pointers are unauthenticated; the tool catalog
+            requires an operator-issued key. Protected actions still require
             an operator-issued API key and an applicable scoped permit.
           </p>
         </div>
@@ -705,9 +709,10 @@
           </a>
         </div>
         <p class="machine-note">
-          Four unauthenticated GETs against the API origin; each opens the raw
-          JSON in a new tab. Protected routes answer these same requests with
-          401 until an operator-issued key is presented.
+          Three unauthenticated GETs against the API origin: the agent manifest,
+          llms.txt, and dependency status. Each opens the raw response in a new
+          tab. The catalog at https://api.thisisatest.tech/mcp/tools.json requires
+          an operator-issued key and returns 401 without one.
         </p>
       </section>
 
@@ -739,9 +744,10 @@
             <h2 id="provenance-title">Built and run by one accountable operator.</h2>
             <p>
               Agent Middleware API is built and run by
-              @@PUBLIC_DISPLAY_NAME@@. The source repository is public; the
-              product boundary and security limitations are also published from
-              the API origin below.
+              @@PUBLIC_DISPLAY_NAME@@. The source repository is private during
+              the design-partner phase and is shared with pilot partners on
+              request. The product boundary and security limitations are
+              published from the API origin below.
             </p>
             <p>
               <a
@@ -762,7 +768,7 @@
                 href="https://github.com/PetrefiedThunder/agent-middleware-api"
                 target="_blank"
                 rel="noopener noreferrer"
-                >Source repository</a
+                >Source repository (pilot access)</a
               >
             </p>
           </div>
