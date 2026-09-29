@@ -183,7 +183,7 @@ class DailyBalanceSnapshot(SQLModel, table=True):
 
     snapshot_id: str = Field(primary_key=True, max_length=50)
     wallet_id: str = Field(max_length=50, foreign_key="wallets.wallet_id", index=True)
-    date: datetime = Field(index=True)
+    date: datetime = Field(sa_type=NaiveUTCDateTime, index=True)
     opening_balance: Decimal = Field(decimal_places=8)
     closing_balance: Decimal = Field(decimal_places=8)
     total_credits: Decimal = Field(default=Decimal("0"), decimal_places=8)
@@ -215,12 +215,8 @@ class ServiceRegistryModel(SQLModel, table=True):
     mcp_manifest: Optional[str] = Field(default=None)
     is_active: bool = Field(default=True)
     metadata_json: Optional[str] = Field(default=None)
-    created_at: datetime = Field(
-        sa_type=NaiveUTCDateTime, default_factory=utc_now
-    )
-    updated_at: datetime = Field(
-        sa_type=NaiveUTCDateTime, default_factory=utc_now
-    )
+    created_at: datetime = Field(sa_type=NaiveUTCDateTime, default_factory=utc_now)
+    updated_at: datetime = Field(sa_type=NaiveUTCDateTime, default_factory=utc_now)
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -246,7 +242,9 @@ class KYCVerificationModel(SQLModel, table=True):
 
     document_type: Optional[str] = Field(default=None, max_length=30)
 
-    first_verified_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
+    first_verified_at: Optional[datetime] = Field(
+        sa_type=NaiveUTCDateTime, default=None
+    )
     last_verified_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
 
     rejection_reason: Optional[str] = Field(default=None, max_length=500)
@@ -256,9 +254,7 @@ class KYCVerificationModel(SQLModel, table=True):
     created_at: datetime = Field(
         sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
     )
-    updated_at: datetime = Field(
-        sa_type=NaiveUTCDateTime, default_factory=utc_now
-    )
+    updated_at: datetime = Field(sa_type=NaiveUTCDateTime, default_factory=utc_now)
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -626,7 +622,7 @@ class ContentScheduleModel(SQLModel, table=True):
         index=True,
     )
     platform: str = Field(max_length=50, index=True)
-    recommended_time: datetime = Field(index=True)
+    recommended_time: datetime = Field(sa_type=NaiveUTCDateTime, index=True)
     confidence: float = Field(default=0.0)
     reasoning: str = Field(default="", max_length=2000)
     estimated_views: Optional[int] = Field(default=None)
@@ -741,9 +737,7 @@ class AuditChainHeadModel(SQLModel, table=True):
     wallet_key: str = Field(primary_key=True, max_length=64)
     last_chain_hash: Optional[str] = Field(default=None, max_length=64)
     last_seq: int = Field(default=0)
-    updated_at: datetime = Field(
-        sa_type=NaiveUTCDateTime, default_factory=utc_now
-    )
+    updated_at: datetime = Field(sa_type=NaiveUTCDateTime, default_factory=utc_now)
 
 
 class SigningKeyModel(SQLModel, table=True):
@@ -817,6 +811,8 @@ class PermitModel(SQLModel, table=True):
     # Opt-out from cross-key duplicate detection. When true, identical requests
     # under different idempotency keys are allowed.
     allow_identical_repeats: bool = Field(default=False)
+    # Nullable preserves the signed payload of permits issued before schema 040.
+    repeat_window_seconds: Optional[int] = Field(default=None)
     # Atomic call-count tracking for local max_calls_per_tool enforcement.
     # Maps tool name -> reserved local call count (e.g., {"partner.echo": 2}).
     tool_call_counts_json: Optional[str] = Field(default=None)
@@ -1142,16 +1138,24 @@ class McpDispatchAttemptModel(SQLModel, table=True):
     # Compensation checkpoints make reconciliation retry-safe. A ledger
     # refund is independently idempotent by correlation_id; permit budget
     # release is not, so that release and this marker are committed together.
-    debit_refunded_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None, index=True)
-    budget_released_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None, index=True)
+    debit_refunded_at: Optional[datetime] = Field(
+        sa_type=NaiveUTCDateTime, default=None, index=True
+    )
+    budget_released_at: Optional[datetime] = Field(
+        sa_type=NaiveUTCDateTime, default=None, index=True
+    )
     created_at: datetime = Field(
         sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
     )
     updated_at: datetime = Field(
         sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
     )
-    dispatched_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None, index=True)
-    completed_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None, index=True)
+    dispatched_at: Optional[datetime] = Field(
+        sa_type=NaiveUTCDateTime, default=None, index=True
+    )
+    completed_at: Optional[datetime] = Field(
+        sa_type=NaiveUTCDateTime, default=None, index=True
+    )
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -1193,8 +1197,6 @@ class PolicyBundleModel(SQLModel, table=True):
     created_at: datetime = Field(
         sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
     )
-    updated_at: datetime = Field(
-        sa_type=NaiveUTCDateTime, default_factory=utc_now
-    )
+    updated_at: datetime = Field(sa_type=NaiveUTCDateTime, default_factory=utc_now)
 
     model_config = {"arbitrary_types_allowed": True}

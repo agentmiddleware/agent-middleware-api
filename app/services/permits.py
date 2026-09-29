@@ -12,6 +12,7 @@ from sqlalchemy import case, func, or_, select, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
+from app.core.config import get_settings
 from app.core.resilience import (
     WRITE_CONFLICT_MAX_ATTEMPTS,
     run_with_write_conflict_retry,
@@ -219,6 +220,7 @@ def permit_model_to_response(model: PermitModel) -> PermitResponse:
         forbidden_fields=_loads_list(model.forbidden_fields_json or "[]"),
         recipient_domain=model.recipient_domain,
         allow_identical_repeats=model.allow_identical_repeats,
+        repeat_window_seconds=model.repeat_window_seconds,
     )
 
 
@@ -321,6 +323,11 @@ class PermitService:
         """
         if request.max_credits <= Decimal("0"):
             raise PermitError("max_credits_must_be_positive")
+        if (
+            request.repeat_window_seconds is not None
+            and not get_settings().ENABLE_PERMIT_REPEAT_WINDOW_ISSUANCE
+        ):
+            raise PermitError("repeat_window_issuance_disabled")
         # Normalize to naive UTC before any comparison, signing, or persistence.
         # Guarantees the signed timestamp and persisted timestamp are identical
         # on every dialect (SQLite, PostgreSQL, asyncpg).
@@ -387,6 +394,7 @@ class PermitService:
             else None,
             recipient_domain=request.recipient_domain,
             allow_identical_repeats=request.allow_identical_repeats,
+            repeat_window_seconds=request.repeat_window_seconds,
         )
         # Sign the same dict verify reconstructs. Building it twice let a
         # field added on one path only keep verifying in tests that never
@@ -1376,7 +1384,7 @@ class PermitService:
                         ),
                         "updated_at": now,
                     }
-                    
+
                     original_counts_json = None
                     if attempt.call_slot_reserved:
                         # Only release call slot if attempt never dispatched.
@@ -1387,17 +1395,22 @@ class PermitService:
                             permit = await session.get(PermitModel, attempt.permit_id)
                             if permit is not None:
                                 original_counts_json = permit.tool_call_counts_json
-                                current_counts = _loads_dict(original_counts_json or "{}")
+                                current_counts = _loads_dict(
+                                    original_counts_json or "{}"
+                                )
                                 tool_name = attempt.public_tool_id
                                 if tool_name in current_counts:
                                     current_count = current_counts[tool_name]
-                                    if isinstance(current_count, int) and current_count > 0:
+                                    if (
+                                        isinstance(current_count, int)
+                                        and current_count > 0
+                                    ):
                                         updated_counts = dict(current_counts)
                                         updated_counts[tool_name] = current_count - 1
-                                        permit_update_values["tool_call_counts_json"] = (
-                                            json.dumps(updated_counts)
-                                        )
-                    
+                                        permit_update_values[
+                                            "tool_call_counts_json"
+                                        ] = json.dumps(updated_counts)
+
                     # Atomic clamped decrement so a concurrent reservation on the
                     # same permit is not clobbered by a read-modify-write here.
                     # Add CAS on tool_call_counts_json when releasing a slot to
@@ -1430,7 +1443,7 @@ class PermitService:
                                     == original_counts_json,
                                 )
                             )
-                    
+
                     released = await session.execute(
                         sa_update(PermitModel)
                         .where(*where_conditions)
@@ -1902,6 +1915,8 @@ class PermitService:
             payload["recipient_domain"] = model.recipient_domain
         if model.allow_identical_repeats:
             payload["allow_identical_repeats"] = True
+        if model.repeat_window_seconds is not None:
+            payload["repeat_window_seconds"] = model.repeat_window_seconds
         return payload
 
     @staticmethod

@@ -58,6 +58,8 @@ def _permit_dict(**overrides: Any) -> dict[str, Any]:
         "aggregate_value_cap": None,
         "forbidden_fields": [],
         "recipient_domain": None,
+        "allow_identical_repeats": False,
+        "repeat_window_seconds": None,
     }
     permit.update(overrides)
     return permit
@@ -70,6 +72,8 @@ def _build_signed_permit(
     aggregate_value_cap: str | None = None,
     forbidden_fields: list[str] | None = None,
     recipient_domain: str | None = None,
+    allow_identical_repeats: bool = False,
+    repeat_window_seconds: int | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return (api-shaped permit dict, trust-keys document), genuinely signed.
 
@@ -110,6 +114,10 @@ def _build_signed_permit(
         signing_payload["forbidden_fields"] = forbidden_fields
     if recipient_domain:
         signing_payload["recipient_domain"] = recipient_domain
+    if allow_identical_repeats:
+        signing_payload["allow_identical_repeats"] = True
+    if repeat_window_seconds is not None:
+        signing_payload["repeat_window_seconds"] = repeat_window_seconds
     signing_payload["payload_hash"] = hashlib.sha256(
         _canonical(signing_payload).encode()
     ).hexdigest()
@@ -123,6 +131,8 @@ def _build_signed_permit(
         aggregate_value_cap=aggregate_value_cap,
         forbidden_fields=list(forbidden_fields or []),
         recipient_domain=recipient_domain,
+        allow_identical_repeats=allow_identical_repeats,
+        repeat_window_seconds=repeat_window_seconds,
         signature=base64.b64encode(signature).decode(),
     )
     key_document = {
@@ -142,9 +152,7 @@ def _build_signed_permit(
     return permit, key_document
 
 
-def _validator(
-    permit: dict[str, Any], key_document: dict[str, Any]
-) -> LocalPermitValidator:
+def _validator(permit: dict[str, Any], key_document: dict[str, Any]) -> LocalPermitValidator:
     return LocalPermitValidator(permit, key_set_from_document(key_document))
 
 
@@ -194,13 +202,9 @@ def test_verify_permit_covers_exactly_the_signed_fields():
         "scopes": ["tool:other:invoke", "billing:charge"],
         "allowed_tools": ["other.tool"],
         "max_credits": "500000",
-        "expires_at": (
-            datetime.now(timezone.utc) + timedelta(days=365)
-        ).isoformat(),
+        "expires_at": (datetime.now(timezone.utc) + timedelta(days=365)).isoformat(),
         "nonce": "nonce-forged",
-        "issued_at": (
-            datetime.now(timezone.utc) - timedelta(days=1)
-        ).isoformat(),
+        "issued_at": (datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),
         "key_id": "some-other-kid",
         # Signed only when true: flipping the stored flag in either
         # direction changes the rebuilt payload.
@@ -297,24 +301,18 @@ def test_check_uses_server_reason_strings_for_denials():
     assert decision.allowed is False
     assert decision.reason == "permit_tool_not_allowed"
 
-    no_billing = LocalPermitValidator(
-        _permit_dict(scopes=[f"tool:{TOOL}:invoke"]), key_set
-    )
+    no_billing = LocalPermitValidator(_permit_dict(scopes=[f"tool:{TOOL}:invoke"]), key_set)
     decision = no_billing.check(TOOL, Decimal("1"))
     assert decision.allowed is False
     assert decision.reason == "permit_scope_missing"
 
-    over_budget = LocalPermitValidator(
-        _permit_dict(max_credits="10", spent_credits="8"), key_set
-    )
+    over_budget = LocalPermitValidator(_permit_dict(max_credits="10", spent_credits="8"), key_set)
     decision = over_budget.check(TOOL, Decimal("3"))
     assert decision.allowed is False
     assert decision.reason == "permit_budget_exceeded"
     assert over_budget.check(TOOL, Decimal("2")).allowed is True
 
-    capped = LocalPermitValidator(
-        _permit_dict(max_calls_per_tool={TOOL: 1}), key_set
-    )
+    capped = LocalPermitValidator(_permit_dict(max_calls_per_tool={TOOL: 1}), key_set)
     assert capped.check(TOOL, Decimal("1")).allowed is True
     capped.record_use(TOOL, Decimal("1"))
     decision = capped.check(TOOL, Decimal("1"))
@@ -355,9 +353,7 @@ def test_check_treats_empty_allowed_tools_as_unrestricted_like_the_server():
 
 
 def test_record_use_advances_local_reservation_and_counters():
-    validator = LocalPermitValidator(
-        _permit_dict(max_credits="10", spent_credits="4"), {}
-    )
+    validator = LocalPermitValidator(_permit_dict(max_credits="10", spent_credits="4"), {})
     assert validator.check(TOOL, Decimal("6")).allowed is True
     validator.record_use(TOOL, Decimal("6"))
     assert validator.reserved_credits == Decimal("6")
@@ -437,9 +433,7 @@ async def test_session_open_verifies_and_local_denial_skips_the_server():
         # Local denial: the out-of-scope tool never reaches the server —
         # that is the RPC hop the in-process validator eliminates.
         with pytest.raises(PermitDeniedError) as exc_info:
-            await session.invoke(
-                "some.other.tool", {}, idempotency_key="session-denied-1"
-            )
+            await session.invoke("some.other.tool", {}, idempotency_key="session-denied-1")
         assert exc_info.value.reason == "permit_tool_not_allowed"
         assert invoke_posts == 0
 
@@ -485,9 +479,7 @@ async def test_session_open_raises_permit_denied_for_malformed_trust_keys():
     )
     try:
         with pytest.raises(PermitDeniedError) as exc_info:
-            await GovernedEdgeSession.open(
-                client, permit_id="permit-local-1", wallet_id="wallet-1"
-            )
+            await GovernedEdgeSession.open(client, permit_id="permit-local-1", wallet_id="wallet-1")
         assert exc_info.value.reason == "permit_trust_keys_invalid"
         assert isinstance(exc_info.value.__cause__, VerificationError)
     finally:
@@ -513,9 +505,71 @@ async def test_session_open_rejects_a_permit_the_published_keys_cannot_verify():
     )
     try:
         with pytest.raises(PermitDeniedError) as exc_info:
-            await GovernedEdgeSession.open(
-                client, permit_id="permit-local-1", wallet_id="wallet-1"
-            )
+            await GovernedEdgeSession.open(client, permit_id="permit-local-1", wallet_id="wallet-1")
         assert exc_info.value.reason == "permit_signature_invalid"
     finally:
         await client.close()
+
+
+def test_permit_signature_covers_allow_identical_repeats():
+    """allow_identical_repeats enters the signed payload when true."""
+    permit_true, keys_true = _build_signed_permit(allow_identical_repeats=True)
+    permit_false, keys_false = _build_signed_permit(allow_identical_repeats=False)
+
+    # True variant verifies with its own keys
+    validator_true = _validator(permit_true, keys_true)
+    assert validator_true.verify_permit()
+
+    # False variant verifies with its own keys
+    validator_false = _validator(permit_false, keys_false)
+    assert validator_false.verify_permit()
+
+    # Tampering: flipping the flag breaks the signature
+    permit_true_tampered = dict(permit_true)
+    permit_true_tampered["allow_identical_repeats"] = False
+    validator_tampered = _validator(permit_true_tampered, keys_true)
+    assert not validator_tampered.verify_permit()
+
+
+def test_permit_signature_covers_repeat_window_seconds():
+    """repeat_window_seconds enters the signed payload when set."""
+    permit_with, keys_with = _build_signed_permit(repeat_window_seconds=3600)
+    permit_without, keys_without = _build_signed_permit(repeat_window_seconds=None)
+
+    # With-window variant verifies
+    validator_with = _validator(permit_with, keys_with)
+    assert validator_with.verify_permit()
+
+    # Without-window variant verifies
+    validator_without = _validator(permit_without, keys_without)
+    assert validator_without.verify_permit()
+
+    # Tampering: changing the window breaks the signature
+    permit_tampered = dict(permit_with)
+    permit_tampered["repeat_window_seconds"] = 7200
+    validator_tampered = _validator(permit_tampered, keys_with)
+    assert not validator_tampered.verify_permit()
+
+    # Tampering: removing the window breaks the signature
+    permit_removed = dict(permit_with)
+    permit_removed["repeat_window_seconds"] = None
+    validator_removed = _validator(permit_removed, keys_with)
+    assert not validator_removed.verify_permit()
+
+
+def test_sdk_permit_validator_rebuilds_new_fields():
+    """LocalPermitValidator.permit_signing_payload includes new v2 fields."""
+    # Permit with both new fields set
+    permit, keys = _build_signed_permit(
+        allow_identical_repeats=True,
+        repeat_window_seconds=7200,
+    )
+    validator = _validator(permit, keys)
+
+    # Verify the permit passes
+    assert validator.verify_permit()
+
+    # Check the rebuilt payload includes the fields
+    rebuilt = validator.permit_signing_payload(permit)
+    assert rebuilt["allow_identical_repeats"] is True
+    assert rebuilt["repeat_window_seconds"] == 7200

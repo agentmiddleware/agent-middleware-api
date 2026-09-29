@@ -6,6 +6,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 
 from app.core.auth import AuthContext, get_auth_context
+from app.core.config import get_settings
 from app.schemas.trust import (
     PermitCreateRequest,
     PermitListResponse,
@@ -17,6 +18,7 @@ from app.schemas.trust import (
 from app.trust import (
     AgentMoney,
     IdempotencyConflictError,
+    IdempotencyCreationDisabledError,
     IdempotencyInProgressError,
     PermitError,
     get_agent_money,
@@ -117,20 +119,32 @@ async def create_permit(
             },
         )
     idem = get_idempotency_service()
+    request_payload = request.model_dump(mode="json")
+    if request.repeat_window_seconds is None:
+        # Preserve hashes written before repeat-window support was introduced.
+        request_payload.pop("repeat_window_seconds")
     try:
         replay = await idem.begin(
             wallet_id=request.issuer_wallet_id,
             endpoint="/v1/permits",
             idempotency_key=idempotency_key,
-            request_payload=request.model_dump(mode="json"),
+            request_payload=request_payload,
+            allow_new_record=(
+                request.repeat_window_seconds is None
+                or get_settings().ENABLE_PERMIT_REPEAT_WINDOW_ISSUANCE
+            ),
         )
+    except IdempotencyCreationDisabledError:
+        raise HTTPException(status_code=400, detail="repeat_window_issuance_disabled")
     except (IdempotencyConflictError, IdempotencyInProgressError) as exc:
         raise HTTPException(status_code=409, detail=exc.args[0])
     if replay and replay.response_json:
         return PermitResponse(**replay.response_json)
 
     try:
-        permit = await get_permit_service().create_permit(request, subject_key_id=auth.key_id)
+        permit = await get_permit_service().create_permit(
+            request, subject_key_id=auth.key_id
+        )
     except PermitError as exc:
         raise HTTPException(status_code=400, detail=exc.reason)
     await idem.complete(

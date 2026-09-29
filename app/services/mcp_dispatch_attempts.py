@@ -20,7 +20,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.config import get_settings
-from app.core.resilience import run_with_write_conflict_retry, WRITE_CONFLICT_MAX_ATTEMPTS
+from app.core.resilience import (
+    run_with_write_conflict_retry,
+    WRITE_CONFLICT_MAX_ATTEMPTS,
+)
 from app.core.time import to_naive_utc, utc_now
 from app.db.database import get_session_factory
 from app.db.models import (
@@ -31,7 +34,12 @@ from app.db.models import (
     PermitModel,
     ReceiptModel,
 )
-from app.services.permits import PermitService, PermitValidation, PermitWriteContendedError, get_permit_service
+from app.services.permits import (
+    PermitService,
+    PermitValidation,
+    PermitWriteContendedError,
+    get_permit_service,
+)
 from app.services.signing_keys import canonical_json, sha256_hex
 
 logger = logging.getLogger(__name__)
@@ -598,7 +606,7 @@ class McpDispatchAttemptService:
                     )
                     if not validation.allowed:
                         return validation, None
-                    
+
                     # Cross-key duplicate detection: check for prior attempts with the
                     # same (permit_id, public_tool_id, request_hash) that are still
                     # active or succeeded. This catches new-key retries with identical
@@ -609,7 +617,11 @@ class McpDispatchAttemptService:
                         duplicate_mode in ("log", "enforce")
                         and not permit.allow_identical_repeats
                     ):
-                        window_seconds = settings.MCP_UPSTREAM_DUPLICATE_WINDOW_SECONDS
+                        window_seconds = (
+                            permit.repeat_window_seconds
+                            if permit.repeat_window_seconds is not None
+                            else settings.MCP_UPSTREAM_DUPLICATE_WINDOW_SECONDS
+                        )
                         cutoff = utc_now() - timedelta(seconds=window_seconds)
                         # States that could block a duplicate if the attempt was
                         # effectful (actually dispatched). We check all matching attempts,
@@ -621,38 +633,48 @@ class McpDispatchAttemptService:
                             *DISPATCH_TERMINAL_STATES,
                         }
                         priors = (
-                            await session.execute(
-                                select(McpDispatchAttemptModel)
-                                .where(
-                                    cast(
-                                        ColumnElement[bool],
-                                        McpDispatchAttemptModel.permit_id == permit_id,
-                                    ),
-                                    cast(
-                                        ColumnElement[bool],
-                                        McpDispatchAttemptModel.public_tool_id
-                                        == public_tool_id,
-                                    ),
-                                    cast(
-                                        ColumnElement[bool],
-                                        McpDispatchAttemptModel.request_hash
-                                        == request_hash,
-                                    ),
-                                    cast(
-                                        ColumnElement[bool],
-                                        McpDispatchAttemptModel.created_at >= cutoff,
-                                    ),
-                                    cast(
-                                        ColumnElement[bool],
-                                        cast(Any, McpDispatchAttemptModel.state).in_(
-                                            blocking_states
+                            (
+                                await session.execute(
+                                    select(McpDispatchAttemptModel)
+                                    .where(
+                                        cast(
+                                            ColumnElement[bool],
+                                            McpDispatchAttemptModel.permit_id
+                                            == permit_id,
                                         ),
-                                    ),
+                                        cast(
+                                            ColumnElement[bool],
+                                            McpDispatchAttemptModel.public_tool_id
+                                            == public_tool_id,
+                                        ),
+                                        cast(
+                                            ColumnElement[bool],
+                                            McpDispatchAttemptModel.request_hash
+                                            == request_hash,
+                                        ),
+                                        cast(
+                                            ColumnElement[bool],
+                                            McpDispatchAttemptModel.created_at
+                                            >= cutoff,
+                                        ),
+                                        cast(
+                                            ColumnElement[bool],
+                                            cast(
+                                                Any, McpDispatchAttemptModel.state
+                                            ).in_(blocking_states),
+                                        ),
+                                    )
+                                    .order_by(
+                                        cast(
+                                            Any, McpDispatchAttemptModel.created_at
+                                        ).desc()
+                                    )
                                 )
-                                .order_by(cast(Any, McpDispatchAttemptModel.created_at).desc())
                             )
-                        ).scalars().all()
-                        
+                            .scalars()
+                            .all()
+                        )
+
                         # Check if ANY prior attempt in the window was effectful
                         # (dispatched or terminal effectful state).
                         blocking_prior = None
@@ -663,13 +685,16 @@ class McpDispatchAttemptService:
                             # - succeeded or delivery_uncertain (known effectful)
                             # - returned_error AFTER dispatch (was effectful)
                             # Exclude returned_error that never dispatched (pre-dispatch failure).
-                            if prior.state == "returned_error" and prior.dispatched_at is None:
+                            if (
+                                prior.state == "returned_error"
+                                and prior.dispatched_at is None
+                            ):
                                 continue  # Non-effectful, does not block
                             # All other states in blocking_states are effectful
                             blocking_prior = prior
                             blocks = True
                             break
-                        
+
                         if blocks and blocking_prior is not None:
                             msg = (
                                 f"Duplicate request detected: new idempotency key with "
@@ -679,9 +704,7 @@ class McpDispatchAttemptService:
                                 f"prior_state={blocking_prior.state})"
                             )
                             if duplicate_mode == "log":
-                                logger.warning(
-                                    f"{msg} - allowing in observe mode"
-                                )
+                                logger.warning(f"{msg} - allowing in observe mode")
                             else:  # enforce
                                 logger.info(msg)
                                 return (
@@ -697,7 +720,7 @@ class McpDispatchAttemptService:
                                     ),
                                     None,
                                 )
-                    
+
                     if unsupported_constraints:
                         # aggregate_value_cap requires folding in-flight reservations,
                         # which the atomic reservation does not yet support. Refuse
@@ -719,7 +742,9 @@ class McpDispatchAttemptService:
                     # This mirrors the logic in PermitService.authorize_and_reserve for
                     # local tools. The counter is atomically incremented via optimistic
                     # concurrency control (CAS on the JSON column).
-                    max_calls_config = _loads_dict(permit.max_calls_per_tool_json or "{}")
+                    max_calls_config = _loads_dict(
+                        permit.max_calls_per_tool_json or "{}"
+                    )
                     call_limit = max_calls_config.get(public_tool_id)
                     original_counts_json = permit.tool_call_counts_json
                     updated_counts_json = None
@@ -770,7 +795,7 @@ class McpDispatchAttemptService:
                     # One `now` is used for both the predicate and the denial
                     # classification below, so the two cannot disagree.
                     now = utc_now()
-                    
+
                     # Build the UPDATE values and WHERE predicates.
                     update_values: dict[str, Any] = {
                         "spent_credits": PermitModel.spent_credits + credits_authorized,
@@ -786,7 +811,7 @@ class McpDispatchAttemptService:
                             <= PermitModel.max_credits,
                         ),
                     ]
-                    
+
                     # If max_calls_per_tool is set for this tool, add the optimistic
                     # lock on tool_call_counts_json to the WHERE predicate and the
                     # updated counter to the values.
@@ -809,7 +834,7 @@ class McpDispatchAttemptService:
                                     == original_counts_json,
                                 )
                             )
-                    
+
                     reserved = await session.execute(
                         sa_update(PermitModel)
                         .where(*where_conditions)
@@ -1127,7 +1152,7 @@ class McpDispatchAttemptService:
         charge or send authority exists. The permit decrement and deletion
         share one transaction, so reconciliation can never observe a prepared
         row whose reservation was already released.
-        
+
         The slot release uses the same CAS pattern as release_dispatch_budget_once,
         so concurrent slot modifications are detected and retried.
         """
@@ -1135,7 +1160,7 @@ class McpDispatchAttemptService:
         if not attempt_id:
             raise DispatchAttemptError("dispatch_attempt_invalid")
         factory = get_session_factory()
-        
+
         async def _once() -> None:
             async with factory() as session:
                 async with session.begin():
@@ -1233,7 +1258,7 @@ class McpDispatchAttemptService:
                             PermitModel.spent_credits >= attempt.credits_authorized,
                         ),
                     ]
-                    
+
                     original_counts_json = None
                     if attempt.call_slot_reserved:
                         # Fetch the permit to get current tool_call_counts_json
@@ -1252,16 +1277,16 @@ class McpDispatchAttemptService:
                                     permit_update_values["tool_call_counts_json"] = (
                                         json.dumps(updated_counts)
                                     )
-                        
+
                         # Add CAS condition on tool_call_counts_json
                         if "tool_call_counts_json" in permit_update_values:
                             if original_counts_json is None:
                                 where_conditions.append(
                                     cast(
                                         ColumnElement[bool],
-                                        cast(Any, PermitModel.tool_call_counts_json).is_(
-                                            None
-                                        ),
+                                        cast(
+                                            Any, PermitModel.tool_call_counts_json
+                                        ).is_(None),
                                     )
                                 )
                             else:
@@ -1272,7 +1297,7 @@ class McpDispatchAttemptService:
                                         == original_counts_json,
                                     )
                                 )
-                    
+
                     released = await session.execute(
                         sa_update(PermitModel)
                         .where(*where_conditions)
@@ -1292,7 +1317,7 @@ class McpDispatchAttemptService:
                         )
                     await session.delete(attempt)
                     await session.flush()
-        
+
         # Wrap in retry logic to handle CAS failures on slot release
         try:
             await run_with_write_conflict_retry(
