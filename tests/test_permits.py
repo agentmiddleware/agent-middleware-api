@@ -305,7 +305,9 @@ async def test_permit_create_rejects_in_progress_idempotency_key(
         wallet_id=provisioned["agent_wallet_id"],
         endpoint="/v1/permits",
         idempotency_key="permit-in-progress-key",
-        request_payload=PermitCreateRequest(**request_payload).model_dump(mode="json"),
+        request_payload=PermitCreateRequest(**request_payload).model_dump(
+            mode="json", exclude={"repeat_window_seconds"}
+        ),
     )
 
     resp = await client.post(
@@ -686,9 +688,9 @@ async def test_reserve_budget_refuses_an_expired_permit(
             allowed_tools=["expiry-reserve-tool"],
             scopes=["tool:expiry-reserve-tool:invoke"],
             max_credits=Decimal("10"),
-            expires_at=(
-                datetime.now(timezone.utc) + timedelta(minutes=30)
-            ).replace(tzinfo=None),
+            expires_at=(datetime.now(timezone.utc) + timedelta(minutes=30)).replace(
+                tzinfo=None
+            ),
         )
     )
 

@@ -313,9 +313,7 @@ class LocalPermitValidator:
             "issuer_wallet_id": str(permit["issuer_wallet_id"]),
             "subject_wallet_id": str(permit["subject_wallet_id"]),
             "subject_key_id": (
-                str(permit["subject_key_id"])
-                if permit.get("subject_key_id") is not None
-                else None
+                str(permit["subject_key_id"]) if permit.get("subject_key_id") is not None else None
             ),
             "scopes": [str(scope) for scope in permit.get("scopes") or []],
             "allowed_tools": [str(tool) for tool in permit.get("allowed_tools") or []],
@@ -335,9 +333,7 @@ class LocalPermitValidator:
                 str(tool): int(limit) for tool, limit in max_calls.items()
             }
         if permit.get("aggregate_value_cap") is not None:
-            payload["aggregate_value_cap"] = cls._canonical_decimal(
-                permit["aggregate_value_cap"]
-            )
+            payload["aggregate_value_cap"] = cls._canonical_decimal(permit["aggregate_value_cap"])
         forbidden = permit.get("forbidden_fields") or []
         if forbidden:
             payload["forbidden_fields"] = [str(name) for name in forbidden]
@@ -520,9 +516,7 @@ class GovernedEdgeSession:
         permit = await client._request_json("GET", f"/v1/permits/{permit_id}")
         document = trust_keys_document
         if document is None:
-            document = await client._request_json(
-                "GET", "/.well-known/trust-keys.json"
-            )
+            document = await client._request_json("GET", "/.well-known/trust-keys.json")
         try:
             key_set = key_set_from_document(document)
         except VerificationError as exc:

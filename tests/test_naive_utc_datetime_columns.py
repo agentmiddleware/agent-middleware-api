@@ -87,7 +87,9 @@ async def rows():
     factory = get_session_factory()
     async with factory() as session:
         session.add(WalletModel(wallet_id=ids["wallet"], wallet_type="sponsor"))
-        session.add(ContentPipelineModel(pipeline_id=ids["pipeline"], title="naive utc"))
+        session.add(
+            ContentPipelineModel(pipeline_id=ids["pipeline"], title="naive utc")
+        )
         await session.flush()
         session.add(
             ContentPieceModel(
@@ -115,7 +117,9 @@ async def rows():
             )
         )
         await session.execute(
-            delete(ContentPieceModel).where(ContentPieceModel.content_id == ids["content"])
+            delete(ContentPieceModel).where(
+                ContentPieceModel.content_id == ids["content"]
+            )
         )
         await session.execute(
             delete(ContentPipelineModel).where(
