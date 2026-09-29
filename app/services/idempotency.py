@@ -534,15 +534,31 @@ class IdempotencyService:
         idempotency_key: str,
         request_payload: dict[str, Any],
         allow_new_record: bool = True,
+        compatible_request_payload: dict[str, Any] | None = None,
     ) -> IdempotencyReplay | None:
-        """Compatibility wrapper returning only the optional replay."""
-        begun = await self.begin_with_record(
-            wallet_id=wallet_id,
-            endpoint=endpoint,
-            idempotency_key=idempotency_key,
-            request_payload=request_payload,
-            allow_new_record=allow_new_record,
-        )
+        """Replay an explicitly supplied historical shape without writing that shape."""
+        try:
+            begun = await self.begin_with_record(
+                wallet_id=wallet_id,
+                endpoint=endpoint,
+                idempotency_key=idempotency_key,
+                request_payload=request_payload,
+                allow_new_record=allow_new_record,
+            )
+        except IdempotencyConflictError as conflict:
+            if compatible_request_payload is None:
+                raise
+            try:
+                begun = await self.begin_with_record(
+                    wallet_id=wallet_id,
+                    endpoint=endpoint,
+                    idempotency_key=idempotency_key,
+                    request_payload=compatible_request_payload,
+                    allow_new_record=False,
+                )
+            except IdempotencyCreationDisabledError:
+                # A record removed between reads must not mint under the old hash.
+                raise conflict
         return begun.replay
 
     async def get_record(
