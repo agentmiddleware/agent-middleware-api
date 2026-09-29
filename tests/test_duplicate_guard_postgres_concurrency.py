@@ -246,7 +246,6 @@ async def test_duplicate_guard_respects_permit_window_override(monkeypatch):
     # Set a very long global window
     monkeypatch.setattr(settings, "MCP_UPSTREAM_DUPLICATE_WINDOW_SECONDS", 86400)
     
-    factory = get_session_factory()
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://test",
@@ -346,7 +345,6 @@ async def test_duplicate_guard_off_mode_allows_duplicates(monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "MCP_UPSTREAM_DUPLICATE_GUARD", DuplicateGuardMode.OFF)
     
-    factory = get_session_factory()
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://test",
