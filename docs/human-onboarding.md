@@ -97,6 +97,10 @@ capabilities that are simulated or undocumented.
 - [ ] Optionally compare with `GET /.well-known/mcp/tools.json` (separate route;
       may differ — if in doubt, treat `/mcp/tools.json` as the primary tool
       discovery path used in examples).
+- [ ] On a production-like deployment the tool catalogs (`/v1/discover`,
+      `/mcp/tools.json`, `/mcp/tools`, `/.well-known/mcp/tools.json`) require
+      the same credentials as invoke and answer `401` without them. Send an
+      operator key (`X-API-Key`) to read them.
 - [ ] Cross-check core capabilities against `/health/dependencies`. When proof
       surfaces are mounted, also inspect its `simulation_modes`; otherwise use
       the startup posture log and deployment configuration.
@@ -147,10 +151,14 @@ bash scripts/human_preflight.sh
 Optional: install `jq` for formatted output. `simulation_modes` appears only
 when proof surfaces are mounted.
 
-The script checks liveness, the public dependency report, and discovery URLs.
-It prints simulation flags when the selected deployment exposes the full
-proof-surface report. It does **not** perform authenticated wallet flows; use
-the golden path for that.
+The script sends only unauthenticated `GET`s. It checks liveness, the public
+dependency report, and discovery URLs. It reads `production_like` from
+`/health/dependencies` first: on a production-like deployment it requires the
+four tool catalogs to answer `401` and skips the `/v1/discover` `agent_first`
+comparison (that needs a key); on a local-compatible deployment it requires
+them to answer `200` and compares `agent_first`. It prints simulation flags
+when the selected deployment exposes the full proof-surface report. It does
+**not** perform authenticated wallet flows; use the golden path for that.
 
 ---
 

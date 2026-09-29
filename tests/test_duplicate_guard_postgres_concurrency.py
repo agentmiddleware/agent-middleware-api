@@ -15,6 +15,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
+from app.core.config import DuplicateGuardMode
 from app.core.time import utc_now
 from app.db.database import get_engine, get_session_factory
 from app.db.models import LedgerEntryModel, McpDispatchAttemptModel, ReceiptModel
@@ -127,7 +128,9 @@ async def test_parallel_identical_new_keys_enforce_mode_one_dispatch(monkeypatch
     from app.core.config import get_settings
 
     settings = get_settings()
-    monkeypatch.setattr(settings, "MCP_UPSTREAM_DUPLICATE_GUARD", "enforce")
+    monkeypatch.setattr(
+        settings, "MCP_UPSTREAM_DUPLICATE_GUARD", DuplicateGuardMode.ENFORCE
+    )
 
     factory = get_session_factory()
     # Provision agent
@@ -287,7 +290,9 @@ async def test_duplicate_guard_respects_permit_window_override(monkeypatch):
     from app.core.config import get_settings
 
     settings = get_settings()
-    monkeypatch.setattr(settings, "MCP_UPSTREAM_DUPLICATE_GUARD", "enforce")
+    monkeypatch.setattr(
+        settings, "MCP_UPSTREAM_DUPLICATE_GUARD", DuplicateGuardMode.ENFORCE
+    )
     # Set a very long global window
     monkeypatch.setattr(settings, "ENABLE_PERMIT_REPEAT_WINDOW_ISSUANCE", True)
     monkeypatch.setattr(settings, "MCP_UPSTREAM_DUPLICATE_WINDOW_SECONDS", 86400)
@@ -408,7 +413,9 @@ async def test_duplicate_guard_off_mode_allows_duplicates(monkeypatch):
     from app.core.config import get_settings
 
     settings = get_settings()
-    monkeypatch.setattr(settings, "MCP_UPSTREAM_DUPLICATE_GUARD", "off")
+    monkeypatch.setattr(
+        settings, "MCP_UPSTREAM_DUPLICATE_GUARD", DuplicateGuardMode.OFF
+    )
 
     async with AsyncClient(
         transport=ASGITransport(app=app),

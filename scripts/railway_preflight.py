@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Railway deploy preflight: customer manifest + deploy posture checks.
 
-Two independent checks, each skipped when its ordinary input is absent.
-Explicit ``--public-db`` mode is an exception and fails closed when absent:
+Independent checks, each skipped when its ordinary input is absent.
+Explicit ``--public-db`` and ``--runtime-posture`` modes are exceptions and
+fail closed when their input is absent:
 
 ``--db`` (needs ``DATABASE_URL``)
     Compare the Alembic head revision in this tree against the
@@ -16,15 +17,55 @@ Explicit ``--public-db`` mode is an exception and fails closed when absent:
 ``--public-db`` (needs ``DATABASE_PUBLIC_URL``)
     Select the explicit public PostgreSQL URL for an off-platform database
     check, such as GitHub Actions after ``railway up``. This never falls back
-    to ``DATABASE_URL``; a missing or private-looking value fails closed.
+    to ``DATABASE_URL``; a missing or private-looking value fails closed. It
+    always runs the database check, whatever other check is selected.
 
 ``--live`` (needs ``PUBLIC_URL`` or ``--url``)
     Probe the deployed service and assert the production posture the SOP
-    requires: healthy, no memory fallback, proof surfaces and dogfood off, no
-    dependency listed unhealthy. ``--expected-version`` and
+    requires: healthy, no memory fallback, proof surfaces off, any published
+    dogfood flag exactly false, no dependency listed unhealthy, and every
+    production tool catalog refusing unauthenticated reads with the
+    application's own 401 ``missing_credentials`` refusal (the #444 Narrow
+    lockdown). Only unauthenticated GETs are sent. The public projection does
+    not publish the dogfood flags, so a ``--live``-only run does not verify
+    the dogfood posture; ``--runtime-posture`` does, in the container.
+    ``--expected-version`` and
     ``--expected-commit-sha`` add exact release-identity checks against both
     ``/health`` and ``/health/dependencies`` for the post-deploy gate; the
     commit expectation must be a full 40-character SHA.
+    ``--expected-signing-key-id`` and ``--expected-signing-public-key-sha256``
+    (given together, only with ``--live``, never with ``--manifest``, which
+    already carries both) require the trust-key document to publish that key
+    id exactly once as an active Ed25519 key with that public-key fingerprint.
+    They serve a live gate run from a checkout other than the release, such
+    as a rollback to a release whose own preflight predates the locked
+    catalogs.
+
+    Limitation (manifest or flags alike): this proves the key is *published*
+    as active, not that the process *signs* with it. The public health
+    report's signing_key entry carries only status and state; the key the
+    process signs with is exposed only on the authenticated
+    ``GET /v1/signing-keys/active``. A rotation by redeploy (new
+    ``TRUST_SIGNING_PRIVATE_KEY_B64`` and ``TRUST_SIGNING_KEY_ID``) activates
+    the new key id without retiring the old one
+    (``SigningKeyService.ensure_active_key``), so both stay active and a
+    stale expectation naming the old key still passes. After a rotation the
+    old key must be retired before this check means anything, and the
+    repository has no operator command for that yet: docs/key-management.md
+    names ``POST /v1/admin/signing-keys/rotate``, which does not exist, and
+    ``retire_key_metadata`` / ``rotate_active_key_metadata`` are service
+    methods only. See the rollback section of docs/deploy-railway.md.
+
+``--runtime-posture`` (run inside the deployed API container)
+    Assert the dogfood posture that is no longer publicly observable: the
+    public health projection omits the dogfood flags and the tool catalogs
+    require credentials, so this reads the service's configuration from the
+    process environment (never a ``.env`` file, and it fails when one exists
+    where the service would read it). It requires a Railway runtime marker
+    variable, a production-like ``ENVIRONMENT`` and both dogfood flags false,
+    so it fails closed on a machine outside Railway.
+    Release expectations and ``--manifest`` belong to ``--live`` and are
+    rejected unless ``--live`` is also given.
 
 ``--manifest`` (optional non-secret JSON)
     Bind the checks to one managed single-tenant deployment. The manifest
@@ -59,6 +100,12 @@ Usage::
       --expected-version 1.3.0 \
       --expected-commit-sha 0123456789abcdef0123456789abcdef01234567
 
+    # Private dogfood posture, inside the deployed API container (an image
+    # built before this flag existed needs the inline check in
+    # docs/deploy-railway.md instead):
+    railway ssh --service api-service --environment production -- \
+      python scripts/railway_preflight.py --db --runtime-posture --strict
+
     # Managed single-tenant gate (URL and commit come from the manifest):
     python scripts/railway_preflight.py --live --strict \
       --manifest /path/to/customer.production.json
@@ -85,7 +132,7 @@ import subprocess
 import sys
 from collections.abc import Mapping
 from pathlib import Path
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -95,14 +142,39 @@ if str(REPO_ROOT) not in sys.path:
 
 from app.core.db_urls import as_sqlalchemy_url  # noqa: E402
 
+if TYPE_CHECKING:
+    import httpx
+
 
 OK = "[preflight] PASS"
 BAD = "[preflight] FAIL"
 SKIP = "[preflight] SKIP"
 
-# Local proof-infrastructure tool ids that must never appear in a production
-# deployment's public discovery (see app/services/dogfood_tool.py).
-_DOGFOOD_TOOL_IDS = frozenset({"partner.notes.write", "partner.notes.count"})
+# Tool catalogs that production-like boots must refuse to unauthenticated
+# callers (#444 Narrow lockdown; see reject_anonymous_production_catalog in
+# app/core/auth.py and SECURITY_LIMITATIONS.md). A stranger must not learn
+# which tools exist.
+_LOCKED_CATALOG_PATHS = (
+    "/v1/discover",
+    "/mcp/tools.json",
+    "/mcp/tools",
+    "/.well-known/mcp/tools.json",
+)
+
+# The error code in the body of that refusal (get_auth_context in
+# app/core/auth.py raises {"detail": {"error": "missing_credentials", ...}}).
+# A 401 from an edge, proxy, or platform layer has a different body and does
+# not prove the application refused the read.
+_CATALOG_REFUSAL_ERROR = "missing_credentials"
+
+# Runtime flags that register local proof-infrastructure tools
+# (partner.notes.write / partner.notes.count; see app/services/dogfood_tool.py).
+_DOGFOOD_RUNTIME_FLAGS = ("ENABLE_DOGFOOD_TOOL", "ENABLE_DOGFOOD_SECOND_TOOL")
+
+# Their names in the full /health/dependencies report (gather_dependency_report
+# in app/core/health.py). The public projection omits both; when either is
+# published it must be exactly false.
+_PUBLISHED_DOGFOOD_FLAGS = ("enable_dogfood_tool", "enable_dogfood_second_tool")
 
 MANIFEST_SCHEMA_VERSION = "1.0"
 _MANIFEST_FIELDS = frozenset(
@@ -403,6 +475,22 @@ def _public_database_url(environment: Mapping[str, str] | None = None) -> str:
     return url
 
 
+def _is_catalog_refusal(response: "httpx.Response") -> bool:
+    """Whether a 401 carries the application's own anonymous-catalog refusal.
+
+    ``reject_anonymous_production_catalog`` (app/core/auth.py) refuses through
+    ``get_auth_context``, whose body is
+    ``{"detail": {"error": "missing_credentials", ...}}``. Anything else (no
+    JSON, another shape, another error code) did not come from that code path.
+    """
+    try:
+        body = response.json()
+    except Exception:
+        return False
+    detail = body.get("detail") if isinstance(body, dict) else None
+    return isinstance(detail, dict) and detail.get("error") == _CATALOG_REFUSAL_ERROR
+
+
 def check_live(
     url: str,
     *,
@@ -486,73 +574,64 @@ def check_live(
             )
 
     # Key presence, not truthiness: a *published* null must still fail the
-    # exactly-false requirement below — only a genuinely absent key (the
-    # post-#348 public projection) earns the discovery fallback.
+    # exactly-false requirement. The full report publishes both dogfood
+    # flags; each one that is published must be exactly false.
+    for published_flag in _PUBLISHED_DOGFOOD_FLAGS:
+        if published_flag in body and body[published_flag] is not False:
+            failures.append(
+                f"{published_flag}={body[published_flag]!r} — must be "
+                "explicitly false in production"
+            )
+    dogfood_verified = body.get("enable_dogfood_tool") is False
     if "enable_dogfood_tool" not in body:
-        # The public /health/dependencies projection stopped publishing the
-        # dogfood flag when proof surfaces are unmounted (the flag described
-        # nothing a caller could reach — see build_public_dependency_report).
-        # Verify the observable posture instead: the dogfood tools must not
-        # be registered in public discovery.
+        # The public projection omits the flag (#348), and since the #444
+        # lockdown the tool catalogs that used to stand in for it require
+        # credentials. The dogfood state is not publicly observable, so say
+        # so rather than report it as checked: --runtime-posture verifies it
+        # inside the deployed API container.
+        print(
+            "[preflight] NOTE enable_dogfood_tool is not published and tool "
+            "catalogs require credentials — the dogfood posture is private; "
+            "verify it with --runtime-posture inside the deployed API container"
+        )
+
+    # Tool catalogs must refuse unauthenticated reads (#444). No credentials
+    # are sent. A 2xx is the pre-lockdown public catalog. Any other status
+    # (a redirect, 403, 404, 5xx) or an unreachable route cannot confirm the
+    # lockdown, so it fails closed too. A 401 counts only when its body is
+    # the application's own missing_credentials refusal: an edge or proxy
+    # 401 in front of a public catalog must not satisfy the gate.
+    for path in _LOCKED_CATALOG_PATHS:
         try:
-            discover_resp = httpx.get(f"{base}/v1/discover", timeout=30)
-            discover_resp.raise_for_status()
-            discover_body = discover_resp.json()
+            catalog_resp = httpx.get(f"{base}{path}", timeout=30)
         except Exception as exc:
             failures.append(
-                "enable_dogfood_tool is absent from /health/dependencies and "
-                f"/v1/discover could not be checked instead: {exc}"
+                f"{path} could not be checked for the locked-down catalog "
+                f"posture: {exc}"
+            )
+            continue
+        catalog_status = catalog_resp.status_code
+        if catalog_status == 401:
+            if _is_catalog_refusal(catalog_resp):
+                continue
+            failures.append(
+                f"{path} answered 401 without the application's "
+                f"{_CATALOG_REFUSAL_ERROR!r} refusal body — cannot confirm the "
+                "locked-down catalog posture"
+            )
+            continue
+        if 200 <= catalog_status < 300:
+            failures.append(
+                f"{path} is publicly readable (HTTP {catalog_status}) — "
+                "production tool catalogs must refuse unauthenticated "
+                "requests with 401"
             )
         else:
-            tools = (
-                discover_body.get("mcp_tools")
-                if isinstance(discover_body, dict)
-                else None
+            failures.append(
+                f"{path} answered an unauthenticated request with HTTP "
+                f"{catalog_status}, expected 401 — cannot confirm the "
+                "locked-down catalog posture"
             )
-            if not isinstance(tools, list) or not all(
-                isinstance(tool, dict) for tool in tools
-            ):
-                # Fail closed on an unrecognized shape: treating it as "no
-                # tools" would let a renamed field or an error page silently
-                # pass the release gate.
-                failures.append(
-                    "enable_dogfood_tool is absent from /health/dependencies "
-                    "and /v1/discover returned an unrecognized shape (no "
-                    "mcp_tools list) — cannot verify dogfood posture"
-                )
-            else:
-                # Check service_id and name independently: a benign
-                # service_id must not mask a dogfood name (or vice versa).
-                # Non-string identifiers are an unrecognized shape, not a
-                # clean catalog.
-                leaked_ids: set[str] = set()
-                malformed_identifier = False
-                for tool in tools:
-                    for field in ("service_id", "name"):
-                        value = tool.get(field)
-                        if value is None:
-                            continue
-                        if not isinstance(value, str):
-                            malformed_identifier = True
-                            continue
-                        if value in _DOGFOOD_TOOL_IDS:
-                            leaked_ids.add(value)
-                if malformed_identifier:
-                    failures.append(
-                        "/v1/discover tool identifiers must be strings — "
-                        "cannot verify dogfood posture"
-                    )
-                if leaked_ids:
-                    failures.append(
-                        "dogfood tools exposed in public discovery: "
-                        f"{sorted(leaked_ids)} — ENABLE_DOGFOOD_TOOL must be "
-                        "false in production"
-                    )
-    elif body["enable_dogfood_tool"] is not False:
-        dogfood = body["enable_dogfood_tool"]
-        failures.append(
-            f"enable_dogfood_tool={dogfood!r} — must be explicitly false in production"
-        )
 
     identity_reports = [("/health/dependencies", body)]
     if expected_version is not None or expected_commit_sha is not None:
@@ -608,7 +687,7 @@ def check_live(
         if health_signing_key_id is not None:
             if health_signing_key_id != expected_signing_key_id:
                 failures.append(
-                    "live health signing key id does not match the customer manifest"
+                    "live health signing key id does not match the expected signing key id"
                 )
 
         try:
@@ -621,7 +700,7 @@ def check_live(
         except Exception:
             failures.append(
                 "public trust-key document is unavailable; cannot verify the "
-                "manifest signing key id"
+                "expected signing key id"
             )
         else:
             published_keys = (
@@ -645,9 +724,7 @@ def check_live(
                 else []
             )
             if issuer != base:
-                failures.append(
-                    "public trust-key issuer does not match the customer manifest URL"
-                )
+                failures.append("public trust-key issuer does not match the live URL")
             if document_alg != "Ed25519":
                 failures.append("public trust-key document must use Ed25519")
             if len(active_matches) != 1 or not _matches_ed25519_public_key(
@@ -655,7 +732,7 @@ def check_live(
                 expected_signing_public_key_sha256 or "",
             ):
                 failures.append(
-                    "manifest signing key id is not published exactly once as an "
+                    "expected signing key id is not published exactly once as an "
                     "active Ed25519 key with valid public material"
                 )
 
@@ -667,9 +744,112 @@ def check_live(
     displayed_version = body.get("version") or "unknown"
     displayed_commit_sha = body.get("commit_sha")
     displayed_sha = f", sha={displayed_commit_sha}" if displayed_commit_sha else ""
+    displayed_dogfood = (
+        "dogfood_tool=false"
+        if dogfood_verified
+        else "dogfood_tool=private (not publicly observable)"
+    )
+    displayed_signing_key = (
+        f", signing key {expected_signing_key_id} published with the expected "
+        "public-key fingerprint"
+        if expected_signing_key_id is not None
+        else ""
+    )
     print(
         f"{OK} {base} healthy (v{displayed_version}{displayed_sha}, "
-        "proof_surfaces=false, dogfood_tool=false, no memory fallback)"
+        f"proof_surfaces=false, {displayed_dogfood}, tool catalogs 401 "
+        f"without credentials, no memory fallback{displayed_signing_key})"
+    )
+    return True
+
+
+def _service_dotenv_files() -> list[Path]:
+    """``.env`` files the running service could read, if any exist.
+
+    ``get_settings()`` reads ``.env`` relative to the process working
+    directory. The image runs the service from ``WORKDIR /app`` (the
+    entrypoint execs uvicorn without changing directory), which is this
+    script's ``REPO_ROOT`` inside the image. The current directory is checked
+    as well, in case the check runs from the same place as the service.
+    """
+    candidates = {REPO_ROOT / ".env", Path.cwd() / ".env"}
+    return sorted(path for path in candidates if path.exists())
+
+
+def check_runtime_posture() -> bool:
+    """Assert the dogfood posture from this process's runtime configuration.
+
+    Meant for the deployed API container (``railway ssh``). Settings are
+    built from the process environment only, never from a ``.env`` file: the
+    image cannot contain one (``.dockerignore`` excludes ``.env`` and
+    ``.env.*``), so inside the container this is exactly what the running
+    service resolves, and a ``.env`` in some other working directory cannot
+    stand in for it. If a ``.env`` file does exist where the service would
+    read it, the check fails: the service's configuration could then differ
+    from this process environment.
+
+    Fails closed off Railway. A production-like ENVIRONMENT alone proves
+    nothing, because every unrecognized value (``ENVIRONMENT=banana``
+    included) is production-like. One of the variables Railway injects into
+    a deployed service (``HOSTED_RUNTIME_MARKER_VARS`` in
+    app/core/trust_mode.py) must also be present. ``railway run`` injects
+    them into a local process too; that run still reads the service's
+    configured variables, not the running process.
+
+    Configuration errors are reported by type only, because a validation
+    message can echo a configured value.
+    """
+    try:
+        from app.core.config import Settings
+        from app.core.trust_mode import (
+            HOSTED_RUNTIME_MARKER_VARS,
+            is_production_like_environment,
+        )
+
+        settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    except Exception as exc:
+        print(
+            f"{BAD} runtime posture: unable to resolve the runtime "
+            f"configuration ({type(exc).__name__})"
+        )
+        return False
+
+    failures: list[str] = []
+    if not any(
+        os.environ.get(marker, "").strip() for marker in HOSTED_RUNTIME_MARKER_VARS
+    ):
+        failures.append(
+            "runtime posture: no Railway runtime marker "
+            f"({', '.join(HOSTED_RUNTIME_MARKER_VARS)}) in this process — run "
+            "--runtime-posture inside the deployed API container"
+        )
+    for dotenv in _service_dotenv_files():
+        failures.append(
+            f"runtime posture: {dotenv} exists and the service would read it "
+            "— this check reads only the process environment, so it cannot "
+            "vouch for that configuration; remove the file from the image"
+        )
+    if not is_production_like_environment(settings.ENVIRONMENT):
+        failures.append(
+            "runtime posture: ENVIRONMENT is not production-like in this "
+            "process — run --runtime-posture inside the deployed API "
+            "container, where the service's runtime configuration applies"
+        )
+    for flag in _DOGFOOD_RUNTIME_FLAGS:
+        if getattr(settings, flag) is not False:
+            failures.append(
+                f"runtime posture: {flag} is enabled — the dogfood tools are "
+                "local proof infrastructure and must be false in production"
+            )
+
+    if failures:
+        for item in failures:
+            print(f"{BAD} {item}")
+        return False
+
+    print(
+        f"{OK} runtime posture: Railway runtime, production-like ENVIRONMENT, "
+        + ", ".join(f"{flag}=false" for flag in _DOGFOOD_RUNTIME_FLAGS)
     )
     return True
 
@@ -691,6 +871,15 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--runtime-posture",
+        action="store_true",
+        help=(
+            "assert this process's runtime configuration is production-like "
+            "with the dogfood tools off; run inside the deployed API container "
+            "(this posture is not publicly observable)"
+        ),
+    )
+    parser.add_argument(
         "--url",
         default=os.getenv("PUBLIC_URL", ""),
         help="service origin for --live (default: $PUBLIC_URL)",
@@ -704,6 +893,23 @@ def main(argv: list[str] | None = None) -> int:
         "--expected-commit-sha",
         default="",
         help="full 40-character commit SHA required from --live",
+    )
+    parser.add_argument(
+        "--expected-signing-key-id",
+        default=None,
+        help=(
+            "signing key id --live requires to be published exactly once as an "
+            "active Ed25519 key (with --expected-signing-public-key-sha256; not "
+            "with --manifest)"
+        ),
+    )
+    parser.add_argument(
+        "--expected-signing-public-key-sha256",
+        default=None,
+        help=(
+            "lowercase SHA-256 of that key's raw 32-byte public key, from the "
+            "key-generation record (with --expected-signing-key-id)"
+        ),
     )
     parser.add_argument(
         "--manifest",
@@ -731,22 +937,86 @@ def main(argv: list[str] | None = None) -> int:
     if args.manifest_only and not args.manifest:
         print(f"{BAD} --manifest-only requires --manifest")
         return 1
+    signing_expectation_given = (
+        args.expected_signing_key_id is not None
+        or args.expected_signing_public_key_sha256 is not None
+    )
     if args.manifest_only and (
         args.db
         or args.live
         or args.public_db
+        or args.runtime_posture
         or args.expected_version
         or args.expected_commit_sha
+        or signing_expectation_given
     ):
         print(
             f"{BAD} --manifest-only cannot be combined with --db, --live, "
-            "--public-db, or live release expectations"
+            "--public-db, --runtime-posture, or live release expectations"
         )
         return 1
 
-    # Neither flag given: run whatever the environment supports.
-    run_db = not args.manifest_only and (args.db or not (args.db or args.live))
-    run_live = not args.manifest_only and (args.live or not (args.db or args.live))
+    # Explicit signing-key expectations stand in for a manifest's, for a live
+    # gate run from another checkout. A present-but-empty value (a failed
+    # substitution in a shell) is rejected rather than read as "not given".
+    if signing_expectation_given:
+        if args.manifest:
+            print(
+                f"{BAD} --expected-signing-key-id and "
+                "--expected-signing-public-key-sha256 cannot be combined with "
+                "--manifest, which already supplies the signing key"
+            )
+            return 1
+        if not args.live:
+            print(
+                f"{BAD} --expected-signing-key-id and "
+                "--expected-signing-public-key-sha256 apply only to --live"
+            )
+            return 1
+        if (
+            args.expected_signing_key_id is None
+            or args.expected_signing_public_key_sha256 is None
+        ):
+            print(
+                f"{BAD} --expected-signing-key-id and "
+                "--expected-signing-public-key-sha256 must be given together"
+            )
+            return 1
+        if _SAFE_ID_RE.fullmatch(args.expected_signing_key_id) is None:
+            print(
+                f"{BAD} --expected-signing-key-id must be a lowercase safe identifier"
+            )
+            return 1
+        if _SHA256_RE.fullmatch(args.expected_signing_public_key_sha256) is None:
+            print(
+                f"{BAD} --expected-signing-public-key-sha256 must be a lowercase "
+                "SHA-256 digest"
+            )
+            return 1
+
+    # Release expectations and the manifest are inputs to the live check.
+    # --runtime-posture on its own deselects that check, so accepting them
+    # there would drop them silently and look like an identity check ran.
+    if (
+        args.runtime_posture
+        and not args.live
+        and (args.expected_version or args.expected_commit_sha or args.manifest)
+    ):
+        print(
+            f"{BAD} --expected-version, --expected-commit-sha, and --manifest "
+            "apply only to --live; add --live or drop them from a "
+            "--runtime-posture run"
+        )
+        return 1
+
+    # No check selected: run whatever the environment supports. The runtime
+    # posture check only means something inside the deployed container, so it
+    # never runs by default. --public-db configures the database check, so it
+    # always runs that check: combining it with another selector must never
+    # switch off the fail-closed public-URL requirement.
+    selected = args.db or args.live or args.runtime_posture
+    run_db = not args.manifest_only and (args.db or args.public_db or not selected)
+    run_live = not args.manifest_only and (args.live or not selected)
 
     results: list[bool] = []
     manifest: CustomerManifest | None = None
@@ -829,6 +1099,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{SKIP} migration parity: DATABASE_URL not set")
             results.append(not args.strict)
 
+    if args.runtime_posture:
+        results.append(check_runtime_posture())
+
     if run_live:
         if effective_url:
             if manifest is not None:
@@ -841,6 +1114,16 @@ def main(argv: list[str] | None = None) -> int:
                         manifest.signing_public_key_sha256
                     ),
                 )
+            elif signing_expectation_given:
+                live_result = check_live(
+                    effective_url,
+                    expected_version=args.expected_version or None,
+                    expected_commit_sha=effective_commit_sha or None,
+                    expected_signing_key_id=args.expected_signing_key_id,
+                    expected_signing_public_key_sha256=(
+                        args.expected_signing_public_key_sha256
+                    ),
+                )
             else:
                 live_result = check_live(
                     effective_url,
@@ -849,8 +1132,31 @@ def main(argv: list[str] | None = None) -> int:
                 )
             results.append(live_result)
         else:
-            print(f"{SKIP} live posture: no PUBLIC_URL and no --url")
-            results.append(not args.strict)
+            # An explicit expectation with nothing to check it against is a
+            # failure even without --strict: skipping would report a release
+            # identity or signing key as passed without a single request.
+            unchecked = [
+                flag
+                for flag, value in (
+                    ("--expected-version", args.expected_version),
+                    ("--expected-commit-sha", args.expected_commit_sha),
+                    ("--expected-signing-key-id", args.expected_signing_key_id),
+                    (
+                        "--expected-signing-public-key-sha256",
+                        args.expected_signing_public_key_sha256,
+                    ),
+                )
+                if value
+            ]
+            if unchecked:
+                print(
+                    f"{BAD} live posture: no PUBLIC_URL and no --url, so "
+                    f"{', '.join(unchecked)} cannot be checked"
+                )
+                results.append(False)
+            else:
+                print(f"{SKIP} live posture: no PUBLIC_URL and no --url")
+                results.append(not args.strict)
 
     if all(results):
         print("[preflight] all checks passed")

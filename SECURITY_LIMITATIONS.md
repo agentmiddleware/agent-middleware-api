@@ -83,10 +83,11 @@ Keep these out of the wedge until a design partner requires them:
 - Gateway exactly-once behavior does not make a remote side effect exactly
   once unless the upstream honors the forwarded idempotency key.
 - The configured upstream path atomically enforces the permit's `max_credits`
-  ceiling. It rejects permits carrying `max_calls_per_tool` or
-  `aggregate_value_cap` before reservation or dispatch because it does not yet
-  implement an atomic remote counter-and-release lifecycle for those fields.
-  On the local path, `aggregate_value_cap` is a predicate of the same
+  ceiling and `max_calls_per_tool` counters (supported since 8c95229, PR #476).
+  It rejects permits carrying `aggregate_value_cap` before reservation or
+  dispatch because it does not yet implement an atomic remote counter-and-release
+  lifecycle for that field. On the local path, `aggregate_value_cap` is a
+  predicate of the same
   guarded reservation `UPDATE` as `max_credits`, against `spent_credits`
   (settled charges plus in-flight reservations) floored to the permit's
   receipt total. The configured upstream path still rejects it before

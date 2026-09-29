@@ -5147,6 +5147,59 @@
           }
         }
       }
+    },
+    "/health/duplicate-guard": {
+      "get": {
+        "tags": [
+          "Discovery"
+        ],
+        "summary": "Duplicate guard observability (admin-only)",
+        "description": "Returns the current duplicate guard mode and observability metrics. Exposes log_mode_blocks (how many times log mode detected but allowed a duplicate) and enforce_mode_blocks (how many times enforce mode blocked a duplicate). Does not expose request contents or secrets. Requires bootstrap admin authentication.",
+        "operationId": "health_duplicate_guard_health_duplicate_guard_get",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {

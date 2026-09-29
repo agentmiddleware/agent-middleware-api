@@ -4,9 +4,18 @@ All settings are loaded from environment variables for zero-GUI deployment.
 """
 
 from decimal import Decimal
+from enum import Enum
 from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
+
+
+class DuplicateGuardMode(str, Enum):
+    """Cross-key duplicate detection enforcement mode."""
+
+    OFF = "off"
+    LOG = "log"
+    ENFORCE = "enforce"
 
 
 class Settings(BaseSettings):
@@ -136,9 +145,9 @@ class Settings(BaseSettings):
     # - "off": disabled (new-key retries with identical request hashes are allowed)
     # - "log": detect and log duplicates but allow them (observe mode, default)
     # - "enforce": refuse duplicate requests with duplicate_request_new_key
-    MCP_UPSTREAM_DUPLICATE_GUARD: str = "log"
+    MCP_UPSTREAM_DUPLICATE_GUARD: DuplicateGuardMode = DuplicateGuardMode.LOG
     # Default repeat detection window in seconds. Duplicates outside this window
-    # are not detected. Can be overridden per-permit via repeat_window_seconds.
+    # are not detected.
     MCP_UPSTREAM_DUPLICATE_WINDOW_SECONDS: int = 86400  # 24 hours
     # Enable only after all workers can verify and enforce repeat-window permits.
     # Disabling issuance never disables validation of already-issued permits.
