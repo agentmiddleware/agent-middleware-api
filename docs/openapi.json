@@ -7006,6 +7006,19 @@
             "type": "boolean",
             "title": "Allow Identical Repeats",
             "default": false
+          },
+          "repeat_window_seconds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 31536000.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repeat Window Seconds"
           }
         },
         "type": "object",
@@ -7473,6 +7486,19 @@
             "type": "boolean",
             "title": "Allow Identical Repeats",
             "default": false
+          },
+          "repeat_window_seconds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 31536000.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repeat Window Seconds"
           }
         },
         "type": "object",

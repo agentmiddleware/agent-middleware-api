@@ -74,7 +74,11 @@ async def test_init_db_sqlite_non_prod_uses_create_all(tmp_path, monkeypatch):
     assert engine is not None
     async with engine.connect() as conn:
         tables = await conn.run_sync(lambda c: set(inspect(c).get_table_names()))
+        permit_columns = await conn.run_sync(
+            lambda c: {column["name"] for column in inspect(c).get_columns("permits")}
+        )
     assert "permits" in tables
+    assert "repeat_window_seconds" in permit_columns
     assert "receipts" in tables
     assert "idempotency_records" in tables
     # create_all does not create alembic_version
@@ -140,10 +144,18 @@ async def test_init_db_production_like_accepts_legacy_create_all_tables(
 
 
 @pytest.mark.asyncio
-async def test_init_db_rejects_unstamped_legacy_dispatch_table_missing_claim_column(
-    tmp_path, monkeypatch
+@pytest.mark.parametrize("environment", ["local", "production"])
+@pytest.mark.parametrize(
+    ("table_name", "column_name"),
+    [
+        ("mcp_dispatch_attempts", "dispatch_claim_hash"),
+        ("permits", "repeat_window_seconds"),
+    ],
+)
+async def test_init_db_rejects_unstamped_legacy_table_missing_required_column(
+    tmp_path, monkeypatch, environment, table_name, column_name
 ):
-    db_path = tmp_path / "legacy_missing_claim.db"
+    db_path = tmp_path / "legacy_missing_column.db"
     monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db_path}")
     monkeypatch.setenv("ENVIRONMENT", "local")
     get_settings.cache_clear()
@@ -154,22 +166,29 @@ async def test_init_db_rejects_unstamped_legacy_dispatch_table_missing_claim_col
     sync = create_engine(f"sqlite:///{db_path}")
     with sync.begin() as connection:
         connection.exec_driver_sql(
-            "ALTER TABLE mcp_dispatch_attempts DROP COLUMN dispatch_claim_hash"
+            f"ALTER TABLE {table_name} DROP COLUMN {column_name}"
         )
-    assert "dispatch_claim_hash" not in {
-        column["name"] for column in inspect(sync).get_columns("mcp_dispatch_attempts")
+    tables = set(inspect(sync).get_table_names())
+    assert REQUIRED_TRUST_TABLES <= tables
+    assert "alembic_version" not in tables
+    assert column_name not in {
+        column["name"] for column in inspect(sync).get_columns(table_name)
     }
     sync.dispose()
 
-    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("ENVIRONMENT", environment)
     monkeypatch.setenv("DEBUG", "false")
     monkeypatch.setenv("ENABLE_PROOF_SURFACES", "false")
     monkeypatch.setenv("ALLOW_METADATA_CREATE_ALL", "false")
     get_settings.cache_clear()
 
-    with pytest.raises(SchemaInitError, match="dispatch_claim_hash") as exc_info:
+    with pytest.raises(SchemaInitError, match=column_name) as exc_info:
         await init_db()
-    assert "alembic upgrade head" in str(exc_info.value)
+    assert f"{table_name}.{column_name}" in str(exc_info.value)
+    if environment == "local":
+        assert "create_all cannot alter existing tables" in str(exc_info.value)
+    else:
+        assert "alembic upgrade head" in str(exc_info.value)
     await close_db()
     get_settings.cache_clear()
 
@@ -199,6 +218,7 @@ def test_init_db_production_like_ok_after_alembic(tmp_path, monkeypatch):
         await close_db()
 
     asyncio.run(_verify_boot())
+    asyncio.run(_verify_boot())  # A later restart must accept the same migrated DB.
 
     sync = create_engine(f"sqlite:///{db_path}")
     tables = set(inspect(sync).get_table_names())
@@ -208,8 +228,14 @@ def test_init_db_production_like_ok_after_alembic(tmp_path, monkeypatch):
     get_settings.cache_clear()
 
 
-def test_init_db_production_like_rejects_stale_alembic_revision(tmp_path, monkeypatch):
-    """Stamped-but-behind Alembic revisions must fail closed at boot."""
+@pytest.mark.parametrize(
+    "revision",
+    ["016_trust_primitives", "039_permit_allow_ident_repeats", "999_unknown_schema"],
+)
+def test_init_db_production_like_rejects_stale_alembic_revision(
+    tmp_path, monkeypatch, revision
+):
+    """Old or unknown stamps must fail even when required columns exist."""
     import asyncio
 
     db_path = tmp_path / "stale_prod.db"
@@ -222,8 +248,13 @@ def test_init_db_production_like_rejects_stale_alembic_revision(tmp_path, monkey
     get_settings.cache_clear()
 
     config = Config("alembic.ini")
-    # Stop before latest trust-plane revisions so tables exist but stamp is stale.
-    command.upgrade(config, "016_trust_primitives")
+    command.upgrade(config, "head")
+    sync = create_engine(f"sqlite:///{db_path}")
+    with sync.begin() as connection:
+        connection.exec_driver_sql(
+            "UPDATE alembic_version SET version_num = ?", (revision,)
+        )
+    sync.dispose()
 
     async def _boot() -> None:
         await close_db()
@@ -272,4 +303,5 @@ def test_alembic_upgrade_creates_trust_tables(tmp_path, monkeypatch):
     permit_cols = {c["name"] for c in inspect(engine).get_columns("permits")}
     assert "permit_id" in permit_cols
     assert "spent_credits" in permit_cols
+    assert "repeat_window_seconds" in permit_cols
     engine.dispose()

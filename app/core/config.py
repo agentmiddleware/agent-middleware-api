@@ -131,7 +131,7 @@ class Settings(BaseSettings):
     MCP_UPSTREAM_CONNECT_TIMEOUT_SECONDS: float = 5.0
     MCP_UPSTREAM_CALL_TIMEOUT_SECONDS: float = 30.0
     MCP_UPSTREAM_MAX_RESPONSE_BYTES: int = 1_048_576
-    
+
     # Cross-key duplicate detection for upstream tools. Modes:
     # - "off": disabled (new-key retries with identical request hashes are allowed)
     # - "log": detect and log duplicates but allow them (observe mode, default)
@@ -140,6 +140,9 @@ class Settings(BaseSettings):
     # Default repeat detection window in seconds. Duplicates outside this window
     # are not detected. Can be overridden per-permit via repeat_window_seconds.
     MCP_UPSTREAM_DUPLICATE_WINDOW_SECONDS: int = 86400  # 24 hours
+    # Enable only after all workers can verify and enforce repeat-window permits.
+    # Disabling issuance never disables validation of already-issued permits.
+    ENABLE_PERMIT_REPEAT_WINDOW_ISSUANCE: bool = False
 
     # --- Inbound request size ---
     # Ceiling on any request body the API will buffer, enforced for every
