@@ -444,7 +444,7 @@
             rel="noopener noreferrer"
             >security limitations</a
           >. The dated competitive sweep this page is built from is
-          <code>docs/market-research-2026-08.md</code> in the public source
+          <code>docs/market-research-2026-08.md</code> in the private source
           repository.
         </p>
       </section>
@@ -458,10 +458,13 @@
               The core trust-plane claims in the left-hand column are
               executable — the rest, like the absence of compliance mapping or a
               self-serve tier, are product facts you can only take us at our
-              word on. The source repository is public; clone it and run
-              <code>make prove-trust-plane</code> to walk
+              word on. The source repository is private during the design-partner
+              phase and is shared with pilot partners on request. Partners who
+              already have the source need Python 3.11+, git, make, curl, and uv
+              before running <code>make prove-trust-plane</code> from the
+              repository root to walk
               permit → invoke → charge → receipt → replay → deny with no
-              credentials and no signup. Then verify a published receipt
+              live API credentials. Then verify a published receipt
               offline, without us.
             </p>
             <p>
@@ -469,7 +472,7 @@
                 href="https://github.com/PetrefiedThunder/agent-middleware-api"
                 target="_blank"
                 rel="noopener noreferrer"
-                >Source repository</a
+                >Source repository (pilot access)</a
               >
               ·
               <a

@@ -57,26 +57,28 @@ https://www.thisisatest.tech/proof/
 
 It labels the evidence as a self-issued sample issued on @@PROOF_RECEIPT_ISSUED@@,
 not customer traction and not a test of the deployment running today. The exact portable receipt and matching key snapshot can be checked
-offline with the repository SDK verifier. The receipt, key files, and verifier
-source are public.
+offline with the repository SDK verifier. The receipt and key files are public;
+the verifier source is included in the private repository shared with partners.
 
 ## Try the complete loop locally
 
-No live credentials are required. The source repository is public. Two local
-paths are self-contained:
+No live credentials are required. The source repository is private during the
+design-partner phase and is shared with pilot partners on request.
+
+For pilot partners who already have the source, first install the prerequisites:
+Python 3.11+, git, make, curl, and uv. See docs/quickstart.md for setup before
+running either path from the repository root.
 
 Drive it yourself (a real server, you hold the keys):
 
-1. Clone https://github.com/PetrefiedThunder/agent-middleware-api
-2. Run `make quickstart` from the repository root.
-3. Follow docs/quickstart.md: mint your own wallet-scoped key, issue
+1. Run `make quickstart` from the repository root.
+2. Follow docs/quickstart.md: mint your own wallet-scoped key, issue
    yourself a permit, invoke one governed tool, replay it, overspend it,
    and verify the signed receipt offline.
 
 Watch it prove itself (no server, one command):
 
-1. Clone the same repository.
-2. Run `make prove-trust-plane` from the repository root.
+1. Run `make prove-trust-plane` from the repository root.
 
 Both use a throwaway local SQLite database and real FastAPI routes. They
 demonstrate permit -> invoke -> charge -> signed receipt -> replay without a
@@ -89,7 +91,7 @@ evidence.
 https://www.thisisatest.tech/
 https://www.thisisatest.tech/proof/ (download a receipt and verify it offline)
 https://www.thisisatest.tech/compare/ (named alternatives, including the rows this loses)
-https://github.com/PetrefiedThunder/agent-middleware-api
+https://github.com/PetrefiedThunder/agent-middleware-api (private; pilot partner access on request)
 
 ## Longer machine brief
 

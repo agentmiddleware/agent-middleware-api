@@ -70,8 +70,12 @@ trusted channel before relying on issuer identity.
 
 ## Run the whole loop yourself
 
-No live credentials required. The source repository is public. From a clone of
-https://github.com/PetrefiedThunder/agent-middleware-api:
+No live credentials required. The source repository is private during the
+design-partner phase and is shared with pilot partners on request.
+
+For pilot partners who already have the source, first install the prerequisites:
+Python 3.11+, git, make, curl, and uv. See docs/quickstart.md for setup before
+running these commands from the repository root:
 
 - `make quickstart` then docs/quickstart.md — mint a wallet-scoped key, issue a
   permit, invoke one governed tool, replay it, overspend it, verify the receipt.
@@ -121,5 +125,5 @@ Human site: https://www.thisisatest.tech/
 Offline receipt verification: https://www.thisisatest.tech/proof/
 Comparison with named alternatives, including the rows this loses:
 https://www.thisisatest.tech/compare/
-Source: https://github.com/PetrefiedThunder/agent-middleware-api
+Source (private; pilot partner access on request): https://github.com/PetrefiedThunder/agent-middleware-api
 Security contact: https://www.thisisatest.tech/.well-known/security.txt
