@@ -111,6 +111,7 @@ async def test_parallel_identical_new_keys_enforce_mode_one_dispatch(monkeypatch
     settings = get_settings()
     monkeypatch.setattr(settings, "MCP_UPSTREAM_DUPLICATE_GUARD", DuplicateGuardMode.ENFORCE)
     
+    factory = get_session_factory()
     # Provision agent
     async with AsyncClient(
         transport=ASGITransport(app=app),
