@@ -2,6 +2,10 @@
 # Human preflight: verify discovery URLs and the public dependency report.
 # Usage: API_URL=http://localhost:8000 bash scripts/human_preflight.sh
 # Requires: curl, python3. Optional: jq for pretty JSON.
+#
+# Sends only unauthenticated GETs. Production-like services lock their tool
+# catalogs behind the same credentials as invoke (#444), so there the catalog
+# routes must answer 401 and the /v1/discover comparison needs an operator key.
 
 set -u
 
@@ -37,20 +41,42 @@ check_http() {
   fi
 }
 
-check_http "Liveness" "/health" "200"
-check_http "OpenAPI" "/openapi.json" "200"
-check_http "Agent manifest" "/.well-known/agent.json" "200"
-check_http "Discover index" "/v1/discover" "200"
-check_http "LLM docs" "/llm.txt" "200"
-check_http "MCP tools manifest" "/mcp/tools.json" "200"
-check_http "Well-known MCP (alternate route)" "/.well-known/mcp/tools.json" "200"
-
-echo ""
 deps_json="$(curl -sS --connect-timeout 3 --max-time 15 "${API_URL}/health/dependencies" 2>/dev/null || true)"
 if [[ -z "$deps_json" ]]; then
   echo -e "${RED}FAILED${NC} to fetch /health/dependencies"
   exit 1
 fi
+
+# Tool catalogs answer 401 without a key on production-like services and 200
+# on local-compatible ones. An unreadable posture fails and expects the lock.
+production_like="$(echo "$deps_json" | python3 -c '
+import json, sys
+value = json.load(sys.stdin).get("production_like")
+print("true" if value is True else "false" if value is False else "unknown")
+' 2>/dev/null || true)"
+case "$production_like" in
+  true) catalog_want="401" ;;
+  false) catalog_want="200" ;;
+  *)
+    echo -e "${RED}BAD${NC} /health/dependencies does not report production_like as true or false"
+    fail=1
+    catalog_want="401"
+    ;;
+esac
+
+check_http "Liveness" "/health" "200"
+check_http "OpenAPI" "/openapi.json" "200"
+check_http "Agent manifest" "/.well-known/agent.json" "200"
+check_http "Discover index" "/v1/discover" "$catalog_want"
+check_http "LLM docs" "/llm.txt" "200"
+check_http "MCP tools manifest" "/mcp/tools.json" "$catalog_want"
+check_http "MCP tools list" "/mcp/tools" "$catalog_want"
+check_http "Well-known MCP (alternate route)" "/.well-known/mcp/tools.json" "$catalog_want"
+if [[ "$catalog_want" == "401" ]]; then
+  echo "    (production_like=${production_like}: tool catalogs require an API key)"
+fi
+
+echo ""
 
 dependency_shape="$(echo "$deps_json" | python3 -c '
 import json, sys
@@ -92,7 +118,11 @@ if [[ "$overall" == "degraded" ]]; then
   echo -e "${YELLOW}Warning:${NC} status is degraded — inspect unhealthy dependencies in the JSON above."
 fi
 
-if [[ "$fail" -eq 0 ]]; then
+if [[ "$fail" -eq 0 && "$catalog_want" != "200" ]]; then
+  echo ""
+  echo "agent_first alignment:"
+  echo -e "${YELLOW}SKIP${NC} /v1/discover requires an API key on this production-like service; compare its agent_first block with /.well-known/agent.json using an operator key"
+elif [[ "$fail" -eq 0 ]]; then
   echo ""
   echo "agent_first alignment:"
   export API_URL
