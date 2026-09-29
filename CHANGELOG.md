@@ -11,6 +11,19 @@ The next release consolidates the accumulated trust-plane and public-product
 work as `v1.3.0`. Create that tag only from the exact commit that passes the
 full release gate; do not backfill a final `v1.2.0` tag.
 
+### Fixed
+- **Duplicate guard hardening**: The cross-key duplicate guard (`MCP_UPSTREAM_DUPLICATE_GUARD`) now validates its mode at startup using a strict enum (`off`, `log`, `enforce`). Typos such as "enforced" are rejected at boot rather than silently falling back to permissive behavior. Invalid modes raise `ValidationError` during config construction.
+- **Duplicate guard observability**: Added `/health/duplicate-guard` endpoint (admin-only) exposing the current mode, configured window, and counters tracking how often log mode would have blocked a request (`log_mode_blocks`) and how often enforce mode actually blocked one (`enforce_mode_blocks`). Does not expose request contents or secrets. Requires bootstrap admin authentication.
+- **Per-permit duplicate window**: Permits can now specify `repeat_window_seconds` to override the global `MCP_UPSTREAM_DUPLICATE_WINDOW_SECONDS` for that permit. The field is validated (must be positive and ≤ 365 days), nullable, optional, and included in the permit signature when set. Existing permit signatures remain valid.
+- **PostgreSQL concurrency proof**: Parallel identical new-key calls under `enforce` mode now produce exactly one dispatch and one charge, verified by a new concurrency test (`test_duplicate_guard_postgres_concurrency.py`) running in the `postgres_permit_concurrency` CI job. The test proves N racing calls yield 1 success receipt, N-1 `duplicate_request_new_key` denials, 1 ledger debit, and 1 upstream dispatch.
+- **SECURITY_LIMITATIONS.md correction**: Corrected the claim that remote tools refuse `max_calls_per_tool`. That constraint has been supported since 8c95229 (PR #476). Only `aggregate_value_cap` is still rejected on the upstream path.
+
+### Changed
+- **Default duplicate guard mode unchanged**: The default remains `log` (observe-only). Operators wishing to enforce duplicate blocking must explicitly set `MCP_UPSTREAM_DUPLICATE_GUARD=enforce`.
+
+### Technical Note
+- **Migration required**: Alembic revision `040_permit_repeat_window` adds the nullable integer column `permits.repeat_window_seconds`. Upgrade the database with `alembic upgrade head` before starting the API. For an unstamped legacy database, first verify and stamp its exact existing revision; do not stamp `head` to bypass migration. The duplicate guard reads the persisted column, and permit signing includes its value only when set; existing permits with `NULL` retain their previous signed payload. Startup rejects existing schemas missing this column, including unstamped legacy databases.
+
 ### 🧪 Failure lab: the lost-response fault measured against a correct baseline
 
 - **`make failure-lab`** runs one vendor-payout workflow against one injected
@@ -172,9 +185,9 @@ full release gate; do not backfill a final `v1.2.0` tag.
   Two neighbouring paths were checked and deliberately left alone. The remote
   reservation now holds a per-tool use via `call_slot_reserved`. The slot is
   released only when the attempt was never dispatched (`dispatched_at IS NULL`):
-  a pre-dispatch error that abandons the prepared attempt or a post-dispatch
-  `returned_error` refund both release the slot, but only if no confirmed send
-  occurred. A confirmed send holds the use consumed. And the
+  a pre-dispatch error that abandons the prepared attempt releases the slot,
+  but any attempt that claimed dispatch keeps its slot consumed, including
+  `delivery_uncertain` and post-dispatch `returned_error` states. The
   refund-after-tool-error path keeps its use consumed on purpose: the tool did
   run there, and the counter counts invocations, not charges.
 

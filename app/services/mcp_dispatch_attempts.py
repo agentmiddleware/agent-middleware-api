@@ -19,7 +19,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.core.config import get_settings
+from app.core.config import DuplicateGuardMode, get_settings
 from app.core.resilience import (
     run_with_write_conflict_retry,
     WRITE_CONFLICT_MAX_ATTEMPTS,
@@ -43,6 +43,24 @@ from app.services.permits import (
 from app.services.signing_keys import canonical_json, sha256_hex
 
 logger = logging.getLogger(__name__)
+
+# In-memory duplicate guard metrics for observability
+_duplicate_guard_metrics = {
+    "log_mode_blocks": 0,  # Times log mode would have blocked
+    "enforce_mode_blocks": 0,  # Times enforce mode actually blocked
+}
+
+
+def get_duplicate_guard_metrics() -> dict[str, Any]:
+    """Return current duplicate guard metrics and effective mode."""
+    settings = get_settings()
+    return {
+        "mode": settings.MCP_UPSTREAM_DUPLICATE_GUARD.value,
+        "log_mode_blocks": _duplicate_guard_metrics["log_mode_blocks"],
+        "enforce_mode_blocks": _duplicate_guard_metrics["enforce_mode_blocks"],
+        "window_seconds": settings.MCP_UPSTREAM_DUPLICATE_WINDOW_SECONDS,
+    }
+
 
 DISPATCH_PREPARED = "prepared"
 DISPATCH_LEGACY_DISPATCHED = "dispatched"
@@ -614,9 +632,10 @@ class McpDispatchAttemptService:
                     settings = get_settings()
                     duplicate_mode = settings.MCP_UPSTREAM_DUPLICATE_GUARD
                     if (
-                        duplicate_mode in ("log", "enforce")
+                        duplicate_mode != DuplicateGuardMode.OFF
                         and not permit.allow_identical_repeats
                     ):
+                        # Use permit-specific window if set, else global default
                         window_seconds = (
                             permit.repeat_window_seconds
                             if permit.repeat_window_seconds is not None
@@ -703,10 +722,12 @@ class McpDispatchAttemptService:
                                 f"prior_attempt={blocking_prior.attempt_id}, "
                                 f"prior_state={blocking_prior.state})"
                             )
-                            if duplicate_mode == "log":
+                            if duplicate_mode == DuplicateGuardMode.LOG:
                                 logger.warning(f"{msg} - allowing in observe mode")
-                            else:  # enforce
+                                _duplicate_guard_metrics["log_mode_blocks"] += 1
+                            else:  # DuplicateGuardMode.ENFORCE
                                 logger.info(msg)
+                                _duplicate_guard_metrics["enforce_mode_blocks"] += 1
                                 return (
                                     PermitValidation(
                                         False,

@@ -219,11 +219,18 @@ that never reached the upstream (attempts with `dispatched_at IS NULL` and state
 blocks the new key.
 
 The guard runs in **watch-only mode** by default (`MCP_UPSTREAM_DUPLICATE_GUARD=log`):
-duplicate new-key retries are **allowed** and dispatched, but logged as a
-warning. Operators can enable enforcement (`MCP_UPSTREAM_DUPLICATE_GUARD=enforce`)
-to deny duplicates as `duplicate_request_new_key`, or disable it entirely
-(`MCP_UPSTREAM_DUPLICATE_GUARD=off`). Individual permits can opt out with
-`allow_identical_repeats=true` regardless of the global setting.
+duplicate new-key retries are **allowed** and dispatched, but logged as
+warnings. Operators can enable enforcement (`MCP_UPSTREAM_DUPLICATE_GUARD=enforce`)
+to deny duplicates with `duplicate_request_new_key`, or disable detection
+entirely (`MCP_UPSTREAM_DUPLICATE_GUARD=off`). Invalid mode values (e.g.,
+"enforced") are rejected at startup. Individual permits can opt out with
+`allow_identical_repeats=true` regardless of the global setting. Per-permit
+windows can be configured via `repeat_window_seconds` to override the global
+`MCP_UPSTREAM_DUPLICATE_WINDOW_SECONDS` (default 24 hours).
+
+Observability: `/health/duplicate-guard` reports the current mode, configured
+window, and counters for log-mode detections (`log_mode_blocks`) and enforce-mode
+denials (`enforce_mode_blocks`).
 
 ---
 
@@ -245,6 +252,7 @@ to deny duplicates as `duplicate_request_new_key`, or disable it entirely
 | `permit_max_calls_exceeded` | B | Per-tool call cap hit / malformed cap |
 | `permit_aggregate_value_cap_exceeded` | B | Cumulative value cap hit |
 | `permit_constraint_unsupported_for_upstream` | B | Configured upstream call carries a usage constraint without an atomic remote enforcement lifecycle |
+| `duplicate_request_new_key` | B | Cross-key duplicate detection denied an identical new-key retry (remote tools, enforce mode only) |
 | `permit_forbidden_field:{field}` | B | Banned argument key present |
 | `permit_signature_invalid` | B | Permit signature failed verification |
 | `human_approval_required` | C | Wallet policy demands approval |
