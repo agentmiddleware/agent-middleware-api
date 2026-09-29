@@ -36,6 +36,10 @@ Fetch in this order:
 3. GET https://api.thisisatest.tech/mcp/tools.json
 4. GET https://api.thisisatest.tech/openapi.json
 
+GET /mcp/tools.json on https://api.thisisatest.tech requires an operator-issued
+key and returns 401 without one. The other bootstrap GETs
+(/.well-known/agent.json, /llms.txt, and /openapi.json) are unauthenticated.
+
 Before assuming real side effects, fetch:
 
 GET https://api.thisisatest.tech/health/dependencies

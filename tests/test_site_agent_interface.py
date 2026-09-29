@@ -504,6 +504,27 @@ def test_rendered_site_has_truthful_proof_and_no_browser_secret_storage(
     assert "does not independently authenticate" in proof
     assert "without trusting this page" not in proof
 
+    howto = next(
+        node
+        for node in _json_ld_graph(proof, "proof/index.html")
+        if node["@type"] == "HowTo"
+    )
+    install = 'python -m pip install "./b2a_sdk[verify]"'
+    for instructions in (_visible_text(proof), howto["step"][1]["text"]):
+        assert (
+            "The source repository is private during the design-partner phase "
+            "and is shared with pilot partners on request."
+        ) in instructions
+        assert "partner who already has the source" in instructions
+        assert "repository root" in instructions
+        assert install in instructions
+        assert "clone" not in instructions.casefold()
+    assert _visible_text(proof).index(install) < _visible_text(proof).index(
+        "b2a-verify-receipt"
+    )
+    assert "no credentials" in _visible_text(proof)
+    assert "no credentials" in howto["step"][0]["text"]
+
 
 def test_marketing_manifest_points_to_custom_origins_and_local_proof() -> None:
     manifest = json.loads(
@@ -562,6 +583,21 @@ def test_machine_pointer_copies_match_and_state_live_access_boundary() -> None:
     api_llm_txt = (ROOT / "static" / "llm.txt").read_text(encoding="utf-8")
 
     assert llm_txt == llms_txt
+    bootstrap = " ".join(
+        llm_txt.split("## Bootstrap", 1)[1].split("## Authority", 1)[0].split()
+    )
+    catalog_notice = (
+        "GET /mcp/tools.json on https://api.thisisatest.tech requires an "
+        "operator-issued key and returns 401 without one."
+    )
+    assert catalog_notice in bootstrap
+    assert bootstrap.index(
+        "4. GET https://api.thisisatest.tech/openapi.json"
+    ) < bootstrap.index(catalog_notice)
+    assert (
+        "The other bootstrap GETs (/.well-known/agent.json, /llms.txt, and "
+        "/openapi.json) are unauthenticated."
+    ) in bootstrap
     assert "human design-partner site" in llm_txt
     assert "teams operating consequential autonomous actions are the buyers" in llm_txt
     assert "Transaction integrity" in llm_txt
@@ -629,6 +665,7 @@ def test_public_surfaces_state_private_source_access_and_partner_prerequisites(
 
     public_paths = (
         output / "index.html",
+        output / "proof" / "index.html",
         output / "compare" / "index.html",
         output / "llm.txt",
         output / "llms.txt",
