@@ -55,7 +55,7 @@ GET /mcp/tools.json
 GET /openapi.json
 ```
 
-On production-like boots that GET requires an operator-issued key and returns 401 without one. Local quickstart stays anonymous.
+On production-like boots, GET /mcp/tools.json requires an operator-issued key and returns 401 without one. Local quickstart stays anonymous. GET /.well-known/agent.json, GET /llms.txt, and GET /openapi.json stay unauthenticated.
 
 `GET /llm.txt` remains available as a backward-compatible alias.
 
