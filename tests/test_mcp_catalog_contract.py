@@ -6,8 +6,10 @@ def test_llm_txt_documents_mcp_catalog_and_transport_auth_boundaries():
     text = (repository_root / "static/llm.txt").read_text()
 
     assert (
-        "On production-like boots that GET requires an operator-issued key and "
-        "returns 401 without one. Local quickstart stays anonymous."
+        "On production-like boots, GET /mcp/tools.json requires an operator-issued "
+        "key and returns 401 without one. Local quickstart stays anonymous. "
+        "GET /.well-known/agent.json, GET /llms.txt, and GET /openapi.json stay "
+        "unauthenticated."
     ) in text
     assert "Required on production-like boots; anonymous for local quickstart" in text
     assert "POST /mcp/public" in text
