@@ -33,7 +33,8 @@ The governed path cannot be silently disabled in production. `app/core/trust_mod
 refuses to boot a production-like environment (`prod`, `staging`, `preview`, …)
 unless **all** of these hold: `TRUST_MODE_ENABLED=true`, a valid 32-byte Ed25519
 signing key is configured, `ALLOW_LEGACY_UNPERMITTED_MCP=false`, `DEBUG=false`,
-`WEBAUTHN_ALLOW_MOCK=false`, and proof surfaces are off. A permissive posture is
+`WEBAUTHN_ALLOW_MOCK=false`, `ALLOW_PRIVATE_NETWORK_TARGETS=false`,
+`ALLOW_UNSAFE_HOST_PYTHON_SANDBOX=false`, and proof surfaces are off. A permissive posture is
 only reachable in local/dev/test, and it logs a loud startup warning.
 
 ---
