@@ -123,7 +123,9 @@ on the previous code.
   (`dns_resolution_failed`) when a hostname cannot be resolved. The external
   adapter runs the governed `/v1/awi/execute` call before the website's
   side-effecting call, never sends the middleware key to mapped routes, and
-  refuses absolute route URLs.
+  refuses absolute route URLs. A governed `200` whose `status` is not
+  `success` (`paused` by a human, `passkey_required`, `max_steps_reached`,
+  `error`) returns `success: false` and the website route is never called.
 - **Dormant auth and KYC**: WebAuthn checks for high-risk AWI actions require
   user verification; `/v1/auth/refresh` claims the old token with one atomic
   conditional UPDATE, so concurrent refreshes cannot fork the chain; KYC GET
@@ -133,7 +135,9 @@ on the previous code.
   the API key is missing or rejected (the `dev-key` fallback is gone) and the
   endpoint reports `simulated` instead of a fake PR URL; behavioral-sandbox
   environments refuse loader, interpreter and PATH-like env vars and
-  over-long names; planner requests reject NaN and Infinity.
+  over-long names; planner requests reject NaN and Infinity, including
+  numbers nested anywhere in the untyped `task_context` (the
+  `candidate_actions` costs, latencies and risks the planner budgets with).
 - **Webhooks and audit summaries**: `POST /v1/webhooks/stripe/identity`
   returns 400 instead of 500 on a forged, stale or unparseable
   `Stripe-Signature` (`stripe.SignatureVerificationError` is not a
