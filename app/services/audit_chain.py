@@ -487,7 +487,33 @@ async def _verify_single_chain(
                 )
             ).scalar_one_or_none()
 
+    # A window that excludes the wallet's genesis event starts mid-chain: the
+    # first in-window event legitimately links to an event *outside* the
+    # window. Seed the expected predecessor from the last stored event before
+    # the window instead of from genesis, otherwise every non-genesis window
+    # reports a valid chain as tampered (``audit_previous_hash_mismatch``).
     previous_hash: str | None = None
+    if events and created_after:
+        first_seq = events[0].seq
+        pred_stmt = (
+            select(ControlPlaneAuditEventModel.chain_hash)
+            .where(cast(ColumnElement[bool], ControlPlaneAuditEventModel.seq < first_seq))
+            .order_by(desc(cast(ColumnElement[Any], ControlPlaneAuditEventModel.seq)))
+            .limit(1)
+        )
+        if wallet_id is None:
+            pred_stmt = pred_stmt.where(
+                cast(Any, ControlPlaneAuditEventModel.wallet_id).is_(None)
+            )
+        else:
+            pred_stmt = pred_stmt.where(
+                cast(
+                    ColumnElement[bool],
+                    ControlPlaneAuditEventModel.wallet_id == wallet_id,
+                )
+            )
+        async with factory() as session:
+            previous_hash = (await session.execute(pred_stmt)).scalar_one_or_none()
     first_event_id = events[0].event_id if events else None
     last_event_id = events[-1].event_id if events else None
     for event in events:
