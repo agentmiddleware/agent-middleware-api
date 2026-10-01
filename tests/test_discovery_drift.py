@@ -174,6 +174,14 @@ async def test_openapi_contains_core_control_plane_routes(client):
     paths = response.json()["paths"]
     assert "/mcp/messages" in paths
     assert "/mcp/tools/{service_id}/invoke" in paths
+    catalog_responses = paths["/mcp/tools.json"]["get"]["responses"]
+    assert "200" in catalog_responses
+    assert "401" in catalog_responses
+    assert "422" in catalog_responses
+    assert (
+        "Missing credentials on production-like boots"
+        in catalog_responses["401"]["description"]
+    )
     assert "/mcp" not in paths
     legacy_mcp_description = paths["/mcp/messages"]["post"]["description"]
     assert "does not implement the standard MCP initialization lifecycle" in (
