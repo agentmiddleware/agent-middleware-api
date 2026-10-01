@@ -11,20 +11,33 @@ Tests for:
 import sys
 from datetime import timedelta
 from types import ModuleType
+from typing import Any
+from uuid import uuid4
 
 import pytest
+from httpx import ASGITransport, AsyncClient
 
 from app.core import url_guard
 from app.core.time import utc_now
+from app.main import app
+from app.routers import awi_enhanced as awi_enhanced_router
+from app.services import awi_playwright_bridge as awi_playwright_bridge_module
+from app.services import awi_rag_engine as awi_rag_engine_module
 from app.services.webauthn_provider import WebAuthnProvider
 from app.services.awi_playwright_bridge import (
     AWIPlaywrightBridge,
+    BridgeSession,
     BrowserSessionLimitExceeded,
     PlaywrightCommand,
     CommandType,
     TranslationMode,
 )
 from app.services.awi_rag_engine import AWIRAGEngine, SearchResult
+from tests.test_trust_helpers import (
+    BOOTSTRAP_HEADERS,
+    create_tool_permit,
+    provision_agent_wallet,
+)
 
 
 class TestWebAuthnProvider:
@@ -762,6 +775,73 @@ class TestAWIRAGEngine:
         assert result is False
 
     @pytest.mark.asyncio
+    async def test_owner_scope_filters_before_scoring_and_truncation(self, engine):
+        """An owner-scoped retrieval never scores, touches, or returns another
+        owner's memory, so it cannot be crowded out of ``top_k`` either."""
+        history = [{"action": "add_to_cart", "parameters": {"product": "Widget"}}]
+        own_a = await engine.index_session(
+            session_id="sess-a",
+            session_type="shopping",
+            action_history=history,
+            state_snapshots=[],
+            owner_wallet_id="wallet-a",
+        )
+        foreign = await engine.index_session(
+            session_id="sess-b",
+            session_type="shopping",
+            action_history=history,
+            state_snapshots=[],
+            owner_wallet_id="wallet-b",
+        )
+        ownerless = await engine.index_session(
+            session_id="sess-admin",
+            session_type="shopping",
+            action_history=history,
+            state_snapshots=[],
+        )
+        a_only = {"wallet-a"}
+        # Identical histories embed identically, so every memory scores 1.0
+        # against this probe and only the owner filter can separate them.
+        memory = engine._memories[own_a]
+        probe = engine._prepare_embedding_text(
+            memory.session_type,
+            memory.action_sequence,
+            memory.page_summaries,
+            memory.key_entities,
+            memory.user_intent,
+        )
+
+        searched = await engine.search(probe, top_k=1, owner_wallet_ids=a_only)
+        by_entity = await engine.search_by_entities(
+            ["Widget"], top_k=5, owner_wallet_ids=a_only
+        )
+        a_or_ownerless = await engine.search(
+            probe, top_k=5, owner_wallet_ids={"wallet-a", None}
+        )
+        context = await engine.get_session_context(
+            current_session_id="sess-a",
+            current_state={"goal": probe},
+            session_type="shopping",
+            top_k=5,
+            owner_wallet_ids=a_only,
+        )
+        # sess-a's own memory is the probe, so the A scope leaves nothing else.
+        similar = await engine.get_similar_sessions(
+            "sess-a", top_k=5, owner_wallet_ids=a_only
+        )
+
+        assert [r.memory_id for r in searched] == [own_a]
+        assert [r.memory_id for r in by_entity] == [own_a]
+        assert {r.memory_id for r in a_or_ownerless} == {own_a, ownerless}
+        assert [m["memory_id"] for m in context["relevant_past_sessions"]] == [own_a]
+        assert similar == []
+        assert engine._memories[foreign].access_count == 0
+
+        # Unscoped calls (bootstrap/internal) keep their prior behavior.
+        unscoped = await engine.search(probe, top_k=5)
+        assert {r.memory_id for r in unscoped} == {own_a, foreign, ownerless}
+
+    @pytest.mark.asyncio
     async def test_get_stats(self, engine):
         """Test getting statistics."""
         await engine.index_session(
@@ -869,3 +949,286 @@ class TestAWIRAGEngine:
 
         assert "search" in suggestions
         assert "add_to_cart" in suggestions
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tenant isolation of the AWI RAG / DOM HTTP routes
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+async def client():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+
+
+@pytest.fixture
+def rag_engine(monkeypatch):
+    """A private RAG engine so no other test's memories reach these routes."""
+    engine = AWIRAGEngine(embedding_model="mock-embedding")
+    monkeypatch.setattr(awi_rag_engine_module, "_rag_engine", engine)
+    return engine
+
+
+async def _tenant_with_session(client: AsyncClient) -> dict[str, Any]:
+    tenant = await provision_agent_wallet(client)
+    resp = await client.post(
+        "/v1/awi/sessions",
+        json={
+            "target_url": "https://example.com",
+            "wallet_id": tenant["agent_wallet_id"],
+        },
+        headers=tenant["agent_headers"],
+    )
+    assert resp.status_code == 201, resp.text
+    tenant["session_id"] = resp.json()["session_id"]
+    return tenant
+
+
+async def _index_memory(
+    client: AsyncClient, tenant: dict[str, Any], *, product: str, idem: str
+) -> str:
+    """Index a shopping memory for ``tenant``'s session via the governed route."""
+    permit = await create_tool_permit(
+        client,
+        wallet_id=tenant["agent_wallet_id"],
+        key_id=tenant["key_id"],
+        tool_name="awi_memory_index",
+        max_credits=50,
+        idem_key=f"permit-{idem}",
+    )
+    resp = await client.post(
+        "/v1/awi/rag/index",
+        json={
+            "session_id": tenant["session_id"],
+            "session_type": "shopping",
+            "action_history": [
+                {"action": "add_to_cart", "parameters": {"product": product}}
+            ],
+        },
+        headers={
+            **tenant["agent_headers"],
+            "X-Permit-Id": permit["permit_id"],
+            "Idempotency-Key": idem,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()["memory_id"]
+
+
+def _assert_hides_owner(resp, owner: dict[str, Any]) -> None:
+    """A denial must not disclose who owns the resource."""
+    assert "wallet_id" not in resp.json()["detail"]
+    assert owner["agent_wallet_id"] not in resp.text
+    assert owner["sponsor_wallet_id"] not in resp.text
+
+
+@pytest.mark.proof
+@pytest.mark.anyio
+async def test_foreign_rag_memory_is_indistinguishable_from_missing(
+    client, clean_database, rag_engine
+):
+    a = await _tenant_with_session(client)
+    b = await _tenant_with_session(client)
+    b_memory = await _index_memory(
+        client, b, product="tenant-b-secret-widget", idem="awi-rag-mem-b"
+    )
+
+    missing = await client.get(
+        f"/v1/awi/rag/memory/{uuid4()}", headers=a["agent_headers"]
+    )
+    foreign_get = await client.get(
+        f"/v1/awi/rag/memory/{b_memory}", headers=a["agent_headers"]
+    )
+    foreign_delete = await client.delete(
+        f"/v1/awi/rag/memory/{b_memory}", headers=a["agent_headers"]
+    )
+
+    assert missing.status_code == 404
+    for resp in (foreign_get, foreign_delete):
+        assert resp.status_code == 404, resp.text
+        assert resp.json()["detail"] == {
+            "error": "not_found",
+            "message": f"Memory {b_memory} not found",
+        }
+        assert resp.json()["detail"].keys() == missing.json()["detail"].keys()
+        _assert_hides_owner(resp, b)
+        assert b["session_id"] not in resp.text
+
+    # Nothing was deleted, and the owner and a bootstrap admin still read it.
+    owner_get = await client.get(
+        f"/v1/awi/rag/memory/{b_memory}", headers=b["agent_headers"]
+    )
+    admin_get = await client.get(
+        f"/v1/awi/rag/memory/{b_memory}", headers=BOOTSTRAP_HEADERS
+    )
+    assert owner_get.status_code == 200, owner_get.text
+    assert owner_get.json()["memory_id"] == b_memory
+    assert admin_get.status_code == 200, admin_get.text
+
+    # Once the owning session is gone the memory is admin-only, and a non-admin
+    # sees a plain 404 rather than an admin_access_denied 403.
+    destroyed = await client.delete(
+        f"/v1/awi/sessions/{b['session_id']}", headers=b["agent_headers"]
+    )
+    assert destroyed.status_code == 204
+    for headers in (a["agent_headers"], b["agent_headers"]):
+        orphan = await client.get(f"/v1/awi/rag/memory/{b_memory}", headers=headers)
+        assert orphan.status_code == 404, orphan.text
+        assert orphan.json()["detail"]["error"] == "not_found"
+    admin_orphan = await client.get(
+        f"/v1/awi/rag/memory/{b_memory}", headers=BOOTSTRAP_HEADERS
+    )
+    assert admin_orphan.status_code == 200
+
+
+@pytest.mark.proof
+@pytest.mark.anyio
+async def test_foreign_awi_session_routes_answer_404_without_owner(
+    client, clean_database, rag_engine
+):
+    a = await _tenant_with_session(client)
+    b = await _tenant_with_session(client)
+    b_memory = await _index_memory(
+        client, b, product="tenant-b-secret-widget", idem="awi-rag-sess-b"
+    )
+
+    missing = await client.get(
+        f"/v1/awi/rag/sessions/awi-{uuid4().hex[:12]}/memories",
+        headers=a["agent_headers"],
+    )
+    probes = [
+        await client.get(
+            f"/v1/awi/rag/sessions/{b['session_id']}/memories",
+            headers=a["agent_headers"],
+        ),
+        await client.delete(
+            f"/v1/awi/rag/sessions/{b['session_id']}/memories",
+            headers=a["agent_headers"],
+        ),
+        await client.get(
+            f"/v1/awi/rag/context/{b['session_id']}", headers=a["agent_headers"]
+        ),
+        await client.get(
+            f"/v1/awi/passkey/status/{b['session_id']}/checkout",
+            headers=a["agent_headers"],
+        ),
+    ]
+
+    assert missing.status_code == 404
+    for resp in probes:
+        assert resp.status_code == 404, resp.text
+        assert resp.json()["detail"] == {
+            "error": "not_found",
+            "message": f"Session {b['session_id']} not found",
+        }
+        _assert_hides_owner(resp, b)
+
+    owner_view = await client.get(
+        f"/v1/awi/rag/sessions/{b['session_id']}/memories",
+        headers=b["agent_headers"],
+    )
+    assert owner_view.status_code == 200, owner_view.text
+    assert [m["memory_id"] for m in owner_view.json()["memories"]] == [b_memory]
+
+
+@pytest.mark.proof
+@pytest.mark.anyio
+async def test_foreign_dom_session_answers_404_without_owner(
+    client, clean_database, monkeypatch
+):
+    a = await provision_agent_wallet(client)
+    b = await provision_agent_wallet(client)
+    bridge = AWIPlaywrightBridge(mode=TranslationMode.CDP_DIRECT)
+    monkeypatch.setattr(awi_playwright_bridge_module, "_bridge", bridge)
+    dom_session_id = str(uuid4())
+    bridge._sessions[dom_session_id] = BridgeSession(
+        session_id=dom_session_id, current_url="https://example.com"
+    )
+    monkeypatch.setitem(
+        awi_enhanced_router._DOM_SESSION_WALLETS,
+        dom_session_id,
+        b["agent_wallet_id"],
+    )
+    preview = {"session_id": dom_session_id, "action": "scroll", "parameters": {}}
+
+    missing = await client.get(
+        f"/v1/awi/dom/state/{uuid4()}", headers=a["agent_headers"]
+    )
+    probes = [
+        await client.get(
+            f"/v1/awi/dom/state/{dom_session_id}", headers=a["agent_headers"]
+        ),
+        await client.post(
+            "/v1/awi/dom/preview", json=preview, headers=a["agent_headers"]
+        ),
+        await client.delete(
+            f"/v1/awi/dom/session/{dom_session_id}", headers=a["agent_headers"]
+        ),
+    ]
+
+    assert missing.status_code == 404
+    for resp in probes:
+        assert resp.status_code == 404, resp.text
+        assert resp.json()["detail"] == {
+            "error": "not_found",
+            "message": f"Session {dom_session_id} not found",
+        }
+        _assert_hides_owner(resp, b)
+    assert dom_session_id in bridge._sessions
+
+    owner_preview = await client.post(
+        "/v1/awi/dom/preview", json=preview, headers=b["agent_headers"]
+    )
+    assert owner_preview.status_code == 200, owner_preview.text
+
+
+@pytest.mark.proof
+@pytest.mark.anyio
+async def test_session_context_draws_only_on_the_callers_memories(
+    client, clean_database, rag_engine
+):
+    a = await _tenant_with_session(client)
+    b = await _tenant_with_session(client)
+    a_memory = await _index_memory(
+        client, a, product="tenant-a-own-widget", idem="awi-rag-ctx-a"
+    )
+    b_memory = await _index_memory(
+        client, b, product="tenant-b-secret-widget", idem="awi-rag-ctx-b"
+    )
+    context_params = {"session_type": "shopping", "top_k": 5}
+
+    resp = await client.get(
+        f"/v1/awi/rag/context/{a['session_id']}",
+        params=context_params,
+        headers=a["agent_headers"],
+    )
+
+    assert resp.status_code == 200, resp.text
+    past = resp.json()["relevant_past_sessions"]
+    assert [m["memory_id"] for m in past] == [a_memory]
+    assert b_memory not in resp.text
+    assert b["session_id"] not in resp.text
+    assert "tenant-b-secret-widget" not in resp.text
+    # Scoring another tenant's memory must not bump its access counters either.
+    assert rag_engine._memories[b_memory].access_count == 0
+
+    owner_b = await client.get(
+        f"/v1/awi/rag/context/{b['session_id']}",
+        params=context_params,
+        headers=b["agent_headers"],
+    )
+    admin = await client.get(
+        f"/v1/awi/rag/context/{a['session_id']}",
+        params=context_params,
+        headers=BOOTSTRAP_HEADERS,
+    )
+    assert owner_b.status_code == 200, owner_b.text
+    assert [m["memory_id"] for m in owner_b.json()["relevant_past_sessions"]] == [
+        b_memory
+    ]
+    assert admin.status_code == 200, admin.text
+    assert [m["memory_id"] for m in admin.json()["relevant_past_sessions"]] == [
+        a_memory
+    ]
