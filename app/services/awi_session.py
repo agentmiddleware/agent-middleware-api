@@ -256,9 +256,20 @@ class AWISessionManager:
                     request.parameters,
                 )
             except Exception as e:
-                logger.warning(f"DOM bridge routing failed, falling back to mock: {e}")
-                result = await self._execute_action_logic(
-                    request.action, request.parameters, state
+                # A failed live browser action must surface as a failure. The
+                # previous fallback re-ran the mock logic and reported
+                # ``status="success"``, so the governed route signed a success
+                # receipt (and debited the wallet) for an action that never
+                # executed. Return a typed error; the governance layer treats
+                # any non-success status as uncharged.
+                logger.warning(f"DOM bridge routing failed: {e}")
+                return AWIExecutionResponse(
+                    execution_id=execution_id,
+                    session_id=request.session_id,
+                    action=request.action,
+                    status="error",
+                    parameters=response_parameters,
+                    error=f"dom_bridge_failed: {e}",
                 )
         else:
             # Fall back to the existing mock/internal logic for headless/API-only AWI sessions
