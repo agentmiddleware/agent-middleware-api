@@ -6,27 +6,61 @@ Push published APIs into the agent discovery network.
 
 Endpoints:
 - POST /v1/broadcast                        — Broadcast a published API
-- GET  /v1/broadcast/jobs                    — List all broadcast jobs
+- GET  /v1/broadcast/jobs                    — List the caller's broadcast jobs
 - GET  /v1/broadcast/jobs/{job_id}           — Get broadcast job details
 - GET  /v1/broadcast/jobs/{job_id}/metrics   — Get discovery metrics
 - POST /v1/broadcast/jobs/{job_id}/events    — Simulate discovery event
 - GET  /v1/broadcast/directories             — List available directories
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from datetime import datetime
 from dataclasses import asdict
 
-from ..core.auth import verify_api_key
+from ..core.auth import AuthContext, get_auth_context
 from ..core.dependencies import get_broadcast_engine
-from ..services.oracle_broadcast import OracleBroadcastEngine, AGENT_DIRECTORIES
+from ..services.oracle_broadcast import (
+    AGENT_DIRECTORIES,
+    BroadcastJob,
+    OracleBroadcastEngine,
+)
 
+# Router-level auth keeps every endpoint (including /directories) behind a
+# credential; handlers that need the caller re-declare get_auth_context, which
+# FastAPI resolves once per request.
 router = APIRouter(
     prefix="/v1/broadcast",
     tags=["Oracle Broadcast"],
-    dependencies=[Depends(verify_api_key)],
+    dependencies=[Depends(get_auth_context)],
 )
+
+
+def _job_not_found(job_id: str) -> HTTPException:
+    return HTTPException(status.HTTP_404_NOT_FOUND, f"Broadcast job {job_id} not found")
+
+
+def _owns_job(auth: AuthContext, job: BroadcastJob) -> bool:
+    """Bootstrap admins see every job; a wallet key only the jobs it created."""
+    if auth.is_bootstrap_admin:
+        return True
+    return auth.wallet_id is not None and job.owner_wallet_id == auth.wallet_id
+
+
+async def _load_owned_job(
+    job_id: str, engine: OracleBroadcastEngine, auth: AuthContext
+) -> BroadcastJob:
+    """Load a broadcast job, or 404 — whether it is missing or not the caller's.
+
+    Every job-scoped handler goes through this so one tenant cannot read
+    another tenant's job or metrics, or forge discovery events into them. A
+    foreign job is indistinguishable from a missing one, so the response is
+    neither an existence oracle nor a leak of the owning wallet id.
+    """
+    job = await engine.get_job(job_id)
+    if job is None or not _owns_job(auth, job):
+        raise _job_not_found(job_id)
+    return job
 
 
 # ---------------------------------------------------------------------------
@@ -117,9 +151,11 @@ class DiscoveryEventRequest(BaseModel):
 )
 async def broadcast_api(
     request: BroadcastRequest,
+    auth: AuthContext = Depends(get_auth_context),
     engine: OracleBroadcastEngine = Depends(get_broadcast_engine),
 ):
     job = await engine.broadcast(
+        owner_wallet_id=auth.wallet_id,
         service_name=request.service_name,
         service_version=request.service_version,
         base_url=request.base_url,
@@ -154,9 +190,15 @@ async def broadcast_api(
 )
 async def list_jobs(
     service_name: str | None = None,
+    auth: AuthContext = Depends(get_auth_context),
     engine: OracleBroadcastEngine = Depends(get_broadcast_engine),
 ):
-    jobs = await engine.list_jobs(service_name=service_name)
+    # A wallet-scoped key only ever lists its own jobs; bootstrap admins see all.
+    jobs = [
+        j
+        for j in await engine.list_jobs(service_name=service_name)
+        if _owns_job(auth, j)
+    ]
     return {
         "jobs": [
             {
@@ -179,11 +221,10 @@ async def list_jobs(
 )
 async def get_job(
     job_id: str,
+    auth: AuthContext = Depends(get_auth_context),
     engine: OracleBroadcastEngine = Depends(get_broadcast_engine),
 ):
-    job = await engine.get_job(job_id)
-    if not job:
-        raise HTTPException(404, f"Broadcast job {job_id} not found")
+    job = await _load_owned_job(job_id, engine, auth)
 
     return BroadcastJobResponse(
         job_id=job.job_id,
@@ -211,11 +252,13 @@ async def get_job(
 )
 async def get_metrics(
     job_id: str,
+    auth: AuthContext = Depends(get_auth_context),
     engine: OracleBroadcastEngine = Depends(get_broadcast_engine),
 ):
+    await _load_owned_job(job_id, engine, auth)
     metrics = await engine.get_discovery_metrics(job_id)
     if not metrics:
-        raise HTTPException(404, f"Broadcast job {job_id} not found")
+        raise _job_not_found(job_id)
     return DiscoveryMetricsResponse(**asdict(metrics))
 
 
@@ -228,6 +271,7 @@ async def get_metrics(
 async def record_discovery_event(
     job_id: str,
     request: DiscoveryEventRequest,
+    auth: AuthContext = Depends(get_auth_context),
     engine: OracleBroadcastEngine = Depends(get_broadcast_engine),
 ):
     if request.event_type not in ("impression", "lookup", "integration"):
@@ -235,11 +279,12 @@ async def record_discovery_event(
             400, "event_type must be impression, lookup, or integration"
         )
 
+    await _load_owned_job(job_id, engine, auth)
     metrics = await engine.simulate_discovery_event(
         job_id, request.event_type, request.source
     )
     if not metrics:
-        raise HTTPException(404, f"Broadcast job {job_id} not found")
+        raise _job_not_found(job_id)
     return DiscoveryMetricsResponse(**asdict(metrics))
 
 

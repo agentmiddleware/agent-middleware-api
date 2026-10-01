@@ -8,19 +8,5 @@
   "repository": {
     "url": "https://github.com/PetrefiedThunder/agent-middleware-api",
     "source": "github"
-  },
-  "remotes": [
-    {
-      "type": "streamable-http",
-      "url": "https://api.thisisatest.tech/mcp",
-      "headers": [
-        {
-          "name": "X-API-Key",
-          "description": "Operator-provisioned wallet API key; there is no public self-serve issuance",
-          "isRequired": true,
-          "isSecret": true
-        }
-      ]
-    }
-  ]
+  }
 }

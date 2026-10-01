@@ -758,7 +758,12 @@ class AttackEngine:
 class ScanStore:
     """PostgreSQL-backed scan storage shared with rtaas via
     SecurityScanModel + SecurityVulnerabilityModel (discriminator:
-    scan_type='internal'). See issue #30."""
+    scan_type='internal'). See issue #30.
+
+    Internal scans keep their owning wallet in the shared ``tenant_id``
+    column (``None`` for a scan launched by a bootstrap admin). Reads take an
+    optional ``owner_wallet_id``: when given, only that wallet's scans are
+    visible; when ``None`` the read is unscoped (bootstrap admin)."""
 
     @staticmethod
     def _require_db() -> None:
@@ -767,14 +772,19 @@ class ScanStore:
                 "red_team.ScanStore requires a configured database. Set DATABASE_URL."
             )
 
-    async def save(self, report: ScanReport):
-        """Upsert a scan report and its child vulnerabilities."""
+    async def save(self, report: ScanReport, owner_wallet_id: str | None = None):
+        """Upsert a scan report and its child vulnerabilities.
+
+        ``owner_wallet_id`` is recorded only when the scan is first stored;
+        a re-save never reassigns ownership.
+        """
         self._require_db()
         factory = get_session_factory()
         async with factory() as session:
             existing = await session.get(SecurityScanModel, report.scan_id)
             new_row = scan_report_to_scan_model(report)
             if existing is None:
+                new_row.tenant_id = owner_wallet_id
                 session.add(new_row)
             else:
                 for field in (
@@ -808,12 +818,17 @@ class ScanStore:
 
             await session.commit()
 
-    async def get(self, scan_id: str) -> ScanReport | None:
+    async def get(
+        self, scan_id: str, owner_wallet_id: str | None = None
+    ) -> ScanReport | None:
         self._require_db()
         factory = get_session_factory()
         async with factory() as session:
             scan = await session.get(SecurityScanModel, scan_id)
             if scan is None or scan.scan_type != "internal":
+                return None
+            # A scan owned by another wallet reads exactly like a missing one.
+            if owner_wallet_id is not None and scan.tenant_id != owner_wallet_id:
                 return None
             result = await session.execute(
                 select(SecurityVulnerabilityModel).where(
@@ -826,16 +841,24 @@ class ScanStore:
             vulns = list(result.scalars().all())
         return scan_model_to_report(scan, vulns)
 
-    async def list_all(self) -> list[ScanReport]:
+    async def list_all(self, owner_wallet_id: str | None = None) -> list[ScanReport]:
         self._require_db()
         factory = get_session_factory()
         async with factory() as session:
-            result = await session.execute(
-                select(SecurityScanModel)
-                .where(
-                    cast(ColumnElement[bool], SecurityScanModel.scan_type == "internal")
+            stmt = select(SecurityScanModel).where(
+                cast(ColumnElement[bool], SecurityScanModel.scan_type == "internal")
+            )
+            if owner_wallet_id is not None:
+                stmt = stmt.where(
+                    cast(
+                        ColumnElement[bool],
+                        SecurityScanModel.tenant_id == owner_wallet_id,
+                    )
                 )
-                .order_by(cast(ColumnElement[Any], SecurityScanModel.created_at).desc())
+            result = await session.execute(
+                stmt.order_by(
+                    cast(ColumnElement[Any], SecurityScanModel.created_at).desc()
+                )
             )
             scans = list(result.scalars().all())
 
@@ -905,8 +928,10 @@ class RedTeamSwarm:
         attack_categories: list[AttackCategory],
         intensity: str = "standard",
         auto_remediate: bool = False,
+        owner_wallet_id: str | None = None,
     ) -> ScanReport:
-        """Execute a full security scan."""
+        """Execute a full security scan owned by ``owner_wallet_id``
+        (``None`` for a bootstrap-admin scan)."""
         require_simulation("red_team")
         scan_id = str(uuid.uuid4())
         started_at = datetime.now(timezone.utc)
@@ -976,7 +1001,7 @@ class RedTeamSwarm:
             score=round(score, 1),
         )
 
-        await self.store.save(report)
+        await self.store.save(report, owner_wallet_id=owner_wallet_id)
         logger.info(
             f"Scan {scan_id}: {len(results)} tests, {len(failed)} vulnerabilities, "
             f"score={score:.1f}/100"
@@ -1095,8 +1120,12 @@ class RedTeamSwarm:
 
         return recs
 
-    async def get_scan(self, scan_id: str) -> ScanReport | None:
-        return await self.store.get(scan_id)  # type: ignore[no-any-return]
+    async def get_scan(
+        self, scan_id: str, owner_wallet_id: str | None = None
+    ) -> ScanReport | None:
+        """Fetch a scan; with ``owner_wallet_id``, only if that wallet owns it."""
+        return await self.store.get(scan_id, owner_wallet_id)  # type: ignore[no-any-return]
 
-    async def list_scans(self) -> list[ScanReport]:
-        return await self.store.list_all()  # type: ignore[no-any-return]
+    async def list_scans(self, owner_wallet_id: str | None = None) -> list[ScanReport]:
+        """List scans; with ``owner_wallet_id``, only that wallet's scans."""
+        return await self.store.list_all(owner_wallet_id)  # type: ignore[no-any-return]

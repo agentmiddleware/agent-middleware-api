@@ -22,6 +22,11 @@ from ..db.models import ContentFactoryGenerationModel
 
 logger = logging.getLogger(__name__)
 
+# Key under which the owning wallet is kept inside the stored provenance JSON.
+# It is internal: ``get_record`` lifts it out into ``owner_wallet_id`` so the
+# provenance a caller reads back is exactly the provenance it was issued.
+_OWNER_WALLET_KEY = "owner_wallet_id"
+
 
 def _sha256_canonical(data: dict[str, Any]) -> str:
     return hashlib.sha256(
@@ -48,15 +53,19 @@ class ContentGenerationStore:
         model: str,
         provenance: dict[str, Any],
         output_text: str,
+        owner_wallet_id: str | None = None,
     ) -> None:
         self._require_db()
         factory = get_session_factory()
+        stored_provenance = dict(provenance)
+        if owner_wallet_id is not None:
+            stored_provenance[_OWNER_WALLET_KEY] = owner_wallet_id
         row = ContentFactoryGenerationModel(
             content_id=content_id,
             prompt_hash=prompt_hash,
             output_hash=output_hash,
             model=model,
-            provenance_json=json.dumps(provenance, sort_keys=True, default=str),
+            provenance_json=json.dumps(stored_provenance, sort_keys=True, default=str),
             output_text=output_text,
             created_at=utc_now(),
         )
@@ -77,6 +86,11 @@ class ContentGenerationStore:
                 provenance = json.loads(row.provenance_json)
             except json.JSONDecodeError:
                 logger.warning("Invalid provenance_json for %s", content_id)
+        if not isinstance(provenance, dict):
+            provenance = {}
+        # Rows written before owner tracking carry no owner and resolve to
+        # ``None``, which only a bootstrap admin may read.
+        owner = provenance.pop(_OWNER_WALLET_KEY, None)
         return {
             "content_id": row.content_id,
             "prompt_hash": row.prompt_hash,
@@ -86,6 +100,7 @@ class ContentGenerationStore:
             "text": row.output_text or "",
             "created_at": row.created_at,
             "updated_at": row.updated_at,
+            "owner_wallet_id": owner if isinstance(owner, str) else None,
         }
 
 
@@ -115,10 +130,28 @@ async def openai_compatible_chat_completion(
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        response = await client.post(url, json=payload, headers=headers)
-        response.raise_for_status()
-        data = response.json()
+    # Provider failures surface as RuntimeError so the caller's 502 + audit
+    # path runs. Messages name only the failure class: the provider URL and
+    # response body stay out of anything returned to the client.
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(url, json=payload, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code
+        logger.warning("LLM provider returned HTTP %s", status_code)
+        raise RuntimeError(f"LLM provider returned HTTP {status_code}.") from exc
+    except httpx.HTTPError as exc:
+        logger.warning("LLM provider request failed: %s", type(exc).__name__)
+        raise RuntimeError(
+            f"LLM provider request failed ({type(exc).__name__})."
+        ) from exc
+    except ValueError as exc:
+        logger.warning("LLM provider returned a non-JSON response")
+        raise RuntimeError("LLM provider returned a non-JSON response.") from exc
+    if not isinstance(data, dict):
+        raise RuntimeError("LLM response is not a JSON object")
     choices = data.get("choices") or []
     if not choices:
         raise RuntimeError("LLM response missing choices")
@@ -136,11 +169,14 @@ async def generate_text(
     store: ContentGenerationStore,
     prompt: str,
     model: str | None = None,
+    owner_wallet_id: str | None = None,
 ) -> dict[str, Any]:
     """
     Simulation: synthetic text, no DB, hashes/provenance null.
 
     Real: OpenAI-compatible completion, persist row with hashes + provenance JSON.
+    ``owner_wallet_id`` is persisted with the row so reads can be scoped to
+    the wallet that generated it (``None`` = bootstrap-admin only).
     """
     if is_simulation("content_factory"):
         cid = str(uuid.uuid4())
@@ -176,6 +212,7 @@ async def generate_text(
         model=model_used,
         provenance=provenance,
         output_text=text,
+        owner_wallet_id=owner_wallet_id,
     )
     return {
         "content_id": content_id,

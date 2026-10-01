@@ -33,6 +33,8 @@ from datetime import timedelta
 from decimal import Decimal
 from typing import Any
 
+from pydantic import ValidationError
+
 from app.core.config import get_settings
 from app.core.time import utc_now
 from app.schemas.acp import ACPCheckoutRequest, ACPCheckoutResponse, ACPLineItem
@@ -161,18 +163,29 @@ def translate_to_permit_bounds(
     and the merchant hostname becomes the ``recipient_domain`` constraint.
     """
     credits = total_minor_to_credits(derive_total_minor(request.line_items))
-    return PermitCreateRequest(
-        issuer_wallet_id=sponsor_wallet_id,
-        subject_wallet_id=agent_wallet_id,
-        subject_key_id=key_id,
-        allowed_tools=[ACP_CHECKOUT_TOOL],
-        max_credits=credits,
-        expires_at=utc_now() + ACP_PERMIT_TTL,
-        max_calls_per_tool={ACP_CHECKOUT_TOOL: 1},
-        aggregate_value_cap=credits,
-        forbidden_fields=[],
-        recipient_domain=request.merchant_domain,
-    )
+    # The permit schema refuses a budget no permit can carry. Raise that as
+    # the permit refusal it is, so the caller abandons the intent instead of
+    # leaving it in progress behind a ValidationError. A $0 checkout keeps
+    # the reason create_permit gave it.
+    if credits <= 0:
+        raise PermitError("max_credits_must_be_positive")
+    try:
+        return PermitCreateRequest(
+            issuer_wallet_id=sponsor_wallet_id,
+            subject_wallet_id=agent_wallet_id,
+            subject_key_id=key_id,
+            allowed_tools=[ACP_CHECKOUT_TOOL],
+            max_credits=credits,
+            expires_at=utc_now() + ACP_PERMIT_TTL,
+            max_calls_per_tool={ACP_CHECKOUT_TOOL: 1},
+            aggregate_value_cap=credits,
+            forbidden_fields=[],
+            recipient_domain=request.merchant_domain,
+        )
+    except ValidationError as exc:
+        # Beyond the Numeric(20, 8) budget column: more whole digits than any
+        # wallet balance holds, or an exchange rate finer than 8 decimals.
+        raise PermitError("acp_permit_bounds_invalid") from exc
 
 
 class ACPCommerceAdapter:

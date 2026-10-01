@@ -11,40 +11,50 @@ hourly.
 
 ## Publish gate (read first)
 
-The registry entry declares a `streamable-http` remote at `POST /mcp`. That
-endpoint is implemented (`app/routers/mcp_standard.py`: stateless JSON-mode
-lifecycle with `initialize`, notifications, `ping`, `tools/list`, and
-`tools/call` backed by server-minted single-tool permits) but ships
-**disabled**: `ENABLE_STANDARD_MCP_ENDPOINT` defaults to false and returns
-404 until an operator enables it on the deployment. Publishing while the
-deployed endpoint is disabled would advertise a transport the server does
-not serve — the class of overclaim
+**The entry is intentionally unpublished, and `server.json` declares no
+remote.** A registry entry would declare a `streamable-http` remote at
+`POST /mcp`. That endpoint is implemented (`app/routers/mcp_standard.py`:
+stateless JSON-mode lifecycle with `initialize`, notifications, `ping`,
+`tools/list`, and `tools/call` backed by server-minted single-tool permits)
+but ships **disabled**: `ENABLE_STANDARD_MCP_ENDPOINT` defaults to false and
+returns 404 until an operator enables it on the deployment. The production
+SOP keeps it that way — [`deploy-railway.md`](deploy-railway.md#required-production-variables)
+lists `ENABLE_STANDARD_MCP_ENDPOINT` as `false` or unset with "Do not turn
+this on" — so the first-party origin (`api.thisisatest.tech`) will not serve
+`/mcp`, and a remote pointing at it would advertise a transport the server
+does not serve: the class of overclaim
 [`discovery-standards-proposal.md`](discovery-standards-proposal.md) exists
 to prevent.
 
-The publish workflow enforces this gate: it sends a real MCP `initialize`
-request to the remote URL in `server.json`, then exercises `tools/list` on
-the negotiated session, and refuses to publish unless both succeed — which
-requires the deployed endpoint to be enabled. That probe is a necessary
-condition for spec compliance, not proof of it. Do not bypass the preflight,
-and do not treat a passing preflight as a substitute for testing with a real
-MCP client (e.g. `claude mcp add --transport http`).
+Adding a remote is therefore a product decision that changes that SOP first,
+not a manifest edit. Only after a deployment is approved to serve `/mcp`
+should `remotes` (see the field notes below) be added to `server.json`.
+
+The publish workflow enforces this gate: it refuses a `server.json` with no
+remote, sends a real MCP `initialize` request to the remote URL otherwise,
+then exercises `tools/list` on the negotiated session, and refuses to publish
+unless both succeed — which requires the deployed endpoint to be enabled.
+That probe is a necessary condition for spec compliance, not proof of it. Do
+not bypass the preflight, and do not treat a passing preflight as a
+substitute for testing with a real MCP client (e.g.
+`claude mcp add --transport http`).
 
 ## The artifact: `server.json`
 
-The repo-root [`server.json`](../server.json) is the complete submission.
-Field notes:
+The repo-root [`server.json`](../server.json) is the submission, minus the
+`remotes` block it deliberately omits until the gate above is lifted. Field
+notes:
 
 - `name` — reverse-DNS namespace plus server name. GitHub authentication
   grants `io.github.PetrefiedThunder/*`. Publishing under a custom domain
   namespace (e.g. `dev.agent-middleware/*`) requires DNS or HTTP domain
   verification with an Ed25519 key instead.
-- `remotes[0].url` — must be HTTPS; localhost URLs are rejected at publish
-  time, and the registry requires (but does not itself verify) that remotes
-  are publicly accessible. `streamable-http` is the recommended type (`sse`
-  is legacy-only).
-- `remotes[0].headers` — declares the `X-API-Key` credential clients must
-  send. Keys are operator-provisioned
+- `remotes[0].url` (not present today) — must be HTTPS; localhost URLs are
+  rejected at publish time, and the registry requires (but does not itself
+  verify) that remotes are publicly accessible. `streamable-http` is the
+  recommended type (`sse` is legacy-only).
+- `remotes[0].headers` (not present today) — would declare the `X-API-Key`
+  credential clients must send. Keys are operator-provisioned
   ([`partner-api-key-bootstrap.md`](partner-api-key-bootstrap.md)); there is
   no public self-serve issuance, and a registry listing does not change that.
 - `version` — unique and immutable per publish. Registry entries cannot be
@@ -57,6 +67,25 @@ Field notes:
   version (`pyproject.toml`, `APP_VERSION`); nothing checks the three stay
   in sync, so bump it manually for `workflow_dispatch` publishes (tag-driven
   publishes overwrite it from the tag).
+
+Once a deployment is approved to serve `/mcp`, the block to add is:
+
+```json
+"remotes": [
+  {
+    "type": "streamable-http",
+    "url": "https://<approved-origin>/mcp",
+    "headers": [
+      {
+        "name": "X-API-Key",
+        "description": "Operator-provisioned wallet API key; there is no public self-serve issuance",
+        "isRequired": true,
+        "isSecret": true
+      }
+    ]
+  }
+]
+```
 
 ## Publishing from CI (preferred)
 
@@ -97,14 +126,15 @@ breaking changes or data resets may occur before GA.
 
 ## Client registration
 
-Once `ENABLE_STANDARD_MCP_ENDPOINT=true` is set on the deployment, users
-connect per client:
+No first-party deployment serves `/mcp` (see the publish gate). On a
+deployment that does — for example a local instance started with
+`ENABLE_STANDARD_MCP_ENDPOINT=true` — users connect per client:
 
 **Claude Code**
 
 ```bash
 claude mcp add --transport http agent-middleware \
-  https://api.thisisatest.tech/mcp \
+  <deployment origin>/mcp \
   --header "X-API-Key: <operator-provisioned key>"
 ```
 
