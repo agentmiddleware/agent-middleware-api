@@ -5,13 +5,14 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
+import httpx
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 from app.schemas.billing import ServiceCategory
 from app.services.service_registry import get_service_registry
-from b2a_sdk import AgentMiddlewareClient, PermitRequest
+from b2a_sdk import AgentMiddlewareClient, IdempotencyConflictError, PermitRequest
 from tests.test_trust_helpers import provision_agent_wallet
 
 
@@ -94,3 +95,57 @@ async def test_python_sdk_permit_invoke_replay_receipt_and_evidence(
         assert evidence.verification["receipt_signature"] == "ok"
     finally:
         registry.unregister_local("sdk-trust-echo")
+
+
+@pytest.mark.anyio
+async def test_python_sdk_charge_idempotency_key_debits_once(clean_database) -> None:
+    """A retried legacy charge() with the same key is replayed, not re-billed."""
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as raw_client:
+        owner = await provision_agent_wallet(raw_client)
+        stranger = await provision_agent_wallet(raw_client)
+    wallet_id = owner["agent_wallet_id"]
+
+    async with AgentMiddlewareClient(
+        api_key=owner["agent_headers"]["X-API-Key"],
+        base_url="http://test",
+        transport=ASGITransport(app=app),
+    ) as sdk:
+        before = Decimal(str(await sdk.get_balance(wallet_id)))
+        first = await sdk.charge(
+            wallet_id, "iot_bridge", units=3, idempotency_key="sdk-charge-1"
+        )
+        replay = await sdk.charge(
+            wallet_id, "iot_bridge", units=3, idempotency_key="sdk-charge-1"
+        )
+        after_replay = Decimal(str(await sdk.get_balance(wallet_id)))
+
+        # Same key, different request: refused rather than silently replayed.
+        with pytest.raises(IdempotencyConflictError) as conflict:
+            await sdk.charge(
+                wallet_id, "iot_bridge", units=4, idempotency_key="sdk-charge-1"
+            )
+        assert conflict.value.detail == "idempotency_key_reused"
+
+        # Another tenant's key cannot charge this wallet, and reusing the
+        # owner's idempotency key does not replay the owner's ledger entry.
+        async with AgentMiddlewareClient(
+            api_key=stranger["agent_headers"]["X-API-Key"],
+            base_url="http://test",
+            transport=ASGITransport(app=app),
+        ) as intruder:
+            with pytest.raises(httpx.HTTPStatusError) as denied:
+                await intruder.charge(
+                    wallet_id, "iot_bridge", units=3, idempotency_key="sdk-charge-1"
+                )
+        assert denied.value.response.status_code == 403
+        assert first["entry_id"] not in denied.value.response.text
+
+        final = Decimal(str(await sdk.get_balance(wallet_id)))
+
+    assert replay["entry_id"] == first["entry_id"]
+    assert before - after_replay == Decimal(str(abs(first["amount"])))
+    assert before - after_replay > 0
+    assert final == after_replay

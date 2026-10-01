@@ -159,8 +159,25 @@ class B2AEdgeClient:
         session_id: str,
         action: str,
         parameters: dict[str, Any],
+        *,
+        permit_id: str,
+        idempotency_key: str,
     ) -> dict[str, Any]:
-        """Execute an AWI action on a session."""
+        """Execute an AWI action on a session.
+
+        ``POST /v1/awi/execute`` is governed: it requires a permit for tool
+        ``awi_execute`` (``X-Permit-Id``) and an ``Idempotency-Key``. Reuse
+        the key when retrying one logical action. Raises ``ValueError``
+        without sending anything when either value is unusable.
+        """
+        permit = permit_id.strip() if isinstance(permit_id, str) else ""
+        if not permit:
+            raise ValueError("permit_id must not be blank")
+        key = idempotency_key.strip() if isinstance(idempotency_key, str) else ""
+        if not key:
+            raise ValueError("idempotency_key must not be blank")
+        if len(key) > 128:
+            raise ValueError("idempotency_key must be at most 128 characters")
         payload = {
             "session_id": session_id,
             "action": action,
@@ -169,7 +186,11 @@ class B2AEdgeClient:
         response = await self._client.post(
             f"{self.api_url}/v1/awi/execute",
             json=payload,
-            headers=self._headers(),
+            headers={
+                **self._headers(),
+                "X-Permit-Id": permit,
+                "Idempotency-Key": key,
+            },
         )
         response.raise_for_status()
         return response.json()

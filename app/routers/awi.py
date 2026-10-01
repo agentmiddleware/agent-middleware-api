@@ -41,17 +41,27 @@ async def _require_session_access(session_id: str, auth: AuthContext) -> AWISess
     """Authorize access to an AWI session before exposing or mutating state."""
     manager = get_awi_session_manager()
     session = await manager.get_session(session_id)
+    not_found = HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail={"error": "not_found", "message": f"Session {session_id} not found"},
+    )
 
     if not session:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "not_found", "message": f"Session {session_id} not found"},
-        )
+        raise not_found
 
-    if session.wallet_id:
-        auth.require_wallet_access(session.wallet_id)
-    else:
-        auth.require_bootstrap_admin()
+    # A session the caller may not see answers exactly like a missing one. The
+    # wallet check's 403 names the *owning* wallet, so raising it after a 404
+    # for unknown ids let any wallet-scoped key confirm a session id exists and
+    # learn which wallet owns it.
+    try:
+        if session.wallet_id:
+            auth.require_wallet_access(session.wallet_id)
+        else:
+            auth.require_bootstrap_admin()
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_403_FORBIDDEN:
+            raise not_found from None
+        raise
 
     return session
 

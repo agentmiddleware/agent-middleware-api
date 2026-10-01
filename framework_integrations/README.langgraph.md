@@ -35,9 +35,14 @@ tools = get_langgraph_tools(client)
 # Create agent
 agent = create_react_agent(model, tools)
 
-# Use the agent
-result = agent.invoke({"messages": ["Check my balance and emit a telemetry event"]})
+# Use the agent (the tools are async: B2AClient is an async client)
+result = await agent.ainvoke(
+    {"messages": ["Check my balance and emit a telemetry event"]}
+)
 ```
+
+The tools are async-only. Drive the agent with `ainvoke`; LangChain refuses a
+sync `invoke` of an async-only tool with `NotImplementedError`.
 
 ## Available Tools
 
@@ -63,7 +68,7 @@ researcher = create_react_agent(
     state_modifier="You are a research agent. Use tools to gather information."
 )
 
-result = researcher.invoke({
+result = await researcher.ainvoke({
     "messages": [
         "Research the latest AI developments and send results to researcher-002"
     ]
@@ -81,7 +86,7 @@ task_agent = create_react_agent(
     prompt="You autonomously complete tasks. Monitor your budget and heal when needed."
 )
 
-result = task_agent.invoke({
+result = await task_agent.ainvoke({
     "messages": ["Process the pending task queue"]
 })
 ```

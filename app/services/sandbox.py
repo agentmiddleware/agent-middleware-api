@@ -82,6 +82,9 @@ class SandboxEnvironment:
     completed_at: datetime | None = None
     final_score: float | None = None
     generalization_score: float | None = None
+    # Wallet that created the environment; ``None`` when a bootstrap admin did,
+    # which leaves it reachable by bootstrap admins only.
+    owner_wallet_id: str | None = None
 
 
 @dataclass
@@ -328,6 +331,7 @@ class SandboxEngine:
         env_type: str = "pattern",
         difficulty: str = "medium",
         seed: int | None = None,
+        owner_wallet_id: str | None = None,
     ) -> SandboxEnvironment:
         """Create a new sandbox environment."""
         env_type_enum = EnvironmentType(env_type)
@@ -336,6 +340,7 @@ class SandboxEngine:
 
         generator = self._generators[env_type_enum]
         env = generator.generate(diff_enum, actual_seed)
+        env.owner_wallet_id = owner_wallet_id
 
         self._environments[env.env_id] = env
         logger.info(f"Created sandbox {env.env_id}: {env_type} / {difficulty}")

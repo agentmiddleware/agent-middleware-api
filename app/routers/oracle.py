@@ -8,7 +8,7 @@ register our API for inbound traffic, and monitor visibility.
 This is SEO for the agentic web. If agents can't find you, you don't exist.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 
 import hashlib
 import json
@@ -39,6 +39,10 @@ router = APIRouter(
         403: {"description": "Invalid API key or access denied"},
     },
 )
+
+# Each batch URL is crawled concurrently and writes a durable crawl row, so an
+# unbounded body is an unbounded fan-out of writes to shared state.
+MAX_BATCH_CRAWL_URLS = 25
 
 
 # --- Crawling ---
@@ -91,7 +95,7 @@ async def crawl_target(
     description="Submit multiple URLs for concurrent crawling and indexing.",
 )
 async def batch_crawl(
-    urls: list[str],
+    urls: list[str] = Body(..., max_length=MAX_BATCH_CRAWL_URLS),
     auth: AuthContext = Depends(get_auth_context),
     oracle: AgentOracle = Depends(get_agent_oracle),
 ):
@@ -363,7 +367,10 @@ async def get_network_graph(
 )
 async def record_discovery(
     referrer: str = Query(default="direct", description="Referring directory URL"),
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     oracle: AgentOracle = Depends(get_agent_oracle),
 ):
+    # Discovery hits feed the shared, global visibility metrics and are meant
+    # to be recorded by this service itself, so tenant keys may not write them.
+    auth.require_bootstrap_admin()
     await oracle.record_discovery(referrer)

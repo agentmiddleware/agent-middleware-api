@@ -6,6 +6,7 @@ Validates hierarchical child wallets, spend caps, and reclaim.
 import pytest
 from httpx import AsyncClient, ASGITransport
 from app.main import app
+from tests.test_trust_helpers import BOOTSTRAP_HEADERS, provision_agent_wallet
 
 
 @pytest.fixture
@@ -137,3 +138,86 @@ async def test_child_wallet_requires_api_key(client):
         "max_spend": 100.0,
     })
     assert resp.status_code in (401, 403)
+
+
+@pytest.mark.anyio
+async def test_scoped_key_cannot_spawn_reclaim_or_view_another_wallets_swarm(
+    client,
+):
+    """A key scoped to wallet A cannot move or read wallet B's swarm budget.
+
+    Spawning debits the parent and reclaiming credits it, so either one on a
+    wallet the caller does not own would move another tenant's money. The
+    swarm view lists every child and its balance. All three must refuse a
+    wallet-scoped key for a different wallet and leave B's balances alone.
+    """
+    tenant_a = await provision_agent_wallet(client)
+    tenant_b = await provision_agent_wallet(client)
+    wallet_a = tenant_a["agent_wallet_id"]
+    wallet_b = tenant_b["agent_wallet_id"]
+    a_headers = tenant_a["agent_headers"]
+
+    b_child_resp = await client.post("/v1/billing/wallets/child", json={
+        "parent_wallet_id": wallet_b,
+        "child_agent_id": "b-worker",
+        "budget_credits": 200.0,
+        "max_spend": 200.0,
+    }, headers=tenant_b["agent_headers"])
+    assert b_child_resp.status_code == 201, b_child_resp.text
+    b_child = b_child_resp.json()["wallet_id"]
+
+    async def balance(wallet_id: str) -> float:
+        resp = await client.get(
+            f"/v1/billing/wallets/{wallet_id}", headers=BOOTSTRAP_HEADERS
+        )
+        assert resp.status_code == 200, resp.text
+        return resp.json()["balance"]
+
+    b_before = await balance(wallet_b)
+    b_child_before = await balance(b_child)
+    assert b_before == 800.0
+    assert b_child_before == 200.0
+
+    spawn = await client.post("/v1/billing/wallets/child", json={
+        "parent_wallet_id": wallet_b,
+        "child_agent_id": "a-stolen-worker",
+        "budget_credits": 100.0,
+        "max_spend": 100.0,
+    }, headers=a_headers)
+    assert spawn.status_code == 403, spawn.text
+    assert spawn.json()["detail"]["error"] == "wallet_access_denied"
+
+    reclaim = await client.post(
+        f"/v1/billing/wallets/{b_child}/reclaim", headers=a_headers
+    )
+    assert reclaim.status_code == 403, reclaim.text
+    assert reclaim.json()["detail"]["error"] == "wallet_access_denied"
+
+    swarm = await client.get(f"/v1/billing/wallets/{wallet_b}/swarm", headers=a_headers)
+    assert swarm.status_code == 403, swarm.text
+    assert swarm.json()["detail"]["error"] == "wallet_access_denied"
+    assert b_child not in swarm.text
+
+    assert await balance(wallet_b) == b_before
+    assert await balance(b_child) == b_child_before
+    b_swarm = await client.get(
+        f"/v1/billing/wallets/{wallet_b}/swarm", headers=BOOTSTRAP_HEADERS
+    )
+    assert b_swarm.status_code == 200, b_swarm.text
+    assert b_swarm.json()["active_children"] == 1
+    assert [c["wallet_id"] for c in b_swarm.json()["children"]] == [b_child]
+
+    # The refusals are about ownership, not the routes: A's own key still
+    # spawns from and reads its own wallet.
+    own_spawn = await client.post("/v1/billing/wallets/child", json={
+        "parent_wallet_id": wallet_a,
+        "child_agent_id": "a-worker",
+        "budget_credits": 100.0,
+        "max_spend": 100.0,
+    }, headers=a_headers)
+    assert own_spawn.status_code == 201, own_spawn.text
+    own_swarm = await client.get(
+        f"/v1/billing/wallets/{wallet_a}/swarm", headers=a_headers
+    )
+    assert own_swarm.status_code == 200, own_swarm.text
+    assert own_swarm.json()["active_children"] == 1

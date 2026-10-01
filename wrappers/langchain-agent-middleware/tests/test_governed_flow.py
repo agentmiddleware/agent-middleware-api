@@ -1,10 +1,12 @@
 """Tests for governed permit→invoke→receipt flow in LangChain wrapper."""
 
+import ast
 import json
 from datetime import UTC, datetime
 
 import httpx
 import pytest
+from b2a_sdk import IdempotencyConflictError
 
 from langchain_b2a import B2AClient
 from langchain_b2a.tools import get_mcp_tools
@@ -120,40 +122,108 @@ async def test_mcp_tool_requires_idempotency_key():
     await client.close()
 
 
-@pytest.mark.asyncio
-async def test_replay_with_same_idempotency_key_returns_cached_receipt():
-    """Test that replaying the same idempotency key returns the original receipt without recharging."""
-    call_count = {"permit": 0, "invoke": 0}
+class _IdempotentGateway:
+    """Mock gateway that enforces idempotency the way the real server does.
 
-    async def handler(request: httpx.Request) -> httpx.Response:
+    The first request under a key does the work (creates the permit, or charges
+    the call) and stores its response with a hash of the request. An identical
+    replay gets the stored response without new work; the same key with a
+    changed request gets the server's conflict (HTTP 409 for permits, a
+    JSON-RPC ``idempotency_key_reused`` error for MCP calls).
+    """
+
+    def __init__(self) -> None:
+        self.permit_requests = 0
+        self.charges = 0
+        # (Idempotency-Key header, mcpContext.idempotency_key) per MCP request.
+        self.invoke_keys: list[tuple[str, str]] = []
+        self._permits: dict[str, tuple[str, dict]] = {}
+        self._invocations: dict[str, tuple[str, dict]] = {}
+
+    async def __call__(self, request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        key = request.headers["idempotency-key"]
+
         if request.url.path == "/v1/permits":
-            call_count["permit"] += 1
-            return httpx.Response(201, json=_permit_payload())
+            self.permit_requests += 1
+            request_hash = json.dumps(body, sort_keys=True)
+            stored = self._permits.setdefault(key, (request_hash, _permit_payload()))
+            if stored[0] != request_hash:
+                return httpx.Response(409, json={"detail": "idempotency_key_reused"})
+            return httpx.Response(201, json=stored[1])
 
         if request.url.path == "/mcp/messages":
-            call_count["invoke"] += 1
-            return httpx.Response(
-                200,
-                json={
-                    "jsonrpc": "2.0",
-                    "id": "replay-key",
-                    "result": {
-                        "content": [{"type": "text", "text": '{"replayed": true}'}],
-                        "structuredContent": {"replayed": True},
-                        "isError": False,
-                        "receipt": _receipt_payload(),
-                    },
-                },
+            params = body["params"]
+            self.invoke_keys.append((key, params["mcpContext"]["idempotency_key"]))
+            request_hash = json.dumps(
+                {"name": params["name"], "arguments": params["arguments"]},
+                sort_keys=True,
             )
+            if key not in self._invocations:
+                self.charges += 1
+                receipt = _receipt_payload()
+                receipt["receipt_id"] = f"receipt-charge-{self.charges}"
+                self._invocations[key] = (
+                    request_hash,
+                    {
+                        "jsonrpc": "2.0",
+                        "id": body["id"],
+                        "result": {
+                            "content": [{"type": "text", "text": '{"ok": true}'}],
+                            "structuredContent": {"ok": True},
+                            "isError": False,
+                            "receipt": receipt,
+                        },
+                    },
+                )
+            stored_hash, stored_response = self._invocations[key]
+            if stored_hash != request_hash:
+                return httpx.Response(
+                    200,
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": body["id"],
+                        "error": {"code": -32603, "message": "idempotency_key_reused"},
+                    },
+                )
+            return httpx.Response(200, json=stored_response)
 
         return httpx.Response(404)
 
-    transport = httpx.MockTransport(handler)
-    client = B2AClient(api_key="test-key", transport=transport)
-    tools = get_mcp_tools(client, wallet_id="wallet-1")
-    tool = tools[0]
 
-    result1 = await tool.ainvoke(
+@pytest.mark.asyncio
+async def test_identical_replay_forwards_same_key_and_charges_once():
+    """An identical replay reuses the permit and key, so the call is charged once."""
+    gateway = _IdempotentGateway()
+    client = B2AClient(api_key="test-key", transport=httpx.MockTransport(gateway))
+    tool = get_mcp_tools(client, wallet_id="wallet-1")[0]
+
+    call = {
+        "tool_name": "partner.search",
+        "idempotency_key": "replay-key",
+        "permit_idempotency_key": "permit-replay-key",
+        "arguments": {"query": "same"},
+    }
+    first = ast.literal_eval(await tool.ainvoke(call))
+    replay = ast.literal_eval(await tool.ainvoke(call))
+
+    assert gateway.invoke_keys == [("replay-key", "replay-key")] * 2
+    assert gateway.permit_requests == 1
+    assert gateway.charges == 1
+    assert first["receipt_id"] == "receipt-charge-1"
+    assert replay["receipt_id"] == first["receipt_id"]
+
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_replay_with_changed_arguments_raises_idempotency_conflict():
+    """Reusing an invocation key with changed arguments is a conflict, not a replay."""
+    gateway = _IdempotentGateway()
+    client = B2AClient(api_key="test-key", transport=httpx.MockTransport(gateway))
+    tool = get_mcp_tools(client, wallet_id="wallet-1")[0]
+
+    await tool.ainvoke(
         {
             "tool_name": "partner.search",
             "idempotency_key": "replay-key",
@@ -162,19 +232,19 @@ async def test_replay_with_same_idempotency_key_returns_cached_receipt():
         }
     )
 
-    result2 = await tool.ainvoke(
-        {
-            "tool_name": "partner.search",
-            "idempotency_key": "replay-key",
-            "permit_idempotency_key": "permit-replay-key",
-            "arguments": {"query": "second"},
-        }
-    )
+    with pytest.raises(IdempotencyConflictError, match="idempotency_key_reused"):
+        await tool.ainvoke(
+            {
+                "tool_name": "partner.search",
+                "idempotency_key": "replay-key",
+                "permit_idempotency_key": "permit-replay-key",
+                "arguments": {"query": "second"},
+            }
+        )
 
-    assert call_count["permit"] >= 1
-    assert call_count["invoke"] >= 1
-    assert "receipt-success" in result1
-    assert "receipt-success" in result2
+    assert gateway.invoke_keys == [("replay-key", "replay-key")] * 2
+    assert gateway.permit_requests == 1
+    assert gateway.charges == 1
 
     await client.close()
 
@@ -218,7 +288,7 @@ async def test_signed_receipt_returned():
         }
     )
 
-    result_dict = eval(result)
+    result_dict = ast.literal_eval(result)
     assert "receipt_id" in result_dict
     assert "signature" in result_dict
     assert "credits_charged" in result_dict
