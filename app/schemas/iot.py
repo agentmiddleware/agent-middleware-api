@@ -6,6 +6,7 @@ All models are Pydantic v2 for automatic OpenAPI generation.
 from pydantic import BaseModel, Field, field_validator
 from enum import Enum
 from datetime import datetime
+from urllib.parse import urlsplit
 import re
 
 # RED TEAM FIX: Safe identifier pattern — blocks path traversal chars (/, .., \)
@@ -68,6 +69,25 @@ class DeviceRegistration(BaseModel):
         ),
         examples=["mqtt://192.168.1.50:1883"],
     )
+
+    @field_validator("broker_url")
+    @classmethod
+    def validate_broker_url(cls, v: str | None) -> str | None:
+        """Refuse credentials in broker_url: it is stored and cached verbatim.
+
+        Any '@' (userinfo, with or without a scheme), query, or fragment is
+        rejected rather than stripped, so a secret is never persisted.
+        """
+        if v is None:
+            return v
+        parsed = urlsplit(v)
+        if "@" in v or parsed.query or parsed.fragment:
+            raise ValueError(
+                "broker_url must not embed credentials ('@'), a query string, "
+                "or a fragment; use scheme://host[:port]."
+            )
+        return v
+
     topic_acl: dict[str, ACLPermission] = Field(
         default_factory=dict,
         description=(

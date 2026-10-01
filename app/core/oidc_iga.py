@@ -522,11 +522,12 @@ async def enforce_tool_call(principal: EnterprisePrincipal, tool_name: str) -> I
                 IGADecision(False, "iga_policy_inactive", grant.group, grant.policy_id, {})
             )
             continue
-        # allowed_tools follows evaluate_wallet_policy's semantics EXACTLY:
-        # None (unset, or malformed JSON decoded by _decode_list) means
-        # unrestricted — any tool passes; a list is a strict allowlist. See
-        # app/services/policies.py:237 ("if allowed_tools is not None and
-        # tool_name not in allowed_tools") and _decode_list at policies.py:25.
+        # allowed_tools follows evaluate_wallet_policy's allow/deny semantics:
+        # None (a NULL column) means unrestricted — any tool passes; a list is
+        # a strict allowlist. A corrupt stored value never reads as None:
+        # app/services/policies.py _decode_list returns [] for it, so it
+        # denies every tool here just as evaluate_wallet_policy denies it
+        # with policy_constraint_corrupt.
         allowed_tools = bundle.allowed_tools
         if allowed_tools is not None and tool_name not in allowed_tools:
             candidates.append(

@@ -46,10 +46,16 @@ async def create_quote(
         service.get("category", ServiceCategory.PLATFORM_FEE.value)
     )
     try:
+        quoted_credits = tool_price(service, category)
+    except ValueError:
+        # A price that is not a finite, non-negative number is never signed:
+        # the quote would be a durable promise no charge could honor.
+        raise HTTPException(status_code=400, detail="tool_price_invalid")
+    try:
         return await get_quote_service().create_quote(
             wallet_id=request.wallet_id,
             tool=request.tool,
-            quoted_credits=tool_price(service, category),
+            quoted_credits=quoted_credits,
             category=category.value,
         )
     except QuoteError as exc:
