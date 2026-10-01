@@ -11,6 +11,25 @@ The next release consolidates the accumulated trust-plane and public-product
 work as `v1.3.0`. Create that tag only from the exact commit that passes the
 full release gate; do not backfill a final `v1.2.0` tag.
 
+### Changed — duplicate guard observability and release gates
+
+- **Durable duplicate-denial count**: `/health/duplicate-guard` now also
+  reports `enforce_mode_denials_durable`, the number of denial receipts
+  carrying `duplicate_request_new_key` across the service lifetime, and labels
+  every metric's scope. The two existing counters stay process-local and still
+  reset on restart. The count is `null`, with a reason, when no database is
+  configured or the query fails, so the endpoint never drops the process-local
+  counters it already served.
+- **Rollout note required per migration**: a test fails when a migration at or
+  after 040 ships without `docs/schema-NNN-rollout.md` naming the revision id it
+  declares and carrying a rollback heading, and when any migration file is
+  named outside the `NNN_name.py` convention. Boot refuses a database whose
+  revision differs from the packaged head, so every migration retires the
+  previously serving image; 040 crossed that boundary without a plan and needed
+  a same-night compatibility release. `docs/schema-041-rollout.md` records that
+  no image packaged at 040, including `34fbdb9` and the compatibility release
+  `e18b0df`, can start once 041 is applied.
+
 ### Security — 2026-08-27 audit follow-up
 
 Findings from the 2026-08-27 repository audit, each re-verified against the

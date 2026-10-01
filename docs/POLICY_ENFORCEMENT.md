@@ -233,7 +233,13 @@ windows can be configured via `repeat_window_seconds` to override the global
 
 Observability: `/health/duplicate-guard` reports the current mode, configured
 window, and counters for log-mode detections (`log_mode_blocks`) and enforce-mode
-denials (`enforce_mode_blocks`).
+denials (`enforce_mode_blocks`). Those two counters are process-local and reset
+on restart. `enforce_mode_denials_durable` counts the denied receipts carrying
+`duplicate_request_new_key` across the service lifetime; it is `null` when no
+database is configured or the count fails or times out, with
+`enforce_mode_denials_durable_unavailable` naming why, and the process-local
+counters are still served. `metric_scopes` labels each metric's durability so a
+monitor never infers it from the values.
 
 ---
 
