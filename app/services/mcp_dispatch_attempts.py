@@ -562,6 +562,63 @@ class McpDispatchAttemptService:
                     )
                     if permit is None:
                         return PermitValidation(False, "permit_not_found", None), None
+                    # Recheck immutable action authority under the same locks as
+                    # reservation. A preflight check cannot authorize a different
+                    # payload or a different owner at this accounting boundary.
+                    from app.services.action_permits import (
+                        action_execution_identity,
+                        validate_action_request,
+                    )
+                    from app.services.idempotency import ACTION_MCP_IDEMPOTENCY_ENDPOINT
+                    from app.services.service_registry import get_service_registry
+
+                    if record.endpoint == ACTION_MCP_IDEMPOTENCY_ENDPOINT or any(
+                        getattr(permit, field) is not None
+                        for field in (
+                            "action_contract_version",
+                            "action_payload_hash",
+                            "action_schema_id",
+                            "action_schema_version",
+                            "action_public_tool_id",
+                            "action_upstream_binding_hash",
+                        )
+                    ):
+                        registry = get_service_registry()
+                        service = await registry.get(public_tool_id)
+                        binding = (
+                            registry.get_action_binding(service) if service else None
+                        )
+                        if binding is None or service is None:
+                            return PermitValidation(
+                                False, "action_tool_binding_required", permit
+                            ), None
+                        if (
+                            service["upstream_tool_name"] != upstream_tool_name
+                            or service["upstream_origin"] != upstream_origin
+                        ):
+                            return PermitValidation(
+                                False, "action_binding_mismatch", permit
+                            ), None
+                        action_validation = await validate_action_request(
+                            permit,
+                            binding,
+                            wallet_id,
+                            key_id,
+                            arguments or {},
+                            "replay",
+                        )
+                        if not action_validation.allowed:
+                            return action_validation, None
+                        identity = action_execution_identity(permit, binding)
+                        if (
+                            record.endpoint != identity.endpoint
+                            or record.idempotency_key != identity.idempotency_key
+                            or record.request_hash
+                            != sha256_hex(identity.request_payload)
+                        ):
+                            raise DispatchAttemptConflictError(
+                                "dispatch_action_owner_invalid"
+                            )
                     await self._assert_approval_binding(
                         session,
                         record=record,
