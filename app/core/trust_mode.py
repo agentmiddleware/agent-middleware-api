@@ -140,6 +140,9 @@ def validate_trust_mode_config(
     redis_url: str = "",
     public_url: str = "",
     database_url: str = "",
+    enable_dogfood_tool: bool = False,
+    enable_dogfood_second_tool: bool = False,
+    allow_private_network_targets: bool = False,
 ) -> None:
     """Refuse unsafe deploy postures in production-like environments.
 
@@ -210,6 +213,22 @@ def validate_trust_mode_config(
                 "local-only; receipt keys stay on "
                 "/.well-known/trust-keys.json)"
             )
+        if enable_dogfood_tool:
+            violations.append(
+                "ENABLE_DOGFOOD_TOOL must be false in production-like "
+                "environments (partner.notes.write is local/CI dogfood "
+                "scaffolding, not a partner integration)"
+            )
+        if enable_dogfood_second_tool:
+            violations.append(
+                "ENABLE_DOGFOOD_SECOND_TOOL must be false in production-like "
+                "environments (partner.notes.count is CI-only scaffolding)"
+            )
+        if allow_private_network_targets:
+            violations.append(
+                "ALLOW_PRIVATE_NETWORK_TARGETS must be false in production-like "
+                "environments (it disables the outbound private-network guard)"
+            )
         configured_database_url = (database_url or "").strip()
         if not configured_database_url:
             violations.append(
@@ -266,6 +285,9 @@ def validate_trust_mode_guardrails(settings: Settings) -> None:
         redis_url=settings.REDIS_URL,
         public_url=settings.PUBLIC_URL,
         database_url=settings.DATABASE_URL,
+        enable_dogfood_tool=settings.ENABLE_DOGFOOD_TOOL,
+        enable_dogfood_second_tool=settings.ENABLE_DOGFOOD_SECOND_TOOL,
+        allow_private_network_targets=settings.ALLOW_PRIVATE_NETWORK_TARGETS,
     )
 
 
