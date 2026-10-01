@@ -141,7 +141,14 @@ async def get_verification_details(
 
     result = await kyc_service.get_verification_details(verification_id)
 
-    if not result:
+    # A verification is visible only to the wallet it belongs to (or a
+    # bootstrap admin). A foreign one must answer exactly like a missing one:
+    # the 403 from require_wallet_access confirmed the id exists and echoed
+    # the owner's wallet_id in its detail.
+    if result is None or not (
+        auth.is_bootstrap_admin
+        or (auth.wallet_id is not None and auth.wallet_id == result["wallet_id"])
+    ):
         raise HTTPException(
             status_code=404,
             detail={
@@ -149,8 +156,6 @@ async def get_verification_details(
                 "message": f"Verification {verification_id} not found",
             },
         )
-
-    auth.require_wallet_access(result["wallet_id"])
 
     return KYCVerificationDetails(
         verification_id=result["verification_id"],

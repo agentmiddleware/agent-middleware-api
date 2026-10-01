@@ -289,6 +289,164 @@ class TestWebAuthnProvider:
         assert "verifications_removed" in result
 
 
+@pytest.mark.proof
+class TestWebAuthnUserVerification:
+    """Passkey verification of a high-risk action must prove user verification.
+
+    Every challenge this provider issues is for a HIGH_RISK_ACTIONS entry
+    (payment, transfer_funds, delete_account, ...). A bare user-presence tap
+    proves only that *someone* touched the authenticator; it is the
+    UV (PIN/biometric) flag that ties the assertion to the credential owner.
+    The assertion check used to pass require_user_verification=False with a
+    comment claiming UV was handled elsewhere, but nothing enforced it, and the
+    challenge options only asked for UV as "preferred".
+
+    py_webauthn is an optional extra that CI does not install, so these tests
+    stand in a fake verify_authentication_response with the library's
+    semantics: it rejects an assertion whose UV flag is unset only when the
+    caller passes require_user_verification=True.
+    """
+
+    CREDENTIAL_ID = "Y3JlZGVudGlhbC1pZA"
+
+    @pytest.fixture
+    def provider(self):
+        return WebAuthnProvider(
+            rp_id="test.example.com",
+            rp_name="Test App",
+            challenge_expiry_seconds=60,
+            verification_validity_seconds=60,
+        )
+
+    @pytest.fixture
+    def fake_py_webauthn(self, monkeypatch):
+        """Pretend py_webauthn is installed; record each verification call."""
+        from types import SimpleNamespace
+
+        from app.services import webauthn_provider
+
+        state = {"calls": [], "user_verified": False}
+
+        def fake_verify_authentication_response(**kwargs):
+            state["calls"].append(kwargs)
+            if kwargs.get("require_user_verification") and not state["user_verified"]:
+                raise ValueError(
+                    "User verification is required but user was not verified "
+                    "during authentication"
+                )
+            return SimpleNamespace(new_sign_count=1)
+
+        monkeypatch.setattr(webauthn_provider, "PY_WEBAUTHN_AVAILABLE", True)
+        monkeypatch.setattr(
+            webauthn_provider,
+            "verify_authentication_response",
+            fake_verify_authentication_response,
+            raising=False,
+        )
+        monkeypatch.setattr(
+            webauthn_provider, "parse_credential_id", lambda value: value, raising=False
+        )
+        monkeypatch.setattr(
+            webauthn_provider,
+            "generate_challenge",
+            lambda: b"\x01" * 64,
+            raising=False,
+        )
+        monkeypatch.setattr(
+            webauthn_provider,
+            "base64url_to_bytes",
+            lambda value: value.encode("ascii"),
+            raising=False,
+        )
+        # Real cryptographic path only: the mock escape hatch must not be what
+        # makes these tests pass or fail.
+        monkeypatch.setenv("WEBAUTHN_ALLOW_MOCK", "false")
+        return state
+
+    async def _register_and_challenge(self, provider, action: str = "payment"):
+        await provider.register_credential(
+            user_id="user-1",
+            credential_id=self.CREDENTIAL_ID,
+            public_key=b"public-key-bytes",
+        )
+        return await provider.create_challenge(
+            session_id="session1", action=action, user_id="user-1"
+        )
+
+    def _assertion(self) -> dict:
+        return {
+            "id": self.CREDENTIAL_ID,
+            "raw_id": self.CREDENTIAL_ID,
+            "type": "public-key",
+            "response": {
+                "authenticator_data": "dGVzdA==",
+                "client_data_json": "e30",
+                "signature": "dGVzdA==",
+            },
+        }
+
+    @pytest.mark.asyncio
+    async def test_assertion_check_requires_user_verification(
+        self, provider, fake_py_webauthn
+    ):
+        fake_py_webauthn["user_verified"] = True
+        challenge = await self._register_and_challenge(provider)
+
+        result = await provider.verify_response(
+            challenge_id=challenge["challenge_id"], credential=self._assertion()
+        )
+
+        assert result["verified"] is True
+        assert len(fake_py_webauthn["calls"]) == 1
+        assert fake_py_webauthn["calls"][0]["require_user_verification"] is True
+
+    @pytest.mark.asyncio
+    async def test_presence_only_assertion_cannot_unlock_high_risk_action(
+        self, provider, fake_py_webauthn
+    ):
+        """A valid signature without the UV flag must not verify a payment."""
+        fake_py_webauthn["user_verified"] = False
+        challenge = await self._register_and_challenge(provider, action="payment")
+
+        with pytest.raises(ValueError, match="Credential verification failed"):
+            await provider.verify_response(
+                challenge_id=challenge["challenge_id"], credential=self._assertion()
+            )
+
+        assert await provider.is_action_verified("session1", "payment") is False
+        stored = provider.get_challenge(challenge["challenge_id"])
+        assert stored is not None
+        assert stored.status.value == "failed"
+
+    @pytest.mark.asyncio
+    async def test_challenge_options_require_user_verification(
+        self, provider, fake_py_webauthn
+    ):
+        """The client is told UV is required, not merely preferred."""
+        challenge = await self._register_and_challenge(provider)
+
+        assert challenge["user_verification"] == "required"
+        assert challenge["authenticator_selection"]["user_verification"] == "required"
+        stored = provider.get_challenge(challenge["challenge_id"])
+        assert stored is not None
+        assert stored.user_verification == "required"
+
+    def test_passkey_challenge_response_defaults_to_required(self):
+        """The API schema never advertises a weaker requirement than enforced."""
+        from app.schemas.awi_enhanced import PasskeyChallengeResponse
+
+        body = PasskeyChallengeResponse(
+            challenge_id="c1",
+            challenge="abc",
+            rp_id="test.example.com",
+            rp_name="Test App",
+            timeout=60000,
+            public_key_cred_params=[],
+            authenticator_selection={},
+        )
+        assert body.user_verification == "required"
+
+
 class TestAWIPlaywrightBridge:
     """Tests for AWI Playwright Bridge."""
 

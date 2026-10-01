@@ -5,6 +5,7 @@ Validates the KYC verification flow for sponsor wallets.
 
 import pytest
 from unittest.mock import patch, MagicMock
+from uuid import uuid4
 from httpx import AsyncClient, ASGITransport
 from app.main import app
 
@@ -340,7 +341,232 @@ async def test_db_key_cannot_read_other_wallet_verification_details(
         f"/v1/kyc/verifications/{verification_id}",
         headers=db_headers,
     )
-    assert resp.status_code == 403
+    # A foreign verification answers exactly like a missing one: a 403 would
+    # confirm the id exists, and its detail echoed the owner's wallet_id.
+    assert resp.status_code == 404
+    assert resp.json()["detail"]["error"] == "verification_not_found"
+    assert wallet_b not in resp.text
+
+
+def _stub_stripe_session(mock_stripe_create) -> str:
+    """Make the patched Stripe create return a session with a unique id."""
+    session_id = f"vs_test_{uuid4().hex}"
+    mock_session = MagicMock()
+    mock_session.id = session_id
+    mock_session.url = "https://verify.stripe.com/test_session"
+    mock_stripe_create.return_value = mock_session
+    return session_id
+
+
+async def _sponsor_with_key(client, api_headers, name: str, *, require_kyc: bool):
+    wallet_resp = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={
+            "sponsor_name": name,
+            "email": f"{name.lower().replace(' ', '-')}@test.com",
+            "initial_credits": 1000,
+            "require_kyc": require_kyc,
+        },
+        headers=api_headers,
+    )
+    assert wallet_resp.status_code == 201
+    wallet_id = wallet_resp.json()["wallet_id"]
+    key_resp = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": wallet_id},
+        headers=api_headers,
+    )
+    assert key_resp.status_code == 201
+    return wallet_id, {"X-API-Key": key_resp.json()["api_key"]}
+
+
+@pytest.mark.dormant
+@pytest.mark.anyio
+@patch("app.services.kyc_service.stripe.identity.VerificationSession.create")
+async def test_foreign_verification_is_indistinguishable_from_missing(
+    mock_stripe_create, client, api_headers
+):
+    """Wallet-scoped keys: deny cross-tenant reads without an existence oracle.
+
+    Wallet A's key asking for wallet B's verification must get the same 404 a
+    nonexistent id gets, never wallet B's id or details; wallet B's own key and
+    the bootstrap admin must still read it.
+    """
+    wallet_a, headers_a = await _sponsor_with_key(
+        client, api_headers, "KYC Oracle A", require_kyc=True
+    )
+    wallet_b, headers_b = await _sponsor_with_key(
+        client, api_headers, "KYC Oracle B", require_kyc=True
+    )
+    assert wallet_a != wallet_b
+    session_id = _stub_stripe_session(mock_stripe_create)
+
+    created = await client.post(
+        "/v1/kyc/sessions",
+        json={"wallet_id": wallet_b, "return_url": "https://example.com/callback"},
+        headers=headers_b,
+    )
+    assert created.status_code == 201, created.text
+    verification_id = created.json()["verification_id"]
+
+    foreign = await client.get(
+        f"/v1/kyc/verifications/{verification_id}", headers=headers_a
+    )
+    missing = await client.get(
+        "/v1/kyc/verifications/nonexistent-verification", headers=headers_a
+    )
+    assert foreign.status_code == missing.status_code == 404
+    assert foreign.json()["detail"]["error"] == missing.json()["detail"]["error"]
+    assert wallet_b not in foreign.text
+    assert session_id not in foreign.text
+    assert "wallet_access_denied" not in foreign.text
+
+    owner = await client.get(
+        f"/v1/kyc/verifications/{verification_id}", headers=headers_b
+    )
+    assert owner.status_code == 200, owner.text
+    assert owner.json()["wallet_id"] == wallet_b
+    assert owner.json()["stripe_session_id"] == session_id
+
+    admin = await client.get(
+        f"/v1/kyc/verifications/{verification_id}", headers=api_headers
+    )
+    assert admin.status_code == 200, admin.text
+    assert admin.json()["wallet_id"] == wallet_b
+
+
+@pytest.mark.dormant
+@pytest.mark.anyio
+@patch("app.services.kyc_service.stripe.identity.VerificationSession.create")
+async def test_default_session_sends_no_invalid_document_type_to_stripe(
+    mock_stripe_create, client, api_headers, sponsor_wallet
+):
+    """Omitting document_type must not send Stripe a value it rejects.
+
+    The old default "document" is not a Stripe Identity allowed_types value,
+    so every default request would have been refused by Stripe.
+    """
+    _stub_stripe_session(mock_stripe_create)
+
+    resp = await client.post(
+        "/v1/kyc/sessions",
+        json={
+            "wallet_id": sponsor_wallet["wallet_id"],
+            "return_url": "https://example.com/callback",
+        },
+        headers=api_headers,
+    )
+    assert resp.status_code == 201, resp.text
+
+    kwargs = mock_stripe_create.call_args.kwargs
+    # No restriction means Stripe accepts every document type it supports.
+    assert "allowed_types" not in kwargs["options"]["document"]
+    assert "document" not in kwargs["metadata"].values()
+
+
+@pytest.mark.dormant
+@pytest.mark.anyio
+@patch("app.services.kyc_service.stripe.identity.VerificationSession.create")
+async def test_explicit_document_type_is_forwarded_to_stripe(
+    mock_stripe_create, client, api_headers, sponsor_wallet
+):
+    """A Stripe-vocabulary document_type is passed through as allowed_types."""
+    _stub_stripe_session(mock_stripe_create)
+
+    resp = await client.post(
+        "/v1/kyc/sessions",
+        json={
+            "wallet_id": sponsor_wallet["wallet_id"],
+            "return_url": "https://example.com/callback",
+            "document_type": "driving_license",
+        },
+        headers=api_headers,
+    )
+    assert resp.status_code == 201, resp.text
+    kwargs = mock_stripe_create.call_args.kwargs
+    assert kwargs["options"]["document"]["allowed_types"] == ["driving_license"]
+
+
+@pytest.mark.dormant
+@pytest.mark.anyio
+@pytest.mark.parametrize("document_type", ["driver_license", "document", "selfie"])
+@patch("app.services.kyc_service.stripe.identity.VerificationSession.create")
+async def test_document_type_outside_stripe_vocabulary_is_rejected(
+    mock_stripe_create, document_type, client, api_headers, sponsor_wallet
+):
+    """Values Stripe rejects fail locally with 422, before any Stripe call."""
+    _stub_stripe_session(mock_stripe_create)
+    resp = await client.post(
+        "/v1/kyc/sessions",
+        json={
+            "wallet_id": sponsor_wallet["wallet_id"],
+            "return_url": "https://example.com/callback",
+            "document_type": document_type,
+        },
+        headers=api_headers,
+    )
+    assert resp.status_code == 422, resp.text
+    mock_stripe_create.assert_not_called()
+
+
+@pytest.mark.dormant
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "return_url",
+    [
+        "javascript:alert(1)",
+        "data:text/html,<script>alert(1)</script>",
+        "http://attacker.example.com/kyc-callback",
+        "ftp://example.com/kyc-callback",
+        "https://",
+        "/relative/kyc-callback",
+        "https://example.com/" + "a" * 2048,
+    ],
+    ids=[
+        "javascript",
+        "data",
+        "http-non-loopback",
+        "ftp",
+        "no-host",
+        "relative",
+        "too-long",
+    ],
+)
+@patch("app.services.kyc_service.stripe.identity.VerificationSession.create")
+async def test_unsafe_return_url_is_rejected(
+    mock_stripe_create, return_url, client, api_headers, sponsor_wallet
+):
+    """return_url must be an absolute https URL (http only for loopback)."""
+    _stub_stripe_session(mock_stripe_create)
+    resp = await client.post(
+        "/v1/kyc/sessions",
+        json={"wallet_id": sponsor_wallet["wallet_id"], "return_url": return_url},
+        headers=api_headers,
+    )
+    assert resp.status_code == 422, resp.text
+    mock_stripe_create.assert_not_called()
+
+
+@pytest.mark.dormant
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "return_url",
+    ["http://localhost:3000/kyc-callback", "http://127.0.0.1:8080/cb"],
+)
+@patch("app.services.kyc_service.stripe.identity.VerificationSession.create")
+async def test_loopback_http_return_url_is_allowed(
+    mock_stripe_create, return_url, client, api_headers, sponsor_wallet
+):
+    """Local development callbacks over plain http keep working."""
+    _stub_stripe_session(mock_stripe_create)
+
+    resp = await client.post(
+        "/v1/kyc/sessions",
+        json={"wallet_id": sponsor_wallet["wallet_id"], "return_url": return_url},
+        headers=api_headers,
+    )
+    assert resp.status_code == 201, resp.text
+    assert mock_stripe_create.call_args.kwargs["return_url"] == return_url
 
 
 @pytest.mark.anyio
