@@ -128,7 +128,10 @@ repo; do not Redeploy from GitHub source).
 - Configure `TRUST_SIGNING_PRIVATE_KEY_B64` from a secret manager or KMS-backed
   runtime injection.
 - Production-like boots also refuse `DEBUG=true`, `WEBAUTHN_ALLOW_MOCK=true`,
-  `ENABLE_PROOF_SURFACES=true`, and `ENABLE_PUBLIC_MCP_ENDPOINT=true`. Set
+  `ENABLE_PROOF_SURFACES=true`, `ENABLE_PUBLIC_MCP_ENDPOINT=true`,
+  `ALLOW_PRIVATE_NETWORK_TARGETS=true` (it disables the outbound-URL guard's
+  private-address checks), `ALLOW_UNSAFE_HOST_PYTHON_SANDBOX=true`, and a
+  host `BEHAVIORAL_SANDBOX_PYTHON_BACKEND` (`unsafe_host`/`host`). Set
   `ENABLE_PROOF_SURFACES=false` so only core trust routers and MCP are mounted.
   Leave proof surfaces frozen unless a partner demo explicitly needs them.
   Anonymous MCP (`POST /mcp/public`) is local-only; receipt verification stays

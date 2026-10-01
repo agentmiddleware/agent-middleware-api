@@ -431,7 +431,11 @@ class ToolCallResponse(BaseModel):
     receipt: dict[str, Any] | None = None
 
 
-@router.get("/tools.json", name="MCP Tools Manifest")
+@router.get(
+    "/tools.json",
+    name="MCP Tools Manifest",
+    responses={401: {"description": "Missing credentials on production-like boots"}},
+)
 async def get_tools_json(
     request: Request,
     category: ServiceCategory | None = None,
@@ -3203,7 +3207,11 @@ def _registered_tool_cost(
     category: ServiceCategory,
 ) -> Decimal:
     # Shared with the quote endpoint so a locked quote and the charge that
-    # honors it are computed from one definition of price.
+    # honors it are computed from one definition of price. A price that is
+    # not finite and non-negative raises ValueError("tool_price_invalid")
+    # here, before idempotency, policy, permit or ledger state is touched; it
+    # is deliberately not a classified ValueError, so the caller gets the
+    # opaque internal_error and the operator gets the logged traceback.
     return tool_price(service, category)
 
 
