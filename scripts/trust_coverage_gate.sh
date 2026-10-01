@@ -77,6 +77,7 @@ TRUST_COVERAGE_MODULES=(
   app.routers.permit_requests
   app.core.trust_mode
   app.core.auth
+  app.core.jwt
   app.services.api_key_service
   app.services.audit_chain
   app.services.policies
