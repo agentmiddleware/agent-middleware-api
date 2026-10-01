@@ -2,11 +2,18 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, StrictInt, field_validator
 
 from app.schemas.policies import PolicyBundleResponse
+
+# Permit and permit-request credit columns are Numeric(20, 8). A permit is
+# signed before it is persisted, so a value the column would round (a ninth
+# decimal, or a positive amount below 1e-8 that rounds to zero) yields a
+# permit whose stored terms no longer match its signature. Refuse those here.
+_CREDIT_DIGITS = 20
+_CREDIT_DECIMAL_PLACES = 8
 
 
 class PermitCreateRequest(BaseModel):
@@ -15,15 +22,27 @@ class PermitCreateRequest(BaseModel):
     subject_key_id: str | None = None
     scopes: list[str] = Field(default_factory=list)
     allowed_tools: list[str] = Field(default_factory=list)
-    max_credits: Decimal
+    max_credits: Decimal = Field(
+        gt=0, max_digits=_CREDIT_DIGITS, decimal_places=_CREDIT_DECIMAL_PLACES
+    )
     expires_at: datetime
-    nonce: str | None = None
+    # permits.nonce is String(64).
+    nonce: str | None = Field(default=None, max_length=64)
     # Governed invokes under this permit block on a human decision (Sentinel)
     # before budget is reserved or credits are charged.
     requires_human_approval: bool = False
-    # Permit schema v2 constraints (all optional)
-    max_calls_per_tool: dict[str, int] = Field(default_factory=dict)
-    aggregate_value_cap: Decimal | None = None
+    # Permit schema v2 constraints (all optional). A limit below one call, or
+    # a cap of zero or less, could never admit a call; strict ints keep
+    # ``true`` from coercing to a one-call limit.
+    max_calls_per_tool: dict[str, Annotated[StrictInt, Field(ge=1)]] = Field(
+        default_factory=dict
+    )
+    aggregate_value_cap: Decimal | None = Field(
+        default=None,
+        gt=0,
+        max_digits=_CREDIT_DIGITS,
+        decimal_places=_CREDIT_DECIMAL_PLACES,
+    )
     forbidden_fields: list[str] = Field(default_factory=list)
     recipient_domain: str | None = None
     # Opt-out from cross-key duplicate detection. When true, identical requests
@@ -109,7 +128,11 @@ class PermitRequestCreate(BaseModel):
     subject_wallet_id: str
     allowed_tools: list[str] = Field(min_length=1)
     scopes: list[str] = Field(default_factory=list)
-    max_credits: Decimal = Field(gt=0)
+    # Hashed for the human at request time and stored as Numeric(20, 8), so
+    # a value the column would round fails its own integrity check at mint.
+    max_credits: Decimal = Field(
+        gt=0, max_digits=_CREDIT_DIGITS, decimal_places=_CREDIT_DECIMAL_PLACES
+    )
     expires_at: datetime
     # Shown to the human approver: why the agent needs this authority.
     justification: str = Field(min_length=1, max_length=2000)

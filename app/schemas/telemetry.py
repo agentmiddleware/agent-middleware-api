@@ -148,7 +148,10 @@ class AutoPRResponse(BaseModel):
     anomaly_id: str
     pr_url: str | None = Field(
         None,
-        description="URL of the created PR (null if dry_run=true).",
+        description=(
+            "URL of a created PR. Always null: the generator is simulated "
+            "and never opens a PR."
+        ),
     )
     diff: str = Field(
         ...,
@@ -157,6 +160,9 @@ class AutoPRResponse(BaseModel):
     files_changed: list[str]
     tests_passed: bool | None = Field(
         None,
-        description="Whether auto-generated unit tests passed.",
+        description="Whether tests passed. Null: no test suite is run.",
     )
-    status: str
+    status: str = Field(
+        ...,
+        description='"dry_run", or "simulated" when dry_run=false.',
+    )

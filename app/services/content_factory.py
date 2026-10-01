@@ -72,7 +72,9 @@ class ContentPipeline:
     brand_config: dict
     language: str
     auto_schedule: bool
-    owner_key: str = ""         # RED TEAM FIX: Tenant scoping
+    # Owning wallet id ("" = bootstrap-admin only). Never an API key: the
+    # column name predates the fix that stopped persisting raw credentials.
+    owner_key: str = ""
     status: str = "queued"
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     content_pieces: list[GeneratedContent] = field(default_factory=list)
@@ -92,7 +94,7 @@ class LiveCampaign:
     pipeline_ids: list[str] = field(default_factory=list)
     status: str = "running"
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    owner_key: str = ""
+    owner_key: str = ""  # Owning wallet id, as on ContentPipeline.
 
 
 def _pipeline_to_row(pipeline: ContentPipeline) -> ContentPipelineModel:
@@ -357,12 +359,20 @@ class ContentStore:
             row = await session.get(ContentCampaignModel, campaign_id)
         return _row_to_campaign(row) if row else None
 
-    async def list_campaigns(self) -> list[LiveCampaign]:
+    async def list_campaigns(
+        self, owner_key: str | None = None
+    ) -> list[LiveCampaign]:
+        """List campaigns, newest first; ``owner_key`` restricts to one owner."""
         self._require_db()
         factory = get_session_factory()
+        query = select(ContentCampaignModel)
+        if owner_key is not None:
+            query = query.where(
+                cast(ColumnElement[bool], ContentCampaignModel.owner_key == owner_key)
+            )
         async with factory() as session:
             result = await session.execute(
-                select(ContentCampaignModel).order_by(
+                query.order_by(
                     cast(ColumnElement[Any], ContentCampaignModel.created_at).desc()
                 )
             )
@@ -914,6 +924,9 @@ class ContentFactory:
         self.store = ContentStore()
         self.scheduler = AlgorithmicScheduler()
         self.generation_store = ContentGenerationStore()
+        # The event loop holds only weak references to tasks; keep in-flight
+        # pipeline runs alive until they finish.
+        self._pipeline_tasks: set[asyncio.Task[None]] = set()
 
     async def generate_llm_text(
         self, prompt: str, model: str | None = None
@@ -940,8 +953,13 @@ class ContentFactory:
         hook: ContentHook | None = None,
         caption_style: CaptionStyle = CaptionStyle.BOLD_IMPACT,
         aspect_ratio: str = "9:16",
+        run_inline: bool = False,
     ) -> ContentPipeline:
-        """Create a new content generation pipeline (standard or hook-based)."""
+        """Create a new content generation pipeline (standard or hook-based).
+
+        Generation runs in the background unless ``run_inline`` is set, in
+        which case it has finished (``ready`` or ``failed``) on return.
+        """
         pipeline = ContentPipeline(
             pipeline_id=str(uuid.uuid4()),
             title=title,
@@ -958,8 +976,14 @@ class ContentFactory:
         )
         await self.store.create_pipeline(pipeline)
 
+        if run_inline:
+            await self._run_pipeline(pipeline.pipeline_id)
+            return pipeline
+
         # Kick off async generation
-        asyncio.create_task(self._run_pipeline(pipeline.pipeline_id))
+        task = asyncio.create_task(self._run_pipeline(pipeline.pipeline_id))
+        self._pipeline_tasks.add(task)
+        task.add_done_callback(self._pipeline_tasks.discard)
 
         return pipeline
 
@@ -975,18 +999,26 @@ class ContentFactory:
                 total += HOOK_FORMAT_MULTIPLIERS.get(fmt, 1)
         return total
 
-    async def _run_pipeline(self, pipeline_id: str):
-        """Execute the content generation pipeline."""
+    async def _run_pipeline(self, pipeline_id: str) -> None:
+        """Execute the content generation pipeline.
+
+        Every status transition is written back through the store. The stored
+        row is the only status any reader sees (GET /pipelines/{id});
+        setting it on the local copy alone left every pipeline reporting
+        "queued" forever.
+        """
         pipeline = await self.store.get_pipeline(pipeline_id)
         if not pipeline:
             return
 
-        pipeline.status = "rendering"
         logger.info(
             f"Pipeline {pipeline_id}: rendering {len(pipeline.target_formats)} formats"
         )
 
         try:
+            pipeline.status = "rendering"
+            await self.store.create_pipeline(pipeline)
+
             tasks = []
             multipliers = (
                 HOOK_FORMAT_MULTIPLIERS if pipeline.hook else FORMAT_MULTIPLIERS
@@ -1006,11 +1038,16 @@ class ContentFactory:
                 await self.store.store_content(piece)
 
             pipeline.status = "ready"
+            await self.store.create_pipeline(pipeline)
             logger.info(f"Pipeline {pipeline_id}: {len(pieces)} pieces generated")
 
         except Exception as e:
             pipeline.status = "failed"
             logger.error(f"Pipeline {pipeline_id} failed: {e}")
+            try:
+                await self.store.create_pipeline(pipeline)
+            except Exception:
+                logger.exception(f"Pipeline {pipeline_id}: could not record failure")
 
     async def launch_campaign(
         self,
@@ -1066,18 +1103,11 @@ class ContentFactory:
                 hook=hook,
                 caption_style=caption_style,
                 aspect_ratio=aspect_ratio,
+                # Generate before gathering: the old bounded poll for "ready"
+                # reported whatever pieces existed when it gave up.
+                run_inline=True,
             )
             campaign.pipeline_ids.append(pipeline.pipeline_id)
-
-            # Wait for async pipeline to finish
-            await asyncio.sleep(0.05)
-            # Ensure pipeline completes
-            p = await self.store.get_pipeline(pipeline.pipeline_id)
-            retries = 0
-            while p and p.status != "ready" and retries < 20:
-                await asyncio.sleep(0.05)
-                p = await self.store.get_pipeline(pipeline.pipeline_id)
-                retries += 1
 
             # Gather results
             content = await self.store.list_by_pipeline(pipeline.pipeline_id)

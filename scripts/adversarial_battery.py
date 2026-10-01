@@ -6,9 +6,13 @@ provisions throwaway, low-budget wallets/keys/permits, probes the governed
 path for the failure modes that matter, prints a PASS/FAIL/SKIP summary, and
 always revokes the keys it minted (even on error).
 
-    export API_URL="https://api.thisisatest.tech"
+    export API_URL="https://staging.example.test"   # or pass --api-url
     export BOOTSTRAP_KEY=...     # from Railway variables — never commit or paste
     python3 scripts/adversarial_battery.py
+
+Remote targets require HTTPS (HTTP is loopback-only, so the bootstrap key
+never crosses the network in cleartext), and the canonical production origin
+additionally requires ``--confirm-production``.
 
 Checks
 ------
@@ -24,8 +28,9 @@ Checks
 
 Notes
 -----
-* This creates real rows on the target (tiny throwaway wallets). ``API_URL`` is
-  required — there is no default — so you can't accidentally hit production.
+* This creates real rows on the target (tiny throwaway wallets). A target is
+  required — there is no default — and production needs explicit
+  confirmation, so you can't accidentally hit it.
 * MCP-invocation checks require an invokable ``golden-path-echo`` governed tool;
   when the deployment exposes none they are reported SKIP (never a false PASS),
   and a failed ``/mcp/tools.json`` discovery is a FAIL.
@@ -35,6 +40,7 @@ Notes
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
@@ -43,10 +49,16 @@ import urllib.request
 import uuid
 from datetime import datetime, timedelta, timezone
 
+if __package__:
+    from .live_script_target import LiveTargetError, resolve_live_target
+else:
+    from live_script_target import LiveTargetError, resolve_live_target
+
 # Name the target explicitly — never default to a live host, so an operator who
 # exports only BOOTSTRAP_KEY cannot unintentionally provision against production.
-API_URL = os.environ.get("API_URL", "").rstrip("/")
-BOOTSTRAP_KEY = os.environ.get("BOOTSTRAP_KEY")
+# Both are resolved in main(), never at import.
+API_URL = ""
+BOOTSTRAP_KEY: str | None = None
 
 # Per-run token so idempotency keys and resource names are unique each run;
 # otherwise the IdempotencyService cache can short-circuit a repeat run and
@@ -369,20 +381,46 @@ def _short(text: str, n: int = 120) -> str:
     return text[:n]
 
 
-def main() -> int:
-    if not API_URL:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Run the authenticated adversarial battery against an explicit target."
+    )
+    parser.add_argument("--api-url", help="API origin; overrides API_URL")
+    parser.add_argument(
+        "--confirm-production",
+        action="store_true",
+        help="confirm intentional use of https://api.thisisatest.tech",
+    )
+    args = parser.parse_args(argv)
+
+    target = args.api_url if args.api_url is not None else os.environ.get("API_URL")
+    if not target:
         print(
-            "ERROR: set API_URL to the deployment you want to test, e.g. "
-            "export API_URL=https://api.thisisatest.tech",
+            "ERROR: set API_URL (or pass --api-url) to the deployment you want "
+            "to test, e.g. export API_URL=https://staging.example.test",
             file=sys.stderr,
         )
         return 2
-    if not BOOTSTRAP_KEY:
+    try:
+        # environ={}: this script names its target with API_URL only, never
+        # the AGENT_MIDDLEWARE_API_URL the shared resolver would fall back to.
+        api_url = resolve_live_target(
+            target, confirm_production=args.confirm_production, environ={}
+        )
+    except LiveTargetError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+    bootstrap_key = os.environ.get("BOOTSTRAP_KEY")
+    if not bootstrap_key:
         print(
             "ERROR: set BOOTSTRAP_KEY (operator key from Railway variables).",
             file=sys.stderr,
         )
         return 2
+
+    global API_URL, BOOTSTRAP_KEY
+    API_URL = api_url
+    BOOTSTRAP_KEY = bootstrap_key
     print(f"Target: {API_URL}  (run {RUN_ID})\n")
 
     issued: list[dict] = []

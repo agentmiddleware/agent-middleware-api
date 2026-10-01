@@ -20,6 +20,7 @@ import sys
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 
 import httpx
 
@@ -44,6 +45,22 @@ def ikey(name: str) -> str:
 
 # Rate-limiting semaphore
 SEM = asyncio.Semaphore(10)
+
+
+def require(condition: object, message: str) -> None:
+    """Fail the run on a broken expectation.
+
+    An explicit raise, unlike a bare assert statement, survives python -O.
+    """
+    if not condition:
+        raise AssertionError(message)
+
+
+def is_zero_credits(value: object) -> bool:
+    try:
+        return Decimal(str(value)) == 0
+    except InvalidOperation:
+        return False
 
 
 async def req(method, path, **kwargs):
@@ -254,21 +271,25 @@ async def test_unicode_payload(spn, agt):
             "issuer_wallet_id": spn,
             "subject_wallet_id": agt,
             "allowed_tools": ["partner.notes.write"],
-            "max_credits": "10",
+            # 7 payloads x 2 credits: the cap must cover every payload, or a
+            # budget denial would mask the result for the last ones.
+            "max_credits": "14",
             "expires_at": "2099-01-01T00:00:00Z",
         },
     )
     pid = permit.json()["permit_id"]
 
+    oversized = "A" * 10000  # beyond the tool's note length limit
     texts = [
         "Hello 世界 🌍",
         "<script>alert('xss')</script>",
         "' OR 1=1 --",
         "\x00\x01\x02",
-        "A" * 10000,
+        oversized,
         "日本語テスト",
         "🔥💀🎉💰",
     ]
+    failed = []
     for i, text in enumerate(texts):
         r = await req(
             "POST",
@@ -286,10 +307,19 @@ async def test_unicode_payload(spn, agt):
             },
         )
         body = r.json()
-        if "error" in body:
-            print(f"  text-{i} ({text[:30]}...): ❌ {body['error']}")
-        else:
+        error = body.get("error")
+        if error is None:
             print(f"  text-{i} ({text[:30]}...): ✅")
+            continue
+        # Only the oversized note may be refused, and the refusal must not
+        # charge: a refused call that moves money is a failure, not a rejection.
+        receipt = (error.get("data") or {}).get("receipt") or {}
+        if text is oversized and is_zero_credits(receipt.get("credits_charged")):
+            print(f"  text-{i} ({text[:30]}...): ✅ refused, uncharged")
+        else:
+            print(f"  text-{i} ({text[:30]}...): ❌ {error}")
+            failed.append(f"text-{i}")
+    require(not failed, f"unicode payloads failed: {failed}")
 
 
 async def test_tampered_permit(spn, agt):
@@ -380,6 +410,7 @@ async def test_timezone_extremes(spn, agt):
         "2099-01-01T00:00:00+05:30",  # India
         "2099-06-01T00:00:00+00:00",  # summer
     ]
+    failed = []
     for i, offset in enumerate(offsets):
         r = await req(
             "POST",
@@ -398,12 +429,19 @@ async def test_timezone_extremes(spn, agt):
             print(f"  {offset} -> {exp}: ✅")
         else:
             print(f"  {offset}: ❌ {r.status_code} {r.text[:100]}")
+            failed.append(offset)
+    require(not failed, f"permit expiries rejected: {failed}")
 
 
 async def test_decimal_precision(spn, agt):
     """Edge-case credit amounts."""
     print("\n[STRESS] Decimal precision...")
     amounts = ["0.01", "0.001", "999999", "-1", "0", "abc", ""]
+    # Only positive amounts the 1000-credit agent wallet covers may mint a
+    # permit. Non-positive, non-numeric, and over-balance amounts must be
+    # refused as a client error -- a 201 for any of them is a failure.
+    creatable = {"0.01", "0.001"}
+    failed = []
     for i, amt in enumerate(amounts):
         r = await req(
             "POST",
@@ -419,12 +457,17 @@ async def test_decimal_precision(spn, agt):
         )
         code = r.status_code
         body = r.json()
+        ok = code == 201 if amt in creatable else code in (400, 422)
+        mark = "✅" if ok else "❌"
         if code == 201:
-            print(f"  max_credits={amt}: ✅ created")
+            print(f"  max_credits={amt}: {mark} created")
         elif "max_credits_must_be_positive" in r.text:
-            print(f"  max_credits={amt}: ✅ rejected (positive required)")
+            print(f"  max_credits={amt}: {mark} rejected (positive required)")
         else:
-            print(f"  max_credits={amt}: ⚠️ {code} {body.get('detail', r.text[:80])}")
+            print(f"  max_credits={amt}: {mark} {code} {body.get('detail', r.text[:80])}")
+        if not ok:
+            failed.append(amt)
+    require(not failed, f"max_credits edge cases misjudged: {failed}")
 
 
 async def test_rapid_fire_idempotency(spn, agt):
@@ -478,7 +521,11 @@ async def test_rapid_fire_idempotency(spn, agt):
     if len(set(receipt_ids)) == 1 and receipt_ids:
         print(f"  All returned same receipt: ✅ {receipt_ids[0]}")
     else:
-        print(f"  Receipt IDs varied: {set(receipt_ids)}")
+        print(f"  Receipt IDs varied: ❌ {set(receipt_ids)}")
+    require(
+        receipt_ids and len(set(receipt_ids)) == 1,
+        f"50 same-key calls must share one receipt, got {set(receipt_ids)}",
+    )
 
 
 async def test_permit_reuse_after_replay(spn, agt):
@@ -520,7 +567,10 @@ async def test_permit_reuse_after_replay(spn, agt):
     # Check spent
     p = await req("GET", f"/v1/permits/{pid}")
     spent = p.json()["spent_credits"]
-    print(f"  24 calls, spent_credits={spent}: {'✅' if spent == '48.0' else '❌'}")
+    # Compare as a number: the API serializes Decimals with fixed precision.
+    spent_ok = Decimal(str(spent)) == Decimal("48")
+    print(f"  24 calls, spent_credits={spent}: {'✅' if spent_ok else '❌'}")
+    require(spent_ok, f"24 calls at 2 credits must spend 48, got {spent}")
 
     # One more should work
     r = await req(
@@ -598,25 +648,31 @@ async def main(argv: list[str] | None = None) -> int:
     print(f"Time: {datetime.now().isoformat()}")
     print("=" * 60)
 
-    # Setup
-    print("\n[SETUP] Creating wallets...")
-    spn, agt = await setup_wallets()
-    print(f"  Sponsor: {spn}")
-    print(f"  Agent: {agt}")
+    try:
+        # Setup
+        print("\n[SETUP] Creating wallets...")
+        spn, agt = await setup_wallets()
+        print(f"  Sponsor: {spn}")
+        print(f"  Agent: {agt}")
 
-    # Run all stress tests
-    await test_budget_exhaustion(spn, agt)
-    await test_expired_permit(spn, agt)
-    await test_concurrent_permit_creation(spn, agt)
-    await test_concurrent_governed_invokes(spn, agt)
-    await test_unicode_payload(spn, agt)
-    await test_tampered_permit(spn, agt)
-    await test_cross_wallet_access(spn, agt)
-    await test_timezone_extremes(spn, agt)
-    await test_decimal_precision(spn, agt)
-    await test_rapid_fire_idempotency(spn, agt)
-    await test_permit_reuse_after_replay(spn, agt)
-    await test_health_under_load()
+        # Run all stress tests
+        await test_budget_exhaustion(spn, agt)
+        await test_expired_permit(spn, agt)
+        await test_concurrent_permit_creation(spn, agt)
+        await test_concurrent_governed_invokes(spn, agt)
+        await test_unicode_payload(spn, agt)
+        await test_tampered_permit(spn, agt)
+        await test_cross_wallet_access(spn, agt)
+        await test_timezone_extremes(spn, agt)
+        await test_decimal_precision(spn, agt)
+        await test_rapid_fire_idempotency(spn, agt)
+        await test_permit_reuse_after_replay(spn, agt)
+        await test_health_under_load()
+    except AssertionError as exc:
+        print("\n" + "=" * 60)
+        print(f"STRESS TEST FAILED ❌: {exc}")
+        print("=" * 60)
+        return 1
 
     print("\n" + "=" * 60)
     print("ALL STRESS TESTS PASSED ✅")

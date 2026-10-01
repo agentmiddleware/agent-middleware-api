@@ -480,9 +480,19 @@ async def test_quote_read_is_wallet_scoped(client, clean_database, registered_to
         await _quote(client, agent["agent_headers"], agent["agent_wallet_id"])
     ).json()["quote_id"]
 
-    assert (
-        await client.get(f"/v1/quotes/{quote_id}", headers=stranger["agent_headers"])
-    ).status_code == 403
+    # A quote the caller may not read is indistinguishable from one that does
+    # not exist: a 403 here confirmed the id was real and its body named the
+    # owner's wallet_id.
+    foreign = await client.get(
+        f"/v1/quotes/{quote_id}", headers=stranger["agent_headers"]
+    )
+    missing = await client.get(
+        "/v1/quotes/quote-0000000000000000", headers=stranger["agent_headers"]
+    )
+    assert foreign.status_code == 404, foreign.text
+    assert foreign.json() == missing.json() == {"detail": "quote_not_found"}
+    assert agent["agent_wallet_id"] not in foreign.text
+    assert agent["sponsor_wallet_id"] not in foreign.text
     assert (
         await client.get(f"/v1/quotes/{quote_id}", headers=agent["agent_headers"])
     ).status_code == 200

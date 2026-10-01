@@ -10,9 +10,20 @@ without changing their human-facing UI.
 import argparse
 import inspect
 import json
-import re
 from pathlib import Path
 from typing import Any
+
+
+def _path_matches(path: str, pattern: str) -> bool:
+    """Match a route path against an action_map pattern.
+
+    ``"/"`` matches only the root. Any other pattern must be the path's final
+    segment(s), so ``/api/cart/add`` matches ``/cart/add`` while ``/format``
+    does not match ``/form`` and ``/research`` does not match ``/search``.
+    """
+    if pattern == "/":
+        return path == "/"
+    return path.rstrip("/").endswith(pattern)
 
 
 class ManifestGenerator:
@@ -95,7 +106,7 @@ class ManifestGenerator:
         }
 
         for (method, pattern), (action, desc) in action_map.items():
-            if method in methods and re.search(pattern.replace("/", r"\\/"), path):
+            if method in methods and _path_matches(path, pattern):
                 return {
                     "awi_action": action,
                     "route": path,

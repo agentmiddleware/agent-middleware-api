@@ -18,8 +18,8 @@ This module works with NEITHER framework installed: the generic
 :func:`as_langgraph_tool` imports ``langchain_core`` — inside the function,
 following the pattern in ``framework_integrations/tools.py``. Unlike the
 legacy ``get_langgraph_tools`` factory in that module (which wraps six
-hardcoded ungoverned helpers and calls async methods without ``await``),
-these wrappers are async end-to-end and go through permits and receipts.
+hardcoded ungoverned helpers with no permit or receipt), these wrappers go
+through permits and receipts.
 """
 
 from __future__ import annotations

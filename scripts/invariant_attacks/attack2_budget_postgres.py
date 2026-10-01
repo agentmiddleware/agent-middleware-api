@@ -4,6 +4,8 @@ overspends, the root cause is confirmed: SELECT ... FOR UPDATE is a no-op on
 SQLite but a real row lock on Postgres."""
 import os
 import json
+import sys
+
 import attacklib as A
 A.API = os.environ.get("API_URL", "http://127.0.0.1:8001")  # PG-backed instance
 
@@ -25,5 +27,20 @@ def race(cap, N, label):
             "cap_allows": cap // 2, "denied_budget": denied, "other": other,
             "total_debited": debited, "OVERSPENT": debited > cap}
 
-for label, cap, N in [("A_cap7_N10", 7, 10), ("B_cap2_N5", 2, 5), ("C_cap6_N8", 6, 8)]:
-    print(json.dumps(race(cap, N, label)))
+def main():
+    rows = [race(cap, N, label)
+            for label, cap, N in [("A_cap7_N10", 7, 10), ("B_cap2_N5", 2, 5), ("C_cap6_N8", 6, 8)]]
+    # HELD needs every race to stay within its cap AND to have actually filled
+    # it: a race whose calls all failed for some other reason debits nothing,
+    # so "not overspent" alone would pass vacuously.
+    held = all(not r["OVERSPENT"] and r["successes"] == r["cap_allows"] and r["other"] == 0
+               for r in rows)
+    verdict = "HELD" if held else "BROKE"
+    evidence = {"attack": "2 - budget overspend (postgres)", "verdict": verdict, "races": rows}
+    print(json.dumps(evidence, indent=2, default=str))
+    with open("evidence_attack2_postgres.json", "w") as fh:
+        json.dump(evidence, fh, indent=2, default=str)
+    return A.verdict_exit_code(verdict)
+
+if __name__ == "__main__":
+    sys.exit(main())

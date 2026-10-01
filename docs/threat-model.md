@@ -4,6 +4,31 @@ This threat model covers the production-beta surface of Agent Middleware API:
 authentication, wallet billing, MCP/tool invocation, telemetry, IoT bridging,
 and sandboxed execution.
 
+## Scope
+
+"Current Controls" below describe the routers a production-posture boot
+mounts, chiefly `CORE_TRUST_ROUTERS` in `app/main.py`. The telemetry, IoT,
+sandbox, media, comms, protocol, factory, broadcast, RTaaS, AI, and AWI
+routers, among others, are `PROOF_SURFACE_ROUTERS` — frozen scaffolding
+mounted only with `ENABLE_PROOF_SURFACES=true`, which production-like boots
+refuse (`app/core/trust_mode.py`). Those controls are not claimed for them,
+and known gaps remain there, for example:
+
+- Several proof-surface handlers carry only the router-level API-key check,
+  with no per-resource wallet ownership check — e.g. `DELETE
+  /v1/iot/devices/{device_id}` and `POST
+  /v1/telemetry/anomalies/{anomaly_id}/auto-pr`.
+- `GET /v1/sandbox/environments` and `GET /v1/sandbox/environments/{env_id}`
+  are unauthenticated.
+- The outbound-URL guard (`app/core/url_guard.py`) that screens agent-supplied
+  URLs for the AWI browser bridge and the behavioral sandbox proxy skips its
+  loopback/RFC1918/link-local checks under `ALLOW_PRIVATE_NETWORK_TARGETS=true`;
+  production-like boots refuse that flag.
+
+See [PROOF_SURFACES.md](PROOF_SURFACES.md) for the freeze list and
+[SECURITY_LIMITATIONS.md](../SECURITY_LIMITATIONS.md) for the production
+boot refusals and the "Rate Limit Posture" section.
+
 ## Security Objectives
 
 - Prevent unauthenticated access to state-changing or execution endpoints.
@@ -43,11 +68,14 @@ and sandboxed execution.
 ## Current Controls
 
 - API-key dependency protects normal authenticated routes.
-- Env keys act as bootstrap/admin credentials.
-- DB-created keys authenticate at runtime and can be revoked or expired.
+- Env keys act as bootstrap/admin credentials and are compared with
+  `hmac.compare_digest`.
+- DB-created keys are stored as SHA-256 hashes, compared constant-time
+  (`APIKeyService.validate_key`), and can be revoked or expired.
 - Wallet-scoped auth context enforces exact wallet ownership for DB keys.
 - API-key management requires bootstrap/admin or exact wallet access.
-- Behavioral sandbox routes require authentication.
+- Behavioral sandbox routes (`/v1/sandbox/behavioral`, a proof surface)
+  require authentication.
 - MCP invoke uses shared auth context and checks wallet access.
 - Governed MCP invoke validates signed permits and idempotency before billing.
 - Signed receipts bind governed MCP attempts to permit, ledger, and audit IDs.
@@ -169,5 +197,6 @@ Required controls:
 - Add structured audit events for every auth decision on sensitive routes.
 - Add admin-only audit export endpoints.
 - Replace subprocess sandbox execution with a hardened isolation provider.
-- Add a route inventory test that fails if a state-changing route lacks auth.
+- Extend `tests/test_route_auth_inventory.py` beyond the `/v1/permits`,
+  `/v1/receipts`, `/v1/audit`, and `/mcp` prefixes it checks today.
 - Add ownership tests whenever new wallet-bound resources are introduced.

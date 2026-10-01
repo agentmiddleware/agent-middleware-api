@@ -60,6 +60,8 @@ class GenerationResult:
     oracle_registration_id: str | None = None
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     warnings: list[str] = field(default_factory=list)
+    # Wallet that submitted the source; None for a bootstrap-admin caller.
+    owner_wallet_id: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -312,6 +314,7 @@ class ProtocolEngine:
         base_url: str = "https://api.example.com",
         register_in_oracle: bool = False,
         oracle_instance=None,
+        owner_wallet_id: str | None = None,
     ) -> GenerationResult:
         """Run the full code-to-discovery pipeline."""
         gen_id = f"gen-{uuid.uuid4().hex[:12]}"
@@ -353,7 +356,11 @@ class ProtocolEngine:
         if register_in_oracle and oracle_instance:
             try:
                 crawl_result = await oracle_instance.crawl(base_url)
-                registration_id = crawl_result.get("api_id")
+                # crawl() returns an IndexedAPI model (or None), not a dict.
+                if crawl_result is None:
+                    warnings.append("Oracle registration failed: service not indexed")
+                else:
+                    registration_id = crawl_result.api_id
             except Exception as e:
                 warnings.append(f"Oracle registration failed: {str(e)}")
 
@@ -367,6 +374,7 @@ class ProtocolEngine:
             agent_json=agent_json,
             oracle_registration_id=registration_id,
             warnings=warnings,
+            owner_wallet_id=owner_wallet_id,
         )
 
         self._generations[gen_id] = result

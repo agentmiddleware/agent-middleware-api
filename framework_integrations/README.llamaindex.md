@@ -35,9 +35,12 @@ tools = get_llamaindex_tools(client)
 # Create agent
 agent = ReActAgent.from_tools(tools, llm=llm, verbose=True)
 
-# Use the agent
-result = agent.chat("Check my balance and emit a telemetry event")
+# Use the agent (the tools are async: B2AClient is an async client)
+result = await agent.achat("Check my balance and emit a telemetry event")
 ```
+
+Each tool is a `FunctionTool` built from an async function, so `acall` awaits
+the request in your event loop. Prefer the async agent entry points.
 
 ## Available Tools
 
@@ -63,7 +66,7 @@ agent = ReActAgent.from_tools(
     system_prompt="You are a data processing agent. Use tools to handle data."
 )
 
-result = agent.chat("Process the uploaded dataset")
+result = await agent.achat("Process the uploaded dataset")
 ```
 
 ## Example: Query Engine with Tools
@@ -76,5 +79,5 @@ from llama_index.core.agent import FnRetriever
 tools = get_llamaindex_tools(client)
 
 agent = ReActAgent.from_tools(tools, llm=llm)
-result = agent.chat("Find documents and summarize them")
+result = await agent.achat("Find documents and summarize them")
 ```

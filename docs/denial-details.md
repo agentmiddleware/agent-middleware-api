@@ -98,6 +98,7 @@ adjacent `details.field` value identifies the rejected field.
 | `human_approval_required` | An active wallet policy demands a human decision and the invoke's permit has no approval gate to provide one. | Invoke under a permit minted with `requires_human_approval` (the standard `/mcp` surface mints one automatically when policy demands it), or have an administrator revise the policy. A gated permit satisfies only this constraint — the policy's other limits still apply. |
 | `tool_not_allowed` | A wallet policy excludes the requested tool. | Use a policy-allowed tool or update the policy allowlist. |
 | `service_category_not_allowed` | A wallet policy excludes the tool's service category. | Use an allowed category or update the category allowlist. |
+| `policy_constraint_corrupt` | A wallet policy's allow-list column is not a JSON array of strings, so the policy cannot be applied. | Have an administrator repair or recreate the policy bundle; the action stays denied until then. |
 | `max_cost_per_action_exceeded` | The quoted action cost exceeds the wallet policy's per-action limit. | Lower the action cost or raise the policy limit. |
 | `daily_spend_limit_exceeded` | Current daily spend plus this action exceeds the wallet policy limit. | Wait for the policy window to reset or have an administrator change the limit. |
 | `real_effects_required` | The policy forbids a simulated execution path. | Use a real-effects tool configuration or revise the policy. |

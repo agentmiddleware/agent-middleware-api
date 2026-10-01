@@ -57,25 +57,89 @@ def test_ci_registers_second_tool_and_passes_it_to_constant_test():
     )
 
 
-def test_constant_test_loop_accepts_other_tool_flag():
-    """The script must accept --other-tool and use it for the denial check."""
-    # Import the script to verify the argument is defined
+def _load_constant_test_loop():
     import importlib.util
-    
+
     spec = importlib.util.spec_from_file_location(
         "constant_test_loop", CONSTANT_TEST_SCRIPT
     )
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    
-    # Verify the CLI parser includes --other-tool
-    import inspect
-    source = inspect.getsource(module)
-    assert "--other-tool" in source, "CLI must accept --other-tool flag"
-    assert "CI_SMOKE_OTHER_TOOL" in source, (
-        "Script must support CI_SMOKE_OTHER_TOOL environment variable"
+    return module
+
+
+def _run_main_capturing(monkeypatch, argv: list[str]) -> tuple[int, dict]:
+    """Run the script's CLI entry point with the network loop stubbed out.
+
+    Returns the exit code and the keyword arguments ``run_constant_test``
+    received, so the test sees what the parsed CLI actually forwards to the
+    denial check rather than what the source text happens to contain.
+    """
+    module = _load_constant_test_loop()
+    captured: dict = {}
+
+    def _fake_run_constant_test(api_url, agent_key, wallet_id, key_id, **kwargs):
+        captured.update(kwargs, api_url=api_url)
+
+    monkeypatch.setattr(module, "run_constant_test", _fake_run_constant_test)
+    monkeypatch.setattr(module, "_get_agent_key", lambda: ("", "", ""))
+    return module.main(argv), captured
+
+
+@pytest.fixture
+def clean_smoke_env(monkeypatch):
+    """Keep ambient CI_SMOKE_* / API_URL settings from leaking into the CLI."""
+    for name in (
+        "API_URL",
+        "CI_SMOKE_TOOL",
+        "CI_SMOKE_OTHER_TOOL",
+        "CI_SMOKE_TOOL_ARGS",
+        "CI_SMOKE_AGENT_KEY",
+        "CI_SMOKE_WALLET_ID",
+        "CI_SMOKE_KEY_ID",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_constant_test_loop_forwards_other_tool_flag(monkeypatch, clean_smoke_env):
+    """--other-tool must reach the denial check as the pinned companion tool."""
+    code, captured = _run_main_capturing(
+        monkeypatch,
+        [
+            "--api-url",
+            "http://127.0.0.1:8000",
+            "--other-tool",
+            "partner.notes.count",
+            "--tool-args",
+            "{}",
+        ],
     )
+    assert code == 0
+    assert captured["api_url"] == "http://127.0.0.1:8000"
+    assert captured["pinned_other_tool"] == "partner.notes.count"
+    assert captured["tool_arguments"] == {}
+
+
+def test_constant_test_loop_reads_other_tool_from_env(monkeypatch, clean_smoke_env):
+    """$CI_SMOKE_OTHER_TOOL must pin the companion tool when the flag is absent."""
+    monkeypatch.setenv("CI_SMOKE_OTHER_TOOL", "partner.notes.count")
+    code, captured = _run_main_capturing(
+        monkeypatch, ["--api-url", "http://127.0.0.1:8000"]
+    )
+    assert code == 0
+    assert captured["pinned_other_tool"] == "partner.notes.count"
+
+
+def test_constant_test_loop_without_other_tool_leaves_it_unpinned(
+    monkeypatch, clean_smoke_env
+):
+    """With neither flag nor env, the loop picks its own companion tool."""
+    code, captured = _run_main_capturing(
+        monkeypatch, ["--api-url", "http://127.0.0.1:8000"]
+    )
+    assert code == 0
+    assert captured["pinned_other_tool"] is None
 
 
 def test_second_tool_is_distinct_from_first():

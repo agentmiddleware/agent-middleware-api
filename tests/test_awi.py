@@ -897,10 +897,21 @@ class TestAWIRouter:
             unchanged_session = await client.get(
                 f"/v1/awi/sessions/{other_session_id}", headers=HEADERS
             )
+            unknown_session = await client.get(
+                "/v1/awi/sessions/awi-000000000000", headers=db_headers
+            )
 
-            assert blocked_get.status_code == 403
-            assert blocked_execute.status_code == 403
-            assert blocked_intervene.status_code == 403
+            # Another wallet's session is indistinguishable from a missing
+            # one: same 404, and the owning wallet id is never disclosed.
+            assert unknown_session.status_code == 404
+            for blocked in (blocked_get, blocked_execute, blocked_intervene):
+                assert blocked.status_code == 404, blocked.text
+                assert blocked.json()["detail"] == {
+                    "error": "not_found",
+                    "message": f"Session {other_session_id} not found",
+                }
+                assert "wallet_id" not in blocked.json()["detail"]
+                assert wallet_b not in blocked.text
             assert unchanged_session.status_code == 200
             assert unchanged_session.json()["status"] == "created"
 

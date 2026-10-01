@@ -7,20 +7,56 @@ limiter. Auth-gated paths are counted. Discovery/docs/health are exempt.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import time
 
 import pytest
+from fastapi import Depends, FastAPI, HTTPException
 from httpx import ASGITransport, AsyncClient
 from starlette.applications import Starlette
+from starlette.requests import Request
 from starlette.responses import PlainTextResponse
 from starlette.routing import Route
 
-from app.core.auth import CREDENTIAL_REJECTED_HEADER
+from app.core.auth import CREDENTIAL_REJECTED_HEADER, AuthContext, get_auth_context
+from app.core.config import get_settings
 from app.core.rate_limiter import (
     _MEMORY_BUCKET_SWEEP_THRESHOLD,
     RateLimitMiddleware,
     rate_limit_discovery,
 )
+
+
+@pytest.fixture
+def accepted_keys(monkeypatch):
+    """Env keys the real auth dependency accepts, one per simulated caller."""
+    keys = [f"accepted-key-{index:03d}" for index in range(64)]
+    monkeypatch.setenv("VALID_API_KEYS", ",".join(keys))
+    get_settings.cache_clear()
+    try:
+        yield keys
+    finally:
+        get_settings.cache_clear()
+
+
+def _governed_app() -> FastAPI:
+    """Routes behind the real auth dependency, and routes with none at all."""
+    api = FastAPI()
+
+    @api.get("/v1/wallets")
+    async def _wallets(auth: AuthContext = Depends(get_auth_context)):
+        return {"source": auth.source}
+
+    @api.get("/v1/wallets/denied")
+    async def _denied(auth: AuthContext = Depends(get_auth_context)):
+        # Authenticated, then refused on scope — the governed-loop denial.
+        raise HTTPException(status_code=403, detail={"error": "insufficient_scope"})
+
+    @api.get("/v1/discover")
+    async def _discover():
+        return {"public": True}
+
+    return api
 
 
 def test_discovery_payload_matches_the_documented_120_default(monkeypatch) -> None:
@@ -145,14 +181,17 @@ async def test_rotating_invalid_keys_share_one_bounded_budget() -> None:
 
 
 @pytest.mark.anyio
-async def test_accepted_credentials_never_touch_the_shared_bucket() -> None:
-    """The shared bucket bounds rejected credentials only, not real traffic."""
+async def test_accepted_credentials_never_touch_the_shared_bucket(
+    accepted_keys,
+) -> None:
+    """The shared bucket bounds unaccepted credentials only, not real traffic.
 
-    async def ok(_request):
-        return PlainTextResponse("ok")
+    Acceptance is what the auth dependency says, not what the status code
+    implies: these keys go through the real ``get_auth_context``.
+    """
 
-    starlette_app = Starlette(routes=[Route("/v1/wallets", ok)])
-    limited = RateLimitMiddleware(starlette_app, requests_per_minute=2)
+    limited = RateLimitMiddleware(_governed_app(), requests_per_minute=2)
+    assert limited.preauth_limit + 5 <= len(accepted_keys)
 
     transport = ASGITransport(app=limited)
     async with AsyncClient(transport=transport, base_url="http://test") as http:
@@ -160,7 +199,7 @@ async def test_accepted_credentials_never_touch_the_shared_bucket() -> None:
             (
                 await http.get(
                     "/v1/wallets",
-                    headers={"X-API-Key": f"accepted-key-{index}"},
+                    headers={"X-API-Key": accepted_keys[index]},
                 )
             ).status_code
             for index in range(limited.preauth_limit + 5)
@@ -229,7 +268,7 @@ async def test_rejected_credential_403_is_charged() -> None:
 
 
 @pytest.mark.anyio
-async def test_authorization_403_is_not_charged() -> None:
+async def test_authorization_403_is_not_charged(accepted_keys) -> None:
     """A denial is ordinary governed traffic, not a credential rejection.
 
     An authenticated caller refused on scope (``wallet_access_denied``,
@@ -237,23 +276,211 @@ async def test_authorization_403_is_not_charged() -> None:
     the shared abuse budget that co-located callers depend on.
     """
 
-    async def denied_on_scope(_request):
-        return PlainTextResponse("denied", status_code=403)
-
-    starlette_app = Starlette(routes=[Route("/v1/wallets", denied_on_scope)])
-    limited = RateLimitMiddleware(starlette_app, requests_per_minute=2)
+    limited = RateLimitMiddleware(_governed_app(), requests_per_minute=2)
 
     transport = ASGITransport(app=limited)
     async with AsyncClient(transport=transport, base_url="http://test") as http:
         responses = [
             await http.get(
-                "/v1/wallets",
-                headers={"X-API-Key": f"authenticated-key-{index}"},
+                "/v1/wallets/denied",
+                headers={"X-API-Key": accepted_keys[index]},
             )
             for index in range(limited.preauth_limit + 5)
         ]
 
     assert [r.status_code for r in responses] == [403] * len(responses)
+    assert responses[0].json()["detail"]["error"] == "insufficient_scope"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("path", "answered"),
+    [
+        # A public route that never authenticates.
+        ("/v1/discover", 200),
+        # No route at all: nothing runs that could look at the key.
+        ("/v1/no-such-route", 404),
+    ],
+)
+async def test_rotating_keys_where_nothing_authenticates_is_bounded(
+    path, answered
+) -> None:
+    """Inventing an X-API-Key per request must not mint a budget per request.
+
+    The per-key bucket is picked from the header before anything verifies it.
+    On a route that never authenticates nothing ever refuses the key either,
+    so a ceiling that only charged refused credentials let a single client
+    send ``limit`` requests per invented value, without bound. Only an
+    accepted credential hands its shared reservation back.
+    """
+
+    limited = RateLimitMiddleware(_governed_app(), requests_per_minute=2)
+    ceiling = limited.preauth_limit
+
+    transport = ASGITransport(app=limited)
+    async with AsyncClient(transport=transport, base_url="http://test") as http:
+        responses = [
+            await http.get(path, headers={"X-API-Key": f"invented-key-{index}"})
+            for index in range(ceiling + 1)
+        ]
+
+    assert [r.status_code for r in responses[:ceiling]] == [answered] * ceiling
+    assert responses[ceiling].status_code == 429
+    assert "does not reset it" in responses[ceiling].json()["detail"]["message"]
+
+
+@pytest.mark.anyio
+async def test_accepted_key_is_not_charged_for_unauthenticated_neighbours(
+    accepted_keys,
+) -> None:
+    """Accepted traffic interleaved with invented keys keeps its own budget.
+
+    The invented keys spend the client's shared bucket; the accepted key's
+    requests hand theirs back, so they are only ever bounded by its own
+    per-key limit.
+    """
+
+    limited = RateLimitMiddleware(_governed_app(), requests_per_minute=3)
+    ceiling = limited.preauth_limit
+
+    transport = ASGITransport(app=limited)
+    async with AsyncClient(transport=transport, base_url="http://test") as http:
+        accepted = []
+        for index in range(ceiling - 1):
+            invented = await http.get(
+                "/v1/discover", headers={"X-API-Key": f"invented-key-{index}"}
+            )
+            assert invented.status_code == 200
+            if index < 3:
+                accepted.append(
+                    await http.get(
+                        "/v1/wallets", headers={"X-API-Key": accepted_keys[0]}
+                    )
+                )
+        last_invented = await http.get(
+            "/v1/discover", headers={"X-API-Key": "invented-key-last"}
+        )
+        over_budget = await http.get(
+            "/v1/discover", headers={"X-API-Key": "invented-key-over"}
+        )
+
+    assert [r.status_code for r in accepted] == [200, 200, 200]
+    assert last_invented.status_code == 200
+    assert over_budget.status_code == 429
+
+
+class _HandlerBug(Exception):
+    """An unhandled error raised by the app after the limiter let it in."""
+
+
+@pytest.mark.anyio
+async def test_a_request_that_raises_is_held_to_the_same_rule(accepted_keys) -> None:
+    """An unhandled error must not hand an unaccepted request's budget back.
+
+    In the real stack nothing between the routes and the limiter turns an
+    unhandled exception into a response, so it propagates out of
+    ``call_next``. Releasing the reservation on that exit would give a caller
+    who can make a public route fail one free request per invented key.
+    Accepted credentials still hand theirs back, error or not.
+    """
+
+    async def app(scope, receive, send):
+        presented = Request(scope).headers.get("X-API-Key", "")
+        if presented in accepted_keys:
+            await get_auth_context(api_key=presented)
+        raise _HandlerBug("unhandled")
+
+    limited = RateLimitMiddleware(app, requests_per_minute=2)
+    ceiling = limited.preauth_limit
+    assert ceiling + 5 <= len(accepted_keys)
+
+    transport = ASGITransport(app=limited)
+    async with AsyncClient(transport=transport, base_url="http://test") as http:
+        for index in range(ceiling + 5):
+            with pytest.raises(_HandlerBug):
+                await http.get(
+                    "/v1/wallets", headers={"X-API-Key": accepted_keys[index]}
+                )
+        for index in range(ceiling):
+            with pytest.raises(_HandlerBug):
+                await http.get(
+                    "/v1/discover", headers={"X-API-Key": f"invented-key-{index}"}
+                )
+        over_budget = await http.get(
+            "/v1/discover", headers={"X-API-Key": "invented-key-over"}
+        )
+
+    assert over_budget.status_code == 429
+
+
+@pytest.mark.anyio
+async def test_raw_api_key_never_names_a_limiter_bucket() -> None:
+    """Bucket names become Redis key names, so a live key must not be one.
+
+    Anyone who can list the limiter's Redis keys (``KEYS rate_limit:*``)
+    would otherwise read every API key that called in the last minute. A
+    digest still gives each distinct value its own bucket.
+    """
+
+    secret = "b2a_live-secret-that-must-never-reach-redis"
+    seen: list[str] = []
+
+    class _RecordingRedis:
+        def __init__(self) -> None:
+            self.counts: dict[str, int] = {}
+
+        async def incr(self, key: str) -> int:
+            seen.append(key)
+            self.counts[key] = self.counts.get(key, 0) + 1
+            return self.counts[key]
+
+        async def expire(self, key: str, _seconds: int) -> bool:
+            return True
+
+        async def decr(self, key: str) -> int:
+            self.counts[key] = self.counts.get(key, 0) - 1
+            return self.counts[key]
+
+        async def delete(self, key: str) -> int:
+            self.counts.pop(key, None)
+            return 1
+
+    fake = _RecordingRedis()
+
+    async def _fake_redis():
+        return fake
+
+    async def ok(_request):
+        return PlainTextResponse("ok")
+
+    app = Starlette(routes=[Route("/v1/wallets", ok)])
+    shared = RateLimitMiddleware(app, requests_per_minute=2)
+    shared._get_redis = _fake_redis  # type: ignore[method-assign]
+    in_memory = RateLimitMiddleware(app, requests_per_minute=2)
+    in_memory._redis_url = ""
+
+    for limited in (shared, in_memory):
+        transport = ASGITransport(app=limited)
+        async with AsyncClient(transport=transport, base_url="http://test") as http:
+            statuses = [
+                (
+                    await http.get("/v1/wallets", headers={"X-API-Key": secret})
+                ).status_code
+                for _ in range(3)
+            ]
+            other = await http.get(
+                "/v1/wallets", headers={"X-API-Key": f"{secret}-other"}
+            )
+        # Still one bucket per distinct key value.
+        assert statuses == [200, 200, 429]
+        assert other.status_code == 200
+
+    assert seen
+    assert not any(secret in key for key in seen)
+    assert not any(secret in key for key in in_memory._requests)
+    # Nor the key table's own lookup hash for that key.
+    key_hash = hashlib.sha256(secret.encode()).hexdigest()
+    assert not any(key_hash in key for key in seen)
 
 
 @pytest.mark.anyio
