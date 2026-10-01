@@ -130,8 +130,11 @@ repo; do not Redeploy from GitHub source).
 - Production-like boots also refuse `DEBUG=true`, `WEBAUTHN_ALLOW_MOCK=true`,
   `ENABLE_PROOF_SURFACES=true`, `ENABLE_PUBLIC_MCP_ENDPOINT=true`,
   `ALLOW_PRIVATE_NETWORK_TARGETS=true` (it disables the outbound-URL guard's
-  private-address checks), `ALLOW_UNSAFE_HOST_PYTHON_SANDBOX=true`, and a
-  host `BEHAVIORAL_SANDBOX_PYTHON_BACKEND` (`unsafe_host`/`host`). Set
+  private-address checks), `ALLOW_UNSAFE_HOST_PYTHON_SANDBOX=true`, a
+  host `BEHAVIORAL_SANDBOX_PYTHON_BACKEND` (`unsafe_host`/`host`), and the
+  local/CI dogfood tools `ENABLE_DOGFOOD_TOOL=true` /
+  `ENABLE_DOGFOOD_SECOND_TOOL=true` (they register executable `partner.*`
+  tools on the core MCP path). Set
   `ENABLE_PROOF_SURFACES=false` so only core trust routers and MCP are mounted.
   Leave proof surfaces frozen unless a partner demo explicitly needs them.
   Anonymous MCP (`POST /mcp/public`) is local-only; receipt verification stays
@@ -207,26 +210,40 @@ missing control.
   in-memory fallback counts a rolling 60 seconds and is strictly tighter; it is
   never reached in a production-like environment, which fails closed instead.
   `rate_limits.window_accounting` in discovery names this difference.
-- **Authenticated:** one bucket per `X-API-Key` value.
+- **Authenticated:** one bucket per `X-API-Key` value. The bucket is named by
+  a domain-separated SHA-256 digest of the value, never the key itself, so the
+  limiter's Redis key names hold neither live API keys nor the `key_hash` the
+  key table stores for them.
 - **No key:** one shared `anonymous` bucket for the whole deployment.
-- **Rejected credentials:** the per-key bucket is selected from a
+- **Unaccepted credentials:** the per-key bucket is selected from a
   caller-supplied header before the key has been verified, so every request
-  whose credentials the app refuses is additionally charged to one shared
-  per-client bucket at ten times the per-key limit. Rotating a fresh invalid
+  whose credentials the app does not accept is additionally charged to one
+  shared per-client bucket at ten times the per-key limit. Rotating a fresh
   `X-API-Key` per request therefore buys no extra budget; the client is bounded
   by that bucket no matter how many key values it invents.
+  - **Not accepted, rather than refused.** A route that never authenticates
+    — public discovery, `/health/dependencies`, a `404` — never refuses an
+    invented key either, so a ceiling charged only on refusal left those
+    routes with a fresh budget per invented value. The reservation is handed
+    back only when the auth dependency (`get_auth_context`) accepted the
+    credentials during the request; every other request that ran keeps it,
+    including one that raised on its way through. That includes a valid key
+    sent to a public route, which is harmless: one key value hits its own
+    per-key limit, a tenth of this bucket, first.
   - **Refused means `401` *or* `403`.** An unknown but well-formed key — what
     a rotating caller actually sends — is answered `403 invalid_api_key`, not
-    `401`, so counting only `401`s would miss the vector entirely.
+    `401`; both are charged even if another credential on the same request
+    was accepted.
   - **A denial is not a refusal.** An authenticated caller denied on scope
     (`wallet_access_denied`, `insufficient_scope`, an IGA decision) is
     ordinary governed-loop traffic and is never charged here. The two are told
-    apart by an internal marker the auth layer sets, stripped before the
-    response leaves the innermost middleware.
-  - **The budget is reserved before the request runs**, and handed back unless
-    the credentials were refused. Reading the bucket and charging it after the
-    response would let every request already in flight pass the same read, so
-    the ceiling would only bound callers who arrive one request at a time.
+    apart by the auth layer itself: it records the acceptance, and marks a
+    refusal with an internal header stripped before the response leaves the
+    innermost middleware.
+  - **The budget is reserved before the request runs**, and handed back only
+    if the credentials were accepted. Reading the bucket and charging it after
+    the response would let every request already in flight pass the same read,
+    so the ceiling would only bound callers who arrive one request at a time.
   - A request whose credentials the app accepts leaves the bucket exactly as
     it found it. Client identity is the ingress peer address (Railway's
     `X-Real-IP` only where the platform marker is present, per the public-MCP

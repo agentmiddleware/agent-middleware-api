@@ -131,6 +131,11 @@ class JWTService:
                 algorithms=[JWT_ALGORITHM],
                 issuer=JWT_ISSUER,
                 audience=JWT_AUDIENCE,
+                # PyJWT checks exp only when it is present, so a signed token
+                # without one would never expire; the rest are read below and
+                # would otherwise surface as a KeyError, not a refused token.
+                # Every token this service mints carries all of them.
+                options={"require": ["exp", "iat", "iss", "aud", "sub", "jti"]},
             )
         except jwt.ExpiredSignatureError:
             raise JWTError("token_expired")

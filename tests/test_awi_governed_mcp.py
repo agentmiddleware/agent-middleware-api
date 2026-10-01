@@ -6,7 +6,9 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
+from app.services import awi_rag_engine as awi_rag_engine_module
 from app.services import mcp_phase9_tools
+from app.services.awi_rag_engine import AWIRAGEngine
 from app.services.mcp_phase9_tools import (
     ALWAYS_GOVERNED_AWI_TOOLS,
     MCP_PHASE9_TOOLS,
@@ -126,3 +128,83 @@ async def test_awi_rag_query_succeeds_with_permit_and_receipt(client, clean_data
     assert receipt["permit_id"] == permit["permit_id"]
     assert receipt["outcome"] == "success"
     assert receipt["ledger_entry_id"]
+
+
+@pytest.mark.proof
+@pytest.mark.anyio
+async def test_awi_rag_query_never_returns_another_tenants_memory(
+    client, clean_database, monkeypatch
+):
+    """The MCP dispatch carries no caller wallet into the tool, so the tool
+    must not search the shared memory store: it points at the wallet-scoped
+    HTTP route instead, like its sibling AWI wrappers."""
+    engine = AWIRAGEngine(embedding_model="mock-embedding")
+    monkeypatch.setattr(awi_rag_engine_module, "_rag_engine", engine)
+
+    caller = await provision_agent_wallet(client)
+    victim = await provision_agent_wallet(client)
+    victim_session = await client.post(
+        "/v1/awi/sessions",
+        json={
+            "target_url": "https://example.com",
+            "wallet_id": victim["agent_wallet_id"],
+        },
+        headers=victim["agent_headers"],
+    )
+    assert victim_session.status_code == 201, victim_session.text
+    victim_session_id = victim_session.json()["session_id"]
+    victim_memory = await engine.index_session(
+        session_id=victim_session_id,
+        session_type="shopping",
+        action_history=[
+            {"action": "add_to_cart", "parameters": {"product": "victim-widget"}}
+        ],
+        state_snapshots=[],
+    )
+    stored = engine._memories[victim_memory]
+    # A query identical to the memory's embedding text scores 1.0, so an
+    # unscoped search could not miss it.
+    query = engine._prepare_embedding_text(
+        stored.session_type,
+        stored.action_sequence,
+        stored.page_summaries,
+        stored.key_entities,
+        stored.user_intent,
+    )
+
+    permit = await create_tool_permit(
+        client,
+        wallet_id=caller["agent_wallet_id"],
+        key_id=caller["key_id"],
+        tool_name="awi_rag_query",
+        max_credits=50,
+        idem_key="permit-awi-rag-isolation",
+    )
+    resp = await client.post(
+        "/mcp/messages",
+        json={
+            "jsonrpc": "2.0",
+            "id": "rag-isolation",
+            "method": "tools/call",
+            "params": {
+                "name": "awi_rag_query",
+                "arguments": {"query": query, "top_k": 5},
+                "mcpContext": {
+                    "wallet_id": caller["agent_wallet_id"],
+                    "permit_id": permit["permit_id"],
+                    "idempotency_key": "awi-rag-isolation-1",
+                },
+            },
+        },
+        headers=caller["agent_headers"],
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "error" not in body, body
+    assert body["result"]["receipt"]["outcome"] == "success"
+    assert victim_memory not in resp.text
+    assert victim_session_id not in resp.text
+    assert victim["agent_wallet_id"] not in resp.text
+    assert "/v1/awi/rag/query" in resp.text
+    assert stored.access_count == 0

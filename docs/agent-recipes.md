@@ -4,6 +4,15 @@
 > the supported one-tool MCP pilot and may refer to unmounted or simulated
 > routes. Do not use this page for product evaluation or integration; start with
 > the [documentation guide](README.md).
+>
+> Agent comms, AI decide/heal, telemetry, and AWI sessions are frozen proof
+> surfaces, not the product wedge (see [WEDGE.md](../WEDGE.md)). Their routers
+> mount only with `ENABLE_PROOF_SURFACES=true`, which production-like deploys
+> refuse at boot, so these routes do not exist on a production instance. See
+> [PROOF_SURFACES.md](PROOF_SURFACES.md). The snippets are also illustrative
+> pseudocode: most `client.*` calls shown (for example `decide`, `heal`,
+> `emit_telemetry`, `send_message`, `register_service`, `set_memory`) are not
+> methods of `b2a_sdk.AgentMiddlewareClient`.
 
 Practical examples for building autonomous agents with the Agent Middleware API.
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
@@ -16,10 +17,11 @@ from typing import Any
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import func, select
 
 from app.core.config import get_settings
 from app.db.database import get_session_factory
-from app.db.models import PermitModel, ReceiptModel
+from app.db.models import LedgerEntryModel, PermitModel, ReceiptModel, WalletModel
 from app.main import app
 from app.schemas.billing import ServiceCategory
 from app.services.receipts import get_receipt_service
@@ -123,6 +125,45 @@ async def _verify_receipt_outcome(
         f"Expected charge {expected_charge}, got {receipt.credits_charged}"
     )
     return receipt
+
+
+async def _ledger_snapshot(*wallet_ids: str) -> dict[str, tuple[int, Decimal]]:
+    """Ledger entry count and balance per wallet, to prove a denial moved nothing."""
+    factory = get_session_factory()
+    snapshot: dict[str, tuple[int, Decimal]] = {}
+    async with factory() as session:
+        for wallet_id in wallet_ids:
+            entries = (
+                await session.execute(
+                    select(func.count())
+                    .select_from(LedgerEntryModel)
+                    .where(LedgerEntryModel.wallet_id == wallet_id)
+                )
+            ).scalar_one()
+            wallet = await session.get(WalletModel, wallet_id)
+            assert wallet is not None
+            snapshot[wallet_id] = (int(entries), wallet.balance)
+    return snapshot
+
+
+async def _assert_no_economic_effect(
+    permit_id: str, ledger_before: dict[str, tuple[int, Decimal]]
+) -> None:
+    """No ledger entry, no balance change, no permit spend, no receipt."""
+    assert await _ledger_snapshot(*ledger_before) == ledger_before
+    factory = get_session_factory()
+    async with factory() as session:
+        permit = await session.get(PermitModel, permit_id)
+        assert permit is not None
+        assert permit.spent_credits == Decimal("0")
+        receipts = (
+            await session.execute(
+                select(func.count())
+                .select_from(ReceiptModel)
+                .where(ReceiptModel.permit_id == permit_id)
+            )
+        ).scalar_one()
+        assert receipts == 0
 
 
 # ─── Track 1: Forged Signatures ──────────────────────────────────────────────
@@ -290,6 +331,9 @@ async def test_agent_b_key_with_agent_a_permit_denied(client, clean_database):
         permit_a = await _create_permit(
             client, provisioned_a["agent_wallet_id"], provisioned_a["key_id"], tool_name
         )
+        ledger_before = await _ledger_snapshot(
+            provisioned_a["agent_wallet_id"], provisioned_b["agent_wallet_id"]
+        )
 
         # Invoke with B's headers but A's permit
         r = await _invoke(
@@ -304,14 +348,15 @@ async def test_agent_b_key_with_agent_a_permit_denied(client, clean_database):
         body = r.json()
         assert "error" in body
         assert body["error"]["code"] == -32003
-
-        # Receipt may not be present if auth layer denies before trust plane
-        receipt = body.get("error", {}).get("data", {}).get("receipt")
-        if receipt:
-            await _verify_receipt_outcome(receipt["receipt_id"], "denied", Decimal("0"))
-        else:
-            # Auth-layer denial before receipt generation — valid outcome
-            pass
+        # Refused at the wallet-access layer, before the permit is consulted:
+        # B's key is not bound to A's wallet. That layer issues no receipt,
+        # because nothing was authorized against the permit.
+        assert body["error"]["message"] == "wallet_access_denied"
+        assert "receipt" not in (body["error"].get("data") or {})
+        await _assert_no_economic_effect(
+            permit_a["permit_id"],
+            ledger_before,
+        )
     finally:
         get_service_registry().unregister_local(tool_name)
 
@@ -326,6 +371,9 @@ async def test_swapped_wallet_key_pair_denied(client, clean_database):
     try:
         permit_a = await _create_permit(
             client, provisioned_a["agent_wallet_id"], provisioned_a["key_id"], tool_name
+        )
+        ledger_before = await _ledger_snapshot(
+            provisioned_a["agent_wallet_id"], provisioned_b["agent_wallet_id"]
         )
 
         # Use wallet B in mcpContext but A's permit, with A's key in headers
@@ -351,11 +399,14 @@ async def test_swapped_wallet_key_pair_denied(client, clean_database):
         body = r.json()
         assert "error" in body
         assert body["error"]["code"] == -32003
-        receipt = body.get("error", {}).get("data", {}).get("receipt")
-        if receipt:
-            await _verify_receipt_outcome(receipt["receipt_id"], "denied", Decimal("0"))
-        else:
-            pass  # Auth-layer denial before receipt generation
+        # A's key is not bound to wallet B, so the wallet-access layer refuses
+        # before the permit is consulted, and issues no receipt.
+        assert body["error"]["message"] == "wallet_access_denied"
+        assert "receipt" not in (body["error"].get("data") or {})
+        await _assert_no_economic_effect(
+            permit_a["permit_id"],
+            ledger_before,
+        )
     finally:
         get_service_registry().unregister_local(tool_name)
 
@@ -417,15 +468,51 @@ async def test_forbidden_fields_with_unicode_injection_denied(client, clean_data
         get_service_registry().unregister_local(tool_name)
 
 
+class _FakeUpstreamExecutor:
+    """Records dispatches; a recipient_domain denial must leave this empty."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    async def call_tool(
+        self,
+        arguments: dict[str, Any],
+        invocation_id: str | None = None,
+        idempotency_key: str | None = None,
+        before_dispatch: Any | None = None,
+    ) -> Any:
+        self.calls.append({"arguments": arguments, "invocation_id": invocation_id})
+        return None
+
+
 @pytest.mark.anyio
 async def test_recipient_domain_wildcard_injection(client, clean_database):
-    """recipient_domain with wildcard-like string must be stored literally, not expanded."""
+    """A wildcard-looking recipient_domain is matched literally, never expanded.
+
+    recipient_domain is only enforced for upstream_mcp tools (a local tool has
+    no recipient to check), so the tool here is an upstream registered at
+    ``https://sub.example.com``. A permit naming ``*.example.com`` must deny
+    it: the constraint is an exact hostname, and a glob-matching
+    implementation would dispatch to a host the permit never named.
+    """
     provisioned = await provision_agent_wallet(client)
     wallet_id = provisioned["agent_wallet_id"]
     key_id = provisioned["key_id"]
     agent_headers = provisioned["agent_headers"]
     tool_name = "fuzz-inj-2"
-    _register_tool(tool_name)
+    executor = _FakeUpstreamExecutor()
+    get_service_registry().register_upstream(
+        service_id=tool_name,
+        name="Fuzz Upstream Tool",
+        description="Security fuzz upstream tool",
+        category=ServiceCategory.AGENT_COMMS,
+        executor=executor,
+        input_schema={"type": "object", "properties": {}},
+        output_schema={"type": "object"},
+        credits_per_unit=2.0,
+        upstream_tool_name="partner.echo",
+        upstream_origin="https://sub.example.com",
+    )
     try:
         permit = await _create_permit(
             client,
@@ -435,8 +522,8 @@ async def test_recipient_domain_wildcard_injection(client, clean_database):
             extra={"recipient_domain": "*.example.com"},
             idem_key="inj-permit-2",
         )
-        # The domain is stored literally; it should NOT match sub.example.com
-        # (unless the implementation does wildcard matching, which it shouldn't)
+        assert permit["recipient_domain"] == "*.example.com"
+
         r = await _invoke(
             client,
             wallet_id,
@@ -446,17 +533,34 @@ async def test_recipient_domain_wildcard_injection(client, clean_database):
             headers=agent_headers,
             idem_key="inj-3",
         )
-        # Local tools don't check recipient_domain, so this should succeed
         assert r.status_code == 200
         body = r.json()
-        assert "error" not in body
+        assert "error" in body, "wildcard recipient_domain matched sub.example.com"
+        assert body["error"]["code"] == -32003
+        assert "permit_recipient_domain_mismatch" in body["error"]["message"]
+        assert executor.calls == [], "the upstream must never be dispatched"
+
+        receipt = body["error"]["data"]["receipt"]
+        await _verify_receipt_outcome(receipt["receipt_id"], "denied", Decimal("0"))
+        factory = get_session_factory()
+        async with factory() as session:
+            model = await session.get(PermitModel, permit["permit_id"])
+            assert model is not None
+            assert model.spent_credits == Decimal("0")
     finally:
         get_service_registry().unregister_local(tool_name)
 
 
 @pytest.mark.anyio
-async def test_max_calls_per_tool_with_null_key_fails_closed(client, clean_database):
-    """Null/None as a key in max_calls_per_tool dict must not crash; should fail closed."""
+async def test_tampered_max_calls_per_tool_row_fails_closed(client, clean_database):
+    """Rewriting a signed permit's max_calls_per_tool in storage denies the call.
+
+    max_calls_per_tool is part of the permit's signed payload, so editing the
+    stored column out-of-band (here, adding a ``"null"`` key: JSON object keys
+    are always strings, so a literal null key cannot arrive over the wire) must
+    fail signature verification before any budget moves. The denial is
+    receipted with zero charge.
+    """
     provisioned = await provision_agent_wallet(client)
     wallet_id = provisioned["agent_wallet_id"]
     key_id = provisioned["key_id"]
@@ -465,16 +569,28 @@ async def test_max_calls_per_tool_with_null_key_fails_closed(client, clean_datab
     _register_tool(tool_name)
     try:
         permit = await _create_permit(
-            client, wallet_id, key_id, tool_name, idem_key="inj-permit-3"
+            client,
+            wallet_id,
+            key_id,
+            tool_name,
+            extra={"max_calls_per_tool": {tool_name: 5}},
+            idem_key="inj-permit-3",
         )
 
-        # Inject null key at DB layer
+        # Tamper with the signed column at the DB layer. json.dumps renders the
+        # None key as the string "null".
         factory = get_session_factory()
         async with factory() as session:
             model = await session.get(PermitModel, permit["permit_id"])
             model.max_calls_per_tool_json = json.dumps({None: 5, tool_name: 5})
             session.add(model)
             await session.commit()
+        async with factory() as session:
+            model = await session.get(PermitModel, permit["permit_id"])
+            assert json.loads(model.max_calls_per_tool_json) == {
+                "null": 5,
+                tool_name: 5,
+            }
 
         r = await _invoke(
             client,
@@ -486,10 +602,15 @@ async def test_max_calls_per_tool_with_null_key_fails_closed(client, clean_datab
         )
         assert r.status_code == 200
         body = r.json()
-        # Should either succeed (null key ignored) or fail closed
-        if "error" in body:
-            receipt = body["error"]["data"]["receipt"]
-            await _verify_receipt_outcome(receipt["receipt_id"], "denied", Decimal("0"))
+        assert "error" in body, "a tampered permit row must not authorize a call"
+        assert body["error"]["message"] == "permit_signature_invalid"
+        receipt = body["error"]["data"]["receipt"]
+        await _verify_receipt_outcome(receipt["receipt_id"], "denied", Decimal("0"))
+
+        async with factory() as session:
+            model = await session.get(PermitModel, permit["permit_id"])
+            assert model is not None
+            assert model.spent_credits == Decimal("0")
     finally:
         get_service_registry().unregister_local(tool_name)
 
@@ -566,11 +687,21 @@ async def test_oversized_payload_on_invoke_is_refused(client, clean_database):
 @pytest.mark.anyio
 async def test_rapid_fire_invokes_all_accounted(client, clean_database):
     """Fire 20 rapid invokes; check all receipts exist and total charge is exact.
-    Requires PostgreSQL for accurate row-lock accounting."""
+    Requires PostgreSQL for accurate row-lock accounting.
+
+    CI runs this in the postgres_trust job with REQUIRE_POSTGRES_TESTS=1, which
+    turns the skip into a failure: a job that lost its PostgreSQL DATABASE_URL
+    must go red rather than pass by skipping the only test it was added for.
+    """
     from app.db.database import get_engine
 
     engine = get_engine()
     if engine is None or engine.dialect.name != "postgresql":
+        if os.environ.get("REQUIRE_POSTGRES_TESTS") == "1":
+            pytest.fail(
+                "REQUIRE_POSTGRES_TESTS=1 but the suite is not running on "
+                "PostgreSQL; check DATABASE_URL"
+            )
         pytest.skip("requires PostgreSQL for accurate concurrent budget accounting")
 
     provisioned = await provision_agent_wallet(client)
