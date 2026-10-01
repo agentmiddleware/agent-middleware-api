@@ -538,3 +538,43 @@ class TestExplicitEnvironmentOnHostedRuntime:
         monkeypatch.setenv("RAILWAY_ENVIRONMENT_ID", "env-123")
         settings = Settings(_env_file=None, ENVIRONMENT="dev")
         validate_trust_mode_guardrails(settings)
+
+
+def test_production_refuses_dogfood_tools_and_private_network_targets():
+    """Local-only escape hatches must be enumerated in the boot refusal.
+
+    ENABLE_DOGFOOD_TOOL / ENABLE_DOGFOOD_SECOND_TOOL register executable
+    ``partner.*`` tools on the core MCP path and ALLOW_PRIVATE_NETWORK_TARGETS
+    disables the outbound private-network guard; none of them was inspected by
+    the production-like guardrail, so a deploy carrying them booted cleanly.
+    """
+    with pytest.raises(TrustModeGuardrailError) as exc_info:
+        validate_trust_mode_config(
+            environment="production",
+            trust_mode_enabled=True,
+            signing_private_key_b64=VALID_SIGNING_PRIVATE_KEY_B64,
+            allow_legacy_unpermitted_mcp=False,
+            enable_proof_surfaces=False,
+            database_url="postgresql+asyncpg://u:p@db/app",
+            enable_dogfood_tool=True,
+            enable_dogfood_second_tool=True,
+            allow_private_network_targets=True,
+        )
+
+    message = str(exc_info.value)
+    assert "ENABLE_DOGFOOD_TOOL" in message
+    assert "ENABLE_DOGFOOD_SECOND_TOOL" in message
+    assert "ALLOW_PRIVATE_NETWORK_TARGETS" in message
+
+
+@pytest.mark.parametrize("environment", ["local", "development", "test", "ci"])
+def test_local_environments_still_accept_dogfood_and_private_targets(environment: str):
+    validate_trust_mode_config(
+        environment=environment,
+        trust_mode_enabled=True,
+        signing_private_key_b64=VALID_SIGNING_PRIVATE_KEY_B64,
+        allow_legacy_unpermitted_mcp=False,
+        enable_dogfood_tool=True,
+        enable_dogfood_second_tool=True,
+        allow_private_network_targets=True,
+    )

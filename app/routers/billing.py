@@ -348,12 +348,25 @@ async def create_sponsor_wallet(
 )
 async def create_agent_wallet(
     request: CreateAgentWalletRequest,
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     auth: AuthContext = Depends(get_auth_context),
     money: AgentMoney = Depends(get_agent_money),
 ):
     _require_wallet_access(auth, request.sponsor_wallet_id)
+    # Opt-in idempotency, keyed on the sponsor (the debited side): a client
+    # whose provisioning call timed out after the sponsor was debited retries
+    # with the same Idempotency-Key and gets the original wallet back instead
+    # of funding a second one and paying twice.
+    guard, replay = await _begin_idempotency(
+        idempotency_key=idempotency_key,
+        wallet_id=request.sponsor_wallet_id,
+        endpoint="/v1/billing/wallets/agent",
+        request_payload=request.model_dump(mode="json"),
+    )
+    if replay is not None:
+        return replay
     try:
-        return await money.create_agent_wallet(
+        wallet = await money.create_agent_wallet(
             sponsor_wallet_id=request.sponsor_wallet_id,
             agent_id=request.agent_id,
             budget_credits=Decimal(str(request.budget_credits)),
@@ -372,25 +385,32 @@ async def create_agent_wallet(
     except WalletNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except InsufficientFundsError as e:
+        insufficient_detail = {
+            "error": "insufficient_funds",
+            "message": (
+                f"Insufficient funds in sponsor wallet: "
+                f"balance={e.current_balance}, required={e.required_amount}"
+            ),
+            "wallet_id": e.wallet_id,
+            "current_balance": float(e.current_balance),
+            "required_amount": float(e.required_amount),
+            "shortfall": float(e.shortfall),
+        }
+        # Terminal for this key: nothing was created or debited, and a replay
+        # should tell the caller the same thing rather than retry blindly.
+        await guard.complete({"detail": insufficient_detail}, 400)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "error": "insufficient_funds",
-                "message": (
-                    f"Insufficient funds in sponsor wallet: "
-                    f"balance={e.current_balance}, required={e.required_amount}"
-                ),
-                "wallet_id": e.wallet_id,
-                "current_balance": float(e.current_balance),
-                "required_amount": float(e.required_amount),
-                "shortfall": float(e.shortfall),
-            },
+            detail=insufficient_detail,
         )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"error": "wallet_error", "message": str(e)},
         )
+    body = wallet.model_dump(mode="json")
+    await guard.complete(body, 201, response_reference=body.get("wallet_id"))
+    return wallet
 
 
 @expansion_router.post(
