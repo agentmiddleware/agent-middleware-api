@@ -132,7 +132,7 @@ class ProgressiveRepresentationEngine:
 
         Not a semantic model: each 10-character chunk maps to a float in
         [0, 1) taken from its SHA-256 digest, so the vector is stable across
-        processes (unlike the salted built-in ``hash``) and labelled
+        processes (unlike the salted built-in Python's builtin hash function) and labelled
         ``simulated``.
         """
         embedding_model = options.get("embedding_model", "default")
