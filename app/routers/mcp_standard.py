@@ -220,6 +220,22 @@ def _meta_idempotency_key_source(
     return (_META_KEY_SOURCE, value)
 
 
+def _action_permit_reference(params: mcp_types.CallToolRequestParams) -> str | None:
+    meta = getattr(params.meta, "model_extra", None) or {}
+    extra = params.model_extra or {}
+    legacy = extra.get("mcpContext", {})
+    values = []
+    if "io.agentmiddleware/permit_id" in meta:
+        values.append(meta["io.agentmiddleware/permit_id"])
+    if isinstance(legacy, dict) and "permit_id" in legacy:
+        values.append(legacy["permit_id"])
+    if any(type(value) is not str or not value.strip() for value in values):
+        raise _mcp_error(-32602, "invalid_permit_reference")
+    if len(set(values)) > 1:
+        raise _mcp_error(-32602, "permit_reference_conflict")
+    return values[0] if values else None
+
+
 def _client_idempotency_key(
     http_request: Request | None, params: mcp_types.CallToolRequestParams
 ) -> str | None:
@@ -355,6 +371,7 @@ async def _governed_tools_call(
     arguments: dict[str, Any],
     client_idempotency_key: str | None,
     request_id: str | None,
+    permit_id: str | None = None,
 ) -> dict[str, Any]:
     """Auto-mint the permit, then run the single governed invoke pipeline."""
     if not tool_name:
@@ -371,12 +388,15 @@ async def _governed_tools_call(
     if record is None:
         raise _mcp_error(-32001, f"Tool not found: {tool_name}")
 
+    if get_service_registry().get_action_binding(record) is not None and not permit_id:
+        raise _mcp_error(-32003, "action_permit_required")
+
     # Wallet policy shapes the permit this surface mints. A policy demanding a
     # human decision is materialized as an approval-gated permit rather than
     # surfacing as an unsatisfiable denial: the agent calls the tool normally
     # and the middleware runs the approval workflow.
     requires_human_approval = await wallet_human_approval_required(auth.wallet_id)
-    if requires_human_approval and not client_idempotency_key:
+    if requires_human_approval and not client_idempotency_key and not permit_id:
         # Without a client key every retry would mint a fresh permit and page
         # a human again instead of polling the pending decision.
         raise _mcp_error(
@@ -398,7 +418,7 @@ async def _governed_tools_call(
         )
 
     idempotency_key = client_idempotency_key or f"mcp-auto-{uuid.uuid4().hex}"
-    permit_id = await _mint_auto_permit(
+    permit_id = permit_id or await _mint_auto_permit(
         auth=auth,
         tool_name=tool_name,
         record=record,
@@ -576,6 +596,7 @@ def _build_standard_mcp_server() -> Server:
                 tool_name=req.params.name,
                 arguments=req.params.arguments or {},
                 client_idempotency_key=client_key,
+                permit_id=_action_permit_reference(req.params),
                 request_id=request_id,
             )
 

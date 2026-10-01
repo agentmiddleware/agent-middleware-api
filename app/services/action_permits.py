@@ -7,7 +7,9 @@ from dataclasses import dataclass
 import hashlib
 import json
 import math
-from typing import Any
+from typing import Any, Literal
+
+from app.services.permits import PermitValidation
 
 from app.core.auth import AuthContext
 from app.db.models import PermitModel
@@ -386,3 +388,54 @@ def action_execution_identity(
             }
         ),
     )
+
+
+async def validate_action_request(
+    permit: PermitModel,
+    binding: ActionToolBinding,
+    wallet_id: str,
+    key_id: str | None,
+    arguments: dict[str, Any],
+    phase: Literal["admission", "replay"],
+) -> PermitValidation:
+    """Non-consuming authority gate; priced admission remains atomic preparation."""
+    from app.core.time import utc_now, to_naive_utc
+    from app.services.permits import get_permit_service
+
+    reason = None
+    if permit.subject_wallet_id != wallet_id:
+        reason = "permit_wallet_mismatch"
+    elif permit.subject_key_id and permit.subject_key_id != key_id:
+        reason = "permit_key_mismatch"
+    elif permit.status != "active":
+        reason = f"permit_{permit.status}"
+    elif to_naive_utc(permit.expires_at) <= utc_now():
+        reason = "permit_expired"
+    elif not await get_permit_service().verify_signature(permit):
+        reason = "permit_signature_invalid"
+    if reason:
+        return PermitValidation(False, reason, permit)
+    try:
+        action_execution_identity(permit, binding)
+        if (
+            permit.requires_human_approval
+            or permit.allow_identical_repeats
+            or permit.repeat_window_seconds is not None
+            or permit.aggregate_value_cap is not None
+            or json.loads(permit.forbidden_fields_json or "[]")
+            or permit.recipient_domain is not None
+        ):
+            raise ValueError("unsupported_action_constraints")
+        scopes = json.loads(permit.scopes_json)
+        if not {f"tool:{binding.public_tool_id}:invoke", "billing:charge"} <= set(
+            scopes
+        ):
+            raise ValueError("permit_scope_missing")
+        if (
+            action_payload_hash(binding, wallet_id, arguments)
+            != permit.action_payload_hash
+        ):
+            raise ValueError("action_payload_mismatch")
+    except (ValueError, TypeError) as exc:
+        return PermitValidation(False, str(exc), permit)
+    return PermitValidation(True, None, permit)

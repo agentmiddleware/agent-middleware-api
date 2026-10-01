@@ -729,6 +729,10 @@ class IdempotencyService:
         caller holds a record id; a mismatch is a no-op, not an error, since
         it means the row moved on and nothing is left to release.
         """
+        if endpoint == ACTION_MCP_IDEMPOTENCY_ENDPOINT:
+            # Until action-aware cleanup proves absence of accepted preparation,
+            # retain the owner even when no debit checkpoint is visible yet.
+            return
         factory = get_session_factory()
         async with factory() as session:
             result = await session.execute(
