@@ -353,6 +353,16 @@ async def create_agent_wallet(
     money: AgentMoney = Depends(get_agent_money),
 ):
     _require_wallet_access(auth, request.sponsor_wallet_id)
+    # Resolve the sponsor before opening an idempotency record: the record's
+    # wallet_id references wallets, so beginning one for an unknown sponsor
+    # would fail the foreign key and answer 500 where the unkeyed path answers
+    # 404. Same message as the engine's WalletNotFoundError so keyed and
+    # unkeyed callers see one body.
+    if await money.get_wallet(request.sponsor_wallet_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail=str(WalletNotFoundError(request.sponsor_wallet_id)),
+        )
     # Opt-in idempotency, keyed on the sponsor (the debited side): a client
     # whose provisioning call timed out after the sponsor was debited retries
     # with the same Idempotency-Key and gets the original wallet back instead
@@ -383,6 +393,9 @@ async def create_agent_wallet(
             auto_refill_amount=Decimal(str(request.auto_refill_amount)),
         )
     except WalletNotFoundError as e:
+        # Every terminal branch must complete the record, or the key stays
+        # in-progress and a retry answers 409 until the stale-record sweep.
+        await guard.complete({"detail": str(e)}, 404)
         raise HTTPException(status_code=404, detail=str(e))
     except InsufficientFundsError as e:
         insufficient_detail = {
@@ -404,9 +417,11 @@ async def create_agent_wallet(
             detail=insufficient_detail,
         )
     except ValueError as e:
+        wallet_error = {"error": "wallet_error", "message": str(e)}
+        await guard.complete({"detail": wallet_error}, 400)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "wallet_error", "message": str(e)},
+            detail=wallet_error,
         )
     body = wallet.model_dump(mode="json")
     await guard.complete(body, 201, response_reference=body.get("wallet_id"))
