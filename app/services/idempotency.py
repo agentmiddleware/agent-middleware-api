@@ -27,8 +27,10 @@ from app.db.models import (
     ReceiptModel,
 )
 from app.services.signing_keys import sha256_hex
+from app.services.action_permits import ActionExecutionIdentity
 
 GOVERNED_MCP_IDEMPOTENCY_ENDPOINT = "/mcp/invoke"
+ACTION_MCP_IDEMPOTENCY_ENDPOINT = "/mcp/action/v1"
 
 
 class IdempotencyConflictError(RuntimeError):
@@ -581,6 +583,58 @@ class IdempotencyService:
                     )
                 )
             ).scalar_one_or_none()
+
+    async def get_action_record(
+        self, *, wallet_id: str, internal_key: str
+    ) -> IdempotencyRecordModel | None:
+        """Look up only the dedicated owner; never adopt transport/legacy rows."""
+        return await self.get_record(
+            wallet_id=wallet_id,
+            endpoint=ACTION_MCP_IDEMPOTENCY_ENDPOINT,
+            idempotency_key=internal_key,
+        )
+
+    async def begin_action_with_record(
+        self,
+        *,
+        wallet_id: str,
+        identity: ActionExecutionIdentity,
+        wait_timeout_seconds: float = 0.0,
+        poll_interval_seconds: float = 0.05,
+        allow_new_record: bool = True,
+    ) -> IdempotencyBegin:
+        if identity.endpoint != ACTION_MCP_IDEMPOTENCY_ENDPOINT:
+            raise ValueError("invalid_action_execution_namespace")
+        if identity.request_payload.get("subject_wallet_id") != wallet_id:
+            raise ValueError("action_execution_wallet_mismatch")
+        return await self.begin_with_record(
+            wallet_id=wallet_id,
+            endpoint=ACTION_MCP_IDEMPOTENCY_ENDPOINT,
+            idempotency_key=identity.idempotency_key,
+            request_payload=identity.request_payload,
+            operation_kind="upstream_mcp",
+            wait_timeout_seconds=wait_timeout_seconds,
+            poll_interval_seconds=poll_interval_seconds,
+            allow_new_record=allow_new_record,
+        )
+
+    async def complete_action(
+        self,
+        *,
+        wallet_id: str,
+        internal_key: str,
+        response_reference: str | None,
+        response_json: dict[str, Any] | None,
+        status_code: int = 200,
+    ) -> None:
+        await self.complete(
+            wallet_id=wallet_id,
+            endpoint=ACTION_MCP_IDEMPOTENCY_ENDPOINT,
+            idempotency_key=internal_key,
+            response_reference=response_reference,
+            response_json=response_json,
+            status_code=status_code,
+        )
 
     async def get_governed_mcp_record(
         self,
