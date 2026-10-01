@@ -124,6 +124,7 @@ All monetary comparisons are done in `Decimal` end-to-end (thresholds stored as
 | Bundle requires human approval | `human_approval_required` — satisfied instead of denied when the invoke's permit carries `requires_human_approval` (the Layer D gate provides the demanded decision; every other check below still runs) |
 | Tool not in the bundle allow-list | `tool_not_allowed` |
 | Service category not in the bundle allow-list | `service_category_not_allowed` |
+| An allow-list column is present but is not a JSON array of strings | `policy_constraint_corrupt` (denied; never read as unrestricted) |
 | `estimated > max_cost_per_action` | `max_cost_per_action_exceeded` |
 | `daily_spend_used + estimated > daily_spend_limit` | `daily_spend_limit_exceeded` |
 | Bundle requires real effects but the call is in simulation mode | `real_effects_required` |
@@ -266,6 +267,7 @@ monitor never infers it from the values.
 | `human_approval_required` | C | Wallet policy demands approval |
 | `tool_not_allowed` | C | Tool outside wallet policy allow-list |
 | `service_category_not_allowed` | C | Category outside wallet policy allow-list |
+| `policy_constraint_corrupt` | C | A wallet policy allow-list column is corrupt; denied rather than read as unrestricted |
 | `max_cost_per_action_exceeded` | C | Per-action cost cap hit |
 | `daily_spend_limit_exceeded` | C | Daily spend cap hit |
 | `real_effects_required` | C | Real-effects policy vs simulation mode |

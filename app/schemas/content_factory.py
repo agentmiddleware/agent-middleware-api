@@ -9,7 +9,7 @@ then feeds them through the AlgorithmicScheduler for staggered
 cross-platform distribution.
 """
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from enum import Enum
 from datetime import datetime
 
@@ -270,6 +270,14 @@ class ContentPipelineRequest(BaseModel):
             "scheduler."
         ),
     )
+
+    @model_validator(mode="after")
+    def single_source(self) -> "ContentPipelineRequest":
+        # Documented as mutually exclusive; accepting both silently reported
+        # the pipeline as clip-sourced and ignored the URL.
+        if self.source_clip_id is not None and self.source_url is not None:
+            raise ValueError("source_clip_id and source_url are mutually exclusive")
+        return self
 
 
 class ContentPipelineResponse(BaseModel):

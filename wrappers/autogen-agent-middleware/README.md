@@ -21,7 +21,7 @@ python -m pip install -e wrappers/autogen-agent-middleware
 ```
 
 `b2a_sdk` must be installed from the local path first: this package
-depends on `b2a-sdk>=0.3.0`, which is not on PyPI, so installing the
+depends on `b2a-sdk>=0.4.0`, which is not on PyPI, so installing the
 wrapper on its own fails to resolve. That installs the `autogen_b2a`
 module used below.
 
@@ -121,7 +121,9 @@ Both `idempotency_key` and `permit_idempotency_key` are **required** and must be
 An identical replay with the same invocation key returns the original receipt
 without recharging. `idempotency_key` identifies one governed invocation, and
 the gateway rejects that key reused with changed invocation input with an
-idempotency conflict (HTTP 409). `permit_idempotency_key` makes permit creation
+idempotency conflict (`IdempotencyConflictError`; on `/mcp/messages` the gateway
+reports it as a JSON-RPC `-32603` `idempotency_key_reused` error rather than an
+HTTP 409). `permit_idempotency_key` makes permit creation
 repeatable; it does not make a changed invocation an idempotent replay.
 
 ```python

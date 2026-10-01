@@ -195,6 +195,18 @@ you meant to audit.
 client methods remain available during the `0.4.x` transition. New code should
 use `AgentMiddlewareClient` and the typed trust-loop methods.
 
+Legacy `charge()` and `@billable` calls made without an idempotency key are
+not replay-safe: retrying one whose response was lost bills the wallet again.
+Pass `charge(..., idempotency_key="...")`, or give `@billable` /
+`@combined` an `idempotency_key_factory` that derives the same key from the
+call's arguments on every retry, and the server replays the original charge
+instead of debiting twice. A key reused for a different charge raises
+`IdempotencyConflictError`.
+
+`@monitored` reports only the exception type on error by default; pass
+`capture_traceback=True` to also send the exception message and traceback,
+which can contain secrets.
+
 ## Build and test
 
 ```bash

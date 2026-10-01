@@ -62,6 +62,7 @@ from ..schemas.billing import (
     RegisterServiceRequest,
     ServiceRegistration,
     ExactDecimalFieldsMixin,
+    MAX_STORABLE_AMOUNT,
 )
 
 
@@ -890,7 +891,13 @@ async def top_up_wallet(
 )
 async def prepare_top_up(
     wallet_id: str,
-    amount_fiat: float = Query(..., gt=0, description="Amount in fiat currency (USD)"),
+    amount_fiat: float = Query(
+        ...,
+        gt=0,
+        lt=MAX_STORABLE_AMOUNT,
+        allow_inf_nan=False,
+        description="Amount in fiat currency (USD)",
+    ),
     currency: str = Query("USD", description="Fiat currency code"),
     auth: AuthContext = Depends(get_auth_context),
 ):
@@ -968,7 +975,15 @@ async def prepare_top_up(
 async def transfer_wallets(
     from_wallet_id: str = Query(..., description="Source wallet ID"),
     to_wallet_id: str = Query(..., description="Destination wallet ID"),
-    amount: float = Query(..., gt=0, description="Amount of credits to transfer"),
+    # ``gt=0`` alone admits Infinity, which reached the engine and then broke
+    # rendering its own 402 (an infinite shortfall is not JSON): a 500.
+    amount: float = Query(
+        ...,
+        gt=0,
+        lt=MAX_STORABLE_AMOUNT,
+        allow_inf_nan=False,
+        description="Amount of credits to transfer",
+    ),
     description: str | None = Query(None, description="Optional transfer description"),
     correlation_id: str | None = Query(
         None,

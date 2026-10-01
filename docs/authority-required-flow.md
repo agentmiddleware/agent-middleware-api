@@ -147,11 +147,11 @@ partly accidental — idempotency behavior (verified by reproduction):
   completion call in `app/routers/mcp.py` no-ops because the record is only
   begun after the permit check — so a retry with the same key after minting
   a permit already executes normally, by accident rather than by contract.
-  (`docs/failure-semantics.md` currently says this case "terminates with a
-  signed terminal idempotency record"; reproduction shows no record is
-  created. The implementing slice must reconcile that sentence with a
-  pinned test.) `human_approval_pending` reaches the same place explicitly:
-  it abandons the record (`idem.abandon()`), so the same key resumes.
+  (`docs/failure-semantics.md` now states that no record is created, pinned
+  by `test_strict_mode_missing_permit_denial_leaves_no_idempotency_record`
+  in `tests/test_mcp_trust_mode.py`.) `human_approval_pending` reaches the
+  same place explicitly: it abandons the record (`idem.abandon()`), so the
+  same key resumes.
 - **Decided denials under an existing permit** (`permit_tool_not_allowed`,
   `permit_scope_missing`, `permit_budget_exceeded`,
   `permit_max_calls_exceeded`, `permit_aggregate_value_cap_exceeded`): these
@@ -300,5 +300,6 @@ so the evidence unlocks work, not debate.
 - D5 conformance: `human_approval_unavailable` carries the envelope (this
   assertion fails on today's code, so the slice cannot pass vacuously), and
   `delivery_uncertain` payloads never carry `authority_required`.
-- Reconcile `docs/failure-semantics.md`'s `permit_required` sentence with a
-  pinned test for whichever record semantics the slice ships.
+- Keep `docs/failure-semantics.md`'s `permit_required` sentence and its
+  pinned test (`test_strict_mode_missing_permit_denial_leaves_no_idempotency_record`)
+  in line with whichever record semantics the slice ships.
