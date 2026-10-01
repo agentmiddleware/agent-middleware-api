@@ -191,12 +191,26 @@ ledger columns, two of which carry UNIQUE constraints. The invariants are
 rail-independent; **the implementation is single-rail.** Claiming otherwise
 would be the most likely factual error in any settlement document.
 
-Nothing in the repository supports any claim about x402 or Payman — outside
-these two strategy documents, those strings, along with USDC and stablecoin,
-appear **zero times**. Existing
-`blockchain` references are an optional, unimplemented proposal to anchor the
-*audit chain's* Merkle root, and have nothing to do with moving money. Reading
-them as crypto direction would be a misreading.
+When this assessment was written, nothing in the repository supported any
+claim about x402 or Payman — outside these two strategy documents, those
+strings, along with USDC and stablecoin, appeared **zero times**.
+
+> **Correction (2026-10-01):** that has since changed for `x402` and `USDC`,
+> in the facilitation sense only. `app/routers/x402.py` and
+> `app/services/x402_engine.py` parse an HTTP 402 payment demand, authorize it
+> against a permit budget, meter it to the shadow ledger (never a committed
+> charge), and emit a signed receipt whose `ledger_entry_id` is `None`. The
+> router is listed in `DORMANT_TRUST_ROUTERS` (`app/main.py`), so it is mounted
+> only when `ENABLE_PROOF_SURFACES=true` and stays unmounted in production. It
+> never mints credits, never writes real ledger entries, and has no custody or
+> on-chain execution. It is **not** a settlement rail: Stripe is still the only
+> one, and the freeze holds. Payman and `stablecoin` still appear nowhere in
+> code. The full statement is in
+> [`settlement-rails.md`](settlement-rails.md#facilitation-surfaces-under-the-freeze-x402-acp).
+
+Existing `blockchain` references are an optional, unimplemented proposal to
+anchor the *audit chain's* Merkle root, and have nothing to do with moving
+money. Reading them as crypto direction would be a misreading.
 
 **Shipped:** [`settlement-rails.md`](settlement-rails.md) — design-only, inside
 the freeze. Its deliverable is a **fifteen-item rail conformance checklist**

@@ -19,7 +19,7 @@ the [documentation guide](docs/README.md).
 > One agent action, at most one debit — no matter how many times the agent
 > retries under the same accepted key. Verify the receipt without us.
 
-("At most one" is deliberate and matches `CONTEXT.md` and `docs/ip/04-claim-sets.md`:
+("At most one" is deliberate and matches `CONTEXT.md`:
 a crash before dispatch refunds, and a denied call never charges. The guarantee is
 never a duplicate charge, not always a charge.)
 

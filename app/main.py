@@ -531,7 +531,8 @@ app = FastAPI(
     # This avoids presenting placeholder support details as a real escalation path.
     contact=public_contact or None,
     license_info={
-        "name": "MIT",
+        "name": "Business Source License 1.1",
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/LICENSE",
     },
     servers=[
         {
@@ -1179,10 +1180,11 @@ async def health_ready():
     description=(
         "Probes the dependencies this deployment runs on, in parallel with a "
         "short timeout. Each entry reports status, latency_ms, and an error "
-        "message when unreachable. With proof surfaces unmounted (the "
-        "production posture) the payload covers the transaction-integrity "
-        "boundary only: postgres, redis, signing key, upstream MCP, version + "
-        "commit SHA. "
+        "code when unreachable (the exception class or a timeout; driver "
+        "messages are logged server-side, never returned). With proof "
+        "surfaces unmounted (the production posture) the payload covers the "
+        "transaction-integrity boundary only: postgres, redis, signing key, "
+        "upstream MCP, version + commit SHA. "
         "Instances that mount proof surfaces additionally report those "
         "surfaces' dependencies and per-service simulation modes; deps whose "
         "consumers are simulated return `not_used` so the verdict doesn't "
