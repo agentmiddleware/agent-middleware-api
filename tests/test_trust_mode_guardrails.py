@@ -272,6 +272,75 @@ def test_production_accepts_a_postgres_database_url():
     )
 
 
+@pytest.mark.parametrize(
+    ("kwarg", "variable"),
+    [
+        ("allow_private_network_targets", "ALLOW_PRIVATE_NETWORK_TARGETS"),
+        ("allow_unsafe_host_python_sandbox", "ALLOW_UNSAFE_HOST_PYTHON_SANDBOX"),
+    ],
+)
+@pytest.mark.parametrize("environment", ["production", "staging", "preview"])
+def test_production_refuses_local_only_escape_hatches(
+    environment: str, kwarg: str, variable: str
+):
+    """The SSRF and host-sandbox escape hatches are local-only, like DEBUG.
+
+    ``ALLOW_PRIVATE_NETWORK_TARGETS`` makes ``app.core.url_guard`` skip every
+    loopback/RFC1918/link-local check, and ``ALLOW_UNSAFE_HOST_PYTHON_SANDBOX``
+    runs agent code on the host. Both must refuse to boot a production-like
+    deployment rather than rely on the operator never setting them.
+    """
+    with pytest.raises(TrustModeGuardrailError) as exc_info:
+        validate_trust_mode_config(
+            environment=environment,
+            trust_mode_enabled=True,
+            signing_private_key_b64=VALID_SIGNING_PRIVATE_KEY_B64,
+            allow_legacy_unpermitted_mcp=False,
+            enable_proof_surfaces=False,
+            database_url=VALID_PRODUCTION_DATABASE_URL,
+            **{kwarg: True},
+        )
+
+    assert f"{variable} must be false" in str(exc_info.value)
+
+
+@pytest.mark.parametrize("environment", ["", "local", "development", "test", "ci"])
+def test_local_environments_accept_local_only_escape_hatches(environment: str):
+    validate_trust_mode_config(
+        environment=environment,
+        trust_mode_enabled=True,
+        signing_private_key_b64="",
+        allow_legacy_unpermitted_mcp=False,
+        allow_private_network_targets=True,
+        allow_unsafe_host_python_sandbox=True,
+        database_url="sqlite+aiosqlite:///./test.db",
+    )
+
+
+def test_settings_wrapper_forwards_local_only_escape_hatches():
+    """The boot path reads the flags from Settings, not only the kwargs."""
+    settings = Settings(
+        ENVIRONMENT="production",
+        TRUST_MODE_ENABLED=True,
+        TRUST_SIGNING_PRIVATE_KEY_B64=VALID_SIGNING_PRIVATE_KEY_B64,
+        ALLOW_LEGACY_UNPERMITTED_MCP=False,
+        ENABLE_PROOF_SURFACES=False,
+        ENABLE_DEV_KEY_SELF_PROVISION=False,
+        DEBUG=False,
+        WEBAUTHN_ALLOW_MOCK=False,
+        DATABASE_URL=VALID_PRODUCTION_DATABASE_URL,
+        ALLOW_PRIVATE_NETWORK_TARGETS=True,
+        ALLOW_UNSAFE_HOST_PYTHON_SANDBOX=True,
+    )
+
+    with pytest.raises(TrustModeGuardrailError) as exc_info:
+        validate_trust_mode_guardrails(settings)
+
+    message = str(exc_info.value)
+    assert "ALLOW_PRIVATE_NETWORK_TARGETS" in message
+    assert "ALLOW_UNSAFE_HOST_PYTHON_SANDBOX" in message
+
+
 @pytest.mark.parametrize("environment", ["", "local", "development", "test", "ci"])
 def test_local_environments_still_accept_sqlite(environment: str):
     """The guard must not make local development impossible.
