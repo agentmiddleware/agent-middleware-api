@@ -8,8 +8,10 @@
 > ([`30-day-customer-validation.md`](30-day-customer-validation.md); see the
 > superseded [`production-beta-roadmap.md`](production-beta-roadmap.md)), and
 > the unchecked boxes below were never updated. Against current code: `NaiveUTCDateTime`
-> (`app/db/types.py`), the `postgres_trust` CI job, and Redis-backed rate
-> limiting (`app/core/rate_limit.py`) shipped. JWT exchange
+> (`app/db/types.py`), the `postgres_trust` CI job, and per-key rate limiting
+> (`RateLimitMiddleware` in `app/core/rate_limiter.py`, a fixed-window counter
+> in Redis with an in-memory fallback) shipped; the token-bucket
+> `app/core/rate_limit.py` exists but nothing mounts it. JWT exchange
 > (`POST /v1/auth/token`, `/refresh`, `/revoke` in `app/routers/auth.py`)
 > exists only as a dormant router, unmounted in production. OAuth/SSO,
 > trust-event webhook subscriptions, KMS/HSM key backends, `POST /v1/admin/signing-keys/rotate`,
