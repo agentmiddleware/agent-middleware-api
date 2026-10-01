@@ -21,10 +21,14 @@ full release gate; do not backfill a final `v1.2.0` tag.
   configured or the query fails, so the endpoint never drops the process-local
   counters it already served.
 - **Rollout note required per migration**: a test fails when a migration at or
-  after 040 ships without `docs/schema-NNN-rollout.md` naming its revision and
-  its rollback boundary. Boot refuses a database ahead of the packaged head, so
-  every migration retires the previously serving image; 040 crossed that
-  boundary without a plan and needed a same-night compatibility release.
+  after 040 ships without `docs/schema-NNN-rollout.md` naming the revision id it
+  declares and carrying a rollback heading, and when any migration file is
+  named outside the `NNN_name.py` convention. Boot refuses a database whose
+  revision differs from the packaged head, so every migration retires the
+  previously serving image; 040 crossed that boundary without a plan and needed
+  a same-night compatibility release. `docs/schema-041-rollout.md` records that
+  no image packaged at 040, including `34fbdb9` and the compatibility release
+  `e18b0df`, can start once 041 is applied.
 
 ### Security — 2026-08-27 audit follow-up
 
