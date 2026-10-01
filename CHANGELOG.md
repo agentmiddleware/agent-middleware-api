@@ -19,7 +19,11 @@ full release gate; do not backfill a final `v1.2.0` tag.
 - **SECURITY_LIMITATIONS.md correction**: Corrected the claim that remote tools refuse `max_calls_per_tool`. That constraint has been supported since 8c95229 (PR #476). Only `aggregate_value_cap` is still rejected on the upstream path.
 
 ### Changed
+- **License change**: the core (everything outside `b2a_sdk/`, `awi_sdk/`, `framework_integrations/`, `wrappers/`, and `examples/`) moves from MIT to the Business Source License 1.1 with a four-year change date back to MIT; the SDK directories stay MIT. Versions published before this change remain MIT. See `LICENSING.md`.
 - **Default duplicate guard mode unchanged**: The default remains `log` (observe-only). Operators wishing to enforce duplicate blocking must explicitly set `MCP_UPSTREAM_DUPLICATE_GUARD=enforce`.
+
+### Removed
+- **Internal IP and deal-room documents** (`docs/ip/`, `docs/invention-inventory.md`, `docs/data-room-corrections-2026-08-26.md`, `docs/reality-check-2026-09-01.md`) are no longer part of the public tree.
 
 ### Technical Note
 - **Migration required**: Alembic revision `040_permit_repeat_window` adds the nullable integer column `permits.repeat_window_seconds`. Upgrade the database with `alembic upgrade head` before starting the API. For an unstamped legacy database, first verify and stamp its exact existing revision; do not stamp `head` to bypass migration. The duplicate guard reads the persisted column, and permit signing includes its value only when set; existing permits with `NULL` retain their previous signed payload. Startup rejects existing schemas missing this column, including unstamped legacy databases.
