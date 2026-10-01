@@ -12,6 +12,8 @@ from httpx import ASGITransport, AsyncClient
 from app.db.database import get_session_factory
 from app.db.models import IdempotencyRecordModel, LedgerEntryModel, PermitModel
 from app.main import app
+from app.services import awi_rag_engine as awi_rag_engine_module
+from app.services.awi_rag_engine import AWIRAGEngine
 from app.services.idempotency import MAX_CLIENT_IDEMPOTENCY_KEY_LENGTH
 from tests.test_trust_helpers import (
     BOOTSTRAP_HEADERS,
@@ -228,6 +230,101 @@ async def test_awi_route_keys_its_debit_to_the_idempotency_record(
         "after a lost acknowledgement would debit again"
     )
     assert unkeyed == 0, "a governed AWI charge landed with no operation_key"
+
+
+async def _index_tenant_memory(
+    client: AsyncClient, tenant: dict[str, Any], *, product: str, idem: str
+) -> str:
+    """Create a session for ``tenant`` and index one memory through the route."""
+    session = await client.post(
+        "/v1/awi/sessions",
+        json={
+            "target_url": "https://example.com",
+            "wallet_id": tenant["agent_wallet_id"],
+        },
+        headers=tenant["agent_headers"],
+    )
+    assert session.status_code == 201, session.text
+    permit = await create_tool_permit(
+        client,
+        wallet_id=tenant["agent_wallet_id"],
+        key_id=tenant["key_id"],
+        tool_name="awi_memory_index",
+        max_credits=50,
+        idem_key=f"permit-{idem}",
+    )
+    resp = await client.post(
+        "/v1/awi/rag/index",
+        json={
+            "session_id": session.json()["session_id"],
+            "session_type": "shopping",
+            "action_history": [
+                {"action": "add_to_cart", "parameters": {"product": product}}
+            ],
+        },
+        headers={
+            **tenant["agent_headers"],
+            "X-Permit-Id": permit["permit_id"],
+            "Idempotency-Key": idem,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()["memory_id"]
+
+
+@pytest.mark.proof
+@pytest.mark.anyio
+async def test_rag_query_scopes_to_caller_before_top_k(
+    client, clean_database, monkeypatch
+):
+    """Another tenant's better matches must not crowd the caller out of
+    ``top_k``, nor have their access counters bumped by the caller's query."""
+    engine = AWIRAGEngine(embedding_model="mock-embedding")
+    monkeypatch.setattr(awi_rag_engine_module, "_rag_engine", engine)
+    caller = await provision_agent_wallet(client)
+    other = await provision_agent_wallet(client)
+    own_memory = await _index_tenant_memory(
+        client, caller, product="caller-widget", idem="awi-topk-own"
+    )
+    other_memory = await _index_tenant_memory(
+        client, other, product="other-tenant-widget", idem="awi-topk-other"
+    )
+    stored = engine._memories[other_memory]
+    # Identical to the other tenant's embedding text: it scores 1.0 and so
+    # outranks the caller's own memory in an unscoped search.
+    query = engine._prepare_embedding_text(
+        stored.session_type,
+        stored.action_sequence,
+        stored.page_summaries,
+        stored.key_entities,
+        stored.user_intent,
+    )
+    permit = await create_tool_permit(
+        client,
+        wallet_id=caller["agent_wallet_id"],
+        key_id=caller["key_id"],
+        tool_name="awi_rag_query",
+        max_credits=50,
+        idem_key="permit-awi-topk-query",
+    )
+
+    resp = await client.post(
+        "/v1/awi/rag/query",
+        json={"query": query, "top_k": 1, "similarity_threshold": 0.0},
+        headers={
+            **caller["agent_headers"],
+            "X-Wallet-Id": caller["agent_wallet_id"],
+            "X-Permit-Id": permit["permit_id"],
+            "Idempotency-Key": "awi-topk-query-1",
+        },
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert [r["memory_id"] for r in body["results"]] == [own_memory]
+    assert body["total_found"] == 1
+    assert other_memory not in resp.text
+    assert stored.access_count == 0
 
 
 # ── Client idempotency-key contract ──────────────────────────────────────────

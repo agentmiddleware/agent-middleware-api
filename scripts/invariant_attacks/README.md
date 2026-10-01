@@ -31,7 +31,7 @@ export TP_NOTES_PATH=../../data/dogfood_partner_notes.jsonl
 
 python attack1_double_charge.py     # double charging          -> HELD
 python attack2_budget.py            # budget overspend         -> HELD on current SQLite
-python attack2_mechanism_sqlite.py  #   ^ confirms no lost update / no overspend
+python attack2_mechanism_sqlite.py  #   ^ no lost update / no overspend -> HELD; exits 1 on BROKE
 python attack3_scope.py             # scope escape             -> HELD
 python attack4_forgery.py           # forged receipts          -> HELD
 python attack6_key_misuse.py        # credential misuse        -> HELD
@@ -52,7 +52,7 @@ it independently exercises the production row-lock path:
 
 ```bash
 # start a throwaway Postgres and a Postgres-backed instance on :8001, then:
-API_URL=http://127.0.0.1:8001 python attack2_budget_postgres.py   # -> no overspend
+API_URL=http://127.0.0.1:8001 python attack2_budget_postgres.py   # -> HELD; exits 1 on BROKE, writes evidence_attack2_*.json
 ```
 
 ## Attack 5 crash consistency

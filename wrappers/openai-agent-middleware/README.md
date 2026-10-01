@@ -49,7 +49,7 @@ python -m pip install -e wrappers/openai-agent-middleware
 ```
 
 `b2a_sdk` must be installed from the local path first: this package depends
-on `b2a-sdk>=0.3.0`, which is not on PyPI. The `openai` package is optional
+on `b2a-sdk>=0.4.0`, which is not on PyPI. The `openai` package is optional
 (`pip install -e "wrappers/openai-agent-middleware[openai]"`): the runner
 accepts the tool-call objects any OpenAI SDK version emits, and plain dicts.
 

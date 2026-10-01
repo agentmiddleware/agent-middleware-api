@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -621,3 +623,147 @@ async def test_mcp_corrupt_policy_denies_before_charge(client, clean_database):
         assert events[0].metadata["policy_id"] == policy_id
     finally:
         registry.unregister_local("policy-echo")
+
+
+
+
+# policy_bundles stores both limits as Numeric(18, 8) (ten integer digits),
+# name as String(255) and risk_tier as String(20). Starlette parses the bare
+# JSON literals Infinity/-Infinity/NaN, and ge=0 alone let +Infinity through.
+UNSTORABLE_LIMITS = [float("inf"), float("-inf"), float("nan"), 1e20, 1e10]
+UNSTORABLE_LIMIT_IDS = ["Infinity", "-Infinity", "NaN", "1e20", "1e10"]
+# The largest float the bounds accept; it still fits Numeric(18, 8).
+LARGEST_STORABLE_LIMIT = 9_999_999_999.0
+ADMIN = {"X-API-Key": "test-key"}
+
+
+def _raw_json(payload: dict) -> dict:
+    """httpx kwargs that send Infinity/NaN as the bare JSON literals."""
+    return {
+        "content": json.dumps(payload),
+        "headers": {**ADMIN, "Content-Type": "application/json"},
+    }
+
+
+async def _policy_total(client: AsyncClient, wallet_id: str) -> int:
+    listed = await client.get(f"/v1/policies?wallet_id={wallet_id}", headers=ADMIN)
+    assert listed.status_code == 200
+    return listed.json()["total"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("field", ["max_cost_per_action", "daily_spend_limit"])
+@pytest.mark.parametrize("value", UNSTORABLE_LIMITS, ids=UNSTORABLE_LIMIT_IDS)
+async def test_policy_create_refuses_unstorable_limits(
+    client, clean_database, field, value
+):
+    wallet_id = await _wallet(client, "policy-unstorable")
+    resp = await client.post(
+        "/v1/policies",
+        **_raw_json({"wallet_id": wallet_id, "name": "Unstorable", field: value}),
+    )
+    assert resp.status_code == 422, resp.text
+    assert await _policy_total(client, wallet_id) == 0
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("field", ["max_cost_per_action", "daily_spend_limit"])
+@pytest.mark.parametrize("value", UNSTORABLE_LIMITS, ids=UNSTORABLE_LIMIT_IDS)
+async def test_policy_patch_refuses_unstorable_limits(
+    client, clean_database, field, value
+):
+    wallet_id = await _wallet(client, "policy-unstorable-patch")
+    created = await client.post(
+        "/v1/policies",
+        json={
+            "wallet_id": wallet_id,
+            "name": "Patched",
+            "max_cost_per_action": 3,
+            "daily_spend_limit": 30,
+        },
+        headers=ADMIN,
+    )
+    assert created.status_code == 201
+    policy_id = created.json()["policy_id"]
+
+    resp = await client.patch(f"/v1/policies/{policy_id}", **_raw_json({field: value}))
+    assert resp.status_code == 422, resp.text
+    stored = await client.get(f"/v1/policies/{policy_id}", headers=ADMIN)
+    assert stored.json()["max_cost_per_action"] == 3.0
+    assert stored.json()["daily_spend_limit"] == 30.0
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"risk_tier": "HIGH"},
+        {"risk_tier": "med"},
+        {"risk_tier": "x" * 300},
+        {"name": "n" * 256},
+    ],
+    ids=["tier-uppercase", "tier-abbreviated", "tier-300-chars", "name-256-chars"],
+)
+async def test_policy_refuses_unknown_risk_tier_and_overlong_name(
+    client, clean_database, overrides
+):
+    """risk_tier is one of the planner's tiers (low/medium/high); anything
+    else never matched a requested tier, and over 20 characters it failed
+    the Postgres insert (500). name is String(255)."""
+    wallet_id = await _wallet(client, "policy-tier")
+    resp = await client.post(
+        "/v1/policies",
+        json={"wallet_id": wallet_id, "name": "Tiered", **overrides},
+        headers=ADMIN,
+    )
+    assert resp.status_code == 422, resp.text
+    assert await _policy_total(client, wallet_id) == 0
+
+    created = await client.post(
+        "/v1/policies",
+        json={"wallet_id": wallet_id, "name": "Tiered", "risk_tier": "low"},
+        headers=ADMIN,
+    )
+    assert created.status_code == 201
+    policy_id = created.json()["policy_id"]
+    patched = await client.patch(
+        f"/v1/policies/{policy_id}", json=overrides, headers=ADMIN
+    )
+    assert patched.status_code == 422, patched.text
+    stored = await client.get(f"/v1/policies/{policy_id}", headers=ADMIN)
+    assert stored.json()["risk_tier"] == "low"
+    assert stored.json()["name"] == "Tiered"
+
+
+@pytest.mark.anyio
+async def test_policy_fields_at_storage_limits_are_accepted(client, clean_database):
+    wallet_id = await _wallet(client, "policy-limits")
+    created = await client.post(
+        "/v1/policies",
+        json={
+            "wallet_id": wallet_id,
+            "name": "n" * 255,
+            "risk_tier": "high",
+            "max_cost_per_action": LARGEST_STORABLE_LIMIT,
+            "daily_spend_limit": 0,
+        },
+        headers=ADMIN,
+    )
+    assert created.status_code == 201, created.text
+    policy = created.json()
+    assert policy["name"] == "n" * 255
+    assert policy["risk_tier"] == "high"
+    assert policy["max_cost_per_action"] == LARGEST_STORABLE_LIMIT
+    assert policy["daily_spend_limit"] == 0.0
+
+    patched = await client.patch(
+        f"/v1/policies/{policy['policy_id']}",
+        json={
+            "risk_tier": "medium",
+            "daily_spend_limit": LARGEST_STORABLE_LIMIT,
+        },
+        headers=ADMIN,
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["risk_tier"] == "medium"
+    assert patched.json()["daily_spend_limit"] == LARGEST_STORABLE_LIMIT

@@ -353,7 +353,11 @@ in committed defaults.
 `REDIS_URL` is required for the managed pilot's isolated Redis service. Outside
 that pilot it remains optional when Redis rate limiting is unused; a
 production-like service fails closed on Redis outage whenever it is set.
-`CORS_ORIGINS` should be locked to known frontends.
+`CORS_ORIGINS` may stay at its documented default `*`: every authenticated
+route takes header credentials, and a wildcard disables credentialed CORS (see
+[`SECURITY_LIMITATIONS.md`](../SECURITY_LIMITATIONS.md), "CORS Posture"). Set
+an explicit origin list, without `*`, only when a browser app must send
+credentials.
 
 Committed `.railway/railway.ts` contains the complete API variable-name set but
 no values: every name, including `VALID_API_KEYS`, signing material, and

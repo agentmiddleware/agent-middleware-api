@@ -20,6 +20,11 @@ and checks the invariants that matter economically:
   7. signature        every receipt verifies under the published Ed25519
                       trust key, and tampered copies do not
 
+Exit status: 0 only when all seven invariants ran and held, 1 when any check
+failed, 2 when the target is unusable (self-provision off, transport error),
+and 3 when nothing failed but an invariant could not run -- scope-denial needs
+the server started with ENABLE_DOGFOOD_SECOND_TOOL=true.
+
 Unlike scripts/dogfood_trust_plane.py (in-process ASGI, bootstrap-admin key),
 this drives the real HTTP surface with a credential the agent minted itself,
 so it reproduces what an external agent can independently establish. The
@@ -47,6 +52,9 @@ BLOCKED_TOOL = "partner.notes.count"
 BURST = 5
 
 failures: list[str] = []
+# Invariants that could not run against this server. A skipped invariant is
+# not a held one, so the run never reports success while this is non-empty.
+skipped: list[str] = []
 
 
 def check(name: str, ok: bool, detail: str = "") -> None:
@@ -221,14 +229,17 @@ async def run(base_url: str) -> int:
                 f"  skipped: {BLOCKED_TOOL} is not registered "
                 "(start the server with ENABLE_DOGFOOD_SECOND_TOOL=true)"
             )
+            skipped.append("scope-denial")
         else:
             check("denied", r5.status_code == 403, f"HTTP {r5.status_code}")
             detail = r5.json().get("detail")
-            if isinstance(detail, dict):
-                check("reason is permit scope", detail.get("error") == "permit_tool_not_allowed")
-                denial = (detail.get("receipt") or {}).get("receipt_id")
-                if denial:
-                    receipts.append(denial)
+            check("denial detail is structured", isinstance(detail, dict))
+            detail = detail if isinstance(detail, dict) else {}
+            check("reason is permit scope", detail.get("error") == "permit_tool_not_allowed")
+            denial = (detail.get("receipt") or {}).get("receipt_id")
+            check("signed denial receipt issued", bool(denial))
+            if denial:
+                receipts.append(denial)
             check("no debit", len(await debits(cl, wallet)) == before)
 
         step("6. a governed tool without a permit fails closed")
@@ -247,8 +258,14 @@ async def run(base_url: str) -> int:
         step("7. receipts verify under the published Ed25519 trust key")
         await verify_receipts(cl, [r for r in receipts if r])
 
-    print(f"\n{'FAILED: ' + ', '.join(failures) if failures else 'ALL INVARIANTS HELD'}")
-    return 1 if failures else 0
+    if failures:
+        print(f"\nFAILED: {', '.join(failures)}")
+        return 1
+    if skipped:
+        print(f"\nSKIPPED: {', '.join(skipped)} (no failures, but not every invariant ran)")
+        return 3
+    print("\nALL INVARIANTS HELD")
+    return 0
 
 
 def main() -> int:
