@@ -1817,6 +1817,7 @@ async def _execute_registered_tool_inner(
         if governed_call and permit_model:
             reason = policy.reason or "policy_denied"
             receipt_payload = await _finalize_governed_denial(
+                unaccepted_iga_use=iga_granted_use,
                 unaccepted_action_owner_id=idem_begin.record_id if idem_begin else None,
                 idem=idem,
                 effects_committed=False,
@@ -1901,6 +1902,7 @@ async def _execute_registered_tool_inner(
                 },
             )
             receipt_payload = await _finalize_governed_denial(
+                unaccepted_iga_use=iga_granted_use,
                 unaccepted_action_owner_id=idem_begin.record_id if idem_begin else None,
                 idem=idem,
                 effects_committed=False,
@@ -2001,6 +2003,7 @@ async def _execute_registered_tool_inner(
                     },
                 )
                 receipt_payload = await _finalize_governed_denial(
+                    unaccepted_iga_use=iga_granted_use,
                     unaccepted_action_owner_id=idem_begin.record_id,
                     idem=idem,
                     effects_committed=False,
@@ -2064,6 +2067,7 @@ async def _execute_registered_tool_inner(
             reason = permit_validation.reason or "permit_denied"
             if permit_model:
                 receipt_payload = await _finalize_governed_denial(
+                    unaccepted_iga_use=iga_granted_use,
                     unaccepted_action_owner_id=idem_begin.record_id
                     if idem_begin
                     else None,
@@ -2090,6 +2094,8 @@ async def _execute_registered_tool_inner(
                 )
             elif permit_validation.reason:
                 await _complete_governed_denial_idempotency(
+                    unaccepted_iga_use=iga_granted_use,
+                    tool_name=tool_name,
                     unaccepted_action_owner_id=idem_begin.record_id
                     if idem_begin
                     else None,
@@ -3554,12 +3560,14 @@ async def _complete_governed_denial_idempotency(
     *,
     idem: Any,
     unaccepted_action_owner_id: str | None = None,
+    unaccepted_iga_use: tuple[EnterprisePrincipal, str, str] | None = None,
     idem_started: bool,
     wallet_id: str,
     endpoint: str,
     idempotency_key: str | None,
     reason: str,
     status_code: int = 403,
+    tool_name: str = "",
 ) -> None:
     if not idem_started or not idempotency_key:
         return
@@ -3571,6 +3579,7 @@ async def _complete_governed_denial_idempotency(
             expected_record_id=unaccepted_action_owner_id,
         ):
             raise IdempotencyInProgressError("idempotency_in_progress")
+        await _release_iga_use(unaccepted_iga_use, tool_name, reason=reason)
         return
     await idem.complete(
         wallet_id=wallet_id,
@@ -3670,6 +3679,7 @@ async def _finalize_governed_denial(
     *,
     idem: Any,
     unaccepted_action_owner_id: str | None = None,
+    unaccepted_iga_use: tuple[EnterprisePrincipal, str, str] | None = None,
     permit_model: Any,
     wallet_id: str,
     key_id: str | None,
@@ -3730,6 +3740,9 @@ async def _finalize_governed_denial(
         )
         if not released:
             raise IdempotencyInProgressError("idempotency_in_progress")
+        # The exact owner is now proven unaccepted. Return only the IGA use
+        # consumed by this invocation; prepared/uncertain owners never reach it.
+        await _release_iga_use(unaccepted_iga_use, tool_name, reason=reason)
         idempotency_record_id = None
     if not detached_action and idempotency_record_id is None and idempotency_key:
         record = await idem.get_record(
