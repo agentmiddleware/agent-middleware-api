@@ -584,3 +584,28 @@ def test_published_window_does_not_claim_one_backend_s_algorithm() -> None:
         "fixed_window_shared_rolling_window_in_memory"
     )
     assert payload["rejected_credentials_scope"] == "shared_per_client_bucket"
+
+
+@pytest.mark.anyio
+async def test_bucket_key_is_canonicalized_like_auth() -> None:
+    """``"key"`` and ``"key "`` are one credential to auth, so one bucket here.
+
+    The limiter used the raw header as the bucket key while auth strips it, so
+    a caller could sidestep the per-key limit by varying trailing whitespace.
+    """
+
+    async def ok(_request):
+        return PlainTextResponse("ok")
+
+    starlette_app = Starlette(routes=[Route("/v1/wallets", ok)])
+    limited = RateLimitMiddleware(starlette_app, requests_per_minute=2)
+
+    transport = ASGITransport(app=limited)
+    async with AsyncClient(transport=transport, base_url="http://test") as http:
+        first = await http.get("/v1/wallets", headers={"X-API-Key": "same-key"})
+        second = await http.get("/v1/wallets", headers={"X-API-Key": "same-key "})
+        third = await http.get("/v1/wallets", headers={"X-API-Key": " same-key"})
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert third.status_code == 429

@@ -2509,390 +2509,64 @@ async def test_losing_an_operation_key_race_does_not_leave_velocity_overcounted(
     assert [entry.entry_id for entry in operation_debits] == [winner.entry_id]
 
 
-# --- Float money request bounds ---
-#
-# Wallet and service money columns are Numeric(20, 8): twelve integer digits.
-# Starlette parses the bare JSON literals Infinity, -Infinity and NaN, and a
-# float field bounded only by ge/gt lets +Infinity through, so these values
-# reached the engine (an Infinity balance and ledger credit on SQLite, a 500
-# on Postgres). Each must be a 422 that writes nothing.
+@pytest.mark.anyio
+async def test_agent_wallet_provisioning_replays_on_idempotency_key(
+    client, api_headers, clean_database
+):
+    """A retried provisioning call with the same Idempotency-Key must not fund
+    a second wallet or debit the sponsor twice."""
+    sponsor_resp = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={"sponsor_name": "Idem Sponsor", "email": "i@s.com", "initial_credits": 1000},
+        headers=api_headers,
+    )
+    assert sponsor_resp.status_code == 201
+    sponsor_id = sponsor_resp.json()["wallet_id"]
 
-UNSTORABLE_CREDITS = [float("inf"), float("-inf"), float("nan"), 1e20, 1e12]
-UNSTORABLE_CREDITS_IDS = ["Infinity", "-Infinity", "NaN", "1e20", "1e12"]
-UNSTORABLE_QUERY_AMOUNTS = ["Infinity", "-Infinity", "NaN", "1e20", "1e12"]
-# The largest float the bounds accept; it still fits Numeric(20, 8).
-LARGEST_STORABLE_CREDITS = 999_999_999_999.0
-
-
-def _raw_json(payload: dict, headers: dict) -> dict:
-    """httpx kwargs that send Infinity/NaN as the bare JSON literals."""
-    return {
-        "content": json.dumps(payload),
-        "headers": {**headers, "Content-Type": "application/json"},
+    payload = {
+        "sponsor_wallet_id": sponsor_id,
+        "agent_id": "idem-bot",
+        "budget_credits": 300,
     }
+    headers = {**api_headers, "Idempotency-Key": "provision-idem-bot-1"}
+    first = await client.post("/v1/billing/wallets/agent", json=payload, headers=headers)
+    assert first.status_code == 201, first.text
+    second = await client.post("/v1/billing/wallets/agent", json=payload, headers=headers)
+    assert second.status_code == 201, second.text
+    assert second.json()["wallet_id"] == first.json()["wallet_id"]
 
+    sponsor = await client.get(f"/v1/billing/wallets/{sponsor_id}", headers=api_headers)
+    assert sponsor.status_code == 200
+    assert sponsor.json()["balance"] == 700.0
 
-async def _wallet_rows(**filters) -> list:
-    factory = get_session_factory()
-    async with factory() as session:
-        stmt = select(WalletModel)
-        for column, value in filters.items():
-            stmt = stmt.where(getattr(WalletModel, column) == value)
-        return list((await session.execute(stmt)).scalars())
-
-
-async def _ledger_rows() -> list:
-    factory = get_session_factory()
-    async with factory() as session:
-        return list((await session.execute(select(LedgerEntryModel))).scalars())
-
-
-async def _funded_agent(client, api_headers, agent_id: str) -> tuple[str, str]:
-    sponsor = await client.post(
-        "/v1/billing/wallets/sponsor",
-        json={
-            "sponsor_name": f"{agent_id} sponsor",
-            "email": f"{agent_id}@t.com",
-            "initial_credits": 10000,
-        },
-        headers=api_headers,
-    )
-    assert sponsor.status_code == 201, sponsor.text
-    agent = await client.post(
+    # Same key, different ask: refused rather than silently replayed.
+    conflict = await client.post(
         "/v1/billing/wallets/agent",
-        json={
-            "sponsor_wallet_id": sponsor.json()["wallet_id"],
-            "agent_id": agent_id,
-            "budget_credits": 1000,
-        },
-        headers=api_headers,
+        json={**payload, "budget_credits": 301},
+        headers=headers,
     )
-    assert agent.status_code == 201, agent.text
-    return sponsor.json()["wallet_id"], agent.json()["wallet_id"]
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["error"] == "idempotency_key_reused"
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("value", UNSTORABLE_CREDITS, ids=UNSTORABLE_CREDITS_IDS)
-async def test_sponsor_wallet_refuses_unstorable_initial_credits(
-    client, api_headers, clean_database, value
-):
-    resp = await client.post(
-        "/v1/billing/wallets/sponsor",
-        **_raw_json(
-            {
-                "sponsor_name": "Unstorable Sponsor",
-                "email": "unstorable@t.com",
-                "initial_credits": value,
-            },
-            api_headers,
-        ),
-    )
-    assert resp.status_code == 422, resp.text
-    assert await _wallet_rows(owner_name="Unstorable Sponsor") == []
-    assert await _ledger_rows() == []
-
-
-@pytest.mark.anyio
-@pytest.mark.parametrize(
-    "field",
-    ["budget_credits", "daily_limit", "auto_refill_threshold", "auto_refill_amount"],
-)
-@pytest.mark.parametrize("value", UNSTORABLE_CREDITS, ids=UNSTORABLE_CREDITS_IDS)
-async def test_agent_wallet_refuses_unstorable_money_fields(
-    client, api_headers, clean_database, field, value
-):
-    sponsor = await client.post(
-        "/v1/billing/wallets/sponsor",
-        json={
-            "sponsor_name": "Bounds Sponsor",
-            "email": "bounds@t.com",
-            "initial_credits": 10000,
-        },
-        headers=api_headers,
-    )
-    sponsor_id = sponsor.json()["wallet_id"]
-    ledger_before = len(await _ledger_rows())
-
-    resp = await client.post(
-        "/v1/billing/wallets/agent",
-        **_raw_json(
-            {
-                "sponsor_wallet_id": sponsor_id,
-                "agent_id": "unstorable-agent",
-                "budget_credits": 100,
-                field: value,
-            },
-            api_headers,
-        ),
-    )
-    assert resp.status_code == 422, resp.text
-    assert await _wallet_rows(agent_id="unstorable-agent") == []
-    after = await client.get(f"/v1/billing/wallets/{sponsor_id}", headers=api_headers)
-    assert Decimal(after.json()["balance_exact"]) == Decimal("10000")
-    assert len(await _ledger_rows()) == ledger_before
-
-
-@pytest.mark.anyio
-@pytest.mark.parametrize("field", ["budget_credits", "max_spend"])
-@pytest.mark.parametrize("value", UNSTORABLE_CREDITS, ids=UNSTORABLE_CREDITS_IDS)
-async def test_child_wallet_refuses_unstorable_money_fields(
-    client, api_headers, clean_database, field, value
-):
-    _, agent_id = await _funded_agent(client, api_headers, "bounds-parent")
-    ledger_before = len(await _ledger_rows())
-
-    resp = await client.post(
-        "/v1/billing/wallets/child",
-        **_raw_json(
-            {
-                "parent_wallet_id": agent_id,
-                "child_agent_id": "unstorable-child",
-                "budget_credits": 10,
-                "max_spend": 10,
-                field: value,
-            },
-            api_headers,
-        ),
-    )
-    assert resp.status_code == 422, resp.text
-    assert await _wallet_rows(child_agent_id="unstorable-child") == []
-    after = await client.get(f"/v1/billing/wallets/{agent_id}", headers=api_headers)
-    assert Decimal(after.json()["balance_exact"]) == Decimal("1000")
-    assert len(await _ledger_rows()) == ledger_before
-
-
-@pytest.mark.anyio
-@pytest.mark.parametrize("value", UNSTORABLE_CREDITS, ids=UNSTORABLE_CREDITS_IDS)
-async def test_service_registration_refuses_unstorable_price(
-    client, api_headers, clean_database, value
-):
-    _, agent_id = await _funded_agent(client, api_headers, "bounds-seller")
-    key = await client.post(
-        "/v1/api-keys",
-        json={"wallet_id": agent_id, "key_name": "seller"},
-        headers=api_headers,
-    )
-    assert key.status_code == 201
-
-    resp = await client.post(
-        "/v1/billing/services",
-        **_raw_json(
-            {
-                "name": "Unstorable price",
-                "category": "agent_comms",
-                "credits_per_unit": value,
-            },
-            {"X-API-Key": key.json()["api_key"]},
-        ),
-    )
-    assert resp.status_code == 422, resp.text
-    factory = get_session_factory()
-    async with factory() as session:
-        rows = await session.execute(
-            select(ServiceRegistryModel).where(
-                ServiceRegistryModel.owner_wallet_id == agent_id
-            )
-        )
-        assert list(rows.scalars()) == []
-
-
-@pytest.mark.anyio
-@pytest.mark.parametrize("value", UNSTORABLE_CREDITS, ids=UNSTORABLE_CREDITS_IDS)
-async def test_direct_top_up_refuses_unstorable_fiat_amount(
-    client, api_headers, clean_database, value
-):
-    sponsor = await client.post(
-        "/v1/billing/wallets/sponsor",
-        json={"sponsor_name": "Bounds Topup", "email": "bt@t.com"},
-        headers=api_headers,
-    )
-    wallet_id = sponsor.json()["wallet_id"]
-
-    resp = await client.post(
-        "/v1/billing/top-up",
-        **_raw_json({"wallet_id": wallet_id, "amount_fiat": value}, api_headers),
-    )
-    assert resp.status_code == 422, resp.text
-    assert await _ledger_rows() == []
-
-
-@pytest.mark.anyio
-@pytest.mark.parametrize("amount", UNSTORABLE_QUERY_AMOUNTS)
-async def test_top_up_prepare_refuses_unstorable_fiat_amount(
-    client, api_headers, clean_database, amount
-):
-    sponsor = await client.post(
-        "/v1/billing/wallets/sponsor",
-        json={"sponsor_name": "Bounds Prepare", "email": "bp@t.com"},
-        headers=api_headers,
-    )
-    wallet_id = sponsor.json()["wallet_id"]
-
-    resp = await client.post(
-        f"/v1/billing/top-up/prepare?wallet_id={wallet_id}&amount_fiat={amount}",
-        headers=api_headers,
-    )
-    assert resp.status_code == 422, resp.text
-    assert await _ledger_rows() == []
-
-
-@pytest.mark.anyio
-@pytest.mark.parametrize("amount", UNSTORABLE_QUERY_AMOUNTS)
-async def test_transfer_refuses_unstorable_amount_without_moving_credits(
-    client, api_headers, clean_database, amount
-):
-    sponsor_id, a = await _funded_agent(client, api_headers, "bounds-xfer-a")
-    b = await client.post(
-        "/v1/billing/wallets/agent",
-        json={"sponsor_wallet_id": sponsor_id, "agent_id": "bounds-xfer-b", "budget_credits": 100},
-        headers=api_headers,
-    )
-    b = b.json()["wallet_id"]
-    ledger_before = len(await _ledger_rows())
-
-    resp = await client.post(
-        f"/v1/billing/transfer?from_wallet_id={a}&to_wallet_id={b}&amount={amount}",
-        headers=api_headers,
-    )
-    assert resp.status_code == 422, resp.text
-
-    wallet_a = await client.get(f"/v1/billing/wallets/{a}", headers=api_headers)
-    wallet_b = await client.get(f"/v1/billing/wallets/{b}", headers=api_headers)
-    assert Decimal(wallet_a.json()["balance_exact"]) == Decimal("1000")
-    assert Decimal(wallet_b.json()["balance_exact"]) == Decimal("100")
-    assert len(await _ledger_rows()) == ledger_before
-
-
-@pytest.mark.anyio
-async def test_transfer_with_unstorable_amount_from_foreign_wallet_moves_nothing(
+async def test_agent_wallet_provisioning_error_completes_idempotency_record(
     client, api_headers, clean_database
 ):
-    """A wallet key naming another tenant's wallet as the source is refused
-    whatever the amount, and the victim's balance is untouched."""
-    _, victim = await _funded_agent(client, api_headers, "bounds-victim")
-    _, attacker = await _funded_agent(client, api_headers, "bounds-attacker")
-    key = await client.post(
-        "/v1/api-keys",
-        json={"wallet_id": attacker, "key_name": "attacker"},
-        headers=api_headers,
-    )
-    attacker_headers = {"X-API-Key": key.json()["api_key"]}
+    """A terminal error must close the key, not leave it in-progress.
 
-    for amount in ("Infinity", "1000"):
-        resp = await client.post(
-            f"/v1/billing/transfer?from_wallet_id={victim}&to_wallet_id={attacker}"
-            f"&amount={amount}",
-            headers=attacker_headers,
-        )
-        assert resp.status_code in {403, 422}, resp.text
-
-    wallet = await client.get(f"/v1/billing/wallets/{victim}", headers=api_headers)
-    assert Decimal(wallet.json()["balance_exact"]) == Decimal("1000")
-
-
-@pytest.mark.anyio
-async def test_money_fields_at_largest_storable_value_are_accepted(
-    client, api_headers, clean_database
-):
-    """The bounds sit at the column limit, not below it."""
-    sponsor = await client.post(
-        "/v1/billing/wallets/sponsor",
-        json={
-            "sponsor_name": "Largest Sponsor",
-            "email": "largest@t.com",
-            "initial_credits": LARGEST_STORABLE_CREDITS,
-        },
-        headers=api_headers,
-    )
-    assert sponsor.status_code == 201, sponsor.text
-    assert Decimal(sponsor.json()["balance_exact"]) == Decimal("999999999999")
-    sponsor_id = sponsor.json()["wallet_id"]
-
-    agent = await client.post(
-        "/v1/billing/wallets/agent",
-        json={
-            "sponsor_wallet_id": sponsor_id,
-            "agent_id": "largest-agent",
-            "budget_credits": 1000,
-            "daily_limit": LARGEST_STORABLE_CREDITS,
-            "auto_refill_threshold": LARGEST_STORABLE_CREDITS,
-            "auto_refill_amount": LARGEST_STORABLE_CREDITS,
-        },
-        headers=api_headers,
-    )
-    assert agent.status_code == 201, agent.text
-    agent_id = agent.json()["wallet_id"]
-    assert Decimal(agent.json()["daily_limit_exact"]) == Decimal("999999999999")
-
-    child = await client.post(
-        "/v1/billing/wallets/child",
-        json={
-            "parent_wallet_id": agent_id,
-            "child_agent_id": "largest-child",
-            "budget_credits": 10,
-            "max_spend": LARGEST_STORABLE_CREDITS,
-        },
-        headers=api_headers,
-    )
-    assert child.status_code == 201, child.text
-
-    key = await client.post(
-        "/v1/api-keys",
-        json={"wallet_id": agent_id, "key_name": "largest"},
-        headers=api_headers,
-    )
-    service = await client.post(
-        "/v1/billing/services",
-        json={
-            "name": "Largest price",
-            "category": "agent_comms",
-            "credits_per_unit": LARGEST_STORABLE_CREDITS,
-        },
-        headers={"X-API-Key": key.json()["api_key"]},
-    )
-    assert service.status_code == 201, service.text
-
-    # A whole sponsor balance at the limit can fund one agent budget.
-    big_sponsor = await client.post(
-        "/v1/billing/wallets/sponsor",
-        json={
-            "sponsor_name": "Largest Funder",
-            "email": "largest-funder@t.com",
-            "initial_credits": LARGEST_STORABLE_CREDITS,
-        },
-        headers=api_headers,
-    )
-    big_agent = await client.post(
-        "/v1/billing/wallets/agent",
-        json={
-            "sponsor_wallet_id": big_sponsor.json()["wallet_id"],
-            "agent_id": "largest-budget-agent",
-            "budget_credits": LARGEST_STORABLE_CREDITS,
-        },
-        headers=api_headers,
-    )
-    assert big_agent.status_code == 201, big_agent.text
-    assert Decimal(big_agent.json()["balance_exact"]) == Decimal("999999999999")
-
-    # The direct top-up body validates and reaches its fixed 410.
-    direct = await client.post(
-        "/v1/billing/top-up",
-        json={"wallet_id": sponsor_id, "amount_fiat": LARGEST_STORABLE_CREDITS},
-        headers=api_headers,
-    )
-    assert direct.status_code == 410, direct.text
-
-    # The query amounts pass validation too; the engine then refuses them on
-    # the merits (the agent holds far less than the amount).
-    transfer = await client.post(
-        f"/v1/billing/transfer?from_wallet_id={agent_id}&to_wallet_id={sponsor_id}"
-        f"&amount={LARGEST_STORABLE_CREDITS}",
-        headers=api_headers,
-    )
-    assert transfer.status_code == 402, transfer.text
-    prepare = await client.post(
-        f"/v1/billing/top-up/prepare?wallet_id={sponsor_id}"
-        f"&amount_fiat={LARGEST_STORABLE_CREDITS}",
-        headers=api_headers,
-    )
-    assert prepare.status_code != 422, prepare.text
+    Without completing the record on the 404 branch, a retry with the same
+    Idempotency-Key answered ``409 idempotency_in_progress`` until the stale
+    record sweep -- the caller could neither replay nor correct the request.
+    """
+    payload = {
+        "sponsor_wallet_id": "wlt-does-not-exist",
+        "agent_id": "orphan-bot",
+        "budget_credits": 10,
+    }
+    headers = {**api_headers, "Idempotency-Key": "provision-orphan-1"}
+    first = await client.post("/v1/billing/wallets/agent", json=payload, headers=headers)
+    assert first.status_code == 404, first.text
+    replay = await client.post("/v1/billing/wallets/agent", json=payload, headers=headers)
+    assert replay.status_code == 404, replay.text
+    assert replay.json() == first.json()

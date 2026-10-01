@@ -507,8 +507,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 ),
             ]
         else:
-            presented_key = request.headers.get(settings.API_KEY_HEADER)
-            bucket_limits = [(_api_key_bucket(presented_key), self.limit)]
+            # Canonicalize the way auth does (app.core.auth strips before
+            # lookup): otherwise "key" and "key " count as separate buckets and
+            # one accepted credential can sidestep the per-key limit.
+            raw_key = request.headers.get(settings.API_KEY_HEADER, "")
+            bucket_key = raw_key.strip() or "anonymous"
+            bucket_limits = [(bucket_key, self.limit)]
 
         # Skip rate limiting for docs, health, and test clients
         skip_paths = (
