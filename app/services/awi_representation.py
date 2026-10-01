@@ -8,6 +8,7 @@ representation they need (summary, embedding, low-res, etc.) instead of
 full DOM/screenshots. This reduces bandwidth and processing time.
 """
 
+import hashlib
 import json
 import uuid
 from datetime import datetime, timezone
@@ -127,20 +128,31 @@ class ProgressiveRepresentationEngine:
     async def _generate_embedding(
         self, page_state: dict[str, Any], options: dict[str, Any]
     ) -> dict[str, Any]:
-        """Generate a semantic embedding of the page content."""
+        """Generate a simulated embedding of the page content.
+
+        Not a semantic model: each 10-character chunk maps to a float in
+        [0, 1) taken from its SHA-256 digest, so the vector is stable across
+        processes (unlike the salted built-in ``hash``) and labelled
+        ``simulated``.
+        """
         embedding_model = options.get("embedding_model", "default")
         html = page_state.get("html", "")
 
         text_content = self._extract_text(html)
 
         mock_embedding = [
-            hash(text_content[i : i + 10]) % 1.0
+            int.from_bytes(
+                hashlib.sha256(text_content[i : i + 10].encode("utf-8")).digest()[:8],
+                "big",
+            )
+            / 2**64
             for i in range(0, min(len(text_content), 1536), 10)
         ]
 
         return {
             "type": "embedding",
             "model": embedding_model,
+            "simulated": True,
             "dimension": len(mock_embedding),
             "vector": mock_embedding[:768]
             if len(mock_embedding) > 768
