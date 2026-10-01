@@ -21,7 +21,7 @@ python -m pip install -e wrappers/langchain-agent-middleware
 ```
 
 `b2a_sdk` must be installed from the local path first: this package
-depends on `b2a-sdk>=0.3.0`, which is not on PyPI, so installing the
+depends on `b2a-sdk>=0.4.0`, which is not on PyPI, so installing the
 wrapper on its own fails to resolve. That installs the `langchain_b2a`
 module used below.
 
