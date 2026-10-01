@@ -23,7 +23,7 @@ from ..core.time import utc_now
 from ..db.database import get_session_factory
 from ..db.models import KYCVerificationModel, WalletModel
 from ..core.config import get_settings
-from ..schemas.billing import KYCStatus, WalletStatus
+from ..schemas.billing import KYCDocumentType, KYCStatus, WalletStatus
 from .agent_money import WalletNotFoundError
 from .wallet_status import SPENDABLE_WALLET_STATUSES
 
@@ -68,7 +68,7 @@ class KYCService:
         self,
         wallet_id: str,
         return_url: str,
-        document_type: str = "document",
+        document_type: Optional[KYCDocumentType] = None,
     ) -> dict:
         """
         Create a Stripe Identity verification session for a sponsor wallet.
@@ -76,8 +76,9 @@ class KYCService:
         Args:
             wallet_id: The wallet requiring verification
             return_url: URL to redirect after verification completes
-            document_type: Type of document to verify
-                (passport, driver_license, id_card)
+            document_type: Restrict verification to one Stripe Identity
+                document type (driving_license, id_card, passport); None
+                accepts any of them
 
         Returns:
             {
@@ -118,31 +119,23 @@ class KYCService:
                     f"KYC verification is not required for wallet {wallet_id}"
                 )
 
-        metadata = {
-            "wallet_id": wallet_id,
-            "document_type": document_type,
+        metadata = {"wallet_id": wallet_id}
+        document_options: dict[str, Any] = {
+            "require_id_number": False,
+            "require_live_capture": True,
+            "require_matching_selfie": True,
         }
+        if document_type is not None:
+            # Already constrained to Stripe's vocabulary by the request schema.
+            # Omitting allowed_types lets Stripe accept every document type.
+            metadata["document_type"] = document_type
+            document_options["allowed_types"] = [document_type]
 
         try:
             verification_session = stripe.identity.VerificationSession.create(
                 type=self.VERIFICATION_TYPE,
                 metadata=metadata,
-                options=cast(
-                    Any,
-                    {
-                        "document": {
-                            # document_type is caller-supplied (from the request body)
-                            # and is validated by Stripe's API at request time.
-                            "allowed_types": cast(
-                                "list[Literal['driving_license', 'id_card', 'passport']]",
-                                [document_type],
-                            ),
-                            "require_id_number": False,
-                            "require_live_capture": True,
-                            "require_matching_selfie": True,
-                        }
-                    },
-                ),
+                options=cast(Any, {"document": document_options}),
                 return_url=return_url,
             )
         except stripe.error.StripeError as e:

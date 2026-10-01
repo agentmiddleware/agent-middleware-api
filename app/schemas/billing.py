@@ -12,7 +12,8 @@ precision errors (e.g., 0.1 + 0.2 ≠ 0.3 with floats).
 """
 
 from decimal import Decimal
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from enum import Enum
@@ -665,19 +666,50 @@ class TransferResponse(ExactDecimalFieldsMixin):
     status: str
 
 
+# Stripe Identity's document allowed_types vocabulary, verbatim. Anything else
+# (including the old "document" default and "driver_license") is refused by
+# Stripe, so it is refused here first.
+KYCDocumentType = Literal["driving_license", "id_card", "passport"]
+
+_KYC_RETURN_URL_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
 class CreateKYCSessionRequest(BaseModel):
     """Request to create a KYC verification session."""
 
     wallet_id: str = Field(..., description="Wallet ID requiring KYC verification.")
     return_url: str = Field(
         ...,
-        description="URL to redirect after verification completes.",
+        max_length=2048,
+        description=(
+            "Absolute https URL to redirect to after verification completes "
+            "(plain http is accepted only for localhost)."
+        ),
         examples=["https://yourapp.com/kyc-callback"],
     )
-    document_type: str = Field(
-        default="document",
-        description="Type of document to verify (passport, driver_license, id_card).",
+    document_type: KYCDocumentType | None = Field(
+        default=None,
+        description=(
+            "Restrict verification to one Stripe Identity document type "
+            "(driving_license, id_card, passport). Omit to accept any of them."
+        ),
     )
+
+    @field_validator("return_url")
+    @classmethod
+    def _validate_return_url(cls, v: str) -> str:
+        """Only a real web origin may receive the post-verification redirect."""
+        parts = urlsplit(v)
+        host = (parts.hostname or "").lower()
+        if not host:
+            raise ValueError("return_url must be an absolute URL with a host")
+        if parts.scheme == "https":
+            return v
+        if parts.scheme == "http" and host in _KYC_RETURN_URL_LOOPBACK_HOSTS:
+            return v
+        raise ValueError(
+            "return_url must use https (plain http is allowed only for localhost)"
+        )
 
 
 class KYCSessionResponse(BaseModel):

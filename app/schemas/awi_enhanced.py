@@ -86,7 +86,7 @@ class PasskeyChallengeResponse(BaseModel):
     rp_name: str = Field(..., description="Relying Party name")
     timeout: int = Field(..., description="Challenge timeout in milliseconds")
     user_verification: str = Field(
-        default="preferred", description="User verification requirement"
+        default="required", description="User verification requirement"
     )
     public_key_cred_params: list[dict[str, Any]] = Field(
         ..., description="Supported public key algorithms"
