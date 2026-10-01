@@ -277,6 +277,8 @@ def test_production_accepts_a_postgres_database_url():
     [
         ("allow_private_network_targets", "ALLOW_PRIVATE_NETWORK_TARGETS"),
         ("allow_unsafe_host_python_sandbox", "ALLOW_UNSAFE_HOST_PYTHON_SANDBOX"),
+        ("enable_dogfood_tool", "ENABLE_DOGFOOD_TOOL"),
+        ("enable_dogfood_second_tool", "ENABLE_DOGFOOD_SECOND_TOOL"),
     ],
 )
 @pytest.mark.parametrize("environment", ["production", "staging", "preview"])
@@ -350,6 +352,8 @@ def test_local_environments_accept_local_only_escape_hatches(environment: str):
         allow_private_network_targets=True,
         allow_unsafe_host_python_sandbox=True,
         behavioral_sandbox_python_backend="unsafe_host",
+        enable_dogfood_tool=True,
+        enable_dogfood_second_tool=True,
         database_url="sqlite+aiosqlite:///./test.db",
     )
 
@@ -369,6 +373,8 @@ def test_settings_wrapper_forwards_local_only_escape_hatches():
         ALLOW_PRIVATE_NETWORK_TARGETS=True,
         ALLOW_UNSAFE_HOST_PYTHON_SANDBOX=True,
         BEHAVIORAL_SANDBOX_PYTHON_BACKEND="unsafe_host",
+        ENABLE_DOGFOOD_TOOL=True,
+        ENABLE_DOGFOOD_SECOND_TOOL=True,
     )
 
     with pytest.raises(TrustModeGuardrailError) as exc_info:
@@ -378,6 +384,8 @@ def test_settings_wrapper_forwards_local_only_escape_hatches():
     assert "ALLOW_PRIVATE_NETWORK_TARGETS" in message
     assert "ALLOW_UNSAFE_HOST_PYTHON_SANDBOX" in message
     assert "BEHAVIORAL_SANDBOX_PYTHON_BACKEND" in message
+    assert "ENABLE_DOGFOOD_TOOL" in message
+    assert "ENABLE_DOGFOOD_SECOND_TOOL" in message
 
 
 @pytest.mark.parametrize("environment", ["", "local", "development", "test", "ci"])
