@@ -304,6 +304,42 @@ def test_production_refuses_local_only_escape_hatches(
     assert f"{variable} must be false" in str(exc_info.value)
 
 
+@pytest.mark.parametrize("backend", ["unsafe_host", "host", " Unsafe_Host "])
+def test_production_refuses_host_python_sandbox_backend(backend: str):
+    """Selecting the host backend by name is the same escape hatch.
+
+    ``app.services.behavioral_sandbox`` runs agent code on the host when
+    ``BEHAVIORAL_SANDBOX_PYTHON_BACKEND`` is ``unsafe_host``/``host`` even with
+    ``ALLOW_UNSAFE_HOST_PYTHON_SANDBOX=false``, so refusing only the flag would
+    leave the backend selector as a bypass.
+    """
+    with pytest.raises(TrustModeGuardrailError) as exc_info:
+        validate_trust_mode_config(
+            environment="production",
+            trust_mode_enabled=True,
+            signing_private_key_b64=VALID_SIGNING_PRIVATE_KEY_B64,
+            allow_legacy_unpermitted_mcp=False,
+            enable_proof_surfaces=False,
+            database_url=VALID_PRODUCTION_DATABASE_URL,
+            behavioral_sandbox_python_backend=backend,
+        )
+
+    assert "BEHAVIORAL_SANDBOX_PYTHON_BACKEND must not be" in str(exc_info.value)
+
+
+@pytest.mark.parametrize("backend", ["", "disabled", "docker"])
+def test_production_accepts_isolated_or_disabled_sandbox_backend(backend: str):
+    validate_trust_mode_config(
+        environment="production",
+        trust_mode_enabled=True,
+        signing_private_key_b64=VALID_SIGNING_PRIVATE_KEY_B64,
+        allow_legacy_unpermitted_mcp=False,
+        enable_proof_surfaces=False,
+        database_url=VALID_PRODUCTION_DATABASE_URL,
+        behavioral_sandbox_python_backend=backend,
+    )
+
+
 @pytest.mark.parametrize("environment", ["", "local", "development", "test", "ci"])
 def test_local_environments_accept_local_only_escape_hatches(environment: str):
     validate_trust_mode_config(
@@ -313,6 +349,7 @@ def test_local_environments_accept_local_only_escape_hatches(environment: str):
         allow_legacy_unpermitted_mcp=False,
         allow_private_network_targets=True,
         allow_unsafe_host_python_sandbox=True,
+        behavioral_sandbox_python_backend="unsafe_host",
         database_url="sqlite+aiosqlite:///./test.db",
     )
 
@@ -331,6 +368,7 @@ def test_settings_wrapper_forwards_local_only_escape_hatches():
         DATABASE_URL=VALID_PRODUCTION_DATABASE_URL,
         ALLOW_PRIVATE_NETWORK_TARGETS=True,
         ALLOW_UNSAFE_HOST_PYTHON_SANDBOX=True,
+        BEHAVIORAL_SANDBOX_PYTHON_BACKEND="unsafe_host",
     )
 
     with pytest.raises(TrustModeGuardrailError) as exc_info:
@@ -339,6 +377,7 @@ def test_settings_wrapper_forwards_local_only_escape_hatches():
     message = str(exc_info.value)
     assert "ALLOW_PRIVATE_NETWORK_TARGETS" in message
     assert "ALLOW_UNSAFE_HOST_PYTHON_SANDBOX" in message
+    assert "BEHAVIORAL_SANDBOX_PYTHON_BACKEND" in message
 
 
 @pytest.mark.parametrize("environment", ["", "local", "development", "test", "ci"])
