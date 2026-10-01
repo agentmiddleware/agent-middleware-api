@@ -23,18 +23,22 @@ _FIELDS = (
 
 
 def upgrade():
-    with op.batch_alter_table("permits", schema=None) as batch_op:
-        for name in _FIELDS:
-            batch_op.add_column(
-                sa.Column(
-                    name,
-                    sa.Integer() if name == "action_contract_version" else sa.String(),
-                    nullable=True,
+    for table in ("permits", "receipts"):
+        with op.batch_alter_table(table, schema=None) as batch_op:
+            for name in _FIELDS:
+                batch_op.add_column(
+                    sa.Column(
+                        name,
+                        sa.Integer()
+                        if name == "action_contract_version"
+                        else sa.String(),
+                        nullable=True,
+                    )
                 )
-            )
 
 
 def downgrade():
-    with op.batch_alter_table("permits", schema=None) as batch_op:
-        for name in reversed(_FIELDS):
-            batch_op.drop_column(name)
+    for table in ("receipts", "permits"):
+        with op.batch_alter_table(table, schema=None) as batch_op:
+            for name in reversed(_FIELDS):
+                batch_op.drop_column(name)

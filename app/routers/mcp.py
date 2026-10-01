@@ -2306,6 +2306,7 @@ async def _execute_registered_tool_inner(
                     wallet_id=wallet_id,
                     endpoint=idempotency_endpoint,
                     idempotency_key=idempotency_key,
+                    expected_record_id=idem_begin.record_id,
                 )
             except Exception:
                 logger.exception(

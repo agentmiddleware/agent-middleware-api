@@ -245,7 +245,7 @@ class PermitVerifyResponse(BaseModel):
     permit: PermitResponse | None = None
 
 
-class ReceiptResponse(BaseModel):
+class ReceiptResponse(ActionPermitFields):
     receipt_id: str
     idempotency_record_id: str | None = None
     dispatch_attempt_id: str | None = None
