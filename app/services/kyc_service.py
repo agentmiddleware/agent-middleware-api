@@ -332,7 +332,9 @@ class KYCService:
                 sig_header,
                 settings.STRIPE_WEBHOOK_SECRET,
             )
-        except ValueError as e:
+        # SignatureVerificationError is a StripeError, not a ValueError, so it
+        # must be named: otherwise a bad signature escapes as a 500.
+        except (ValueError, stripe.SignatureVerificationError) as e:
             logger.error(f"Invalid Stripe signature: {e}")
             return False
 

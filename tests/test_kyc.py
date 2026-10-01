@@ -3,11 +3,18 @@ Tests for KYC Verification (Stripe Identity).
 Validates the KYC verification flow for sponsor wallets.
 """
 
+import hashlib
+import hmac
+import json
+import time
+
 import pytest
+import stripe
 from unittest.mock import patch, MagicMock
 from uuid import uuid4
 from httpx import AsyncClient, ASGITransport
 from app.main import app
+from app.services import kyc_service as kyc_service_module
 
 
 @pytest.fixture
@@ -586,3 +593,139 @@ async def test_wallet_response_includes_kyc_status(client, api_headers):
     data = resp.json()
     assert "kyc_status" in data
     assert data["kyc_status"] == "pending"
+
+
+IDENTITY_WEBHOOK_SECRET = "whsec_identity_test"
+
+
+def _stripe_signature_header(payload: bytes, secret: str) -> str:
+    """A Stripe-Signature header computed the way Stripe signs webhooks."""
+    timestamp = int(time.time())
+    signed = f"{timestamp}.".encode() + payload
+    digest = hmac.new(secret.encode(), signed, hashlib.sha256).hexdigest()
+    return f"t={timestamp},v1={digest}"
+
+
+@pytest.fixture
+async def pending_identity_session(client, api_headers, sponsor_wallet, monkeypatch):
+    """A sponsor wallet with an open Stripe Identity session and a known secret."""
+    monkeypatch.setattr(
+        kyc_service_module.settings, "STRIPE_WEBHOOK_SECRET", IDENTITY_WEBHOOK_SECRET
+    )
+    session_id = f"vs_sig_{sponsor_wallet['wallet_id']}"
+    with patch(
+        "app.services.kyc_service.stripe.identity.VerificationSession.create"
+    ) as mock_create:
+        mock_create.return_value = MagicMock(
+            id=session_id, url="https://verify.stripe.com/sig_test"
+        )
+        resp = await client.post(
+            "/v1/kyc/sessions",
+            json={
+                "wallet_id": sponsor_wallet["wallet_id"],
+                "return_url": "https://example.com/callback",
+            },
+            headers=api_headers,
+        )
+    assert resp.status_code == 201, resp.text
+    payload = json.dumps(
+        {
+            "id": "evt_identity_sig_test",
+            "object": "event",
+            "type": "identity.verification_session.verified",
+            "data": {
+                "object": {"id": session_id, "object": "identity.verification_session"}
+            },
+        }
+    ).encode()
+    return {"wallet_id": sponsor_wallet["wallet_id"], "payload": payload}
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "signature",
+    [
+        pytest.param("forged", id="signed-with-another-secret"),
+        pytest.param("t=1700000000,v1=deadbeef", id="stale-garbage-signature"),
+        pytest.param("not-a-stripe-signature", id="unparseable-header"),
+    ],
+)
+async def test_identity_webhook_rejects_bad_signature_with_400(
+    client, api_headers, pending_identity_session, signature
+):
+    """A bad signature is a client error (400), not an unhandled 500, and changes nothing."""
+    payload = pending_identity_session["payload"]
+    if signature == "forged":
+        signature = _stripe_signature_header(payload, "whsec_attacker")
+
+    resp = await client.post(
+        "/v1/webhooks/stripe/identity",
+        content=payload,
+        headers={"stripe-signature": signature},
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "Invalid Stripe signature"
+    status_resp = await client.get(
+        f"/v1/kyc/status/{pending_identity_session['wallet_id']}",
+        headers=api_headers,
+    )
+    assert status_resp.json()["kyc_status"] == "pending"
+
+
+@pytest.mark.anyio
+async def test_identity_webhook_rejects_signature_error_without_dispatch(
+    client, pending_identity_session
+):
+    """stripe.SignatureVerificationError is not a ValueError; it must still map to 400."""
+    assert not issubclass(stripe.SignatureVerificationError, ValueError)
+    with (
+        patch(
+            "app.services.kyc_service.stripe.Webhook.construct_event",
+            side_effect=stripe.SignatureVerificationError(
+                "Invalid signature", "invalid_sig"
+            ),
+        ),
+        patch.object(
+            kyc_service_module.KYCService, "_handle_verification_verified"
+        ) as mock_verified,
+    ):
+        resp = await client.post(
+            "/v1/webhooks/stripe/identity",
+            content=pending_identity_session["payload"],
+            headers={"stripe-signature": "invalid_sig"},
+        )
+
+    assert resp.status_code == 400
+    mock_verified.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_identity_webhook_missing_signature_is_400(client):
+    resp = await client.post("/v1/webhooks/stripe/identity", content=b"{}")
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "Missing Stripe signature"
+
+
+@pytest.mark.anyio
+async def test_identity_webhook_accepts_correctly_signed_event(
+    client, api_headers, pending_identity_session
+):
+    """Control for the rejections above: the same event, correctly signed, verifies."""
+    payload = pending_identity_session["payload"]
+    resp = await client.post(
+        "/v1/webhooks/stripe/identity",
+        content=payload,
+        headers={
+            "stripe-signature": _stripe_signature_header(
+                payload, IDENTITY_WEBHOOK_SECRET
+            )
+        },
+    )
+
+    assert resp.status_code == 200, resp.text
+    status_resp = await client.get(
+        f"/v1/kyc/status/{pending_identity_session['wallet_id']}",
+        headers=api_headers,
+    )
+    assert status_resp.json()["kyc_status"] == "verified"
