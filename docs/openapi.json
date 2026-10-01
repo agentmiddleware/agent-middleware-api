@@ -2151,6 +2151,7 @@
           "Trust Permits"
         ],
         "summary": "Get Quote",
+        "description": "Read a quote the caller's wallet owns.\n\nA quote another wallet owns reads as ``quote_not_found``, exactly like an\nid that does not exist. Answering 403 instead confirmed the id was real,\nand the ``wallet_access_denied`` body named the owning wallet_id.",
         "operationId": "get_quote_v1_quotes__quote_id__get",
         "security": [
           {
@@ -6168,6 +6169,7 @@
           },
           "budget_credits": {
             "type": "number",
+            "exclusiveMaximum": 1000000000000.0,
             "exclusiveMinimum": 0.0,
             "title": "Budget Credits",
             "description": "Credits to provision from the sponsor's balance."
@@ -6176,6 +6178,7 @@
             "anyOf": [
               {
                 "type": "number",
+                "exclusiveMaximum": 1000000000000.0,
                 "minimum": 0.0
               },
               {
@@ -6193,6 +6196,7 @@
           },
           "auto_refill_threshold": {
             "type": "number",
+            "exclusiveMaximum": 1000000000000.0,
             "minimum": 0.0,
             "title": "Auto Refill Threshold",
             "description": "Refill trigger threshold.",
@@ -6200,6 +6204,7 @@
           },
           "auto_refill_amount": {
             "type": "number",
+            "exclusiveMaximum": 1000000000000.0,
             "minimum": 0.0,
             "title": "Auto Refill Amount",
             "description": "Amount to refill.",
@@ -6237,6 +6242,7 @@
           },
           "initial_credits": {
             "type": "number",
+            "exclusiveMaximum": 1000000000000.0,
             "minimum": 0.0,
             "title": "Initial Credits",
             "description": "Initial credit balance (in ecosystem credits).",
@@ -7007,11 +7013,12 @@
           "max_credits": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "number",
+                "exclusiveMinimum": 0.0
               },
               {
                 "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,21}0*$)\\d{0,12}\\.\\d{0,8}0*$)"
               }
             ],
             "title": "Max Credits"
@@ -7024,7 +7031,8 @@
           "nonce": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 64
               },
               {
                 "type": "null"
@@ -7039,7 +7047,8 @@
           },
           "max_calls_per_tool": {
             "additionalProperties": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1.0
             },
             "type": "object",
             "title": "Max Calls Per Tool"
@@ -7047,11 +7056,12 @@
           "aggregate_value_cap": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "number",
+                "exclusiveMinimum": 0.0
               },
               {
                 "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,21}0*$)\\d{0,12}\\.\\d{0,8}0*$)"
               },
               {
                 "type": "null"
@@ -7185,7 +7195,7 @@
               },
               {
                 "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,21}0*$)\\d{0,12}\\.\\d{0,8}0*$)"
               }
             ],
             "title": "Max Credits"
@@ -7699,6 +7709,7 @@
           },
           "name": {
             "type": "string",
+            "maxLength": 255,
             "minLength": 1,
             "title": "Name"
           },
@@ -7734,6 +7745,7 @@
             "anyOf": [
               {
                 "type": "number",
+                "exclusiveMaximum": 10000000000.0,
                 "minimum": 0.0
               },
               {
@@ -7746,6 +7758,7 @@
             "anyOf": [
               {
                 "type": "number",
+                "exclusiveMaximum": 10000000000.0,
                 "minimum": 0.0
               },
               {
@@ -7761,6 +7774,11 @@
           },
           "risk_tier": {
             "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ],
             "title": "Risk Tier",
             "default": "medium"
           },
@@ -7809,6 +7827,7 @@
             "anyOf": [
               {
                 "type": "string",
+                "maxLength": 255,
                 "minLength": 1
               },
               {
@@ -7849,6 +7868,7 @@
             "anyOf": [
               {
                 "type": "number",
+                "exclusiveMaximum": 10000000000.0,
                 "minimum": 0.0
               },
               {
@@ -7861,6 +7881,7 @@
             "anyOf": [
               {
                 "type": "number",
+                "exclusiveMaximum": 10000000000.0,
                 "minimum": 0.0
               },
               {
@@ -7883,7 +7904,12 @@
           "risk_tier": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ]
               },
               {
                 "type": "null"
