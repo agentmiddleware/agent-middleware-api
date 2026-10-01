@@ -111,6 +111,23 @@ on the previous code.
   endpoint reports `simulated` instead of a fake PR URL; behavioral-sandbox
   environments refuse loader, interpreter and PATH-like env vars and
   over-long names; planner requests reject NaN and Infinity.
+- **Webhooks and audit summaries**: `POST /v1/webhooks/stripe/identity`
+  returns 400 instead of 500 on a forged, stale or unparseable
+  `Stripe-Signature` (`stripe.SignatureVerificationError` is not a
+  `ValueError`; it was fail-closed either way). `GET /v1/audit/summary` and
+  `GET /v1/audit/events?summary=true` count in SQL over every matching event
+  instead of tallying a 10,000-row read, so `total`, `by_event`,
+  `by_outcome`, `by_wallet`, `ok` and `failed` are exact at any table size;
+  the one bucket read from metadata JSON, `by_policy_reason`, carries an
+  additive `by_policy_reason_truncated` flag whenever its row cap left
+  events out.
+- **Proof scripts exit non-zero on the failures they detect**:
+  `attack2_budget_postgres.py`, `attack2_mechanism_sqlite.py`,
+  `stress_test_live.py`, `agent_self_credential_proof.py` (the scope-denial
+  invariant is no longer skipped by default) and `adversarial_battery.py`
+  (now behind the same live-target guard as the other live scripts: HTTPS
+  required, the production origin needs `--confirm-production`) fail the
+  process on their own measurement instead of printing and exiting 0.
 - **Migration 041** (`041_scrub_content_owner_keys`, data-only): blanks
   `content_pipelines.owner_key` and `content_campaigns.owner_key` values that
   are not a known wallet id, which is what legacy rows stored the raw API key
