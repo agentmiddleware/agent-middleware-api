@@ -620,6 +620,66 @@ async def test_approval_card_page_shows_the_reviewed_terms(
     assert denied.status_code == 403
 
 
+class _RecordingNotifications:
+    def __init__(self) -> None:
+        self.sent: list[dict] = []
+
+    async def send_email(self, **kwargs) -> None:
+        self.sent.append(kwargs)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "approval_url",
+    [
+        "javascript:alert(document.domain)",
+        " JaVaScRiPt:alert(1)",
+        "data:text/html,<script>alert(1)</script>",
+        "http://sentinel.test/a/abc123",
+    ],
+)
+async def test_non_https_sentinel_approval_url_is_not_stored_or_linked(
+    client, clean_database, monkeypatch, sentinel, approval_url
+):
+    import app.services.notifications as notifications_module
+
+    settings = _sentinel_env(monkeypatch, simulated=False)
+    monkeypatch.setattr(settings, "SENTINEL_APPROVERS", "approver@example.com")
+    mailer = _RecordingNotifications()
+    monkeypatch.setattr(
+        notifications_module, "get_notification_service", lambda: mailer
+    )
+    sentinel.approval_url = approval_url
+    agent = await provision_agent_wallet(client)
+    created = await _request(client, agent)
+    assert created.status_code == 202
+    request_id = created.json()["request_id"]
+
+    # The Sentinel response is not trusted to choose the link scheme: the
+    # row keeps no URL, so neither surface can turn it into a clickable link.
+    assert (await _load(request_id)).approval_url is None
+
+    assert len(mailer.sent) == 1
+    email = mailer.sent[0]
+    for rendered in (email["html"], email["body"]):
+        assert approval_url.strip() not in rendered
+        assert "<a " not in rendered
+    assert "Approve or reject from the Sentinel" in email["html"]
+
+    card = await client.get(
+        f"/v1/permit-requests/{request_id}/card", headers=agent["agent_headers"]
+    )
+    assert card.status_code == 200
+    assert approval_url.strip() not in card.text
+    assert "<a " not in card.text
+
+    stranger = await provision_agent_wallet(client)
+    denied = await client.get(
+        f"/v1/permit-requests/{request_id}/card", headers=stranger["agent_headers"]
+    )
+    assert denied.status_code == 403
+
+
 @pytest.mark.asyncio
 async def test_request_hash_binds_every_reviewed_term(
     client, clean_database, monkeypatch, sentinel
