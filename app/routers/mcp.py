@@ -104,6 +104,7 @@ from ..trust import (
     get_permit_service,
     get_quote_service,
     get_receipt_service,
+    permit_constraints_snapshot,
     record_audit_event,
     get_refund_reconciliation_service,
     resolve_client_idempotency_key,
@@ -3193,8 +3194,6 @@ async def _raise_charged_upstream_failure(
 
 def _permit_constraints_snapshot(permit_model: Any) -> dict[str, Any]:
     """Build a snapshot of permit v2 constraints for receipt signing."""
-    from app.services.permits import permit_constraints_snapshot
-
     return permit_constraints_snapshot(permit_model)
 
 
