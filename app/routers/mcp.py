@@ -982,6 +982,21 @@ async def _execute_registered_tool(
             request_payload=request_payload,
             owned_record=owned_record,
         )
+    except ToolPermissionDenied as exc:
+        if exc.receipt is None and permit_id and wallet_id:
+            exc.receipt = await _action_request_denial_receipt(
+                permit_id=permit_id,
+                wallet_id=wallet_id,
+                auth=auth,
+                tool_name=tool_name,
+                arguments=arguments,
+                reason=str(exc),
+                endpoint=endpoint,
+                transport=transport,
+                request_id=request_id,
+                transport_key=idempotency_key,
+            )
+        raise
     except (
         AuditChainContendedError,
         ReceiptWriteContendedError,
@@ -1013,6 +1028,88 @@ async def _execute_registered_tool(
                         extra={"wallet_id": wallet_id},
                     )
         raise
+
+
+async def _action_request_denial_receipt(
+    *,
+    permit_id: str,
+    wallet_id: str,
+    auth: AuthContext,
+    tool_name: str,
+    arguments: dict[str, Any],
+    reason: str,
+    endpoint: str,
+    transport: str,
+    request_id: str | None,
+    transport_key: str | None,
+) -> dict[str, Any] | None:
+    """Receipt a verified subject's refused request, never its execution owner.
+
+    Expiry/revocation removes execution authority, not eligibility for denial
+    evidence. Foreign or unsigned authority does not establish that eligibility.
+    """
+    if not auth.is_bootstrap_admin and auth.wallet_id != wallet_id:
+        return None
+    async with get_session_factory()() as session:
+        model = await session.get(PermitModel, permit_id)
+    if (
+        model is None
+        or model.action_contract_version != 1
+        or model.subject_wallet_id != wallet_id
+        or (model.subject_key_id and model.subject_key_id != auth.key_id)
+    ):
+        return None
+    try:
+        if not await get_permit_service().verify_signature(model):
+            return None
+    except (TypeError, ValueError):
+        return None
+    # This hashes the refused request. It is intentionally not the authorized
+    # action digest and carries no idempotency/dispatch/ledger owner linkage.
+    denied_request = {
+        "kind": "action_request_denial",
+        "permit_id": permit_id,
+        "wallet_id": wallet_id,
+        "tool_name": tool_name,
+        "arguments": arguments,
+    }
+    decision = evaluate_tool_invocation(
+        auth=auth,
+        wallet_id=wallet_id,
+        tool_name=tool_name,
+        estimated_cost=None,
+        request_id=request_id,
+    )
+    audit = await _audit_mcp_invocation(
+        decision=decision,
+        endpoint=endpoint,
+        transport=transport,
+        ok=False,
+        error=reason,
+        effects_committed=False,
+        extra_metadata={
+            "evidence_scope": "request_denial",
+            "permit_id": permit_id,
+            "transport_idempotency_key": transport_key,
+            "request_hash": sha256_hex(denied_request),
+        },
+    )
+    receipt = await get_receipt_service().create_receipt(
+        permit_id=permit_id,
+        wallet_id=wallet_id,
+        key_id=auth.key_id,
+        tool=tool_name,
+        request_payload=denied_request,
+        response_payload={"error": reason},
+        ledger_entry_id=None,
+        credits_authorized=Decimal("0"),
+        credits_charged=Decimal("0"),
+        outcome="denied",
+        reason_code=_stable_receipt_reason(reason),
+        audit_event_id=audit.event_id,
+        constraints_evaluated={"evidence_scope": "request_denial"},
+    )
+    return _receipt_response_payload(receipt)
 
 
 async def _assert_action_current_access(
