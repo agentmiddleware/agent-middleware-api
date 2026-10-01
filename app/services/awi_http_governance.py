@@ -268,8 +268,9 @@ async def begin_awi_http_governed(
 def _stable_awi_failure_reason(action_status: str, error: Any) -> str:
     """Collapse a typed failure to a receipt-safe reason code.
 
-    ``"dom_bridge_failed: <exception text>"`` becomes ``dom_bridge_failed``;
-    other statuses (``passkey_required``, ``paused``, ...) name themselves.
+    A status of "error" whose error text reads "dom_bridge_failed: <detail>"
+    yields the reason code dom_bridge_failed (the prefix before the first
+    colon); other statuses (passkey_required, paused, ...) name themselves.
     The result is sanitized to the receipt service's reason-code pattern
     rather than raising on adversarial detail text.
     """
