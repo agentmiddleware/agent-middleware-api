@@ -6,6 +6,7 @@ Returns standard rate limit headers on every response.
 """
 
 import asyncio
+import hashlib
 import ipaddress
 import logging
 import os
@@ -18,7 +19,11 @@ from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
-from .auth import CREDENTIAL_REJECTED_HEADER
+from .auth import (
+    CREDENTIAL_ACCEPTANCE,
+    CREDENTIAL_REJECTED_HEADER,
+    CredentialAcceptance,
+)
 from .config import get_settings
 from .runtime_degradation import mark_rate_limiter_memory_fallback
 from .trust_mode import is_production_like_environment
@@ -30,15 +35,20 @@ _PUBLIC_MCP_PATH = "/mcp/public"
 _PUBLIC_MCP_BUCKET_PREFIX = "route:mcp-public"
 _PUBLIC_MCP_GLOBAL_LIMIT_MULTIPLIER = 10
 
-# Shared ceiling on requests whose credentials the app refused. The per-key
-# bucket is chosen from a caller-supplied header before the key has been
-# verified, so without this a caller rotating a fresh invalid X-API-Key per
+# Shared ceiling on requests whose credentials the app did not accept —
+# refused, or never checked because the route does not authenticate. The
+# per-key bucket is chosen from a caller-supplied header before the key has
+# been verified, so without this a caller rotating a fresh X-API-Key per
 # request would mint a fresh budget every time. Ten times the per-key limit,
 # matching the public-MCP global bucket: wide enough that a partner whose key
 # is briefly wrong is not throttled by it, narrow enough that key rotation is
 # bounded.
 _PREAUTH_BUCKET_PREFIX = "preauth:rejected-credentials"
 _PREAUTH_LIMIT_MULTIPLIER = 10
+
+# Prefix hashed with a presented X-API-Key to name its bucket; see
+# _api_key_bucket.
+_API_KEY_BUCKET_DOMAIN = b"agent-middleware-api:rate-limit-bucket:v1\x00"
 
 # In-memory fallback bookkeeping: bucket keys are caller-controlled, so the
 # dict is swept (at most once per window) once it grows past this many
@@ -65,9 +75,10 @@ def rate_limit_discovery() -> dict[str, Any]:
     ``window_accounting`` names that difference rather than letting a reader
     infer one algorithm from ``window_seconds``.
 
-    Requests whose credentials the app refuses — a ``401``, or the ``403`` an
-    unknown API key is answered with — are additionally charged to a shared
-    per-client bucket (``rejected_credentials_scope``); see
+    Requests whose credentials the app does not accept — a ``401``, the
+    ``403`` an unknown API key is answered with, or any request to a route
+    that never authenticates — are additionally charged to a shared per-client
+    bucket (``rejected_credentials_scope``); see
     ``RateLimitMiddleware.dispatch``. An authenticated caller denied on scope
     is not: in a trust plane, denials are ordinary traffic.
     """
@@ -114,6 +125,23 @@ def _client_id(request: Request) -> str:
         return ipaddress.ip_address(raw).compressed
     except ValueError:
         return peer_host
+
+
+def _api_key_bucket(presented_key: str | None) -> str:
+    """Name a presented key's bucket without putting the key itself in it.
+
+    Bucket names become Redis key names, so the raw header value would write
+    every API key that called in the last minute into the limiter's store in
+    plaintext. A digest still gives each distinct value its own bucket. It is
+    domain-separated so the name is not also the ``key_hash`` the API-key
+    table stores for the same key.
+    """
+    if presented_key is None:
+        return "anonymous"
+    digest = hashlib.sha256(
+        _API_KEY_BUCKET_DOMAIN + presented_key.encode("utf-8")
+    ).hexdigest()
+    return f"api_key_sha256:{digest}"
 
 
 class RateLimiterUnavailable(RuntimeError):
@@ -256,7 +284,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return limited, remaining, reset_in
 
     def _preauth_bucket(self, request: Request) -> str:
-        """Name the shared bucket that rejected credentials are charged to."""
+        """Name the shared bucket that unaccepted credentials are charged to."""
         namespace = (
             f"{settings.STATE_NAMESPACE}:{settings.PUBLIC_URL or settings.APP_NAME}"
         )
@@ -372,7 +400,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         *,
         force_memory: bool = False,
     ) -> tuple[JSONResponse | None, bool]:
-        """Take a rejected-credential reservation, or the 429 that refuses it."""
+        """Take a pre-auth reservation, or the 429 that refuses it."""
         if preauth_bucket is None:
             return None, False
         exhausted, reset_in = await self._reserve(
@@ -389,7 +417,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 reset_in,
                 (
                     "Rate limit exceeded. "
-                    f"{self.preauth_limit} requests per minute with rejected "
+                    f"{self.preauth_limit} requests per minute without accepted "
                     "credentials allowed per client; presenting a different API "
                     "key does not reset it."
                 ),
@@ -479,8 +507,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 ),
             ]
         else:
-            bucket_key = request.headers.get(settings.API_KEY_HEADER, "anonymous")
-            bucket_limits = [(bucket_key, self.limit)]
+            presented_key = request.headers.get(settings.API_KEY_HEADER)
+            bucket_limits = [(_api_key_bucket(presented_key), self.limit)]
 
         # Skip rate limiting for docs, health, and test clients
         skip_paths = (
@@ -507,7 +535,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # so that large test suites don't self-throttle.
         if (
             not public_mcp_request
-            and bucket_key == "test-key"
+            and presented_key == "test-key"
             and not is_production_like_environment(settings.ENVIRONMENT)
         ):
             response = await call_next(request)
@@ -524,12 +552,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         # Pre-authentication ceiling. The per-key bucket above is selected from
         # a header the caller controls, before verify_api_key has had a chance
-        # to reject it, so a caller sending a fresh invalid X-API-Key on every
-        # request would otherwise be handed a fresh 120-request budget each
-        # time — an unbounded amount of authenticated-route traffic from one
-        # client. One shared per-client bucket bounds that instead: every
-        # request reserves from it before running, and hands the reservation
-        # back unless the app refused the credentials. Rotation buys nothing
+        # to reject it, so a caller sending a fresh X-API-Key on every request
+        # would otherwise be handed a fresh 120-request budget each time — an
+        # unbounded amount of traffic from one client. One shared per-client
+        # bucket bounds that instead: every request reserves from it before
+        # running, and hands the reservation back only if get_auth_context
+        # accepted the credentials. Keying that on acceptance rather than on
+        # refusal matters: a route that never authenticates (a public route,
+        # a 404) never refuses an invented key either. Rotation buys nothing
         # past the bucket, and a request whose credentials the app accepts
         # leaves it exactly as it found it.
         preauth_bucket = None if public_mcp_request else self._preauth_bucket(request)
@@ -632,14 +662,25 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     ),
                 )
 
-            # Process request
-            response = await call_next(request)
+            # Process request, recording whether it authenticated. Once the app
+            # has run, the reservation is kept unless it accepted credentials
+            # — decided in the finally, so a request that raised on its way
+            # through is held to the same rule as one that answered.
+            acceptance = CredentialAcceptance()
+            acceptance_token = CREDENTIAL_ACCEPTANCE.set(acceptance)
+            try:
+                response = await call_next(request)
+            finally:
+                CREDENTIAL_ACCEPTANCE.reset(acceptance_token)
+                keep_reservation = not acceptance.accepted
 
-            # Keep the reservation only when the app refused these credentials
-            # — a 401, or the 403 it answers an unknown API key with. An
-            # authenticated caller denied on scope hands its reservation back:
-            # in a trust plane, denials are ordinary traffic, not abuse.
-            keep_reservation = _credentials_were_rejected(response)
+            # Also keep it when the app refused credentials — a 401, or the 403
+            # it answers an unknown API key with — even if another credential
+            # on the request was accepted. An authenticated caller denied on
+            # scope hands its reservation back: in a trust plane, denials are
+            # ordinary traffic, not abuse.
+            if _credentials_were_rejected(response):
+                keep_reservation = True
 
             response.headers["X-RateLimit-Limit"] = str(self.limit)
             response.headers["X-RateLimit-Remaining"] = str(header_remaining)
@@ -647,9 +688,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
             return response  # type: ignore[no-any-return]
         finally:
-            # Every exit that is not a refused credential — the per-key 429,
-            # a limiter 503, an answered request, an exception on the way
-            # through — gives the reservation back.
+            # Every other exit — accepted credentials, or a request refused
+            # before it ran (the per-key 429, a limiter 503) — gives the
+            # reservation back.
             if preauth_bucket is not None and preauth_reserved and not keep_reservation:
                 await self._release(
                     preauth_bucket,
