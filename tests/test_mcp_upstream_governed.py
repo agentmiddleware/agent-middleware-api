@@ -2094,7 +2094,9 @@ async def test_governed_upstream_replay_remains_bound_to_permit_api_key(
                 "key_name": "partner-upstream-replay-second-key",
                 "expires_in_days": 30,
             },
-            headers=provisioned["agent_headers"],
+            # The agent's own key expires, and a bounded key cannot mint
+            # siblings, so the second same-wallet key comes from bootstrap.
+            headers=BOOTSTRAP_HEADERS,
         )
         assert second_key_response.status_code == 201
 

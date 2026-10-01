@@ -103,6 +103,20 @@ def mask_key(key: str) -> str:
     return f"{key[:6]}...{key[-4:]}"
 
 
+def _key_is_live(key: APIKeyModel, now: datetime) -> bool:
+    """True if ``key`` could authenticate at ``now``.
+
+    The single liveness rule: ACTIVE status, use budget not spent, and not
+    past ``expires_at``. Status alone is not enough — nothing sweeps expired
+    or exhausted keys to a non-active status.
+    """
+    if key.status != APIKeyStatus.ACTIVE.value:
+        return False
+    if key.max_uses is not None and key.use_count >= key.max_uses:
+        return False
+    return not key.expires_at or key.expires_at >= now
+
+
 class APIKeyService:
     """
     Manages API keys for wallet authentication and key rotation.
@@ -241,6 +255,7 @@ class APIKeyService:
         response_keys = []
         total_active = 0
         total_revoked = 0
+        now = utc_now()
 
         for key in keys:
             metadata = {}
@@ -267,7 +282,9 @@ class APIKeyService:
                 }
             )
 
-            if key.status == APIKeyStatus.ACTIVE.value:
+            # total_active counts keys that could authenticate now, not keys
+            # whose status still reads "active" after expiry or exhaustion.
+            if _key_is_live(key, now):
                 total_active += 1
             elif key.status == APIKeyStatus.REVOKED.value:
                 total_revoked += 1
@@ -282,12 +299,12 @@ class APIKeyService:
     async def has_live_key(self, wallet_id: str) -> bool:
         """True if the wallet holds at least one key that could authenticate now.
 
-        Deliberately mirrors ``validate_key``'s liveness rule — ACTIVE status
-        *and* not past ``expires_at`` — rather than reusing ``get_keys``'
-        ``total_active``, which counts status only. Nothing sweeps expired keys
-        to a non-active status, so a status-only check reports a wallet as
-        credentialed after every one of its keys has timed out, and any gate
-        built on it would outlive the credentials it is meant to track.
+        Deliberately mirrors ``validate_key``'s liveness rule — ACTIVE status,
+        budget not spent, *and* not past ``expires_at`` (``_key_is_live``).
+        Nothing sweeps expired keys to a non-active status, so a status-only
+        check reports a wallet as credentialed after every one of its keys has
+        timed out, and any gate built on it would outlive the credentials it is
+        meant to track.
         """
         now = utc_now()
         async with self._session_factory()() as session:
@@ -297,13 +314,7 @@ class APIKeyService:
                     col(APIKeyModel.status) == APIKeyStatus.ACTIVE.value,
                 )
             )
-            for key in result.scalars().all():
-                if key.max_uses is not None and key.use_count >= key.max_uses:
-                    continue
-                expires_at = key.expires_at
-                if not expires_at or expires_at >= now:
-                    return True
-        return False
+            return any(_key_is_live(key, now) for key in result.scalars().all())
 
     async def is_key_live(self, key_id: str) -> bool:
         """True if this specific key could authenticate right now.
@@ -320,12 +331,26 @@ class APIKeyService:
                 select(APIKeyModel).where(col(APIKeyModel.key_id) == key_id)
             )
             key = result.scalar_one_or_none()
-        if not key or key.status != APIKeyStatus.ACTIVE.value:
-            return False
-        if key.max_uses is not None and key.use_count >= key.max_uses:
-            return False
-        expires_at = key.expires_at
-        return not expires_at or expires_at >= utc_now()
+        return key is not None and _key_is_live(key, utc_now())
+
+    async def is_key_bounded(self, key_id: str | None) -> bool:
+        """True if this key carries a use budget (max_uses) or an expiry.
+
+        A bounded key must not mint fresh credentials for its wallet: a new
+        key takes only the bounds its request names, so a capped or expiring
+        key could otherwise outlive its own limits through an unlimited
+        sibling. A missing or unknown key_id counts as bounded (fail closed).
+        """
+        if key_id is None:
+            return True
+        async with self._session_factory()() as session:
+            result = await session.execute(
+                select(APIKeyModel).where(col(APIKeyModel.key_id) == key_id)
+            )
+            key = result.scalar_one_or_none()
+        if key is None:
+            return True
+        return key.max_uses is not None or key.expires_at is not None
 
     async def validate_key(self, api_key: str) -> Optional[APIKeyModel]:
         """
@@ -344,8 +369,15 @@ class APIKeyService:
         key_hash = hashlib.sha256(api_key.encode()).hexdigest()
 
         async with self._session_factory()() as session:
+            # Look up by the indexed full digest, not the prefix alone: the
+            # prefix is "b2a_" plus four random characters and is not unique,
+            # so two live keys sharing it are expected at a few thousand keys
+            # (and can be ground out deliberately by any caller able to mint
+            # keys). A prefix-only lookup then returned several rows and
+            # failed every request for both keys with a 500.
             result = await session.execute(
                 select(APIKeyModel).where(
+                    col(APIKeyModel.key_hash) == key_hash,
                     col(APIKeyModel.key_prefix) == key_prefix,
                     col(APIKeyModel.status) == APIKeyStatus.ACTIVE.value,
                 )
@@ -626,6 +658,7 @@ class APIKeyService:
         wallet_id: str,
         reason: str = "security_incident",
         create_new_key: bool = True,
+        bounding_key_id: str | None = None,
     ) -> dict:
         """
         Immediately revoke all keys for a wallet and optionally create new ones.
@@ -634,6 +667,11 @@ class APIKeyService:
             wallet_id: Wallet to revoke keys for
             reason: Reason for emergency revocation
             create_new_key: Whether to create a new emergency key
+            bounding_key_id: The authenticating caller's own key. When set,
+                the replacement takes its bounds from this key alone, and no
+                replacement is minted if it is not a non-expired active key
+                of the wallet. None (bootstrap admins) keeps the wallet-wide
+                donor rule.
 
         Returns:
             {
@@ -724,6 +762,18 @@ class APIKeyService:
                     for key in active_keys
                     if not key.expires_at or key.expires_at >= now
                 ]
+                if bounding_key_id is not None:
+                    # A wallet-scoped caller may only carry its own key's
+                    # authority over: picking the loosest sibling would let a
+                    # capped key come out of the incident with an unbounded
+                    # replacement it never held.
+                    bounding_keys = [
+                        key for key in bounding_keys if key.key_id == bounding_key_id
+                    ]
+                    if not bounding_keys:
+                        create_new_key = False
+
+            if create_new_key:
                 emergency_expires_at = None
                 emergency_max_uses = None
                 if bounding_keys:
@@ -855,7 +905,14 @@ class APIKeyService:
 
         Returns:
             Rotation result dict
+
+        Raises:
+            InvalidRotationRequestError: the wallet holds no live key. There
+                is no credential to contain, and falling back to
+                ``rotate_key(key_id=None)`` would mint a fresh key with no
+                bounds at all.
         """
+        now = utc_now()
         async with self._session_factory()() as session:
             result = await session.execute(
                 select(APIKeyModel).where(
@@ -863,14 +920,23 @@ class APIKeyService:
                     col(APIKeyModel.status) == APIKeyStatus.ACTIVE.value,
                 )
             )
-            active_key = result.scalars().first()
+            # Pick a key that could still authenticate: an expired or
+            # exhausted ACTIVE key is not the suspect credential, and
+            # rotating it would leave the live one untouched.
+            live_key = next(
+                (key for key in result.scalars().all() if _key_is_live(key, now)),
+                None,
+            )
 
-        key_id = active_key.key_id if active_key else None
+        if live_key is None:
+            raise InvalidRotationRequestError(
+                f"wallet {wallet_id} has no live API key to rotate"
+            )
 
         rotation_result = await self.rotate_key(
             wallet_id=wallet_id,
-            key_id=key_id,
-            revoke_old=key_id is not None,
+            key_id=live_key.key_id,
+            revoke_old=True,
             reason=f"AUTOMATIC: {reason}",
             triggered_by="security_system",
         )

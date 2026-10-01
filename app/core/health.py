@@ -76,8 +76,11 @@ async def _run_check(
             "error": f"timeout after {CHECK_TIMEOUT_SECONDS}s",
         }
     except Exception as exc:
-        logger.debug("dependency check '%s' raised", name, exc_info=True)
-        result = {"status": "down", "error": f"{type(exc).__name__}: {exc}"}
+        # Driver messages name internal hosts, ports, and database roles, and
+        # /health/dependencies is unauthenticated. The report carries only the
+        # exception class; the full text goes to the operator log.
+        logger.warning("dependency check '%s' raised", name, exc_info=True)
+        result = {"status": "down", "error": type(exc).__name__}
 
     result.setdefault("error", None)
     result["latency_ms"] = round((time.monotonic() - start) * 1000, 2)

@@ -51,5 +51,5 @@ use them as product onboarding or a public capability list:
 - [`mcp-registry-submission.md`](mcp-registry-submission.md) is a gated
   publication runbook; do not submit while the deployed standard MCP endpoint
   is disabled.
-- `aegis/`, `superpowers/`, and `ip/` contain internal work and legal research,
-  not product documentation.
+- `aegis/` and `superpowers/` contain internal planning records, not product
+  documentation.
