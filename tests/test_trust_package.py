@@ -68,6 +68,7 @@ def test_permits_facade_matches_service():
     assert trust.get_permit_service is permits.get_permit_service
     assert trust.PermitError is permits.PermitError
     assert trust.PermitValidation is permits.PermitValidation
+    assert trust.permit_constraints_snapshot is permits.permit_constraints_snapshot
 
 
 def test_receipts_facade_matches_service():

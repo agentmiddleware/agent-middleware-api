@@ -88,6 +88,7 @@ from .permits import (
     PermitValidation,
     PermitWriteContendedError,
     get_permit_service,
+    permit_constraints_snapshot,
     permit_model_to_response,
 )
 from .permit_requests import (
@@ -189,6 +190,7 @@ __all__ = [
     "PermitError",
     "PermitWriteContendedError",
     "get_permit_service",
+    "permit_constraints_snapshot",
     "permit_model_to_response",
     # permit requests (agent asks, human approves, middleware mints)
     "ApprovalCardView",
