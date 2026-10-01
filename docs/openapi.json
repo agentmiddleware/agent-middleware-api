@@ -3066,6 +3066,9 @@
               }
             }
           },
+          "401": {
+            "description": "Missing credentials on production-like boots"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
