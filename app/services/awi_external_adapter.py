@@ -99,7 +99,8 @@ class AWIExternalAdapter:
         The adapter maps the standardized AWI action to the website's
         internal routes and executes the call. The governed
         ``POST /v1/awi/execute`` call (authorize, meter, receipt) must succeed
-        first; the side-effecting internal call runs only after it does.
+        first, with a 2xx *and* ``status == "success"``; the side-effecting
+        internal call runs only after it does.
         ``permit_id`` and ``idempotency_key`` are forwarded to that governed
         call as ``X-Permit-Id`` and ``Idempotency-Key``, which it requires.
         """
@@ -137,11 +138,30 @@ class AWIExternalAdapter:
             headers=governance_headers,
         )
         response.raise_for_status()
+        awi_response = response.json()
+
+        # A 2xx is not a go-ahead on its own: the session layer answers 200
+        # with status "paused" (human intervention), "passkey_required",
+        # "max_steps_reached" or "error". Only an executed action may reach
+        # the website's side-effecting route.
+        awi_status = (
+            awi_response.get("status") if isinstance(awi_response, dict) else None
+        )
+        if awi_status != "success":
+            return {
+                "success": False,
+                "error": (
+                    f"Governed AWI execute did not succeed (status: {awi_status}); "
+                    "internal route not called"
+                ),
+                "awi_response": awi_response,
+                "internal_result": None,
+            }
 
         result = await self._execute_internal_call(mapped_route, parameters)
 
         return {
-            "awi_response": response.json(),
+            "awi_response": awi_response,
             "internal_result": result,
         }
 
