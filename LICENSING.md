@@ -6,7 +6,7 @@ This repository is licensed by directory. Two licenses apply.
 |---|---|---|
 | Everything not listed below: `app/`, `migrations/`, `scripts/`, `tests/`, `docs/`, `site/`, `failure_lab/`, `static/`, root files | [Business Source License 1.1](LICENSE) | `LICENSE` |
 | `b2a_sdk/` | MIT | `b2a_sdk/LICENSE` |
-| `awi_sdk/` | MIT | `awi_sdk/LICENSE` |
+| `awi_sdk/` | MIT | `awi_sdk/LICENSE` (copied into `awi_sdk/typescript/LICENSE` so the npm tarball carries it) |
 | `framework_integrations/` | MIT | `framework_integrations/LICENSE` |
 | `wrappers/*` (each package) | MIT | `wrappers/<package>/LICENSE` |
 | `examples/` | MIT | `examples/LICENSE` |
