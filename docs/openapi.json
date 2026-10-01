@@ -5912,6 +5912,12 @@
             },
             "type": "object",
             "title": "By Policy Reason"
+          },
+          "by_policy_reason_truncated": {
+            "type": "boolean",
+            "title": "By Policy Reason Truncated",
+            "description": "True when by_policy_reason was tallied from only the newest events (a row cap applies to that bucket alone), so its counts are a lower bound. total, by_event, by_outcome and by_wallet always cover every matching event.",
+            "default": false
           }
         },
         "type": "object",
