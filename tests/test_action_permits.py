@@ -196,3 +196,88 @@ async def test_generic_service_action_issuance_is_closed():
     )
     with pytest.raises(PermitError, match="action_permit_requires_trusted_issuance"):
         await PermitService().create_permit(request)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("stored_window_null", [False, True])
+async def test_historical_envelope_issuance_record_replays(
+    clean_database, stored_window_null
+):
+    from datetime import datetime, timedelta, timezone
+    from httpx import ASGITransport, AsyncClient
+    from sqlalchemy import select
+    from app.db.database import get_session_factory
+    from app.db.models import PermitModel
+    from app.main import app
+    from app.schemas.trust import PermitCreateRequest
+    from app.services.idempotency import get_idempotency_service
+    from app.services.signing_keys import sha256_hex
+    from tests.test_trust_helpers import provision_agent_wallet
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        wallet = await provision_agent_wallet(client)
+        payload = dict(
+            issuer_wallet_id=wallet["agent_wallet_id"],
+            subject_wallet_id=wallet["agent_wallet_id"],
+            subject_key_id=wallet["key_id"],
+            allowed_tools=["historical-echo"],
+            max_credits=10,
+            expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+        )
+        request = PermitCreateRequest(**payload)
+        permit = await PermitService().create_permit(request)
+        historical_payload = request.model_dump(mode="json", exclude=set(FIELDS))
+        if not stored_window_null:
+            historical_payload.pop("repeat_window_seconds")
+        historical_response = permit.model_dump(mode="json", exclude=set(FIELDS))
+        identity = dict(
+            wallet_id=wallet["agent_wallet_id"],
+            endpoint="/v1/permits",
+            idempotency_key="historical-envelope",
+        )
+        idem = get_idempotency_service()
+        await idem.begin(**identity, request_payload=historical_payload)
+        await idem.complete(
+            **identity,
+            response_reference=permit.permit_id,
+            response_json=historical_response,
+            status_code=201,
+        )
+        headers = {
+            **wallet["agent_headers"],
+            "Idempotency-Key": identity["idempotency_key"],
+        }
+        for explicit_null in (False, True):
+            replay_payload = (
+                {**payload, **dict.fromkeys(FIELDS)} if explicit_null else payload
+            )
+            replay = await client.post(
+                "/v1/permits", json=replay_payload, headers=headers
+            )
+            assert replay.status_code == 201, replay.text
+            assert replay.json()["permit_id"] == permit.permit_id
+        conflict = await client.post(
+            "/v1/permits", json={**payload, "max_credits": 11}, headers=headers
+        )
+        assert conflict.status_code == 409
+        record = await idem.get_record(**identity)
+        assert record.request_hash == sha256_hex(historical_payload)
+        async with get_session_factory()() as session:
+            assert (
+                len(list((await session.execute(select(PermitModel))).scalars())) == 1
+            )
+        action = await client.post(
+            "/v1/permits",
+            json={**payload, **FIELDS},
+            headers={**headers, "Idempotency-Key": "action-input-refused"},
+        )
+        assert action.status_code == 400
+        assert action.json()["detail"] == "action_permit_requires_trusted_issuance"
+        assert (
+            await idem.get_record(
+                **{**identity, "idempotency_key": "action-input-refused"}
+            )
+            is None
+        )

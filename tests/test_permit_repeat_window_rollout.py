@@ -11,7 +11,7 @@ from app.core.time import utc_now
 from app.db.database import get_session_factory
 from app.db.models import IdempotencyRecordModel, PermitModel
 from app.main import app
-from app.schemas.trust import PermitCreateRequest
+from app.schemas.trust import ActionPermitFields, PermitCreateRequest
 from app.services.idempotency import IdempotencyConflictError, get_idempotency_service
 from app.services.permits import PermitError, get_permit_service
 from app.services.signing_keys import sha256_hex
@@ -83,10 +83,14 @@ async def test_legacy_permit_creation_replays_with_omitted_or_null_window(
     payload = _request(wallet)
     request = PermitCreateRequest(**payload)
     permit = await get_permit_service().create_permit(request)
-    legacy_payload = request.model_dump(mode="json")
+    legacy_payload = request.model_dump(
+        mode="json", exclude=set(ActionPermitFields.model_fields)
+    )
     if not stored_null:
         legacy_payload.pop("repeat_window_seconds")
-    legacy_response = permit.model_dump(mode="json")
+    legacy_response = permit.model_dump(
+        mode="json", exclude=set(ActionPermitFields.model_fields)
+    )
     legacy_response.pop("repeat_window_seconds", None)
     idem = get_idempotency_service()
     identity = {
@@ -143,7 +147,9 @@ async def test_new_windowless_permits_keep_pre040_request_hash(
     replay = await client.post("/v1/permits", json=payload, headers=headers)
     assert replay.status_code == 201
     assert replay.json() == created.json()
-    canonical = PermitCreateRequest(**payload).model_dump(mode="json")
+    canonical = PermitCreateRequest(**payload).model_dump(
+        mode="json", exclude=set(ActionPermitFields.model_fields)
+    )
     canonical.pop("repeat_window_seconds")
     async with get_session_factory()() as session:
         records = list(
@@ -169,7 +175,9 @@ async def test_compatible_replay_does_not_recreate_a_disappearing_record(
     }
     await idem.begin(
         **identity,
-        request_payload=PermitCreateRequest(**payload).model_dump(mode="json"),
+        request_payload=PermitCreateRequest(**payload).model_dump(
+            mode="json", exclude=set(ActionPermitFields.model_fields)
+        ),
     )
     record = await idem.get_record(**identity)
     original_begin = idem.begin_with_record
@@ -258,7 +266,9 @@ async def test_disabled_issuance_preserves_in_progress_key(client, clean_databas
         wallet_id=wallet["agent_wallet_id"],
         endpoint="/v1/permits",
         idempotency_key="pending-window",
-        request_payload=PermitCreateRequest(**payload).model_dump(mode="json"),
+        request_payload=PermitCreateRequest(**payload).model_dump(
+            mode="json", exclude=set(ActionPermitFields.model_fields)
+        ),
     )
     response = await client.post(
         "/v1/permits",

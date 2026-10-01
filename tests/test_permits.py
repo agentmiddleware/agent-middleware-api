@@ -11,7 +11,7 @@ from app.core.time import utc_now
 from app.db.database import get_session_factory
 from app.db.models import PermitModel
 from app.main import app
-from app.schemas.trust import PermitCreateRequest
+from app.schemas.trust import ActionPermitFields, PermitCreateRequest
 from app.services.idempotency import get_idempotency_service
 from app.services.permits import PermitError, get_permit_service
 from tests.test_trust_helpers import (
@@ -306,7 +306,8 @@ async def test_permit_create_rejects_in_progress_idempotency_key(
         endpoint="/v1/permits",
         idempotency_key="permit-in-progress-key",
         request_payload=PermitCreateRequest(**request_payload).model_dump(
-            mode="json", exclude={"repeat_window_seconds"}
+            mode="json",
+            exclude={"repeat_window_seconds", *ActionPermitFields.model_fields},
         ),
     )
 
