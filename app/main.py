@@ -1210,7 +1210,10 @@ async def health_dependencies():
         "Returns the current duplicate guard mode and observability metrics. "
         "Exposes log_mode_blocks (how many times log mode detected but allowed "
         "a duplicate) and enforce_mode_blocks (how many times enforce mode "
-        "blocked a duplicate). Does not expose request contents or secrets. "
+        "blocked a duplicate) for this process, plus "
+        "enforce_mode_denials_durable (denial receipts with reason_code "
+        "duplicate_request_new_key across the service lifetime) and the scope "
+        "of each metric. Does not expose request contents or secrets. "
         "Requires bootstrap admin authentication."
     ),
 )
@@ -1218,4 +1221,4 @@ async def health_duplicate_guard(
     auth: AuthContext = Depends(get_auth_context),
 ):
     auth.require_bootstrap_admin()
-    return get_duplicate_guard_metrics()
+    return await get_duplicate_guard_metrics()
