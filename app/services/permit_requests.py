@@ -65,6 +65,7 @@ from app.services.approval_card import (
     ApprovalCardView,
     render_email_html,
     render_text_summary,
+    safe_approval_url,
 )
 from app.services.human_approval import (
     HumanApprovalUnavailableError,
@@ -365,7 +366,15 @@ class PermitRequestService:
         model.sentinel_action_id = str(action_id)
         url = payload.get("approval_url") or payload.get("url")
         if isinstance(url, str):
-            model.approval_url = url[:512]
+            # The link is rendered as the approver's primary action, so the
+            # Sentinel response does not get to pick its scheme. The URL is
+            # not logged: it carries the magic-link token.
+            model.approval_url = safe_approval_url(url[:512])
+            if model.approval_url is None:
+                logger.warning(
+                    "sentinel_approval_url_rejected request_id=%s",
+                    model.request_id,
+                )
 
     async def _notify_approvers(self, model: PermitRequestModel) -> None:
         """Email the approval card. Best effort — Sentinel is the decision channel."""
