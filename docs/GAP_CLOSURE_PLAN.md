@@ -9,8 +9,8 @@
 > the unchecked boxes below were never updated. Against current code: per-key
 > rate limiting shipped as `RateLimitMiddleware` in `app/core/rate_limiter.py`
 > (a fixed-window counter in Redis, with an in-memory fallback), not as the
-> token-bucket design in 1.1; `app/core/rate_limit.py` exists but nothing
-> mounts it. JWT exchange
+> token-bucket design in 1.1; a token-bucket module written for 1.1 was never
+> mounted and has been removed. JWT exchange
 > (`POST /v1/auth/token`, `/refresh`, `/revoke` in `app/routers/auth.py`)
 > exists only as a dormant router, unmounted in production. OAuth 2.1/PKCE,
 > trust-event webhook delivery, the `/v1/dashboard/*` API, KMS/HSM signing, the
@@ -33,7 +33,7 @@
 **Solution:** Token-bucket rate limiter per wallet + global burst protection.
 
 ```python
-# app/core/rate_limit.py
+# Proposed design — never mounted, since removed (see status above)
 class RateLimiter:
     """Token-bucket rate limiter backed by Redis.
 
@@ -45,7 +45,7 @@ class RateLimiter:
 ```
 
 **Deliverables:**
-- [ ] `app/core/rate_limit.py` — token bucket implementation
+- [ ] Token bucket implementation (never mounted, since removed; see status above)
 - [ ] Redis integration (use existing Redis on Railway)
 - [ ] Middleware: `RateLimitMiddleware` in `app/main.py`
 - [ ] Headers: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`
