@@ -17,7 +17,9 @@ full release gate; do not backfill a final `v1.2.0` tag.
   reports `enforce_mode_denials_durable`, the number of denial receipts
   carrying `duplicate_request_new_key` across the service lifetime, and labels
   every metric's scope. The two existing counters stay process-local and still
-  reset on restart.
+  reset on restart. The count is `null`, with a reason, when no database is
+  configured or the query fails, so the endpoint never drops the process-local
+  counters it already served.
 - **Rollout note required per migration**: a test fails when a migration at or
   after 040 ships without `docs/schema-NNN-rollout.md` naming its revision and
   its rollback boundary. Boot refuses a database ahead of the packaged head, so

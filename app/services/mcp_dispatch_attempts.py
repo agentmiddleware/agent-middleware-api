@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import asyncio
 import logging
 import math
 import secrets
@@ -15,7 +16,7 @@ from typing import Any, cast
 from urllib.parse import urlsplit
 
 from sqlalchemy import func, select, update as sa_update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -25,7 +26,7 @@ from app.core.resilience import (
     WRITE_CONFLICT_MAX_ATTEMPTS,
 )
 from app.core.time import to_naive_utc, utc_now
-from app.db.database import get_session_factory
+from app.db.database import get_session_factory, is_database_configured
 from app.db.models import (
     HumanApprovalModel,
     IdempotencyRecordModel,
@@ -76,15 +77,27 @@ DUPLICATE_GUARD_METRIC_SCOPES: dict[str, dict[str, Any]] = {
         "durable": True,
         "source": "receipts",
         "description": (
-            "Denial receipts with reason_code duplicate_request_new_key across "
-            "the service lifetime."
+            "Denied receipts with reason_code duplicate_request_new_key across "
+            "the service lifetime. Null when no database is configured or the "
+            "count failed or timed out; enforce_mode_denials_durable_unavailable "
+            "then names why."
         ),
     },
 }
 
 
-async def count_duplicate_denial_receipts() -> int:
-    """Count enforce-mode duplicate refusals from their durable denial receipts."""
+# Bound the durable count the way the dependency health checks bound theirs,
+# so a slow or hung database cannot hang the admin observability endpoint.
+DUPLICATE_DENIAL_COUNT_TIMEOUT_SECONDS = 2.0
+
+
+async def _query_duplicate_denial_receipts() -> int:
+    """Count denied receipts whose reason is the duplicate guard.
+
+    Every duplicate refusal is finalized as a receipt with outcome ``denied``.
+    Filtering on that indexed column first keeps the lifetime count off a
+    sequential scan: ``reason_code`` alone has no index.
+    """
     from app.db.models import ReceiptModel
 
     factory = get_session_factory()
@@ -93,13 +106,37 @@ async def count_duplicate_denial_receipts() -> int:
             select(func.count())
             .select_from(ReceiptModel)
             .where(
+                cast(ColumnElement[bool], ReceiptModel.outcome == "denied"),
                 cast(
                     ColumnElement[bool],
                     ReceiptModel.reason_code == DUPLICATE_DENIAL_REASON_CODE,
-                )
+                ),
             )
         )
         return int(result.scalar_one() or 0)
+
+
+async def count_duplicate_denial_receipts() -> tuple[int | None, str | None]:
+    """Count enforce-mode duplicate refusals from their durable denial receipts.
+
+    Returns ``(count, None)`` normally, or ``(None, reason)`` when no database
+    is configured or the count failed or timed out, so the process-local
+    counters are still served. The reason is a stable token or an exception
+    type name only; it never carries a message that could echo configuration.
+    """
+    if not is_database_configured():
+        return None, "database_not_configured"
+    try:
+        count = await asyncio.wait_for(
+            _query_duplicate_denial_receipts(),
+            timeout=DUPLICATE_DENIAL_COUNT_TIMEOUT_SECONDS,
+        )
+    except (RuntimeError, SQLAlchemyError, asyncio.TimeoutError) as exc:
+        logger.warning(
+            "duplicate_denial_count_unavailable: %s", type(exc).__name__
+        )
+        return None, type(exc).__name__
+    return count, None
 
 
 async def get_duplicate_guard_metrics() -> dict[str, Any]:
@@ -113,14 +150,18 @@ async def get_duplicate_guard_metrics() -> dict[str, Any]:
     settings = get_settings()
     mode = settings.MCP_UPSTREAM_DUPLICATE_GUARD
     mode_value = mode.value if isinstance(mode, DuplicateGuardMode) else str(mode)
-    return {
+    durable_count, unavailable = await count_duplicate_denial_receipts()
+    payload: dict[str, Any] = {
         "mode": mode_value,
         "log_mode_blocks": _duplicate_guard_metrics["log_mode_blocks"],
         "enforce_mode_blocks": _duplicate_guard_metrics["enforce_mode_blocks"],
-        "enforce_mode_denials_durable": await count_duplicate_denial_receipts(),
+        "enforce_mode_denials_durable": durable_count,
         "window_seconds": settings.MCP_UPSTREAM_DUPLICATE_WINDOW_SECONDS,
         "metric_scopes": DUPLICATE_GUARD_METRIC_SCOPES,
     }
+    if unavailable is not None:
+        payload["enforce_mode_denials_durable_unavailable"] = unavailable
+    return payload
 
 
 DISPATCH_PREPARED = "prepared"
