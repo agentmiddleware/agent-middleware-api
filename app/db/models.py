@@ -813,6 +813,12 @@ class PermitModel(SQLModel, table=True):
     allow_identical_repeats: bool = Field(default=False)
     # Nullable preserves the signed payload of permits issued before schema 040.
     repeat_window_seconds: Optional[int] = Field(default=None)
+    action_contract_version: Optional[int] = Field(default=None)
+    action_payload_hash: Optional[str] = Field(default=None)
+    action_schema_id: Optional[str] = Field(default=None)
+    action_schema_version: Optional[str] = Field(default=None)
+    action_public_tool_id: Optional[str] = Field(default=None)
+    action_upstream_binding_hash: Optional[str] = Field(default=None)
     # Atomic call-count tracking for local max_calls_per_tool enforcement.
     # Maps tool name -> reserved local call count (e.g., {"partner.echo": 2}).
     tool_call_counts_json: Optional[str] = Field(default=None)
