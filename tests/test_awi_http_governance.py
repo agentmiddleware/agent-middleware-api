@@ -591,3 +591,112 @@ async def test_awi_contended_charge_closes_the_key_it_cannot_safely_reopen(
     )
     assert retry.status_code == 500, retry.text
     assert retry.json()["detail"]["error"] == "ledger_write_contended"
+
+
+@pytest.mark.anyio
+async def test_execute_dom_bridge_failure_takes_no_charge_and_replays(
+    client, clean_database, monkeypatch
+):
+    """A failed live DOM-bridge action must not be receipted as success.
+
+    The session manager used to fall back to the mock logic when the bridge
+    raised, so the route signed ``outcome="success"`` and debited the wallet
+    for an action that never executed. Now the manager returns a typed
+    ``status="error"`` and the governance layer takes the uncharged branch.
+    """
+    from app.services.awi_session import get_awi_session_manager
+
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    headers = provisioned["agent_headers"]
+    permit = await create_tool_permit(
+        client,
+        wallet_id=wallet_id,
+        key_id=provisioned["key_id"],
+        tool_name="awi_execute",
+        max_credits=50,
+        idem_key="permit-awi-dom-failure",
+    )
+    create = await client.post(
+        "/v1/awi/sessions",
+        json={"target_url": "https://example.com", "wallet_id": wallet_id},
+        headers=headers,
+    )
+    assert create.status_code == 201
+    session_id = create.json()["session_id"]
+
+    manager = get_awi_session_manager()
+    manager._dom_sessions[session_id] = "dom-session-under-test"
+
+    async def _bridge_raises(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("playwright target closed")
+
+    monkeypatch.setattr(manager, "_execute_via_dom_bridge", _bridge_raises)
+    try:
+        exec_headers = {
+            **headers,
+            "X-Permit-Id": permit["permit_id"],
+            "Idempotency-Key": "awi-dom-failure-1",
+        }
+        body = {
+            "session_id": session_id,
+            "action": "navigate_to",
+            "parameters": {"url": "https://example.com/next"},
+        }
+        resp = await client.post("/v1/awi/execute", json=body, headers=exec_headers)
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["status"] == "error"
+        assert data["error"].startswith("dom_bridge_failed")
+        assert data["receipt"]["outcome"] == "failed"
+        assert data["receipt"]["ledger_entry_id"] is None
+
+        receipt_resp = await client.get(
+            f"/v1/receipts/{data['receipt']['receipt_id']}", headers=headers
+        )
+        assert receipt_resp.status_code == 200
+        receipt = receipt_resp.json()
+        assert receipt["outcome"] == "failed"
+        assert Decimal(str(receipt["credits_charged"])) == Decimal("0")
+        assert receipt["reason_code"] == "dom_bridge_failed"
+
+        factory = get_session_factory()
+        async with factory() as session:
+            debits = (
+                await session.execute(
+                    select(func.count())
+                    .select_from(LedgerEntryModel)
+                    .where(
+                        LedgerEntryModel.wallet_id == wallet_id,
+                        LedgerEntryModel.amount < 0,
+                    )
+                )
+            ).scalar_one()
+            spent = (
+                await session.execute(
+                    select(PermitModel.spent_credits).where(
+                        PermitModel.permit_id == permit["permit_id"]
+                    )
+                )
+            ).scalar_one()
+        assert debits == 0, "a failed DOM-bridge action was debited"
+        assert Decimal(str(spent or 0)) == Decimal("0")
+
+        # Same key replays the identical typed failure without re-running.
+        replay = await client.post("/v1/awi/execute", json=body, headers=exec_headers)
+        assert replay.status_code == 200, replay.text
+        assert replay.json()["receipt"]["receipt_id"] == data["receipt"]["receipt_id"]
+        async with factory() as session:
+            debits_after = (
+                await session.execute(
+                    select(func.count())
+                    .select_from(LedgerEntryModel)
+                    .where(
+                        LedgerEntryModel.wallet_id == wallet_id,
+                        LedgerEntryModel.amount < 0,
+                    )
+                )
+            ).scalar_one()
+        assert debits_after == 0
+    finally:
+        manager._dom_sessions.pop(session_id, None)
