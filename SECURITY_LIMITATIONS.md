@@ -130,8 +130,11 @@ repo; do not Redeploy from GitHub source).
 - Production-like boots also refuse `DEBUG=true`, `WEBAUTHN_ALLOW_MOCK=true`,
   `ENABLE_PROOF_SURFACES=true`, `ENABLE_PUBLIC_MCP_ENDPOINT=true`,
   `ALLOW_PRIVATE_NETWORK_TARGETS=true` (it disables the outbound-URL guard's
-  private-address checks), `ALLOW_UNSAFE_HOST_PYTHON_SANDBOX=true`, and a
-  host `BEHAVIORAL_SANDBOX_PYTHON_BACKEND` (`unsafe_host`/`host`). Set
+  private-address checks), `ALLOW_UNSAFE_HOST_PYTHON_SANDBOX=true`, a
+  host `BEHAVIORAL_SANDBOX_PYTHON_BACKEND` (`unsafe_host`/`host`), and the
+  local/CI dogfood tools `ENABLE_DOGFOOD_TOOL=true` /
+  `ENABLE_DOGFOOD_SECOND_TOOL=true` (they register executable `partner.*`
+  tools on the core MCP path). Set
   `ENABLE_PROOF_SURFACES=false` so only core trust routers and MCP are mounted.
   Leave proof surfaces frozen unless a partner demo explicitly needs them.
   Anonymous MCP (`POST /mcp/public`) is local-only; receipt verification stays
