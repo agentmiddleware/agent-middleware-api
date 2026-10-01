@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import asyncio
 import logging
 import math
 import secrets
@@ -15,7 +16,7 @@ from typing import Any, cast
 from urllib.parse import urlsplit
 
 from sqlalchemy import func, select, update as sa_update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -25,7 +26,7 @@ from app.core.resilience import (
     WRITE_CONFLICT_MAX_ATTEMPTS,
 )
 from app.core.time import to_naive_utc, utc_now
-from app.db.database import get_session_factory
+from app.db.database import get_session_factory, is_database_configured
 from app.db.models import (
     HumanApprovalModel,
     IdempotencyRecordModel,
@@ -44,22 +45,123 @@ from app.services.signing_keys import canonical_json, sha256_hex
 
 logger = logging.getLogger(__name__)
 
-# In-memory duplicate guard metrics for observability
+# In-memory duplicate guard metrics for observability. Both counters are
+# process-local: they reset on restart and, under several workers, describe
+# only the answering process. The durable count published next to them comes
+# from the denial receipts every enforce-mode refusal writes.
 _duplicate_guard_metrics = {
     "log_mode_blocks": 0,  # Times log mode would have blocked
     "enforce_mode_blocks": 0,  # Times enforce mode actually blocked
 }
 
+DUPLICATE_DENIAL_REASON_CODE = "duplicate_request_new_key"
 
-def get_duplicate_guard_metrics() -> dict[str, Any]:
-    """Return current duplicate guard metrics and effective mode."""
+DUPLICATE_GUARD_METRIC_SCOPES: dict[str, dict[str, Any]] = {
+    "log_mode_blocks": {
+        "scope": "process_local",
+        "durable": False,
+        "reset_on": "process_restart",
+        "description": (
+            "Log-mode detections counted by this API process only; an allowed "
+            "call leaves no durable denial record."
+        ),
+    },
+    "enforce_mode_blocks": {
+        "scope": "process_local",
+        "durable": False,
+        "reset_on": "process_restart",
+        "description": "Enforce-mode refusals counted by this API process only.",
+    },
+    "enforce_mode_denials_durable": {
+        "scope": "durable",
+        "durable": True,
+        "source": "receipts",
+        "description": (
+            "Denied receipts with reason_code duplicate_request_new_key across "
+            "the service lifetime. Null when no database is configured or the "
+            "count failed or timed out; enforce_mode_denials_durable_unavailable "
+            "then names why."
+        ),
+    },
+}
+
+
+# Bound the durable count the way the dependency health checks bound theirs,
+# so a slow or hung database cannot hang the admin observability endpoint.
+DUPLICATE_DENIAL_COUNT_TIMEOUT_SECONDS = 2.0
+
+
+async def _query_duplicate_denial_receipts() -> int:
+    """Count denied receipts whose reason is the duplicate guard.
+
+    Every duplicate refusal is finalized as a receipt with outcome ``denied``.
+    Filtering on that indexed column first keeps the lifetime count off a
+    sequential scan: ``reason_code`` alone has no index.
+    """
+    from app.db.models import ReceiptModel
+
+    factory = get_session_factory()
+    async with factory() as session:
+        result = await session.execute(
+            select(func.count())
+            .select_from(ReceiptModel)
+            .where(
+                cast(ColumnElement[bool], ReceiptModel.outcome == "denied"),
+                cast(
+                    ColumnElement[bool],
+                    ReceiptModel.reason_code == DUPLICATE_DENIAL_REASON_CODE,
+                ),
+            )
+        )
+        return int(result.scalar_one() or 0)
+
+
+async def count_duplicate_denial_receipts() -> tuple[int | None, str | None]:
+    """Count enforce-mode duplicate refusals from their durable denial receipts.
+
+    Returns ``(count, None)`` normally, or ``(None, reason)`` when no database
+    is configured or the count failed or timed out, so the process-local
+    counters are still served. The reason is a stable token or an exception
+    type name only; it never carries a message that could echo configuration.
+    """
+    if not is_database_configured():
+        return None, "database_not_configured"
+    try:
+        count = await asyncio.wait_for(
+            _query_duplicate_denial_receipts(),
+            timeout=DUPLICATE_DENIAL_COUNT_TIMEOUT_SECONDS,
+        )
+    except (RuntimeError, SQLAlchemyError, asyncio.TimeoutError) as exc:
+        logger.warning(
+            "duplicate_denial_count_unavailable: %s", type(exc).__name__
+        )
+        return None, type(exc).__name__
+    return count, None
+
+
+async def get_duplicate_guard_metrics() -> dict[str, Any]:
+    """Return the effective duplicate guard mode and its metrics.
+
+    The process-local counters answer "since this worker started". The durable
+    count answers "ever", from the receipts the guard writes when it refuses a
+    call. Each metric's scope is published alongside so a monitor never has to
+    infer durability from the values.
+    """
     settings = get_settings()
-    return {
-        "mode": settings.MCP_UPSTREAM_DUPLICATE_GUARD.value,
+    mode = settings.MCP_UPSTREAM_DUPLICATE_GUARD
+    mode_value = mode.value if isinstance(mode, DuplicateGuardMode) else str(mode)
+    durable_count, unavailable = await count_duplicate_denial_receipts()
+    payload: dict[str, Any] = {
+        "mode": mode_value,
         "log_mode_blocks": _duplicate_guard_metrics["log_mode_blocks"],
         "enforce_mode_blocks": _duplicate_guard_metrics["enforce_mode_blocks"],
+        "enforce_mode_denials_durable": durable_count,
         "window_seconds": settings.MCP_UPSTREAM_DUPLICATE_WINDOW_SECONDS,
+        "metric_scopes": DUPLICATE_GUARD_METRIC_SCOPES,
     }
+    if unavailable is not None:
+        payload["enforce_mode_denials_durable_unavailable"] = unavailable
+    return payload
 
 
 DISPATCH_PREPARED = "prepared"
