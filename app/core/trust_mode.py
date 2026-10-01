@@ -137,6 +137,8 @@ def validate_trust_mode_config(
     static_dev_api_keys: str = "",
     enable_dev_key_self_provision: bool = False,
     enable_public_mcp_endpoint: bool = False,
+    allow_private_network_targets: bool = False,
+    allow_unsafe_host_python_sandbox: bool = False,
     redis_url: str = "",
     public_url: str = "",
     database_url: str = "",
@@ -210,6 +212,19 @@ def validate_trust_mode_config(
                 "local-only; receipt keys stay on "
                 "/.well-known/trust-keys.json)"
             )
+        if allow_private_network_targets:
+            violations.append(
+                "ALLOW_PRIVATE_NETWORK_TARGETS must be false in production-like "
+                "environments (it skips the outbound-URL guard's "
+                "loopback/RFC1918/link-local checks, re-opening SSRF against "
+                "cloud metadata endpoints and internal services)"
+            )
+        if allow_unsafe_host_python_sandbox:
+            violations.append(
+                "ALLOW_UNSAFE_HOST_PYTHON_SANDBOX must be false in "
+                "production-like environments (host Python execution is not "
+                "a sandbox; it is a local-development escape hatch)"
+            )
         configured_database_url = (database_url or "").strip()
         if not configured_database_url:
             violations.append(
@@ -263,6 +278,8 @@ def validate_trust_mode_guardrails(settings: Settings) -> None:
         static_dev_api_keys=settings.STATIC_DEV_API_KEYS,
         enable_dev_key_self_provision=settings.ENABLE_DEV_KEY_SELF_PROVISION,
         enable_public_mcp_endpoint=settings.ENABLE_PUBLIC_MCP_ENDPOINT,
+        allow_private_network_targets=settings.ALLOW_PRIVATE_NETWORK_TARGETS,
+        allow_unsafe_host_python_sandbox=settings.ALLOW_UNSAFE_HOST_PYTHON_SANDBOX,
         redis_url=settings.REDIS_URL,
         public_url=settings.PUBLIC_URL,
         database_url=settings.DATABASE_URL,
