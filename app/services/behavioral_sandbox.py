@@ -28,6 +28,7 @@ import redis.asyncio as redis
 
 from ..core.config import get_settings
 from ..core.durable_state import get_durable_state
+from ..core.trust_mode import UNSAFE_HOST_SANDBOX_BACKENDS
 from ..core.url_guard import check_outbound_url
 from ..schemas.sandbox_behavioral import (
     ExecutionStatus,
@@ -313,7 +314,10 @@ class BehavioralSandboxEngine:
                 image=settings.BEHAVIORAL_SANDBOX_DOCKER_IMAGE,
             )
 
-        if backend in ("unsafe_host", "host") or settings.ALLOW_UNSAFE_HOST_PYTHON_SANDBOX:
+        if (
+            backend in UNSAFE_HOST_SANDBOX_BACKENDS
+            or settings.ALLOW_UNSAFE_HOST_PYTHON_SANDBOX
+        ):
             return await self._execute_python_host(
                 sandbox_code=sandbox_code,
                 timeout_seconds=timeout_seconds,
