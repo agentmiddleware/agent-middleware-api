@@ -19,6 +19,7 @@ Covers the contract of request -> notify -> approve -> mint -> poll:
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -957,3 +958,29 @@ async def test_request_at_full_storage_scale_mints_a_verifiable_permit(
     assert verify.status_code == 200
     assert verify.json()["valid"] is True, verify.json()
 
+
+
+@pytest.mark.anyio
+async def test_malformed_sentinel_response_never_logs_the_approval_url(
+    client, clean_database, monkeypatch, sentinel, caplog
+):
+    """A malformed create response is logged by shape, never by value.
+
+    The response may still carry approval_url, a magic-link credential, so
+    the error log names only the payload's keys.
+    """
+    _sentinel_env(monkeypatch, simulated=False)
+    token = "SENTINEL-MAGIC-LINK-TOKEN-7f3a"
+
+    async def malformed_create(**kwargs):
+        return {"status": "pending", "approval_url": f"https://sentinel.test/a/{token}"}
+
+    monkeypatch.setattr(sentinel, "create_approval", malformed_create)
+    agent = await provision_agent_wallet(client)
+    with caplog.at_level(logging.ERROR, logger="app.services.permit_requests"):
+        created = await _request(client, agent)
+    assert created.status_code == 503, created.text
+    assert "sentinel_permit_request_malformed" in caplog.text
+    assert "approval_url" in caplog.text
+    assert token not in caplog.text
+    assert "sentinel.test" not in caplog.text

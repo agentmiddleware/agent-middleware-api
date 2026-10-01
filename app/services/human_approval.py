@@ -679,7 +679,9 @@ class HumanApprovalService:
 
         action_id = payload.get("action_id") or payload.get("id")
         if not action_id:
-            logger.error("sentinel_create_malformed_response: %s", payload)
+            logger.error(
+                "sentinel_create_malformed_response: keys=%s", sorted(payload)
+            )
             raise HumanApprovalUnavailableError()
         model.sentinel_action_id = str(action_id)
         return payload
