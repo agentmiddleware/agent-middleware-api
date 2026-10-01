@@ -148,6 +148,8 @@ def validate_trust_mode_config(
     redis_url: str = "",
     public_url: str = "",
     database_url: str = "",
+    enable_dogfood_tool: bool = False,
+    enable_dogfood_second_tool: bool = False,
 ) -> None:
     """Refuse unsafe deploy postures in production-like environments.
 
@@ -217,6 +219,17 @@ def validate_trust_mode_config(
                 "environments (anonymous MCP discovery and verification is "
                 "local-only; receipt keys stay on "
                 "/.well-known/trust-keys.json)"
+            )
+        if enable_dogfood_tool:
+            violations.append(
+                "ENABLE_DOGFOOD_TOOL must be false in production-like "
+                "environments (partner.notes.write is local/CI dogfood "
+                "scaffolding, not a partner integration)"
+            )
+        if enable_dogfood_second_tool:
+            violations.append(
+                "ENABLE_DOGFOOD_SECOND_TOOL must be false in production-like "
+                "environments (partner.notes.count is CI-only scaffolding)"
             )
         if allow_private_network_targets:
             violations.append(
@@ -298,6 +311,8 @@ def validate_trust_mode_guardrails(settings: Settings) -> None:
         redis_url=settings.REDIS_URL,
         public_url=settings.PUBLIC_URL,
         database_url=settings.DATABASE_URL,
+        enable_dogfood_tool=settings.ENABLE_DOGFOOD_TOOL,
+        enable_dogfood_second_tool=settings.ENABLE_DOGFOOD_SECOND_TOOL,
     )
 
 
