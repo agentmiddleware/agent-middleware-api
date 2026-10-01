@@ -642,3 +642,231 @@ async def test_action_replay_rejects_invalid_enterprise_token(
     assert reason in response.text
     assert (await action_rows())[0].model_dump() == before
     assert action_runtime[3].dispatch_count == 1
+
+
+async def denial_evidence(runtime, response, reason):
+    from sqlalchemy import select
+    from app.db.database import get_session_factory
+    from app.db.models import ReceiptModel, ControlPlaneAuditEventModel
+    from app.services.receipts import get_receipt_service
+
+    async with get_session_factory()() as session:
+        rows = list(
+            (
+                await session.execute(
+                    select(ReceiptModel).where(
+                        ReceiptModel.permit_id == runtime[2],
+                        ReceiptModel.outcome == "denied",
+                    )
+                )
+            ).scalars()
+        )
+        assert rows, response.text
+        receipt = rows[-1]
+        audit = await session.get(ControlPlaneAuditEventModel, receipt.audit_event_id)
+    assert receipt.receipt_id in response.text
+    assert receipt.reason_code == reason
+    assert receipt.idempotency_record_id is None
+    assert receipt.dispatch_attempt_id is None
+    assert receipt.ledger_entry_id is None
+    assert receipt.credits_charged == 0
+    assert audit is not None
+    assert (await get_receipt_service().verify_receipt(receipt.receipt_id))[0]
+    return receipt
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("surface", ["standard", "legacy", "rest"])
+async def test_eligible_digest_denial_has_detached_signed_evidence(
+    action_runtime, surface
+):
+    from sqlalchemy import select
+    from app.db.database import get_session_factory
+    from app.db.models import ReceiptModel
+
+    bad_args = {"amount_minor": 2, "recipient": "alice"}
+    initial = await invoke_action(
+        action_runtime, surface, "initial-denial", arguments=bad_args
+    )
+    first_denial = await denial_evidence(
+        action_runtime, initial, "action_payload_mismatch"
+    )
+    assert await action_rows() == []
+    assert action_runtime[3].dispatch_count == 0
+    accepted = await invoke_action(action_runtime, surface, "accepted")
+    assert "error" not in accepted.json(), accepted.text
+    owner_before = (await action_rows())[0].model_dump()
+    async with get_session_factory()() as session:
+        original = (
+            await session.execute(
+                select(ReceiptModel).where(
+                    ReceiptModel.idempotency_record_id == owner_before["record_id"]
+                )
+            )
+        ).scalar_one()
+        receipt_before = original.model_dump()
+    retry = await invoke_action(
+        action_runtime, surface, "invalid-retry", arguments=bad_args
+    )
+    second_denial = await denial_evidence(
+        action_runtime, retry, "action_payload_mismatch"
+    )
+    assert first_denial.receipt_id != second_denial.receipt_id
+    assert second_denial.request_hash != original.request_hash
+    assert (await action_rows())[0].model_dump() == owner_before
+    async with get_session_factory()() as session:
+        original = await session.get(ReceiptModel, original.receipt_id)
+        assert original.model_dump() == receipt_before
+    assert action_runtime[3].dispatch_count == 1
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("surface", ["standard", "legacy", "rest"])
+@pytest.mark.parametrize(
+    "denial,reason",
+    [
+        ("budget", "permit_budget_exceeded"),
+        ("expired", "permit_expired"),
+        ("revoked", "permit_revoked"),
+        ("policy", "policy_tool_not_allowed"),
+        ("grant", "iga_no_matching_role"),
+    ],
+)
+async def test_eligible_preowner_denial_evidence(
+    action_runtime, monkeypatch, surface, denial, reason
+):
+    from datetime import timedelta
+    from decimal import Decimal
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from app.core.time import utc_now
+    from app.db.database import get_session_factory
+    from app.db.models import PermitModel
+    from app.services.permits import get_permit_service
+    from app.services.signing_keys import get_signing_key_service
+    from app.routers import mcp
+
+    if denial in {"budget", "expired", "revoked"}:
+        async with get_session_factory()() as session:
+            permit = await session.get(PermitModel, action_runtime[2])
+            if denial == "budget":
+                permit.max_credits = Decimal("1")
+            elif denial == "expired":
+                permit.expires_at = utc_now() - timedelta(seconds=1)
+            else:
+                permit.status = "revoked"
+            signature, key_id, _ = await get_signing_key_service().sign_payload(
+                get_permit_service()._unsigned_payload(permit)
+            )
+            permit.signature, permit.key_id = signature, key_id
+            await session.commit()
+    elif denial == "policy":
+        monkeypatch.setattr(
+            mcp,
+            "evaluate_wallet_policy",
+            AsyncMock(return_value=SimpleNamespace(allowed=False, reason=reason)),
+        )
+    else:
+        monkeypatch.setattr(mcp, "_verified_enterprise_principal", lambda _: object())
+        monkeypatch.setattr(
+            mcp,
+            "enforce_tool_call",
+            AsyncMock(return_value=SimpleNamespace(allowed=False, reason=reason)),
+        )
+    response = await invoke_action(action_runtime, surface, "denied")
+    await denial_evidence(action_runtime, response, reason)
+    assert await action_rows() == []
+    assert action_runtime[3].dispatch_count == 0
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("surface", ["standard", "legacy", "rest"])
+@pytest.mark.parametrize(
+    "ineligible", ["missing", "foreign_wallet", "foreign_key", "signature"]
+)
+async def test_ineligible_action_denial_does_not_disclose_receipt(
+    action_runtime, surface, ineligible
+):
+    from sqlalchemy import select
+    from app.db.database import get_session_factory
+    from app.db.models import PermitModel, ReceiptModel
+    from tests.test_trust_helpers import provision_agent_wallet
+
+    foreign = await provision_agent_wallet(action_runtime[0])
+    if ineligible != "missing":
+        async with get_session_factory()() as session:
+            permit = await session.get(PermitModel, action_runtime[2])
+            if ineligible == "foreign_wallet":
+                permit.subject_wallet_id = foreign["agent_wallet_id"]
+            elif ineligible == "foreign_key":
+                permit.subject_key_id = foreign["key_id"]
+            else:
+                permit.signature = "invalid"
+            if ineligible != "signature":
+                from app.services.permits import get_permit_service
+                from app.services.signing_keys import get_signing_key_service
+
+                signature, key_id, _ = await get_signing_key_service().sign_payload(
+                    get_permit_service()._unsigned_payload(permit)
+                )
+                permit.signature, permit.key_id = signature, key_id
+            await session.commit()
+    response = await invoke_action(
+        action_runtime, surface, "ineligible", permit=ineligible != "missing"
+    )
+    assert "receipt" not in response.text
+    async with get_session_factory()() as session:
+        receipts = list(
+            (
+                await session.execute(
+                    select(ReceiptModel).where(
+                        ReceiptModel.permit_id == action_runtime[2]
+                    )
+                )
+            ).scalars()
+        )
+    assert receipts == []
+    assert await action_rows() == []
+    assert action_runtime[3].dispatch_count == 0
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("surface", ["standard", "legacy", "rest"])
+async def test_policy_replay_denial_preserves_accepted_evidence(
+    action_runtime, monkeypatch, surface
+):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from sqlalchemy import select
+    from app.routers import mcp
+    from app.db.database import get_session_factory
+    from app.db.models import ReceiptModel
+
+    accepted = await invoke_action(action_runtime, surface, "accepted")
+    assert "error" not in accepted.json(), accepted.text
+    before_owner = (await action_rows())[0].model_dump()
+    async with get_session_factory()() as session:
+        original = (
+            await session.execute(
+                select(ReceiptModel).where(
+                    ReceiptModel.idempotency_record_id == before_owner["record_id"]
+                )
+            )
+        ).scalar_one()
+        before_receipt = original.model_dump()
+    monkeypatch.setattr(
+        mcp,
+        "evaluate_wallet_policy",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                allowed=False, reason="policy_tool_not_allowed"
+            )
+        ),
+    )
+    denied = await invoke_action(action_runtime, surface, "policy-retry")
+    await denial_evidence(action_runtime, denied, "policy_tool_not_allowed")
+    assert (await action_rows())[0].model_dump() == before_owner
+    async with get_session_factory()() as session:
+        original = await session.get(ReceiptModel, original.receipt_id)
+        assert original.model_dump() == before_receipt
+    assert action_runtime[3].dispatch_count == 1
