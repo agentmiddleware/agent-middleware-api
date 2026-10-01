@@ -172,8 +172,11 @@ async def rotate_api_key(
     Creates a new key and optionally revokes the old one.
     """
     auth.require_wallet_access(request.wallet_id)
-    if request.key_id is None:
+    if request.key_id is None or request.key_id != auth.key_id:
         # Without key_id this is a plain create with no bounds to inherit.
+        # With another key's id, the new key inherits THAT key's bounds, so a
+        # bounded caller could adopt an unbounded sibling's authority (with
+        # or without revoke_old). A bounded caller may rotate only itself.
         await _refuse_bounded_minter(auth)
     service = get_api_key_service()
 
@@ -284,6 +287,12 @@ async def emergency_revoke(
             wallet_id=request.wallet_id,
             reason=request.reason,
             create_new_key=request.create_new_key,
+            # A wallet-scoped caller's replacement is bounded by its own key,
+            # never by a looser sibling it never held. Bootstrap admins keep
+            # the wallet-wide donor rule.
+            bounding_key_id=(
+                None if auth.is_bootstrap_admin else (auth.key_id or "")
+            ),
         )
 
         new_key = None

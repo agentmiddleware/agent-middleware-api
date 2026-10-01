@@ -25,7 +25,10 @@ on the previous code.
   of the non-unique 8-character prefix, so two live keys sharing a prefix no
   longer fail every request with a 500. A wallet key with `max_uses` or
   `expires_at` gets `403 bounded_key_cannot_mint` on `POST /v1/api-keys` and on
-  rotate without `key_id`, so a capped key cannot mint an uncapped sibling.
+  rotate without `key_id` or naming any key other than its own, so a capped
+  key cannot mint an uncapped sibling or adopt one's bounds. An emergency
+  replacement requested by a wallet-scoped caller takes only that caller's
+  own key's bounds.
   Liveness (status, use budget, expiry) is one rule everywhere; auto-rotation
   no longer mints an unbounded key when the wallet has no live key.
 - **Preflight is operator-only**: `POST /v1/launch/preflight` requires a

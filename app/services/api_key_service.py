@@ -658,6 +658,7 @@ class APIKeyService:
         wallet_id: str,
         reason: str = "security_incident",
         create_new_key: bool = True,
+        bounding_key_id: str | None = None,
     ) -> dict:
         """
         Immediately revoke all keys for a wallet and optionally create new ones.
@@ -666,6 +667,11 @@ class APIKeyService:
             wallet_id: Wallet to revoke keys for
             reason: Reason for emergency revocation
             create_new_key: Whether to create a new emergency key
+            bounding_key_id: The authenticating caller's own key. When set,
+                the replacement takes its bounds from this key alone, and no
+                replacement is minted if it is not a non-expired active key
+                of the wallet. None (bootstrap admins) keeps the wallet-wide
+                donor rule.
 
         Returns:
             {
@@ -756,6 +762,18 @@ class APIKeyService:
                     for key in active_keys
                     if not key.expires_at or key.expires_at >= now
                 ]
+                if bounding_key_id is not None:
+                    # A wallet-scoped caller may only carry its own key's
+                    # authority over: picking the loosest sibling would let a
+                    # capped key come out of the incident with an unbounded
+                    # replacement it never held.
+                    bounding_keys = [
+                        key for key in bounding_keys if key.key_id == bounding_key_id
+                    ]
+                    if not bounding_keys:
+                        create_new_key = False
+
+            if create_new_key:
                 emergency_expires_at = None
                 emergency_max_uses = None
                 if bounding_keys:

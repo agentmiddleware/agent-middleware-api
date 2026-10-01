@@ -129,15 +129,19 @@ audit trail says otherwise:
   key's expiry and *remaining* `max_uses` budget (rotating a use-budgeted
   key requires `revoke_old: true`, otherwise the remaining budget would
   exist twice), and an emergency replacement takes both its bounds from
-  one donor credential: the active, non-expired key (exhausted ones
-  included, so a key spending its final use on the emergency call cannot
-  mint itself an unbounded replacement) with the largest remaining
-  budget, tie-broken by latest expiry. A wallet key that is itself bounded
+  one donor credential. For a wallet-scoped caller the donor is the
+  caller's own key (exhausted included, so a key spending its final use on
+  the emergency call cannot mint itself an unbounded replacement); if that
+  key is no longer a non-expired active key, every key is still revoked but
+  no replacement is minted. For a bootstrap admin the donor is the active,
+  non-expired key with the largest remaining budget, tie-broken by latest
+  expiry. A wallet key that is itself bounded
   (it has a `max_uses` budget or an expiry), or a JWT derived from one,
   cannot mint fresh keys at all: `POST /v1/api-keys`, and `POST
-  /v1/api-keys/rotate` without `key_id`, answer 403
-  `bounded_key_cannot_mint`, because the new key would take only the bounds
-  its request names. Such a key can still rotate itself (with its `key_id`,
+  /v1/api-keys/rotate` without `key_id` or with any `key_id` other than its
+  own, answer 403 `bounded_key_cannot_mint`, because the new key would take
+  only the bounds its request names, or those of a looser sibling key it
+  never held. Such a key can still rotate itself (with its `key_id`,
   plus `revoke_old: true` when it has a `max_uses` budget), which carries
   its expiry and remaining budget over. To issue a
   key with fresh bounds, mint one explicitly with `POST /v1/api-keys` as a
