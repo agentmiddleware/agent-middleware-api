@@ -11,6 +11,24 @@ The next release consolidates the accumulated trust-plane and public-product
 work as `v1.3.0`. Create that tag only from the exact commit that passes the
 full release gate; do not backfill a final `v1.2.0` tag.
 
+### Changed — duplicate guard observability and release gates
+
+- **Durable duplicate-denial count**: `/health/duplicate-guard` now also
+  reports `enforce_mode_denials_durable`, the number of denial receipts
+  carrying `duplicate_request_new_key` across the service lifetime, and labels
+  every metric's scope. The two existing counters stay process-local and still
+  reset on restart.
+- **Constant test loop opts out of the duplicate guard**: the monitor repeats
+  one operator-chosen payload on every run under a fresh idempotency key, so
+  its permit now sets `allow_identical_repeats`. Running the gateway with
+  `MCP_UPSTREAM_DUPLICATE_GUARD=enforce` no longer turns the production smoke
+  red on its second run.
+- **Rollout note required per migration**: a test fails when a migration at or
+  after 040 ships without `docs/schema-NNN-rollout.md` naming its revision and
+  its rollback boundary. Boot refuses a database ahead of the packaged head, so
+  every migration retires the previously serving image; 040 crossed that
+  boundary without a plan and needed a same-night compatibility release.
+
 ### Security — 2026-08-27 audit follow-up
 
 Findings from the 2026-08-27 repository audit, each re-verified against the
