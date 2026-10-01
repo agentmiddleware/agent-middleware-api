@@ -72,6 +72,7 @@ class _Wire:
     def __init__(self) -> None:
         self.requests: list[httpx.Request] = []
         self.governed_status = 200
+        self.governed_body_status = "success"
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
@@ -81,7 +82,9 @@ class _Wire:
                     self.governed_status,
                     json={"detail": {"error": "permit_required"}},
                 )
-            return httpx.Response(200, json={"status": "success", "receipt": {}})
+            return httpx.Response(
+                200, json={"status": self.governed_body_status, "receipt": {}}
+            )
         return httpx.Response(200, json={"internal": "done"})
 
     def paths(self) -> list[str]:
@@ -128,6 +131,36 @@ async def test_adapter_governance_denial_never_reaches_internal_route(wire):
         "the internal side-effecting route ran even though the governed "
         "call was refused"
     )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "body_status", ["paused", "passkey_required", "max_steps_reached", "error"]
+)
+async def test_adapter_governed_2xx_refusal_never_reaches_internal_route(
+    wire, body_status
+):
+    """The session layer refuses with HTTP 200 and a non-success status
+    (human pause, passkey gate, step limit, failed preconditions); that is
+    not a go-ahead for the website's side effect."""
+    wire.governed_body_status = body_status
+    adapter = _adapter()
+    try:
+        result = await adapter.execute_action_for_external(
+            session_id="sess-1",
+            action=AWIStandardAction.CHECKOUT,
+            parameters={},
+            route_mapping={"checkout": "/checkout"},
+            permit_id="permit-123",
+            idempotency_key="idem-123",
+        )
+    finally:
+        await adapter.close()
+
+    assert wire.paths() == ["/v1/awi/execute"]
+    assert result["success"] is False
+    assert result["internal_result"] is None
+    assert result["awi_response"]["status"] == body_status
 
 
 @pytest.mark.anyio
@@ -626,3 +659,57 @@ async def test_awi_sdk_governed_execute_end_to_end_and_cross_wallet_denied(
     assert result["status"] == "success"
     assert result["receipt"]["permit_id"] == owner_permit["permit_id"]
     assert result["receipt"]["outcome"] == "success"
+
+
+@pytest.mark.anyio
+async def test_adapter_human_paused_session_never_reaches_internal_route(
+    http_client, clean_database
+):
+    """End to end: a human pauses the session, the governed route answers
+    200 ``status: paused``, and the adapter must not run the website call."""
+    owner = await provision_agent_wallet(http_client)
+    permit = await create_tool_permit(
+        http_client,
+        wallet_id=owner["agent_wallet_id"],
+        key_id=owner["key_id"],
+        tool_name="awi_execute",
+        max_credits=50,
+        idem_key="permit-adapter-paused",
+    )
+    headers = owner["agent_headers"]
+    created = await http_client.post(
+        "/v1/awi/sessions",
+        json={
+            "target_url": "https://example.com",
+            "wallet_id": owner["agent_wallet_id"],
+        },
+        headers=headers,
+    )
+    assert created.status_code == 201, created.text
+    session_id = created.json()["session_id"]
+    paused = await http_client.post(
+        "/v1/awi/intervene",
+        json={"session_id": session_id, "action": "pause", "reason": "stop"},
+        headers=headers,
+    )
+    assert paused.status_code == 200, paused.text
+
+    adapter = AWIExternalAdapter("http://test", headers["X-API-Key"])
+    adapter._client._transport = ASGITransport(app=app)
+    internal: list[httpx.Request] = []
+    adapter._internal_client._transport = _capturing_transport(internal)
+    try:
+        result = await adapter.execute_action_for_external(
+            session_id,
+            AWIStandardAction.NAVIGATE_TO,
+            {"url": "https://example.com/checkout"},
+            {"navigate_to": "/checkout"},
+            permit_id=permit["permit_id"],
+            idempotency_key="adapter-paused-1",
+        )
+    finally:
+        await adapter.close()
+
+    assert result["awi_response"]["status"] == "paused"
+    assert result["success"] is False
+    assert internal == [], "the website route ran on a human-paused session"

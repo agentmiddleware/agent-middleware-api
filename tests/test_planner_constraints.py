@@ -469,3 +469,71 @@ async def test_planner_endpoint_accepts_finite_overrides(client, clean_database)
     assert [a["id"] for a in data["selected_actions"]] == ["winner"]
     assert math.isfinite(data["expected_utility"])
     assert data["expected_utility"] == pytest.approx(4 - 0.5 * 1 - 1.5 * 0.01)
+
+
+# task_context.candidate_actions carries the per-action numbers the planner
+# scores and budgets with. A NaN credit_cost passes every budget comparison,
+# a -Infinity risk_score or latency_ms cancels that budget, and either one
+# poisons expected_utility and the audited constraint margins.
+_CANDIDATE_NUMBER_FIELDS = [
+    "credit_cost",
+    "latency_ms",
+    "risk_score",
+    "expected_value",
+    "reliability",
+]
+
+
+@pytest.mark.proof
+@pytest.mark.parametrize("field", _CANDIDATE_NUMBER_FIELDS)
+@pytest.mark.parametrize("value", _NON_FINITE)
+def test_task_context_rejects_non_finite_candidate_numbers(field, value):
+    payload = _endpoint_payload()["state"]
+    payload["task_context"]["candidate_actions"][0][field] = value
+    with pytest.raises(ValidationError) as exc:
+        OptimizerState(**payload)
+    assert f"candidate_actions[0].{field}" in str(exc.value)
+
+
+@pytest.mark.proof
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "field, token",
+    [
+        ("credit_cost", "NaN"),
+        ("risk_score", "-Infinity"),
+        ("latency_ms", "-Infinity"),
+        ("expected_value", "Infinity"),
+        ("reliability", "NaN"),
+    ],
+)
+async def test_planner_endpoint_never_plans_with_non_finite_candidates(
+    clean_database, monkeypatch, field, token
+):
+    calls: list = []
+    original = planner_router.optimize_action_set
+
+    def spy(*args, **kwargs):
+        calls.append(args)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(planner_router, "optimize_action_set", spy)
+    request_id = f"req-planner-non-finite-candidate-{field}"
+    payload = _endpoint_payload()
+    payload["state"]["request_id"] = request_id
+    payload["state"]["task_context"]["candidate_actions"][0][field] = float(token)
+
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        response = await c.post(
+            "/v1/planner/optimize",
+            content=json.dumps(payload),
+            headers={"X-API-Key": "test-key", "Content-Type": "application/json"},
+        )
+
+    # Refused by the schema; as with the bare-token test above, FastAPI's
+    # default 422 handler may surface that as a 500 because it echoes the
+    # non-finite input. Either way nothing is planned or audited.
+    assert response.status_code in (422, 500)
+    assert calls == []
+    assert await list_audit_events(request_id=request_id) == []
