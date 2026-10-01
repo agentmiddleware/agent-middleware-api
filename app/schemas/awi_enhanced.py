@@ -151,8 +151,15 @@ class DOMBridgeSessionRequest(BaseModel):
     )
     wallet_id: Optional[str] = Field(None, description="Wallet that owns this session")
     headless: bool = Field(default=True, description="Run browser in headless mode")
-    viewport_width: int = Field(default=1280, description="Viewport width in pixels")
-    viewport_height: int = Field(default=720, description="Viewport height in pixels")
+    # Bounded: the size feeds a real browser context, and an unbounded one
+    # lets a caller exhaust memory on render/screenshot. Keep in step with
+    # the bridge-side check in AWIPlaywrightBridge.create_session.
+    viewport_width: int = Field(
+        default=1280, ge=320, le=3840, description="Viewport width in pixels"
+    )
+    viewport_height: int = Field(
+        default=720, ge=240, le=2160, description="Viewport height in pixels"
+    )
 
 
 class DOMBridgeSessionResponse(BaseModel):

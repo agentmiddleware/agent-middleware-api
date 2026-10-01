@@ -16,6 +16,7 @@ from uuid import uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from pydantic import ValidationError
 
 from app.core import url_guard
 from app.core.time import utc_now
@@ -23,6 +24,7 @@ from app.main import app
 from app.routers import awi_enhanced as awi_enhanced_router
 from app.services import awi_playwright_bridge as awi_playwright_bridge_module
 from app.services import awi_rag_engine as awi_rag_engine_module
+from app.schemas.awi_enhanced import DOMBridgeSessionRequest
 from app.services.webauthn_provider import WebAuthnProvider
 from app.services.awi_playwright_bridge import (
     AWIPlaywrightBridge,
@@ -753,6 +755,89 @@ class TestAWIPlaywrightBridge:
         assert bridge._get_sort_option_value("price_low") == "price-asc"
         assert bridge._get_sort_option_value("price_high") == "price-desc"
         assert bridge._get_sort_option_value("relevance") == "relevance"
+
+
+class TestDOMBridgeViewportBounds:
+    """Viewport sizes are bounded before they reach a browser context."""
+
+    OUT_OF_RANGE = [(0, 720), (1280, 0), (-1, -1), (100000, 720), (1280, 100000)]
+
+    @pytest.fixture(autouse=True)
+    def _pin_public_documentation_dns(self, monkeypatch):
+        async def resolve(_host):
+            return [(None, None, None, None, ("93.184.216.34", 0))]
+
+        monkeypatch.setattr(url_guard, "_resolve_host", resolve)
+
+    @pytest.mark.parametrize("width,height", OUT_OF_RANGE)
+    def test_schema_rejects_out_of_range_viewport(self, width, height):
+        with pytest.raises(ValidationError):
+            DOMBridgeSessionRequest(
+                target_url="https://example.com",
+                viewport_width=width,
+                viewport_height=height,
+            )
+
+    @pytest.mark.parametrize("width,height", [(1280, 720), (320, 240), (3840, 2160)])
+    def test_schema_accepts_supported_viewports(self, width, height):
+        request = DOMBridgeSessionRequest(
+            target_url="https://example.com",
+            viewport_width=width,
+            viewport_height=height,
+        )
+        assert (request.viewport_width, request.viewport_height) == (width, height)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("viewport", OUT_OF_RANGE)
+    async def test_bridge_rejects_out_of_range_viewport(self, viewport):
+        bridge = AWIPlaywrightBridge(mode=TranslationMode.CDP_DIRECT)
+
+        with pytest.raises(ValueError, match="viewport"):
+            await bridge.create_session("https://example.com", viewport=viewport)
+
+        assert await bridge.list_sessions() == []
+
+    @pytest.mark.anyio
+    async def test_dom_session_endpoint_rejects_unbounded_viewport(
+        self, clean_database
+    ):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            provisioned = await provision_agent_wallet(client)
+            headers = provisioned["agent_headers"]
+            wallet_id = provisioned["agent_wallet_id"]
+
+            for width, height in self.OUT_OF_RANGE:
+                resp = await client.post(
+                    "/v1/awi/dom/session",
+                    json={
+                        "target_url": "https://example.com",
+                        "wallet_id": wallet_id,
+                        "viewport_width": width,
+                        "viewport_height": height,
+                    },
+                    headers=headers,
+                )
+                assert resp.status_code == 422, resp.text
+
+            # The owning wallet still gets a session with a supported size.
+            created = await client.post(
+                "/v1/awi/dom/session",
+                json={
+                    "target_url": "https://example.com",
+                    "wallet_id": wallet_id,
+                    "viewport_width": 1280,
+                    "viewport_height": 720,
+                },
+                headers=headers,
+            )
+            assert created.status_code == 201, created.text
+            session_id = created.json()["session_id"]
+
+            deleted = await client.delete(
+                f"/v1/awi/dom/session/{session_id}", headers=headers
+            )
+            assert deleted.status_code == 204, deleted.text
 
 
 class TestAWIRAGEngine:
