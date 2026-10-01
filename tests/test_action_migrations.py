@@ -7,6 +7,16 @@ import sys
 
 import pytest
 
+from tests.support.action_database_guard import (
+    require_action_database_url,
+    require_action_test_environment,
+)
+
+# Validate the separately selected migration target before pytest DB setup too.
+if os.environ.get("ACTION_MIGRATION_DATABASE_URL"):
+    require_action_database_url(os.environ["ACTION_MIGRATION_DATABASE_URL"])
+    require_action_test_environment(os.environ.get("ENVIRONMENT"))
+
 FIELDS = (
     "action_contract_version",
     "action_payload_hash",
@@ -109,8 +119,8 @@ def test_postgres_legacy_roundtrip_and_fail_closed_downgrade():
     import asyncpg
 
     url = os.environ["ACTION_MIGRATION_DATABASE_URL"]
-    assert url.startswith("postgresql+asyncpg://sellers@127.0.0.1:55439/amw_action_")
-    assert os.environ.get("ENVIRONMENT") == "test"
+    require_action_database_url(url)
+    require_action_test_environment(os.environ.get("ENVIRONMENT"))
 
     async def query(sql):
         connection = await asyncpg.connect(

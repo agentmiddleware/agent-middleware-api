@@ -16,6 +16,15 @@ from tests import test_mcp_postgres_multiprocess as stress
 from tests.test_action_migrations import FIELDS
 from tests.test_action_permits import _action_request
 from tests.test_trust_helpers import BOOTSTRAP_HEADERS, provision_agent_wallet
+from tests.support.action_database_guard import (
+    require_action_database_url,
+    require_action_test_environment,
+)
+
+# Reject at collection, before the shared autouse session fixture connects.
+if os.environ.get("RUN_MCP_MULTIPROCESS_TESTS") == "1":
+    require_action_database_url(os.environ.get("DATABASE_URL", ""))
+    require_action_test_environment(os.environ.get("ENVIRONMENT"))
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
@@ -23,8 +32,8 @@ pytestmark = pytest.mark.asyncio(loop_scope="session")
 @pytest_asyncio.fixture(scope="module", loop_scope="session")
 async def harness(tmp_path_factory):
     url = stress._require_explicit_isolation()
-    assert url.startswith("postgresql+asyncpg://sellers@127.0.0.1:55439/amw_action_")
-    assert os.environ.get("ENVIRONMENT") == "test"
+    require_action_database_url(url)
+    require_action_test_environment(os.environ.get("ENVIRONMENT"))
     from app.db.database import get_engine
 
     async with get_engine().connect() as conn:
