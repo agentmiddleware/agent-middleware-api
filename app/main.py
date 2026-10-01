@@ -531,7 +531,8 @@ app = FastAPI(
     # This avoids presenting placeholder support details as a real escalation path.
     contact=public_contact or None,
     license_info={
-        "name": "MIT",
+        "name": "Business Source License 1.1",
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/LICENSE",
     },
     servers=[
         {
