@@ -10,6 +10,7 @@ import math
 from typing import Any
 
 from app.core.auth import AuthContext
+from app.db.models import PermitModel
 from app.schemas.trust import ActionPermitCreateRequest, PermitResponse
 
 
@@ -292,3 +293,96 @@ async def create_action_permit(
         action_upstream_binding_hash=binding.upstream_binding_hash,
     )
     return await get_permit_service()._persist_permit(permit)
+
+
+def action_execution_identity(
+    permit: PermitModel, binding: ActionToolBinding
+) -> ActionExecutionIdentity:
+    """Derive an owner from signed authority, never caller or signing keys.
+
+    Admission/signature validation belongs to the invocation pipeline. This
+    function validates the complete supported action contract before any begin.
+    """
+    from app.services.idempotency import ACTION_MCP_IDEMPOTENCY_ENDPOINT
+
+    if (
+        type(permit.action_contract_version) is not int
+        or permit.action_contract_version != 1
+    ):
+        raise ValueError("unsupported_action_contract_version")
+    for value in (
+        permit.permit_id,
+        permit.subject_wallet_id,
+        binding.deployment_authority,
+        binding.public_tool_id,
+        binding.upstream_binding_hash,
+        binding.schema_id,
+        binding.schema_version,
+    ):
+        if type(value) is not str or not value:
+            raise ValueError("invalid_action_binding")
+    if (
+        type(binding.input_schema) is not dict
+        or binding.input_schema.get("type") != "object"
+    ):
+        raise ValueError("invalid_action_binding")
+    _check_schema(binding.input_schema)
+    for value_hash in (permit.action_payload_hash, binding.upstream_binding_hash):
+        if (
+            type(value_hash) is not str
+            or len(value_hash) != 64
+            or any(c not in "0123456789abcdef" for c in value_hash)
+        ):
+            raise ValueError("invalid_action_digest")
+    if (
+        permit.action_schema_id != binding.schema_id
+        or permit.action_schema_version != binding.schema_version
+        or permit.action_public_tool_id != binding.public_tool_id
+        or permit.action_upstream_binding_hash != binding.upstream_binding_hash
+    ):
+        raise ValueError("action_binding_mismatch")
+    try:
+        tools = json.loads(permit.allowed_tools_json)
+        caps = json.loads(permit.max_calls_per_tool_json or "null")
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid_action_permit_scope") from exc
+    if (
+        tools != [binding.public_tool_id]
+        or type(caps) is not dict
+        or set(caps) != {binding.public_tool_id}
+        or type(caps[binding.public_tool_id]) is not int
+        or caps[binding.public_tool_id] != 1
+    ):
+        raise ValueError("invalid_action_permit_scope")
+    owner = {
+        "action_contract_version": 1,
+        "permit_id": permit.permit_id,
+        "subject_wallet_id": permit.subject_wallet_id,
+        "public_tool_id": binding.public_tool_id,
+        "upstream_binding_hash": binding.upstream_binding_hash,
+    }
+
+    def digest(payload: dict[str, Any]) -> str:
+        return hashlib.sha256(
+            json.dumps(
+                payload,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            ).encode("utf-8")
+        ).hexdigest()
+
+    return ActionExecutionIdentity(
+        endpoint=ACTION_MCP_IDEMPOTENCY_ENDPOINT,
+        idempotency_key="act1-" + digest(owner),
+        request_payload={**owner, "action_payload_hash": permit.action_payload_hash},
+        native_idempotency_key="act1-"
+        + digest(
+            {
+                **owner,
+                "deployment_authority": binding.deployment_authority,
+                "owner_namespace": ACTION_MCP_IDEMPOTENCY_ENDPOINT,
+            }
+        ),
+    )
