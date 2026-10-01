@@ -13,6 +13,7 @@ from app.services.action_permits import (
     ActionToolBinding,
     action_payload_hash,
     canonical_action_payload,
+    upstream_action_binding_hash,
 )
 from app.services.permits import PermitService
 from app.services.signing_keys import canonical_json
@@ -30,7 +31,20 @@ MONEY_SCHEMA = {
     "additionalProperties": False,
 }
 BINDING = ActionToolBinding(
-    "test-plane", "partner.pay", "a" * 64, "money", "1", MONEY_SCHEMA
+    "test-plane",
+    "partner.pay",
+    upstream_action_binding_hash(
+        deployment_authority="test-plane",
+        public_tool_id="partner.pay",
+        upstream_origin="https://fixture.invalid",
+        upstream_tool_name="pay",
+        schema_id="money",
+        schema_version="1",
+        input_schema=MONEY_SCHEMA,
+    ),
+    "money",
+    "1",
+    MONEY_SCHEMA,
 )
 FIELDS = dict(
     action_contract_version=1,
@@ -482,3 +496,31 @@ async def test_generic_permit_cannot_set_action_fields():
             await PermitService().create_permit(
                 ordinary.model_copy(update={field: value})
             )
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [{"upstream_origin": "https://other.invalid"}, {"upstream_tool_name": "other"}],
+)
+def test_registry_re_registration_cannot_reuse_old_destination_hash(changed):
+    from app.services.service_registry import ServiceRegistry
+    from app.schemas.billing import ServiceCategory
+
+    registration = dict(
+        service_id="partner.pay",
+        name="Pay",
+        description="fixture",
+        category=next(iter(ServiceCategory)),
+        executor=object(),
+        input_schema=MONEY_SCHEMA,
+        output_schema=None,
+        credits_per_unit=1,
+        upstream_tool_name="pay",
+        upstream_origin="https://fixture.invalid",
+        action_binding=BINDING,
+    )
+    registry = ServiceRegistry()
+    registry.register_upstream(**registration)
+    for instance in (registry, ServiceRegistry()):
+        with pytest.raises(ValueError, match="action_binding_registry_mismatch"):
+            instance.register_upstream(**{**registration, **changed})
