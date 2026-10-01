@@ -902,3 +902,58 @@ async def test_coherent_tampering_of_terms_and_hash_fails_anchor_check(
         from app.db.models import PermitModel
         assert (await session.execute(select(PermitModel))).scalars().all() == []
 
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "max_credits", ["1.123456789", "0.000000001", "1000000000000"]
+)
+async def test_request_max_credits_outside_storage_scale_is_refused(
+    client, clean_database, monkeypatch, sentinel, max_credits
+):
+    """permit_requests.max_credits is Numeric(20, 8), like the permit it mints.
+
+    A 9-decimal ask was hashed for the human at full precision, then stored
+    rounded, so the approved request failed its own integrity check at mint;
+    0.000000001 passed the ``> 0`` guard and was stored as zero. Both are a
+    422 now, before a row is written or a human is paged.
+    """
+    _sentinel_env(monkeypatch, simulated=False)
+    agent = await provision_agent_wallet(client)
+
+    resp = await _request(client, agent, idem="preq-scale", max_credits=max_credits)
+    assert resp.status_code == 422, resp.text
+    assert sentinel.created == []
+    factory = get_session_factory()
+    async with factory() as session:
+        rows = (await session.execute(select(PermitRequestModel))).scalars().all()
+        assert rows == []
+
+
+@pytest.mark.asyncio
+async def test_request_at_full_storage_scale_mints_a_verifiable_permit(
+    client, clean_database, monkeypatch, sentinel
+):
+    _sentinel_env(monkeypatch, simulated=True)
+    monkeypatch.setattr(get_settings(), "ENVIRONMENT", "development")
+    agent = await provision_agent_wallet(client)
+
+    resp = await _request(client, agent, idem="preq-scale-ok", max_credits="1.12345678")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["status"] == "approved", body
+    permit = body["permit"]
+    assert Decimal(str(permit["max_credits"])) == Decimal("1.12345678")
+
+    verify = await client.post(
+        "/v1/permits/verify",
+        json={
+            "permit_id": permit["permit_id"],
+            "wallet_id": agent["agent_wallet_id"],
+            "tool": TOOLS[0],
+            "estimated_credits": "1",
+        },
+        headers=agent["agent_headers"],
+    )
+    assert verify.status_code == 200
+    assert verify.json()["valid"] is True, verify.json()
+

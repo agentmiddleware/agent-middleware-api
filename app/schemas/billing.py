@@ -128,6 +128,13 @@ class AlertSeverity(str, Enum):
 
 SAFE_WALLET_ID = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$")
 
+# Wallet, ledger and service money columns are Numeric(20, 8): twelve integer
+# digits. Float money request fields stay strictly below 1e12 and refuse the
+# Infinity/NaN literals Starlette's JSON parser accepts (ge/gt alone let
+# +Infinity through), so an unstorable amount is a 422 here rather than an
+# Infinity balance and ledger row (SQLite) or a 500 (Postgres).
+MAX_STORABLE_AMOUNT = 1e12
+
 
 def _exact_decimal(value: Any) -> str | None:
     """Return a JSON-safe exact decimal string without binary float math."""
@@ -185,6 +192,8 @@ class CreateSponsorWalletRequest(BaseModel):
     initial_credits: float = Field(
         default=0.0,
         ge=0,
+        lt=MAX_STORABLE_AMOUNT,
+        allow_inf_nan=False,
         description="Initial credit balance (in ecosystem credits).",
     )
     currency: str = Field(
@@ -218,11 +227,15 @@ class CreateAgentWalletRequest(BaseModel):
     budget_credits: float = Field(
         ...,
         gt=0,
+        lt=MAX_STORABLE_AMOUNT,
+        allow_inf_nan=False,
         description="Credits to provision from the sponsor's balance.",
     )
     daily_limit: float | None = Field(
         default=None,
         ge=0,
+        lt=MAX_STORABLE_AMOUNT,
+        allow_inf_nan=False,
         description="Optional daily spend cap.",
     )
     auto_refill: bool = Field(
@@ -232,11 +245,15 @@ class CreateAgentWalletRequest(BaseModel):
     auto_refill_threshold: float = Field(
         default=100.0,
         ge=0,
+        lt=MAX_STORABLE_AMOUNT,
+        allow_inf_nan=False,
         description="Refill trigger threshold.",
     )
     auto_refill_amount: float = Field(
         default=1000.0,
         ge=0,
+        lt=MAX_STORABLE_AMOUNT,
+        allow_inf_nan=False,
         description="Amount to refill.",
     )
 
@@ -255,11 +272,15 @@ class CreateChildWalletRequest(BaseModel):
     budget_credits: float = Field(
         ...,
         gt=0,
+        lt=MAX_STORABLE_AMOUNT,
+        allow_inf_nan=False,
         description="Credits to provision from parent's balance.",
     )
     max_spend: float = Field(
         ...,
         gt=0,
+        lt=MAX_STORABLE_AMOUNT,
+        allow_inf_nan=False,
         description="Hard lifetime spend cap in credits.",
     )
     task_description: str = Field(
@@ -474,6 +495,8 @@ class TopUpRequest(BaseModel):
     amount_fiat: float = Field(
         ...,
         gt=0,
+        lt=MAX_STORABLE_AMOUNT,
+        allow_inf_nan=False,
         description="Amount in fiat currency (e.g., USD).",
     )
     payment_method: str = Field(default="stripe", description="Payment rail to use.")
@@ -620,7 +643,9 @@ class RegisterServiceRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: str = Field(default="", max_length=1000)
     category: ServiceCategory
-    credits_per_unit: float = Field(..., gt=0)
+    credits_per_unit: float = Field(
+        ..., gt=0, lt=MAX_STORABLE_AMOUNT, allow_inf_nan=False
+    )
     unit_name: str = Field(default="request", max_length=50)
     mcp_manifest: dict | None = None
 
