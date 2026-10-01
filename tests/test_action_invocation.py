@@ -139,6 +139,15 @@ async def action_runtime(monkeypatch, clean_database):
     from tests.test_action_permits import _action_request
     from tests.test_trust_helpers import BOOTSTRAP_HEADERS, provision_agent_wallet
 
+    # The shared SQLite engine outlives pytest's function event loops. A
+    # contended pool queue can retain a previous loop; give this fixture its
+    # own pool lifetime without changing database rows or production auth.
+    from app.db.database import get_engine
+
+    engine = get_engine()
+    if engine is not None and engine.dialect.name == "sqlite":
+        await engine.dispose()
+
     monkeypatch.setenv("ENABLE_STANDARD_MCP_ENDPOINT", "true")
     get_settings.cache_clear()
     registry = get_service_registry()
@@ -174,6 +183,8 @@ async def action_runtime(monkeypatch, clean_database):
         )
         assert response.status_code == 201, response.text
         yield client, wallets, response.json()["permit_id"], executor
+    if engine is not None and engine.dialect.name == "sqlite":
+        await engine.dispose()
     get_settings.cache_clear()
 
 
