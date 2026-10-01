@@ -275,6 +275,43 @@ def test_repo_does_not_ship_stale_production_config_paths() -> None:
     assert "POSTGRES_PASSWORD: changeme" not in local_compose
 
 
+def test_readme_version_badge_matches_changelog_release_state() -> None:
+    """The front-page badge must not present an untagged version as released.
+
+    It read `version-v1.3.0-blue` while CHANGELOG.md was still headed
+    `[Unreleased] — planned v1.3.0` and no v1.3.0 tag existed. The source
+    version (pyproject, APP_VERSION) legitimately runs ahead of the tag; the
+    badge is what a reader takes as the shipped release.
+    """
+
+    changelog = (REPO_ROOT / "CHANGELOG.md").read_text()
+    top = next(line for line in changelog.splitlines() if line.startswith("## "))
+    readme = (REPO_ROOT / "README.md").read_text()
+    badge = re.search(r"img\.shields\.io/badge/version-(.+?)-([0-9a-z]+)\)", readme)
+    assert badge, "README.md must keep its version badge"
+    # shields.io static badges escape a literal dash as `--`.
+    message = badge.group(1).replace("--", "-")
+
+    if top.startswith("## [Unreleased]"):
+        assert "unreleased" in message.lower(), (
+            f"CHANGELOG.md's newest section is {top!r}, but the README badge "
+            f"says {message!r} as if that version had shipped"
+        )
+        planned = re.search(r"planned (v\d+\.\d+\.\d+)", top)
+        if planned:
+            assert message.startswith(planned.group(1)), (
+                f"README badge {message!r} does not name the planned "
+                f"{planned.group(1)} from CHANGELOG.md"
+            )
+    else:
+        released = re.match(r"## \[(\d+\.\d+\.\d+)\]", top)
+        assert released, f"unrecognized CHANGELOG.md heading: {top!r}"
+        assert message == f"v{released.group(1)}", (
+            f"README badge {message!r} does not match the newest released "
+            f"CHANGELOG.md section {top!r}"
+        )
+
+
 # --- Runnable examples -----------------------------------------------------
 
 

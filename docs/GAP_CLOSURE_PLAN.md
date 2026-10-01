@@ -1,5 +1,22 @@
 # Trust Plane Gap Closure Plan
 
+> **Status (2026-10-01): historical plan, frozen — not a spec or a progress
+> record.** Written 2026-08-04; [`SPRINT_PLAN.md`](SPRINT_PLAN.md) is its
+> sprint-by-sprint duplicate. New core capability stays frozen until a named
+> prospective customer documents the need
+> ([`30-day-customer-validation.md`](30-day-customer-validation.md); see the
+> superseded [`production-beta-roadmap.md`](production-beta-roadmap.md)), and
+> the unchecked boxes below were never updated. Against current code: Redis-backed rate
+> limiting (`app/core/rate_limit.py`) shipped. JWT exchange
+> (`POST /v1/auth/token`, `/refresh`, `/revoke` in `app/routers/auth.py`)
+> exists only as a dormant router, unmounted in production. OAuth 2.1/PKCE,
+> trust-event webhook delivery, the `/v1/dashboard/*` API, KMS/HSM signing, the
+> `POST /v1/admin/signing-keys/rotate` route, permit delegation, and Merkle
+> batching do not exist. For what the product is today, read
+> [`../WEDGE.md`](../WEDGE.md) and
+> [`../SECURITY_LIMITATIONS.md`](../SECURITY_LIMITATIONS.md); for signing-key
+> rotation as it works now, [`key-management.md`](key-management.md#status).
+
 **Target:** Close P0-P1 gaps identified in competitive analysis
 **Timeline:** 6 weeks to production-ready enterprise trust plane
 **Owner:** Agent-Middleware-API maintainers
