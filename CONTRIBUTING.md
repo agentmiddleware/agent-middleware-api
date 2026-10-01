@@ -29,6 +29,15 @@ do less than the docs say, fix the docs in the same PR.
 things this project deliberately does not claim; adding a claim it contradicts
 will be rejected.
 
+## Licensing of contributions
+
+The core (everything outside the MIT directories listed in
+[`LICENSING.md`](LICENSING.md)) is under the Business Source License 1.1; the
+SDKs, framework integrations, wrappers, and examples are MIT. By submitting a
+contribution you agree that it is licensed under the license of the directory
+it lands in, and you certify the Developer Certificate of Origin (DCO 1.1) for
+it. Contributors keep their copyright.
+
 ## Where to start
 
 Good first contributions, roughly easiest first:
