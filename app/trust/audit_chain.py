@@ -16,6 +16,7 @@ from app.services.audit_chain import (
 )
 from app.services.audit_log import (
     count_audit_events,
+    count_audit_events_grouped,
     list_audit_events,
     record_audit_event,
     summarize_audit_events,
@@ -30,5 +31,6 @@ __all__ = [
     "record_audit_event",
     "list_audit_events",
     "count_audit_events",
+    "count_audit_events_grouped",
     "summarize_audit_events",
 ]

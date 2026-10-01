@@ -48,6 +48,7 @@ from .audit_chain import (
     AuditChainVerification,
     audit_payload,
     count_audit_events,
+    count_audit_events_grouped,
     list_audit_events,
     record_audit_event,
     sign_audit_model,
@@ -269,6 +270,7 @@ __all__ = [
     "record_audit_event",
     "list_audit_events",
     "count_audit_events",
+    "count_audit_events_grouped",
     "summarize_audit_events",
     # policy
     "evaluate_tool_invocation",
