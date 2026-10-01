@@ -1,5 +1,23 @@
 # Hyper-Focused Sprints: Trust Plane Gap Closure
 
+> **Status (2026-10-01): historical plan, frozen — not a spec or a progress
+> record.** Written 2026-08-04 as the sprint breakdown of
+> [`GAP_CLOSURE_PLAN.md`](GAP_CLOSURE_PLAN.md), which covers the same gaps.
+> New core capability stays frozen until a named prospective customer
+> documents the need
+> ([`30-day-customer-validation.md`](30-day-customer-validation.md); see the
+> superseded [`production-beta-roadmap.md`](production-beta-roadmap.md)), and
+> the unchecked boxes below were never updated. Against current code: `NaiveUTCDateTime`
+> (`app/db/types.py`), the `postgres_trust` CI job, and Redis-backed rate
+> limiting (`app/core/rate_limit.py`) shipped. JWT exchange
+> (`POST /v1/auth/token`, `/refresh`, `/revoke` in `app/routers/auth.py`)
+> exists only as a dormant router, unmounted in production. OAuth/SSO,
+> trust-event webhook subscriptions, KMS/HSM key backends, `POST /v1/admin/signing-keys/rotate`,
+> permit delegation, Merkle batching, and the `/v1/dashboard/*` API do not
+> exist (the static `/dashboard` page is a status index, not that API). For
+> what the product is today, read [`../WEDGE.md`](../WEDGE.md) and
+> [`../SECURITY_LIMITATIONS.md`](../SECURITY_LIMITATIONS.md).
+
 **Target:** Production-ready enterprise trust plane
 **Sprint cadence:** 2-week sprints
 **Team size:** 1-2 engineers
