@@ -112,7 +112,7 @@ without paging a human or minting anything as a side effect of looking.
 | `SENTINEL_APPROVERS` | empty | Comma-separated; email entries also get the card |
 | `SENTINEL_RISK_LEVEL` | `high` | Forwarded on the approval request |
 | `PERMIT_REQUEST_TIMEOUT_SECONDS` | `3600` | Local decision window (60..86400) |
-| `RESEND_API_KEY` / `ALERT_FROM_EMAIL` | empty | Optional card email delivery |
+| `RESEND_API_KEY` / `ALERT_FROM_EMAIL` | empty | Optional card email delivery; set both, with a sender address you control |
 
 ## Fail-closed rules
 

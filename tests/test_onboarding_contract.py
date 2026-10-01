@@ -7,6 +7,7 @@ gates. These are cheap to re-break in a docs edit, so they are pinned.
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import tomllib
@@ -424,3 +425,67 @@ async def test_health_payload_exposes_guardrail_posture() -> None:
     assert report["production_like"] is is_production_like_environment(
         settings.ENVIRONMENT
     )
+
+
+# --- Operator docs quote what the code does --------------------------------
+
+_ERROR_HEADING = re.compile(r"^### `([A-Za-z_][\w.]*Error): (.+)`$", re.MULTILINE)
+# Raised by Python or third-party tooling, not by this codebase.
+_EXTERNAL_ERRORS = frozenset({"ModuleNotFoundError", "alembic.util.exc.CommandError"})
+
+
+def _app_source_with_joined_literals() -> str:
+    """All of app/, with adjacent string literals joined across line breaks."""
+
+    source = "\n".join(
+        path.read_text() for path in sorted((REPO_ROOT / "app").rglob("*.py"))
+    )
+    return re.sub(r'"\s*\n\s*"', "", source)
+
+
+def test_troubleshooting_error_headings_match_raised_errors() -> None:
+    """Each `XxxError: message` heading must be an error the app raises.
+
+    The headings once quoted a `ValueError` and a `RuntimeError` text that no
+    code raised, so an operator searching for their traceback found nothing.
+    """
+
+    doc = (REPO_ROOT / "TROUBLESHOOTING.md").read_text()
+    app_errors = [
+        (name, message)
+        for name, message in _ERROR_HEADING.findall(doc)
+        if name not in _EXTERNAL_ERRORS
+    ]
+    assert app_errors, "expected startup-error headings in TROUBLESHOOTING.md"
+    source = _app_source_with_joined_literals()
+    for name, message in app_errors:
+        assert re.search(rf"^class {re.escape(name)}\(", source, re.MULTILINE), (
+            f"TROUBLESHOOTING.md names {name}, which app/ does not define"
+        )
+        assert message in source, (
+            f"TROUBLESHOOTING.md quotes `{name}: {message}`, which app/ never raises"
+        )
+
+
+def test_server_json_does_not_advertise_the_disabled_standard_mcp_remote() -> None:
+    """No registry remote while the production SOP keeps `POST /mcp` off.
+
+    With ENABLE_STANDARD_MCP_ENDPOINT forbidden on the first-party origin,
+    `/mcp` answers 404 there, so a `remotes` entry would advertise a transport
+    the server does not serve. Adding one means changing the SOP first
+    (docs/mcp-registry-submission.md, "Publish gate"), then this test.
+    """
+
+    deploy_sop = (REPO_ROOT / "docs" / "deploy-railway.md").read_text()
+    sop_row = next(
+        line
+        for line in deploy_sop.splitlines()
+        if line.startswith("| `ENABLE_STANDARD_MCP_ENDPOINT` |")
+    )
+    assert "Do not turn this on" in sop_row
+    manifest = json.loads((REPO_ROOT / "server.json").read_text())
+    assert not manifest.get("remotes"), (
+        "server.json declares a remote the production SOP keeps disabled"
+    )
+    submission = (REPO_ROOT / "docs" / "mcp-registry-submission.md").read_text()
+    assert "deploy-railway.md#required-production-variables" in submission
