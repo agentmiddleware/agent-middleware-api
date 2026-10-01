@@ -7,6 +7,7 @@ import pytest
 from httpx import AsyncClient, ASGITransport
 from app.main import app
 from app.services.audit_log import list_audit_events
+from tests.test_trust_helpers import provision_agent_wallet
 
 
 @pytest.fixture
@@ -234,3 +235,169 @@ async def test_sandbox_lifecycle_records_governance_audit_events(
     assert by_request_id["req-sandbox-evaluate"].metadata["generalization_score"] == (
         evaluate.json()["generalization_score"]
     )
+
+
+# --------------------------------------------------------------------------
+# Tenant isolation: puzzle environments are owned by the creating wallet.
+# --------------------------------------------------------------------------
+
+
+async def _create_env(client, headers) -> str:
+    resp = await client.post(
+        "/v1/sandbox/environments",
+        json={"env_type": "pattern", "difficulty": "easy", "seed": 7},
+        headers=headers,
+    )
+    assert resp.status_code == 201
+    return resp.json()["env_id"]
+
+
+@pytest.mark.proof
+@pytest.mark.anyio
+async def test_sandbox_reads_require_api_key(client):
+    """Neither GET may be served to an unauthenticated caller."""
+    env_id = await _create_env(client, HEADERS)
+
+    listing = await client.get("/v1/sandbox/environments")
+    assert listing.status_code == 401
+    assert env_id not in listing.text
+
+    single = await client.get(f"/v1/sandbox/environments/{env_id}")
+    assert single.status_code == 401
+    assert "grid" not in single.text
+
+
+@pytest.mark.proof
+@pytest.mark.anyio
+async def test_sandbox_env_not_accessible_across_tenants(client, clean_database):
+    a = await provision_agent_wallet(client)
+    b = await provision_agent_wallet(client)
+    env_id = await _create_env(client, a["agent_headers"])
+    missing_id = "env-doesnotexist"
+
+    def _same_as_missing(foreign, missing) -> None:
+        # A foreign environment must be indistinguishable from a missing one
+        # (no existence oracle) and must never echo the owner's wallet.
+        assert foreign.status_code == 404
+        assert missing.status_code == 404
+        assert foreign.text.replace(env_id, "ID") == missing.text.replace(
+            missing_id, "ID"
+        )
+        assert a["agent_wallet_id"] not in foreign.text
+
+    # Wallet B cannot read A's environment.
+    _same_as_missing(
+        await client.get(
+            f"/v1/sandbox/environments/{env_id}", headers=b["agent_headers"]
+        ),
+        await client.get(
+            f"/v1/sandbox/environments/{missing_id}", headers=b["agent_headers"]
+        ),
+    )
+
+    # Wallet B cannot act on A's environment.
+    action = {"action": {"type": "submit_transform", "value": "rotate"}}
+    _same_as_missing(
+        await client.post(
+            f"/v1/sandbox/environments/{env_id}/actions",
+            json=action,
+            headers=b["agent_headers"],
+        ),
+        await client.post(
+            f"/v1/sandbox/environments/{missing_id}/actions",
+            json=action,
+            headers=b["agent_headers"],
+        ),
+    )
+
+    # Wallet B cannot evaluate (and thereby complete) A's environment.
+    _same_as_missing(
+        await client.post(
+            f"/v1/sandbox/environments/{env_id}/evaluate", headers=b["agent_headers"]
+        ),
+        await client.post(
+            f"/v1/sandbox/environments/{missing_id}/evaluate",
+            headers=b["agent_headers"],
+        ),
+    )
+
+    # B's attempts left A's environment untouched, and the owner still works.
+    owner_view = await client.get(
+        f"/v1/sandbox/environments/{env_id}", headers=a["agent_headers"]
+    )
+    assert owner_view.status_code == 200
+    assert owner_view.json()["action_count"] == 0
+    assert owner_view.json()["state"]["step"] == 0
+    assert owner_view.json()["completed_at"] is None
+
+    owner_action = await client.post(
+        f"/v1/sandbox/environments/{env_id}/actions",
+        json={"action": {"type": "observe", "value": "grid"}},
+        headers=a["agent_headers"],
+    )
+    assert owner_action.status_code == 200
+    assert owner_action.json()["step"] == 1
+
+    owner_eval = await client.post(
+        f"/v1/sandbox/environments/{env_id}/evaluate", headers=a["agent_headers"]
+    )
+    assert owner_eval.status_code == 200
+    assert owner_eval.json()["env_id"] == env_id
+
+    # Bootstrap admins keep cross-tenant access.
+    admin_view = await client.get(
+        f"/v1/sandbox/environments/{env_id}", headers=HEADERS
+    )
+    assert admin_view.status_code == 200
+    assert admin_view.json()["action_count"] == 1
+
+
+@pytest.mark.proof
+@pytest.mark.anyio
+async def test_sandbox_admin_created_env_not_visible_to_wallet_keys(
+    client, clean_database
+):
+    a = await provision_agent_wallet(client)
+    admin_env = await _create_env(client, HEADERS)
+
+    assert (
+        await client.get(
+            f"/v1/sandbox/environments/{admin_env}", headers=a["agent_headers"]
+        )
+    ).status_code == 404
+    assert (
+        await client.post(
+            f"/v1/sandbox/environments/{admin_env}/evaluate",
+            headers=a["agent_headers"],
+        )
+    ).status_code == 404
+
+    listing = await client.get("/v1/sandbox/environments", headers=a["agent_headers"])
+    assert listing.status_code == 200
+    assert admin_env not in listing.text
+
+
+@pytest.mark.proof
+@pytest.mark.anyio
+async def test_sandbox_list_environments_scoped_to_caller(client, clean_database):
+    a = await provision_agent_wallet(client)
+    b = await provision_agent_wallet(client)
+    env_a = await _create_env(client, a["agent_headers"])
+    env_b = await _create_env(client, b["agent_headers"])
+
+    b_list = await client.get("/v1/sandbox/environments", headers=b["agent_headers"])
+    assert b_list.status_code == 200
+    assert [e["env_id"] for e in b_list.json()["environments"]] == [env_b]
+    assert b_list.json()["total"] == 1
+    assert env_a not in b_list.text
+
+    a_list = await client.get("/v1/sandbox/environments", headers=a["agent_headers"])
+    assert a_list.status_code == 200
+    assert [e["env_id"] for e in a_list.json()["environments"]] == [env_a]
+    assert env_b not in a_list.text
+
+    # Bootstrap admins still enumerate every environment.
+    admin_list = await client.get("/v1/sandbox/environments", headers=HEADERS)
+    assert admin_list.status_code == 200
+    admin_ids = {e["env_id"] for e in admin_list.json()["environments"]}
+    assert {env_a, env_b} <= admin_ids
