@@ -20,6 +20,21 @@ pytestmark = [
 ]
 
 
+@pytest_asyncio.fixture(scope="module", loop_scope="session", autouse=True)
+async def require_fresh_action_schema():
+    from sqlalchemy import inspect
+    from app.db.database import get_engine
+    from tests.test_action_migrations import FIELDS
+    from tests.test_mcp_postgres_multiprocess import _assert_migrated_empty_database
+
+    assert os.environ.get("ENVIRONMENT") == "test"
+    async with get_engine().connect() as connection:
+        await _assert_migrated_empty_database(connection)
+        for table in ("permits", "receipts"):
+            columns = await connection.run_sync(lambda c: inspect(c).get_columns(table))
+            assert set(FIELDS) <= {c["name"] for c in columns}, "stale 041 schema"
+
+
 @pytest_asyncio.fixture(loop_scope="session")
 async def clean_database():
     async for value in sqlite_clean_database.__wrapped__():
