@@ -42,7 +42,12 @@ jobs:
               print('API_URL not configured. Skipping anomaly check.')
               exit(0)
 
-          api_key = os.environ.get('API_KEY') or 'dev-key'
+          # No fallback credential: a missing secret or a rejected key must
+          # fail the job, never pass green.
+          api_key = (os.environ.get('API_KEY') or '').strip()
+          if not api_key:
+              print('API_KEY not configured.')
+              exit(1)
 
           headers = {'X-API-Key': api_key}
 
@@ -55,7 +60,7 @@ jobs:
 
           if resp.status_code != 200:
               print(f'Failed to fetch anomalies: {resp.status_code}')
-              exit(0)
+              exit(1)
 
           data = resp.json()
           anomalies = data.get('anomalies', [])
@@ -92,6 +97,7 @@ jobs:
                   f.write('has_fix=true\n')
           else:
               print(f'Fix generation failed: {fix_resp.status_code}')
+              exit(1)
           "
 
       - name: Apply fix and create PR

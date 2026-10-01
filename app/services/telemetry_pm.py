@@ -621,13 +621,16 @@ class AnomalyDetector:
 
 class AutoPRGenerator:
     """
-    Generates code fixes and optionally pushes them as pull requests.
+    Generates a placeholder code fix for an anomaly (simulated proof surface).
 
-    In production, this:
-    1. Gathers context from the anomaly + related telemetry
-    2. Sends context to an LLM to generate a fix
-    3. Runs the test suite against the fix
-    4. Pushes a PR if tests pass and dry_run=False
+    A real adapter would:
+    1. Gather context from the anomaly + related telemetry
+    2. Send context to an LLM to generate a fix
+    3. Run the test suite against the fix
+    4. Push a PR if tests pass and dry_run=False
+
+    Only step 1 exists. Steps 2-4 are not implemented, so results never
+    report a created PR or a test outcome.
     """
 
     def __init__(self, git_remote: str = "", branch_prefix: str = "auto-pm/"):
@@ -641,8 +644,9 @@ class AutoPRGenerator:
         dry_run: bool = True,
     ) -> dict:
         """
-        Generate a code fix for an anomaly.
-        Returns diff, files_changed, test results, and optionally a PR URL.
+        Generate a placeholder code fix for an anomaly.
+        Returns diff and files_changed; pr_url and tests_passed are always
+        None, and status is "dry_run" or (when dry_run=False) "simulated".
         """
         require_simulation("telemetry_pm")
         # Build context for the LLM
@@ -653,23 +657,27 @@ class AutoPRGenerator:
         diff = self._generate_placeholder_diff(anomaly)
         files = self._infer_affected_files(anomaly)
 
+        # Nothing here runs a test suite, pushes a branch, or opens a PR, so
+        # the result must never claim otherwise: tests_passed stays unknown,
+        # pr_url stays null, and a non-dry-run request is marked "simulated"
+        # rather than "pr_created" with a fabricated URL.
         result = {
             "anomaly_id": anomaly.anomaly_id,
             "diff": diff,
             "files_changed": files,
-            "tests_passed": True,  # In production: actually run tests
+            "tests_passed": None,
             "context_events": len(related_events),
+            "pr_url": None,
+            "status": "dry_run" if dry_run else "simulated",
         }
 
-        if not dry_run and self.git_remote:
-            _branch = f"{self.branch_prefix}{anomaly.anomaly_id}"
-            # Production: git checkout -b, apply diff, commit, push, create PR
-            result["pr_url"] = f"{self.git_remote}/pull/auto-{uuid.uuid4().hex[:6]}"
-            result["status"] = "pr_created"
-            logger.info(f"Auto-PR created for {anomaly.anomaly_id}: {result['pr_url']}")
-        else:
-            result["pr_url"] = None
-            result["status"] = "dry_run"
+        if not dry_run:
+            logger.info(
+                "Auto-PR simulated for %s: no PR opened (would-be branch %s%s)",
+                anomaly.anomaly_id,
+                self.branch_prefix,
+                anomaly.anomaly_id,
+            )
 
         return result
 

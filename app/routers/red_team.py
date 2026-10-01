@@ -11,11 +11,15 @@ explicitly enabled. The repository's real adversarial tooling is
 scripts/invariant_attacks/.
 
 Findings are structured and machine-readable.
+
+Scans are wallet-scoped: a scan belongs to the wallet whose key launched it,
+and a wallet-scoped key can read and list only its own scans. Bootstrap
+admins launch ownerless scans and can read every scan.
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 
-from ..core.auth import verify_api_key
+from ..core.auth import AuthContext, get_auth_context
 from ..core.dependencies import get_red_team_swarm
 from ..services.red_team import RedTeamSwarm
 from ..schemas.red_team import (
@@ -30,8 +34,29 @@ from ..schemas.red_team import (
 router = APIRouter(
     prefix="/v1/security",
     tags=["Red Team Security Swarm"],
-    dependencies=[Depends(verify_api_key)],
 )
+
+
+def _scan_owner_scope(auth: AuthContext) -> str | None:
+    """Wallet a caller's scans are owned by and its reads are confined to.
+
+    ``None`` only for a bootstrap admin: its scans are ownerless and its reads
+    are unscoped. Every other caller is pinned to its own wallet, so one tenant
+    can never read, list, or enumerate another tenant's scan reports.
+    """
+    if auth.is_bootstrap_admin:
+        return None
+    if auth.wallet_id is None:
+        # A non-admin key always carries a wallet; refuse rather than fall
+        # through to the unscoped (admin) read path.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "wallet_access_denied",
+                "message": "API key is not authorized for this wallet.",
+            },
+        )
+    return auth.wallet_id
 
 
 @router.post(
@@ -47,6 +72,7 @@ router = APIRouter(
 )
 async def launch_scan(
     request: ScanRequest,
+    auth: AuthContext = Depends(get_auth_context),
     swarm: RedTeamSwarm = Depends(get_red_team_swarm),
 ):
     report = await swarm.run_scan(
@@ -54,6 +80,7 @@ async def launch_scan(
         attack_categories=request.attack_categories,
         intensity=request.intensity,
         auto_remediate=request.auto_remediate,
+        owner_wallet_id=_scan_owner_scope(auth),
     )
     return ScanResponse(
         scan_id=report.scan_id,
@@ -70,12 +97,16 @@ async def launch_scan(
     "/scans",
     response_model=ScanListResponse,
     summary="List all security scans",
-    description="Returns all historical scan reports, newest first.",
+    description=(
+        "Returns the caller's historical scan reports, newest first "
+        "(every scan for a bootstrap admin)."
+    ),
 )
 async def list_scans(
+    auth: AuthContext = Depends(get_auth_context),
     swarm: RedTeamSwarm = Depends(get_red_team_swarm),
 ):
-    scans = await swarm.list_scans()
+    scans = await swarm.list_scans(owner_wallet_id=_scan_owner_scope(auth))
     scans.sort(key=lambda s: s.started_at, reverse=True)
     return ScanListResponse(scans=scans, total=len(scans))
 
@@ -92,9 +123,11 @@ async def list_scans(
 )
 async def get_scan_report(
     scan_id: str,
+    auth: AuthContext = Depends(get_auth_context),
     swarm: RedTeamSwarm = Depends(get_red_team_swarm),
 ):
-    report = await swarm.get_scan(scan_id)
+    # Another wallet's scan is reported as not found: no existence oracle.
+    report = await swarm.get_scan(scan_id, owner_wallet_id=_scan_owner_scope(auth))
     if not report:
         raise HTTPException(status_code=404, detail="Scan not found")
     return report
@@ -113,9 +146,10 @@ async def get_scan_report(
 async def get_vulnerabilities(
     scan_id: str,
     severity: Severity | None = None,
+    auth: AuthContext = Depends(get_auth_context),
     swarm: RedTeamSwarm = Depends(get_red_team_swarm),
 ):
-    report = await swarm.get_scan(scan_id)
+    report = await swarm.get_scan(scan_id, owner_wallet_id=_scan_owner_scope(auth))
     if not report:
         raise HTTPException(status_code=404, detail="Scan not found")
 
@@ -142,6 +176,7 @@ async def get_vulnerabilities(
     ),
 )
 async def quick_scan(
+    auth: AuthContext = Depends(get_auth_context),
     swarm: RedTeamSwarm = Depends(get_red_team_swarm),
 ):
     from ..schemas.red_team import AttackCategory
@@ -154,5 +189,6 @@ async def quick_scan(
             AttackCategory.PRIVILEGE_ESCALATION,
         ],
         intensity="quick",
+        owner_wallet_id=_scan_owner_scope(auth),
     )
     return report

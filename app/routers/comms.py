@@ -13,12 +13,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from datetime import datetime
 
-from ..core.auth import verify_api_key
+from ..core.auth import AuthContext, get_auth_context
 from ..core.dependencies import get_agent_comms
 from ..services.agent_comms import (
     AgentComms,
     MessageType,
     MessagePriority,
+    caller_owns_agent,
+    owner_identity,
 )
 
 router = APIRouter(
@@ -146,23 +148,41 @@ class HandoffResponse(BaseModel):
 # --- Auth helpers ---
 
 
-async def _require_agent_owner(comms: AgentComms, api_key: str, agent_id: str) -> None:
-    """Reject the request unless the calling API key owns this agent.
+async def require_agent_owner(
+    comms: AgentComms, auth: AuthContext, agent_id: str
+) -> None:
+    """Reject the request unless the caller owns this agent.
 
     Applied to every endpoint that acts on behalf of an agent (send, ack,
-    handoff, inbox) so an authenticated caller cannot impersonate an agent
-    they do not own. Unregistered or owner-less agents pass through; the
-    underlying service handles "not found".
+    handoff, inbox, here and on ``/v1/agent-comms``) so an authenticated
+    caller cannot impersonate an agent they do not own. Fails closed: an
+    unregistered id is 404 and an owner-less record is 403, because neither
+    has a tenant the caller could prove it belongs to. Bootstrap admins
+    (operator keys, outside every tenant) may still address those two, but
+    not an agent another caller registered.
     """
     agent = await comms.registry.get(agent_id)
-    if agent and agent.owner_key and agent.owner_key != api_key:
+    if agent is None:
+        if auth.is_bootstrap_admin:
+            return
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=status.HTTP_404_NOT_FOUND,
             detail={
-                "error": "access_denied",
-                "message": "You do not own this agent.",
+                "error": "agent_not_found",
+                "message": f"Agent '{agent_id}' is not registered.",
             },
         )
+    if caller_owns_agent(agent, auth):
+        return
+    if not agent.owner_key and auth.is_bootstrap_admin:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={
+            "error": "access_denied",
+            "message": "You do not own this agent.",
+        },
+    )
 
 
 # --- Endpoints ---
@@ -181,14 +201,14 @@ async def _require_agent_owner(comms: AgentComms, api_key: str, agent_id: str) -
 )
 async def register_agent(
     request: AgentRegistrationRequest,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     comms: AgentComms = Depends(get_agent_comms),
 ):
     agent = await comms.register_agent(
         name=request.name,
         capabilities=request.capabilities,
         webhook_url=request.webhook_url,
-        owner_key=api_key,
+        owner_key=owner_identity(auth),
     )
     return AgentRegistrationResponse(
         agent_id=agent.agent_id,
@@ -205,8 +225,8 @@ async def register_agent(
     "/agents",
     summary="List registered agents",
     description=(
-        "List all agents in the communication network, "
-        "optionally filtered by capability."
+        "List the agents the caller registered (bootstrap admins see every "
+        "agent), optionally filtered by capability."
     ),
 )
 async def list_agents(
@@ -214,13 +234,17 @@ async def list_agents(
         None,
         description="Filter agents by capability (e.g., 'video-transcription').",
     ),
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     comms: AgentComms = Depends(get_agent_comms),
 ):
     if capability:
         agents = await comms.registry.find_by_capability(capability)
     else:
         agents = await comms.registry.list_all()
+    if not auth.is_bootstrap_admin:
+        # Tenants never enumerate each other's agents. Capability handoff
+        # routing reads the registry server-side and is unaffected.
+        agents = [a for a in agents if caller_owns_agent(a, auth)]
 
     return {
         "agents": [
@@ -254,10 +278,10 @@ async def list_agents(
 async def send_message(
     from_agent: str,
     request: SendMessageRequest,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     comms: AgentComms = Depends(get_agent_comms),
 ):
-    await _require_agent_owner(comms, api_key, from_agent)
+    await require_agent_owner(comms, auth, from_agent)
     msg = await comms.send_message(
         from_agent=from_agent,
         to_agent=request.to_agent,
@@ -293,10 +317,10 @@ async def send_message(
 async def poll_inbox(
     agent_id: str,
     limit: int = Query(50, ge=1, le=200, description="Max messages to return"),
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     comms: AgentComms = Depends(get_agent_comms),
 ):
-    await _require_agent_owner(comms, api_key, agent_id)
+    await require_agent_owner(comms, auth, agent_id)
     messages = await comms.router.poll(agent_id, limit=limit)
     return {
         "agent_id": agent_id,
@@ -326,10 +350,10 @@ async def poll_inbox(
 async def acknowledge_message(
     agent_id: str,
     message_id: str,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     comms: AgentComms = Depends(get_agent_comms),
 ):
-    await _require_agent_owner(comms, api_key, agent_id)
+    await require_agent_owner(comms, auth, agent_id)
     acked = await comms.router.acknowledge(agent_id, message_id)
     if not acked:
         raise HTTPException(
@@ -356,10 +380,10 @@ async def acknowledge_message(
 async def request_handoff(
     from_agent: str,
     request: HandoffRequest,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     comms: AgentComms = Depends(get_agent_comms),
 ):
-    await _require_agent_owner(comms, api_key, from_agent)
+    await require_agent_owner(comms, auth, from_agent)
     msg = await comms.request_handoff(
         from_agent=from_agent,
         capability=request.capability,

@@ -14,6 +14,7 @@ from app.schemas.audit import (
 from app.schemas.trust import AuditChainVerifyRequest, AuditChainVerifyResponse
 from app.trust import (
     count_audit_events,
+    count_audit_events_grouped,
     list_audit_events,
     summarize_audit_events,
     verify_audit_chain,
@@ -97,7 +98,9 @@ async def get_audit_events(
     next_offset = offset + len(events) if offset + len(events) < total else None
     response_summary = None
     if summary:
-        summary_events = await list_audit_events(
+        # Counted in SQL over every matching event, not tallied from a capped
+        # row read, so ok + failed always equals total.
+        buckets = await count_audit_events_grouped(
             event=event,
             wallet_id=wallet_id,
             key_id=key_id,
@@ -108,18 +111,16 @@ async def get_audit_events(
             ok=ok,
             created_after=created_after,
             created_before=created_before,
-            limit=10_000,
-            offset=0,
         )
         by_event: dict[str, int] = {}
         ok_count = 0
         failed_count = 0
-        for audit_event in summary_events:
-            by_event[audit_event.event] = by_event.get(audit_event.event, 0) + 1
-            if audit_event.ok:
-                ok_count += 1
+        for bucket in buckets:
+            by_event[bucket.event] = by_event.get(bucket.event, 0) + bucket.count
+            if bucket.ok:
+                ok_count += bucket.count
             else:
-                failed_count += 1
+                failed_count += bucket.count
         response_summary = {
             "total": total,
             "ok": ok_count,

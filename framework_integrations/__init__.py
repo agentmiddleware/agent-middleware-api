@@ -16,7 +16,7 @@ repository after `python -m pip install -r requirements.txt`.
 ## Quick Start
 
 ```python
-from framework_integrations import B2AClient, get_langgraph_tools, get_crewai_tools
+from framework_integrations import B2AClient, get_langgraph_tools, get_llamaindex_tools
 
 # Initialize client
 client = B2AClient(
@@ -25,10 +25,14 @@ client = B2AClient(
     wallet_id="your-wallet-id"
 )
 
-# Get tools for your framework
+# Get tools for your framework (async tools: drive them with ainvoke / acall)
 langgraph_tools = get_langgraph_tools(client)
-crewai_tools = get_crewai_tools(client)
+llamaindex_tools = get_llamaindex_tools(client)
 ```
+
+`get_crewai_tools` raises `NotImplementedError`: CrewAI runs each async tool
+on a fresh event loop, which the async `B2AClient` cannot survive between
+calls. Use the governed `CrewAIB2ATool` in `wrappers/crewai-agent-middleware`.
 
 ## Framework-Specific Guides
 
