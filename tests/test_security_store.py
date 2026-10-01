@@ -253,8 +253,16 @@ async def test_rtaas_job_round_trip_preserves_targets_and_vulns():
     assert got.tenant_id == "tenant-x"
     assert got.intensity == "thorough"
     assert len(got.targets) == 2
-    assert got.targets[0].auth_header == "Bearer x"
+    # The target credential is never forwarded, so it is never persisted.
+    assert got.targets[0].auth_header is None
     assert got.targets[0].method == "POST"
+    assert got.targets[0].description == "primary"
+    factory = get_session_factory()
+    async with factory() as session:
+        row = await session.get(SecurityScanModel, "rtaas-rt")
+    assert row is not None
+    assert "Bearer x" not in (row.targets_json or "")
+    assert "auth_header" not in (row.targets_json or "")
     assert {c for c in got.attack_categories} == {
         AttackCategory.INJECTION,
         AttackCategory.RATE_LIMIT_EVASION,
