@@ -17,6 +17,7 @@ In production, wire up:
 import asyncio
 import uuid
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from enum import Enum
@@ -64,6 +65,9 @@ class StoredVideo:
     transcript: str | None = None
     duration_seconds: float | None = None
     hooks: list[ViralHook] = field(default_factory=list)
+    # Wallet whose key ingested the video. None for a bootstrap-admin upload,
+    # which only bootstrap admins can reach.
+    owner_wallet_id: str | None = None
 
 
 class VideoStore:
@@ -366,6 +370,8 @@ class MediaEngine:
         self.distributor = PlatformDistributor()
         self.scheduler = SchedulingEngine()
         self._clip_store: dict[str, GeneratedClip] = {}
+        # clip_id -> owning wallet, inherited from the source video.
+        self._clip_owners: dict[str, str | None] = {}
 
     async def ingest_video(
         self,
@@ -373,6 +379,7 @@ class MediaEngine:
         source_url: str | None = None,
         language: str = "en",
         metadata: dict | None = None,
+        owner_wallet_id: str | None = None,
     ) -> StoredVideo:
         """Start the video ingestion pipeline."""
         video = StoredVideo(
@@ -385,6 +392,7 @@ class MediaEngine:
             ),
             metadata=metadata or {},
             created_at=datetime.now(timezone.utc),
+            owner_wallet_id=owner_wallet_id,
         )
         await self.video_store.create(video)
 
@@ -454,6 +462,7 @@ class MediaEngine:
         # Store clips
         for clip in clips:
             self._clip_store[clip.clip_id] = clip
+            self._clip_owners[clip.clip_id] = video.owner_wallet_id
 
         return clips  # type: ignore[no-any-return]
 
@@ -465,13 +474,21 @@ class MediaEngine:
         hashtags: list[str] | None = None,
         schedule_at: datetime | None = None,
         optimize_schedule: bool = True,
+        *,
+        owner_allowed: Callable[[str | None], bool],
     ) -> list[DistributionResult]:
-        """Distribute clips to social platforms."""
+        """Distribute clips to social platforms.
+
+        ``owner_allowed`` decides, from a clip's owning wallet, whether the
+        caller may distribute it. A clip it rejects is reported exactly like
+        an unknown clip id, so the response never confirms that another
+        tenant's clip exists.
+        """
         results = []
 
         for clip_id in clip_ids:
             clip = self._clip_store.get(clip_id)
-            if not clip:
+            if not clip or not owner_allowed(self._clip_owners.get(clip_id)):
                 for platform in platforms:
                     results.append(
                         DistributionResult(
@@ -501,3 +518,6 @@ class MediaEngine:
 
     async def get_clip(self, clip_id: str) -> GeneratedClip | None:
         return self._clip_store.get(clip_id)
+
+    async def get_clip_owner(self, clip_id: str) -> str | None:
+        return self._clip_owners.get(clip_id)

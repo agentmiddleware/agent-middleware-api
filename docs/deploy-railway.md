@@ -823,9 +823,10 @@ expectation naming the old key still passes. After any rotation:
 1. Update the expected key id and fingerprint, in the manifest or the
    first-party record below, from the new key's key-generation record.
 2. Retire the old key's metadata. The repository has no operator command for
-   this yet. `docs/key-management.md` describes
-   `POST /v1/admin/signing-keys/rotate`, but that route does not exist; it is
-   an open item in `docs/GAP_CLOSURE_PLAN.md`. `retire_key_metadata` and
+   this yet. `docs/key-management.md` proposes
+   `POST /v1/admin/signing-keys/rotate` for its KMS target state, but that
+   route does not exist; it is an unbuilt item in the frozen
+   `docs/GAP_CLOSURE_PLAN.md`. `retire_key_metadata` and
    `rotate_active_key_metadata` in `app/services/signing_keys.py` are service
    methods with no route or script. Do the retirement as its own reviewed
    change, and treat the signing-key check as unverified until it is done.

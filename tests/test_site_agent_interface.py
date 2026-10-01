@@ -1184,10 +1184,30 @@ def test_faq_structured_data_is_generated_from_the_visible_answers(tmp_path) -> 
     )
     canonical_boundary = (
         "At our boundary: one accepted idempotency key maps to at most one "
-        "gateway dispatch and debit plus one terminal receipt."
+        "gateway dispatch and debit, and to one terminal receipt on the "
+        "upstream path and every reconcilable outcome."
     )
     assert canonical_boundary in text
     assert canonical_boundary in exactly_once_answer
+    # A local governed tool that crashes after its side effect leaves one debit
+    # and no receipt (TRUST_MODEL.md; test_mcp_postgres_multiprocess asserts
+    # receipt_ids == ()), so neither the FAQ nor the CONTEXT.md vocabulary it
+    # is drawn from may promise a receipt unconditionally.
+    local_crash_exception = (
+        "The exception is a local governed tool that crashes after its side "
+        "effect: that leaves one execution and one debit with no receipt, "
+        "pending manual review."
+    )
+    assert local_crash_exception in exactly_once_answer
+    context = " ".join((ROOT / "CONTEXT.md").read_text(encoding="utf-8").split())
+    unqualified_receipt_claim = "gateway dispatch and debit plus one terminal receipt"
+    assert unqualified_receipt_claim not in text
+    assert unqualified_receipt_claim not in context
+    assert (
+        "at most one gateway dispatch and debit, and to one terminal receipt on "
+        "the upstream path and every reconcilable outcome" in context
+    )
+    assert "a local governed tool that crashes after its side effect" in context
     assert "produces one dispatch, one debit, one receipt" not in text
     assert "produces one dispatch, one debit, one receipt" not in exactly_once_answer
 

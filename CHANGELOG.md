@@ -11,6 +11,49 @@ The next release consolidates the accumulated trust-plane and public-product
 work as `v1.3.0`. Create that tag only from the exact commit that passes the
 full release gate; do not backfill a final `v1.2.0` tag.
 
+### Security — 2026-08-27 audit follow-up
+
+Findings from the 2026-08-27 repository audit, each re-verified against the
+current code before fixing. Every fix ships with a regression test that fails
+on the previous code.
+
+- **Production boots refuse the remaining local-only escape hatches**
+  (#485, #486): `ALLOW_PRIVATE_NETWORK_TARGETS=true` (disables the outbound-URL
+  guard's private-address checks), `ALLOW_UNSAFE_HOST_PYTHON_SANDBOX=true`, and
+  a host `BEHAVIORAL_SANDBOX_PYTHON_BACKEND` (`unsafe_host`/`host`).
+- **API keys**: `validate_key` looks keys up by the indexed `key_hash` instead
+  of the non-unique 8-character prefix, so two live keys sharing a prefix no
+  longer fail every request with a 500. A wallet key with `max_uses` or
+  `expires_at` gets `403 bounded_key_cannot_mint` on `POST /v1/api-keys` and on
+  rotate without `key_id` or naming any key other than its own, so a capped
+  key cannot mint an uncapped sibling or adopt one's bounds. An emergency
+  replacement requested by a wallet-scoped caller takes only that caller's
+  own key's bounds.
+  Liveness (status, use budget, expiry) is one rule everywhere; auto-rotation
+  no longer mints an unbounded key when the wallet has no live key.
+- **Preflight is operator-only**: `POST /v1/launch/preflight` requires a
+  bootstrap admin key and no longer echoes a placeholder admin key's prefix.
+- **`/health/dependencies`** returns only the exception class for a failed
+  probe; driver messages (hosts, ports, roles) go to the server log.
+- **Policies fail closed**: a corrupt `allowed_tools_json` /
+  `allowed_service_categories_json` denies with `policy_constraint_corrupt`
+  instead of reading as "unrestricted" (wallet policy and the IGA bridge).
+- **Tool prices** must be finite and non-negative; a negative or infinite
+  registration price is refused before any permit, quote, or ledger state is
+  touched (`tool_price_invalid`).
+- **Proof surfaces scoped to the owning wallet** (unmounted by default and
+  refused in production, fixed anyway): media videos/clips, IoT devices,
+  telemetry events/anomalies/auto-PR context, and RTaaS jobs/vulnerabilities.
+  Foreign resources answer like missing ones (404, no owner id). RTaaS no
+  longer stores target `auth_header` values.
+
+### Documentation
+- Root and strategy docs reconciled with the code: the version badge marks
+  v1.3.0 as unreleased, `PRODUCT_STRATEGY.md` corrects the x402 statement
+  (dormant facilitation router, not a settlement rail), `key-management.md` no
+  longer describes a nonexistent signing-key rotation route as current, and
+  stale plans/reviews/PR artifacts carry a dated "historical" banner.
+
 ### Fixed
 - **Duplicate guard hardening**: The cross-key duplicate guard (`MCP_UPSTREAM_DUPLICATE_GUARD`) now validates its mode at startup using a strict enum (`off`, `log`, `enforce`). Typos such as "enforced" are rejected at boot rather than silently falling back to permissive behavior. Invalid modes raise `ValidationError` during config construction.
 - **Duplicate guard observability**: Added `/health/duplicate-guard` endpoint (admin-only) exposing the current mode, configured window, and counters tracking how often log mode would have blocked a request (`log_mode_blocks`) and how often enforce mode actually blocked one (`enforce_mode_blocks`). Does not expose request contents or secrets. Requires bootstrap admin authentication.
@@ -19,7 +62,11 @@ full release gate; do not backfill a final `v1.2.0` tag.
 - **SECURITY_LIMITATIONS.md correction**: Corrected the claim that remote tools refuse `max_calls_per_tool`. That constraint has been supported since 8c95229 (PR #476). Only `aggregate_value_cap` is still rejected on the upstream path.
 
 ### Changed
+- **License change**: the core (everything outside `b2a_sdk/`, `awi_sdk/`, `framework_integrations/`, `wrappers/`, and `examples/`) moves from MIT to the Business Source License 1.1 with a four-year change date back to MIT; the SDK directories stay MIT. Versions published before this change remain MIT. See `LICENSING.md`.
 - **Default duplicate guard mode unchanged**: The default remains `log` (observe-only). Operators wishing to enforce duplicate blocking must explicitly set `MCP_UPSTREAM_DUPLICATE_GUARD=enforce`.
+
+### Removed
+- **Internal IP and deal-room documents** (`docs/ip/`, `docs/invention-inventory.md`, `docs/data-room-corrections-2026-08-26.md`, `docs/reality-check-2026-09-01.md`) are no longer part of the public tree.
 
 ### Technical Note
 - **Migration required**: Alembic revision `040_permit_repeat_window` adds the nullable integer column `permits.repeat_window_seconds`. Upgrade the database with `alembic upgrade head` before starting the API. For an unstamped legacy database, first verify and stamp its exact existing revision; do not stamp `head` to bypass migration. The duplicate guard reads the persisted column, and permit signing includes its value only when set; existing permits with `NULL` retain their previous signed payload. Startup rejects existing schemas missing this column, including unstamped legacy databases.
