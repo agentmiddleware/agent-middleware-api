@@ -34,6 +34,10 @@ def isolated_services(monkeypatch):
         mcp_dispatch_attempts.McpDispatchAttemptService(),
     )
     monkeypatch.setattr(permits, "_service", permits.PermitService())
+    yield
+    from app.core import oidc_iga
+
+    oidc_iga.reset_iga_counters()
 
 
 async def assert_detached_refusal(runtime, response, reason):
@@ -134,13 +138,37 @@ async def test_exhausted_iga_can_renew_without_spending_action(
         "atomic_missing",
     ],
 )
-async def test_preacceptance_gate_can_recover(action_runtime, monkeypatch, gate):
+@pytest.mark.parametrize("real_iga", [False, True])
+async def test_preacceptance_gate_can_recover(
+    action_runtime, monkeypatch, gate, real_iga
+):
     from app.routers import mcp
     from app.services.permits import get_permit_service, PermitValidation
     from app.services.mcp_dispatch_attempts import (
         get_mcp_dispatch_attempt_service,
         DispatchPrepareRolledBackError,
     )
+
+    if real_iga:
+        from app.core import oidc_iga as iga
+        from app.services import policies
+
+        iga.reset_iga_counters()
+        principal = iga.EnterprisePrincipal(
+            "fixture", "okta", "https://fixture.invalid", groups=("payer",)
+        )
+        grant = iga.IGAGrant("payer", "fixture-policy", max_uses=1)
+        monkeypatch.setattr(iga, "resolve_policy_grants", lambda _: [grant])
+        monkeypatch.setattr(
+            policies,
+            "get_policy_bundle",
+            AsyncMock(
+                return_value=SimpleNamespace(
+                    is_active=True, allowed_tools=["partner.pay"]
+                )
+            ),
+        )
+        monkeypatch.setattr(mcp, "_verified_enterprise_principal", lambda _: principal)
 
     service = get_mcp_dispatch_attempt_service()
     calls = 0
@@ -207,6 +235,25 @@ async def test_preacceptance_gate_can_recover(action_runtime, monkeypatch, gate)
 async def test_unknown_prepare_outcome_retains_owner(
     action_runtime, monkeypatch, uncertain
 ):
+    from app.routers import mcp
+    from app.core import oidc_iga as iga
+    from app.services import policies
+
+    iga.reset_iga_counters()
+    principal = iga.EnterprisePrincipal(
+        "fixture", "okta", "https://fixture.invalid", groups=("payer",)
+    )
+    grant = iga.IGAGrant("payer", "fixture-policy", max_uses=1)
+    monkeypatch.setattr(iga, "resolve_policy_grants", lambda _: [grant])
+    monkeypatch.setattr(
+        policies,
+        "get_policy_bundle",
+        AsyncMock(
+            return_value=SimpleNamespace(is_active=True, allowed_tools=["partner.pay"])
+        ),
+    )
+    monkeypatch.setattr(mcp, "_verified_enterprise_principal", lambda _: principal)
+
     from app.services.mcp_dispatch_attempts import (
         get_mcp_dispatch_attempt_service,
         DispatchPrepareCommitUncertainError,
@@ -221,6 +268,9 @@ async def test_unknown_prepare_outcome_retains_owner(
     response = await invoke_action(action_runtime, "rest", "unknown")
     assert "idempotency_in_progress" in response.text
     owner = (await action_rows())[0]
+    assert (
+        await iga.enforce_tool_call(principal, "partner.pay")
+    ).reason == "iga_max_uses_exceeded"
     assert owner.response_json is None
     async with get_session_factory()() as session:
         assert not (await session.execute(select(ReceiptModel))).scalars().all()
@@ -278,6 +328,25 @@ async def test_preacceptance_cleanup_cannot_release_changed_owner(
     from tests.test_action_invocation import prepare_action
     from app.db.models import IdempotencyRecordModel
 
+    from app.routers import mcp
+    from app.core import oidc_iga as iga
+    from app.services import policies
+
+    iga.reset_iga_counters()
+    principal = iga.EnterprisePrincipal(
+        "fixture", "okta", "https://fixture.invalid", groups=("payer",)
+    )
+    grant = iga.IGAGrant("payer", "fixture-policy", max_uses=1)
+    monkeypatch.setattr(iga, "resolve_policy_grants", lambda _: [grant])
+    monkeypatch.setattr(
+        policies,
+        "get_policy_bundle",
+        AsyncMock(
+            return_value=SimpleNamespace(is_active=True, allowed_tools=["partner.pay"])
+        ),
+    )
+    monkeypatch.setattr(mcp, "_verified_enterprise_principal", lambda _: principal)
+
     service = get_mcp_dispatch_attempt_service()
     original_prepare = service.authorize_reserve_and_prepare
     monkeypatch.setattr(
@@ -309,6 +378,9 @@ async def test_preacceptance_cleanup_cannot_release_changed_owner(
     monkeypatch.setattr(idem, "abandon", race_abandon)
     response = await invoke_action(action_runtime, "rest", "raced")
     assert "idempotency_in_progress" in response.text, response.text
+    assert (
+        await iga.enforce_tool_call(principal, "partner.pay")
+    ).reason == "iga_max_uses_exceeded"
     assert len(await action_rows()) == 1
     async with get_session_factory()() as session:
         assert not (await session.execute(select(ReceiptModel))).scalars().all()
