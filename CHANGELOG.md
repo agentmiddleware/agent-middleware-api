@@ -29,6 +29,10 @@ full release gate; do not backfill a final `v1.2.0` tag.
   a same-night compatibility release. `docs/schema-041-rollout.md` records that
   no image packaged at 040, including `34fbdb9` and the compatibility release
   `e18b0df`, can start once 041 is applied.
+- **Railway IaC preserves `MCP_UPSTREAM_DUPLICATE_GUARD`**: production now sets
+  the guard to `enforce`, so `.railway/railway.ts` lists it as `preserve()` and
+  a `railway config apply` no longer proposes deleting it. `.env.example`
+  documents the guard mode and window.
 
 ### Security — 2026-08-27 audit follow-up
 
