@@ -67,8 +67,19 @@ async def get_quote(
     quote_id: str,
     auth: AuthContext = Depends(get_auth_context),
 ) -> QuoteResponse:
+    """Read a quote the caller's wallet owns.
+
+    A quote another wallet owns reads as ``quote_not_found``, exactly like an
+    id that does not exist. Answering 403 instead confirmed the id was real,
+    and the ``wallet_access_denied`` body named the owning wallet_id.
+    """
     quote = await get_quote_service().get_quote(quote_id)
     if not quote:
         raise HTTPException(status_code=404, detail="quote_not_found")
-    auth.require_wallet_access(quote.wallet_id)
+    try:
+        auth.require_wallet_access(quote.wallet_id)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_403_FORBIDDEN:
+            raise HTTPException(status_code=404, detail="quote_not_found") from None
+        raise
     return quote
