@@ -6,19 +6,22 @@ BASE_URL, reachable agent directories, and non-placeholder content assets.
 
 Endpoints:
 - POST /v1/launch/preflight — Run the readiness sweep, get a GO/NO-GO verdict
+
+Operator-only: the report describes deployment configuration (bootstrap-key
+hygiene, DEBUG, rate limit), so it requires a bootstrap admin key. A
+wallet-scoped tenant key is refused with 403 admin_access_denied.
 """
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from datetime import datetime
 
-from ..core.auth import verify_api_key
+from ..core.auth import AuthContext, get_auth_context
 from ..services.preflight import PreflightEngine
 
 router = APIRouter(
     prefix="/v1/launch",
     tags=["Preflight"],
-    dependencies=[Depends(verify_api_key)],
 )
 
 
@@ -78,10 +81,18 @@ class PreflightResponse(BaseModel):
         "2. **DOMAIN** — Verify BASE_URL is a real domain, manifests will resolve\n"
         "3. **ORACLE** — Validate agent directory registration URLs\n"
         "4. **ASSETS** — Check content source URLs and crawl targets\n\n"
-        "Returns a GO/NO-GO verdict with per-check details."
+        "Returns a GO/NO-GO verdict with per-check details. "
+        "Requires bootstrap admin authentication."
     ),
 )
-async def run_preflight(request: PreflightRequest = PreflightRequest()):
+async def run_preflight(
+    request: PreflightRequest = PreflightRequest(),
+    auth: AuthContext = Depends(get_auth_context),
+):
+    # The report is operator configuration, not tenant data: a wallet-scoped
+    # key must not learn the deployment's key hygiene, DEBUG state, or rate
+    # limit, nor drive a sweep that operators use as a launch gate.
+    auth.require_bootstrap_admin()
     engine = PreflightEngine()
 
     config_overrides = {}

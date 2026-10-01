@@ -4,8 +4,9 @@
 
 This project has **one maintainer**. `CODEOWNERS` assigns every path to
 `@PetrefiedThunder`, and the commit history is one human author plus Dependabot
-and AI-assisted commits — most co-authored under that account, seven authored
-directly as `Claude <noreply@anthropic.com>`. There is no second reviewer, no
+and AI-assisted commits — most co-authored under that account, many authored
+directly as `Claude <noreply@anthropic.com>` (108 of the 819 commits on `main`
+as of 2026-10-01). There is no second reviewer, no
 organization behind the repository, and no funding.
 
 Anyone evaluating this project for production use should weigh that directly.

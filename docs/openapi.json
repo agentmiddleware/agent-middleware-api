@@ -2968,8 +2968,31 @@
           "Preflight"
         ],
         "summary": "Pre-flight Readiness Check",
-        "description": "Runs a comprehensive validation sweep before production launch:\n\n1. **KEYS** — Reject test-key/placeholder API keys, validate Stripe tokens\n2. **DOMAIN** — Verify BASE_URL is a real domain, manifests will resolve\n3. **ORACLE** — Validate agent directory registration URLs\n4. **ASSETS** — Check content source URLs and crawl targets\n\nReturns a GO/NO-GO verdict with per-check details.",
+        "description": "Runs a comprehensive validation sweep before production launch:\n\n1. **KEYS** — Reject test-key/placeholder API keys, validate Stripe tokens\n2. **DOMAIN** — Verify BASE_URL is a real domain, manifests will resolve\n3. **ORACLE** — Validate agent directory registration URLs\n4. **ASSETS** — Check content source URLs and crawl targets\n\nReturns a GO/NO-GO verdict with per-check details. Requires bootstrap admin authentication.",
         "operationId": "run_preflight_v1_launch_preflight_post",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -3005,12 +3028,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ]
+        }
       }
     },
     "/mcp/tools.json": {
@@ -5135,7 +5153,7 @@
           "Discovery"
         ],
         "summary": "Dependency health check",
-        "description": "Probes the dependencies this deployment runs on, in parallel with a short timeout. Each entry reports status, latency_ms, and an error message when unreachable. With proof surfaces unmounted (the production posture) the payload covers the transaction-integrity boundary only: postgres, redis, signing key, upstream MCP, version + commit SHA. Instances that mount proof surfaces additionally report those surfaces' dependencies and per-service simulation modes; deps whose consumers are simulated return `not_used` so the verdict doesn't degrade on mock-only deployments.",
+        "description": "Probes the dependencies this deployment runs on, in parallel with a short timeout. Each entry reports status, latency_ms, and an error code when unreachable (the exception class or a timeout; driver messages are logged server-side, never returned). With proof surfaces unmounted (the production posture) the payload covers the transaction-integrity boundary only: postgres, redis, signing key, upstream MCP, version + commit SHA. Instances that mount proof surfaces additionally report those surfaces' dependencies and per-service simulation modes; deps whose consumers are simulated return `not_used` so the verdict doesn't degrade on mock-only deployments.",
         "operationId": "health_dependencies_health_dependencies_get",
         "responses": {
           "200": {

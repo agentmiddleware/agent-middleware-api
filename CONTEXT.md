@@ -6,8 +6,11 @@ They describe the current implementation, not an aspirational architecture.
 ## Agent-action transaction boundary
 
 The governed boundary through which one agent tool action is authorized. One
-accepted idempotency key maps to at most one gateway dispatch and debit plus one
-terminal receipt. On the configured upstream MCP path, the gateway persists a
+accepted idempotency key maps to at most one gateway dispatch and debit, and to
+one terminal receipt on the upstream path and every reconcilable outcome. The
+exception is a local governed tool that crashes after its side effect: that
+leaves one execution and one debit with no receipt, pending manual review (see
+`TRUST_MODEL.md`). On the configured upstream MCP path, the gateway persists a
 one-shot `dispatch_claimed` state immediately before the network send. Its one
 nullable `dispatch_claim_hash` field preserves historical rows while preventing
 a later activation from reacquiring an already durable send claim.

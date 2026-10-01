@@ -17,7 +17,7 @@ Two numbers are in play and they are not the same thing:
 
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from app.schemas.billing import ServiceCategory
@@ -113,12 +113,29 @@ PROOF_SURFACE_CATEGORIES: frozenset[ServiceCategory] = frozenset(
 
 
 def tool_price(service: dict[str, Any], category: ServiceCategory) -> Decimal:
-    """Current price in credits for one call of a registered tool."""
+    """Current price in credits for one call of a registered tool.
+
+    Raises ``ValueError("tool_price_invalid")`` unless the registered price is
+    a finite, non-negative number. Every caller reads the price before any
+    policy, permit, quote or ledger step, so refusing here keeps a bad
+    registration out of all of them: a negative price would otherwise be
+    reserved against the permit as a *negative* amount (growing its budget),
+    and an infinite one signed into a quote or receipt.
+    """
     default_price = DEFAULT_PRICING[category][1]
     exact_price = service.get("credits_per_unit_exact")
-    if exact_price is not None:
-        return Decimal(str(exact_price))
-    return Decimal(str(service.get("credits_per_unit", default_price)))
+    raw_price = (
+        exact_price
+        if exact_price is not None
+        else service.get("credits_per_unit", default_price)
+    )
+    try:
+        price = Decimal(str(raw_price))
+    except InvalidOperation:
+        raise ValueError("tool_price_invalid") from None
+    if not price.is_finite() or price < 0:
+        raise ValueError("tool_price_invalid")
+    return price
 
 
 def charge_units_for(credits: Decimal, category: ServiceCategory) -> Decimal:
