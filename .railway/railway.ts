@@ -30,6 +30,7 @@ export default defineRailway(() =>
           ENVIRONMENT: preserve(),
           MCP_UPSTREAM_BEARER_TOKEN: preserve(),
           MCP_UPSTREAM_CREDITS_PER_CALL: preserve(),
+          MCP_UPSTREAM_DUPLICATE_GUARD: preserve(),
           MCP_UPSTREAM_ENABLED: preserve(),
           MCP_UPSTREAM_PUBLIC_TOOL_ID: preserve(),
           MCP_UPSTREAM_TOOL_NAME: preserve(),
