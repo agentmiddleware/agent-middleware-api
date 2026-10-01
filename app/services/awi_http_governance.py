@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
@@ -264,6 +265,77 @@ async def begin_awi_http_governed(
     )
 
 
+def _stable_awi_failure_reason(action_status: str, error: Any) -> str:
+    """Collapse a typed failure to a receipt-safe reason code.
+
+    A status of "error" whose error text reads "dom_bridge_failed: <detail>"
+    yields the reason code dom_bridge_failed (the prefix before the first
+    colon); other statuses (passkey_required, paused, ...) name themselves.
+    The result is sanitized to the receipt service's reason-code pattern
+    rather than raising on adversarial detail text.
+    """
+    candidate = action_status
+    if action_status == "error" and isinstance(error, str) and error:
+        candidate = error.split(":", 1)[0]
+    cleaned = re.sub(r"[^a-z0-9_.:-]", "_", candidate.strip().lower())
+    if not cleaned or not cleaned[0].isalpha():
+        cleaned = f"awi_{cleaned}" if cleaned else "awi_failed"
+    return cleaned[:128]
+
+
+async def _complete_awi_http_failed_action(
+    ctx: AwiHttpGovernedContext,
+    *,
+    request_payload: dict[str, Any],
+    response_payload: dict[str, Any],
+    action_status: str,
+) -> dict[str, Any]:
+    """Finalize a governed AWI call whose action did not execute.
+
+    No permit budget is reserved and no wallet debit is taken. A signed
+    ``failed`` receipt with ``credits_charged=0`` records the outcome, and the
+    idempotency record is completed on the failure body so a replay of the
+    same key returns the same typed failure instead of re-running the action.
+    """
+    idem = get_idempotency_service()
+    reason_code = _stable_awi_failure_reason(
+        action_status, response_payload.get("error")
+    )
+    receipt = await get_receipt_service().create_receipt(
+        permit_id=ctx.permit_id,
+        wallet_id=ctx.wallet_id,
+        key_id=ctx.auth.key_id,
+        tool=ctx.tool_name,
+        request_payload=request_payload,
+        response_payload=response_payload,
+        ledger_entry_id=None,
+        credits_authorized=ctx.credits,
+        credits_charged=Decimal("0"),
+        outcome="failed",
+        audit_event_id=None,
+        reason_code=reason_code,
+    )
+    response_with_receipt = {
+        **response_payload,
+        "receipt": {
+            "receipt_id": receipt.receipt_id,
+            "permit_id": receipt.permit_id,
+            "ledger_entry_id": receipt.ledger_entry_id,
+            "outcome": receipt.outcome,
+            "signature": receipt.signature,
+        },
+    }
+    await idem.complete(
+        wallet_id=ctx.wallet_id,
+        endpoint=ctx.endpoint,
+        idempotency_key=ctx.idempotency_key,
+        response_reference=receipt.receipt_id,
+        response_json=response_with_receipt,
+        status_code=200,
+    )
+    return response_with_receipt
+
+
 async def complete_awi_http_governed(
     ctx: AwiHttpGovernedContext,
     *,
@@ -285,6 +357,19 @@ async def complete_awi_http_governed(
     """
     if ctx.replay_response is not None:
         return ctx.replay_response
+
+    # Typed AWI responses carry ``status``. Anything other than "success"
+    # (error, passkey_required, paused, max_steps_reached) means the action did
+    # not execute: take the uncharged branch. Payloads without a status field
+    # (passkey challenge/verify, DOM sync, memory index) are unaffected.
+    action_status = response_payload.get("status")
+    if action_status is not None and action_status != "success":
+        return await _complete_awi_http_failed_action(
+            ctx,
+            request_payload=request_payload,
+            response_payload=response_payload,
+            action_status=str(action_status),
+        )
 
     from app.services.agent_money import DEFAULT_PRICING, InsufficientFundsResponse
 
