@@ -380,8 +380,8 @@ stale.** The toolkit ships offline-verifiable decision receipts:
 - **Ed25519 signatures over RFC 8785 (JCS) canonical payloads** — the same
   signature algorithm this repo uses. The canonicalization is *related but not
   identical*: this repo's `awi-canonical-json/1` deliberately differs from JCS on
-  decimal normalization and datetime coercion (see `ip/06-ids-candidates.md`
-  item 7). Do not describe the signing inputs as interchangeable. Both rules are
+  decimal normalization and datetime coercion. Do not describe the signing
+  inputs as interchangeable. Both rules are
   pinned by fixtures in
   [`tests/test_canonical_json_fixtures.py`](../tests/test_canonical_json_fixtures.py)
   — RFC 8785 defines neither Python type, so a `Decimal` canonicalizes to a
@@ -519,9 +519,8 @@ Two reasons this belongs on the record rather than in a table row yet. First, it
 is genuinely a different category — payment rails, not a governance boundary —
 and forcing it into the §4 matrix would compare unlike things. Second, an
 acquisition-draft citation purporting to describe a Skyfire patent turned out to
-be fabricated (see [`ip/06-ids-candidates.md`](ip/06-ids-candidates.md) §C.1b),
-which had created a false impression that this lane was already assessed. It was
-not.
+be fabricated, which had created a false impression that this lane was already
+assessed. It was not.
 
 **Open question, added to §7:** does any agent payment network — Skyfire,
 Nevermined, Payman — bind a charge to an idempotency record or define behaviour
