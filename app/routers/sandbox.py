@@ -13,12 +13,45 @@ from datetime import datetime
 from ..core.auth import AuthContext, get_auth_context
 from ..core.dependencies import get_sandbox_engine
 from ..services.governance import record_governed_action
-from ..services.sandbox import SandboxEngine
+from ..services.sandbox import SandboxEngine, SandboxEnvironment
 
 router = APIRouter(
     prefix="/v1/sandbox",
     tags=["Interactive Testing Sandboxes"],
 )
+
+
+def _env_not_found(env_id: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail={
+            "error": "environment_not_found",
+            "message": f"Environment {env_id} not found",
+        },
+    )
+
+
+async def _load_owned_env(
+    env_id: str,
+    engine: SandboxEngine,
+    auth: AuthContext,
+) -> SandboxEnvironment:
+    """Fetch an environment and enforce that the caller's wallet owns it.
+
+    Environments are wallet-scoped: ``owner_wallet_id`` is the creating wallet.
+    Every env-scoped handler goes through this so one tenant cannot read, act
+    on, or evaluate another tenant's environment. A foreign environment is
+    answered exactly like a missing one -- no existence oracle, and the
+    owner's wallet id is never echoed.
+    """
+    env = await engine.get_environment(env_id)
+    if env is None:
+        raise _env_not_found(env_id)
+    try:
+        auth.require_wallet_access(env.owner_wallet_id)
+    except HTTPException:
+        raise _env_not_found(env_id) from None
+    return env
 
 
 # --- Schemas ---
@@ -132,6 +165,7 @@ async def create_environment(
             env_type=request.env_type,
             difficulty=request.difficulty,
             seed=request.seed,
+            owner_wallet_id=auth.wallet_id,
         )
         response = _env_to_response(env, engine)
         await record_governed_action(
@@ -172,6 +206,7 @@ async def submit_action(
     auth: AuthContext = Depends(get_auth_context),
     engine: SandboxEngine = Depends(get_sandbox_engine),
 ):
+    await _load_owned_env(env_id, engine, auth)
     try:
         result = await engine.submit_action(env_id, request.action)
         response = ActionResponse(
@@ -224,6 +259,7 @@ async def evaluate_environment(
     auth: AuthContext = Depends(get_auth_context),
     engine: SandboxEngine = Depends(get_sandbox_engine),
 ):
+    await _load_owned_env(env_id, engine, auth)
     try:
         result = await engine.evaluate(env_id)
         response = EvaluationResponse(**result)
@@ -258,14 +294,10 @@ async def evaluate_environment(
 )
 async def get_environment(
     env_id: str,
+    auth: AuthContext = Depends(get_auth_context),
     engine: SandboxEngine = Depends(get_sandbox_engine),
 ):
-    env = await engine.get_environment(env_id)
-    if not env:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "environment_not_found"},
-        )
+    env = await _load_owned_env(env_id, engine, auth)
     return _env_to_response(env, engine)
 
 
@@ -275,9 +307,18 @@ async def get_environment(
     summary="List all environments",
 )
 async def list_environments(
+    auth: AuthContext = Depends(get_auth_context),
     engine: SandboxEngine = Depends(get_sandbox_engine),
 ):
     envs = await engine.list_environments()
+    # A wallet-scoped key only ever sees its own environments, so this cannot
+    # be used to enumerate other tenants. Bootstrap admins see every one.
+    if not auth.is_bootstrap_admin:
+        envs = [
+            e
+            for e in envs
+            if auth.wallet_id is not None and e.owner_wallet_id == auth.wallet_id
+        ]
     return EnvironmentListResponse(
         environments=[
             {
