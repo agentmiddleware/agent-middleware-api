@@ -816,11 +816,18 @@ class AWIRAGEngine:
         In production, this calls OpenAI/Azure/etc embedding API.
         For now, generates a deterministic hash-based embedding.
         """
-        if self._embedding_model.startswith("text-embedding"):
+        from ..core.config import get_settings
+
+        if (
+            self._embedding_model.startswith("text-embedding")
+            and get_settings().LLM_API_KEY
+        ):
             try:
                 return await self._generate_openai_embedding(text)
-            except Exception:
-                pass
+            except Exception as exc:
+                # Name the failure only: the text and provider message may
+                # carry caller content.
+                logger.warning("awi_rag_embedding_fallback: %s", type(exc).__name__)
 
         return self._generate_mock_embedding(text)
 

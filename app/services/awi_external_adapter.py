@@ -9,6 +9,7 @@ endpoints without changing their human-facing UI.
 
 import logging
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -36,11 +37,20 @@ class AWIExternalAdapter:
             base_url=self.middleware_url,
             headers={"X-API-Key": api_key},
             timeout=30.0,
+            follow_redirects=False,
+        )
+        # Mapped website routes go through a client that never carries the
+        # middleware credential, so a route_mapping entry cannot receive it.
+        self._internal_client = httpx.AsyncClient(
+            base_url=self.middleware_url,
+            timeout=30.0,
+            follow_redirects=False,
         )
 
     async def close(self):
-        """Close the HTTP client."""
+        """Close the HTTP clients."""
         await self._client.aclose()
+        await self._internal_client.aclose()
 
     async def discover_manifest(self) -> dict[str, Any]:
         """Fetch the AWI manifest from the configured control plane."""
@@ -79,12 +89,19 @@ class AWIExternalAdapter:
         action: AWIStandardAction,
         parameters: dict[str, Any],
         route_mapping: dict[str, str],
+        *,
+        permit_id: str | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """
         Execute an AWI action, translating it to internal API calls.
 
         The adapter maps the standardized AWI action to the website's
-        internal routes and executes the call.
+        internal routes and executes the call. The governed
+        ``POST /v1/awi/execute`` call (authorize, meter, receipt) must succeed
+        first; the side-effecting internal call runs only after it does.
+        ``permit_id`` and ``idempotency_key`` are forwarded to that governed
+        call as ``X-Permit-Id`` and ``Idempotency-Key``, which it requires.
         """
         action_str = action.value if isinstance(action, AWIStandardAction) else action
 
@@ -94,8 +111,20 @@ class AWIExternalAdapter:
                 "success": False,
                 "error": f"No route mapping for action: {action_str}",
             }
+        if not _is_relative_route(mapped_route):
+            return {
+                "success": False,
+                "error": (
+                    f"Route mapping for action {action_str} must be a relative "
+                    "path, not an absolute URL"
+                ),
+            }
 
-        result = await self._execute_internal_call(mapped_route, parameters)
+        governance_headers: dict[str, str] = {}
+        if permit_id is not None:
+            governance_headers["X-Permit-Id"] = permit_id
+        if idempotency_key is not None:
+            governance_headers["Idempotency-Key"] = idempotency_key
 
         response = await self._client.post(
             "/v1/awi/execute",
@@ -105,8 +134,11 @@ class AWIExternalAdapter:
                 "parameters": parameters,
                 "dry_run": False,
             },
+            headers=governance_headers,
         )
         response.raise_for_status()
+
+        result = await self._execute_internal_call(mapped_route, parameters)
 
         return {
             "awi_response": response.json(),
@@ -116,9 +148,11 @@ class AWIExternalAdapter:
     async def _execute_internal_call(
         self, route: str, parameters: dict[str, Any]
     ) -> dict[str, Any]:
-        """Execute an internal API call."""
+        """Execute an internal API call (relative routes only, no credential)."""
+        if not _is_relative_route(route):
+            return {"error": "internal route must be a relative path"}
         try:
-            response = await self._client.post(route, json=parameters)
+            response = await self._internal_client.post(route, json=parameters)
             response.raise_for_status()
             return response.json()
         except httpx.HTTPError as e:
@@ -191,7 +225,10 @@ class AWIFallbackAdapter:
         """Discover via MCP fallback."""
         try:
             return await self.awi.discover_manifest()
-        except Exception:
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "awi_fallback_discover_failed: %s", type(exc).__name__, exc_info=True
+            )
             return {
                 "name": "MCP Fallback",
                 "actions": [],
@@ -199,16 +236,31 @@ class AWIFallbackAdapter:
             }
 
     async def create_session(self, target_url: str, wallet_id: str) -> dict[str, Any]:
-        """Create session with fallback."""
+        """Create session with fallback.
+
+        No session exists when the control plane is unreachable, so none is
+        reported: ``session_id`` is ``None`` and ``status`` is ``unavailable``.
+        """
         try:
             return await self.awi.create_external_session(target_url, wallet_id)
-        except Exception as e:
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "awi_fallback_create_session_failed: %s",
+                type(exc).__name__,
+                exc_info=True,
+            )
             return {
-                "session_id": f"fallback-{wallet_id}",
+                "session_id": None,
                 "target_url": target_url,
-                "status": "mcp_fallback",
-                "error": str(e),
+                "status": "unavailable",
+                "error": type(exc).__name__,
             }
+
+
+def _is_relative_route(route: str) -> bool:
+    """True when ``route`` names a path, not a URL with a scheme or host."""
+    parts = urlsplit(route)
+    return not parts.scheme and not parts.netloc
 
 
 _awi_external_adapter: AWIExternalAdapter | None = None
