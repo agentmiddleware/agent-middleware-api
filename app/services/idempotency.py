@@ -792,7 +792,7 @@ class IdempotencyService:
         endpoint: str,
         idempotency_key: str,
         expected_record_id: str | None = None,
-    ) -> None:
+    ) -> bool:
         """Release an in-progress record so the caller may retry the key.
 
         Used when a governed invoke stops on a retryable, side-effect-free
@@ -810,10 +810,11 @@ class IdempotencyService:
         owned that row, and releasing it there would hand the winner's
         at-most-once protection to whoever asked next. Pass it whenever the
         caller holds a record id; a mismatch is a no-op, not an error, since
-        it means the row moved on and nothing is left to release.
+        it means the row moved on and nothing is left to release. Returns true
+        only when this call committed deletion of the eligible owner.
         """
         if endpoint == ACTION_MCP_IDEMPOTENCY_ENDPOINT and expected_record_id is None:
-            return
+            return False
         factory = get_session_factory()
         async with factory() as session:
             await _lock_action_cleanup(session, endpoint)
@@ -824,21 +825,22 @@ class IdempotencyService:
             )
             record = result.scalar_one_or_none()
             if not record:
-                return
+                return False
             if (
                 expected_record_id is not None
                 and record.record_id != expected_record_id
             ):
-                return
+                return False
             if record.response_json is not None or record.ledger_entry_id:
-                return
+                return False
             if (
                 endpoint == ACTION_MCP_IDEMPOTENCY_ENDPOINT
                 and not await may_abandon_action_owner(record, session)
             ):
-                return
+                return False
             await session.delete(record)
             await session.commit()
+            return True
 
     async def mark_charged(
         self,

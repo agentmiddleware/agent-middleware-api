@@ -65,6 +65,7 @@ from ..services.mcp_dispatch_attempts import (
     DispatchAttemptConflictError,
     DispatchClaimUnavailableError,
     DispatchPrepareCommitUncertainError,
+    DispatchPrepareRolledBackError,
     DispatchResultRejectedError,
     DispatchResultTooLargeError,
     McpDispatchAttemptService,
@@ -1621,6 +1622,9 @@ async def _execute_registered_tool_inner(
             reason = permit_validation.reason or "permit_denied"
             if permit_model:
                 receipt_payload = await _finalize_governed_denial(
+                    unaccepted_action_owner_id=idem_begin.record_id
+                    if idem_begin
+                    else None,
                     idem=idem,
                     effects_committed=False,
                     approval_consumed=False,
@@ -1641,6 +1645,9 @@ async def _execute_registered_tool_inner(
                 )
             elif permit_validation.reason:
                 await _complete_governed_denial_idempotency(
+                    unaccepted_action_owner_id=idem_begin.record_id
+                    if idem_begin
+                    else None,
                     idem=idem,
                     idem_started=idem_started,
                     wallet_id=wallet_id,
@@ -1716,6 +1723,7 @@ async def _execute_registered_tool_inner(
         receipt_payload = None
         if governed_call and permit_model:
             receipt_payload = await _finalize_governed_denial(
+                unaccepted_action_owner_id=idem_begin.record_id if idem_begin else None,
                 idem=idem,
                 effects_committed=False,
                 approval_consumed=False,
@@ -1736,6 +1744,7 @@ async def _execute_registered_tool_inner(
             )
         else:
             await _complete_governed_denial_idempotency(
+                unaccepted_action_owner_id=idem_begin.record_id if idem_begin else None,
                 idem=idem,
                 idem_started=idem_started,
                 wallet_id=wallet_id,
@@ -1808,6 +1817,7 @@ async def _execute_registered_tool_inner(
         if governed_call and permit_model:
             reason = policy.reason or "policy_denied"
             receipt_payload = await _finalize_governed_denial(
+                unaccepted_action_owner_id=idem_begin.record_id if idem_begin else None,
                 idem=idem,
                 effects_committed=False,
                 approval_consumed=False,
@@ -1891,6 +1901,7 @@ async def _execute_registered_tool_inner(
                 },
             )
             receipt_payload = await _finalize_governed_denial(
+                unaccepted_action_owner_id=idem_begin.record_id if idem_begin else None,
                 idem=idem,
                 effects_committed=False,
                 approval_consumed=approval_check is not None,
@@ -1965,6 +1976,11 @@ async def _execute_registered_tool_inner(
                 # caller retries the same key.
                 raise
             except Exception as exc:
+                if action_identity is not None and not isinstance(
+                    exc, DispatchPrepareRolledBackError
+                ):
+                    # Unknown preparation failures cannot prove non-acceptance.
+                    raise IdempotencyInProgressError("idempotency_in_progress") from exc
                 reason = "upstream_prepare_failed"
                 audit_event = await _audit_mcp_invocation(
                     effects_committed=False,
@@ -1985,6 +2001,7 @@ async def _execute_registered_tool_inner(
                     },
                 )
                 receipt_payload = await _finalize_governed_denial(
+                    unaccepted_action_owner_id=idem_begin.record_id,
                     idem=idem,
                     effects_committed=False,
                     approval_consumed=approval_check is not None,
@@ -2047,6 +2064,9 @@ async def _execute_registered_tool_inner(
             reason = permit_validation.reason or "permit_denied"
             if permit_model:
                 receipt_payload = await _finalize_governed_denial(
+                    unaccepted_action_owner_id=idem_begin.record_id
+                    if idem_begin
+                    else None,
                     idem=idem,
                     effects_committed=False,
                     approval_consumed=approval_check is not None,
@@ -2070,6 +2090,9 @@ async def _execute_registered_tool_inner(
                 )
             elif permit_validation.reason:
                 await _complete_governed_denial_idempotency(
+                    unaccepted_action_owner_id=idem_begin.record_id
+                    if idem_begin
+                    else None,
                     idem=idem,
                     idem_started=idem_started,
                     wallet_id=wallet_id,
@@ -3530,6 +3553,7 @@ def _governed_error_payload(
 async def _complete_governed_denial_idempotency(
     *,
     idem: Any,
+    unaccepted_action_owner_id: str | None = None,
     idem_started: bool,
     wallet_id: str,
     endpoint: str,
@@ -3538,6 +3562,15 @@ async def _complete_governed_denial_idempotency(
     status_code: int = 403,
 ) -> None:
     if not idem_started or not idempotency_key:
+        return
+    if endpoint == "/mcp/action/v1" and unaccepted_action_owner_id is not None:
+        if not await idem.abandon(
+            wallet_id=wallet_id,
+            endpoint=endpoint,
+            idempotency_key=idempotency_key,
+            expected_record_id=unaccepted_action_owner_id,
+        ):
+            raise IdempotencyInProgressError("idempotency_in_progress")
         return
     await idem.complete(
         wallet_id=wallet_id,
@@ -3636,6 +3669,7 @@ async def _release_local_permit_reservation(
 async def _finalize_governed_denial(
     *,
     idem: Any,
+    unaccepted_action_owner_id: str | None = None,
     permit_model: Any,
     wallet_id: str,
     key_id: str | None,
@@ -3681,7 +3715,23 @@ async def _finalize_governed_denial(
     true exactly when ``_require_human_approval`` returned, which it does
     solely for the approval this call consumed.
     """
-    if idempotency_record_id is None and idempotency_key:
+    detached_action = (
+        endpoint == "/mcp/action/v1" and unaccepted_action_owner_id is not None
+    )
+    if detached_action:
+        # Delete only this invocation's still-unprepared owner, under the same
+        # lock and accounting invariants used by action cleanup. A concurrent
+        # preparation or uncertain checkpoint must keep its authority intact.
+        released = await idem.abandon(
+            wallet_id=wallet_id,
+            endpoint=endpoint,
+            idempotency_key=idempotency_key or "",
+            expected_record_id=unaccepted_action_owner_id,
+        )
+        if not released:
+            raise IdempotencyInProgressError("idempotency_in_progress")
+        idempotency_record_id = None
+    if not detached_action and idempotency_record_id is None and idempotency_key:
         record = await idem.get_record(
             wallet_id=wallet_id,
             endpoint=endpoint,
@@ -3741,6 +3791,8 @@ async def _finalize_governed_denial(
         # wrapper can free the idempotency record this invocation still owns.
         raise
     receipt_payload = _receipt_response_payload(receipt)
+    if detached_action:
+        return receipt_payload
     await idem.complete(
         wallet_id=wallet_id,
         endpoint=endpoint,

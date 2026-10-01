@@ -1115,7 +1115,17 @@ class McpDispatchAttemptService:
                             public_tool_id=public_tool_id,
                         )
                         if _unsupported_upstream_constraints(
-                            permit, tool_name=public_tool_id
+                            permit,
+                            tool_name=(
+                                public_tool_id
+                                if permit.action_contract_version == 1
+                                and existing.call_slot_reserved
+                                and json.loads(
+                                    permit.tool_call_counts_json or "{}"
+                                ).get(public_tool_id)
+                                == 1
+                                else None
+                            ),
                         ):
                             # A row created by an older worker may already hold a
                             # reservation the atomic path cannot re-validate.
