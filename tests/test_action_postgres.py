@@ -7,14 +7,21 @@ import pytest_asyncio
 
 from tests import test_action_invocation as action
 from tests.conftest import clean_database as sqlite_clean_database
+from tests.support.action_database_guard import (
+    require_action_database_url,
+    require_action_test_environment,
+)
+
+# Collection precedes conftest's autouse session database setup. An opted-in
+# unsafe target must fail here, before even schema inspection can connect.
+if os.environ.get("RUN_POSTGRES_CONCURRENCY_TESTS") == "1":
+    require_action_database_url(os.environ.get("DATABASE_URL", ""))
+    require_action_test_environment(os.environ.get("ENVIRONMENT"))
 
 pytestmark = [
     pytest.mark.asyncio(loop_scope="session"),
     pytest.mark.skipif(
-        os.environ.get("RUN_POSTGRES_CONCURRENCY_TESTS") != "1"
-        or not os.environ.get("DATABASE_URL", "").startswith(
-            "postgresql+asyncpg://sellers@127.0.0.1:55439/amw_action_"
-        ),
+        os.environ.get("RUN_POSTGRES_CONCURRENCY_TESTS") != "1",
         reason="requires explicitly opted-in disposable local amw_action PostgreSQL database",
     ),
 ]
@@ -27,7 +34,8 @@ async def require_fresh_action_schema():
     from tests.test_action_migrations import FIELDS
     from tests.test_mcp_postgres_multiprocess import _assert_migrated_empty_database
 
-    assert os.environ.get("ENVIRONMENT") == "test"
+    require_action_database_url(os.environ.get("DATABASE_URL", ""))
+    require_action_test_environment(os.environ.get("ENVIRONMENT"))
     async with get_engine().connect() as connection:
         await _assert_migrated_empty_database(connection)
         for table in ("permits", "receipts"):
