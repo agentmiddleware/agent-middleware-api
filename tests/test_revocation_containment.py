@@ -283,6 +283,97 @@ async def test_rotation_revokes_access_token_derived_from_old_key(
     assert listed.json()["total_revoked"] == 1
 
 
+@pytest.mark.dormant
+@pytest.mark.anyio
+async def test_concurrent_refreshes_cannot_fork_the_chain(
+    client, clean_database, signing_key, monkeypatch
+):
+    """Rotation is single-use even under a race.
+
+    Refresh used to read the row, check ``revoked`` and then write it back with
+    no lock or conditional UPDATE, so concurrent presentations of one refresh
+    token could all pass the check and each mint its own new chain — a stolen
+    token replayed alongside the legitimate client would survive rotation.
+    Exactly one presentation may win; the rest are refused as revoked.
+    """
+    import asyncio
+
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.db.database import get_session_factory
+    from app.db.models import RefreshTokenModel
+
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    tokens = await _mint_tokens(client, provisioned["agent_headers"]["X-API-Key"])
+
+    # Adversarial schedule, so the race is reproduced on every run rather than
+    # left to event-loop timing: any presenter that loads the refresh-token row
+    # is held right after the read until every rival has read it too. A
+    # read-check-write rotation then has all of them observe revoked=False; an
+    # atomic claim never depends on what such a read returned.
+    attempts = 5
+    barrier = asyncio.Barrier(attempts)
+    armed = True
+    original_get = AsyncSession.get
+
+    async def get_then_wait_for_rivals(self, entity, ident, *args, **kwargs):
+        row = await original_get(self, entity, ident, *args, **kwargs)
+        if armed and entity is RefreshTokenModel:
+            try:
+                await asyncio.wait_for(barrier.wait(), timeout=2)
+            except (asyncio.TimeoutError, asyncio.BrokenBarrierError):
+                pass
+        return row
+
+    monkeypatch.setattr(AsyncSession, "get", get_then_wait_for_rivals)
+
+    results = await asyncio.gather(
+        *(
+            client.post(
+                "/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
+            )
+            for _ in range(attempts)
+        )
+    )
+    armed = False
+    statuses = sorted(r.status_code for r in results)
+    assert statuses == [200] + [401] * (attempts - 1), [r.text for r in results]
+    for denied in (r for r in results if r.status_code == 401):
+        assert denied.json()["detail"]["error"] == "revoked_refresh_token"
+
+    # The chain did not fork: the wallet holds exactly one live refresh token,
+    # the one handed to the single winner.
+    winner = next(r for r in results if r.status_code == 200)
+    factory = get_session_factory()
+    async with factory() as session:
+        live = (
+            (
+                await session.execute(
+                    select(RefreshTokenModel).where(
+                        RefreshTokenModel.wallet_id == wallet_id,
+                        RefreshTokenModel.revoked.is_(False),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert len(live) == 1
+
+    # The winner's rotated token still renews, and the original stays dead.
+    renewed = await client.post(
+        "/v1/auth/refresh", json={"refresh_token": winner.json()["refresh_token"]}
+    )
+    assert renewed.status_code == 200, renewed.text
+    replay = await client.post(
+        "/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
+    )
+    assert replay.status_code == 401
+    assert replay.json()["detail"]["error"] == "revoked_refresh_token"
+
+
 @pytest.mark.anyio
 async def test_legacy_unbound_refresh_token_fails_closed(
     client, clean_database, signing_key

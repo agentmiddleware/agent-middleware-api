@@ -7,11 +7,16 @@ gates. These are cheap to re-break in a docs edit, so they are pinned.
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
+import tomllib
 from pathlib import Path
 
 import pytest
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
+from packaging.version import Version
 
 from app.main import (
     _SIGNING_KEY_REMEDIATION,
@@ -343,6 +348,54 @@ def test_dry_run_example_states_its_proof_surface_prerequisite() -> None:
     )
 
 
+# --- Framework wrapper SDK floor --------------------------------------------
+
+#: First b2a-sdk release with the typed async `AgentMiddlewareClient` trust
+#: loop (`create_permit` / `invoke_tool` with caller-owned idempotency keys)
+#: that every framework wrapper subclasses and calls (b2a_sdk/CHANGELOG.md).
+B2A_SDK_TRUST_LOOP_FLOOR = Version("0.4.0")
+
+
+def test_wrappers_require_an_sdk_that_ships_the_trust_loop() -> None:
+    """A wrapper's `b2a-sdk` lower bound must exclude SDKs it cannot run on.
+
+    The wrappers declared `b2a-sdk>=0.3.0`, so a resolver could pick a 0.3.x
+    SDK that has no `AgentMiddlewareClient` and every governed call failed.
+    The wrapper CI job installs the in-tree SDK, so nothing else exercises
+    the declared floor.
+    """
+
+    sdk_version = Version(
+        tomllib.loads((REPO_ROOT / "b2a_sdk" / "pyproject.toml").read_text())[
+            "project"
+        ]["version"]
+    )
+    pyprojects = sorted((REPO_ROOT / "wrappers").glob("*/pyproject.toml"))
+    assert pyprojects, "expected framework wrappers under wrappers/"
+
+    offenders = []
+    for pyproject in pyprojects:
+        rel = pyproject.relative_to(REPO_ROOT).as_posix()
+        dependencies = tomllib.loads(pyproject.read_text())["project"]["dependencies"]
+        sdk_requirements = [
+            requirement
+            for requirement in map(Requirement, dependencies)
+            if canonicalize_name(requirement.name) == "b2a-sdk"
+        ]
+        if len(sdk_requirements) != 1:
+            offenders.append(f"{rel}: expected one b2a-sdk dependency")
+            continue
+        specifier = sdk_requirements[0].specifier
+        floors = [Version(spec.version) for spec in specifier if spec.operator == ">="]
+        if not floors or max(floors) < B2A_SDK_TRUST_LOOP_FLOOR:
+            offenders.append(f"{rel}: b2a-sdk{specifier} admits a pre-trust-loop SDK")
+        if not specifier.contains(sdk_version):
+            offenders.append(f"{rel}: b2a-sdk{specifier} excludes in-tree {sdk_version}")
+    assert not offenders, (
+        f"wrappers must require b2a-sdk>={B2A_SDK_TRUST_LOOP_FLOOR}: {offenders}"
+    )
+
+
 # --- Deployment posture is auditable ---------------------------------------
 
 
@@ -372,3 +425,67 @@ async def test_health_payload_exposes_guardrail_posture() -> None:
     assert report["production_like"] is is_production_like_environment(
         settings.ENVIRONMENT
     )
+
+
+# --- Operator docs quote what the code does --------------------------------
+
+_ERROR_HEADING = re.compile(r"^### `([A-Za-z_][\w.]*Error): (.+)`$", re.MULTILINE)
+# Raised by Python or third-party tooling, not by this codebase.
+_EXTERNAL_ERRORS = frozenset({"ModuleNotFoundError", "alembic.util.exc.CommandError"})
+
+
+def _app_source_with_joined_literals() -> str:
+    """All of app/, with adjacent string literals joined across line breaks."""
+
+    source = "\n".join(
+        path.read_text() for path in sorted((REPO_ROOT / "app").rglob("*.py"))
+    )
+    return re.sub(r'"\s*\n\s*"', "", source)
+
+
+def test_troubleshooting_error_headings_match_raised_errors() -> None:
+    """Each `XxxError: message` heading must be an error the app raises.
+
+    The headings once quoted a `ValueError` and a `RuntimeError` text that no
+    code raised, so an operator searching for their traceback found nothing.
+    """
+
+    doc = (REPO_ROOT / "TROUBLESHOOTING.md").read_text()
+    app_errors = [
+        (name, message)
+        for name, message in _ERROR_HEADING.findall(doc)
+        if name not in _EXTERNAL_ERRORS
+    ]
+    assert app_errors, "expected startup-error headings in TROUBLESHOOTING.md"
+    source = _app_source_with_joined_literals()
+    for name, message in app_errors:
+        assert re.search(rf"^class {re.escape(name)}\(", source, re.MULTILINE), (
+            f"TROUBLESHOOTING.md names {name}, which app/ does not define"
+        )
+        assert message in source, (
+            f"TROUBLESHOOTING.md quotes `{name}: {message}`, which app/ never raises"
+        )
+
+
+def test_server_json_does_not_advertise_the_disabled_standard_mcp_remote() -> None:
+    """No registry remote while the production SOP keeps `POST /mcp` off.
+
+    With ENABLE_STANDARD_MCP_ENDPOINT forbidden on the first-party origin,
+    `/mcp` answers 404 there, so a `remotes` entry would advertise a transport
+    the server does not serve. Adding one means changing the SOP first
+    (docs/mcp-registry-submission.md, "Publish gate"), then this test.
+    """
+
+    deploy_sop = (REPO_ROOT / "docs" / "deploy-railway.md").read_text()
+    sop_row = next(
+        line
+        for line in deploy_sop.splitlines()
+        if line.startswith("| `ENABLE_STANDARD_MCP_ENDPOINT` |")
+    )
+    assert "Do not turn this on" in sop_row
+    manifest = json.loads((REPO_ROOT / "server.json").read_text())
+    assert not manifest.get("remotes"), (
+        "server.json declares a remote the production SOP keeps disabled"
+    )
+    submission = (REPO_ROOT / "docs" / "mcp-registry-submission.md").read_text()
+    assert "deploy-railway.md#required-production-variables" in submission

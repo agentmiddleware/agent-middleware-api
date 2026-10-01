@@ -10,6 +10,8 @@ partner.echo — a lie that breaks autonomous discovery.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -33,6 +35,7 @@ def proof_surfaces_off(monkeypatch):
     import app.routers.discover as discover_mod
     import app.routers.well_known as well_known_mod
 
+    original_flag = os.environ.get("ENABLE_PROOF_SURFACES")
     monkeypatch.setenv("ENABLE_PROOF_SURFACES", "false")
     get_settings.cache_clear()
     cfg = get_settings()
@@ -42,7 +45,14 @@ def proof_surfaces_off(monkeypatch):
     monkeypatch.setattr(well_known_mod, "settings", cfg)
     sync_proof_surface_mcp_registration()
     yield
-    monkeypatch.setenv("ENABLE_PROOF_SURFACES", "true")
+    # Rebuild the cached settings from the flag as it stood before this
+    # fixture, not from a hard-coded value: restoring "true" here left every
+    # later test in the session reading ENABLE_PROOF_SURFACES=True from the
+    # settings cache, after monkeypatch had already put the env var back.
+    if original_flag is None:
+        monkeypatch.delenv("ENABLE_PROOF_SURFACES", raising=False)
+    else:
+        monkeypatch.setenv("ENABLE_PROOF_SURFACES", original_flag)
     get_settings.cache_clear()
     restored = get_settings()
     monkeypatch.setattr(main_mod, "settings", restored)
@@ -110,14 +120,16 @@ async def test_discover_and_tools_json_agree_when_proof_surfaces_off(
 
 
 @pytest.mark.anyio
+@pytest.mark.proof
 async def test_discover_and_tools_json_agree_when_proof_surfaces_on(client):
     """When proof surfaces are on, /v1/discover and /mcp/tools.json must agree.
     
     Both should show proof-surface tools plus any registered dogfood tools.
+    The suite default is ENABLE_PROOF_SURFACES=false; the ``proof`` marker
+    makes the autouse conftest fixture turn the flag on, mount the proof
+    routers and register the proof-surface MCP tools for this test only.
     """
-    settings = get_settings()
-    if not settings.ENABLE_PROOF_SURFACES:
-        pytest.skip("suite default expects proof surfaces on")
+    assert get_settings().ENABLE_PROOF_SURFACES is True
     
     sync_proof_surface_mcp_registration()
     
@@ -183,14 +195,41 @@ async def test_llms_txt_discovery_auth_claim_matches_mcp_messages_requirement(cl
     """llms.txt must not say MCP auth is optional if POST /mcp/messages requires a key.
     
     The endpoint requires authentication (via get_auth_context dependency), so
-    llms.txt must reflect that.
+    llms.txt must reflect that. Checked line by line rather than by proximity:
+    the endpoints table row for /mcp/messages must start with "Required", and no line
+    that names /mcp/messages or the X-API-Key header may call anything
+    optional, wherever in the document it appears.
     """
+    unauthenticated = await client.post(
+        "/mcp/messages",
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+    )
+    assert unauthenticated.status_code == 401, unauthenticated.text
+
     resp = await client.get("/llms.txt")
     assert resp.status_code == 200
-    text = resp.text.lower()
-    
-    # MCP messages endpoint requires auth
-    # llms.txt should not claim it's optional
-    assert "optional" not in text or "auth" not in text.split("optional")[0][-100:], (
-        "llms.txt must not claim MCP auth is optional when /mcp/messages requires it"
+    lines = resp.text.splitlines()
+
+    table_rows = [
+        line
+        for line in lines
+        if line.lstrip().startswith("|") and "/mcp/messages" in line
+    ]
+    assert len(table_rows) == 1, (
+        f"expected one endpoints-table row for /mcp/messages, got {table_rows}"
+    )
+    auth_cell = table_rows[0].strip().strip("|").split("|")[-1].strip()
+    assert auth_cell.startswith("Required"), (
+        f"llms.txt lists /mcp/messages auth as {auth_cell!r}: {table_rows[0]}"
+    )
+
+    optional_auth_lines = [
+        line
+        for line in lines
+        if ("/mcp/messages" in line.lower() or "x-api-key" in line.lower())
+        and "optional" in line.lower()
+    ]
+    assert not optional_auth_lines, (
+        "llms.txt must not claim MCP auth is optional when /mcp/messages "
+        f"requires it: {optional_auth_lines}"
     )

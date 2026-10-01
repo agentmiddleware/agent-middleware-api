@@ -46,6 +46,9 @@ price drift.
 | `quote_expired` | The window elapsed before the invoke |
 | `quote_already_consumed` | Already spent (or lost the single-use race) |
 
+`POST /v1/quotes` itself answers `400 tool_price_invalid` and signs nothing when
+the tool's registered price is not a finite, non-negative number.
+
 All of these deny the invoke (`403`, JSON-RPC `-32603`) rather than falling
 back to the live price. The caller asked to be charged a specific number;
 substituting a different one is the one outcome a price lock must never

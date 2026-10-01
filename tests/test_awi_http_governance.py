@@ -12,6 +12,8 @@ from httpx import ASGITransport, AsyncClient
 from app.db.database import get_session_factory
 from app.db.models import IdempotencyRecordModel, LedgerEntryModel, PermitModel
 from app.main import app
+from app.services import awi_rag_engine as awi_rag_engine_module
+from app.services.awi_rag_engine import AWIRAGEngine
 from app.services.idempotency import MAX_CLIENT_IDEMPOTENCY_KEY_LENGTH
 from tests.test_trust_helpers import (
     BOOTSTRAP_HEADERS,
@@ -228,6 +230,101 @@ async def test_awi_route_keys_its_debit_to_the_idempotency_record(
         "after a lost acknowledgement would debit again"
     )
     assert unkeyed == 0, "a governed AWI charge landed with no operation_key"
+
+
+async def _index_tenant_memory(
+    client: AsyncClient, tenant: dict[str, Any], *, product: str, idem: str
+) -> str:
+    """Create a session for ``tenant`` and index one memory through the route."""
+    session = await client.post(
+        "/v1/awi/sessions",
+        json={
+            "target_url": "https://example.com",
+            "wallet_id": tenant["agent_wallet_id"],
+        },
+        headers=tenant["agent_headers"],
+    )
+    assert session.status_code == 201, session.text
+    permit = await create_tool_permit(
+        client,
+        wallet_id=tenant["agent_wallet_id"],
+        key_id=tenant["key_id"],
+        tool_name="awi_memory_index",
+        max_credits=50,
+        idem_key=f"permit-{idem}",
+    )
+    resp = await client.post(
+        "/v1/awi/rag/index",
+        json={
+            "session_id": session.json()["session_id"],
+            "session_type": "shopping",
+            "action_history": [
+                {"action": "add_to_cart", "parameters": {"product": product}}
+            ],
+        },
+        headers={
+            **tenant["agent_headers"],
+            "X-Permit-Id": permit["permit_id"],
+            "Idempotency-Key": idem,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()["memory_id"]
+
+
+@pytest.mark.proof
+@pytest.mark.anyio
+async def test_rag_query_scopes_to_caller_before_top_k(
+    client, clean_database, monkeypatch
+):
+    """Another tenant's better matches must not crowd the caller out of
+    ``top_k``, nor have their access counters bumped by the caller's query."""
+    engine = AWIRAGEngine(embedding_model="mock-embedding")
+    monkeypatch.setattr(awi_rag_engine_module, "_rag_engine", engine)
+    caller = await provision_agent_wallet(client)
+    other = await provision_agent_wallet(client)
+    own_memory = await _index_tenant_memory(
+        client, caller, product="caller-widget", idem="awi-topk-own"
+    )
+    other_memory = await _index_tenant_memory(
+        client, other, product="other-tenant-widget", idem="awi-topk-other"
+    )
+    stored = engine._memories[other_memory]
+    # Identical to the other tenant's embedding text: it scores 1.0 and so
+    # outranks the caller's own memory in an unscoped search.
+    query = engine._prepare_embedding_text(
+        stored.session_type,
+        stored.action_sequence,
+        stored.page_summaries,
+        stored.key_entities,
+        stored.user_intent,
+    )
+    permit = await create_tool_permit(
+        client,
+        wallet_id=caller["agent_wallet_id"],
+        key_id=caller["key_id"],
+        tool_name="awi_rag_query",
+        max_credits=50,
+        idem_key="permit-awi-topk-query",
+    )
+
+    resp = await client.post(
+        "/v1/awi/rag/query",
+        json={"query": query, "top_k": 1, "similarity_threshold": 0.0},
+        headers={
+            **caller["agent_headers"],
+            "X-Wallet-Id": caller["agent_wallet_id"],
+            "X-Permit-Id": permit["permit_id"],
+            "Idempotency-Key": "awi-topk-query-1",
+        },
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert [r["memory_id"] for r in body["results"]] == [own_memory]
+    assert body["total_found"] == 1
+    assert other_memory not in resp.text
+    assert stored.access_count == 0
 
 
 # ── Client idempotency-key contract ──────────────────────────────────────────
@@ -591,3 +688,112 @@ async def test_awi_contended_charge_closes_the_key_it_cannot_safely_reopen(
     )
     assert retry.status_code == 500, retry.text
     assert retry.json()["detail"]["error"] == "ledger_write_contended"
+
+
+@pytest.mark.anyio
+async def test_execute_dom_bridge_failure_takes_no_charge_and_replays(
+    client, clean_database, monkeypatch
+):
+    """A failed live DOM-bridge action must not be receipted as success.
+
+    The session manager used to fall back to the mock logic when the bridge
+    raised, so the route signed ``outcome="success"`` and debited the wallet
+    for an action that never executed. Now the manager returns a typed
+    ``status="error"`` and the governance layer takes the uncharged branch.
+    """
+    from app.services.awi_session import get_awi_session_manager
+
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    headers = provisioned["agent_headers"]
+    permit = await create_tool_permit(
+        client,
+        wallet_id=wallet_id,
+        key_id=provisioned["key_id"],
+        tool_name="awi_execute",
+        max_credits=50,
+        idem_key="permit-awi-dom-failure",
+    )
+    create = await client.post(
+        "/v1/awi/sessions",
+        json={"target_url": "https://example.com", "wallet_id": wallet_id},
+        headers=headers,
+    )
+    assert create.status_code == 201
+    session_id = create.json()["session_id"]
+
+    manager = get_awi_session_manager()
+    manager._dom_sessions[session_id] = "dom-session-under-test"
+
+    async def _bridge_raises(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("playwright target closed")
+
+    monkeypatch.setattr(manager, "_execute_via_dom_bridge", _bridge_raises)
+    try:
+        exec_headers = {
+            **headers,
+            "X-Permit-Id": permit["permit_id"],
+            "Idempotency-Key": "awi-dom-failure-1",
+        }
+        body = {
+            "session_id": session_id,
+            "action": "navigate_to",
+            "parameters": {"url": "https://example.com/next"},
+        }
+        resp = await client.post("/v1/awi/execute", json=body, headers=exec_headers)
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["status"] == "error"
+        assert data["error"].startswith("dom_bridge_failed")
+        assert data["receipt"]["outcome"] == "failed"
+        assert data["receipt"]["ledger_entry_id"] is None
+
+        receipt_resp = await client.get(
+            f"/v1/receipts/{data['receipt']['receipt_id']}", headers=headers
+        )
+        assert receipt_resp.status_code == 200
+        receipt = receipt_resp.json()
+        assert receipt["outcome"] == "failed"
+        assert Decimal(str(receipt["credits_charged"])) == Decimal("0")
+        assert receipt["reason_code"] == "dom_bridge_failed"
+
+        factory = get_session_factory()
+        async with factory() as session:
+            debits = (
+                await session.execute(
+                    select(func.count())
+                    .select_from(LedgerEntryModel)
+                    .where(
+                        LedgerEntryModel.wallet_id == wallet_id,
+                        LedgerEntryModel.amount < 0,
+                    )
+                )
+            ).scalar_one()
+            spent = (
+                await session.execute(
+                    select(PermitModel.spent_credits).where(
+                        PermitModel.permit_id == permit["permit_id"]
+                    )
+                )
+            ).scalar_one()
+        assert debits == 0, "a failed DOM-bridge action was debited"
+        assert Decimal(str(spent or 0)) == Decimal("0")
+
+        # Same key replays the identical typed failure without re-running.
+        replay = await client.post("/v1/awi/execute", json=body, headers=exec_headers)
+        assert replay.status_code == 200, replay.text
+        assert replay.json()["receipt"]["receipt_id"] == data["receipt"]["receipt_id"]
+        async with factory() as session:
+            debits_after = (
+                await session.execute(
+                    select(func.count())
+                    .select_from(LedgerEntryModel)
+                    .where(
+                        LedgerEntryModel.wallet_id == wallet_id,
+                        LedgerEntryModel.amount < 0,
+                    )
+                )
+            ).scalar_one()
+        assert debits_after == 0
+    finally:
+        manager._dom_sessions.pop(session_id, None)

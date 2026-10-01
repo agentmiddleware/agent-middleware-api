@@ -731,3 +731,114 @@ def test_040_repeat_window_seconds_column_upgrade_and_downgrade(tmp_path, monkey
     assert "allow_identical_repeats" in permit_columns_downgraded
     engine.dispose()
     os.remove(db_path)
+
+
+def test_041_scrubs_legacy_plaintext_owner_keys_from_content_tables(
+    tmp_path, monkeypatch
+):
+    """Legacy content rows stored the raw API key in owner_key; 041 blanks them.
+
+    Rows whose owner_key is a known wallet id (what the factory routers write
+    now) keep their owner, and an already-blank row stays blank. The rows are
+    inserted at head and the scrub is exercised by stepping back to 040 and
+    forward again, which also pins that the downgrade is a no-op (the scrubbed
+    values were credentials and are unrecoverable) and the upgrade idempotent.
+    """
+    db_path = tmp_path / "content-owner-key-migration.db"
+    async_url = f"sqlite+aiosqlite:///{db_path}"
+    sync_url = f"sqlite:///{db_path}"
+    sentinel = "b2a_live_secret_that_must_not_survive"
+    wallet_id = "spn-content-owner-mig"
+
+    monkeypatch.setenv("DATABASE_URL", async_url)
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+    asyncio.set_event_loop(asyncio.new_event_loop())
+
+    engine = create_engine(sync_url)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO wallets (
+                    wallet_id, wallet_type, owner_key, balance, lifetime_credits,
+                    lifetime_debits, daily_spent, auto_refill, status
+                ) VALUES (:wallet_id, 'sponsor', '', 0, 0, 0, 0, 0, 'active')
+                """
+            ),
+            {"wallet_id": wallet_id},
+        )
+        for pipeline_id, owner_key in (
+            ("pipe-legacy", sentinel),
+            ("pipe-owned", wallet_id),
+            ("pipe-admin", ""),
+        ):
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO content_pipelines (
+                        pipeline_id, title, language, auto_schedule, owner_key,
+                        status, caption_style, aspect_ratio, created_at
+                    ) VALUES (
+                        :pipeline_id, 'Legacy pipeline', 'en', 1, :owner_key,
+                        'queued', 'bold_impact', '9:16', '2026-10-01 00:00:00'
+                    )
+                    """
+                ),
+                {"pipeline_id": pipeline_id, "owner_key": owner_key},
+            )
+        for campaign_id, owner_key in (
+            ("camp-legacy", sentinel),
+            ("camp-owned", wallet_id),
+        ):
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO content_campaigns (
+                        campaign_id, campaign_title, source_url, status,
+                        owner_key, created_at
+                    ) VALUES (
+                        :campaign_id, 'Legacy campaign', 'https://example.com/v',
+                        'running', :owner_key, '2026-10-01 00:00:00'
+                    )
+                    """
+                ),
+                {"campaign_id": campaign_id, "owner_key": owner_key},
+            )
+    engine.dispose()
+
+    def owners() -> tuple[dict, dict]:
+        engine = create_engine(sync_url)
+        with engine.connect() as connection:
+            pipelines = dict(
+                connection.execute(
+                    text("SELECT pipeline_id, owner_key FROM content_pipelines")
+                ).all()
+            )
+            campaigns = dict(
+                connection.execute(
+                    text("SELECT campaign_id, owner_key FROM content_campaigns")
+                ).all()
+            )
+        engine.dispose()
+        return pipelines, campaigns
+
+    # Nothing is scrubbed by inserting at head; the scrub runs on upgrade.
+    assert owners()[0]["pipe-legacy"] == sentinel
+
+    command.downgrade(config, "040_permit_repeat_window")
+    asyncio.set_event_loop(asyncio.new_event_loop())
+    command.upgrade(config, "head")
+    asyncio.set_event_loop(asyncio.new_event_loop())
+
+    pipelines, campaigns = owners()
+    assert pipelines == {"pipe-legacy": "", "pipe-owned": wallet_id, "pipe-admin": ""}
+    assert campaigns == {"camp-legacy": "", "camp-owned": wallet_id}
+    assert sentinel not in repr((pipelines, campaigns))
+
+    # Idempotent: a second pass changes nothing.
+    command.downgrade(config, "040_permit_repeat_window")
+    asyncio.set_event_loop(asyncio.new_event_loop())
+    command.upgrade(config, "head")
+    asyncio.set_event_loop(asyncio.new_event_loop())
+    assert owners() == (pipelines, campaigns)

@@ -12,7 +12,7 @@ Based on arXiv:2506.10953v1 gap analysis.
 """
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
@@ -41,10 +41,43 @@ from ..schemas.awi_enhanced import (
 )
 from ..services.awi_playwright_bridge import BrowserSessionLimitExceeded
 
+if TYPE_CHECKING:
+    from ..services.awi_rag_engine import SessionMemory
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/awi", tags=["AWI Enhanced"])
 _DOM_SESSION_WALLETS: dict[str, str | None] = {}
+
+
+def _not_found(kind: str, resource_id: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail={"error": "not_found", "message": f"{kind} {resource_id} not found"},
+    )
+
+
+def _require_owner_or_not_found(
+    auth: AuthContext, wallet_id: str | None, not_found: HTTPException
+) -> None:
+    """Authorize a resource owned by ``wallet_id``, or answer ``not_found``.
+
+    The session helpers used to 404 a missing id and only then run the wallet
+    check, whose 403 body carries the *owning* wallet id. Any wallet-scoped
+    key could therefore tell a real session id from an invented one and learn
+    which wallet owns it. A resource the caller may not see is now reported
+    exactly like one that does not exist; owners and bootstrap admins are
+    unaffected.
+    """
+    try:
+        if wallet_id:
+            auth.require_wallet_access(wallet_id)
+        else:
+            auth.require_bootstrap_admin()
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_403_FORBIDDEN:
+            raise not_found from None
+        raise
 
 
 async def _require_awi_session_access(session_id: str, auth: AuthContext) -> None:
@@ -55,15 +88,11 @@ async def _require_awi_session_access(session_id: str, auth: AuthContext) -> Non
     session = await manager.get_session(session_id)
 
     if not session:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "not_found", "message": f"Session {session_id} not found"},
-        )
+        raise _not_found("Session", session_id)
 
-    if session.wallet_id:
-        auth.require_wallet_access(session.wallet_id)
-    else:
-        auth.require_bootstrap_admin()
+    _require_owner_or_not_found(
+        auth, session.wallet_id, _not_found("Session", session_id)
+    )
 
 
 async def _require_dom_session_access(session_id: str, auth: AuthContext) -> None:
@@ -73,16 +102,11 @@ async def _require_dom_session_access(session_id: str, auth: AuthContext) -> Non
     bridge = get_playwright_bridge()
     session = await bridge.get_session(session_id)
     if not session:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "not_found", "message": f"Session {session_id} not found"},
-        )
+        raise _not_found("Session", session_id)
 
-    wallet_id = _DOM_SESSION_WALLETS.get(session_id)
-    if wallet_id:
-        auth.require_wallet_access(wallet_id)
-    else:
-        auth.require_bootstrap_admin()
+    _require_owner_or_not_found(
+        auth, _DOM_SESSION_WALLETS.get(session_id), _not_found("Session", session_id)
+    )
 
 
 async def _require_memory_access(session_id: str, auth: AuthContext) -> None:
@@ -93,6 +117,43 @@ async def _require_memory_access(session_id: str, auth: AuthContext) -> None:
         if exc.status_code != status.HTTP_404_NOT_FOUND:
             raise
         auth.require_bootstrap_admin()
+
+
+async def _load_owned_memory(memory_id: str, auth: AuthContext) -> "SessionMemory":
+    """Load a RAG memory, or 404 — whether it is missing or not the caller's.
+
+    The denial for a foreign memory used to be a 403 naming the owning wallet
+    (or, once its session was gone, ``admin_access_denied``), next to a 404
+    for an unknown id. Every denial now carries the same body as a missing
+    memory and never names the owning session or wallet.
+    """
+    from ..services.awi_rag_engine import get_awi_rag_engine
+
+    memory = await get_awi_rag_engine().get_memory(memory_id)
+    if memory is None:
+        raise _not_found("Memory", memory_id)
+    try:
+        await _require_memory_access(memory.session_id, auth)
+    except HTTPException as exc:
+        if exc.status_code in (
+            status.HTTP_403_FORBIDDEN,
+            status.HTTP_404_NOT_FOUND,
+        ):
+            raise _not_found("Memory", memory_id) from None
+        raise
+    return memory
+
+
+def _rag_owner_scope(wallet_id: str, auth: AuthContext) -> set[str | None]:
+    """Memory owners a caller acting for ``wallet_id`` may retrieve from.
+
+    Bootstrap admins additionally see memories of ownerless (admin-created)
+    sessions, matching the route-level tenant filter on ``/rag/query``.
+    """
+    owners: set[str | None] = {wallet_id}
+    if auth.is_bootstrap_admin:
+        owners.add(None)
+    return owners
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -825,6 +886,7 @@ async def index_session(
             action_history=request.action_history,
             state_snapshots=request.state_snapshots,
             metadata=request.metadata,
+            owner_wallet_id=wallet_id,
         )
 
         memory = await rag.get_memory(memory_id)
@@ -906,15 +968,20 @@ async def query_memories(
     try:
         start_time = utc_now()
 
+        # Scope by owner inside the search, before scoring and top_k truncation:
+        # filtering only afterwards let other tenants' better matches empty the
+        # caller's results and bumped their memories' access counters.
         results = await rag.search(
             query=request.query,
             session_type=request.session_type,
             top_k=request.top_k,
             similarity_threshold=request.similarity_threshold,
             include_raw_state=request.include_raw_state,
+            owner_wallet_ids=_rag_owner_scope(gov.wallet_id, auth),
         )
 
-        # Tenant isolation: only return memories for sessions owned by this wallet.
+        # Tenant isolation (defense in depth): only return memories for sessions
+        # owned by this wallet.
         scoped: list[Any] = []
         for r in results:
             session = await sessions.get_session(r.session_id)
@@ -975,19 +1042,7 @@ async def get_memory(
     auth: AuthContext = Depends(get_auth_context),
 ):
     """Get a specific memory by ID."""
-    from ..services.awi_rag_engine import get_awi_rag_engine
-
-    rag = get_awi_rag_engine()
-
-    memory = await rag.get_memory(memory_id)
-
-    if not memory:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "not_found", "message": f"Memory {memory_id} not found"},
-        )
-
-    await _require_memory_access(memory.session_id, auth)
+    memory = await _load_owned_memory(memory_id, auth)
 
     return {
         "memory_id": memory.memory_id,
@@ -1017,23 +1072,12 @@ async def delete_memory(
     """Delete a specific memory."""
     from ..services.awi_rag_engine import get_awi_rag_engine
 
-    rag = get_awi_rag_engine()
-    memory = await rag.get_memory(memory_id)
-    if not memory:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "not_found", "message": f"Memory {memory_id} not found"},
-        )
+    await _load_owned_memory(memory_id, auth)
 
-    await _require_memory_access(memory.session_id, auth)
-
-    deleted = await rag.delete_memory(memory_id)
+    deleted = await get_awi_rag_engine().delete_memory(memory_id)
 
     if not deleted:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "not_found", "message": f"Memory {memory_id} not found"},
-        )
+        raise _not_found("Memory", memory_id)
 
 
 @router.get(
@@ -1076,11 +1120,14 @@ async def get_session_context(
             "goal": "",
         }
 
+        # Context for a session draws only on memories of that session's own
+        # wallet (or, for an ownerless admin session, ownerless memories).
         context = await rag.get_session_context(
             current_session_id=session_id,
             current_state=current_state,
             session_type=session_type,
             top_k=top_k,
+            owner_wallet_ids={session.wallet_id},
         )
 
         return SessionContextResponse(**context)

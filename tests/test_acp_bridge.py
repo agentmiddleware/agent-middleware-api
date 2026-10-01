@@ -388,6 +388,53 @@ async def test_acp_checkout_exceeding_wallet_balance_rejected(
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("quantity", "unit_amount", "reason"),
+    [
+        # $0: a zero credit budget, which no permit may carry.
+        (1, 0, "max_credits_must_be_positive"),
+        # 1e11 cents -> 1e12 credits: more whole digits than the permit's
+        # Numeric(20, 8) budget column (or any wallet balance) can hold.
+        (10_000, 10_000_000, None),
+    ],
+    ids=["zero-total", "beyond-storage"],
+)
+async def test_acp_checkout_outside_permit_bounds_is_refused_and_frees_intent(
+    client, spt_stub, clean_database, quantity, unit_amount, reason
+):
+    """A derived budget no permit can carry is a clean 400, never a 500.
+
+    The intent id is released (a retry is refused the same way, not left
+    ``acp_intent_in_progress``), nothing is minted, and the settlement rail
+    is never touched.
+    """
+    ctx = await provision_agent_wallet(client)
+    total = quantity * unit_amount
+    body = checkout_body(
+        "intent-bounds-1",
+        quantity=quantity,
+        unit_amount=unit_amount,
+        client_total=total,
+    )
+    errors = []
+    for _ in range(2):
+        resp = await client.post(
+            checkout_url(ctx), json=body, headers=ctx["agent_headers"]
+        )
+        assert resp.status_code == 400, resp.text
+        errors.append(resp.json()["detail"]["error"])
+    assert errors[0] == errors[1]
+    if reason is not None:
+        assert errors[0] == reason
+
+    assert spt_stub == []
+    _, permits_total = await get_permit_service().list_permits(
+        wallet_id=ctx["agent_wallet_id"]
+    )
+    assert permits_total == 0
+
+
+@pytest.mark.anyio
 async def test_acp_rejects_malformed_checkouts(client, spt_stub, clean_database):
     ctx = await provision_agent_wallet(client)
     url = checkout_url(ctx)

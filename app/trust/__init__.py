@@ -48,6 +48,7 @@ from .audit_chain import (
     AuditChainVerification,
     audit_payload,
     count_audit_events,
+    count_audit_events_grouped,
     list_audit_events,
     record_audit_event,
     sign_audit_model,
@@ -88,6 +89,7 @@ from .permits import (
     PermitValidation,
     PermitWriteContendedError,
     get_permit_service,
+    permit_constraints_snapshot,
     permit_model_to_response,
 )
 from .permit_requests import (
@@ -189,6 +191,7 @@ __all__ = [
     "PermitError",
     "PermitWriteContendedError",
     "get_permit_service",
+    "permit_constraints_snapshot",
     "permit_model_to_response",
     # permit requests (agent asks, human approves, middleware mints)
     "ApprovalCardView",
@@ -267,6 +270,7 @@ __all__ = [
     "record_audit_event",
     "list_audit_events",
     "count_audit_events",
+    "count_audit_events_grouped",
     "summarize_audit_events",
     # policy
     "evaluate_tool_invocation",

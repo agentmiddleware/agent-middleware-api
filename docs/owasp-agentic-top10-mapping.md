@@ -99,6 +99,12 @@ operator-configured upstream. Upstream connections validate the destination,
 refuse unsafe redirects, and pin one resolved address per session
 ([SECURITY_LIMITATIONS.md](../SECURITY_LIMITATIONS.md)).
 
+Agent-supplied URLs on the dormant AWI browser bridge and behavioral sandbox
+proxy pass a separate outbound-URL guard (`app/core/url_guard.py`) that blocks
+loopback, RFC1918, and link-local targets. Its local-development escape hatch,
+`ALLOW_PRIVATE_NETWORK_TARGETS=true`, skips those checks; production-like boots
+refuse to start with it set (`app/core/trust_mode.py`).
+
 - Gap: dependency and artifact attestation for this repo itself follows normal
   CI practice, nothing stronger; multi-upstream registry governance is
   deliberately not implemented.

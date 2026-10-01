@@ -12,8 +12,8 @@ What the card shows is exactly what the middleware will mint if approved (the
 frozen terms on the ``permit_requests`` row), never what the polling agent
 sends later. The decision itself is not taken here — approve/reject lives in
 Sentinel, whose magic link is rendered as the primary action when the create
-response carried one. Without a link the card is still the full disclosure of
-what is pending, which is what makes the Sentinel prompt legible.
+response carried an https one. Without a link the card is still the full
+disclosure of what is pending, which is what makes the Sentinel prompt legible.
 
 Styling matches the site's receipt aesthetic (see ``site/styles.css``) with
 literal values rather than CSS variables, because mail clients drop
@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from html import escape
+from urllib.parse import urlsplit
 
 # site/styles.css tokens, resolved. Mail clients need literals, not var():
 # email shell/blockquote = --paper-shade, hosted shell = --ink,
@@ -74,6 +75,29 @@ class ApprovalCardView:
     permit_id: str | None = None
     reason: str | None = None
     extra_notes: list[str] = field(default_factory=list)
+
+
+def safe_approval_url(url: str | None) -> str | None:
+    """Return ``url`` only when it is an absolute https link, else None.
+
+    Escaping keeps a URL inside its ``href`` attribute, but a
+    ``javascript:`` or ``data:`` scheme still runs when clicked, and the
+    emailed card has no CSP behind it. Control characters anywhere and
+    surrounding whitespace are refused outright because browsers strip
+    them before reading the scheme (tabs and newlines even mid-scheme), so
+    the scheme checked here is the one a client would follow.
+    """
+    if not isinstance(url, str) or not url or url != url.strip():
+        return None
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in url):
+        return None
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return None
+    if parts.scheme.lower() != "https" or not parts.netloc:
+        return None
+    return url
 
 
 def _stamp(value: datetime) -> str:
@@ -155,9 +179,10 @@ def card_fragment_html(view: ApprovalCardView) -> str:
         rows.append(_row("Reason", escape(view.reason), mono=False))
 
     action = ""
-    if view.approval_url and view.status == "pending":
+    approval_url = safe_approval_url(view.approval_url)
+    if approval_url and view.status == "pending":
         action = (
-            f'<p style="margin:20px 0 0;"><a href="{escape(view.approval_url, quote=True)}" '
+            f'<p style="margin:20px 0 0;"><a href="{escape(approval_url, quote=True)}" '
             f'style="display:inline-block;padding:12px 20px;background:{_BUTTON_BRASS};'
             "border-radius:6px;"
             f"color:{_BUTTON_INK};text-decoration:none;font-family:{_BODY};"
@@ -246,6 +271,7 @@ def render_text_summary(view: ApprovalCardView) -> str:
     ]
     if view.simulated:
         lines.insert(1, "[SIMULATED — not valid for production authority]")
-    if view.approval_url:
-        lines += ["", f"Review & decide: {view.approval_url}"]
+    approval_url = safe_approval_url(view.approval_url)
+    if approval_url:
+        lines += ["", f"Review & decide: {approval_url}"]
     return "\n".join(lines)
