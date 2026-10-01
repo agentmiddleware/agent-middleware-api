@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from app.core.auth import AuthContext, get_auth_context
 from app.core.config import get_settings
 from app.schemas.trust import (
+    ActionPermitFields,
     PermitCreateRequest,
     PermitListResponse,
     PermitResponse,
@@ -98,6 +99,10 @@ async def create_permit(
     auth: AuthContext = Depends(get_auth_context),
     money: AgentMoney = Depends(get_agent_money),
 ) -> PermitResponse:
+    if request.action_contract_version is not None:
+        raise HTTPException(
+            status_code=400, detail="action_permit_requires_trusted_issuance"
+        )
     auth.require_wallet_access(request.issuer_wallet_id)
     # Authorizing only the issuer let any wallet holder mint a signed permit
     # against an arbitrary victim wallet (charged when used, listed in the
@@ -119,7 +124,10 @@ async def create_permit(
             },
         )
     idem = get_idempotency_service()
-    request_payload = request.model_dump(mode="json")
+    # Nullable action fields must not change historical envelope issuance hashes.
+    request_payload = request.model_dump(
+        mode="json", exclude=set(ActionPermitFields.model_fields)
+    )
     compatible_request_payload = None
     if request.repeat_window_seconds is None:
         # Revision 040 also wrote this optional field as null into request hashes.
