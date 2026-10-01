@@ -171,8 +171,10 @@ class PreflightEngine:
                 passed=False,
                 severity="critical",
                 message=f"Found {len(placeholder_keys)} placeholder API key(s).",
+                # Never echo key material: a prefix of 'test-key' or
+                # 'changeme' is the whole bootstrap admin key.
                 detail=(
-                    f"Keys like '{placeholder_keys[0][:8]}...' are not "
+                    "Placeholder values in VALID_API_KEYS are not "
                     "production-safe. Generate real keys."
                 ),
             ))

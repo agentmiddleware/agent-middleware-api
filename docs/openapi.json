@@ -4,7 +4,8 @@
     "title": "Agent Middleware API",
     "description": "## Agent Transaction Integrity\n\n**Make consequential agent actions transactional.**\n\nTransaction-integrity boundary for consequential autonomous actions on the configured upstream-MCP path: one logical action binds scoped authority and configured consumption to at most one gateway dispatch and debit, records delivery_uncertain instead of automatically redispatching, and links gateway evidence for required external reconciliation.\n\nIt is not a full agent middleware platform. This is a durable gateway state machine, not one distributed ACID transaction and not proof of the downstream effect. A remote side effect is exactly once only when the upstream honors the forwarded idempotency key. See `/WEDGE.md` and `/SECURITY_LIMITATIONS.md`.\n\n### Canonical Loop\n\n`logical action -> authorize -> reserve allowance -> debit -> claim dispatch -> confirmed outcome | delivery_uncertain -> receipt/audit -> authoritative external reconciliation required`\n\n### Product Surface\n\n- **Logical action identity** — accepted key bound to one payload\n- **Bounded authority consumption** — scoped permit and configured allowance\n- **One-shot gateway dispatch/debit** — at most once per accepted action\n- **Explicit uncertainty** — `delivery_uncertain` is not auto-redispatched\n- **Linked gateway evidence** — receipt and audit data for reconciliation\n- **Discovery** — `.well-known/agent.json`, `/mcp/tools.json`, `/llms.txt`, `/v1/discover`\n\n### Proof Surfaces\n\nAgentic-web, browser, content, oracle, sandbox, media, IoT, red-team, and telemetry demos are labeled scaffolding. They mount only when `ENABLE_PROOF_SURFACES=true` and do not define the product.\n\n### Authentication\n\nProtected endpoints require an API key via the `X-API-Key` header.\n\n### For Agents\n\nStart at `/.well-known/agent.json`, then `/llms.txt` and `/mcp/tools.json`. Prefer `PUBLIC_URL` over any localhost server entry.",
     "license": {
-      "name": "MIT"
+      "name": "Business Source License 1.1",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/LICENSE"
     },
     "version": "1.3.0"
   },
@@ -2983,8 +2984,31 @@
           "Preflight"
         ],
         "summary": "Pre-flight Readiness Check",
-        "description": "Runs a comprehensive validation sweep before production launch:\n\n1. **KEYS** — Reject test-key/placeholder API keys, validate Stripe tokens\n2. **DOMAIN** — Verify BASE_URL is a real domain, manifests will resolve\n3. **ORACLE** — Validate agent directory registration URLs\n4. **ASSETS** — Check content source URLs and crawl targets\n\nReturns a GO/NO-GO verdict with per-check details.",
+        "description": "Runs a comprehensive validation sweep before production launch:\n\n1. **KEYS** — Reject test-key/placeholder API keys, validate Stripe tokens\n2. **DOMAIN** — Verify BASE_URL is a real domain, manifests will resolve\n3. **ORACLE** — Validate agent directory registration URLs\n4. **ASSETS** — Check content source URLs and crawl targets\n\nReturns a GO/NO-GO verdict with per-check details. Requires bootstrap admin authentication.",
         "operationId": "run_preflight_v1_launch_preflight_post",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -3020,12 +3044,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ]
+        }
       }
     },
     "/mcp/tools.json": {
@@ -3062,6 +3081,9 @@
                 "schema": {}
               }
             }
+          },
+          "401": {
+            "description": "Missing credentials on production-like boots"
           },
           "422": {
             "description": "Validation Error",
@@ -5150,7 +5172,7 @@
           "Discovery"
         ],
         "summary": "Dependency health check",
-        "description": "Probes the dependencies this deployment runs on, in parallel with a short timeout. Each entry reports status, latency_ms, and an error message when unreachable. With proof surfaces unmounted (the production posture) the payload covers the transaction-integrity boundary only: postgres, redis, signing key, upstream MCP, version + commit SHA. Instances that mount proof surfaces additionally report those surfaces' dependencies and per-service simulation modes; deps whose consumers are simulated return `not_used` so the verdict doesn't degrade on mock-only deployments.",
+        "description": "Probes the dependencies this deployment runs on, in parallel with a short timeout. Each entry reports status, latency_ms, and an error code when unreachable (the exception class or a timeout; driver messages are logged server-side, never returned). With proof surfaces unmounted (the production posture) the payload covers the transaction-integrity boundary only: postgres, redis, signing key, upstream MCP, version + commit SHA. Instances that mount proof surfaces additionally report those surfaces' dependencies and per-service simulation modes; deps whose consumers are simulated return `not_used` so the verdict doesn't degrade on mock-only deployments.",
         "operationId": "health_dependencies_health_dependencies_get",
         "responses": {
           "200": {
