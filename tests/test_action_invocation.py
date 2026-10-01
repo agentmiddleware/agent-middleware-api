@@ -870,3 +870,267 @@ async def test_policy_replay_denial_preserves_accepted_evidence(
         original = await session.get(ReceiptModel, original.receipt_id)
         assert original.model_dump() == before_receipt
     assert action_runtime[3].dispatch_count == 1
+
+
+async def assert_action_accounting(runtime, expected=1):
+    """Assert the persisted economic chain, not merely HTTP success."""
+    import json
+    from decimal import Decimal
+    from sqlalchemy import select
+    from app.db.database import get_session_factory
+    from app.db.models import (
+        PermitModel,
+        McpDispatchAttemptModel,
+        LedgerEntryModel,
+        ReceiptModel,
+        WalletModel,
+    )
+
+    owners = [row for row in await action_rows() if row.endpoint == "/mcp/action/v1"]
+    assert len(owners) == expected
+    async with get_session_factory()() as session:
+        wallet = await session.get(WalletModel, runtime[1]["agent_wallet_id"])
+        assert wallet.balance == Decimal("1000") - Decimal("2") * expected
+        all_debits = list(
+            (
+                await session.execute(
+                    select(LedgerEntryModel).where(
+                        LedgerEntryModel.wallet_id == wallet.wallet_id,
+                        LedgerEntryModel.amount < 0,
+                    )
+                )
+            ).scalars()
+        )
+        assert len(all_debits) == expected
+        assert {entry.operation_key for entry in all_debits} == {
+            owner.record_id for owner in owners
+        }
+        all_attempts = list(
+            (
+                await session.execute(
+                    select(McpDispatchAttemptModel).where(
+                        McpDispatchAttemptModel.wallet_id == wallet.wallet_id,
+                    )
+                )
+            ).scalars()
+        )
+        assert len(all_attempts) == expected
+        for owner in owners:
+            attempt = (
+                await session.execute(
+                    select(McpDispatchAttemptModel).where(
+                        McpDispatchAttemptModel.idempotency_record_id == owner.record_id
+                    )
+                )
+            ).scalar_one()
+            debit = (
+                await session.execute(
+                    select(LedgerEntryModel).where(
+                        LedgerEntryModel.operation_key == owner.record_id
+                    )
+                )
+            ).scalar_one()
+            receipt = (
+                await session.execute(
+                    select(ReceiptModel).where(
+                        ReceiptModel.idempotency_record_id == owner.record_id
+                    )
+                )
+            ).scalar_one()
+            permit = await session.get(PermitModel, attempt.permit_id)
+            assert permit.spent_credits == Decimal("2")
+            assert json.loads(permit.tool_call_counts_json) == {"partner.pay": 1}
+            assert attempt.call_slot_reserved is True
+            assert owner.ledger_entry_id == debit.entry_id == receipt.ledger_entry_id
+            assert receipt.dispatch_attempt_id == attempt.attempt_id
+            assert receipt.credits_charged == Decimal("2")
+            assert debit.amount == Decimal("-2")
+            assert attempt.state == "succeeded"
+    assert runtime[3].dispatch_count == expected
+
+
+@pytest.mark.anyio
+async def test_twenty_fresh_action_keys_share_accounting(action_runtime):
+    import asyncio
+
+    surfaces = ("standard", "legacy", "rest")
+    responses = await asyncio.gather(
+        *(
+            invoke_action(action_runtime, surfaces[i % 3], f"concurrent-{i}")
+            for i in range(20)
+        )
+    )
+    for response in responses:
+        assert ("error" not in response.json() and response.status_code < 400) or (
+            "idempotency_in_progress" in response.text
+        ), response.text
+    replay = await invoke_action(action_runtime, "standard", "completed-replay")
+    assert "error" not in replay.json(), replay.text
+    await assert_action_accounting(action_runtime)
+
+
+@pytest.mark.anyio
+async def test_new_trusted_permit_intentionally_repeats(action_runtime):
+    from tests.test_action_permits import _action_request
+    from tests.test_trust_helpers import BOOTSTRAP_HEADERS
+
+    client, wallets, _, executor = action_runtime
+    first = await invoke_action(action_runtime, "standard", "first-action")
+    assert "error" not in first.json(), first.text
+    issued = await client.post(
+        "/v1/action-permits",
+        json=_action_request(
+            issuer_wallet_id=wallets["sponsor_wallet_id"],
+            subject_wallet_id=wallets["agent_wallet_id"],
+            subject_key_id=wallets["key_id"],
+            arguments={"amount_minor": 1, "recipient": "alice"},
+            max_credits=2,
+        ).model_dump(mode="json"),
+        headers={**BOOTSTRAP_HEADERS, "Idempotency-Key": "new-authority"},
+    )
+    assert issued.status_code == 201, issued.text
+    second_runtime = (client, wallets, issued.json()["permit_id"], executor)
+    second = await invoke_action(second_runtime, "standard", "second-action")
+    assert "error" not in second.json(), second.text
+    await assert_action_accounting(action_runtime, expected=2)
+    assert executor.calls[0]["idempotency_key"] != executor.calls[1]["idempotency_key"]
+
+
+async def prepare_action(runtime, arguments):
+    from decimal import Decimal
+    from app.db.database import get_session_factory
+    from app.db.models import PermitModel
+    from app.services.idempotency import get_idempotency_service
+    from app.services.mcp_dispatch_attempts import get_mcp_dispatch_attempt_service
+
+    async with get_session_factory()() as session:
+        permit = await session.get(PermitModel, runtime[2])
+    identity = action_permits.action_execution_identity(permit, BINDING)
+    idem = get_idempotency_service()
+    owner = await idem.get_action_record(
+        wallet_id=permit.subject_wallet_id, internal_key=identity.idempotency_key
+    )
+    if owner is None:
+        begun = await idem.begin_action_with_record(
+            wallet_id=permit.subject_wallet_id, identity=identity
+        )
+        owner = await idem.get_action_record(
+            wallet_id=permit.subject_wallet_id, internal_key=identity.idempotency_key
+        )
+        assert owner.record_id == begun.record_id
+    return await get_mcp_dispatch_attempt_service().authorize_reserve_and_prepare(
+        idempotency_record_id=owner.record_id,
+        wallet_id=permit.subject_wallet_id,
+        permit_id=permit.permit_id,
+        key_id=permit.subject_key_id,
+        public_tool_id="partner.pay",
+        upstream_tool_name="pay",
+        upstream_origin="https://fixture.invalid",
+        request_hash=owner.request_hash,
+        credits_authorized=Decimal("2"),
+        arguments=arguments,
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("already_prepared", [False, True])
+async def test_atomic_action_prepare_rechecks_digest(action_runtime, already_prepared):
+    from app.db.database import get_session_factory
+    from app.db.models import PermitModel
+
+    if already_prepared:
+        validation, original = await prepare_action(
+            action_runtime, {"amount_minor": 1, "recipient": "alice"}
+        )
+        assert validation.allowed
+    before = (await action_rows())[0].model_dump() if already_prepared else None
+    validation, attempt = await prepare_action(
+        action_runtime, {"amount_minor": 2, "recipient": "alice"}
+    )
+    assert not validation.allowed
+    assert validation.reason == "action_payload_mismatch"
+    assert attempt is None
+    async with get_session_factory()() as session:
+        permit = await session.get(PermitModel, action_runtime[2])
+        assert permit.spent_credits == (2 if already_prepared else 0)
+    if before:
+        assert (await action_rows())[0].model_dump() == before
+    assert action_runtime[3].dispatch_count == 0
+
+
+@pytest.mark.anyio
+async def test_exhausted_action_replay_returns_identical_receipt(action_runtime):
+    import json
+
+    first = await invoke_action(action_runtime, "standard", "first")
+    assert "error" not in first.json(), first.text
+    owner = (await action_rows())[0]
+    original_receipt = json.loads(owner.response_json)["receipt"]
+    for surface in ("standard", "legacy", "rest"):
+        response = await invoke_action(action_runtime, surface, "replay-" + surface)
+        assert "error" not in response.json(), response.text
+        # Standard MCP wraps the governed result; compare the durable response
+        # and require the original receipt identifier in every wire response.
+        assert original_receipt["receipt_id"] in response.text
+        assert (await action_rows())[0].model_dump() == owner.model_dump()
+    await assert_action_accounting(action_runtime)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("tamper", ["namespace", "key", "hash", "origin", "tool"])
+async def test_atomic_action_owner_and_destination_binding(action_runtime, tamper):
+    from decimal import Decimal
+    from app.db.database import get_session_factory
+    from app.db.models import PermitModel, IdempotencyRecordModel
+    from app.services.idempotency import get_idempotency_service
+    from app.services.mcp_dispatch_attempts import (
+        DispatchAttemptConflictError,
+        get_mcp_dispatch_attempt_service,
+    )
+    from app.services.signing_keys import sha256_hex
+
+    async with get_session_factory()() as session:
+        permit = await session.get(PermitModel, action_runtime[2])
+    identity = action_permits.action_execution_identity(permit, BINDING)
+    begun = await get_idempotency_service().begin_action_with_record(
+        wallet_id=permit.subject_wallet_id, identity=identity
+    )
+    request_hash = sha256_hex(identity.request_payload)
+    async with get_session_factory()() as session:
+        owner = await session.get(IdempotencyRecordModel, begun.record_id)
+        if tamper == "namespace":
+            owner.endpoint = "/mcp/invoke"
+        elif tamper == "key":
+            owner.idempotency_key = "caller-selected"
+        elif tamper == "hash":
+            owner.request_hash = request_hash = "a" * 64
+        await session.commit()
+    kwargs = dict(
+        idempotency_record_id=begun.record_id,
+        wallet_id=permit.subject_wallet_id,
+        permit_id=permit.permit_id,
+        key_id=permit.subject_key_id,
+        public_tool_id="partner.pay",
+        upstream_tool_name="other" if tamper == "tool" else "pay",
+        upstream_origin="https://other.invalid"
+        if tamper == "origin"
+        else "https://fixture.invalid",
+        request_hash=request_hash,
+        credits_authorized=Decimal("2"),
+        arguments={"amount_minor": 1, "recipient": "alice"},
+    )
+    service = get_mcp_dispatch_attempt_service()
+    if tamper in {"namespace", "key", "hash"}:
+        with pytest.raises(
+            DispatchAttemptConflictError, match="dispatch_action_owner_invalid"
+        ):
+            await service.authorize_reserve_and_prepare(**kwargs)
+    else:
+        validation, attempt = await service.authorize_reserve_and_prepare(**kwargs)
+        assert validation.reason == "action_binding_mismatch"
+        assert not validation.allowed and attempt is None
+    async with get_session_factory()() as session:
+        permit = await session.get(PermitModel, permit.permit_id)
+        assert permit.spent_credits == 0
+        assert permit.tool_call_counts_json in (None, "{}")
+    assert action_runtime[3].dispatch_count == 0
