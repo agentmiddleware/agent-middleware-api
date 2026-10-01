@@ -12,15 +12,26 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from datetime import datetime
 
-from ..core.auth import verify_api_key
+from ..core.auth import AuthContext, get_auth_context
 from ..core.dependencies import get_protocol_engine, get_agent_oracle
-from ..services.protocol_engine import ProtocolEngine
+from ..services.protocol_engine import GenerationResult, ProtocolEngine
 
 router = APIRouter(
     prefix="/v1/protocol",
     tags=["Protocol Generation Engine"],
-    dependencies=[Depends(verify_api_key)],
 )
+
+
+def _can_read_generation(auth: AuthContext, generation: GenerationResult) -> bool:
+    """Generations are owned by the wallet that submitted the source.
+
+    Bootstrap admins see every generation. A wallet-scoped caller sees only
+    generations it created; a generation made with a bootstrap key has no
+    owning wallet and stays admin-only.
+    """
+    if auth.is_bootstrap_admin:
+        return True
+    return auth.wallet_id is not None and generation.owner_wallet_id == auth.wallet_id
 
 
 # --- Schemas ---
@@ -99,9 +110,14 @@ class GenerationListResponse(BaseModel):
 )
 async def generate_protocol(
     request: GenerateRequest,
+    auth: AuthContext = Depends(get_auth_context),
     engine: ProtocolEngine = Depends(get_protocol_engine),
     oracle=Depends(get_agent_oracle),
 ):
+    if request.register_in_oracle:
+        # Oracle registration writes the shared, global Oracle index, which
+        # no single tenant owns.
+        auth.require_bootstrap_admin()
     result = await engine.generate(
         source_code=request.source_code,
         service_name=request.service_name,
@@ -109,6 +125,7 @@ async def generate_protocol(
         base_url=request.base_url,
         register_in_oracle=request.register_in_oracle,
         oracle_instance=oracle if request.register_in_oracle else None,
+        owner_wallet_id=auth.wallet_id,
     )
     return GenerateResponse(
         generation_id=result.generation_id,
@@ -131,9 +148,12 @@ async def generate_protocol(
     description="Retrieve historical generation runs.",
 )
 async def list_generations(
+    auth: AuthContext = Depends(get_auth_context),
     engine: ProtocolEngine = Depends(get_protocol_engine),
 ):
-    gens = await engine.list_generations()
+    gens = [
+        g for g in await engine.list_generations() if _can_read_generation(auth, g)
+    ]
     return GenerationListResponse(
         generations=[
             {
@@ -157,10 +177,13 @@ async def list_generations(
 )
 async def get_generation(
     generation_id: str,
+    auth: AuthContext = Depends(get_auth_context),
     engine: ProtocolEngine = Depends(get_protocol_engine),
 ):
     result = await engine.get_generation(generation_id)
-    if not result:
+    # A foreign generation gets the same 404 as a missing one, so the
+    # endpoint is not an existence oracle for other tenants' generation ids.
+    if not result or not _can_read_generation(auth, result):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"error": "generation_not_found"},
