@@ -3,11 +3,22 @@ Schemas for the Behavioral Sandbox Engine.
 All models are Pydantic v2 for automatic OpenAPI generation.
 """
 
+import re
 from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+MAX_SANDBOX_ENV_VARS = 32
+MAX_SANDBOX_ENV_VALUE_CHARS = 4096
+_ENV_VAR_NAME_RE = re.compile(r"[A-Z_][A-Z0-9_]{0,63}")
+# Caller-supplied variables must not steer the dynamic loader, the
+# interpreter, the shell, or the sandbox's own SANDBOX marker.
+_DENIED_ENV_VAR_PREFIXES = ("LD_", "DYLD_", "GLIBC_", "PYTHON")
+_DENIED_ENV_VAR_NAMES = frozenset(
+    {"PATH", "HOME", "SANDBOX", "BASH_ENV", "ENV", "IFS", "SHELLOPTS"}
+)
 
 
 class SandboxEnvironmentType(str, Enum):
@@ -37,7 +48,9 @@ class SandboxEnvironmentCreate(BaseModel):
         default=SandboxEnvironmentType.PYTHON_SUBPROCESS,
         description="Type of sandbox environment to create",
     )
-    name: str = Field(..., description="Human-readable name for this environment")
+    name: str = Field(
+        ..., max_length=128, description="Human-readable name for this environment"
+    )
     wallet_id: str | None = Field(None, description="Optional wallet for billing")
     timeout_seconds: int = Field(
         default=30, ge=1, le=300, description="Max execution time"
@@ -50,8 +63,36 @@ class SandboxEnvironmentCreate(BaseModel):
     )
     env_vars: dict[str, str] = Field(
         default_factory=dict,
-        description="Environment variables to set in sandbox",
+        description=(
+            "Environment variables to set in sandbox (at most "
+            f"{MAX_SANDBOX_ENV_VARS}; names match [A-Z_][A-Z0-9_]{{0,63}}; "
+            "LD_*, DYLD_*, GLIBC_*, PYTHON*, PATH, HOME, SANDBOX and shell "
+            "startup names are refused)"
+        ),
     )
+
+    @field_validator("env_vars")
+    @classmethod
+    def _validate_env_vars(cls, env_vars: dict[str, str]) -> dict[str, str]:
+        if len(env_vars) > MAX_SANDBOX_ENV_VARS:
+            raise ValueError(
+                f"at most {MAX_SANDBOX_ENV_VARS} environment variables are allowed"
+            )
+        for name, value in env_vars.items():
+            if not _ENV_VAR_NAME_RE.fullmatch(name):
+                raise ValueError(
+                    "environment variable names must match [A-Z_][A-Z0-9_]{0,63}"
+                )
+            if name in _DENIED_ENV_VAR_NAMES or name.startswith(
+                _DENIED_ENV_VAR_PREFIXES
+            ):
+                raise ValueError(f"environment variable {name} is not allowed")
+            if len(value) > MAX_SANDBOX_ENV_VALUE_CHARS or "\x00" in value:
+                raise ValueError(
+                    f"environment variable {name} must be at most "
+                    f"{MAX_SANDBOX_ENV_VALUE_CHARS} characters with no NUL bytes"
+                )
+        return env_vars
 
 
 class SandboxEnvironment(BaseModel):

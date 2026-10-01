@@ -243,7 +243,9 @@ class Settings(BaseSettings):
     # --- Notification Service ---
     RESEND_API_KEY: str = ""
     SLACK_WEBHOOK_URL: str = ""
-    ALERT_FROM_EMAIL: str = "alerts@b2a.dev"
+    # Sender for Resend email. Empty by default so no placeholder sender ships;
+    # set it, to an address the operator controls, together with RESEND_API_KEY.
+    ALERT_FROM_EMAIL: str = ""
 
     # --- Sentinel Human Approval (pauseapi.app) ---
     # Backs the per-permit requires_human_approval gate on governed invokes.
@@ -278,6 +280,8 @@ class Settings(BaseSettings):
     # --- Velocity Monitoring ---
     VELOCITY_HOURLY_LIMIT: Decimal = Decimal("1000.0")
     VELOCITY_DAILY_LIMIT: Decimal = Decimal("10000.0")
+    # Reserved: read into VelocityMonitor but used by no check today (there is
+    # no standard-deviation detection). Changing it has no effect.
     VELOCITY_ALERT_THRESHOLD: int = 2
     VELOCITY_FREEZE_THRESHOLD: int = 3
 

@@ -97,7 +97,10 @@ class WebAuthnChallenge:
     expires_at: datetime
     rp_id: str
     rp_name: str
-    user_verification: str = "preferred"
+    # Challenges exist only for HIGH_RISK_ACTIONS, so user verification
+    # (PIN/biometric), not mere presence, is always required. See
+    # _verify_authenticator_assertion, which enforces it.
+    user_verification: str = "required"
     attestations: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -294,7 +297,7 @@ class WebAuthnProvider:
                     ]
                     if self._credentials
                     else None,
-                    user_verification=UserVerificationRequirement.PREFERRED,
+                    user_verification=UserVerificationRequirement.REQUIRED,
                 )
 
                 # Convert to JSON-compatible dict
@@ -317,7 +320,7 @@ class WebAuthnProvider:
             "rp_id": self._rp_id,
             "rp_name": self._rp_name,
             "timeout": self._timeout_ms,
-            "user_verification": "preferred",
+            "user_verification": challenge.user_verification,
             "public_key_cred_params": [
                 {"alg": -7, "type": "public-key"},  # ES256
                 {"alg": -257, "type": "public-key"},  # RS256
@@ -326,7 +329,7 @@ class WebAuthnProvider:
             "authenticator_selection": {
                 "authenticator_attachment": "platform",
                 "resident_key": "preferred",
-                "user_verification": "preferred",
+                "user_verification": challenge.user_verification,
             },
         }
 
@@ -674,7 +677,11 @@ class WebAuthnProvider:
                 expected_origin=expected_origin,
                 credential_public_key=stored_credential.public_key,
                 credential_current_sign_count=stored_credential.sign_count,
-                require_user_verification=False,  # We handle this ourselves
+                # Every challenge guards a HIGH_RISK_ACTIONS entry. Without the
+                # UV flag an assertion proves only that someone touched the
+                # authenticator, not that its owner approved the action, so
+                # py_webauthn must reject an assertion whose UV flag is unset.
+                require_user_verification=True,
             )
 
             # Update stored sign count to prevent cloned credential attacks

@@ -88,7 +88,8 @@ class X402Client:
         *,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
-        self.api_key = api_key
+        # Held only in the transport's default headers (see ``api_key``), not
+        # duplicated as instance state, so ``vars(client)`` dumps omit it.
         self.base_url = base_url.rstrip("/")
         self._client = httpx.AsyncClient(
             base_url=self.base_url,
@@ -104,6 +105,11 @@ class X402Client:
             transport=transport,
             follow_redirects=False,
         )
+
+    @property
+    def api_key(self) -> str:
+        """The API key this client sends as ``X-API-Key`` (read-only)."""
+        return self._client.headers["X-API-Key"]
 
     async def parse_402(
         self,

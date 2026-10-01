@@ -13,13 +13,16 @@ machine-to-machine messaging with built-in routing and delivery confirmation.
 """
 
 import asyncio
+import hashlib
+import hmac
 import uuid
 import logging
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
+from ..core.auth import AuthContext
 from ..core.durable_state import get_durable_state
 from ..core.runtime_mode import is_simulation, require_simulation
 from .agent_comms_store import CommsMessageStore, compute_payload_hash
@@ -96,12 +99,58 @@ class RegisteredAgent:
     name: str
     capabilities: list[str]  # What this agent can do
     webhook_url: str | None  # Where to deliver messages
-    api_key: str  # Auth for sending/receiving
-    owner_key: str = ""  # RED TEAM FIX: API key of the registering tenant
+    # Digest of the agent's messaging key; the plaintext is returned once, at
+    # registration, and never stored.
+    api_key: str
+    # Owner identity (see owner_identity), never a raw credential.
+    owner_key: str = ""
     status: str = "active"
     registered_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     last_seen: datetime | None = None
     message_count: int = 0
+
+
+# ---------------------------------------------------------------------------
+# Ownership
+# ---------------------------------------------------------------------------
+#
+# An agent is owned by the tenant that registered it. Wallet-scoped callers
+# (database API keys and the JWTs minted from them) own by wallet, so two
+# wallets never share an identity. Callers with no wallet (bootstrap/env keys)
+# own by a digest of their key. Neither form is a usable credential, so the
+# durable registry holds no secrets.
+
+_OWNER_WALLET_PREFIX = "wallet:"
+_DIGEST_PREFIX = "sha256:"
+
+
+def _digest(secret: str) -> str:
+    return _DIGEST_PREFIX + hashlib.sha256(secret.encode()).hexdigest()
+
+
+def owner_identity(auth: AuthContext) -> str:
+    """Non-secret ownership identity for an authenticated caller."""
+    if auth.wallet_id:
+        return _OWNER_WALLET_PREFIX + auth.wallet_id
+    return _digest(auth.raw_key)
+
+
+def caller_owns_agent(agent: RegisteredAgent, auth: AuthContext) -> bool:
+    """True only when ``auth`` is the tenant that registered ``agent``.
+
+    An owner-less record matches nobody. A record registered before ownership
+    moved off the raw key holds that key's digest (see
+    ``AgentRegistry._scrub_plaintext_credentials``), so an API-key caller also
+    matches on the digest of its own key. A JWT caller never does: its
+    ``raw_key`` is not the credential that registered the agent.
+    """
+    if not agent.owner_key:
+        return False
+    candidates = [owner_identity(auth)]
+    if auth.source != "jwt":
+        candidates.append(_digest(auth.raw_key))
+    stored = agent.owner_key.encode()
+    return any(hmac.compare_digest(stored, c.encode()) for c in candidates)
 
 
 def _parse_dt(value: Any) -> datetime | None:
@@ -135,6 +184,25 @@ class AgentRegistry:
         payload["last_seen"] = last_seen
         return RegisteredAgent(**payload)
 
+    @staticmethod
+    def _scrub_plaintext_credentials(agent: RegisteredAgent) -> bool:
+        """Replace any plaintext key on ``agent`` with its digest.
+
+        Records written before this fix stored the registering caller's raw
+        API key as ``owner_key`` and the agent key in plaintext. Returns True
+        when the record changed.
+        """
+        changed = False
+        if agent.owner_key and not agent.owner_key.startswith(
+            (_OWNER_WALLET_PREFIX, _DIGEST_PREFIX)
+        ):
+            agent.owner_key = _digest(agent.owner_key)
+            changed = True
+        if agent.api_key and not agent.api_key.startswith(_DIGEST_PREFIX):
+            agent.api_key = _digest(agent.api_key)
+            changed = True
+        return changed
+
     async def _hydrate_if_needed(self):
         if self._hydrated:
             return
@@ -144,16 +212,26 @@ class AgentRegistry:
                 return
 
             payload = await self._state.load_json("comms.registry")
+            scrubbed = False
             if isinstance(payload, dict):
                 loaded: dict[str, RegisteredAgent] = {}
                 for agent_id, record in payload.items():
                     try:
-                        loaded[agent_id] = self._agent_from_dict(record)
+                        agent = self._agent_from_dict(record)
                     except Exception:
                         logger.exception(
                             "Skipping corrupt comms agent record: %s", agent_id
                         )
+                        continue
+                    scrubbed = self._scrub_plaintext_credentials(agent) or scrubbed
+                    loaded[agent_id] = agent
                 self._agents = loaded
+
+            if scrubbed:
+                # Rewrite the stored registry so legacy plaintext keys do not
+                # stay at rest.
+                async with self._lock:
+                    await self._persist_locked()
 
             self._hydrated = True
 
@@ -177,20 +255,27 @@ class AgentRegistry:
         webhook_url: str | None = None,
         owner_key: str = "",
     ) -> RegisteredAgent:
+        """Register an agent owned by ``owner_key`` (an ``owner_identity``).
+
+        The returned record carries the agent key in plaintext so the caller
+        can hand it out once; the registry keeps only its digest.
+        """
         await self._hydrate_if_needed()
+        agent_key = f"ak-{uuid.uuid4().hex}"
         agent = RegisteredAgent(
             agent_id=f"agent-{uuid.uuid4().hex[:12]}",
             name=name,
             capabilities=capabilities,
             webhook_url=webhook_url,
-            api_key=f"ak-{uuid.uuid4().hex}",
+            api_key=agent_key,
             owner_key=owner_key,
         )
+        self._scrub_plaintext_credentials(agent)
         async with self._lock:
             self._agents[agent.agent_id] = agent
             await self._persist_locked()
         logger.info(f"Agent registered: {agent.agent_id} ({agent.name})")
-        return agent
+        return replace(agent, api_key=agent_key)
 
     async def get(self, agent_id: str) -> RegisteredAgent | None:
         await self._hydrate_if_needed()

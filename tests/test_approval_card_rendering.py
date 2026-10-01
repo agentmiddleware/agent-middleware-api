@@ -12,6 +12,7 @@ from app.services.approval_card import (
     ApprovalCardView,
     render_email_html,
     render_page_html,
+    render_text_summary,
 )
 
 
@@ -100,3 +101,46 @@ def test_hostile_terms_stay_text_and_only_pending_cards_link_to_decision(
     )
     links = [attrs["href"] for tag, attrs in document.elements if tag == "a"]
     assert links == ([url] if status == "pending" else [])
+
+
+_UNSAFE_APPROVAL_URLS = [
+    "javascript:alert(1)",
+    " JaVaScRiPt:alert(1)",
+    "java\tscript:alert(1)",
+    "java\nscript:alert(1)",
+    "jav&#x09;ascript:alert(1)",
+    "\x00javascript:alert(1)",
+    "data:text/html,<script>alert(1)</script>",
+    "vbscript:msgbox(1)",
+    "http://sentinel.example/decide?request=123",
+    "//sentinel.example/decide?request=123",
+    "https:alert(1)",
+    "https://[::1",
+    "/v1/permit-requests/request-123/card",
+]
+
+
+@pytest.mark.parametrize("render", [render_email_html, render_page_html])
+@pytest.mark.parametrize("url", _UNSAFE_APPROVAL_URLS)
+def test_non_https_approval_url_is_never_rendered_as_a_link(view, render, url):
+    # Escaping keeps a hostile URL inside the href attribute, but a
+    # javascript:/data: scheme is still executable once clicked, and the
+    # emailed card has no CSP to fall back on. Only an absolute https link
+    # becomes the action; anything else drops to the no-link instructions.
+    source = render(replace(view, approval_url=url))
+    document = _Document(source)
+    assert not [attrs for tag, attrs in document.elements if tag == "a"]
+    assert "Review &amp; decide" not in source
+    assert "Approve or reject from the Sentinel" in source
+
+
+@pytest.mark.parametrize("url", _UNSAFE_APPROVAL_URLS)
+def test_non_https_approval_url_is_left_out_of_the_text_summary(view, url):
+    text = render_text_summary(replace(view, approval_url=url))
+    assert url.strip() not in text
+    assert "Review & decide" not in text
+
+
+def test_https_approval_url_is_the_text_summary_action(view):
+    text = render_text_summary(view)
+    assert f"Review & decide: {view.approval_url}" in text

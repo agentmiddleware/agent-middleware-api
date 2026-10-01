@@ -6,10 +6,13 @@ Lightweight client for interacting with AWI-enabled services.
 Based on arXiv:2506.10953v1 - "Build the web for agents, not agents for the web"
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
+
+#: Longest ``Idempotency-Key`` the governed AWI routes accept.
+MAX_IDEMPOTENCY_KEY_LENGTH = 128
 
 
 @dataclass
@@ -17,7 +20,8 @@ class AWIClientConfig:
     """Configuration for AWI client."""
 
     base_url: str = "http://localhost:8000"
-    api_key: str | None = None
+    # Kept out of repr() so logging a config never prints the credential.
+    api_key: str | None = field(default=None, repr=False)
     wallet_id: str | None = None
     timeout: float = 30.0
     max_retries: int = 3
@@ -39,9 +43,11 @@ class AWIClient:
 
         session = await client.create_session("https://shop.example.com")
         result = await client.execute(
-            session.session_id,
+            session["session_id"],
             "search_and_sort",
-            {"query": "laptops", "sort_by": "price"}
+            {"query": "laptops", "sort_by": "price"},
+            permit_id="permit-from-POST-/v1/permits",
+            idempotency_key="search-laptops-1",
         )
     """
 
@@ -53,6 +59,8 @@ class AWIClient:
             base_url=config.base_url,
             timeout=config.timeout,
             headers=self._build_headers(),
+            # A redirect must not carry X-API-Key to another host.
+            follow_redirects=False,
         )
 
     def _build_headers(self) -> dict[str, str]:
@@ -118,9 +126,17 @@ class AWIClient:
         parameters: dict[str, Any] | None = None,
         representation: str | None = None,
         dry_run: bool = False,
+        *,
+        permit_id: str,
+        idempotency_key: str,
     ) -> dict[str, Any]:
         """
         Execute an AWI action within a session.
+
+        ``POST /v1/awi/execute`` is governed: it requires a signed permit for
+        tool ``awi_execute`` and an idempotency key, sent as ``X-Permit-Id``
+        and ``Idempotency-Key``. Reuse the same key when retrying one logical
+        action so the server replays the first outcome instead of acting twice.
 
         Args:
             session_id: ID of the active session
@@ -128,10 +144,18 @@ class AWIClient:
             parameters: Action-specific parameters
             representation: Request a specific representation after
             dry_run: Simulate without side effects
+            permit_id: Permit authorizing ``awi_execute`` for this wallet
+            idempotency_key: Caller-chosen key for this logical action
+                (non-blank, at most 128 characters)
 
         Returns:
             Execution result with status, output, and optional representation
+
+        Raises:
+            ValueError: ``permit_id`` or ``idempotency_key`` is unusable; no
+                request is sent.
         """
+        headers = self._governed_headers(permit_id, idempotency_key)
         payload = {
             "session_id": session_id,
             "action": action,
@@ -141,9 +165,27 @@ class AWIClient:
         if representation:
             payload["representation_request"] = representation
 
-        response = await self._client.post("/v1/awi/execute", json=payload)
+        response = await self._client.post(
+            "/v1/awi/execute", json=payload, headers=headers
+        )
         response.raise_for_status()
         return response.json()
+
+    @staticmethod
+    def _governed_headers(permit_id: str, idempotency_key: str) -> dict[str, str]:
+        """Validate and build the governance headers for a governed route."""
+        permit = permit_id.strip() if isinstance(permit_id, str) else ""
+        if not permit:
+            raise ValueError("permit_id must not be blank")
+        key = idempotency_key.strip() if isinstance(idempotency_key, str) else ""
+        if not key:
+            raise ValueError("idempotency_key must not be blank")
+        if len(key) > MAX_IDEMPOTENCY_KEY_LENGTH:
+            raise ValueError(
+                "idempotency_key must be at most "
+                f"{MAX_IDEMPOTENCY_KEY_LENGTH} characters"
+            )
+        return {"X-Permit-Id": permit, "Idempotency-Key": key}
 
     async def get_representation(
         self,
