@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import ast
+import importlib
 import io
+import json
 import sys
 import threading
 from collections import Counter
@@ -151,6 +153,8 @@ def test_verdict_exit_code_fails_closed(verdict: str | None, expected: int) -> N
         "attack2_budget.py",
         "attack3_scope.py",
         "attack4_forgery.py",
+        "attack2_budget_postgres.py",
+        "attack2_mechanism_sqlite.py",
     ],
 )
 def test_attack_main_returns_shared_verdict_exit_code(script_name: str) -> None:
@@ -241,6 +245,133 @@ def test_attack_main_returns_shared_verdict_exit_code(script_name: str) -> None:
             )
         )
     )
+
+
+def _import_fresh(module_name: str):
+    """Import an attack script anew so module-level code runs under stubs."""
+    sys.modules.pop(module_name, None)
+    return importlib.import_module(module_name)
+
+
+def _stub_budget_race(monkeypatch, *, successes_for, spent_for=None) -> None:
+    """Stub the attacklib HTTP/DB primitives the attack 2 race scripts use.
+
+    ``successes_for(cap)`` decides how many parallel calls succeed (the rest
+    are budget-denied); each success debits 2 credits on the wallet ledger.
+    ``spent_for(successes)`` overrides what the permit row's spent_credits
+    says, which otherwise agrees with the ledger.
+    """
+    import attacklib
+
+    state: dict = {}
+
+    def provision(label):
+        return {"api_key": f"b2a_{label}", "wallet_id": f"agt-{label}"}
+
+    def issue_permit(cred, *, max_credits, **_kwargs):
+        state["cap"] = max_credits
+        return {"json": {"permit_id": f"permit-{cred['wallet_id']}"}}
+
+    def fire_parallel(n, _fn):
+        won = successes_for(state["cap"])
+        state["successes"] = won
+        return [{"outcome": "success"}] * won + [
+            {"reason": "permit_budget_exceeded"}
+        ] * (n - won)
+
+    def charged(successes):
+        return successes * 2.0
+
+    def ledger(_cred):
+        return {"json": {"period_debits_exact": str(charged(state["successes"]))}}
+
+    def db_rows(query, _params=()):
+        if "FROM permits" in query:
+            spent = (spent_for or charged)(state["successes"])
+            return [
+                {
+                    "permit_id": "permit-x",
+                    "max_credits": state["cap"],
+                    "spent_credits": spent,
+                    "status": "active",
+                }
+            ]
+        return [{"amount": -2}] * state["successes"]
+
+    monkeypatch.setattr(attacklib, "API", attacklib.API)
+    monkeypatch.setattr(attacklib, "provision", provision)
+    monkeypatch.setattr(attacklib, "issue_permit", issue_permit)
+    monkeypatch.setattr(attacklib, "fire_parallel", fire_parallel)
+    monkeypatch.setattr(attacklib, "ledger", ledger)
+    monkeypatch.setattr(attacklib, "db_rows", db_rows)
+    monkeypatch.setattr(attacklib, "outcome_of", lambda r: r.get("outcome"))
+    monkeypatch.setattr(attacklib, "reason_of", lambda r: r.get("reason"))
+    monkeypatch.setattr(attacklib, "invoke", lambda *a, **k: {})
+
+
+def _held_race(cap):
+    return cap // 2
+
+
+def _overspent_race(cap):
+    return cap // 2 + 1
+
+
+def _vacuous_race(_cap):
+    return 0
+
+
+@pytest.mark.parametrize(
+    "script_name", ["attack2_budget_postgres", "attack2_mechanism_sqlite"]
+)
+@pytest.mark.parametrize(
+    ("successes_for", "expected_verdict", "expected_exit"),
+    [
+        pytest.param(_held_race, "HELD", 0, id="cap-held"),
+        pytest.param(_overspent_race, "BROKE", 1, id="overspent"),
+        # Every call failing for some other reason debits nothing, so nothing
+        # is overspent -- but the race never reached the cap, which proves
+        # nothing and must not pass.
+        pytest.param(_vacuous_race, "BROKE", 1, id="vacuous-race"),
+    ],
+)
+def test_attack2_race_scripts_fail_closed(
+    monkeypatch,
+    tmp_path,
+    capsys,
+    script_name: str,
+    successes_for,
+    expected_verdict: str,
+    expected_exit: int,
+) -> None:
+    _stub_budget_race(monkeypatch, successes_for=successes_for)
+    monkeypatch.chdir(tmp_path)
+
+    module = _import_fresh(script_name)
+    assert module.main() == expected_exit
+
+    printed = json.loads(capsys.readouterr().out)
+    assert printed["verdict"] == expected_verdict
+    (evidence_file,) = tmp_path.glob("evidence_attack2_*.json")
+    assert json.loads(evidence_file.read_text()) == printed
+
+
+def test_attack2_mechanism_flags_lost_update_without_overspend(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    # The permit row under-records spend (a lost update) even though the cap
+    # held on the ledger: the mechanism check must still fail.
+    _stub_budget_race(
+        monkeypatch, successes_for=_held_race, spent_for=lambda _successes: 2.0
+    )
+    monkeypatch.chdir(tmp_path)
+
+    module = _import_fresh("attack2_mechanism_sqlite")
+    assert module.main() == 1
+    printed = json.loads(capsys.readouterr().out)
+    assert printed["lost_update"] is True
+    assert printed["overspent_vs_cap"] is False
+    assert printed["verdict"] == "BROKE"
 
 
 def test_combined_requires_every_storm_variant_to_start() -> None:

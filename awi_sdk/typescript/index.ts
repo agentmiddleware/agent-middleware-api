@@ -90,6 +90,18 @@ export interface AWIVocabulary {
   categories: string[];
 }
 
+/** Longest Idempotency-Key the governed AWI routes accept. */
+export const MAX_IDEMPOTENCY_KEY_LENGTH = 128;
+
+export interface AWIExecuteOptions {
+  representation?: AWIRepresentationType;
+  dryRun?: boolean;
+  /** Permit authorizing tool `awi_execute`; sent as X-Permit-Id. */
+  permitId: string;
+  /** Caller-chosen key for this logical action; reuse it on retry. */
+  idempotencyKey: string;
+}
+
 /**
  * AWI TypeScript Client
  *
@@ -102,10 +114,12 @@ export interface AWIVocabulary {
  * });
  *
  * const session = await client.createSession("https://shop.example.com");
- * const result = await client.execute(session.session_id, "search_and_sort", {
- *   query: "laptops",
- *   sort_by: "price"
- * });
+ * const result = await client.execute(
+ *   session.session_id,
+ *   "search_and_sort",
+ *   { query: "laptops", sort_by: "price" },
+ *   { permitId: "permit-from-POST-/v1/permits", idempotencyKey: "search-1" }
+ * );
  * ```
  */
 export class AWIClient {
@@ -117,6 +131,8 @@ export class AWIClient {
     this.client = axios.create({
       baseURL: config.baseUrl,
       timeout: config.timeout || 30000,
+      // Never follow redirects: axios forwards X-API-Key to the new host.
+      maxRedirects: 0,
       headers: {
         "Content-Type": "application/json",
         "X-API-Key": config.apiKey,
@@ -145,22 +161,55 @@ export class AWIClient {
     return response.data;
   }
 
+  /**
+   * Execute an AWI action. POST /v1/awi/execute is governed: it requires a
+   * permit (X-Permit-Id) and an Idempotency-Key. Throws before sending when
+   * either is blank or the key is longer than 128 characters.
+   */
   async execute(
     sessionId: string,
     action: AWIAction,
-    parameters?: Record<string, unknown>,
-    options?: {
-      representation?: AWIRepresentationType;
-      dryRun?: boolean;
-    }
+    parameters: Record<string, unknown> | undefined,
+    options: AWIExecuteOptions
   ): Promise<AWIExecutionResult> {
-    const response: AxiosResponse = await this.client.post("/v1/awi/execute", {
-      session_id: sessionId,
-      action,
-      parameters: parameters || {},
-      representation_request: options?.representation,
-      dry_run: options?.dryRun ?? false,
-    });
+    const permitId =
+      typeof options?.permitId === "string" ? options.permitId.trim() : "";
+    if (!permitId) {
+      throw new Error("permitId must not be blank");
+    }
+    const idempotencyKey =
+      typeof options?.idempotencyKey === "string"
+        ? options.idempotencyKey.trim()
+        : "";
+    if (!idempotencyKey) {
+      throw new Error("idempotencyKey must not be blank");
+    }
+    // Count code points, as the server does, not UTF-16 code units.
+    const keyLength = idempotencyKey.replace(
+      /[\uD800-\uDBFF][\uDC00-\uDFFF]/g,
+      "_"
+    ).length;
+    if (keyLength > MAX_IDEMPOTENCY_KEY_LENGTH) {
+      throw new Error(
+        `idempotencyKey must be at most ${MAX_IDEMPOTENCY_KEY_LENGTH} characters`
+      );
+    }
+    const response: AxiosResponse = await this.client.post(
+      "/v1/awi/execute",
+      {
+        session_id: sessionId,
+        action,
+        parameters: parameters || {},
+        representation_request: options.representation,
+        dry_run: options.dryRun ?? false,
+      },
+      {
+        headers: {
+          "X-Permit-Id": permitId,
+          "Idempotency-Key": idempotencyKey,
+        },
+      }
+    );
     return response.data;
   }
 

@@ -20,6 +20,13 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
+def _failure_status(exc: Exception) -> Optional[int]:
+    """HTTP status of a failed send, without touching the exception text."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code
+    return None
+
+
 class NotificationService:
     """
     Sends alerts via email (Resend) and Slack webhooks.
@@ -315,7 +322,13 @@ This is an automated notification from Agent Middleware API.
             resp.raise_for_status()
             logger.info(f"Slack alert sent: {title}")
         except Exception as e:
-            logger.error(f"Failed to send Slack alert: {e}")
+            # The webhook URL is the credential, and httpx puts the request
+            # URL in its exception text, so log only the status and type.
+            logger.error(
+                "slack_alert_failed status=%s error_type=%s",
+                _failure_status(e),
+                type(e).__name__,
+            )
 
     async def send_email(
         self,
@@ -364,7 +377,12 @@ This is an automated notification from Agent Middleware API.
             resp.raise_for_status()
             logger.info(f"Alert email sent to {to}")
         except Exception as e:
-            logger.error(f"Failed to send email to {to}: {e}")
+            logger.error(
+                "Failed to send email to %s: status=%s error_type=%s",
+                to,
+                _failure_status(e),
+                type(e).__name__,
+            )
 
     async def send_security_alert(
         self,

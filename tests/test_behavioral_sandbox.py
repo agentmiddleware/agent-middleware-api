@@ -7,6 +7,7 @@ import os
 import pytest
 
 from httpx import ASGITransport, AsyncClient
+from pydantic import ValidationError
 
 from app.main import app
 from app.core.config import get_settings
@@ -86,6 +87,66 @@ class TestBehavioralSandboxSchemas:
         assert req.env_id == "sandbox-test-123"
         assert req.tool_name == "test_tool"
         assert req.dry_run is True
+
+    @pytest.mark.proof
+    @pytest.mark.parametrize(
+        "key",
+        [
+            "LD_PRELOAD",
+            "LD_LIBRARY_PATH",
+            "LD_AUDIT",
+            "DYLD_INSERT_LIBRARIES",
+            "GLIBC_TUNABLES",
+            "PYTHONPATH",
+            "PYTHONSTARTUP",
+            "PYTHONHOME",
+            "PATH",
+            "HOME",
+            "BASH_ENV",
+            "SANDBOX",
+        ],
+    )
+    def test_env_vars_refuse_loader_and_interpreter_keys(self, key):
+        """Keys that steer the loader, interpreter, or sandbox marker are refused."""
+        with pytest.raises(ValidationError):
+            SandboxEnvironmentCreate(name="t", env_vars={key: "/tmp/evil.so"})
+
+    @pytest.mark.proof
+    @pytest.mark.parametrize(
+        "key", ["", "1ABC", "MY-VAR", "MY VAR", "A=B", "ld_preload", "X" * 65, "A\x00B"]
+    )
+    def test_env_vars_refuse_malformed_names(self, key):
+        with pytest.raises(ValidationError):
+            SandboxEnvironmentCreate(name="t", env_vars={key: "1"})
+
+    @pytest.mark.proof
+    def test_env_vars_bound_count_and_value_size(self):
+        with pytest.raises(ValidationError):
+            SandboxEnvironmentCreate(
+                name="t", env_vars={f"VAR_{i}": "1" for i in range(33)}
+            )
+        with pytest.raises(ValidationError):
+            SandboxEnvironmentCreate(name="t", env_vars={"BIG": "x" * 4097})
+        with pytest.raises(ValidationError):
+            SandboxEnvironmentCreate(name="t", env_vars={"NUL": "a\x00b"})
+
+        at_limit = SandboxEnvironmentCreate(
+            name="t", env_vars={f"VAR_{i}": "x" * 4096 for i in range(32)}
+        )
+        assert len(at_limit.env_vars) == 32
+
+    @pytest.mark.proof
+    def test_env_vars_allow_ordinary_keys(self):
+        req = SandboxEnvironmentCreate(
+            name="t", env_vars={"MY_FLAG": "1", "_PRIVATE": "x", "FEATURE_X2": "on"}
+        )
+        assert req.env_vars == {"MY_FLAG": "1", "_PRIVATE": "x", "FEATURE_X2": "on"}
+
+    @pytest.mark.proof
+    def test_environment_name_is_bounded(self):
+        with pytest.raises(ValidationError):
+            SandboxEnvironmentCreate(name="n" * 129)
+        assert SandboxEnvironmentCreate(name="n" * 128).name == "n" * 128
 
 
 class TestBehavioralSandboxEngine:
@@ -379,6 +440,44 @@ class TestBehavioralSandboxRouter:
             data = response.json()
             assert "env_id" in data
             assert data["name"] == "router-test"
+
+    @pytest.mark.proof
+    @pytest.mark.anyio
+    async def test_create_environment_endpoint_refuses_dangerous_env_vars(
+        self, api_headers
+    ):
+        """LD_PRELOAD/PATH/PYTHONPATH never reach the stored environment."""
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            for env_vars in (
+                {"LD_PRELOAD": "/tmp/evil.so"},
+                {"PATH": "/tmp/evil-bin"},
+                {"PYTHONPATH": "/tmp/evil-lib"},
+                {"SANDBOX": "false"},
+            ):
+                response = await client.post(
+                    "/v1/sandbox/behavioral/environments",
+                    json={"name": "env-guard", "env_vars": env_vars},
+                    headers=api_headers,
+                )
+                assert response.status_code == 422, env_vars
+                assert "env_id" not in response.text
+
+            response = await client.post(
+                "/v1/sandbox/behavioral/environments",
+                json={"name": "n" * 129},
+                headers=api_headers,
+            )
+            assert response.status_code == 422
+
+            response = await client.post(
+                "/v1/sandbox/behavioral/environments",
+                json={"name": "env-guard", "env_vars": {"MY_FLAG": "1"}},
+                headers=api_headers,
+            )
+            assert response.status_code == 201
+            assert response.json()["name"] == "env-guard"
 
     @pytest.mark.anyio
     async def test_execute_tool_endpoint(self, api_headers):

@@ -118,6 +118,9 @@ class BroadcastJob:
     status: str = "pending"      # pending, broadcasting, complete, partial
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     completed_at: datetime | None = None
+    # Wallet whose key created the job; None for bootstrap-admin jobs, which
+    # only bootstrap admins can then see. Enforced by the router.
+    owner_wallet_id: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -141,6 +144,7 @@ class OracleBroadcastEngine:
         openapi_spec: dict | None = None,
         agent_json: dict | None = None,
         directories: list[str] | None = None,
+        owner_wallet_id: str | None = None,
     ) -> BroadcastJob:
         """
         Execute a mass-broadcast of discovery artifacts to agent directories.
@@ -154,6 +158,7 @@ class OracleBroadcastEngine:
             openapi_spec: Generated OpenAPI spec
             agent_json: Generated agent.json manifest
             directories: Optional list of directory IDs to target (default: all)
+            owner_wallet_id: Wallet that owns the job (the caller's wallet)
         """
         job = BroadcastJob(
             job_id=f"bcast-{uuid.uuid4().hex[:12]}",
@@ -161,6 +166,7 @@ class OracleBroadcastEngine:
             service_version=service_version,
             base_url=base_url,
             generation_id=generation_id,
+            owner_wallet_id=owner_wallet_id,
         )
 
         # Step 1: Register in local Agent Oracle

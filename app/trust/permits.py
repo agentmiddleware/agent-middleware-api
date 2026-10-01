@@ -11,6 +11,7 @@ from app.services.permits import (
     PermitValidation,
     PermitWriteContendedError,
     get_permit_service,
+    permit_constraints_snapshot,
     permit_model_to_response,
 )
 
@@ -20,5 +21,6 @@ __all__ = [
     "PermitValidation",
     "PermitWriteContendedError",
     "get_permit_service",
+    "permit_constraints_snapshot",
     "permit_model_to_response",
 ]

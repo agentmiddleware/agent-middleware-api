@@ -12,7 +12,8 @@ precision errors (e.g., 0.1 + 0.2 ≠ 0.3 with floats).
 """
 
 from decimal import Decimal
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from enum import Enum
@@ -127,6 +128,13 @@ class AlertSeverity(str, Enum):
 
 SAFE_WALLET_ID = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$")
 
+# Wallet, ledger and service money columns are Numeric(20, 8): twelve integer
+# digits. Float money request fields stay strictly below 1e12 and refuse the
+# Infinity/NaN literals Starlette's JSON parser accepts (ge/gt alone let
+# +Infinity through), so an unstorable amount is a 422 here rather than an
+# Infinity balance and ledger row (SQLite) or a 500 (Postgres).
+MAX_STORABLE_AMOUNT = 1e12
+
 
 def _exact_decimal(value: Any) -> str | None:
     """Return a JSON-safe exact decimal string without binary float math."""
@@ -184,6 +192,8 @@ class CreateSponsorWalletRequest(BaseModel):
     initial_credits: float = Field(
         default=0.0,
         ge=0,
+        lt=MAX_STORABLE_AMOUNT,
+        allow_inf_nan=False,
         description="Initial credit balance (in ecosystem credits).",
     )
     currency: str = Field(
@@ -217,11 +227,15 @@ class CreateAgentWalletRequest(BaseModel):
     budget_credits: float = Field(
         ...,
         gt=0,
+        lt=MAX_STORABLE_AMOUNT,
+        allow_inf_nan=False,
         description="Credits to provision from the sponsor's balance.",
     )
     daily_limit: float | None = Field(
         default=None,
         ge=0,
+        lt=MAX_STORABLE_AMOUNT,
+        allow_inf_nan=False,
         description="Optional daily spend cap.",
     )
     auto_refill: bool = Field(
@@ -231,11 +245,15 @@ class CreateAgentWalletRequest(BaseModel):
     auto_refill_threshold: float = Field(
         default=100.0,
         ge=0,
+        lt=MAX_STORABLE_AMOUNT,
+        allow_inf_nan=False,
         description="Refill trigger threshold.",
     )
     auto_refill_amount: float = Field(
         default=1000.0,
         ge=0,
+        lt=MAX_STORABLE_AMOUNT,
+        allow_inf_nan=False,
         description="Amount to refill.",
     )
 
@@ -254,11 +272,15 @@ class CreateChildWalletRequest(BaseModel):
     budget_credits: float = Field(
         ...,
         gt=0,
+        lt=MAX_STORABLE_AMOUNT,
+        allow_inf_nan=False,
         description="Credits to provision from parent's balance.",
     )
     max_spend: float = Field(
         ...,
         gt=0,
+        lt=MAX_STORABLE_AMOUNT,
+        allow_inf_nan=False,
         description="Hard lifetime spend cap in credits.",
     )
     task_description: str = Field(
@@ -473,6 +495,8 @@ class TopUpRequest(BaseModel):
     amount_fiat: float = Field(
         ...,
         gt=0,
+        lt=MAX_STORABLE_AMOUNT,
+        allow_inf_nan=False,
         description="Amount in fiat currency (e.g., USD).",
     )
     payment_method: str = Field(default="stripe", description="Payment rail to use.")
@@ -619,7 +643,9 @@ class RegisterServiceRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: str = Field(default="", max_length=1000)
     category: ServiceCategory
-    credits_per_unit: float = Field(..., gt=0)
+    credits_per_unit: float = Field(
+        ..., gt=0, lt=MAX_STORABLE_AMOUNT, allow_inf_nan=False
+    )
     unit_name: str = Field(default="request", max_length=50)
     mcp_manifest: dict | None = None
 
@@ -665,19 +691,50 @@ class TransferResponse(ExactDecimalFieldsMixin):
     status: str
 
 
+# Stripe Identity's document allowed_types vocabulary, verbatim. Anything else
+# (including the old "document" default and "driver_license") is refused by
+# Stripe, so it is refused here first.
+KYCDocumentType = Literal["driving_license", "id_card", "passport"]
+
+_KYC_RETURN_URL_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
 class CreateKYCSessionRequest(BaseModel):
     """Request to create a KYC verification session."""
 
     wallet_id: str = Field(..., description="Wallet ID requiring KYC verification.")
     return_url: str = Field(
         ...,
-        description="URL to redirect after verification completes.",
+        max_length=2048,
+        description=(
+            "Absolute https URL to redirect to after verification completes "
+            "(plain http is accepted only for localhost)."
+        ),
         examples=["https://yourapp.com/kyc-callback"],
     )
-    document_type: str = Field(
-        default="document",
-        description="Type of document to verify (passport, driver_license, id_card).",
+    document_type: KYCDocumentType | None = Field(
+        default=None,
+        description=(
+            "Restrict verification to one Stripe Identity document type "
+            "(driving_license, id_card, passport). Omit to accept any of them."
+        ),
     )
+
+    @field_validator("return_url")
+    @classmethod
+    def _validate_return_url(cls, v: str) -> str:
+        """Only a real web origin may receive the post-verification redirect."""
+        parts = urlsplit(v)
+        host = (parts.hostname or "").lower()
+        if not host:
+            raise ValueError("return_url must be an absolute URL with a host")
+        if parts.scheme == "https":
+            return v
+        if parts.scheme == "http" and host in _KYC_RETURN_URL_LOOPBACK_HOSTS:
+            return v
+        raise ValueError(
+            "return_url must use https (plain http is allowed only for localhost)"
+        )
 
 
 class KYCSessionResponse(BaseModel):

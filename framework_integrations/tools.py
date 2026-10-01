@@ -23,10 +23,13 @@ def get_langgraph_tools(client: B2AClient) -> list[Any]:
     tools = get_langgraph_tools(client)
 
     agent = create_react_agent(model, tools)
-    result = agent.invoke({"messages": ["..."]})
+    result = await agent.ainvoke({"messages": ["..."]})
     ```
 
-    Returns a list of LangChain BaseTool-compatible objects.
+    Returns a list of LangChain BaseTool-compatible objects. The tools are
+    async (``B2AClient`` is an async client), so drive them with
+    ``ainvoke``; LangChain refuses a sync ``invoke`` of an async-only tool
+    rather than returning an un-awaited coroutine.
     """
     try:
         from langchain_core.tools import tool
@@ -34,7 +37,7 @@ def get_langgraph_tools(client: B2AClient) -> list[Any]:
         raise ImportError("LangGraph not installed. Run: pip install langgraph")
 
     @tool
-    def emit_telemetry(event: str, properties: str = "{}") -> str:
+    async def emit_telemetry(event: str, properties: str = "{}") -> str:
         """Emit a telemetry event to track agent activity.
 
         Args:
@@ -44,16 +47,18 @@ def get_langgraph_tools(client: B2AClient) -> list[Any]:
         import json
 
         props = json.loads(properties) if properties else {}
-        return client.emit_telemetry(event, props)
+        return str(await client.emit_telemetry(event, props))
 
     @tool
-    def get_balance() -> str:
+    async def get_balance() -> str:
         """Get the current wallet balance in credits."""
-        balance = client.get_balance()
+        balance = await client.get_balance()
         return f"Current balance: {balance} credits"
 
     @tool
-    def send_message(to_agent: str, content: str, priority: str = "normal") -> str:
+    async def send_message(
+        to_agent: str, content: str, priority: str = "normal"
+    ) -> str:
         """Send a message to another agent.
 
         Args:
@@ -64,10 +69,10 @@ def get_langgraph_tools(client: B2AClient) -> list[Any]:
         import json
 
         content_dict = json.loads(content)
-        return client.send_message(to_agent, content_dict, priority)
+        return str(await client.send_message(to_agent, content_dict, priority))
 
     @tool
-    def ai_decide(context: str, options: str) -> str:
+    async def ai_decide(context: str, options: str) -> str:
         """Make an AI-powered decision based on context.
 
         Args:
@@ -78,11 +83,11 @@ def get_langgraph_tools(client: B2AClient) -> list[Any]:
 
         ctx = json.loads(context)
         opts = json.loads(options)
-        decision = client.decide(ctx, opts)
+        decision = await client.decide(ctx, opts)
         return f"Decision: {decision}"
 
     @tool
-    def self_heal(issue: str, error_log: str = "{}") -> str:
+    async def self_heal(issue: str, error_log: str = "{}") -> str:
         """AI-powered self-healing diagnostics.
 
         Args:
@@ -92,18 +97,18 @@ def get_langgraph_tools(client: B2AClient) -> list[Any]:
         import json
 
         ctx = json.loads(error_log)
-        result = client.heal(issue, ctx)
+        result = await client.heal(issue, ctx)
         return str(result)
 
     @tool
-    def awi_session(target_url: str, max_steps: int = 100) -> str:
+    async def awi_session(target_url: str, max_steps: int = 100) -> str:
         """Create an AWI session for web automation.
 
         Args:
             target_url: URL of the website to interact with
             max_steps: Maximum steps for the session
         """
-        result = client.create_awi_session(target_url, max_steps)
+        result = await client.create_awi_session(target_url, max_steps)
         return f"Session created: {result.get('session_id', 'unknown')}"
 
     return [
@@ -118,97 +123,28 @@ def get_langgraph_tools(client: B2AClient) -> list[Any]:
 
 def get_crewai_tools(client: B2AClient) -> list[Any]:
     """
-    Get CrewAI-compatible tools from B2A client.
+    Not supported: raises ``NotImplementedError``.
 
-    Usage:
-    ```python
-    from crewai import Agent
-    from framework_integrations import B2AClient, get_crewai_tools
+    CrewAI executes every tool through a synchronous ``invoke`` that runs an
+    async tool body with ``asyncio.run`` -- a fresh event loop per call.
+    ``B2AClient`` is an async client whose ``httpx.AsyncClient`` pools
+    connections on the loop that opened them, so the call after the first
+    fails with "Event loop is closed". The earlier sync tools never awaited
+    the client at all (no request was sent; the balance and AWI tools
+    returned a coroutine repr or crashed). Rather than hand CrewAI tools that
+    cannot work, this factory refuses.
 
-    client = B2AClient(api_key="...", wallet_id="...")
-    tools = get_crewai_tools(client)
-
-    researcher = Agent(
-        role="Researcher",
-        goal="Find and analyze information",
-        tools=tools
-    )
-    ```
-
-    Returns a list of CrewAI Tool objects.
+    Use the governed CrewAI wrapper instead (permit -> invoke -> signed
+    receipt): ``CrewAIB2ATool`` from ``wrappers/crewai-agent-middleware``,
+    or ``framework_integrations.LangGraphGovernedTools`` for LangGraph.
     """
-    try:
-        from crewai.tools import BaseTool
-    except ImportError:
-        raise ImportError("CrewAI not installed. Run: pip install crewai")
-
-    class TelemetryTool(BaseTool):
-        name: str = "emit_telemetry"
-        description: str = "Emit a telemetry event to track agent activity"
-
-        def _run(self, event: str, properties: str = "{}") -> str:
-            import json
-
-            props = json.loads(properties) if properties else {}
-            return client.emit_telemetry(event, props)
-
-    class BalanceTool(BaseTool):
-        name: str = "get_balance"
-        description: str = "Get the current wallet balance in credits"
-
-        def _run(self) -> str:
-            balance = client.get_balance()
-            return f"Current balance: {balance} credits"
-
-    class MessageTool(BaseTool):
-        name: str = "send_message"
-        description: str = "Send a message to another agent"
-
-        def _run(self, to_agent: str, content: str, priority: str = "normal") -> str:
-            import json
-
-            content_dict = json.loads(content)
-            return client.send_message(to_agent, content_dict, priority)
-
-    class DecideTool(BaseTool):
-        name: str = "ai_decide"
-        description: str = "Make an AI-powered decision"
-
-        def _run(self, context: str, options: str) -> str:
-            import json
-
-            ctx = json.loads(context)
-            opts = json.loads(options)
-            decision = client.decide(ctx, opts)
-            return f"Decision: {decision}"
-
-    class HealTool(BaseTool):
-        name: str = "self_heal"
-        description: str = "AI-powered self-healing diagnostics"
-
-        def _run(self, issue: str, error_log: str = "{}") -> str:
-            import json
-
-            ctx = json.loads(error_log)
-            result = client.heal(issue, ctx)
-            return str(result)
-
-    class AWISessionTool(BaseTool):
-        name: str = "awi_session"
-        description: str = "Create an AWI session for web automation"
-
-        def _run(self, target_url: str, max_steps: int = 100) -> str:
-            result = client.create_awi_session(target_url, max_steps)
-            return f"Session created: {result.get('session_id', 'unknown')}"
-
-    return [
-        TelemetryTool(),
-        BalanceTool(),
-        MessageTool(),
-        DecideTool(),
-        HealTool(),
-        AWISessionTool(),
-    ]
+    raise NotImplementedError(
+        "get_crewai_tools is not supported: CrewAI runs each async tool on a "
+        "fresh event loop, which the async B2AClient cannot survive between "
+        "calls. Use the governed CrewAIB2ATool from "
+        "wrappers/crewai-agent-middleware, or "
+        "framework_integrations.LangGraphGovernedTools."
+    )
 
 
 def get_autogen_tools(client: B2AClient) -> list[Any]:
@@ -256,61 +192,68 @@ def get_llamaindex_tools(client: B2AClient) -> list[Any]:
     tools = get_llamaindex_tools(client)
 
     agent = ReActAgent.from_tools(tools, llm=llm)
+    response = await agent.achat("...")
     ```
 
-    Returns a list of LlamaIndex FunctionTool objects.
+    Returns a list of LlamaIndex FunctionTool objects built from async
+    functions (``B2AClient`` is an async client), so ``acall`` awaits the
+    request in the caller's event loop.
     """
     try:
         from llama_index.core.tools import FunctionTool
     except ImportError:
         raise ImportError("LlamaIndex not installed. Run: pip install llama-index")
 
-    def emit_telemetry(event: str, properties: str = "{}") -> str:
+    async def emit_telemetry(event: str, properties: str = "{}") -> str:
         """Emit a telemetry event to track agent activity."""
         import json
 
         props = json.loads(properties) if properties else {}
-        return str(client.emit_telemetry(event, props))
+        return str(await client.emit_telemetry(event, props))
 
-    def get_balance() -> str:
+    async def get_balance() -> str:
         """Get the current wallet balance in credits."""
-        balance = client.get_balance()
+        balance = await client.get_balance()
         return f"Current balance: {balance} credits"
 
-    def send_message(to_agent: str, content: str, priority: str = "normal") -> str:
+    async def send_message(
+        to_agent: str, content: str, priority: str = "normal"
+    ) -> str:
         """Send a message to another agent."""
         import json
 
         content_dict = json.loads(content)
-        return str(client.send_message(to_agent, content_dict, priority))
+        return str(await client.send_message(to_agent, content_dict, priority))
 
-    def ai_decide(context: str, options: str) -> str:
+    async def ai_decide(context: str, options: str) -> str:
         """Make an AI-powered decision based on context."""
         import json
 
         ctx = json.loads(context)
         opts = json.loads(options)
-        decision = client.decide(ctx, opts)
+        decision = await client.decide(ctx, opts)
         return f"Decision: {decision}"
 
-    def self_heal(issue: str, error_log: str = "{}") -> str:
+    async def self_heal(issue: str, error_log: str = "{}") -> str:
         """AI-powered self-healing diagnostics."""
         import json
 
         ctx = json.loads(error_log)
-        result = client.heal(issue, ctx)
+        result = await client.heal(issue, ctx)
         return str(result)
 
-    def awi_session(target_url: str, max_steps: int = 100) -> str:
+    async def awi_session(target_url: str, max_steps: int = 100) -> str:
         """Create an AWI session for web automation."""
-        result = client.create_awi_session(target_url, max_steps)
+        result = await client.create_awi_session(target_url, max_steps)
         return f"Session created: {result.get('session_id', 'unknown')}"
 
+    # async_fn, not fn: FunctionTool.acall awaits these in the caller's loop
+    # instead of calling a sync wrapper that hands back a coroutine.
     return [
-        FunctionTool.from_defaults(fn=emit_telemetry, name="emit_telemetry"),
-        FunctionTool.from_defaults(fn=get_balance, name="get_balance"),
-        FunctionTool.from_defaults(fn=send_message, name="send_message"),
-        FunctionTool.from_defaults(fn=ai_decide, name="ai_decide"),
-        FunctionTool.from_defaults(fn=self_heal, name="self_heal"),
-        FunctionTool.from_defaults(fn=awi_session, name="awi_session"),
+        FunctionTool.from_defaults(async_fn=emit_telemetry, name="emit_telemetry"),
+        FunctionTool.from_defaults(async_fn=get_balance, name="get_balance"),
+        FunctionTool.from_defaults(async_fn=send_message, name="send_message"),
+        FunctionTool.from_defaults(async_fn=ai_decide, name="ai_decide"),
+        FunctionTool.from_defaults(async_fn=self_heal, name="self_heal"),
+        FunctionTool.from_defaults(async_fn=awi_session, name="awi_session"),
     ]

@@ -18,6 +18,7 @@ from b2a_sdk import (
     PermitRequest,
     TransportError,
 )
+from b2a_sdk.x402 import X402Client
 
 
 def _permit_payload() -> dict:
@@ -331,6 +332,24 @@ async def test_authentication_and_transport_failures_are_typed() -> None:
     async with _client(transport_handler) as client:
         with pytest.raises(TransportError):
             await client.discover_tools()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("client_cls", [AgentMiddlewareClient, X402Client])
+async def test_api_key_is_not_kept_as_plain_instance_state(client_cls: type) -> None:
+    secret = "sk-live-do-not-log"
+    client = client_cls(api_key=secret, base_url="https://gateway.example")
+    try:
+        # Debug dumps of the object (repr, vars/__dict__) must not carry the
+        # secret; the transport's X-API-Key header is the one place it lives.
+        assert secret not in repr(client)
+        assert secret not in repr(vars(client))
+        # Reading the configured key stays backward compatible.
+        assert client.api_key == secret
+        with pytest.raises(AttributeError):
+            client.api_key = "sk-other"
+    finally:
+        await client._client.aclose()
 
 
 @pytest.mark.asyncio

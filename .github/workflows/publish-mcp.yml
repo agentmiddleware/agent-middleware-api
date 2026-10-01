@@ -37,7 +37,16 @@ jobs:
           import urllib.error
           import urllib.request
 
-          url = json.load(open("server.json"))["remotes"][0]["url"]
+          remotes = json.load(open("server.json")).get("remotes") or []
+          if not remotes:
+              print(
+                  "::error::Preflight failed: server.json declares no remote."
+                  " The standard /mcp endpoint stays disabled under the"
+                  " production SOP, so there is nothing to publish"
+                  " (docs/mcp-registry-submission.md)."
+              )
+              sys.exit(1)
+          url = remotes[0]["url"]
 
           def post(payload, session_id=None):
               headers = {

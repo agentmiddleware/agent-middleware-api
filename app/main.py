@@ -10,6 +10,7 @@ auditable receipts. Other workloads are labeled proof surfaces.
 
 import asyncio
 import logging
+import math
 from pathlib import Path
 import sys
 import time
@@ -17,8 +18,10 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import Depends, FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from .core.auth import AuthContext, get_auth_context
 from .core.build_metadata import get_build_commit_sha, get_build_provenance
@@ -610,6 +613,34 @@ app.add_middleware(SecurityHeadersMiddleware)
 # layer below — routing included — sees a GET, and the response leaves with
 # the GET's status and headers but no body, per RFC 9110 §9.3.2.
 app.add_middleware(HeadMethodMiddleware)
+
+
+def _json_safe_numbers(value: Any) -> Any:
+    """Spell non-finite floats as strings; strict JSON has no such numbers."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return "NaN" if math.isnan(value) else ("Infinity" if value > 0 else "-Infinity")
+    if isinstance(value, dict):
+        return {key: _json_safe_numbers(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_safe_numbers(item) for item in value]
+    return value
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_error_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    """FastAPI's default 422, safe to render for every refused input.
+
+    Starlette's JSON parser accepts the bare literals Infinity, -Infinity and
+    NaN, and a validation error echoes the refused input back. The default
+    handler then failed to serialize its own 422 and answered 500 instead.
+    """
+    return JSONResponse(
+        status_code=422,
+        content={"detail": _json_safe_numbers(jsonable_encoder(exc.errors()))},
+    )
+
 
 # --- Mount service routers ---
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -33,6 +35,7 @@ def proof_surfaces_off(monkeypatch):
     import app.routers.discover as discover_mod
     import app.routers.well_known as well_known_mod
 
+    original_flag = os.environ.get("ENABLE_PROOF_SURFACES")
     monkeypatch.setenv("ENABLE_PROOF_SURFACES", "false")
     get_settings.cache_clear()
     cfg = get_settings()
@@ -42,7 +45,14 @@ def proof_surfaces_off(monkeypatch):
     monkeypatch.setattr(well_known_mod, "settings", cfg)
     sync_proof_surface_mcp_registration()
     yield
-    monkeypatch.setenv("ENABLE_PROOF_SURFACES", "true")
+    # Rebuild the cached settings from the flag as it stood before this
+    # fixture, not from a hard-coded value: restoring "true" here left every
+    # later test in the session reading ENABLE_PROOF_SURFACES=True from the
+    # settings cache, after monkeypatch had already put the env var back.
+    if original_flag is None:
+        monkeypatch.delenv("ENABLE_PROOF_SURFACES", raising=False)
+    else:
+        monkeypatch.setenv("ENABLE_PROOF_SURFACES", original_flag)
     get_settings.cache_clear()
     restored = get_settings()
     monkeypatch.setattr(main_mod, "settings", restored)
@@ -168,10 +178,14 @@ async def test_llm_txt_uses_public_url_and_wedge_quickstart(client, monkeypatch)
 
 
 @pytest.mark.anyio
+@pytest.mark.proof
 async def test_tools_json_still_lists_awi_when_proof_on(client):
-    settings = get_settings()
-    if not settings.ENABLE_PROOF_SURFACES:
-        pytest.skip("suite default expects proof surfaces on")
+    """With proof surfaces on, the stubs the off-gate hides come back.
+
+    The suite default is ENABLE_PROOF_SURFACES=false; the ``proof`` marker
+    makes the autouse conftest fixture turn the flag on for this test only.
+    """
+    assert get_settings().ENABLE_PROOF_SURFACES is True
     sync_proof_surface_mcp_registration()
     resp = await client.get("/mcp/tools.json")
     assert resp.status_code == 200
