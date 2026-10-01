@@ -244,6 +244,9 @@ class McpGenerator:
         if truth.get("runtime_service"):
             annotations["runtimeService"] = truth["runtime_service"]
 
+        if self.registry.get_action_binding(service) is not None:
+            annotations["actionPermitRequired"] = True
+
         if service.get("require_permit"):
             annotations["requirePermit"] = True
 

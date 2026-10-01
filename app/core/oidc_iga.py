@@ -486,7 +486,9 @@ def reset_iga_counters() -> None:
     _window_calls.clear()
 
 
-async def enforce_tool_call(principal: EnterprisePrincipal, tool_name: str) -> IGADecision:
+async def enforce_tool_call(
+    principal: EnterprisePrincipal, tool_name: str, *, consume: bool = True
+) -> IGADecision:
     """Decide whether this enterprise principal may invoke ``tool_name``.
 
     First grant whose bundle is active, allows the tool, and passes the
@@ -542,6 +544,10 @@ async def enforce_tool_call(principal: EnterprisePrincipal, tool_name: str) -> I
             continue
         eligible.append(grant)
 
+    if eligible and not consume:
+        # Existing-action access checks current grants without spending another use.
+        grant = eligible[0]
+        return IGADecision(True, "allowed", grant.group, grant.policy_id, {})
     if eligible:
         # Check-and-record must be atomic: the same lock covers the cap read,
         # the decision, and the increment, so two concurrent calls cannot both
