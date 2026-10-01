@@ -1,4 +1,4 @@
-> Status: draft for review. Industry sources are cited as characterized by the editorial review of 2026-10-01; they were not re-fetched from this environment.
+> Status: draft for review. Industry sources were checked on 2026-10-01 through web search, against search excerpts of each cited page and independent coverage; the cited pages themselves could not be fetched from the authoring environment.
 
 # Intent is not authority: what an agent gateway cannot promise, and what it can
 
@@ -24,15 +24,15 @@ Who may mint a permit is a wallet-authority question, not an operator-only one. 
 
 *Evidence class: industry. Surveys, disclosed vulnerabilities and regulation. None of it measures AMW.*
 
-The Cloud Security Alliance press release of 21 April 2026 reports a 65% figure. It is a result from 418 surveyed professionals, not a measured rate across all organizations. IBM's report of 30 July 2025 says 13% of organizations surveyed reported a breach of AI models or applications, and 97% of that subset reported lacking proper AI access controls; it concerns AI models and applications, not agents specifically.
+The Cloud Security Alliance press release of 21 April 2026 reports that 65% of respondents' organizations had experienced AI agent-related incidents in the past 12 months. That figure comes from an online survey of 418 IT and security professionals, run in January 2026 and commissioned by Token Security. It is a survey result, not a measured rate across all organizations. IBM's report of 30 July 2025 says 13% of the breached organizations it studied reported a breach of AI models or applications, and 97% of that subset reported lacking proper AI access controls; that statistic concerns AI models and applications, not agents specifically.
 
-The incidents and disclosures commonly cited in this debate do not establish accidental duplicate execution. EchoLeak was a disclosed vulnerability with no known affected customers, not a confirmed theft incident. The Step Finance theft is explained by the company as compromised executive devices; nobody has established that autonomous agents executed those transfers, so it is not used here as agent evidence. Both belong to the class of compromised credentials, malicious instructions, supply-chain exposure and exfiltration, and neither says anything about retries.
+The incidents and disclosures commonly cited in this debate do not establish accidental duplicate execution. EchoLeak (CVE-2025-32711), a zero-click flaw in Microsoft 365 Copilot found by Aim Labs and disclosed in June 2025 after Microsoft patched it, was a disclosed vulnerability with no known affected customers, not a confirmed theft incident. Step Finance blamed the January 2026 theft from its treasury, which it put at about $40 million, on compromised executive devices; nobody has established that autonomous agents executed those transfers, so it is not used here as agent evidence. Both belong to the class of compromised credentials, malicious instructions, supply-chain exposure and exfiltration, and neither says anything about retries.
 
 Those classes map poorly onto what AMW does. By the repository's own OWASP self-assessment, credential misuse is enforced only for DB-backed wallet-scoped keys (bootstrap-admin keys are full-control credentials the claim does not cover); prompt injection is contained rather than prevented, because the gateway cannot see prompts; supply chain is partially addressed because there is no registry to poison and the single upstream origin is validated and pinned. The mapping has no row for data exfiltration, and no document in the repository claims to address it (docs/owasp-agentic-top10-mapping.md).
 
 AMW's idempotency argument therefore has to stand on its own evidence. The repository's own duplicate-execution evidence is three GitHub issue reports and one community thread: stripe/ai#402 and crewAIInc/crewAI#5802 are reproductions, langchain-ai/langgraph#7417 is a confirmed production incident of duplicated execution and cost, and the community thread is a first-hand report of one request firing a side effect four times. The repository records no confirmed production incident of a duplicated payment charge (docs/market-research-2026-08.md:57-73, 326-328).
 
-On regulation, current Commission guidance under the AI Omnibus places the principal high-risk deadlines in December 2027 and August 2028. The EUR 35m / 7% of turnover penalty tier concerns prohibited practices, not ordinary high-risk compliance failures generally. AMW claims no compliance mapping to the EU AI Act or any other framework; receipts may be one input an auditor accepts, and that determination is the operator's (WEDGE.md:292-295). AEGIS is a research system described in a paper, not an established standard.
+On regulation, the EU AI Omnibus, a regulation in force since 27 July 2026, moved the application date for stand-alone high-risk AI systems listed in Annex III to 2 December 2027, and for high-risk AI embedded in products covered by Annex I product legislation to 2 August 2028. The EUR 35m / 7% of turnover penalty tier concerns prohibited practices, not ordinary high-risk compliance failures generally. AMW claims no compliance mapping to the EU AI Act or any other framework; receipts may be one input an auditor accepts, and that determination is the operator's (WEDGE.md:292-295). AEGIS, a pre-execution firewall and audit layer for agent tool calls, is a research system described in a 2026 preprint, not an established standard.
 
 ## What AMW's measured results show
 
@@ -105,7 +105,7 @@ Intent is not authority. The agent's wish to refund, pay or deploy is a request;
 
 ## Sources
 
-External (characterizations as verified by the reviewer; not fetched from this environment):
+External (checked on 2026-10-01 through web search against each page's search excerpts and independent coverage; the pages themselves were not fetched):
 
 - Step Finance company statement: https://www.bleepingcomputer.com/news/security/step-finance-says-compromised-execs-devices-led-to-40m-crypto-theft/
 - EchoLeak discoverer's account: https://www.catonetworks.com/blog/breaking-down-echoleak/
