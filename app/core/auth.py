@@ -393,7 +393,10 @@ async def _auth_from_jwt(token: str) -> AuthContext:
 
     return AuthContext(
         source="jwt",
-        raw_key=token[:20] + "...",
+        # Not a credential: a stable, non-secret handle for the API key that
+        # minted this token. A truncated token cannot serve: every EdDSA JWT
+        # opens with the same encoded header, so all JWT callers shared it.
+        raw_key=f"jwt:{payload.key_id}",
         wallet_id=payload.sub,
         key_id=payload.key_id,
         is_bootstrap_admin=False,

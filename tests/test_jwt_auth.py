@@ -91,6 +91,30 @@ async def test_raw_access_token_authenticates(jwt_service, live_key):
 
 
 @pytest.mark.anyio
+async def test_jwt_contexts_do_not_share_raw_key(jwt_service, live_key):
+    """Legacy routers key resource ownership on ``raw_key``. Every EdDSA token
+    starts with the same encoded header, so a truncated token made every JWT
+    caller in every wallet the same principal there."""
+    first = jwt_service.create_access_token(
+        wallet_id="wallet_one", key_id="key_one", scopes=[]
+    )
+    second = jwt_service.create_access_token(
+        wallet_id="wallet_two", key_id="key_two", scopes=[]
+    )
+    assert first[:20] == second[:20]
+
+    one = await get_auth_context(api_key=None, authorization=f"Bearer {first}")
+    two = await get_auth_context(api_key=second)
+
+    assert one.raw_key != two.raw_key
+    # The handle is stable per originating key and carries no token material.
+    again = await get_auth_context(api_key=None, authorization=f"Bearer {first}")
+    assert again.raw_key == one.raw_key
+    assert first[:20] not in one.raw_key
+    assert second[:20] not in two.raw_key
+
+
+@pytest.mark.anyio
 async def test_raw_unbound_access_token_fails_closed(jwt_service, auth_client):
     token = jwt_service.create_access_token(
         wallet_id="wallet_raw_unbound", key_id=None, scopes=[]
