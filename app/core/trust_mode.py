@@ -44,6 +44,11 @@ LOCAL_COMPATIBLE_ENVIRONMENTS = frozenset(
 )
 
 
+# BEHAVIORAL_SANDBOX_PYTHON_BACKEND values that run agent code directly on the
+# host (app/services/behavioral_sandbox.py). Kept in step with that selector.
+UNSAFE_HOST_SANDBOX_BACKENDS = frozenset({"unsafe_host", "host"})
+
+
 class TrustModeGuardrailError(RuntimeError):
     """Raised when trust mode is unsafe for a production-like deployment."""
 
@@ -139,6 +144,7 @@ def validate_trust_mode_config(
     enable_public_mcp_endpoint: bool = False,
     allow_private_network_targets: bool = False,
     allow_unsafe_host_python_sandbox: bool = False,
+    behavioral_sandbox_python_backend: str = "",
     redis_url: str = "",
     public_url: str = "",
     database_url: str = "",
@@ -225,6 +231,14 @@ def validate_trust_mode_config(
                 "production-like environments (host Python execution is not "
                 "a sandbox; it is a local-development escape hatch)"
             )
+        sandbox_backend = (behavioral_sandbox_python_backend or "").strip().lower()
+        if sandbox_backend in UNSAFE_HOST_SANDBOX_BACKENDS:
+            violations.append(
+                "BEHAVIORAL_SANDBOX_PYTHON_BACKEND must not be "
+                f"{sandbox_backend!r} in production-like environments (it "
+                "selects the same unsandboxed host Python execution as "
+                "ALLOW_UNSAFE_HOST_PYTHON_SANDBOX; use 'docker' or 'disabled')"
+            )
         configured_database_url = (database_url or "").strip()
         if not configured_database_url:
             violations.append(
@@ -280,6 +294,7 @@ def validate_trust_mode_guardrails(settings: Settings) -> None:
         enable_public_mcp_endpoint=settings.ENABLE_PUBLIC_MCP_ENDPOINT,
         allow_private_network_targets=settings.ALLOW_PRIVATE_NETWORK_TARGETS,
         allow_unsafe_host_python_sandbox=settings.ALLOW_UNSAFE_HOST_PYTHON_SANDBOX,
+        behavioral_sandbox_python_backend=settings.BEHAVIORAL_SANDBOX_PYTHON_BACKEND,
         redis_url=settings.REDIS_URL,
         public_url=settings.PUBLIC_URL,
         database_url=settings.DATABASE_URL,

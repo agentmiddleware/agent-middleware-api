@@ -34,7 +34,8 @@ refuses to boot a production-like environment (`prod`, `staging`, `preview`, …
 unless **all** of these hold: `TRUST_MODE_ENABLED=true`, a valid 32-byte Ed25519
 signing key is configured, `ALLOW_LEGACY_UNPERMITTED_MCP=false`, `DEBUG=false`,
 `WEBAUTHN_ALLOW_MOCK=false`, `ALLOW_PRIVATE_NETWORK_TARGETS=false`,
-`ALLOW_UNSAFE_HOST_PYTHON_SANDBOX=false`, and proof surfaces are off. A permissive posture is
+`ALLOW_UNSAFE_HOST_PYTHON_SANDBOX=false`, no host `BEHAVIORAL_SANDBOX_PYTHON_BACKEND`,
+and proof surfaces are off. A permissive posture is
 only reachable in local/dev/test, and it logs a loud startup warning.
 
 ---
