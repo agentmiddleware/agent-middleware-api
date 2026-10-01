@@ -888,6 +888,13 @@ class ReceiptModel(SQLModel, table=True):
         index=True,
     )
 
+    action_contract_version: Optional[int] = Field(default=None)
+    action_payload_hash: Optional[str] = Field(default=None)
+    action_schema_id: Optional[str] = Field(default=None)
+    action_schema_version: Optional[str] = Field(default=None)
+    action_public_tool_id: Optional[str] = Field(default=None)
+    action_upstream_binding_hash: Optional[str] = Field(default=None)
+
     model_config = {"arbitrary_types_allowed": True}
 
 

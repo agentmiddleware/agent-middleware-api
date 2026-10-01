@@ -486,7 +486,7 @@ async def test_action_gate_rejects_unsupported_signed_constraints(monkeypatch, c
 
 
 @pytest.mark.anyio
-async def test_generic_abandon_retains_action_owner(action_runtime):
+async def test_generic_abandon_retains_prepared_action_owner(action_runtime):
     from app.services.idempotency import get_idempotency_service
     from app.db.database import get_session_factory
     from app.db.models import PermitModel
@@ -498,6 +498,10 @@ async def test_generic_abandon_retains_action_owner(action_runtime):
     begun = await idem.begin_action_with_record(
         wallet_id=permit.subject_wallet_id, identity=identity
     )
+    accepted, _ = await prepare_action(
+        action_runtime, {"amount_minor": 1, "recipient": "alice"}
+    )
+    assert accepted.allowed
     await idem.abandon(
         wallet_id=permit.subject_wallet_id,
         endpoint=identity.endpoint,
