@@ -116,6 +116,12 @@ async def test_duplicate_guard_health_endpoint_requires_admin_auth(client):
     assert "log_mode_blocks" in body
     assert "enforce_mode_blocks" in body
     assert "window_seconds" in body
+    assert isinstance(body["enforce_mode_denials_durable"], int)
+    scopes = body["metric_scopes"]
+    assert scopes["log_mode_blocks"]["durable"] is False
+    assert scopes["enforce_mode_blocks"]["durable"] is False
+    assert scopes["enforce_mode_denials_durable"]["durable"] is True
+    assert scopes["enforce_mode_denials_durable"]["source"] == "receipts"
 
 
 def test_repeat_window_seconds_rejects_excessive_values():

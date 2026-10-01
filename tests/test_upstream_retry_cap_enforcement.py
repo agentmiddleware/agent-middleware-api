@@ -459,6 +459,18 @@ async def test_duplicate_detection_enforce_mode(client, clean_database, monkeypa
         assert "error" in body2
         assert body2["error"]["message"] == "duplicate_request_new_key"
         assert executor.dispatch_count == 1  # No second dispatch
+
+        # The refusal is a denial receipt, so the durable count on the admin
+        # observability endpoint reflects it without depending on this
+        # process's in-memory counter.
+        metrics = await client.get(
+            "/health/duplicate-guard", headers=BOOTSTRAP_HEADERS
+        )
+        assert metrics.status_code == 200
+        metrics_body = metrics.json()
+        assert metrics_body["mode"] == "enforce"
+        assert metrics_body["enforce_mode_denials_durable"] == 1
+        assert metrics_body["enforce_mode_blocks"] >= 1
     finally:
         get_service_registry().unregister_local(tool_name)
 

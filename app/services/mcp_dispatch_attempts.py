@@ -44,21 +44,82 @@ from app.services.signing_keys import canonical_json, sha256_hex
 
 logger = logging.getLogger(__name__)
 
-# In-memory duplicate guard metrics for observability
+# In-memory duplicate guard metrics for observability. Both counters are
+# process-local: they reset on restart and, under several workers, describe
+# only the answering process. The durable count published next to them comes
+# from the denial receipts every enforce-mode refusal writes.
 _duplicate_guard_metrics = {
     "log_mode_blocks": 0,  # Times log mode would have blocked
     "enforce_mode_blocks": 0,  # Times enforce mode actually blocked
 }
 
+DUPLICATE_DENIAL_REASON_CODE = "duplicate_request_new_key"
 
-def get_duplicate_guard_metrics() -> dict[str, Any]:
-    """Return current duplicate guard metrics and effective mode."""
+DUPLICATE_GUARD_METRIC_SCOPES: dict[str, dict[str, Any]] = {
+    "log_mode_blocks": {
+        "scope": "process_local",
+        "durable": False,
+        "reset_on": "process_restart",
+        "description": (
+            "Log-mode detections counted by this API process only; an allowed "
+            "call leaves no durable denial record."
+        ),
+    },
+    "enforce_mode_blocks": {
+        "scope": "process_local",
+        "durable": False,
+        "reset_on": "process_restart",
+        "description": "Enforce-mode refusals counted by this API process only.",
+    },
+    "enforce_mode_denials_durable": {
+        "scope": "durable",
+        "durable": True,
+        "source": "receipts",
+        "description": (
+            "Denial receipts with reason_code duplicate_request_new_key across "
+            "the service lifetime."
+        ),
+    },
+}
+
+
+async def count_duplicate_denial_receipts() -> int:
+    """Count enforce-mode duplicate refusals from their durable denial receipts."""
+    from app.db.models import ReceiptModel
+
+    factory = get_session_factory()
+    async with factory() as session:
+        result = await session.execute(
+            select(func.count())
+            .select_from(ReceiptModel)
+            .where(
+                cast(
+                    ColumnElement[bool],
+                    ReceiptModel.reason_code == DUPLICATE_DENIAL_REASON_CODE,
+                )
+            )
+        )
+        return int(result.scalar_one() or 0)
+
+
+async def get_duplicate_guard_metrics() -> dict[str, Any]:
+    """Return the effective duplicate guard mode and its metrics.
+
+    The process-local counters answer "since this worker started". The durable
+    count answers "ever", from the receipts the guard writes when it refuses a
+    call. Each metric's scope is published alongside so a monitor never has to
+    infer durability from the values.
+    """
     settings = get_settings()
+    mode = settings.MCP_UPSTREAM_DUPLICATE_GUARD
+    mode_value = mode.value if isinstance(mode, DuplicateGuardMode) else str(mode)
     return {
-        "mode": settings.MCP_UPSTREAM_DUPLICATE_GUARD.value,
+        "mode": mode_value,
         "log_mode_blocks": _duplicate_guard_metrics["log_mode_blocks"],
         "enforce_mode_blocks": _duplicate_guard_metrics["enforce_mode_blocks"],
+        "enforce_mode_denials_durable": await count_duplicate_denial_receipts(),
         "window_seconds": settings.MCP_UPSTREAM_DUPLICATE_WINDOW_SECONDS,
+        "metric_scopes": DUPLICATE_GUARD_METRIC_SCOPES,
     }
 
 
