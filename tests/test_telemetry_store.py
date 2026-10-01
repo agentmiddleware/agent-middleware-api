@@ -3,9 +3,10 @@ Direct tests for the PG-backed EventStore introduced in #28.
 
 test_telemetry.py already covers the HTTP surface. These tests exercise
 the store in isolation to verify: round-trip fidelity, filter correctness,
-retention eviction, and stats aggregation.
+retention eviction, stats aggregation, and tenant (owner) partitioning.
 """
 
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -19,7 +20,12 @@ from app.schemas.telemetry import (
     TelemetryEvent,
     TelemetryEventType,
 )
-from app.services.telemetry_pm import EventStore
+from app.services.telemetry_pm import (
+    ANY_OWNER,
+    AnomalyDetector,
+    EventStore,
+    owner_for_wallet,
+)
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -215,3 +221,131 @@ async def test_query_time_window_uses_event_timestamp_when_present(
     assert recent_event.timestamp == recent.astimezone(timezone.utc).replace(
         tzinfo=None
     )
+
+
+# --- Tenant (owner) partitioning ---
+
+OWNER_A = owner_for_wallet("agt-tenant-a")
+OWNER_B = owner_for_wallet("agt-tenant-b")
+
+
+@pytest.mark.anyio
+async def test_owner_partitions_are_isolated():
+    store = EventStore()
+    await store.ingest([_event(source="a1"), _event(source="a2")], "b-a", OWNER_A)
+    await store.ingest([_event(source="b1")], "b-b", OWNER_B)
+    await store.ingest([_event(source="ops")], "b-admin")
+
+    # A pre-scoping row (bare id, no owner) lands in the unowned partition.
+    factory = get_session_factory()
+    async with factory() as session:
+        session.add(
+            TelemetryEventModel(
+                event_id="legacy-evt",
+                batch_id="b-legacy",
+                event_type="error",
+                severity="high",
+                source="legacy",
+                message="old",
+            )
+        )
+        await session.commit()
+
+    a_events = await store.query(owner=OWNER_A)
+    assert {se.event.source for se in a_events} == {"a1", "a2"}
+    for se in a_events:
+        # The owner key fits the 50-char id column and never embeds the
+        # wallet id itself.
+        assert len(se.event_id) <= 50
+        assert "agt-tenant-a" not in se.event_id
+
+    assert {se.event.source for se in await store.query(owner=OWNER_B)} == {"b1"}
+    assert {se.event.source for se in await store.query(owner=None)} == {
+        "ops",
+        "legacy",
+    }
+    assert len(await store.query()) == 5
+    assert len(await store.query(owner=ANY_OWNER)) == 5
+    assert await store.query(owner=owner_for_wallet("agt-stranger")) == []
+
+    a_stats = await store.stats(owner=OWNER_A)
+    assert a_stats["total"] == 2
+    assert a_stats["by_source"] == {"a1": 1, "a2": 1}
+    assert (await store.stats(owner=None))["by_source"] == {"ops": 1, "legacy": 1}
+    assert (await store.stats())["total"] == 5
+
+    assert await store.owners(event_type=TelemetryEventType.ERROR) == sorted(
+        [None, OWNER_A, OWNER_B], key=lambda o: (o is not None, o or "")
+    )
+
+
+class _FakeDurableState:
+    """In-process stand-in for the durable state store."""
+
+    enabled = True
+
+    def __init__(self, payload=None):
+        self.payload = payload
+
+    async def load_json(self, key):
+        return self.payload
+
+    async def save_json(self, key, value):
+        self.payload = json.loads(json.dumps(value))
+        return True
+
+
+def _detector(store: EventStore, state: _FakeDurableState) -> AnomalyDetector:
+    detector = AnomalyDetector(store)
+    detector._state = state  # type: ignore[assignment]
+    return detector
+
+
+@pytest.mark.anyio
+async def test_detector_builds_anomalies_per_owner_and_persists_owner():
+    store = EventStore()
+    # A alone has a concentrated burst; B's errors are below the sample floor
+    # and must not dilute (or join) A's anomaly.
+    await store.ingest([_event(source="a-svc") for _ in range(12)], "b-a", OWNER_A)
+    await store.ingest([_event(source="b-svc") for _ in range(3)], "b-b", OWNER_B)
+
+    state = _FakeDurableState()
+    detector = _detector(store, state)
+    [report] = await detector.analyze()
+    assert report.summary.startswith("12/12 errors")
+    assert report.affected_endpoints == ["a-svc"]
+
+    # Owner survives a restart via the durable payload.
+    reloaded = _detector(store, state)
+    assert await reloaded.get_anomaly(report.anomaly_id, owner=OWNER_A) is not None
+    assert await reloaded.get_anomaly(report.anomaly_id, owner=OWNER_B) is None
+    assert await reloaded.get_anomaly(report.anomaly_id) is not None
+    assert (await reloaded.get_anomalies(owner=OWNER_B))[1] == 0
+    assert (await reloaded.get_anomalies(owner=OWNER_A))[1] == 1
+
+
+@pytest.mark.anyio
+async def test_persisted_anomaly_without_owner_is_admin_only():
+    """An anomaly persisted before tenant scoping (or with a corrupt owner)
+    fails closed: only an unscoped (bootstrap-admin) read sees it."""
+    now = utc_now().isoformat()
+    record = {
+        "anomaly_id": "anom-legacy",
+        "severity": "medium",
+        "category": "source_concentration",
+        "summary": "legacy",
+        "affected_endpoints": ["svc"],
+        "event_count": 10,
+        "first_seen": now,
+        "last_seen": now,
+    }
+    state = _FakeDurableState(
+        {"anom-legacy": record, "anom-bad-owner": {**record, "owner": 42}}
+    )
+    detector = _detector(EventStore(), state)
+
+    for anomaly_id in ("anom-legacy", "anom-bad-owner"):
+        assert await detector.get_anomaly(anomaly_id, owner=OWNER_A) is None
+        assert await detector.get_anomaly(anomaly_id) is not None
+    assert (await detector.get_anomalies(owner=OWNER_A))[1] == 0
+    assert (await detector.get_anomalies())[1] == 2
