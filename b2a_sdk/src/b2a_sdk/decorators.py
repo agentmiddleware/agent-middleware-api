@@ -8,7 +8,7 @@ Developer Experience decorators for agent tools.
 - @billable: Gates function execution behind the billing engine
 - @mcp_tool: Registers a function as an MCP tool with auto-discovery
 
-Both decorators use asyncio.create_task for non-blocking execution.
+Telemetry is scheduled as a background task for non-blocking execution.
 """
 
 import asyncio
@@ -17,8 +17,8 @@ import functools
 import inspect
 import time
 import traceback
-from collections.abc import Callable
-from typing import ParamSpec, TypeVar, get_type_hints
+from collections.abc import Callable, Coroutine
+from typing import Any, ParamSpec, TypeVar, get_type_hints
 
 from .client import B2AClient, DryRunSimulation
 
@@ -30,6 +30,43 @@ _registration_callbacks: list[Callable] = []
 _dry_run_context: contextvars.ContextVar[DryRunSimulation | None] = contextvars.ContextVar(
     "dry_run_context", default=None
 )
+
+# Strong references to in-flight telemetry tasks: the event loop keeps only a
+# weak one, so an unreferenced task can be garbage-collected before it runs.
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _fire_and_forget(coro: Coroutine[Any, Any, Any]) -> None:
+    """Schedule a telemetry coroutine without blocking or failing the caller.
+
+    A sync function under @monitored can run with no event loop, where
+    ``asyncio.create_task`` raises RuntimeError *after* the function already
+    ran -- discarding its result, or masking its own exception. Telemetry is
+    best-effort, so with no running loop the event is dropped instead.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        coro.close()
+        return
+    task = loop.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
+def _error_details(func_name: str, exc: Exception, capture_traceback: bool) -> dict[str, Any]:
+    """Error telemetry fields; exception text and traceback only on opt-in.
+
+    Exception messages and source lines in a traceback can carry secrets
+    (tokens, PII, request bodies), so by default only the exception type is
+    reported.
+    """
+    if not capture_traceback:
+        return {"message": f"Error in {func_name}"}
+    return {
+        "message": f"Error in {func_name}: {exc}",
+        "stack_trace": traceback.format_exc(),
+    }
 
 
 def register_mcp_tool_callback(callback: Callable) -> None:
@@ -107,13 +144,16 @@ def monitored(
     client: B2AClient,
     service_name: str,
     capture_args: bool = False,
+    *,
+    capture_traceback: bool = False,
 ):
     """
     Instantly wires a function to the Autonomous Product Manager.
 
-    Tracks execution latency, success/failure status, and captures
-    stack traces on error. Telemetry is fired in the background
-    using asyncio.create_task to add zero latency to execution.
+    Tracks execution latency and success/failure status, and reports the
+    exception type on error. Telemetry is fired in the background to add zero
+    latency to execution; a sync function called with no running event loop
+    still runs normally, but its telemetry event is dropped.
 
     Usage:
         b2a = B2AClient(api_key="agt-xyz123")
@@ -127,6 +167,9 @@ def monitored(
         client: B2AClient instance for telemetry submission
         service_name: Name of the service/module (appears in telemetry)
         capture_args: If True, includes function args in metadata
+        capture_traceback: If True, error events also carry the exception
+            message and the formatted traceback, which can contain secrets.
+            Off by default.
 
     Returns:
         Decorator function
@@ -149,7 +192,7 @@ def monitored(
                 metadata["latency_ms"] = latency_ms
                 metadata["status"] = "success"
 
-                asyncio.create_task(
+                _fire_and_forget(
                     client.telemetry(
                         event_type="api_call",
                         source=service_name,
@@ -165,17 +208,16 @@ def monitored(
             except Exception as e:
                 latency_ms = int((time.time() - start_time) * 1000)
 
-                asyncio.create_task(
+                _fire_and_forget(
                     client.telemetry(
                         event_type="error",
                         source=service_name,
-                        message=f"Error in {func.__name__}: {str(e)}",
                         severity="high",
                         function=func.__name__,
                         error_type=type(e).__name__,
-                        stack_trace=traceback.format_exc(),
                         latency_ms=latency_ms,
                         status="failed",
+                        **_error_details(func.__name__, e, capture_traceback),
                     )
                 )
 
@@ -197,7 +239,7 @@ def monitored(
                 metadata["latency_ms"] = latency_ms
                 metadata["status"] = "success"
 
-                asyncio.create_task(
+                _fire_and_forget(
                     client.telemetry(
                         event_type="api_call",
                         source=service_name,
@@ -213,17 +255,16 @@ def monitored(
             except Exception as e:
                 latency_ms = int((time.time() - start_time) * 1000)
 
-                asyncio.create_task(
+                _fire_and_forget(
                     client.telemetry(
                         event_type="error",
                         source=service_name,
-                        message=f"Error in {func.__name__}: {str(e)}",
                         severity="high",
                         function=func.__name__,
                         error_type=type(e).__name__,
-                        stack_trace=traceback.format_exc(),
                         latency_ms=latency_ms,
                         status="failed",
+                        **_error_details(func.__name__, e, capture_traceback),
                     )
                 )
 
@@ -242,6 +283,8 @@ def billable(
     service_category: str,
     units: float = 1.0,
     request_path: str | None = None,
+    *,
+    idempotency_key_factory: Callable[..., str] | None = None,
 ):
     """
     Gates function execution behind the Agent Financial Gateway.
@@ -249,6 +292,15 @@ def billable(
     Before executing the function, the SDK attempts to charge the wallet.
     If the wallet has insufficient funds, InsufficientFundsError is raised
     and the function never executes.
+
+    Without ``idempotency_key_factory`` each call is charged independently,
+    so the charge is not replay-safe: retrying a call whose charge response
+    was lost bills the wallet again. The factory receives the decorated
+    function's arguments and must return the same key for every retry of the
+    same logical call (derive it from a caller-supplied request or job id; a
+    fresh UUID per call protects nothing). The server then replays the
+    original charge instead of debiting twice. The decorated function itself
+    still runs on every call.
 
     When called within a `simulate_session()` context, the charge is
     simulated without affecting real balance or triggering velocity monitoring.
@@ -272,12 +324,17 @@ def billable(
         service_category: Service category for pricing
         units: Number of units to charge (default: 1.0)
         request_path: Optional API path for tracking
+        idempotency_key_factory: Optional callable, invoked with the decorated
+            function's arguments, returning the charge's ``Idempotency-Key``
 
     Returns:
         Decorator function
 
     Raises:
         InsufficientFundsError: If wallet balance is insufficient
+        IdempotencyConflictError: If the key was used for a different charge
+        ValueError: If the factory returns a blank or overlong key (nothing is
+            charged and the function does not run)
     """
 
     def decorator(func: Callable[P, T]) -> Callable[P, T]:
@@ -296,11 +353,17 @@ def billable(
                 sim.add_charge_result(result)
                 return await func(*args, **kwargs)
 
+            charge_kwargs: dict[str, Any] = {}
+            if idempotency_key_factory is not None:
+                # Passed only when configured, so a client whose charge()
+                # predates the keyword keeps working.
+                charge_kwargs["idempotency_key"] = idempotency_key_factory(*args, **kwargs)
             await client.charge(
                 wallet_id=wallet_id,
                 service_category=service_category,
                 units=units,
                 request_path=request_path or f"{func.__module__}.{func.__name__}",
+                **charge_kwargs,
             )
             return await func(*args, **kwargs)
 
@@ -324,6 +387,8 @@ def combined(
     service_name: str,
     units: float = 1.0,
     request_path: str | None = None,
+    *,
+    idempotency_key_factory: Callable[..., str] | None = None,
 ):
     """
     Combines @monitored and @billable into a single decorator.
@@ -344,6 +409,7 @@ def combined(
         service_name: Name for telemetry
         units: Units to charge
         request_path: Optional API path
+        idempotency_key_factory: Optional charge key factory; see @billable
 
     Returns:
         Decorator function
@@ -351,7 +417,14 @@ def combined(
 
     def decorator(func: Callable[P, T]) -> Callable[P, T]:
         monitored_decorator = monitored(client, service_name)
-        billable_decorator = billable(client, wallet_id, service_category, units, request_path)
+        billable_decorator = billable(
+            client,
+            wallet_id,
+            service_category,
+            units,
+            request_path,
+            idempotency_key_factory=idempotency_key_factory,
+        )
 
         decorated = billable_decorator(monitored_decorator(func))
 
