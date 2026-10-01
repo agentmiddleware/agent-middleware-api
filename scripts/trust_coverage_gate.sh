@@ -30,8 +30,29 @@ TRUST_COVERAGE_TESTS=(
   tests/test_signed_quotes.py
   tests/test_denial_details_and_self_service.py
   tests/test_adversarial_five_claims.py
+  tests/test_standard_mcp_endpoint.py
+  tests/test_api_keys.py
+  tests/test_key_management.py
+  tests/test_revocation_containment.py
+  tests/test_jwt_auth.py
+  tests/test_tenant_isolation_hardening.py
+  tests/test_static_dev_api_keys.py
+  tests/test_dev_key_self_provision.py
+  tests/test_policy_bundles.py
+  tests/test_policy_decisions.py
+  tests/test_evidence_bundle.py
+  tests/test_preflight.py
+  tests/test_governed_metering.py
+  tests/test_billing.py
+  tests/test_public_mcp_endpoint.py
+  tests/test_discovery.py
+  tests/test_public_metadata.py
+  tests/test_trust_coverage_gate_scope.py
 )
 
+# tests/test_trust_coverage_gate_scope.py fails when a CORE_TRUST_ROUTERS
+# module or a core-loop service is neither listed here nor exempted there with
+# a written reason, so a new trust module cannot sit outside the floor.
 TRUST_COVERAGE_MODULES=(
   app.routers.mcp
   app.routers.permits
@@ -55,6 +76,21 @@ TRUST_COVERAGE_MODULES=(
   app.routers.quotes
   app.routers.permit_requests
   app.core.trust_mode
+  app.core.auth
+  app.services.api_key_service
+  app.services.audit_chain
+  app.services.policies
+  app.services.governed_metering
+  app.routers.mcp_standard
+  app.routers.api_keys
+  app.routers.dev_keys
+  app.routers.policies
+  app.routers.evidence
+  app.routers.preflight
+  app.routers.billing
+  app.routers.mcp_public
+  app.routers.well_known
+  app.routers.discover
 )
 
 COV_ARGS=()
