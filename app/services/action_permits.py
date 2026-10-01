@@ -23,6 +23,49 @@ class ActionToolBinding:
     input_schema: dict[str, Any]
 
 
+def upstream_action_binding_hash(
+    *,
+    deployment_authority: str,
+    public_tool_id: str,
+    upstream_origin: str,
+    upstream_tool_name: str,
+    schema_id: str,
+    schema_version: str,
+    input_schema: dict[str, Any],
+) -> str:
+    """Bind exact configured destination and schema, independent of DNS or keys."""
+    descriptor = dict(
+        binding_contract_version=1,
+        deployment_authority=deployment_authority,
+        public_tool_id=public_tool_id,
+        upstream_origin=upstream_origin,
+        upstream_tool_name=upstream_tool_name,
+        schema_id=schema_id,
+        schema_version=schema_version,
+        input_schema=input_schema,
+    )
+    for value in (
+        deployment_authority,
+        public_tool_id,
+        upstream_origin,
+        upstream_tool_name,
+        schema_id,
+        schema_version,
+    ):
+        if type(value) is not str or not value:
+            raise ValueError("invalid_action_binding")
+    _check_schema(input_schema)
+    return hashlib.sha256(
+        json.dumps(
+            descriptor,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
 @dataclass(frozen=True)
 class ActionExecutionIdentity:
     endpoint: str

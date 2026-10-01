@@ -30,7 +30,11 @@ from ..db.database import get_session_factory
 from ..db.models import ServiceRegistryModel
 from ..schemas.billing import ServiceCategory
 
-from .action_permits import ActionToolBinding, _check_schema
+from .action_permits import (
+    ActionToolBinding,
+    _check_schema,
+    upstream_action_binding_hash,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -360,6 +364,17 @@ class ServiceRegistry:
                 or not action_binding.schema_version
             ):
                 raise ValueError("invalid_action_binding")
+            expected_hash = upstream_action_binding_hash(
+                deployment_authority=action_binding.deployment_authority,
+                public_tool_id=service_id,
+                upstream_origin=upstream_origin,
+                upstream_tool_name=upstream_tool_name,
+                schema_id=action_binding.schema_id,
+                schema_version=action_binding.schema_version,
+                input_schema=input_schema,
+            )
+            if action_binding.upstream_binding_hash != expected_hash:
+                raise ValueError("action_binding_registry_mismatch")
             _check_schema(action_binding.input_schema)
             action_binding = replace(
                 action_binding, input_schema=deepcopy(input_schema)
