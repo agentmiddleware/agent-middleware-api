@@ -122,6 +122,69 @@ async def test_duplicate_guard_health_endpoint_requires_admin_auth(client):
     assert scopes["enforce_mode_blocks"]["durable"] is False
     assert scopes["enforce_mode_denials_durable"]["durable"] is True
     assert scopes["enforce_mode_denials_durable"]["source"] == "receipts"
+    assert "enforce_mode_denials_durable_unavailable" not in body
+
+
+@pytest.mark.anyio
+async def test_duplicate_guard_metrics_without_database_report_null(monkeypatch):
+    """No database is a supported posture: the process-local counters are
+    still served and the durable count is null with a stable reason."""
+    from app.services import mcp_dispatch_attempts as module
+
+    monkeypatch.setattr(module, "is_database_configured", lambda: False)
+    body = await module.get_duplicate_guard_metrics()
+    assert body["enforce_mode_denials_durable"] is None
+    assert body["enforce_mode_denials_durable_unavailable"] == "database_not_configured"
+    assert "mode" in body
+    assert isinstance(body["log_mode_blocks"], int)
+    assert isinstance(body["enforce_mode_blocks"], int)
+
+
+@pytest.mark.anyio
+async def test_duplicate_guard_metrics_survive_a_failing_count(monkeypatch):
+    """A failing count must not take the whole admin endpoint down, and the
+    reason exposes an exception type only, never a message."""
+    from app.services import mcp_dispatch_attempts as module
+
+    def explode():
+        raise RuntimeError("DATABASE_URL not configured. simulated secret-ish detail")
+
+    monkeypatch.setattr(module, "get_session_factory", explode)
+    body = await module.get_duplicate_guard_metrics()
+    assert body["enforce_mode_denials_durable"] is None
+    assert body["enforce_mode_denials_durable_unavailable"] == "RuntimeError"
+    assert "secret-ish" not in str(body)
+
+
+@pytest.mark.anyio
+async def test_duplicate_guard_metrics_bound_the_count_with_a_timeout(monkeypatch):
+    """A hung database must not hang the admin endpoint."""
+    import asyncio
+
+    from app.services import mcp_dispatch_attempts as module
+
+    async def hang() -> int:
+        await asyncio.sleep(5)
+        return 0
+
+    monkeypatch.setattr(module, "_query_duplicate_denial_receipts", hang)
+    monkeypatch.setattr(module, "DUPLICATE_DENIAL_COUNT_TIMEOUT_SECONDS", 0.05)
+    body = await module.get_duplicate_guard_metrics()
+    assert body["enforce_mode_denials_durable"] is None
+    assert body["enforce_mode_denials_durable_unavailable"] == "TimeoutError"
+
+
+@pytest.mark.anyio
+async def test_duplicate_guard_health_endpoint_rejects_non_admin_keys(client):
+    """A wallet-scoped key is authenticated but not a bootstrap admin."""
+    from tests.test_trust_helpers import provision_agent_wallet
+
+    provisioned = await provision_agent_wallet(client)
+    r = await client.get(
+        "/health/duplicate-guard", headers=provisioned["agent_headers"]
+    )
+    assert r.status_code == 403
+    assert r.json()["detail"]["error"] == "admin_access_denied"
 
 
 def test_repeat_window_seconds_rejects_excessive_values():
