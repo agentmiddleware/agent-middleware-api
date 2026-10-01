@@ -45,6 +45,35 @@ def _invalid_request(error: str, message: str) -> dict:
     return {"error": error, "message": message}
 
 
+async def _refuse_bounded_minter(auth: AuthContext) -> None:
+    """Refuse to mint a fresh key for a caller whose own key is bounded.
+
+    POST /v1/api-keys and rotate without key_id issue a key carrying only
+    the bounds the request names, and both are reachable with the wallet's
+    own key (or a JWT derived from it). A key with a use budget or an expiry
+    could otherwise mint an unlimited, never-expiring sibling and outlive its
+    own limits. Rotating the bounded key itself (key_id set) stays allowed:
+    that path carries its remaining bounds over. Bootstrap admins and
+    unbounded wallet keys are unaffected.
+    """
+    if auth.is_bootstrap_admin:
+        return
+    if not await get_api_key_service().is_key_bounded(auth.key_id):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={
+            "error": "bounded_key_cannot_mint",
+            "message": (
+                "This API key has a use budget or an expiry, so it cannot "
+                "mint new keys. Rotate it with key_id and revoke_old to carry "
+                "its remaining bounds over, or ask a bootstrap admin for a key "
+                "with fresh bounds."
+            ),
+        },
+    )
+
+
 @router.post(
     "",
     response_model=APIKeyWithSecret,
@@ -66,6 +95,7 @@ async def create_api_key(
     Store it securely - it cannot be retrieved later.
     """
     auth.require_wallet_access(request.wallet_id)
+    await _refuse_bounded_minter(auth)
     service = get_api_key_service()
 
     try:
@@ -142,6 +172,9 @@ async def rotate_api_key(
     Creates a new key and optionally revokes the old one.
     """
     auth.require_wallet_access(request.wallet_id)
+    if request.key_id is None:
+        # Without key_id this is a plain create with no bounds to inherit.
+        await _refuse_bounded_minter(auth)
     service = get_api_key_service()
 
     client_ip = http_request.client.host if http_request.client else None
