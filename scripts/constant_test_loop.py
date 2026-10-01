@@ -423,6 +423,12 @@ def run_constant_test(
                 "scopes": [f"tool:{governed_tool}:invoke", "billing:charge"],
                 "max_credits": max_credits,
                 "expires_at": expires_at,
+                # This harness deliberately repeats one operator-chosen payload
+                # on every run under a fresh idempotency key. Opt its permit out
+                # of the cross-key duplicate guard so running the gateway with
+                # MCP_UPSTREAM_DUPLICATE_GUARD=enforce denies real duplicates
+                # without turning this monitor red on its second run.
+                "allow_identical_repeats": True,
             },
             headers=permit_headers,
         )
