@@ -25,6 +25,7 @@ Features:
 
 import logging
 import math
+from collections.abc import Collection, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional
@@ -52,6 +53,9 @@ class SessionMemory:
     accessed_at: datetime
     access_count: int = 0
     relevance_tags: list[str] = field(default_factory=list)
+    # Wallet that owned the AWI session when it was indexed; None for an
+    # ownerless (bootstrap-admin) session. Owner-scoped retrieval filters on it.
+    owner_wallet_id: Optional[str] = None
 
 
 @dataclass
@@ -207,6 +211,7 @@ class AWIRAGEngine:
         action_history: list[dict[str, Any]],
         state_snapshots: list[dict[str, Any]],
         metadata: Optional[dict[str, Any]] = None,
+        owner_wallet_id: Optional[str] = None,
     ) -> str:
         """
         Index a completed session for future retrieval.
@@ -217,6 +222,7 @@ class AWIRAGEngine:
             action_history: List of actions taken in the session.
             state_snapshots: State representations captured during session.
             metadata: Additional metadata to store.
+            owner_wallet_id: Wallet owning the AWI session (None if ownerless).
 
         Returns:
             The memory_id for the indexed session.
@@ -272,6 +278,7 @@ class AWIRAGEngine:
             accessed_at=utc_now(),
             relevance_tags=[final_type]
             + self._generate_tags(action_sequence, key_entities),
+            owner_wallet_id=owner_wallet_id,
         )
 
         self._memories[memory_id] = memory
@@ -306,6 +313,27 @@ class AWIRAGEngine:
         memory_ids = self._session_index.get(session_id, [])
         return [self._memories[mid] for mid in memory_ids if mid in self._memories]
 
+    def _owned_ids(
+        self,
+        memory_ids: Iterable[str],
+        owner_wallet_ids: Optional[Collection[Optional[str]]],
+    ) -> set[str]:
+        """Restrict ``memory_ids`` to memories whose owner is in the scope.
+
+        Retrieval scopes by owner *before* scoring, so another tenant's
+        memories are never compared, have their access counters bumped, or
+        take a ``top_k`` slot that a later filter would empty. ``None`` means
+        unscoped and is for bootstrap-admin and internal callers only.
+        """
+        if owner_wallet_ids is None:
+            return set(memory_ids)
+        return {
+            mid
+            for mid in memory_ids
+            if mid in self._memories
+            and self._memories[mid].owner_wallet_id in owner_wallet_ids
+        }
+
     # ─────────────────────────────────────────────────────────────────────────
     # Semantic Search
     # ─────────────────────────────────────────────────────────────────────────
@@ -317,6 +345,7 @@ class AWIRAGEngine:
         top_k: int = 5,
         similarity_threshold: float = 0.7,
         include_raw_state: bool = False,
+        owner_wallet_ids: Optional[Collection[Optional[str]]] = None,
     ) -> list[SearchResult]:
         """
         Semantic search over session memories.
@@ -330,14 +359,18 @@ class AWIRAGEngine:
             top_k: Number of results to return.
             similarity_threshold: Minimum similarity score (0.0-1.0).
             include_raw_state: Include full state data in results.
+            owner_wallet_ids: Only search memories owned by these wallets
+                (``None`` in the collection matches ownerless memories).
+                ``None`` searches every tenant: bootstrap/internal use only.
 
         Returns:
             List of SearchResult objects sorted by similarity.
         """
         query_embedding = await self._generate_embedding(query)
 
-        # Dormant legacy branch; init_chroma() leaves _use_chroma false.
-        if self._use_chroma and self._chroma_collection:
+        # Dormant legacy branch; init_chroma() leaves _use_chroma false. The
+        # Chroma index carries no owner, so scoped searches never use it.
+        if self._use_chroma and self._chroma_collection and owner_wallet_ids is None:
             results = await self._search_chroma(query_embedding, session_type, top_k)
             # Add raw_state if requested
             if include_raw_state:
@@ -348,7 +381,7 @@ class AWIRAGEngine:
             return results
 
         # Fallback to in-memory search
-        candidate_ids = set(self._memories.keys())
+        candidate_ids = self._owned_ids(self._memories.keys(), owner_wallet_ids)
 
         if session_type:
             type_ids = self._type_index.get(session_type, set())
@@ -390,6 +423,7 @@ class AWIRAGEngine:
         entities: list[str],
         session_type: Optional[str] = None,
         top_k: int = 5,
+        owner_wallet_ids: Optional[Collection[Optional[str]]] = None,
     ) -> list[SearchResult]:
         """
         Search for sessions containing specific entities.
@@ -398,13 +432,14 @@ class AWIRAGEngine:
             entities: List of entity names to search for.
             session_type: Optional filter by session type.
             top_k: Number of results to return.
+            owner_wallet_ids: Owner scope, as for :meth:`search`.
 
         Returns:
             List of SearchResult objects.
         """
         entity_set = {e.lower() for e in entities}
 
-        candidate_ids = set(self._memories.keys())
+        candidate_ids = self._owned_ids(self._memories.keys(), owner_wallet_ids)
 
         if session_type:
             type_ids = self._type_index.get(session_type, set())
@@ -449,6 +484,7 @@ class AWIRAGEngine:
         self,
         session_id: str,
         top_k: int = 3,
+        owner_wallet_ids: Optional[Collection[Optional[str]]] = None,
     ) -> list[SearchResult]:
         """
         Find sessions similar to a given session.
@@ -456,6 +492,7 @@ class AWIRAGEngine:
         Args:
             session_id: The session to find similar sessions for.
             top_k: Number of similar sessions to return.
+            owner_wallet_ids: Owner scope, as for :meth:`search`.
 
         Returns:
             List of similar SearchResult objects.
@@ -467,8 +504,10 @@ class AWIRAGEngine:
 
         query_embedding = memories[0].embedding
 
+        own_ids = {m.memory_id for m in memories}
+        scoped_ids = self._owned_ids(self._memories.keys(), owner_wallet_ids)
         other_ids = [
-            mid for mid in self._memories if mid not in [m.memory_id for m in memories]
+            mid for mid in self._memories if mid in scoped_ids and mid not in own_ids
         ]
 
         results = []
@@ -510,6 +549,7 @@ class AWIRAGEngine:
         current_state: dict[str, Any],
         session_type: Optional[str] = None,
         top_k: int = 3,
+        owner_wallet_ids: Optional[Collection[Optional[str]]] = None,
     ) -> dict[str, Any]:
         """
         Get relevant context from past sessions for the current session.
@@ -521,6 +561,8 @@ class AWIRAGEngine:
             current_state: Current session state (URL, goal, etc.).
             session_type: Inferred or specified session type.
             top_k: Number of similar sessions to consider.
+            owner_wallet_ids: Owner scope, as for :meth:`search`. It also
+                bounds the suggested actions and patterns derived from them.
 
         Returns:
             Dict with relevant past sessions and suggested actions.
@@ -539,6 +581,7 @@ class AWIRAGEngine:
             query=query,
             session_type=session_type,
             top_k=top_k,
+            owner_wallet_ids=owner_wallet_ids,
         )
 
         context_memories = []
