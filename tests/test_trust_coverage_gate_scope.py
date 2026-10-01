@@ -30,6 +30,7 @@ SECURITY_CRITICAL_MODULES = frozenset(
     {
         # authenticate: credential validation, key issuance, self-serve mint
         "app.core.auth",
+        "app.core.jwt",
         "app.services.api_key_service",
         "app.routers.dev_keys",
         # authorize
