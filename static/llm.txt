@@ -55,6 +55,8 @@ GET /mcp/tools.json
 GET /openapi.json
 ```
 
+On production-like boots, GET /mcp/tools.json requires an operator-issued key and returns 401 without one. Local quickstart stays anonymous. GET /.well-known/agent.json, GET /llms.txt, and GET /openapi.json stay unauthenticated.
+
 `GET /llm.txt` remains available as a backward-compatible alias.
 
 Use `/v1/discover` as an optional expanded catalog after the bootstrap sequence.
@@ -194,8 +196,9 @@ clients require `/mcp` after the operator enables the Streamable HTTP transport.
 | Permits | `/v1/permits` | Required |
 | Receipts | `/v1/receipts` | Required |
 | Audit | `/v1/audit` | Required |
-| MCP discovery | `/mcp/tools.json` | Public |
-| Governed MCP invoke | `/mcp/messages` (`/mcp` only when enabled) | Required |
+| MCP catalog | `GET /mcp/tools.json` | Required on production-like boots; anonymous for local quickstart |
+| Read-only public MCP | `POST /mcp/public` | None; public read-only tools only; opt-in local-compatible environments only, unavailable in production-like environments |
+| Governed legacy MCP invoke | `POST /mcp/messages` | Required; credentialed legacy JSON-RPC transport |
 | Health | `/health` | None |
 
 ---
