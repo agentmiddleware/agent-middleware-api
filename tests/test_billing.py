@@ -5,7 +5,6 @@ micro-metering → 402 insufficient funds → top-ups → arbitrage reporting.
 """
 
 import asyncio
-import json
 import pytest
 from datetime import timedelta
 from decimal import Decimal
@@ -16,7 +15,7 @@ from sqlalchemy import select
 from app.main import app
 from app.core.config import Settings, get_settings
 from app.db.database import get_session_factory
-from app.db.models import LedgerEntryModel, ServiceRegistryModel, WalletModel
+from app.db.models import LedgerEntryModel, WalletModel
 from app.services.agent_money import get_agent_money
 from app.services.audit_log import list_audit_events
 
