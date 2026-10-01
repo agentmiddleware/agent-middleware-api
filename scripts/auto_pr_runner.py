@@ -9,7 +9,7 @@ Standalone script called by CI/CD (auto-pr.yml) to:
 
 Exit codes:
   0 — No anomalies found or fix generated successfully
-  1 — API connection failed
+  1 — API_KEY not configured, API connection failed, or anomaly fetch rejected
   2 — Fix generation failed
 """
 
@@ -21,9 +21,15 @@ import httpx
 
 def main():
     api_url = os.environ.get("API_URL", "http://localhost:8000")
-    api_key = os.environ.get("API_KEY", "dev-key")
+    # No fallback credential: a missing secret must fail the job, never send a
+    # guessable placeholder key and carry on.
+    api_key = os.environ.get("API_KEY", "").strip()
     output_file = os.environ.get("FIX_OUTPUT", "/tmp/fix_details.json")
     github_output = os.environ.get("GITHUB_OUTPUT")
+
+    if not api_key:
+        print("[Auto-PR] API_KEY not configured")
+        sys.exit(1)
 
     headers = {"X-API-Key": api_key}
 

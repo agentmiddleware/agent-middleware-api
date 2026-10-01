@@ -328,6 +328,49 @@ async def test_telemetry_auto_pr_context_excludes_other_tenants_events(
 
 @pytest.mark.proof
 @pytest.mark.anyio
+async def test_auto_pr_never_reports_a_fabricated_pr(
+    client, clean_database, fresh_telemetry, monkeypatch
+):
+    """The generator pushes no branch and runs no tests, so it must not say so.
+
+    With a git remote configured, dry_run=false used to answer
+    status="pr_created" with a made-up ``<remote>/pull/auto-xxxxxx`` URL and
+    tests_passed=true for a placeholder diff nobody tested.
+    """
+    pm = fresh_telemetry
+    a, _b, anomaly_id = await _seed_two_tenants(client, pm)
+    monkeypatch.setattr(
+        pm.pr_generator, "git_remote", "https://github.com/example/repo"
+    )
+
+    for headers in (a["agent_headers"], BOOTSTRAP_HEADERS):
+        resp = await client.post(
+            f"/v1/telemetry/anomalies/{anomaly_id}/auto-pr",
+            json={"anomaly_id": anomaly_id, "dry_run": False},
+            headers=headers,
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["anomaly_id"] == anomaly_id
+        assert body["pr_url"] is None
+        assert body["status"] == "simulated"
+        assert body["tests_passed"] is None
+        assert "/pull/" not in resp.text
+
+    preview = await client.post(
+        f"/v1/telemetry/anomalies/{anomaly_id}/auto-pr",
+        json={"anomaly_id": anomaly_id, "dry_run": True},
+        headers=a["agent_headers"],
+    )
+    assert preview.status_code == 200
+    assert preview.json()["pr_url"] is None
+    assert preview.json()["status"] == "dry_run"
+    assert preview.json()["tests_passed"] is None
+    assert preview.json()["diff"]
+
+
+@pytest.mark.proof
+@pytest.mark.anyio
 async def test_telemetry_ingest_and_stats_scoped_to_caller(
     client, clean_database, fresh_telemetry
 ):
