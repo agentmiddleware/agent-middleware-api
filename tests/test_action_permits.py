@@ -281,3 +281,204 @@ async def test_historical_envelope_issuance_record_replays(
             )
             is None
         )
+
+
+def _action_request(**overrides):
+    from datetime import timedelta
+    from app.core.time import utc_now
+    from app.schemas.trust import ActionPermitCreateRequest
+
+    return ActionPermitCreateRequest(
+        **{
+            "issuer_wallet_id": "sponsor",
+            "subject_wallet_id": "agent",
+            "tool_name": "partner.pay",
+            "arguments": {"amount_minor": 1, "recipient": "alice"},
+            "max_credits": 5,
+            "expires_at": utc_now() + timedelta(hours=1),
+            **overrides,
+        }
+    )
+
+
+@pytest.mark.anyio
+async def test_subject_cannot_self_issue_action(monkeypatch):
+    from fastapi import HTTPException
+    from app.core.auth import AuthContext
+    from app.services.action_permits import create_action_permit
+
+    with pytest.raises(HTTPException) as denied:
+        await create_action_permit(
+            _action_request(issuer_wallet_id="agent"),
+            AuthContext("test", "", wallet_id="agent"),
+        )
+    assert denied.value.status_code == 403
+
+
+@pytest.mark.anyio
+async def test_service_issuance_enforces_authority(monkeypatch):
+    from fastapi import HTTPException
+    from unittest.mock import AsyncMock
+    from app.core.auth import AuthContext
+    from app.services.action_permits import create_action_permit
+    from app.services.agent_money import get_agent_money
+
+    monkeypatch.setattr(
+        get_agent_money(), "is_wallet_or_descendant", AsyncMock(return_value=False)
+    )
+    for wallet in ("agent", "foreign", "sponsor"):
+        with pytest.raises(HTTPException) as denied:
+            await create_action_permit(
+                _action_request(), AuthContext("test", "", wallet_id=wallet)
+            )
+        assert denied.value.status_code == 403
+
+
+@pytest.mark.anyio
+async def test_sponsor_can_issue_for_descendant(monkeypatch):
+    from unittest.mock import AsyncMock
+    from app.core.auth import AuthContext
+    from app.services.action_permits import create_action_permit
+    from app.services.agent_money import get_agent_money
+    from app.services.permits import get_permit_service
+    from app.services.service_registry import get_service_registry
+
+    monkeypatch.setattr(
+        get_agent_money(), "is_wallet_or_descendant", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(
+        get_service_registry(), "get", AsyncMock(return_value={"trusted": True})
+    )
+    monkeypatch.setattr(
+        get_service_registry(), "get_action_binding", lambda record: BINDING
+    )
+    persist = AsyncMock(side_effect=lambda request: request)
+    monkeypatch.setattr(get_permit_service(), "_persist_permit", persist)
+    for auth in (
+        AuthContext("test", "", wallet_id="sponsor", key_id="sponsor-key"),
+        AuthContext("test", "", is_bootstrap_admin=True),
+    ):
+        permit = await create_action_permit(
+            _action_request(subject_key_id="agent-key"), auth
+        )
+        assert permit.action_payload_hash == action_payload_hash(
+            BINDING, "agent", _action_request().arguments
+        )
+        assert permit.allowed_tools == ["partner.pay"]
+        assert permit.max_calls_per_tool == {"partner.pay": 1}
+        assert permit.subject_key_id == "agent-key"
+
+
+def test_action_quote_approval_repeat_options_rejected():
+    for option in (
+        {"quote_id": "q"},
+        {"requires_human_approval": True},
+        {"allow_identical_repeats": True},
+        {"repeat_window_seconds": 60},
+        {"action_payload_hash": "b" * 64},
+        {"allowed_tools": ["other"]},
+    ):
+        with pytest.raises(ValidationError):
+            _action_request(**option)
+
+
+def test_registry_binding_is_trusted_snapshot():
+    from app.services.service_registry import ServiceRegistry
+    from app.schemas.billing import ServiceCategory
+
+    registry = ServiceRegistry()
+    schema = dict(MONEY_SCHEMA)
+    record = registry.register_upstream(
+        service_id="partner.pay",
+        name="Pay",
+        description="fixture",
+        category=next(iter(ServiceCategory)),
+        executor=object(),
+        input_schema=schema,
+        output_schema=None,
+        credits_per_unit=1,
+        upstream_tool_name="pay",
+        upstream_origin="https://fixture.invalid",
+        action_binding=BINDING,
+    )
+    assert registry.get_action_binding(record) == BINDING
+    schema["type"] = "string"
+    assert registry.get_action_binding(record) == BINDING
+    record["upstream_tool_name"] = "other"
+    with pytest.raises(ValueError, match="action_binding_registry_mismatch"):
+        registry.get_action_binding(record)
+    assert registry.get_action_binding({"action_binding": BINDING}) is None
+
+
+@pytest.mark.anyio
+async def test_action_route_persists_and_replays(clean_database, monkeypatch):
+    from httpx import ASGITransport, AsyncClient
+    from app.main import app
+    from app.services.service_registry import get_service_registry
+    from tests.test_trust_helpers import BOOTSTRAP_HEADERS, provision_agent_wallet
+
+    registry = get_service_registry()
+    monkeypatch.setattr(
+        registry,
+        "get",
+        __import__("unittest.mock", fromlist=["AsyncMock"]).AsyncMock(
+            return_value={"fixture": True}
+        ),
+    )
+    monkeypatch.setattr(registry, "get_action_binding", lambda record: BINDING)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        wallets = await provision_agent_wallet(client)
+        payload = _action_request(
+            issuer_wallet_id=wallets["sponsor_wallet_id"],
+            subject_wallet_id=wallets["agent_wallet_id"],
+            subject_key_id=wallets["key_id"],
+        ).model_dump(mode="json")
+        denied = await client.post(
+            "/v1/action-permits",
+            json=payload,
+            headers={**wallets["agent_headers"], "Idempotency-Key": "denied"},
+        )
+        assert denied.status_code == 403
+        headers = {**BOOTSTRAP_HEADERS, "Idempotency-Key": "trusted"}
+        response = await client.post(
+            "/v1/action-permits", json=payload, headers=headers
+        )
+        assert response.status_code == 201, response.text
+        permit = response.json()
+        assert permit["action_payload_hash"] == action_payload_hash(
+            BINDING, wallets["agent_wallet_id"], payload["arguments"]
+        )
+        assert permit["max_calls_per_tool"] == {"partner.pay": 1}
+        replay = await client.post("/v1/action-permits", json=payload, headers=headers)
+        assert replay.json() == permit
+        changed = await client.post(
+            "/v1/action-permits",
+            json={**payload, "arguments": {"amount_minor": 2, "recipient": "alice"}},
+            headers=headers,
+        )
+        assert changed.status_code == 409
+
+
+@pytest.mark.anyio
+async def test_generic_permit_cannot_set_action_fields():
+    from datetime import timedelta
+    from app.core.time import utc_now
+    from app.schemas.trust import PermitCreateRequest
+    from app.services.permits import PermitError
+
+    ordinary = PermitCreateRequest(
+        issuer_wallet_id="agent",
+        subject_wallet_id="agent",
+        max_credits=5,
+        expires_at=utc_now() + timedelta(hours=1),
+    )
+    for field, value in FIELDS.items():
+        # Internal callers using model_copy must not bypass the generic boundary.
+        with pytest.raises(
+            PermitError, match="action_permit_requires_trusted_issuance"
+        ):
+            await PermitService().create_permit(
+                ordinary.model_copy(update={field: value})
+            )

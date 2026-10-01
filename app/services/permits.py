@@ -324,8 +324,19 @@ class PermitService:
         it, so a retried mint collides on the primary key instead of issuing a
         second permit carrying the same authority.
         """
-        if request.action_contract_version is not None:
+        if any(
+            getattr(request, field) is not None
+            for field in ActionPermitFields.model_fields
+        ):
             raise PermitError("action_permit_requires_trusted_issuance")
+        return await self._persist_permit(request, subject_key_id, permit_id)
+
+    async def _persist_permit(
+        self,
+        request: PermitCreateRequest,
+        subject_key_id: str | None = None,
+        permit_id: str | None = None,
+    ) -> PermitResponse:
         if request.max_credits <= Decimal("0"):
             raise PermitError("max_credits_must_be_positive")
         if (

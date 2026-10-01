@@ -68,6 +68,20 @@ class PermitCreateRequest(ActionPermitFields):
         return value
 
 
+class ActionPermitCreateRequest(BaseModel):
+    """Trusted issuer selects one action; signed binding is server-derived."""
+
+    model_config = {"extra": "forbid"}
+    issuer_wallet_id: str
+    subject_wallet_id: str
+    subject_key_id: str | None = None
+    max_credits: Decimal
+    expires_at: datetime
+    nonce: str | None = None
+    tool_name: str = Field(min_length=1)
+    arguments: dict[str, Any]
+
+
 class PermitResponse(ActionPermitFields):
     permit_id: str
     issuer_wallet_id: str

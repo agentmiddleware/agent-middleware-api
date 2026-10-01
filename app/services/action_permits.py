@@ -9,6 +9,9 @@ import json
 import math
 from typing import Any
 
+from app.core.auth import AuthContext
+from app.schemas.trust import ActionPermitCreateRequest, PermitResponse
+
 
 @dataclass(frozen=True)
 class ActionToolBinding:
@@ -194,3 +197,55 @@ def action_payload_hash(
     return hashlib.sha256(
         canonical_action_payload(binding, wallet_id, arguments).encode("utf-8")
     ).hexdigest()
+
+
+async def authorize_action_issuer(
+    request: ActionPermitCreateRequest, auth: AuthContext
+) -> None:
+    """Require independent sponsor custody or trusted bootstrap authority."""
+    from fastapi import HTTPException
+    from app.services.agent_money import get_agent_money
+
+    if auth.is_bootstrap_admin:
+        return
+    auth.require_wallet_access(request.issuer_wallet_id)
+    if (
+        request.issuer_wallet_id == request.subject_wallet_id
+        or not await get_agent_money().is_wallet_or_descendant(
+            request.subject_wallet_id, request.issuer_wallet_id
+        )
+    ):
+        raise HTTPException(status_code=403, detail="action_issuer_authority_required")
+
+
+async def create_action_permit(
+    request: ActionPermitCreateRequest, auth: AuthContext
+) -> PermitResponse:
+    from app.schemas.trust import PermitCreateRequest
+    from app.services.permits import PermitError, get_permit_service
+    from app.services.service_registry import get_service_registry
+
+    await authorize_action_issuer(request, auth)
+    registry = get_service_registry()
+    record = await registry.get(request.tool_name)
+    try:
+        binding = registry.get_action_binding(record) if record else None
+        if binding is None:
+            raise PermitError("action_tool_binding_required")
+        digest = action_payload_hash(
+            binding, request.subject_wallet_id, request.arguments
+        )
+    except ValueError as exc:
+        raise PermitError(str(exc)) from exc
+    permit = PermitCreateRequest(
+        **request.model_dump(exclude={"tool_name", "arguments"}),
+        allowed_tools=[request.tool_name],
+        max_calls_per_tool={request.tool_name: 1},
+        action_contract_version=1,
+        action_payload_hash=digest,
+        action_schema_id=binding.schema_id,
+        action_schema_version=binding.schema_version,
+        action_public_tool_id=binding.public_tool_id,
+        action_upstream_binding_hash=binding.upstream_binding_hash,
+    )
+    return await get_permit_service()._persist_permit(permit)
