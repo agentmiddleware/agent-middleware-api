@@ -432,7 +432,11 @@ class ToolCallResponse(BaseModel):
     receipt: dict[str, Any] | None = None
 
 
-@router.get("/tools.json", name="MCP Tools Manifest")
+@router.get(
+    "/tools.json",
+    name="MCP Tools Manifest",
+    responses={401: {"description": "Missing credentials on production-like boots"}},
+)
 async def get_tools_json(
     request: Request,
     category: ServiceCategory | None = None,
