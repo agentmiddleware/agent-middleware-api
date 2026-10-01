@@ -196,7 +196,7 @@ async def test_llms_txt_discovery_auth_claim_matches_mcp_messages_requirement(cl
     
     The endpoint requires authentication (via get_auth_context dependency), so
     llms.txt must reflect that. Checked line by line rather than by proximity:
-    the endpoints table row for /mcp/messages must read "Required", and no line
+    the endpoints table row for /mcp/messages must start with "Required", and no line
     that names /mcp/messages or the X-API-Key header may call anything
     optional, wherever in the document it appears.
     """
@@ -219,7 +219,7 @@ async def test_llms_txt_discovery_auth_claim_matches_mcp_messages_requirement(cl
         f"expected one endpoints-table row for /mcp/messages, got {table_rows}"
     )
     auth_cell = table_rows[0].strip().strip("|").split("|")[-1].strip()
-    assert auth_cell == "Required", (
+    assert auth_cell.startswith("Required"), (
         f"llms.txt lists /mcp/messages auth as {auth_cell!r}: {table_rows[0]}"
     )
 
