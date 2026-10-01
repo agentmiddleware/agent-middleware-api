@@ -18,11 +18,6 @@ full release gate; do not backfill a final `v1.2.0` tag.
   carrying `duplicate_request_new_key` across the service lifetime, and labels
   every metric's scope. The two existing counters stay process-local and still
   reset on restart.
-- **Constant test loop opts out of the duplicate guard**: the monitor repeats
-  one operator-chosen payload on every run under a fresh idempotency key, so
-  its permit now sets `allow_identical_repeats`. Running the gateway with
-  `MCP_UPSTREAM_DUPLICATE_GUARD=enforce` no longer turns the production smoke
-  red on its second run.
 - **Rollout note required per migration**: a test fails when a migration at or
   after 040 ships without `docs/schema-NNN-rollout.md` naming its revision and
   its rollback boundary. Boot refuses a database ahead of the packaged head, so
