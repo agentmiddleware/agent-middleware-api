@@ -1,4 +1,4 @@
-> Status: draft for review. Industry sources were checked on 2026-10-01 through web search, against search excerpts of each cited page and independent coverage; the cited pages themselves could not be fetched from the authoring environment.
+> Status: draft for review. Industry sources were checked on 2026-10-01 through web search, against search excerpts of each cited page and independent coverage; the cited pages themselves could not be fetched from the authoring environment, and the Open Agent Passport table number (Table 6) could not be confirmed.
 
 # Intent is not authority: what an agent gateway cannot promise, and what it can
 
@@ -105,7 +105,7 @@ Intent is not authority. The agent's wish to refund, pay or deploy is a request;
 
 ## Sources
 
-External (checked on 2026-10-01 through web search against each page's search excerpts and independent coverage; the pages themselves were not fetched):
+External (checked on 2026-10-01 through web search against each page's search excerpts and independent coverage; the pages themselves were not fetched, and the Open Agent Passport table number could not be confirmed):
 
 - Step Finance company statement: https://www.bleepingcomputer.com/news/security/step-finance-says-compromised-execs-devices-led-to-40m-crypto-theft/
 - EchoLeak discoverer's account: https://www.catonetworks.com/blog/breaking-down-echoleak/
