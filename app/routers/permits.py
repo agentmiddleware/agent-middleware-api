@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
+from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 
@@ -9,6 +10,7 @@ from app.core.auth import AuthContext, get_auth_context
 from app.core.config import get_settings
 from app.schemas.trust import (
     ActionPermitFields,
+    ActionPermitCreateRequest,
     PermitCreateRequest,
     PermitListResponse,
     PermitResponse,
@@ -28,6 +30,8 @@ from app.trust import (
     get_receipt_service,
     permit_model_to_response,
 )
+
+action_router = APIRouter(prefix="/v1/action-permits", tags=["Trust Permits"])
 
 router = APIRouter(prefix="/v1/permits", tags=["Trust Permits"])
 
@@ -296,3 +300,42 @@ async def verify_permit(
         details=validation.details,
         permit=permit_model_to_response(permit) if permit else None,
     )
+
+
+@action_router.post("", response_model=PermitResponse, status_code=201)
+async def issue_action_permit(
+    request: ActionPermitCreateRequest,
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    auth: AuthContext = Depends(get_auth_context),
+) -> PermitResponse:
+    from app.services.action_permits import (
+        authorize_action_issuer,
+        create_action_permit,
+    )
+
+    await authorize_action_issuer(request, auth)
+    idem = get_idempotency_service()
+    identity: dict[str, Any] = dict(
+        wallet_id=request.issuer_wallet_id,
+        endpoint="/v1/action-permits",
+        idempotency_key=idempotency_key,
+    )
+    try:
+        replay = await idem.begin(
+            **identity, request_payload=request.model_dump(mode="json")
+        )
+    except (IdempotencyConflictError, IdempotencyInProgressError) as exc:
+        raise HTTPException(status_code=409, detail=exc.args[0])
+    if replay and replay.response_json:
+        return PermitResponse(**replay.response_json)
+    try:
+        permit = await create_action_permit(request, auth)
+    except PermitError as exc:
+        raise HTTPException(status_code=400, detail=exc.reason)
+    await idem.complete(
+        **identity,
+        response_reference=permit.permit_id,
+        response_json=permit.model_dump(mode="json"),
+        status_code=201,
+    )
+    return permit

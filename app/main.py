@@ -702,6 +702,7 @@ PROOF_SURFACE_ROUTERS = (
     awi_enhanced,
 )
 
+app.include_router(permits.action_router)
 for router_module in CORE_TRUST_ROUTERS:
     app.include_router(
         router_module.router,
