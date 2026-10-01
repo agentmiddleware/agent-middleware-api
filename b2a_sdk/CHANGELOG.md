@@ -12,6 +12,36 @@ both with different values (see below). `parse_402_response()` always sets the
 two equal, so the normal path is unchanged. The tag is not cut by this
 change — `python-sdk-v0.5.0` is still a release decision.
 
+### Audit follow-up (2026-10-01)
+
+Security and correctness fixes from the 2026-08-27 repository audit. The only
+incompatible change is `B2AEdgeClient.execute_awi_action()`, and 0.5.0 is
+still unreleased.
+
+- **Replay-safe legacy charges**: `AgentMiddlewareClient.charge()` takes a
+  keyword-only `idempotency_key`, validated before anything is sent and
+  forwarded as `Idempotency-Key`; a 409 on a keyed charge raises
+  `IdempotencyConflictError`. `@billable` and `@combined` take an
+  `idempotency_key_factory`, called with the decorated function's arguments,
+  so retries of one logical call derive the same key. Calls without a key are
+  unchanged and are not replay-safe.
+- **`create_agent_wallet(daily_limit=0)`** now sends the zero cap ("spend
+  nothing"). A truthiness test used to drop it, which the server reads as
+  "no cap".
+- **`@monitored`** no longer sends the exception text or a stack trace to
+  telemetry by default; pass `capture_traceback=True` to include them. Its
+  sync wrapper no longer raises `RuntimeError` when called with no running
+  event loop: the telemetry event is dropped and the wrapped function's own
+  result or exception comes back.
+- **`api_key` is a read-only property** on `AgentMiddlewareClient` and
+  `X402Client`, read from the transport's `X-API-Key` header, so `vars()`
+  dumps no longer contain the key. Assigning to it raises `AttributeError`;
+  assignment never changed the key actually sent.
+- **`B2AEdgeClient.execute_awi_action()`** requires keyword `permit_id` and
+  `idempotency_key` and sends them as `X-Permit-Id` and `Idempotency-Key`.
+  The server already required both, so the old call always failed with 403
+  or 400. Blank values raise `ValueError` before any request is sent.
+
 ### Added
 
 - **ACP (Agentic Commerce Protocol) checkout**: Add `ACPLineItem`,
