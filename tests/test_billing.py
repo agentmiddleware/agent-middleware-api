@@ -2546,3 +2546,26 @@ async def test_agent_wallet_provisioning_replays_on_idempotency_key(
     )
     assert conflict.status_code == 409
     assert conflict.json()["detail"]["error"] == "idempotency_key_reused"
+
+
+@pytest.mark.anyio
+async def test_agent_wallet_provisioning_error_completes_idempotency_record(
+    client, api_headers, clean_database
+):
+    """A terminal error must close the key, not leave it in-progress.
+
+    Without completing the record on the 404 branch, a retry with the same
+    Idempotency-Key answered ``409 idempotency_in_progress`` until the stale
+    record sweep -- the caller could neither replay nor correct the request.
+    """
+    payload = {
+        "sponsor_wallet_id": "wlt-does-not-exist",
+        "agent_id": "orphan-bot",
+        "budget_credits": 10,
+    }
+    headers = {**api_headers, "Idempotency-Key": "provision-orphan-1"}
+    first = await client.post("/v1/billing/wallets/agent", json=payload, headers=headers)
+    assert first.status_code == 404, first.text
+    replay = await client.post("/v1/billing/wallets/agent", json=payload, headers=headers)
+    assert replay.status_code == 404, replay.text
+    assert replay.json() == first.json()
