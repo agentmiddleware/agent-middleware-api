@@ -1,21 +1,26 @@
 """Cross-tenant isolation regression tests for routers that previously
 trusted a client-supplied wallet/tenant id without an ownership check.
 
-Covers three confirmed IDOR / missing-auth findings:
+Covers confirmed IDOR / missing-auth findings:
   - telemetry_scope: pipelines are wallet-scoped and must not be readable,
     mutable, or enumerable across tenants.
   - planner/optimize: must authenticate and enforce wallet ownership before
     reading policy bundles or writing signed audit events.
   - sandbox/behavioral get/destroy/execute: must require auth + env ownership.
+  - iot: devices belong to the registering wallet; another wallet must not
+    read, message, subscribe to, deregister, or enumerate them.
 """
 
 from __future__ import annotations
+
+import uuid
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
-from tests.test_trust_helpers import provision_agent_wallet
+from app.services.iot_bridge import DeviceRegistry
+from tests.test_trust_helpers import BOOTSTRAP_HEADERS, provision_agent_wallet
 
 
 @pytest.fixture
@@ -211,6 +216,174 @@ async def test_sandbox_env_not_accessible_across_tenants(client, clean_database)
             f"/v1/sandbox/behavioral/environments/{env_id}", headers=a["agent_headers"]
         )
     ).status_code == 200
+
+
+# --------------------------------------------------------------------------
+# iot
+# --------------------------------------------------------------------------
+
+
+def _iot_device(device_id: str, **extra) -> dict:
+    return {
+        "device_id": device_id,
+        "protocol": "mqtt",
+        "topic_acl": {
+            f"device/{device_id}/telemetry": "read",
+            f"device/{device_id}/command": "write",
+        },
+        **extra,
+    }
+
+
+def _iot_id(label: str) -> str:
+    # iot_devices is not reset by clean_database; keep ids unique per test.
+    return f"iot-{label}-{uuid.uuid4().hex[:12]}"
+
+
+async def _iot_event_types(device_id: str) -> list[str]:
+    events = await DeviceRegistry().recent_events(limit=100)
+    return [e["event"] for e in events if e["device_id"] == device_id]
+
+
+@pytest.mark.proof
+@pytest.mark.anyio
+async def test_iot_device_not_accessible_across_tenants(client, clean_database):
+    a = await provision_agent_wallet(client)
+    b = await provision_agent_wallet(client)
+    device_id = _iot_id("a")
+    missing_id = _iot_id("missing")
+
+    create = await client.post(
+        "/v1/iot/devices", json=_iot_device(device_id), headers=a["agent_headers"]
+    )
+    assert create.status_code == 201
+    assert a["agent_wallet_id"] not in create.text
+
+    base = f"/v1/iot/devices/{device_id}"
+    message = {"topic": f"device/{device_id}/command", "payload": {"cmd": "unlock"}}
+    subscribe = {"topic": f"device/{device_id}/telemetry"}
+
+    # Wallet B can neither read, message, subscribe to, nor deregister A's
+    # device. Delete goes last so an unfixed router cannot mask the others.
+    denied = [
+        await client.get(base, headers=b["agent_headers"]),
+        await client.post(f"{base}/messages", json=message, headers=b["agent_headers"]),
+        await client.post(
+            f"{base}/subscribe", params=subscribe, headers=b["agent_headers"]
+        ),
+        await client.delete(base, headers=b["agent_headers"]),
+    ]
+    missing = await client.get(
+        f"/v1/iot/devices/{missing_id}", headers=b["agent_headers"]
+    )
+    assert missing.status_code == 404
+    for resp in denied:
+        # Same 404 a nonexistent device gets: no existence oracle, and the
+        # owner's wallet id is never echoed.
+        assert resp.status_code == 404, resp.text
+        assert resp.json()["detail"]["error"] == "device_not_found"
+        assert resp.json()["detail"]["message"].replace(device_id, "<id>") == (
+            missing.json()["detail"]["message"].replace(missing_id, "<id>")
+        )
+        assert a["agent_wallet_id"] not in resp.text
+
+    # Nothing B attempted reached the device or its audit trail.
+    assert await _iot_event_types(device_id) == ["register"]
+
+    # A's device survived B's delete attempt and the owner keeps full access.
+    assert (await client.get(base, headers=a["agent_headers"])).status_code == 200
+    sent = await client.post(
+        f"{base}/messages", json=message, headers=a["agent_headers"]
+    )
+    assert sent.status_code == 200
+    subscribed = await client.post(
+        f"{base}/subscribe", params=subscribe, headers=a["agent_headers"]
+    )
+    assert subscribed.status_code == 200
+
+    # Bootstrap admins keep cross-tenant access.
+    assert (await client.get(base, headers=BOOTSTRAP_HEADERS)).status_code == 200
+
+    # The owner can deregister its own device.
+    assert (await client.delete(base, headers=a["agent_headers"])).status_code == 204
+    assert (await client.get(base, headers=a["agent_headers"])).status_code == 404
+
+
+@pytest.mark.proof
+@pytest.mark.anyio
+async def test_iot_list_devices_scoped_to_caller(client, clean_database):
+    a = await provision_agent_wallet(client)
+    b = await provision_agent_wallet(client)
+    a_dev, b_dev, admin_dev = _iot_id("a"), _iot_id("b"), _iot_id("admin")
+
+    for device_id, headers in (
+        (a_dev, a["agent_headers"]),
+        (b_dev, b["agent_headers"]),
+        (admin_dev, BOOTSTRAP_HEADERS),
+    ):
+        resp = await client.post(
+            "/v1/iot/devices", json=_iot_device(device_id), headers=headers
+        )
+        assert resp.status_code == 201
+
+    for caller, own, other in ((a, a_dev, b), (b, b_dev, a)):
+        listing = await client.get(
+            "/v1/iot/devices?per_page=200", headers=caller["agent_headers"]
+        )
+        assert listing.status_code == 200
+        body = listing.json()
+        # Only the caller's own device: never the other wallet's, never the
+        # ownerless admin-registered one, and the total does not leak a count.
+        assert [d["device_id"] for d in body["devices"]] == [own]
+        assert body["total"] == 1
+        assert other["agent_wallet_id"] not in listing.text
+
+    # An ownerless (admin-registered) device is invisible to wallet keys...
+    assert (
+        await client.get(f"/v1/iot/devices/{admin_dev}", headers=a["agent_headers"])
+    ).status_code == 404
+    # ...while bootstrap admins still see every tenant's devices.
+    admin_listing = await client.get(
+        "/v1/iot/devices?per_page=200", headers=BOOTSTRAP_HEADERS
+    )
+    assert admin_listing.status_code == 200
+    assert admin_listing.json()["total"] >= 3
+
+
+@pytest.mark.proof
+@pytest.mark.anyio
+async def test_iot_registration_metadata_cannot_assign_ownership(
+    client, clean_database
+):
+    a = await provision_agent_wallet(client)
+    b = await provision_agent_wallet(client)
+    device_id = _iot_id("spoof")
+
+    # B registers a device while naming A as owner in client-controlled
+    # metadata. Ownership comes from the authenticated key, never the body.
+    spoof = {
+        key: a["agent_wallet_id"]
+        for key in (
+            "owner_wallet_id",
+            "_owner_wallet_id",
+            "__owner_wallet_id",
+            "wallet_id",
+            "owner",
+        )
+    }
+    create = await client.post(
+        "/v1/iot/devices",
+        json=_iot_device(device_id, metadata=spoof),
+        headers=b["agent_headers"],
+    )
+    assert create.status_code == 201
+
+    base = f"/v1/iot/devices/{device_id}"
+    assert (await client.get(base, headers=a["agent_headers"])).status_code == 404
+    assert (await client.delete(base, headers=a["agent_headers"])).status_code == 404
+    listing = await client.get("/v1/iot/devices", headers=a["agent_headers"])
+    assert device_id not in listing.text
+    assert (await client.get(base, headers=b["agent_headers"])).status_code == 200
 
 
 @pytest.mark.anyio
