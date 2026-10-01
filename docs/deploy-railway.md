@@ -243,6 +243,8 @@ slice.
 
 For migration 040, follow [the compatibility rollout and rollback procedure](schema-040-rollout.md)
 before this upload sequence. The previous schema-039 image is not a valid rollback.
+For migration 041, read [its rollback boundary](schema-041-rollout.md): once it is
+applied, no image packaged at 040 can start again.
 
 **Build and ship from this repo with the in-repo Dockerfile. Production
 releases are operator-run from a clean exact-SHA checkout.**
