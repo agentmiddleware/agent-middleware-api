@@ -65,9 +65,14 @@ available to this project right now, ahead of any feature.
 
 ## If the maintainer goes quiet
 
-The project is MIT licensed. If the maintainer is unresponsive for an extended
-period, forking is explicitly endorsed — no permission needed, and no hard
-feelings. To make a fork viable rather than a dead end:
+The core is under the Business Source License 1.1 and the SDKs are MIT (see
+[`LICENSING.md`](LICENSING.md)). The BSL permits copying, modification, and
+redistribution, and each version converts to MIT four years after it is
+published, so if the maintainer is unresponsive for an extended period, forking
+is explicitly endorsed — no permission needed, and no hard feelings. The one
+thing a fork may not do before the change date is offer the core to third
+parties as a competing hosted service. To make a fork viable rather than a dead
+end:
 
 - The trust-plane release gates are checked-in scripts
   (`scripts/trust_release_gate.sh`, `scripts/trust_coverage_gate.sh`) rather
@@ -115,8 +120,9 @@ AI Safety Fund. That advice needs correcting before anyone acts on it:
   That is engineering hardening, not safety research, and reviewers will
   recognize the difference.
 
-Better-matched sources for an open-source infrastructure project of this shape,
-which fund maintenance directly and take no equity:
+Better-matched sources for infrastructure of this shape, which fund maintenance
+directly and take no equity. Note that most require an OSI-approved license,
+which the BSL-licensed core is not; the MIT SDKs may qualify on their own:
 
 - **Sovereign Tech Agency** — funds maintenance and hardening of critical open
   digital infrastructure.
