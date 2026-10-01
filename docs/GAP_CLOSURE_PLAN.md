@@ -6,8 +6,11 @@
 > prospective customer documents the need
 > ([`30-day-customer-validation.md`](30-day-customer-validation.md); see the
 > superseded [`production-beta-roadmap.md`](production-beta-roadmap.md)), and
-> the unchecked boxes below were never updated. Against current code: Redis-backed rate
-> limiting (`app/core/rate_limit.py`) shipped. JWT exchange
+> the unchecked boxes below were never updated. Against current code: per-key
+> rate limiting shipped as `RateLimitMiddleware` in `app/core/rate_limiter.py`
+> (a fixed-window counter in Redis, with an in-memory fallback), not as the
+> token-bucket design in 1.1; `app/core/rate_limit.py` exists but nothing
+> mounts it. JWT exchange
 > (`POST /v1/auth/token`, `/refresh`, `/revoke` in `app/routers/auth.py`)
 > exists only as a dormant router, unmounted in production. OAuth 2.1/PKCE,
 > trust-event webhook delivery, the `/v1/dashboard/*` API, KMS/HSM signing, the
