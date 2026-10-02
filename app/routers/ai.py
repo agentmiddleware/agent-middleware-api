@@ -169,6 +169,7 @@ async def get_decisions(
 ):
     """Get recent decisions for an agent."""
     ai = get_agent_intelligence()
+    await ai.initialize()
     decisions = ai.get_decisions(agent_id, limit, owner_wallet_id=_owner_wallet(auth))
 
     return [
@@ -219,6 +220,7 @@ async def diagnose_and_heal(
 async def get_heal(heal_id: str, auth: AuthContext = Depends(get_auth_context)):
     """Get a specific self-heal result."""
     ai = get_agent_intelligence()
+    await ai.initialize()
     result = ai.get_heal(heal_id)
     owner = _owner_wallet(auth)
 

@@ -170,12 +170,13 @@ class McpGenerator:
 
     def _service_to_mcp_tool(self, service: dict) -> dict[str, Any]:
         """Convert a service record to MCP tool format."""
+        input_schema = service.get("input_schema")
+        if input_schema is None:
+            input_schema = {"type": "object", "properties": {}}
         tool = {
             "name": service["service_id"],
             "description": service.get("description", ""),
-            "inputSchema": service.get(
-                "input_schema", {"type": "object", "properties": {}}
-            ),
+            "inputSchema": input_schema,
         }
 
         cat = service.get("category", "unknown") or "unknown"

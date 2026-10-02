@@ -69,6 +69,51 @@ def _initialize(protocol_version: str = "2025-06-18") -> dict:
 
 
 @pytest.mark.anyio
+async def test_discovery_preserves_typed_tools_alongside_no_argument_tool(
+    client, standard_mcp_enabled
+):
+    from mcp.types import Tool
+
+    registry = get_service_registry()
+
+    def ready() -> dict:
+        raise AssertionError("discovery must not invoke a tool")
+
+    def echo(message: str) -> dict:
+        raise AssertionError("discovery must not invoke a tool")
+
+    handlers = {"discovery.ready": ready, "discovery.echo": echo}
+    for name, handler in handlers.items():
+        registry.register_local(
+            service_id=name,
+            name=name,
+            description="Synthetic discovery fixture",
+            category=ServiceCategory.PLATFORM_FEE,
+            func=handler,
+        )
+    try:
+        typed_schema = registry.get_local("discovery.echo")["input_schema"]
+        assert registry.get_local("discovery.ready")["input_schema"] is None
+        standard = await client.post(
+            "/mcp", json=_rpc("tools/list"), headers=BOOTSTRAP_MCP_HEADERS
+        )
+        assert standard.status_code == 200
+        assert "result" in standard.json(), standard.text
+        manifest = await client.get("/mcp/tools.json")
+        assert manifest.status_code == 200
+        for tools in (standard.json()["result"]["tools"], manifest.json()["tools"]):
+            by_name = {tool["name"]: Tool.model_validate(tool) for tool in tools}
+            assert by_name["discovery.ready"].inputSchema == {
+                "type": "object",
+                "properties": {},
+            }
+            assert by_name["discovery.echo"].inputSchema == typed_schema
+    finally:
+        for name in handlers:
+            registry.unregister_local(name)
+
+
+@pytest.mark.anyio
 async def test_endpoint_disabled_by_default(client):
     resp = await client.post("/mcp", json=_initialize(), headers=BOOTSTRAP_MCP_HEADERS)
     assert resp.status_code == 404

@@ -214,6 +214,8 @@ class DOMSyncRequest(BaseModel):
 class DOMSyncResponse(BaseModel):
     """Response from DOM sync execution."""
 
+    status: str = "success"
+    effect_status: str | None = None
     session_id: str = Field(..., description="Browser session ID")
     execution_id: str = Field(..., description="Unique execution ID")
     action: str = Field(..., description="Action that was executed")

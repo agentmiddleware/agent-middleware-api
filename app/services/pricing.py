@@ -112,11 +112,26 @@ PROOF_SURFACE_CATEGORIES: frozenset[ServiceCategory] = frozenset(
 )
 
 
+def credit_amount_fits_storage(amount: Decimal) -> bool:
+    """Whether a non-negative credit amount survives the signed-row round trip.
+
+    Quotes and receipts use Numeric(20, 8). SQLite also converts the bound
+    Decimal through a float and reconstructs eight fractional places, so even
+    some in-scale large values lose precision there. Use the same conservative
+    contract on both supported backends; never silently round a signed amount.
+    """
+    return (
+        amount.is_finite()
+        and Decimal("0") <= amount < Decimal("1000000000000")
+        and Decimal(f"{float(amount):.8f}") == amount
+    )
+
+
 def tool_price(service: dict[str, Any], category: ServiceCategory) -> Decimal:
     """Current price in credits for one call of a registered tool.
 
     Raises ``ValueError("tool_price_invalid")`` unless the registered price is
-    a finite, non-negative number. Every caller reads the price before any
+    a finite, non-negative, losslessly storable number. Every caller reads the price before any
     policy, permit, quote or ledger step, so refusing here keeps a bad
     registration out of all of them: a negative price would otherwise be
     reserved against the permit as a *negative* amount (growing its budget),
@@ -133,7 +148,7 @@ def tool_price(service: dict[str, Any], category: ServiceCategory) -> Decimal:
         price = Decimal(str(raw_price))
     except InvalidOperation:
         raise ValueError("tool_price_invalid") from None
-    if not price.is_finite() or price < 0:
+    if not credit_amount_fits_storage(price):
         raise ValueError("tool_price_invalid")
     return price
 

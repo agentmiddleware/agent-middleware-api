@@ -60,15 +60,26 @@ TRUST_PLANE_DESCRIPTION = POSITIONING_DESCRIPTION
 # (ENABLE_PROOF_SURFACES=true), for honesty about what is actually reachable.
 # Unmounted instances publish an empty proof_surfaces list; the historical
 # inventory stays in docs/PROOF_SURFACES.md.
+AWI_HTTP_PERMIT_ENDPOINTS = [
+    "POST /v1/awi/execute",
+    "POST /v1/awi/passkey/challenge",
+    "POST /v1/awi/passkey/verify",
+    "POST /v1/awi/dom/sync",
+    "POST /v1/awi/rag/index",
+    "POST /v1/awi/rag/query",
+]
+
 PROOF_SURFACE_CATALOG: list[dict[str, Any]] = [
     {
         "id": "awi_automation",
         "status": "proof_surface",
         "simulation": True,
-        "governed_by_permits": False,
+        "permit_required_http_endpoints": AWI_HTTP_PERMIT_ENDPOINTS,
         "note": (
-            "HTTP AWI routes bypass the permit→receipt loop unless invoked "
-            "as governed MCP tools."
+            "The listed HTTP actions require X-Permit-Id and Idempotency-Key; "
+            "other AWI routes retain their own wallet/session authorization. "
+            "This remains a proof surface, not a qualified production "
+            "transaction-integrity boundary."
         ),
     },
     {
@@ -257,7 +268,7 @@ def _local_try_it_manifest() -> dict[str, Any]:
     return {
         "mode": "local_self_hosted",
         "repository": "https://github.com/PetrefiedThunder/agent-middleware-api",
-        "repository_access": "public",
+        "repository_access": "private",
         "command": "make prove-trust-plane",
         "live_access": "operator_issued",
         "requires_live_credentials": False,
@@ -273,8 +284,8 @@ def _local_try_it_manifest() -> dict[str, Any]:
             "Runs the real FastAPI transaction-integrity path against a "
             "throwaway local SQLite database. This is a reproducible proof, "
             "not a production or settlement claim. The source repository is "
-            "public; clone it and run the proof locally before treating it as "
-            "production evidence."
+            "private; clone access must be granted separately. Authorized "
+            "clones can run the proof locally without live API credentials."
         ),
     }
 
@@ -541,13 +552,18 @@ def build_awi_manifest() -> dict[str, Any]:
             "audit_chain_verification": "/v1/audit/verify-chain",
             "openapi": "/openapi.json",
         },
+        "http_authorization": {
+            "permit_required_endpoints": AWI_HTTP_PERMIT_ENDPOINTS,
+            "required_headers": ["X-Permit-Id", "Idempotency-Key"],
+            "additional_headers": {"POST /v1/awi/rag/query": ["X-Wallet-Id"]},
+        },
         "representation_types": [item.value for item in AWIRepresentationType],
         "actions": actions,
         "safety_capabilities": {
             "wallet_scoped_authorization": True,
             "human_intervention": ["pause", "resume", "steer"],
             # Advertised as available on the proof surface; see known_limitations
-            # for mock/production-like constraints and MCP-only permit path.
+            # for mock/production-like constraints; HTTP requirements are above.
             "passkey_high_risk_actions": True,
             "signed_permits": True,
             "tamper_evident_audit_chain": True,
@@ -555,7 +571,8 @@ def build_awi_manifest() -> dict[str, Any]:
         },
         "known_limitations": [
             "This is an AWI semantics profile over MCP/HTTP, not a standalone AWI wire standard.",
-            "HTTP AWI routes are a proof surface and do not enforce permits/receipts unless the call goes through governed MCP.",
+            "The listed HTTP actions require permits and idempotency keys. Session/read routes retain their own wallet/session authorization; not every AWI route uses permit accounting.",
+            "AWI remains a proof surface with unresolved accounting and admission limitations, not a qualified production transaction-integrity boundary.",
             "Passkey verification fails closed without py_webauthn; WEBAUTHN_ALLOW_MOCK is refused in production-like environments.",
             "The login action is provisional; credential_handle is preferred over plaintext credentials.",
             "click_button and scroll are compatibility actions, not pure semantic actions.",

@@ -88,12 +88,30 @@ class AgentIntelligence:
         # Load decisions
         decisions_data = await self._state.load_json("agent_intelligence.decisions")
         if decisions_data:
-            self._decisions = decisions_data
+            self._decisions = {
+                key: [
+                    item
+                    if isinstance(item, AgentDecision)
+                    else AgentDecision(
+                        **{
+                            **item,
+                            "timestamp": datetime.fromisoformat(item["timestamp"]),
+                        }
+                    )
+                    for item in items
+                ]
+                for key, items in decisions_data.items()
+            }
 
         # Load heals
         heals_data = await self._state.load_json("agent_intelligence.heals")
         if heals_data:
-            self._heals = heals_data
+            self._heals = {
+                key: item
+                if isinstance(item, SelfHealResult)
+                else SelfHealResult(**item)
+                for key, item in heals_data.items()
+            }
 
         # Load memory
         memory_data = await self._state.load_json("agent_intelligence.memory")

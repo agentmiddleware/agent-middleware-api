@@ -57,10 +57,10 @@ async def auth_client():
 def live_key(monkeypatch):
     from app.services.api_key_service import APIKeyService
 
-    async def is_key_live(_self, _key_id: str) -> bool:
+    async def is_key_live(_self, _key_id: str, _wallet_id: str) -> bool:
         return True
 
-    monkeypatch.setattr(APIKeyService, "is_key_live", is_key_live)
+    monkeypatch.setattr(APIKeyService, "consume_derived_key_use", is_key_live)
 
 
 @pytest.mark.anyio
@@ -135,10 +135,10 @@ async def test_raw_revoked_access_token_fails_closed(
 ):
     from app.services.api_key_service import APIKeyService
 
-    async def is_key_live(_self, _key_id: str) -> bool:
+    async def is_key_live(_self, _key_id: str, _wallet_id: str) -> bool:
         return False
 
-    monkeypatch.setattr(APIKeyService, "is_key_live", is_key_live)
+    monkeypatch.setattr(APIKeyService, "consume_derived_key_use", is_key_live)
     token = jwt_service.create_access_token(
         wallet_id="wallet_raw_revoked", key_id="key_revoked", scopes=[]
     )
@@ -371,10 +371,10 @@ class _KeyStoreUnavailable(Exception):
 def key_store_down(monkeypatch):
     from app.services.api_key_service import APIKeyService
 
-    async def is_key_live(_self, _key_id: str) -> bool:
+    async def is_key_live(_self, _key_id: str, _wallet_id: str) -> bool:
         raise _KeyStoreUnavailable("key store unavailable")
 
-    monkeypatch.setattr(APIKeyService, "is_key_live", is_key_live)
+    monkeypatch.setattr(APIKeyService, "consume_derived_key_use", is_key_live)
 
 
 @pytest.mark.anyio

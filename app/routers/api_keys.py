@@ -48,6 +48,19 @@ def _invalid_request(error: str, message: str) -> dict:
     return {"error": error, "message": message}
 
 
+def _refuse_jwt_minter(auth: AuthContext) -> None:
+    # API keys cannot carry a JWT's scope set or short lifetime. Even rotating
+    # its own originating key would turn delegated access into wider authority.
+    if auth.source == "jwt":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "jwt_cannot_mint_api_key",
+                "message": "Present an authorized API key to create replacement credentials.",
+            },
+        )
+
+
 async def _refuse_bounded_minter(auth: AuthContext) -> None:
     """Refuse to mint a fresh key for a caller whose own key is bounded.
 
@@ -59,6 +72,7 @@ async def _refuse_bounded_minter(auth: AuthContext) -> None:
     that path carries its remaining bounds over. Bootstrap admins and
     unbounded wallet keys are unaffected.
     """
+    _refuse_jwt_minter(auth)
     if auth.is_bootstrap_admin:
         return
     if not await get_api_key_service().is_key_bounded(auth.key_id):
@@ -230,6 +244,7 @@ async def rotate_api_key(
     minting another key or failing on the already-revoked ``key_id``.
     """
     auth.require_wallet_access(request.wallet_id)
+    _refuse_jwt_minter(auth)
     if request.key_id is None or request.key_id != auth.key_id:
         # Without key_id this is a plain create with no bounds to inherit.
         # With another key's id, the new key inherits THAT key's bounds, so a
@@ -350,6 +365,8 @@ async def emergency_revoke(
     Optionally creates a new emergency key.
     """
     auth.require_wallet_access(request.wallet_id)
+    if request.create_new_key:
+        _refuse_jwt_minter(auth)
     service = get_api_key_service()
 
     try:

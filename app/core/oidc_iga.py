@@ -85,6 +85,15 @@ class IGAGrant:
     velocity_max_calls: int | None = None
 
 
+@dataclass(eq=False)
+class IGAUseReservation:
+    """Process-local identity for one consumption; never exposed to callers."""
+
+    counter_key: tuple[str, str, str, str, str]
+    recorded_at: float
+    released: bool = False
+
+
 @dataclass(frozen=True)
 class IGADecision:
     allowed: bool
@@ -92,6 +101,9 @@ class IGADecision:
     group: str | None = None
     policy_id: str | None = None
     details: dict[str, Any] = field(default_factory=dict)
+    reservation: IGAUseReservation | None = field(
+        default=None, repr=False, compare=False
+    )
 
 
 @dataclass(frozen=True)
@@ -491,7 +503,7 @@ def resolve_policy_grants(principal: EnterprisePrincipal) -> list[IGAGrant]:
 # same policy_id with different caps, so the group participates too.
 _CounterKey = tuple[str, str, str, str, str]
 _lifetime_uses: dict[_CounterKey, int] = {}
-_window_calls: dict[_CounterKey, deque[float]] = {}
+_window_calls: dict[_CounterKey, deque[IGAUseReservation]] = {}
 _counter_lock: asyncio.Lock = asyncio.Lock()
 
 # Monotonic time source for the velocity window. Module-level indirection so
@@ -627,7 +639,7 @@ async def enforce_tool_call(
                     window = _window_calls.get(counter_key)
                     if window is not None:
                         cutoff = now - float(window_seconds)
-                        while window and window[0] <= cutoff:
+                        while window and window[0].recorded_at <= cutoff:
                             window.popleft()
                         if not window:
                             # Fully aged out: drop the key so idle principals
@@ -654,14 +666,16 @@ async def enforce_tool_call(
                 # history is recorded only for velocity-capped grants so the
                 # per-key deque stays bounded by the cap itself.
                 _lifetime_uses[counter_key] = used + 1
+                reservation = IGAUseReservation(counter_key, now)
                 if has_velocity_cap:
-                    _window_calls.setdefault(counter_key, deque()).append(now)
+                    _window_calls.setdefault(counter_key, deque()).append(reservation)
                 return IGADecision(
                     allowed=True,
                     reason="allowed",
                     group=grant.group,
                     policy_id=grant.policy_id,
                     details={"used": used + 1},
+                    reservation=reservation,
                 )
 
     # Every grant was exhausted: surface the most informative denial. max()
@@ -676,6 +690,7 @@ async def release_tool_use(
     *,
     group: str,
     policy_id: str,
+    reservation: IGAUseReservation | None = None,
 ) -> None:
     """Compensate one recorded use whose action never dispatched.
 
@@ -687,12 +702,12 @@ async def release_tool_use(
     hits insufficient funds once would be locked out forever.
 
     ``group``/``policy_id`` identify the exact grant the ALLOW decision was
-    issued under (IGADecision carries both). Under the same counter lock as
-    the check-and-record, the grant's lifetime counter is decremented
-    (clamped at zero) and the MOST RECENT velocity timestamp for that
-    per-grant key is dropped — mirroring precisely what the ALLOW recorded.
-    Callers should treat this as best-effort compensation; it never raises
-    on an already-empty counter.
+    issued under. The opaque reservation from that decision identifies the
+    exact recorded use, including when later calls have completed or this use
+    has already aged out. Missing, mismatched or already released identities
+    fail closed without changing counters. The marker stays only with the
+    request and its bounded velocity window; no unbounded reservation registry
+    is retained.
     """
     key: _CounterKey = (
         principal.issuer,
@@ -702,6 +717,13 @@ async def release_tool_use(
         policy_id,
     )
     async with _counter_lock:
+        if (
+            reservation is None
+            or reservation.counter_key != key
+            or reservation.released
+        ):
+            return
+        reservation.released = True
         used = _lifetime_uses.get(key, 0)
         if used > 1:
             _lifetime_uses[key] = used - 1
@@ -709,6 +731,9 @@ async def release_tool_use(
             del _lifetime_uses[key]
         window = _window_calls.get(key)
         if window:
-            window.pop()
+            try:
+                window.remove(reservation)
+            except ValueError:
+                pass  # This exact call already aged out; keep newer calls.
             if not window:
                 del _window_calls[key]
