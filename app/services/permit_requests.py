@@ -152,14 +152,23 @@ def permit_request_hash(
     )
 
 
-def sentinel_request_key(request_hash: str) -> str:
+def sentinel_request_key(
+    request_hash: str, *, subject_wallet_id: str, idempotency_key: str
+) -> str:
     """Deterministic Sentinel Idempotency-Key for one permit request.
 
-    Derived from the reviewed terms, not the row id, so a create whose
-    response was lost resolves to the same Sentinel approval instead of paging
-    the human twice.
+    Bind the caller's wallet-scoped request identity and reviewed terms. A new
+    client key needs a new approval, while retrying after a lost create response
+    must still resolve to the original approval even before a row was persisted.
     """
-    return f"mw-preq-{request_hash[:44]}"
+    identity = sha256_hex(
+        {
+            "subject_wallet_id": subject_wallet_id,
+            "idempotency_key": idempotency_key,
+            "request_hash": request_hash,
+        }
+    )
+    return f"mw-preq-{identity[:44]}"
 
 
 class PermitRequestService:
@@ -344,7 +353,11 @@ class PermitRequestService:
                 risk_level=settings.SENTINEL_RISK_LEVEL or "high",
                 approvers=self._approvers(),
                 timeout_seconds=self._timeout_seconds(),
-                idempotency_key=sentinel_request_key(model.request_hash),
+                idempotency_key=sentinel_request_key(
+                    model.request_hash,
+                    subject_wallet_id=model.subject_wallet_id,
+                    idempotency_key=model.idempotency_key,
+                ),
             )
         except httpx.HTTPStatusError as exc:
             status_code = exc.response.status_code
@@ -449,6 +462,11 @@ class PermitRequestService:
         except httpx.HTTPError as exc:
             raise HumanApprovalUnavailableError() from exc
 
+        if utc_now() >= model.expires_at:
+            return await self._decide(
+                model, REQUEST_STATUS_EXPIRED, reason="approval_window_elapsed"
+            )
+
         decision = payload.get("status") or payload.get("decision") or ""
         if decision not in {REQUEST_STATUS_APPROVED, REQUEST_STATUS_REJECTED}:
             return model
@@ -471,10 +489,14 @@ class PermitRequestService:
         UPDATE is the single serialization point, so concurrent pollers cannot
         both mint. A caller that loses the race reloads the winner's row.
         """
+        now = utc_now()
+        if decision == REQUEST_STATUS_APPROVED and now >= model.expires_at:
+            decision = REQUEST_STATUS_EXPIRED
+            reason = "approval_window_elapsed"
         target = (
             REQUEST_STATUS_MINTING if decision == REQUEST_STATUS_APPROVED else decision
         )
-        decided_at = model.decided_at or utc_now()
+        decided_at = model.decided_at or now
         values: dict[str, Any] = {
             "status": target,
             "decided_at": decided_at,
@@ -482,23 +504,25 @@ class PermitRequestService:
             "reason": reason if reason is not None else model.reason,
         }
         if target == REQUEST_STATUS_MINTING:
-            values["mint_started_at"] = utc_now()
+            values["mint_started_at"] = now
+
+        conditions = [
+            cast(
+                ColumnElement[bool], PermitRequestModel.request_id == model.request_id
+            ),
+            cast(
+                ColumnElement[bool], PermitRequestModel.status == REQUEST_STATUS_PENDING
+            ),
+        ]
+        if target == REQUEST_STATUS_MINTING:
+            conditions.append(
+                cast(ColumnElement[bool], PermitRequestModel.expires_at > now)
+            )
 
         factory = get_session_factory()
         async with factory() as session:
             result = await session.execute(
-                update(PermitRequestModel)
-                .where(
-                    cast(
-                        ColumnElement[bool],
-                        PermitRequestModel.request_id == model.request_id,
-                    ),
-                    cast(
-                        ColumnElement[bool],
-                        PermitRequestModel.status == REQUEST_STATUS_PENDING,
-                    ),
-                )
-                .values(**values)
+                update(PermitRequestModel).where(*conditions).values(**values)
             )
             await session.commit()
             won = cast(Any, result).rowcount == 1
