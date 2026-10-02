@@ -255,7 +255,9 @@ def main() -> int:
         json_mode=args.json,
     )
 
-    if args.json:
+    if args.key_only:
+        print(result["api_key"])
+    elif args.json:
         # Machine-readable: JSON to stdout, all status to stderr.
         # Never print bootstrap_key. This lets `jq -r .api_key` work.
         print(json.dumps(result, indent=2))
