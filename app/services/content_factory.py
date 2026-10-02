@@ -999,7 +999,11 @@ class ContentFactory:
 
         if run_inline:
             await self._run_pipeline(pipeline.pipeline_id)
-            return pipeline
+            # The durable store returns copies; _run_pipeline updates its own
+            # copy, so return the saved terminal status rather than "queued".
+            finished = await self.store.get_pipeline(pipeline.pipeline_id)
+            assert finished is not None
+            return finished
 
         # Kick off async generation
         task = asyncio.create_task(self._run_pipeline(pipeline.pipeline_id))
@@ -1111,6 +1115,7 @@ class ContentFactory:
         # Create a pipeline per hook
         hook_results: list[CampaignHookResult] = []
         all_content_ids: list[str] = []
+        all_pipelines_ready = True
 
         for hook in hooks:
             pipeline = await self.create_pipeline(
@@ -1129,6 +1134,11 @@ class ContentFactory:
                 run_inline=True,
             )
             campaign.pipeline_ids.append(pipeline.pipeline_id)
+            all_pipelines_ready = all_pipelines_ready and pipeline.status == "ready"
+            if not all_pipelines_ready:
+                campaign.status = "failed"
+            # Preserve completed work if a later hook or scheduling step fails.
+            await self.store.create_campaign(campaign)
 
             # Gather results
             content = await self.store.list_by_pipeline(pipeline.pipeline_id)
@@ -1152,7 +1162,7 @@ class ContentFactory:
 
         # Auto-schedule across platforms
         schedule_summary: dict = {}
-        if auto_schedule and all_content_ids and platforms:
+        if auto_schedule and all_content_ids and platforms and all_pipelines_ready:
             recommendations = await self.scheduler.recommend(
                 content_ids=all_content_ids,
                 platforms=platforms,
@@ -1182,14 +1192,15 @@ class ContentFactory:
                 ],
             }
 
-        campaign.status = "completed"
+        campaign.status = "completed" if all_pipelines_ready else "failed"
+        await self.store.create_campaign(campaign)
         total_pieces = sum(hr.total_pieces for hr in hook_results)
 
         return LiveCampaignResponse(
             campaign_id=campaign_id,
             campaign_title=campaign_title,
             source_url=source_url,
-            status="completed",
+            status=campaign.status,
             hooks_processed=len(hooks),
             total_content_pieces=total_pieces,
             hook_results=hook_results,
