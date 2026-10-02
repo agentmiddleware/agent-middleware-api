@@ -22,6 +22,7 @@ from failure_lab.claims import (
     assert_claims_are_supported,
     build_claims_manifest,
     find_claim,
+    load_claims_manifest,
     normalize_claim,
     render_markdown,
     supported_claims,
@@ -158,3 +159,41 @@ def test_the_manifest_carries_the_prd_fields_and_serialises():
 
     table = render_markdown(manifest)
     assert "T01" in table and "|" in table
+
+
+@pytest.mark.parametrize("row_verdict", [Verdict.FAIL, Verdict.ERROR])
+def test_loaded_manifest_cannot_promote_negative_rows_to_pass(tmp_path, row_verdict):
+    manifest = build_claims_manifest(
+        [_scenario("T01", observed=row_verdict, documented=row_verdict)],
+        environment="local",
+    )
+    document = manifest.as_dict()
+    # A stale or edited summary disagrees with its own observed rows.
+    document["claims"][0]["status"] = "PASS"
+    path = tmp_path / "claims.json"
+    path.write_text(json.dumps(document))
+    loaded = load_claims_manifest(path)
+    record = loaded.records[0]
+    assert record.status == row_verdict.value
+    assert record.matches_documented_expectation
+    assert any("configuration row observed" in line for line in record.limitations)
+    with pytest.raises(UnsupportedClaimError):
+        assert_claim_is_supported(loaded, CLAIM)
+    assert supported_claims(loaded) == []
+
+
+@pytest.mark.parametrize("documented", [Verdict.PASS, Verdict.FAIL])
+def test_loaded_manifest_keeps_passing_rows_and_expectation_gate(tmp_path, documented):
+    manifest = build_claims_manifest(
+        [_scenario("T01", observed=Verdict.PASS, documented=documented)],
+        environment="local",
+    )
+    path = tmp_path / "claims.json"
+    path.write_text(json.dumps(manifest.as_dict()))
+    loaded = load_claims_manifest(path)
+    assert loaded.records[0].status == "PASS"
+    if documented == Verdict.PASS:
+        assert assert_claim_is_supported(loaded, CLAIM)
+    else:
+        with pytest.raises(UnsupportedClaimError):
+            assert_claim_is_supported(loaded, CLAIM)
