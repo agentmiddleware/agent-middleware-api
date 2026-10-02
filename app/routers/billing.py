@@ -550,15 +550,18 @@ async def get_ledger(
     _require_wallet_access(auth, wallet_id)
     entries = await money.get_ledger(wallet_id, limit)
 
-    period_credits = sum(e.amount for e in entries if e.amount > 0)
-    period_debits = sum(abs(e.amount) for e in entries if e.amount < 0)
+    amounts = [Decimal(e.amount_exact or str(e.amount)) for e in entries]
+    period_credits = sum((amount for amount in amounts if amount > 0), Decimal("0"))
+    period_debits = sum((-amount for amount in amounts if amount < 0), Decimal("0"))
 
     return LedgerResponse(
         entries=entries,
         total=len(entries),
         wallet_id=wallet_id,
-        period_credits=period_credits,
-        period_debits=period_debits,
+        period_credits=float(period_credits),
+        period_credits_exact=str(period_credits),
+        period_debits=float(period_debits),
+        period_debits_exact=str(period_debits),
     )
 
 
@@ -614,6 +617,28 @@ async def charge_wallet(
     request_id = request.headers.get("X-Request-ID")
     endpoint = "/v1/billing/charge"
 
+    # Resolve after tenant authorization and before the idempotency row's FK.
+    if not await money.get_wallet(wallet_id):
+        await _record_billing_governance(
+            event="billing.charge",
+            auth=auth,
+            wallet_id=wallet_id,
+            service_category=category.value,
+            endpoint=endpoint,
+            request_id=request_id,
+            ok=False,
+            error="wallet_not_found",
+            metadata={"units": units, "request_path": request_path},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": "wallet_not_found",
+                "wallet_id": wallet_id,
+                "message": str(WalletNotFoundError(wallet_id)),
+            },
+        )
+
     # Idempotency is opt-in via the Idempotency-Key header: a client that
     # retries a charge (e.g. after a timeout) with the same key gets the
     # original outcome replayed instead of being billed twice.
@@ -662,19 +687,23 @@ async def charge_wallet(
             status_code=status_code,
         )
 
-    (
-        policy_estimated_cost,
-        policy_id,
-        evaluated_constraints,
-    ) = await _enforce_billing_policy(
-        auth=auth,
-        wallet_id=wallet_id,
-        category=category,
-        units=units,
-        endpoint=endpoint,
-        request_id=request_id,
-        money=money,
-    )
+    try:
+        (
+            policy_estimated_cost,
+            policy_id,
+            evaluated_constraints,
+        ) = await _enforce_billing_policy(
+            auth=auth,
+            wallet_id=wallet_id,
+            category=category,
+            units=units,
+            endpoint=endpoint,
+            request_id=request_id,
+            money=money,
+        )
+    except HTTPException as exc:
+        await _complete_idempotency({"detail": exc.detail}, exc.status_code)
+        raise
     try:
         result = await money.charge(
             wallet_id=wallet_id,
