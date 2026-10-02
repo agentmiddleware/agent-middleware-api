@@ -17,5 +17,11 @@ if [ "${RUN_MIGRATIONS_ON_START:-}" = "true" ]; then
   alembic upgrade head
 fi
 
+# Docker/Compose command overrides retain their arguments after the same
+# fail-closed migration gate used by the default application command.
+if [ "$#" -gt 0 ]; then
+  exec "$@"
+fi
+
 app_module="${APP_MODULE:-app.main:app}"
 exec uvicorn "$app_module" --host 0.0.0.0 --port "${PORT:-8000}"
