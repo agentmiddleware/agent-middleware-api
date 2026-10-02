@@ -685,7 +685,7 @@ class PermitService:
                         # A concurrent reservation consumed the remaining budget,
                         # flipped the status, or (when max_calls_per_tool is set)
                         # incremented the call counter, breaking the optimistic
-                        # lock. Re-read for an accurate reason and deny.
+                        # lock. Re-read to distinguish denial from contention.
                         await session.refresh(model)
                         if model.status != "active":
                             return PermitValidation(
@@ -752,19 +752,24 @@ class PermitService:
                                     floor_excess=floor_excess,
                                 ),
                             )
-                        return PermitValidation(
-                            False,
-                            "permit_budget_exceeded",
-                            model,
-                            {
-                                "required_credits": _num(estimated_credits),
-                                "remaining_credits": _num(
-                                    model.max_credits - model.spent_credits
-                                ),
-                                "spent_credits": _num(model.spent_credits),
-                                "max_credits": _num(model.max_credits),
-                            },
-                        )
+                        if model.spent_credits + estimated_credits > model.max_credits:
+                            return PermitValidation(
+                                False,
+                                "permit_budget_exceeded",
+                                model,
+                                {
+                                    "required_credits": _num(estimated_credits),
+                                    "remaining_credits": _num(
+                                        model.max_credits - model.spent_credits
+                                    ),
+                                    "spent_credits": _num(model.spent_credits),
+                                    "max_credits": _num(model.max_credits),
+                                },
+                            )
+                        # A stale call counter can lose its comparison while
+                        # authority remains. Restart the whole reservation;
+                        # no debit or invocation has occurred at this boundary.
+                        raise PermitWriteContendedError()
                     # Reflect the committed reservation on the returned model.
                     await session.refresh(model)
                 return validation
