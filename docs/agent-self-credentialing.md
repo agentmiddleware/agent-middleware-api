@@ -18,7 +18,7 @@ mkdir -p data
 cp .env.example .env
 ```
 
-Set these in `.env` (generate a fresh signing seed; never reuse one):
+Set these literal values in `.env`:
 
 ```bash
 ENVIRONMENT=local
@@ -26,11 +26,15 @@ DATABASE_URL=sqlite+aiosqlite:///./data/local_api.db
 ENABLE_DEV_KEY_SELF_PROVISION=true   # mints wallet-scoped keys, no shared secret
 ENABLE_DOGFOOD_TOOL=true             # registers partner.notes.write
 ENABLE_DOGFOOD_SECOND_TOOL=true      # registers partner.notes.count (scope-denial target)
-TRUST_SIGNING_PRIVATE_KEY_B64=$(python3 -c 'import base64,secrets; print(base64.b64encode(secrets.token_bytes(32)).decode())')
 TRUST_SIGNING_KEY_ID=local-dev-ed25519
 ```
 
+Generate a fresh local signing seed **in the shell**, export it, and start the
+server in that same shell. `.env` parsing does not execute `$(...)`; do not put
+the generation command in that file. Never reuse a production signing key.
+
 ```bash
+export TRUST_SIGNING_PRIVATE_KEY_B64="$(.venv/bin/python -c 'import base64,secrets; print(base64.b64encode(secrets.token_bytes(32)).decode())')"
 .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
