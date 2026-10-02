@@ -1,9 +1,12 @@
 """Synthetic, offline authority attenuation regressions against the pinned tree."""
 
+import base64
+
 import pytest
 from fastapi import Depends, FastAPI
 from httpx import ASGITransport, AsyncClient
 from app.core.auth import AuthContext, get_auth_context
+from app.core.config import get_settings
 from app.core.jwt import get_jwt_service
 from app.core.scopes import require_scope
 from app.db.database import get_session_factory
@@ -13,7 +16,12 @@ from app.services.api_key_service import get_api_key_service
 
 
 @pytest.fixture
-async def client(clean_database):
+async def client(clean_database, monkeypatch):
+    monkeypatch.setattr(
+        get_settings(),
+        "TRUST_SIGNING_PRIVATE_KEY_B64",
+        base64.b64encode(bytes(range(32))).decode(),
+    )
     app = FastAPI()
     app.include_router(auth.router)  # Explicit dormant-surface opt-in.
     app.include_router(api_keys.router)
@@ -251,3 +259,35 @@ async def test_refresh_missing_signed_scope_binding_fails_closed(client):
     response = await client.post("/v1/auth/refresh", json={"refresh_token": legacy})
     assert response.status_code == 401
     assert response.json()["detail"]["error"] == "invalid_refresh_token"
+
+
+@pytest.mark.parametrize("header", ["Authorization", "X-API-Key"])
+async def test_rotated_jwts_share_the_origin_rate_limit(client, header):
+    from app.core.rate_limiter import RateLimitMiddleware
+
+    key = await seed("qa_rotated_rate")
+    first = await exchange(client, key, ["billing:read"])
+    second = await exchange(client, key, ["billing:read"])
+    tokens = [first["access_token"], second["access_token"]]
+    app = FastAPI()
+    app.add_middleware(RateLimitMiddleware, requests_per_minute=2)
+
+    @app.get("/protected")
+    async def protected(auth: AuthContext = Depends(get_auth_context)):
+        return {"accepted": True}
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as http:
+        statuses = []
+        for index in range(4):
+            token = tokens[index % 2]
+            headers = {
+                header: "Bearer " + token if header == "Authorization" else token
+            }
+            if header == "Authorization":
+                headers["X-API-Key"] = (
+                    "test-key"  # Ignored headers cannot activate the test bypass.
+                )
+            statuses.append((await http.get("/protected", headers=headers)).status_code)
+    assert statuses == [200, 200, 429, 429]
