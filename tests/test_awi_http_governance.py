@@ -691,15 +691,15 @@ async def test_awi_contended_charge_closes_the_key_it_cannot_safely_reopen(
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("failure", ["raised", "structured_zero", "structured_partial"])
 async def test_execute_dom_bridge_failure_takes_no_charge_and_replays(
-    client, clean_database, monkeypatch
+    client, clean_database, monkeypatch, failure
 ):
-    """A failed live DOM-bridge action must not be receipted as success.
+    """Browser failure is receipted as uncertain and cannot redispatch on replay.
 
-    The session manager used to fall back to the mock logic when the bridge
-    raised, so the route signed ``outcome="success"`` and debited the wallet
-    for an action that never executed. Now the manager returns a typed
-    ``status="error"`` and the governance layer takes the uncharged branch.
+    Even zero completed commands may mean the first command took effect before
+    raising. The existing post-effect accounting path remains uncharged; this
+    does not establish that an actual browser action was safe to refund.
     """
     from app.services.awi_session import get_awi_session_manager
 
@@ -725,8 +725,18 @@ async def test_execute_dom_bridge_failure_takes_no_charge_and_replays(
     manager = get_awi_session_manager()
     manager._dom_sessions[session_id] = "dom-session-under-test"
 
+    calls = 0
+
     async def _bridge_raises(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
-        raise RuntimeError("playwright target closed")
+        nonlocal calls
+        calls += 1
+        if failure == "raised":
+            raise RuntimeError("playwright target closed")
+        return {
+            "success": False,
+            "commands_executed": 1 if failure == "structured_partial" else 0,
+            "error": "synthetic command failure",
+        }
 
     monkeypatch.setattr(manager, "_execute_via_dom_bridge", _bridge_raises)
     try:
@@ -745,7 +755,8 @@ async def test_execute_dom_bridge_failure_takes_no_charge_and_replays(
         data = resp.json()
         assert data["status"] == "error"
         assert data["error"].startswith("dom_bridge_failed")
-        assert data["receipt"]["outcome"] == "failed"
+        assert data["effect_status"] == "unknown"
+        assert data["receipt"]["outcome"] == "delivery_uncertain"
         assert data["receipt"]["ledger_entry_id"] is None
 
         receipt_resp = await client.get(
@@ -753,7 +764,7 @@ async def test_execute_dom_bridge_failure_takes_no_charge_and_replays(
         )
         assert receipt_resp.status_code == 200
         receipt = receipt_resp.json()
-        assert receipt["outcome"] == "failed"
+        assert receipt["outcome"] == "delivery_uncertain"
         assert Decimal(str(receipt["credits_charged"])) == Decimal("0")
         assert receipt["reason_code"] == "dom_bridge_failed"
 
@@ -783,6 +794,7 @@ async def test_execute_dom_bridge_failure_takes_no_charge_and_replays(
         replay = await client.post("/v1/awi/execute", json=body, headers=exec_headers)
         assert replay.status_code == 200, replay.text
         assert replay.json()["receipt"]["receipt_id"] == data["receipt"]["receipt_id"]
+        assert calls == 1
         async with factory() as session:
             debits_after = (
                 await session.execute(
