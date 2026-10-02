@@ -47,6 +47,7 @@ from app.core.time import utc_now
 from app.db.database import get_session_factory
 from app.db.models import QuoteModel
 from app.schemas.trust import QuoteResponse
+from app.services.pricing import credit_amount_fits_storage
 from app.services.signing_keys import get_signing_key_service, sha256_hex
 
 logger = logging.getLogger(__name__)
@@ -138,8 +139,10 @@ class QuoteService:
         quoted_credits: Decimal,
         category: str,
     ) -> QuoteResponse:
-        if quoted_credits < Decimal("0"):
+        if quoted_credits.is_finite() and quoted_credits < Decimal("0"):
             raise QuoteError("quoted_credits_must_not_be_negative")
+        if not credit_amount_fits_storage(quoted_credits):
+            raise QuoteError("quoted_credits_invalid")
 
         now = utc_now()
         model = QuoteModel(

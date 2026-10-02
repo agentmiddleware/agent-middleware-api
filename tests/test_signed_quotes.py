@@ -598,3 +598,40 @@ async def test_wallet_can_list_its_own_quotes(client, clean_database, registered
     assert (
         await client.get("/v1/me/quotes", headers=BOOTSTRAP_HEADERS)
     ).status_code == 403
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("price", [0.00000001, 0.12345678])
+async def test_eight_place_prices_keep_quote_and_receipt_signatures_after_reload(
+    client, clean_database, registered_tool, price
+):
+    from app.services.receipts import get_receipt_service
+
+    registered_tool(price)
+    agent = await provision_agent_wallet(client)
+    permit = await create_tool_permit(
+        client,
+        wallet_id=agent["agent_wallet_id"],
+        key_id=agent["key_id"],
+        tool_name=TOOL,
+    )
+    quote = await _quote(client, agent["agent_headers"], agent["agent_wallet_id"])
+    assert quote.status_code == 201
+    quote_id = quote.json()["quote_id"]
+    async with get_session_factory()() as session:
+        model = await session.get(QuoteModel, quote_id)
+        assert model is not None
+        assert await get_quote_service().verify_signature(model) is True
+    invoked = await _invoke(
+        client,
+        agent["agent_headers"],
+        wallet_id=agent["agent_wallet_id"],
+        permit_id=permit["permit_id"],
+        quote_id=quote_id,
+    )
+    assert invoked.status_code == 200
+    assert invoked.json().get("isError") is not True
+    receipt = invoked.json()["receipt"]
+    assert Decimal(str(receipt["credits_charged"])) == Decimal(str(price))
+    valid, reason, _ = await get_receipt_service().verify_receipt(receipt["receipt_id"])
+    assert valid, reason
