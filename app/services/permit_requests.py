@@ -496,7 +496,9 @@ class PermitRequestService:
         target = (
             REQUEST_STATUS_MINTING if decision == REQUEST_STATUS_APPROVED else decision
         )
-        decided_at = model.decided_at or now
+        decided_at = (
+            now if target == REQUEST_STATUS_EXPIRED else model.decided_at or now
+        )
         values: dict[str, Any] = {
             "status": target,
             "decided_at": decided_at,
@@ -520,12 +522,33 @@ class PermitRequestService:
             )
 
         factory = get_session_factory()
+        overdue_claim = False
         async with factory() as session:
             result = await session.execute(
-                update(PermitRequestModel).where(*conditions).values(**values)
+                update(PermitRequestModel)
+                .where(*conditions)
+                .values(**values)
+                .returning(cast(ColumnElement[Any], PermitRequestModel.expires_at))
             )
-            await session.commit()
-            won = cast(Any, result).rowcount == 1
+            claimed_deadline = result.scalar_one_or_none()
+            won = claimed_deadline is not None
+            # The UPDATE can wait behind another transaction after evaluating
+            # the pre-wait timestamp. Do not commit a provisional mint claim
+            # that completed after its persisted deadline.
+            overdue_claim = (
+                target == REQUEST_STATUS_MINTING
+                and claimed_deadline is not None
+                and utc_now() >= claimed_deadline
+            )
+            if overdue_claim:
+                await session.rollback()
+            else:
+                await session.commit()
+
+        if overdue_claim:
+            return await self._decide(
+                model, REQUEST_STATUS_EXPIRED, reason="approval_window_elapsed"
+            )
 
         reloaded = await self._load(model.request_id)
         if reloaded is None:  # pragma: no cover - row cannot vanish
