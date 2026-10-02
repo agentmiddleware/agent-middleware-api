@@ -848,6 +848,7 @@ async def _execute(
         results,
         environment=environment_document,
         receipts=receipts,
+        trust_keys=key_document,
         verification_results=verifications,
         secret_values=[
             admin_api_key,
@@ -870,13 +871,9 @@ async def _execute(
         archive=archive,
     )
 
-    # After the bundle, not before it. build_evidence_bundle scans its own
-    # bytes for the run's secrets and raises without leaving a staging
-    # directory behind; writing this file first meant a leak that aborted the
-    # run still left a key document sitting in the caller's --output
-    # directory. Beside the bundle rather than inside it, because a file the
-    # manifest does not list makes verify_bundle_integrity report the bundle
-    # as tampered with -- `python -m failure_lab verify` looks for it here.
+    # Preserve the sibling for callers using its original location. The bundle
+    # now carries its own manifest-covered, leak-scanned copy for offline use.
+    # Write this only after the bundle's secret scan has succeeded.
     if key_document is not None:
         (directory / TRUST_KEYS_FILENAME).write_text(
             _json_text(redact(key_document)), encoding="utf-8"

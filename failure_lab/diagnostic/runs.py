@@ -597,7 +597,7 @@ async def execute(
             render_run_html(record.comparisons, environment=redacted_environment)
         )
 
-        receipts, verifications, _keys = harvest_evidence(results)
+        receipts, verifications, key_document = harvest_evidence(results)
         bundle = build_evidence_bundle(
             run_dir / "evidence",
             results,
@@ -607,6 +607,7 @@ async def execute(
             scenarios=scenarios,
             event_log=log.events,
             receipts=receipts,
+            trust_keys=key_document,
             verification_results=verifications,
             random_seed=record.seed,
             test_configuration={"surface": "web", "scenarios": list(record.scenarios)},
