@@ -186,3 +186,69 @@ async def test_charge_with_unknown_api_key_is_refused(http, clean_database):
     assert excinfo.value.response.status_code == 403
     assert excinfo.value.response.json()["detail"]["error"] == "invalid_api_key"
     assert await _balance(http, agent) == before
+
+
+@pytest.mark.anyio
+async def test_discover_and_awi_execute_forward_required_headers_verbatim():
+    sent = []
+    client = B2AClient(
+        api_url="http://b2a.test", api_key="synthetic", wallet_id="wallet-local"
+    )
+    await client._client.aclose()
+    client._client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: sent.append(request) or httpx.Response(200, json={})
+        )
+    )
+    try:
+        await client.discover()
+        await client.execute_awi_action(
+            "session-local",
+            "navigate_to",
+            {},
+            permit_id="permit-local",
+            idempotency_key=" logical-action ",
+        )
+    finally:
+        await client.close()
+    assert sent[0].url.path == "/v1/discover"
+    assert sent[0].headers["X-API-Key"] == "synthetic"
+    assert sent[1].url.path == "/v1/awi/execute"
+    assert sent[1].headers["X-API-Key"] == "synthetic"
+    assert sent[1].headers["X-Permit-Id"] == "permit-local"
+    assert sent[1].headers["Idempotency-Key"] == " logical-action "
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("permit_id", "key"),
+    [
+        ("", "key"),
+        (" ", "key"),
+        (None, "key"),
+        ("permit", ""),
+        ("permit", " "),
+        ("permit", None),
+        ("permit", "x" * 129),
+        ("permit", " " + "x" * 128),
+    ],
+)
+async def test_awi_execute_refuses_invalid_headers_before_transport(permit_id, key):
+    sent = []
+    client = B2AClient(api_url="http://b2a.test", api_key="synthetic")
+    await client._client.aclose()
+    client._client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: sent.append(request) or httpx.Response(200, json={})
+        )
+    )
+    try:
+        with pytest.raises(ValueError):
+            await client.execute_awi_action(
+                "session", "navigate_to", {}, permit_id=permit_id, idempotency_key=key
+            )
+        with pytest.raises(TypeError):
+            await client.execute_awi_action("session", "navigate_to", {})
+    finally:
+        await client.close()
+    assert sent == []

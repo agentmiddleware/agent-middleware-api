@@ -154,8 +154,21 @@ class B2AClient:
         session_id: str,
         action: str,
         parameters: dict[str, Any],
+        *,
+        permit_id: str,
+        idempotency_key: str,
     ) -> dict[str, Any]:
-        """Execute a standardized AWI action."""
+        """Call the proof-only AWI route with its required governance headers.
+
+        Reuse the caller-owned idempotency key verbatim for one logical action.
+        The server remains responsible for authorization and accounting.
+        """
+        if not isinstance(permit_id, str) or not permit_id.strip():
+            raise ValueError("permit_id must not be blank")
+        if not isinstance(idempotency_key, str) or not idempotency_key.strip():
+            raise ValueError("idempotency_key must not be blank")
+        if len(idempotency_key) > 128:
+            raise ValueError("idempotency_key must be at most 128 characters")
         payload = {
             "session_id": session_id,
             "action": action,
@@ -163,7 +176,11 @@ class B2AClient:
         }
         response = await self._client.post(
             f"{self.config.api_url}/v1/awi/execute",
-            headers=self._headers(),
+            headers={
+                **self._headers(),
+                "X-Permit-Id": permit_id,
+                "Idempotency-Key": idempotency_key,
+            },
             json=payload,
         )
         response.raise_for_status()
@@ -183,6 +200,7 @@ class B2AClient:
         """Get the discovery manifest."""
         response = await self._client.get(
             f"{self.config.api_url}/v1/discover",
+            headers=self._headers(),
         )
         response.raise_for_status()
         return response.json()
