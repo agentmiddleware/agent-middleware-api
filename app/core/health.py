@@ -310,6 +310,16 @@ async def _check_signing_key() -> dict[str, Any]:
     return {"status": "up", "state": "loaded"}
 
 
+async def check_database_readiness() -> dict[str, Any]:
+    """Probe the required ORM database with the shared timeout/sanitization."""
+    result = await _run_check("database", _check_postgres)
+    # A missing engine/configuration cannot serve the trust-plane ORM routes.
+    if result["status"] != "up":
+        result["status"] = "down"
+    result["configured"] = bool(get_settings().DATABASE_URL)
+    return result
+
+
 async def check_mqtt_readiness() -> dict[str, Any]:
     """Sim-aware mqtt entry for ``/health/ready``.
 

@@ -32,7 +32,9 @@ from .core.durable_state import (
     get_durable_state,
 )
 from .core.health import (
+    CHECK_TIMEOUT_SECONDS,
     build_public_dependency_report,
+    check_database_readiness,
     check_mqtt_readiness,
     gather_dependency_report,
 )
@@ -1178,7 +1180,12 @@ async def health_ready():
     checks: dict[str, dict[str, Any]] = {}
     all_healthy = True
 
-    state_report = await get_durable_state().health_report()
+    try:
+        state_report = await asyncio.wait_for(
+            get_durable_state().health_report(), timeout=CHECK_TIMEOUT_SECONDS
+        )
+    except Exception:
+        state_report = {"ok": False, "backend": "unknown"}
     checks["state_store"] = {
         "status": "up" if state_report.get("ok", False) else "down",
         "backend": state_report.get("backend", "unknown"),
@@ -1195,16 +1202,18 @@ async def health_ready():
     if checks["mqtt"]["status"] == "down":
         all_healthy = False
 
-    if settings.DATABASE_URL:
-        checks["database"] = {"status": "up", "configured": True}
-    else:
-        checks["database"] = {"status": "not_configured", "configured": False}
+    checks["database"] = await check_database_readiness()
+    if checks["database"]["status"] != "up":
+        all_healthy = False
 
-    return {
-        "status": "ready" if all_healthy else "not_ready",
-        "version": settings.APP_VERSION,
-        "checks": checks,
-    }
+    return JSONResponse(
+        status_code=200 if all_healthy else 503,
+        content={
+            "status": "ready" if all_healthy else "not_ready",
+            "version": settings.APP_VERSION,
+            "checks": checks,
+        },
+    )
 
 
 @app.get(
