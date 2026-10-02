@@ -1514,6 +1514,44 @@ def test_live_fails_on_bad_posture(monkeypatch, override):
     assert preflight.check_live("https://api.example.com") is False
 
 
+@pytest.mark.parametrize("field", ["enable_proof_surfaces", "runtime_degradation"])
+def test_live_rejects_missing_public_posture_field(monkeypatch, capsys, field):
+    payload = {key: value for key, value in HEALTHY.items() if key != field}
+    _patch_get(monkeypatch, payload)
+    assert preflight.check_live("https://api.example.com") is False
+    assert "[preflight] PASS" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("value", [None, 0, "", [], {}, "false", True])
+def test_live_requires_boolean_false_for_proof_surfaces(monkeypatch, value):
+    _patch_get(monkeypatch, {**HEALTHY, "enable_proof_surfaces": value})
+    assert preflight.check_live("https://api.example.com") is False
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        0,
+        [],
+        "false",
+        {},
+        {"durable_state": None},
+        {"durable_state": []},
+        {"durable_state": "false"},
+        {"durable_state": {}},
+        {"durable_state": {"fell_back_to_memory": None}},
+        {"durable_state": {"fell_back_to_memory": 0}},
+        {"durable_state": {"fell_back_to_memory": "false"}},
+        {"durable_state": {"fell_back_to_memory": []}},
+        {"durable_state": {"fell_back_to_memory": {}}},
+    ],
+)
+def test_live_requires_explicit_durable_posture(monkeypatch, value):
+    _patch_get(monkeypatch, {**HEALTHY, "runtime_degradation": value})
+    assert preflight.check_live("https://api.example.com") is False
+
+
 # ---------------------------------------------------------------------------
 # Locked-down tool catalogs and the private dogfood posture.
 #

@@ -526,16 +526,20 @@ def check_live(
     if unhealthy:
         failures.append(f"unhealthy dependencies: {unhealthy}")
 
-    degradation = body.get("runtime_degradation") or {}
-    durable = degradation.get("durable_state") or {}
-    if durable.get("fell_back_to_memory"):
+    degradation = body.get("runtime_degradation")
+    durable = (
+        degradation.get("durable_state") if isinstance(degradation, dict) else None
+    )
+    fallback = durable.get("fell_back_to_memory") if isinstance(durable, dict) else None
+    if fallback is not False:
         failures.append(
-            "durable state fell back to memory — DATABASE_URL / STATE_BACKEND "
-            "are not taking effect"
+            "runtime_degradation.durable_state.fell_back_to_memory must be "
+            "explicitly false — missing, malformed, or degraded state cannot "
+            "establish durable storage"
         )
 
-    if body.get("enable_proof_surfaces"):
-        failures.append("enable_proof_surfaces=true — must be false in production")
+    if body.get("enable_proof_surfaces") is not False:
+        failures.append("enable_proof_surfaces must be explicitly false in production")
 
     # Build provenance: did this image come through the documented release
     # path? The operator uploads an archive-stamped exact-SHA release context;
