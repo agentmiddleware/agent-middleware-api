@@ -53,7 +53,27 @@ REQUIRED_TRUST_TABLES = frozenset(
 )
 REQUIRED_TRUST_COLUMNS = {
     "mcp_dispatch_attempts": frozenset({"dispatch_claim_hash"}),
-    "permits": frozenset({"repeat_window_seconds"}),
+    "permits": frozenset(
+        {
+            "repeat_window_seconds",
+            "action_contract_version",
+            "action_payload_hash",
+            "action_schema_id",
+            "action_schema_version",
+            "action_public_tool_id",
+            "action_upstream_binding_hash",
+        }
+    ),
+    "receipts": frozenset(
+        {
+            "action_contract_version",
+            "action_payload_hash",
+            "action_schema_id",
+            "action_schema_version",
+            "action_public_tool_id",
+            "action_upstream_binding_hash",
+        }
+    ),
 }
 
 _engine: AsyncEngine | None = None
