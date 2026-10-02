@@ -34,6 +34,7 @@ class B2AFunctionTool:
         self.permit_ttl_minutes = permit_ttl_minutes
         # Cache permits to avoid 409 on replay (server hashes full permit body including expires_at)
         self._permit_cache: dict[str, str] = {}  # permit_idempotency_key → permit_id
+        self._permit_requests: dict[str, PermitRequest] = {}
 
     async def discover_tools(self) -> list[dict[str, Any]]:
         """Discover all available MCP tools."""
@@ -69,10 +70,10 @@ class B2AFunctionTool:
         if not permit_idempotency_key or not permit_idempotency_key.strip():
             raise ValueError("permit_idempotency_key is required and must not be blank")
 
-        # Check cache first - reuse existing permit to avoid 409 on replay
-        if permit_idempotency_key in self._permit_cache:
-            permit_id = self._permit_cache[permit_idempotency_key]
-        else:
+        # Retain the body before the first await: a lost acknowledgement must
+        # replay the original expiry under the same caller-owned key.
+        request = self._permit_requests.get(permit_idempotency_key)
+        if request is None:
             request = PermitRequest(
                 issuer_wallet_id=self.wallet_id,
                 subject_wallet_id=self.wallet_id,
@@ -82,7 +83,19 @@ class B2AFunctionTool:
                 allowed_tools=[tool_name],
                 scopes=[f"tool:{tool_name}:invoke", "billing:charge"],
             )
+            self._permit_requests[permit_idempotency_key] = request
+        elif (
+            request.subject_wallet_id != self.wallet_id
+            or request.max_credits != self.permit_budget
+            or request.allowed_tools != [tool_name]
+        ):
+            raise ValueError(
+                "permit_idempotency_key reused with different permit terms"
+            )
 
+        if permit_idempotency_key in self._permit_cache:
+            permit_id = self._permit_cache[permit_idempotency_key]
+        else:
             permit = await self.client.create_permit(
                 request, idempotency_key=permit_idempotency_key
             )
