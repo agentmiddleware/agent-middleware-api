@@ -432,3 +432,196 @@ async def test_action_recovery_requires_atomic_call_reservation(
         ):
             await prepare_action(action_runtime, args)
     assert action_runtime[3].dispatch_count == 0
+
+
+@pytest.fixture
+def limited_iga(monkeypatch):
+    from app.core import oidc_iga as iga
+    from app.routers import mcp
+    from app.services import policies
+
+    iga.reset_iga_counters()
+    principal = iga.EnterprisePrincipal(
+        "fixture", "okta", "https://fixture.invalid", groups=("payer",)
+    )
+    grant = iga.IGAGrant("payer", "fixture-policy", max_uses=1)
+    monkeypatch.setattr(iga, "resolve_policy_grants", lambda _: [grant])
+    monkeypatch.setattr(
+        policies,
+        "get_policy_bundle",
+        AsyncMock(
+            return_value=SimpleNamespace(is_active=True, allowed_tools=["partner.pay"])
+        ),
+    )
+    monkeypatch.setattr(mcp, "_verified_enterprise_principal", lambda _: principal)
+    release = AsyncMock(wraps=mcp.release_tool_use)
+    monkeypatch.setattr(mcp, "release_tool_use", release)
+    return principal, release
+
+
+async def invoke_with_optional_key(runtime, client_key):
+    if client_key:
+        return await invoke_action(runtime, "rest", client_key)
+    client, wallets, permit_id, _ = runtime
+    return await client.post(
+        "/mcp/tools/partner.pay/invoke",
+        json={
+            "name": "partner.pay",
+            "arguments": {"amount_minor": 1, "recipient": "alice"},
+            "mcp_context": {
+                "wallet_id": wallets["agent_wallet_id"],
+                "permit_id": permit_id,
+            },
+        },
+        headers=wallets["agent_headers"],
+    )
+
+
+def inject_preacceptance_contention(monkeypatch, contention):
+    from app.routers import mcp
+    from app.services.audit_chain import AuditChainContendedError
+    from app.services.mcp_dispatch_attempts import get_mcp_dispatch_attempt_service
+    from app.services.permits import PermitWriteContendedError
+    from app.services.receipts import get_receipt_service, ReceiptWriteContendedError
+
+    if contention == "permit":
+        monkeypatch.setattr(
+            get_mcp_dispatch_attempt_service(),
+            "authorize_reserve_and_prepare",
+            AsyncMock(side_effect=PermitWriteContendedError()),
+        )
+        return
+    original_policy = mcp.evaluate_wallet_policy
+    calls = 0
+
+    async def deny_after_precheck(**kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            return SimpleNamespace(
+                allowed=False,
+                reason="policy_tool_not_allowed",
+                policy_id="fixture-policy",
+                evaluated_constraints={},
+            )
+        return await original_policy(**kwargs)
+
+    monkeypatch.setattr(mcp, "evaluate_wallet_policy", deny_after_precheck)
+    if contention == "audit":
+        monkeypatch.setattr(
+            mcp,
+            "_audit_mcp_invocation",
+            AsyncMock(side_effect=AuditChainContendedError()),
+        )
+    else:
+        # The denial releases the owner and IGA use before writing its receipt.
+        monkeypatch.setattr(
+            type(get_receipt_service()),
+            "create_receipt",
+            AsyncMock(side_effect=ReceiptWriteContendedError()),
+        )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("client_key", [None, "client-key"])
+@pytest.mark.parametrize("contention", ["audit", "permit", "receipt"])
+async def test_action_contention_returns_only_unaccepted_iga_use(
+    action_runtime, monkeypatch, limited_iga, client_key, contention
+):
+    from app.db.models import LedgerEntryModel
+
+    principal, release = limited_iga
+    with monkeypatch.context() as patch:
+        inject_preacceptance_contention(patch, contention)
+        response = await invoke_with_optional_key(action_runtime, client_key)
+    assert response.status_code == 409, response.text
+    assert await action_rows() == []
+    assert action_runtime[3].dispatch_count == 0
+    async with get_session_factory()() as session:
+        assert (
+            not (await session.execute(select(McpDispatchAttemptModel))).scalars().all()
+        )
+        assert not (await session.execute(select(ReceiptModel))).scalars().all()
+        assert (
+            not (
+                await session.execute(
+                    select(LedgerEntryModel).where(
+                        LedgerEntryModel.operation_key.is_not(None)
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        permit = await session.get(PermitModel, action_runtime[2])
+        assert permit.spent_credits == 0
+        assert not json.loads(permit.tool_call_counts_json or "{}")
+    release.assert_awaited_once_with(
+        principal, "partner.pay", group="payer", policy_id="fixture-policy"
+    )
+    retry = await invoke_with_optional_key(action_runtime, client_key)
+    assert retry.status_code == 200, retry.text
+    replay = await invoke_with_optional_key(action_runtime, client_key)
+    assert replay.status_code == 200, replay.text
+    assert release.await_count == 1
+    await assert_action_accounting(action_runtime)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("client_key", [None, "client-key"])
+@pytest.mark.parametrize(
+    "cleanup", ["prepared", "replaced", "uncertain", "failed", "ack_lost"]
+)
+async def test_action_contention_keeps_iga_without_confirmed_owner_deletion(
+    action_runtime, monkeypatch, limited_iga, client_key, cleanup
+):
+    from app.core import oidc_iga as iga
+    from app.db.models import IdempotencyRecordModel
+    from app.services.idempotency import get_idempotency_service
+    from tests.test_action_invocation import prepare_action
+
+    principal, release = limited_iga
+    idem = get_idempotency_service()
+    original_abandon = idem.abandon
+
+    async def cannot_confirm_abandon(**kwargs):
+        if cleanup == "failed":
+            raise RuntimeError("synthetic cleanup failure")
+        if cleanup == "ack_lost":
+            assert await original_abandon(**kwargs)
+            raise RuntimeError("synthetic commit acknowledgement loss")
+        if cleanup == "prepared":
+            accepted, _ = await prepare_action(
+                action_runtime, {"amount_minor": 1, "recipient": "alice"}
+            )
+            assert accepted.allowed
+        else:
+            async with get_session_factory()() as session:
+                owner = await session.get(
+                    IdempotencyRecordModel, kwargs["expected_record_id"]
+                )
+                if cleanup == "replaced":
+                    owner.record_id = "replacement-owner"
+                else:
+                    # A mismatched owner hash cannot prove non-acceptance.
+                    owner.request_hash = "uncertain"
+                await session.commit()
+        return await original_abandon(**kwargs)
+
+    inject_preacceptance_contention(monkeypatch, "audit")
+    abandon = AsyncMock(wraps=cannot_confirm_abandon)
+    monkeypatch.setattr(idem, "abandon", abandon)
+    response = await invoke_with_optional_key(action_runtime, client_key)
+    assert response.status_code == 409, response.text
+    abandon.assert_awaited_once()
+    release.assert_not_awaited()
+    assert (
+        await iga.enforce_tool_call(principal, "partner.pay")
+    ).reason == "iga_max_uses_exceeded"
+    owners = await action_rows()
+    assert len(owners) == (0 if cleanup == "ack_lost" else 1)
+    if cleanup == "replaced":
+        assert owners[0].record_id == "replacement-owner"
+    assert action_runtime[3].dispatch_count == 0
+    async with get_session_factory()() as session:
+        assert not (await session.execute(select(ReceiptModel))).scalars().all()
