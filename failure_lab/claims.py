@@ -81,6 +81,18 @@ def normalize_claim(text: str) -> str:
     return collapsed.rstrip(".").casefold()
 
 
+def _observed_status(status: str, observed: Mapping[str, str]) -> tuple[str, list[str]]:
+    """A PASS summary cannot outrank the negative configuration rows it reports."""
+    worst_row = next((v for v in ("ERROR", "FAIL") if v in observed.values()), "")
+    if status == SUPPORTING_STATUS and worst_row:
+        return worst_row, [
+            f"The result document reported {SUPPORTING_STATUS} while a "
+            f"configuration row observed {worst_row}; the row is used as the "
+            "status, because a scenario verdict is the worst of its rows."
+        ]
+    return status, []
+
+
 @dataclass
 class ClaimRecord:
     """One claim, one test, one observed result."""
@@ -152,14 +164,17 @@ class ClaimRecord:
             matches = bool(expected) and not rows_diverge
         else:
             matches = bool(reported) and not rows_diverge
+        status, status_lines = _observed_status(
+            str(document.get("status", "")), observed
+        )
         return cls(
             claim=str(document.get("claim", "")),
             test_id=str(document.get("test_id", "")),
             version=str(document.get("version", "")),
-            status=str(document.get("status", "")),
+            status=status,
             environment=str(document.get("environment", "")),
             tested_at=str(document.get("tested_at", "")),
-            limitations=list(document.get("limitations") or []),
+            limitations=list(document.get("limitations") or []) + status_lines,
             definition_hash=str(document.get("definition_hash", "")),
             definition_version=str(
                 document.get("definition_version", TEST_DEFINITION_VERSION)
@@ -340,16 +355,9 @@ def build_claims_manifest(
         # The observed verdict, copied -- but never a summary that outranks the
         # rows it summarises. ScenarioResult.verdict is the worst row, so a
         # document reading PASS over a FAIL row did not come from a run.
-        status = str(document.get("verdict", ""))
-        worst_row = next((v for v in ("ERROR", "FAIL") if v in observed.values()), "")
-        status_lines: list[str] = []
-        if status == SUPPORTING_STATUS and worst_row:
-            status_lines.append(
-                f"The result document reported {SUPPORTING_STATUS} while a "
-                f"configuration row observed {worst_row}; the row is used as the "
-                "status, because a scenario verdict is the worst of its rows."
-            )
-            status = worst_row
+        status, status_lines = _observed_status(
+            str(document.get("verdict", "")), observed
+        )
 
         limitations = list(document.get("limitations") or [])
         limitations.extend(status_lines)
