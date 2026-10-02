@@ -255,8 +255,10 @@ def _build_capabilities() -> list[ServiceCapability]:
             name="awi",
             version="1.0",
             description=(
-                "Agentic Web Interface proof surface — not permit-enforced on HTTP "
-                "unless routed through governed MCP"
+                "Agentic Web Interface proof surface — HTTP execute and selected "
+                "actions require X-Permit-Id and Idempotency-Key; see "
+                "/.well-known/awi.json for route-specific requirements. "
+                "Not a qualified production transaction-integrity boundary."
             ),
             category="automation",
             surface="proof_surface",
