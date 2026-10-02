@@ -596,6 +596,7 @@ class McpDispatchAttemptService:
     async def _validate_action_owner(
         self,
         *,
+        session: AsyncSession,
         record: IdempotencyRecordModel,
         permit: PermitModel,
         wallet_id: str,
@@ -641,6 +642,7 @@ class McpDispatchAttemptService:
                 key_id,
                 arguments or {},
                 "replay",
+                session=session,
             )
             if not action_validation.allowed:
                 return action_validation
@@ -723,6 +725,7 @@ class McpDispatchAttemptService:
                     if permit is None:
                         return PermitValidation(False, "permit_not_found", None), None
                     action_denial = await self._validate_action_owner(
+                        session=session,
                         record=record,
                         permit=permit,
                         wallet_id=wallet_id,
@@ -1193,6 +1196,7 @@ class McpDispatchAttemptService:
                                 "dispatch_prepare_commit_uncertain"
                             )
                         action_denial = await self._validate_action_owner(
+                            session=recovery_session,
                             record=record,
                             permit=permit,
                             wallet_id=wallet_id,

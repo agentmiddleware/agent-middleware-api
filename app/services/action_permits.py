@@ -9,6 +9,8 @@ import json
 import math
 from typing import Any, Literal
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.services.permits import PermitValidation
 
 from app.core.auth import AuthContext
@@ -397,6 +399,8 @@ async def validate_action_request(
     key_id: str | None,
     arguments: dict[str, Any],
     phase: Literal["admission", "replay"],
+    *,
+    session: AsyncSession | None = None,
 ) -> PermitValidation:
     """Non-consuming authority gate; priced admission remains atomic preparation."""
     from app.core.time import utc_now, to_naive_utc
@@ -411,7 +415,7 @@ async def validate_action_request(
         reason = f"permit_{permit.status}"
     elif to_naive_utc(permit.expires_at) <= utc_now():
         reason = "permit_expired"
-    elif not await get_permit_service().verify_signature(permit):
+    elif not await get_permit_service().verify_signature(permit, session=session):
         reason = "permit_signature_invalid"
     if reason:
         return PermitValidation(False, reason, permit)
