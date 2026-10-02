@@ -96,7 +96,9 @@ class JWTService:
 
         return jwt.encode(payload, private_key, algorithm=JWT_ALGORITHM)
 
-    def create_refresh_token(self, wallet_id: str) -> str:
+    def create_refresh_token(
+        self, wallet_id: str, scopes: list[str] | None = None
+    ) -> str:
         """Create a long-lived refresh token."""
         private_key, signing_key_id = self._load_keys()
         now = datetime.now(timezone.utc)
@@ -110,6 +112,7 @@ class JWTService:
             "aud": JWT_AUDIENCE,
             "jti": jti,
             "type": "refresh",
+            "scopes": scopes if scopes is not None else [],
             "kid": signing_key_id,
         }
 
@@ -145,10 +148,16 @@ class JWTService:
         if payload.get("type") != token_type:
             raise JWTError(f"token_type_mismatch: expected {token_type}")
 
+        scopes = payload.get("scopes")
+        if not isinstance(scopes, list) or not all(
+            isinstance(scope, str) for scope in scopes
+        ):
+            raise JWTError("invalid_or_missing_scopes")
+
         return JWTPayload(
             sub=payload["sub"],
             key_id=payload.get("key_id"),
-            scopes=payload.get("scopes", []),
+            scopes=scopes,
             iat=payload["iat"],
             exp=payload["exp"],
             iss=payload["iss"],

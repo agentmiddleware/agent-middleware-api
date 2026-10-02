@@ -1379,7 +1379,7 @@ async def test_jwt_from_bounded_key_cannot_mint_key(
     for path in ("/v1/api-keys", "/v1/api-keys/rotate"):
         resp = await client.post(path, json={"wallet_id": wallet_id}, headers=bearer)
         assert resp.status_code == 403, resp.text
-        assert resp.json()["detail"]["error"] == "bounded_key_cannot_mint"
+        assert resp.json()["detail"]["error"] == "jwt_cannot_mint_api_key"
 
     assert await _key_ids(client, api_headers, wallet_id) == [bounded["key_id"]]
 

@@ -15,7 +15,7 @@ from collections import defaultdict
 from typing import Any
 
 import redis.asyncio as redis
-from fastapi import Request, Response
+from fastapi import HTTPException, Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
@@ -23,8 +23,11 @@ from .auth import (
     CREDENTIAL_ACCEPTANCE,
     CREDENTIAL_REJECTED_HEADER,
     CredentialAcceptance,
+    _parse_bearer_authorization,
 )
 from .config import get_settings
+from .jwt import JWTError, get_jwt_service
+from .oidc_iga import is_iga_issuer_token
 from .runtime_degradation import mark_rate_limiter_memory_fallback
 from .trust_mode import is_production_like_environment
 
@@ -99,6 +102,36 @@ def rate_limit_discovery() -> dict[str, Any]:
             "X-RateLimit-Reset",
         ],
     }
+
+
+def _presented_rate_identity(request: Request) -> str | None:
+    """Mirror credential precedence without consuming authentication budgets.
+
+    Internal JWTs share their originating key's bucket across token rotation.
+    An enterprise bearer is attribution only; its accompanying API key remains
+    the credential. Invalid credentials remain subject to the preauth ceiling.
+    """
+    api_key = request.headers.get(settings.API_KEY_HEADER, "").strip() or None
+    authorization = request.headers.get("authorization")
+    token = None
+    if authorization is not None:
+        try:
+            token = _parse_bearer_authorization(authorization)
+        except HTTPException:
+            return f"invalid-authorization:{authorization}"
+        if api_key and is_iga_issuer_token(token):
+            return api_key
+    elif api_key is not None:
+        candidate = api_key.removeprefix("Bearer ").strip()
+        if candidate.count(".") == 2:
+            token = candidate
+    if token is None:
+        return api_key
+    try:
+        payload = get_jwt_service().verify_access_token(token)
+    except JWTError:
+        return f"invalid-jwt:{token}"
+    return f"jwt:{payload.key_id}"
 
 
 def _client_id(request: Request) -> str:
@@ -512,9 +545,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             # one accepted credential can sidestep the per-key limit. A blank
             # header is no credential at all, so it shares the anonymous
             # bucket. The bucket is then named by a digest, never the key.
-            presented_key = (
-                request.headers.get(settings.API_KEY_HEADER, "").strip() or None
-            )
+            presented_key = _presented_rate_identity(request)
             bucket_limits = [(_api_key_bucket(presented_key), self.limit)]
 
         # Skip rate limiting for docs, health, and test clients

@@ -55,14 +55,20 @@ async def exchange_api_key_for_tokens(
     jwt_svc = get_jwt_service()
 
     # Default scopes: all billing and tool invoke
-    scopes = request.scopes or ["billing:charge", "tool:invoke"]
+    scopes = (
+        request.scopes
+        if request.scopes is not None
+        else ["billing:charge", "tool:invoke"]
+    )
 
     access_token = jwt_svc.create_access_token(
         wallet_id=db_key.wallet_id,
         key_id=db_key.key_id,
         scopes=scopes,
     )
-    refresh_token = jwt_svc.create_refresh_token(wallet_id=db_key.wallet_id)
+    refresh_token = jwt_svc.create_refresh_token(
+        wallet_id=db_key.wallet_id, scopes=scopes
+    )
 
     # Store refresh token JTI for revocation
     refresh_payload = jwt_svc.verify_refresh_token(refresh_token)
@@ -194,9 +200,11 @@ async def refresh_access_token(
     new_access = jwt_svc.create_access_token(
         wallet_id=payload.sub,
         key_id=origin_key_id,
-        scopes=["billing:charge", "tool:invoke"],
+        scopes=payload.scopes,
     )
-    new_refresh = jwt_svc.create_refresh_token(wallet_id=payload.sub)
+    new_refresh = jwt_svc.create_refresh_token(
+        wallet_id=payload.sub, scopes=payload.scopes
+    )
 
     # Store new refresh token, carrying the binding forward so rotation cannot
     # launder a chain into an unbound one.
