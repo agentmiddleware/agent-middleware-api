@@ -28,6 +28,23 @@ from app.schemas.billing import ServiceCategory
 from pydantic import BaseModel
 
 
+@pytest.mark.parametrize(
+    "schema", [None, {}, {"type": "object", "properties": {"id": {"type": "integer"}}}]
+)
+def test_manifest_normalizes_only_missing_or_null_input_schema(schema):
+    generator = McpGenerator()
+    service = {"service_id": "schema-fixture", "input_schema": schema}
+    tool = generator._service_to_mcp_tool(service)
+    assert tool["inputSchema"] == (
+        {"type": "object", "properties": {}} if schema is None else schema
+    )
+    service.pop("input_schema")
+    assert generator._service_to_mcp_tool(service)["inputSchema"] == {
+        "type": "object",
+        "properties": {},
+    }
+
+
 class TestSchemaExtraction:
     """Test Pydantic to MCP schema conversion."""
 
