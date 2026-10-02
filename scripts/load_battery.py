@@ -34,11 +34,12 @@ os.environ.setdefault("ALLOW_LEGACY_UNPERMITTED_MCP", "true")
 # These must be set before importing app modules
 DB_URL = os.environ.get("DATABASE_URL")
 PG_CONTAINER = "agent-middleware-load-test"
+_OWNED_CONTAINER_ID: str | None = None
 
 
 def _ensure_postgres() -> str:
     """Start a local Postgres container if DATABASE_URL not set."""
-    global DB_URL
+    global DB_URL, _OWNED_CONTAINER_ID
     if DB_URL:
         return DB_URL
 
@@ -52,7 +53,7 @@ def _ensure_postgres() -> str:
         print(f"[load] Reusing existing container {PG_CONTAINER}")
     else:
         print(f"[load] Starting Postgres container {PG_CONTAINER}...")
-        subprocess.run(
+        started = subprocess.run(
             [
                 "docker",
                 "run",
@@ -72,11 +73,13 @@ def _ensure_postgres() -> str:
             ],
             check=True,
             capture_output=True,
+            text=True,
         )
+        _OWNED_CONTAINER_ID = started.stdout.strip()
         # Wait for Postgres to be ready
         for _ in range(30):
             check = subprocess.run(
-                ["docker", "exec", PG_CONTAINER, "pg_isready", "-U", "postgres"],
+                ["docker", "exec", _OWNED_CONTAINER_ID, "pg_isready", "-U", "postgres"],
                 capture_output=True,
             )
             if check.returncode == 0:
@@ -94,13 +97,16 @@ def _ensure_postgres() -> str:
 
 def _stop_postgres() -> None:
     """Stop the container we started."""
-    if os.environ.get("DATABASE_URL") != DB_URL:
-        return  # User-provided DB, don't touch
-    print(f"[load] Stopping container {PG_CONTAINER}...")
-    subprocess.run(
-        ["docker", "stop", "-t", "5", PG_CONTAINER],
+    global _OWNED_CONTAINER_ID
+    if not _OWNED_CONTAINER_ID:
+        return
+    print(f"[load] Stopping container {_OWNED_CONTAINER_ID}...")
+    stopped = subprocess.run(
+        ["docker", "stop", "-t", "5", _OWNED_CONTAINER_ID],
         capture_output=True,
     )
+    if stopped.returncode == 0:
+        _OWNED_CONTAINER_ID = None
 
 
 def _run_migrations() -> None:
