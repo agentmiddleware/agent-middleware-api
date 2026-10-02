@@ -998,21 +998,6 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 1
 
-    # Release expectations and the manifest are inputs to the live check.
-    # --runtime-posture on its own deselects that check, so accepting them
-    # there would drop them silently and look like an identity check ran.
-    if (
-        args.runtime_posture
-        and not args.live
-        and (args.expected_version or args.expected_commit_sha or args.manifest)
-    ):
-        print(
-            f"{BAD} --expected-version, --expected-commit-sha, and --manifest "
-            "apply only to --live; add --live or drop them from a "
-            "--runtime-posture run"
-        )
-        return 1
-
     # No check selected: run whatever the environment supports. The runtime
     # posture check only means something inside the deployed container, so it
     # never runs by default. --public-db configures the database check, so it
@@ -1021,6 +1006,20 @@ def main(argv: list[str] | None = None) -> int:
     selected = args.db or args.live or args.runtime_posture
     run_db = not args.manifest_only and (args.db or args.public_db or not selected)
     run_live = not args.manifest_only and (args.live or not selected)
+
+    # Explicit selectors can disable the live check. Do not silently discard
+    # its release expectations; manifest-only validation is the stated exception.
+    if (
+        not run_live
+        and not args.manifest_only
+        and (args.expected_version or args.expected_commit_sha or args.manifest)
+    ):
+        print(
+            f"{BAD} --expected-version, --expected-commit-sha, and --manifest "
+            "apply only to --live; add --live or drop them from a "
+            "--db or --runtime-posture run"
+        )
+        return 1
 
     results: list[bool] = []
     manifest: CustomerManifest | None = None
