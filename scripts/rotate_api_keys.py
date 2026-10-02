@@ -27,10 +27,16 @@ from __future__ import annotations
 
 import argparse
 import os
+from pathlib import Path
 import secrets
 import sys
 
 import httpx
+
+if not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from scripts.live_script_target import LiveTargetError, resolve_live_target  # noqa: E402
 
 KEY_PREFIX = "amw_live_"
 KEY_ENTROPY_BYTES = 32
@@ -49,7 +55,7 @@ def generate(count: int) -> int:
 
 
 def _probe(base_url: str, api_key: str) -> httpx.Response:
-    with httpx.Client(base_url=base_url, timeout=30) as client:
+    with httpx.Client(base_url=base_url, timeout=30, follow_redirects=False) as client:
         return client.get(CHECK_PATH, headers={"X-API-Key": api_key})
 
 
@@ -68,6 +74,14 @@ def verify() -> int:
     ]
     if missing:
         print(f"Missing required environment variables: {', '.join(missing)}")
+        return 2
+
+    try:
+        # This read-only verifier supports an explicitly selected production
+        # origin, but credentials must never travel over remote plaintext HTTP.
+        base_url = resolve_live_target(base_url, confirm_production=True, environ={})
+    except LiveTargetError as exc:
+        print(f"Invalid AGENT_MIDDLEWARE_API_URL: {exc}")
         return 2
 
     failures = []
