@@ -1514,6 +1514,44 @@ def test_live_fails_on_bad_posture(monkeypatch, override):
     assert preflight.check_live("https://api.example.com") is False
 
 
+@pytest.mark.parametrize("field", ["enable_proof_surfaces", "runtime_degradation"])
+def test_live_rejects_missing_public_posture_field(monkeypatch, capsys, field):
+    payload = {key: value for key, value in HEALTHY.items() if key != field}
+    _patch_get(monkeypatch, payload)
+    assert preflight.check_live("https://api.example.com") is False
+    assert "[preflight] PASS" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("value", [None, 0, "", [], {}, "false", True])
+def test_live_requires_boolean_false_for_proof_surfaces(monkeypatch, value):
+    _patch_get(monkeypatch, {**HEALTHY, "enable_proof_surfaces": value})
+    assert preflight.check_live("https://api.example.com") is False
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        0,
+        [],
+        "false",
+        {},
+        {"durable_state": None},
+        {"durable_state": []},
+        {"durable_state": "false"},
+        {"durable_state": {}},
+        {"durable_state": {"fell_back_to_memory": None}},
+        {"durable_state": {"fell_back_to_memory": 0}},
+        {"durable_state": {"fell_back_to_memory": "false"}},
+        {"durable_state": {"fell_back_to_memory": []}},
+        {"durable_state": {"fell_back_to_memory": {}}},
+    ],
+)
+def test_live_requires_explicit_durable_posture(monkeypatch, value):
+    _patch_get(monkeypatch, {**HEALTHY, "runtime_degradation": value})
+    assert preflight.check_live("https://api.example.com") is False
+
+
 # ---------------------------------------------------------------------------
 # Locked-down tool catalogs and the private dogfood posture.
 #
@@ -2236,10 +2274,15 @@ def test_cli_public_db_checks_the_public_url_alongside_other_checks(
 )
 @pytest.mark.parametrize(
     "selectors",
-    [["--runtime-posture"], ["--db", "--runtime-posture"]],
-    ids=["runtime_posture", "db_and_runtime_posture"],
+    [
+        ["--runtime-posture"],
+        ["--db", "--runtime-posture"],
+        ["--db"],
+        ["--db", "--public-db"],
+    ],
+    ids=["runtime_posture", "db_and_runtime_posture", "db", "db_and_public_db"],
 )
-def test_cli_runtime_posture_rejects_live_only_options_without_live(
+def test_cli_selectors_reject_live_only_options_without_live(
     tmp_path,
     monkeypatch,
     capsys,
@@ -2261,8 +2304,13 @@ def test_cli_runtime_posture_rejects_live_only_options_without_live(
     assert "apply only to --live" in capsys.readouterr().out
 
 
-def test_cli_runtime_posture_with_live_keeps_release_expectations(monkeypatch):
+@pytest.mark.parametrize(
+    "selectors", [[], ["--db", "--live"], ["--live", "--runtime-posture"]]
+)
+def test_cli_selected_live_check_keeps_release_expectations(monkeypatch, selectors):
     seen = []
+    monkeypatch.setenv("DATABASE_URL", "sqlite+aiosqlite:///unused.db")
+    monkeypatch.setattr(preflight, "check_db", lambda _url: seen.append("db") is None)
     monkeypatch.setattr(
         preflight,
         "check_runtime_posture",
@@ -2275,13 +2323,14 @@ def test_cli_runtime_posture_with_live_keeps_release_expectations(monkeypatch):
 
     monkeypatch.setattr(preflight, "check_live", check_live)
 
-    arguments = ["--live", "--runtime-posture", "--strict"]
+    arguments = [*selectors, "--strict"]
     arguments += ["--url", "https://api.example.com"]
     arguments += ["--expected-version", "1.3.0"]
     arguments += ["--expected-commit-sha", EXPECTED_COMMIT_SHA]
     assert preflight.main(arguments) == 0
+    expected_checks = ["runtime"] if "--runtime-posture" in selectors else ["db"]
     assert seen == [
-        "runtime",
+        *expected_checks,
         ("https://api.example.com", "1.3.0", EXPECTED_COMMIT_SHA),
     ]
 
