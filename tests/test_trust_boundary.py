@@ -107,9 +107,9 @@ TRUST_PACKAGE_LAZY_EXCEPTIONS = frozenset({("adapters.py", "app.routers.mcp")})
 def _is_module(dotted: str) -> bool:
     """True when ``dotted`` names a module or package in this repository."""
     candidate = ROOT.joinpath(*dotted.split("."))
-    return candidate.with_suffix(".py").is_file() or (
-        candidate / "__init__.py"
-    ).is_file()
+    return (
+        candidate.with_suffix(".py").is_file() or (candidate / "__init__.py").is_file()
+    )
 
 
 def _imports(path: Path, source: str | None = None) -> list[tuple[str, bool]]:

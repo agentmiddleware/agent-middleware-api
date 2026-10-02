@@ -78,9 +78,11 @@ AGENT_DIRECTORIES = [
 # Data models
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class BroadcastTarget:
     """A single directory we're broadcasting to."""
+
     directory_id: str
     directory_name: str
     url: str
@@ -94,9 +96,10 @@ class BroadcastTarget:
 @dataclass
 class DiscoveryMetrics:
     """Tracking how a published API is being discovered."""
-    impressions: int = 0          # Times listed in directory searches
-    lookups: int = 0              # Times llm.txt/agent.json fetched
-    integrations: int = 0         # Times another agent called the API
+
+    impressions: int = 0  # Times listed in directory searches
+    lookups: int = 0  # Times llm.txt/agent.json fetched
+    integrations: int = 0  # Times another agent called the API
     last_lookup_at: datetime | None = None
     referral_sources: dict[str, int] = field(default_factory=dict)
 
@@ -104,18 +107,19 @@ class DiscoveryMetrics:
 @dataclass
 class BroadcastJob:
     """A complete broadcast operation for one published API."""
+
     job_id: str
     service_name: str
     service_version: str
     base_url: str
-    generation_id: str           # From Protocol Engine
+    generation_id: str  # From Protocol Engine
     oracle_registration_id: str | None = None
     targets: list[BroadcastTarget] = field(default_factory=list)
     directories_contacted: int = 0
     directories_confirmed: int = 0
     directories_failed: int = 0
     discovery_metrics: DiscoveryMetrics = field(default_factory=DiscoveryMetrics)
-    status: str = "pending"      # pending, broadcasting, complete, partial
+    status: str = "pending"  # pending, broadcasting, complete, partial
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     completed_at: datetime | None = None
     # Wallet whose key created the job; None for bootstrap-admin jobs, which
@@ -126,6 +130,7 @@ class BroadcastJob:
 # ---------------------------------------------------------------------------
 # Broadcast Engine
 # ---------------------------------------------------------------------------
+
 
 class OracleBroadcastEngine:
     """Pushes published APIs into the agent discovery network."""
@@ -185,8 +190,13 @@ class OracleBroadcastEngine:
 
         for directory in target_dirs:
             target = await self._send_to_directory(
-                directory, service_name, service_version, base_url,
-                llm_txt, openapi_spec, agent_json,
+                directory,
+                service_name,
+                service_version,
+                base_url,
+                llm_txt,
+                openapi_spec,
+                agent_json,
             )
             job.targets.append(target)
             job.directories_contacted += 1
@@ -297,9 +307,7 @@ class OracleBroadcastEngine:
 
         for target in job.targets:
             if target.status == "confirmed":
-                metrics.referral_sources[target.directory_name] = (
-                    10 + hash_val % 30
-                )
+                metrics.referral_sources[target.directory_name] = 10 + hash_val % 30
 
         return metrics
 

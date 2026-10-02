@@ -85,33 +85,33 @@ async def test_discover_and_tools_json_agree_when_proof_surfaces_off(
     client, proof_surfaces_off, dogfood_on
 ):
     """When proof surfaces are off, /v1/discover and /mcp/tools.json must agree.
-    
+
     Both should show dogfood tools (partner.notes.write) but not proof-surface
     stubs (awi_*, telemetry, etc.).
     """
     discover_resp = await client.get("/v1/discover")
     tools_json_resp = await client.get("/mcp/tools.json")
-    
+
     assert discover_resp.status_code == 200
     assert tools_json_resp.status_code == 200
-    
+
     discover_data = discover_resp.json()
     tools_json_data = tools_json_resp.json()
-    
+
     # Extract tool names from both endpoints
     discover_tools = {tool["service_id"] for tool in discover_data["mcp_tools"]}
     tools_json_tools = {tool["name"] for tool in tools_json_data["tools"]}
-    
+
     # They must agree
     assert discover_tools == tools_json_tools, (
         f"Discovery tools mismatch: /v1/discover has {discover_tools}, "
         f"/mcp/tools.json has {tools_json_tools}"
     )
-    
+
     # When dogfood is on and proof surfaces are off, we should see the dogfood tool
     assert "partner.notes.write" in tools_json_tools
     assert "partner.notes.write" in discover_tools
-    
+
     # But not proof-surface stubs
     assert not any(name.startswith("awi_") for name in tools_json_tools)
     assert not any(name.startswith("awi_") for name in discover_tools)
@@ -123,35 +123,35 @@ async def test_discover_and_tools_json_agree_when_proof_surfaces_off(
 @pytest.mark.proof
 async def test_discover_and_tools_json_agree_when_proof_surfaces_on(client):
     """When proof surfaces are on, /v1/discover and /mcp/tools.json must agree.
-    
+
     Both should show proof-surface tools plus any registered dogfood tools.
     The suite default is ENABLE_PROOF_SURFACES=false; the ``proof`` marker
     makes the autouse conftest fixture turn the flag on, mount the proof
     routers and register the proof-surface MCP tools for this test only.
     """
     assert get_settings().ENABLE_PROOF_SURFACES is True
-    
+
     sync_proof_surface_mcp_registration()
-    
+
     discover_resp = await client.get("/v1/discover")
     tools_json_resp = await client.get("/mcp/tools.json")
-    
+
     assert discover_resp.status_code == 200
     assert tools_json_resp.status_code == 200
-    
+
     discover_data = discover_resp.json()
     tools_json_data = tools_json_resp.json()
-    
+
     # Extract tool names
     discover_tools = {tool["service_id"] for tool in discover_data["mcp_tools"]}
     tools_json_tools = {tool["name"] for tool in tools_json_data["tools"]}
-    
+
     # They must agree
     assert discover_tools == tools_json_tools, (
         f"Discovery tools mismatch: /v1/discover has {discover_tools}, "
         f"/mcp/tools.json has {tools_json_tools}"
     )
-    
+
     # Proof surfaces should include AWI tools
     assert any(name.startswith("awi_") for name in tools_json_tools)
     assert any(name.startswith("awi_") for name in discover_tools)
@@ -162,29 +162,29 @@ async def test_discover_and_tools_json_both_empty_when_no_tools_registered(
     client, proof_surfaces_off
 ):
     """When no tools are registered and proof surfaces are off, both should agree.
-    
+
     Note: This fixture has proof_surfaces_off but NOT dogfood_on.
     The registry may have leftover tools from other tests, but both endpoints
     must still agree on what they return.
     """
     discover_resp = await client.get("/v1/discover")
     tools_json_resp = await client.get("/mcp/tools.json")
-    
+
     assert discover_resp.status_code == 200
     assert tools_json_resp.status_code == 200
-    
+
     discover_data = discover_resp.json()
     tools_json_data = tools_json_resp.json()
-    
+
     discover_tools = {tool["service_id"] for tool in discover_data["mcp_tools"]}
     tools_json_tools = {tool["name"] for tool in tools_json_data["tools"]}
-    
+
     # Both must agree, even if the registry has leftover tools from other tests
     assert discover_tools == tools_json_tools, (
         f"Discovery tools mismatch: /v1/discover has {discover_tools}, "
         f"/mcp/tools.json has {tools_json_tools}"
     )
-    
+
     # With proof surfaces off and no dogfood flag, we shouldn't see proof-surface stubs
     assert not any(name.startswith("awi_") for name in tools_json_tools)
     assert not any(name.startswith("awi_") for name in discover_tools)
@@ -193,7 +193,7 @@ async def test_discover_and_tools_json_both_empty_when_no_tools_registered(
 @pytest.mark.anyio
 async def test_llms_txt_discovery_auth_claim_matches_mcp_messages_requirement(client):
     """llms.txt must not say MCP auth is optional if POST /mcp/messages requires a key.
-    
+
     The endpoint requires authentication (via get_auth_context dependency), so
     llms.txt must reflect that. Checked line by line rather than by proximity:
     the endpoints table row for /mcp/messages must start with "Required", and no line

@@ -108,9 +108,7 @@ async def parse_payment_required(
     """Strictly parse an observed HTTP 402 into a payment requirement."""
     del auth  # authenticated-only surface; parsing itself is tenant-neutral
     try:
-        requirement = get_x402_handler().parse_402(
-            request.status_code, request.headers
-        )
+        requirement = get_x402_handler().parse_402(request.status_code, request.headers)
     except X402Error as exc:
         raise HTTPException(status_code=400, detail=exc.reason)
     return X402RequirementResponse(
@@ -169,8 +167,7 @@ async def _recover_stale_settle_record(
         record is not None
         and record.response_json is None
         and not record.ledger_entry_id
-        and record.created_at
-        < utc_now() - timedelta(seconds=_SETTLE_STALE_SECONDS)
+        and record.created_at < utc_now() - timedelta(seconds=_SETTLE_STALE_SECONDS)
     )
     if not stale:
         # Possibly a live concurrent attempt: refuse, exactly as before.
@@ -180,9 +177,7 @@ async def _recover_stale_settle_record(
         record.record_id
     )
     if receipt is not None:
-        raise HTTPException(
-            status_code=409, detail="x402_settled_unrecoverable_replay"
-        )
+        raise HTTPException(status_code=409, detail="x402_settled_unrecoverable_replay")
     # Mark the recovery on the audit chain BEFORE abandoning (mirrors
     # acp_intent_recovered): the re-run may legitimately leave a second
     # reservation trail for this key, and this event lets an operator read

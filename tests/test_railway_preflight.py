@@ -232,9 +232,15 @@ def test_private_pilot_sop_runs_schema_check_inside_api_container() -> None:
     assert 'test "$sentinel_count" -eq 1' in sop
     assert 'test "$post_ready" = "true"' in sop
     assert sop.count('--manifest "$MANIFEST" --url "$API_URL"') == 2
-    assert 'RELEASE_CONTEXT="$(python3 scripts/prepare_railway_release.py --ref "$DEPLOY_SHA")"' in private_release
+    assert (
+        'RELEASE_CONTEXT="$(python3 scripts/prepare_railway_release.py --ref "$DEPLOY_SHA")"'
+        in private_release
+    )
     assert 'railway up "$RELEASE_CONTEXT" --path-as-root' in private_release
-    assert 'test "$(cat "$RELEASE_CONTEXT/.build_commit_sha")" = "$DEPLOY_SHA"' in private_release
+    assert (
+        'test "$(cat "$RELEASE_CONTEXT/.build_commit_sha")" = "$DEPLOY_SHA"'
+        in private_release
+    )
     assert "railway variable set COMMIT_SHA" not in private_release
     assert "--build-arg COMMIT_SHA" not in private_release
     source_gate = private_release.index(
@@ -247,9 +253,11 @@ def test_private_pilot_sop_runs_schema_check_inside_api_container() -> None:
         'RELEASE_CONTEXT="$(python3 scripts/prepare_railway_release.py --ref "$DEPLOY_SHA")"'
     )
     deploy = private_release.index('railway up "$RELEASE_CONTEXT" --path-as-root')
-    private_deploy = private_release[deploy : private_release.index(
-        "# Resolve and wait for the uniquely marked deployment"
-    )]
+    private_deploy = private_release[
+        deploy : private_release.index(
+            "# Resolve and wait for the uniquely marked deployment"
+        )
+    ]
     assert "--no-gitignore" in private_deploy
     post_gate = private_release.rindex(
         "python3 scripts/railway_preflight.py --live --strict"
@@ -272,7 +280,9 @@ def test_private_pilot_sop_runs_schema_check_inside_api_container() -> None:
 def test_verification_checklist_pairs_public_gate_with_private_posture() -> None:
     """Step 5's --live gate is public-only; the step must say so and give the
     in-container command that verifies the dogfood posture."""
-    checklist = (REPO_ROOT / "docs" / "deployment-verification-checklist.md").read_text()
+    checklist = (
+        REPO_ROOT / "docs" / "deployment-verification-checklist.md"
+    ).read_text()
     step5 = checklist[
         checklist.index("5. **Run the strict live preflight**") : checklist.index(
             "6. **List what is still not live.**"
@@ -282,7 +292,9 @@ def test_verification_checklist_pairs_public_gate_with_private_posture() -> None
     assert "python3 scripts/railway_preflight.py --live --strict" in step5
     assert "public-only" in step5
     assert '--deployment-instance "$INSTANCE_ID"' in step5
-    assert "python scripts/railway_preflight.py --db --runtime-posture --strict" in step5
+    assert (
+        "python scripts/railway_preflight.py --db --runtime-posture --strict" in step5
+    )
     assert "#rolling-back-to-an-image-without---runtime-posture" in step5
 
 
@@ -363,9 +375,9 @@ def test_rollback_live_gates_verify_the_signing_key_from_a_gate_checkout() -> No
     still checked by the tool, from the manifest, not by hand."""
     sop = (REPO_ROOT / "docs" / "deploy-railway.md").read_text()
     rollback = sop[
-        sop.index("#### Rolling back to an image without `--runtime-posture`") : sop.index(
-            "### Customer operations manifest"
-        )
+        sop.index(
+            "#### Rolling back to an image without `--runtime-posture`"
+        ) : sop.index("### Customer operations manifest")
     ]
 
     assert 'GATE_SHA="$(git rev-parse origin/main)"' in rollback
@@ -376,7 +388,7 @@ def test_rollback_live_gates_verify_the_signing_key_from_a_gate_checkout() -> No
     ) in rollback
     assert '''SIGNING_KEY_ID="$(jq -er '.signing_key_id' "$MANIFEST")"''' in rollback
     assert (
-        '''SIGNING_PUBLIC_KEY_SHA256="$(jq -er '.signing_public_key_sha256' '''
+        """SIGNING_PUBLIC_KEY_SHA256="$(jq -er '.signing_public_key_sha256' """
         '''"$MANIFEST")"'''
     ) in rollback
     # The jq fields are the manifest's own field names.
@@ -479,9 +491,9 @@ def test_railway_cli_version_guard_fails_closed(
 def _rollback_section() -> str:
     sop = (REPO_ROOT / "docs" / "deploy-railway.md").read_text()
     return sop[
-        sop.index("#### Rolling back to an image without `--runtime-posture`") : sop.index(
-            "### Customer operations manifest"
-        )
+        sop.index(
+            "#### Rolling back to an image without `--runtime-posture`"
+        ) : sop.index("### Customer operations manifest")
     ]
 
 
@@ -529,7 +541,9 @@ def _first_party_block() -> str:
 
 def test_first_party_rollback_variant_replaces_every_manifest_input() -> None:
     rollback = _rollback_section()
-    variant = rollback[rollback.index("##### First-party stack without a customer manifest") :]
+    variant = rollback[
+        rollback.index("##### First-party stack without a customer manifest") :
+    ]
     block = _first_party_block()
 
     # The manifest-derived variables all have a named, non-live source.
@@ -537,7 +551,9 @@ def test_first_party_rollback_variant_replaces_every_manifest_input() -> None:
     assert 'ENVIRONMENT="production"' in block
     assert 'PROJECT_ID="${FIRST_PARTY_PROJECT_ID:?' in block
     assert 'SIGNING_KEY_ID="${FIRST_PARTY_SIGNING_KEY_ID:?' in block
-    assert 'SIGNING_PUBLIC_KEY_SHA256="${FIRST_PARTY_SIGNING_PUBLIC_KEY_SHA256:?' in block
+    assert (
+        'SIGNING_PUBLIC_KEY_SHA256="${FIRST_PARTY_SIGNING_PUBLIC_KEY_SHA256:?' in block
+    )
     assert "first-party operations record" in block
     assert "first-party key-generation record" in block
     assert "stop and escalate" in block
@@ -764,7 +780,9 @@ def test_documented_runtime_posture_check_fails_closed(tmp_path, environment) ->
     assert result.stdout == "[preflight] FAIL runtime posture\n"
 
 
-@pytest.mark.parametrize("marker_value", [None, "", "   "], ids=["unset", "empty", "blank"])
+@pytest.mark.parametrize(
+    "marker_value", [None, "", "   "], ids=["unset", "empty", "blank"]
+)
 def test_documented_runtime_posture_check_requires_railway_marker(
     tmp_path,
     marker_value,
@@ -825,10 +843,16 @@ def test_canonical_railway_sop_uses_immutable_release_context() -> None:
         )
     ]
 
-    assert 'RELEASE_CONTEXT="$(python3 scripts/prepare_railway_release.py --ref "$DEPLOY_SHA")"' in canonical
+    assert (
+        'RELEASE_CONTEXT="$(python3 scripts/prepare_railway_release.py --ref "$DEPLOY_SHA")"'
+        in canonical
+    )
     assert "set -euo pipefail" in canonical
     assert 'test -d "$RELEASE_CONTEXT"' in canonical
-    assert 'test "$(cat "$RELEASE_CONTEXT/.build_commit_sha")" = "$DEPLOY_SHA"' in canonical
+    assert (
+        'test "$(cat "$RELEASE_CONTEXT/.build_commit_sha")" = "$DEPLOY_SHA"'
+        in canonical
+    )
     assert 'railway up "$RELEASE_CONTEXT" --path-as-root' in canonical
     canonical_deploy = canonical[canonical.index('railway up "$RELEASE_CONTEXT"') :]
     assert "--no-gitignore" in canonical_deploy
@@ -2080,8 +2104,7 @@ def test_runtime_image_never_contains_a_dotenv_file():
     """Ignoring .env equals what the service resolves only because the image
     build context never includes one."""
     patterns = {
-        line.strip()
-        for line in (REPO_ROOT / ".dockerignore").read_text().splitlines()
+        line.strip() for line in (REPO_ROOT / ".dockerignore").read_text().splitlines()
     }
 
     assert {".env", ".env.*"} <= patterns

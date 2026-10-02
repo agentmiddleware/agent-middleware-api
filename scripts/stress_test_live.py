@@ -464,7 +464,9 @@ async def test_decimal_precision(spn, agt):
         elif "max_credits_must_be_positive" in r.text:
             print(f"  max_credits={amt}: {mark} rejected (positive required)")
         else:
-            print(f"  max_credits={amt}: {mark} {code} {body.get('detail', r.text[:80])}")
+            print(
+                f"  max_credits={amt}: {mark} {code} {body.get('detail', r.text[:80])}"
+            )
         if not ok:
             failed.append(amt)
     require(not failed, f"max_credits edge cases misjudged: {failed}")

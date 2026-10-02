@@ -798,9 +798,7 @@ class APIKeyService:
                     donor = max(bounding_keys, key=_donor_rank)
                     emergency_expires_at = donor.expires_at
                     if donor.max_uses is not None:
-                        emergency_max_uses = max(
-                            donor.max_uses - donor.use_count, 0
-                        )
+                        emergency_max_uses = max(donor.max_uses - donor.use_count, 0)
 
                 full_key, key_hash, key_prefix = generate_api_key()
                 new_key_id = f"key_{uuid4().hex[:12]}"

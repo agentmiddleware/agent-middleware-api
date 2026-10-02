@@ -25,13 +25,13 @@ from app.services.signing_keys import _decode_private_key
 JWT_ALGORITHM = "EdDSA"
 JWT_ISSUER = "agent-middleware-api"
 JWT_AUDIENCE = "agent-middleware-api"
-JWT_ACCESS_EXPIRY = 900   # 15 minutes
+JWT_ACCESS_EXPIRY = 900  # 15 minutes
 JWT_REFRESH_EXPIRY = 604800  # 7 days
 
 
 @dataclass(frozen=True)
 class JWTPayload:
-    sub: str          # wallet_id
+    sub: str  # wallet_id
     key_id: str | None
     scopes: list[str]
     # Epoch seconds, as PyJWT decodes them. Callers that need a datetime
@@ -40,8 +40,8 @@ class JWTPayload:
     exp: int
     iss: str
     aud: str
-    jti: str          # unique token id
-    type: str         # access | refresh
+    jti: str  # unique token id
+    type: str  # access | refresh
 
 
 class JWTError(Exception):

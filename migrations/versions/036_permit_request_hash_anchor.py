@@ -20,7 +20,7 @@ depends_on = None
 
 def upgrade():
     """Add original_request_hash column to permit_requests.
-    
+
     The new column stores the hash computed at request time and is never
     updated. Minting verifies that request_hash matches original_request_hash
     to prevent an attacker from coherently tampering with both the terms and
@@ -30,7 +30,7 @@ def upgrade():
     # backfill it, then recreate the table with the NOT NULL constraint.
     conn = op.get_bind()
     dialect_name = conn.dialect.name
-    
+
     if dialect_name == "sqlite":
         # SQLite path: add nullable, backfill, then recreate table.
         op.add_column(

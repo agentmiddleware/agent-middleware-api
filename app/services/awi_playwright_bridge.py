@@ -1169,7 +1169,9 @@ class AWIPlaywrightBridge:
             )
         root = Path(upload_dir).resolve()
         candidate = Path(file_path)
-        resolved = (candidate if candidate.is_absolute() else root / candidate).resolve()
+        resolved = (
+            candidate if candidate.is_absolute() else root / candidate
+        ).resolve()
         if not resolved.is_relative_to(root):
             raise ValueError("upload path escapes the configured upload directory")
         return str(resolved)
@@ -2026,9 +2028,7 @@ class AWIPlaywrightBridge:
                 url, wait_until="networkidle", timeout=self._default_timeout_ms
             )
             navigated_url = session._page.url
-            session.current_url = (
-                url if navigated_url == f"{url}/" else navigated_url
-            )
+            session.current_url = url if navigated_url == f"{url}/" else navigated_url
             session.page_title = await session._page.title()
             logger.info(f"Navigated to {url} for session {session.session_id}")
         except Exception as e:

@@ -343,9 +343,7 @@ def _evaluate(case: dict[str, Any]) -> tuple[str, list[str], dict[str, int]]:
 
     problems: list[str] = []
     if duplicate_dispatches:
-        problems.append(
-            f"{dispatches} dispatches crossed the fault layer for one key"
-        )
+        problems.append(f"{dispatches} dispatches crossed the fault layer for one key")
     if duplicate_executions:
         problems.append(
             f"{executions} downstream executions (effect ledger) for one key"
@@ -522,7 +520,9 @@ class DatabaseRestart(Scenario):
         "replication behaviour differ and are not covered here.",
     )
 
-    async def run_configuration(self, target: Target, log: EventLog) -> ConfigurationResult:
+    async def run_configuration(
+        self, target: Target, log: EventLog
+    ) -> ConfigurationResult:
         target.require_gateway()
         backdate_seconds = int(
             self.options.get("backdate_seconds", DEFAULT_BACKDATE_SECONDS)
@@ -794,9 +794,7 @@ class DatabaseRestart(Scenario):
                 "refund_count": recovery_view["refund_count"],
                 "net_debit_count": recovery_view["net_debit_count"],
                 "net_charge_credits": recovery_view["net_charge_credits"],
-                "unsettled_debit_entry_ids": recovery_view[
-                    "unsettled_debit_entry_ids"
-                ],
+                "unsettled_debit_entry_ids": recovery_view["unsettled_debit_entry_ids"],
                 "idempotency_records": len(recovery_view["records"]),
                 "idempotency_record_completed": recovery_view["record_completed"],
             },
@@ -822,9 +820,7 @@ class DatabaseRestart(Scenario):
             "final_receipt_outcomes": final_view["receipt_outcomes"],
             "final_net_debit_count": final_view["net_debit_count"],
             "final_net_charge_credits": final_view["net_charge_credits"],
-            "final_unsettled_debit_entry_ids": final_view[
-                "unsettled_debit_entry_ids"
-            ],
+            "final_unsettled_debit_entry_ids": final_view["unsettled_debit_entry_ids"],
             "wallet_balance_after_case": after_retry.wallet_balance,
         }
         disposition, problems, measures = _evaluate(case)

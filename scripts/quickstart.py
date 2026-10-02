@@ -167,7 +167,7 @@ def print_banner(port: int, state_dir: Path) -> None:
 [quickstart] from minting your own key to holding a signed receipt that
 [quickstart] verifies offline — and a forged one that fails.
 [quickstart]
-[quickstart] State: {state_dir}  (server log: {state_dir / 'server.log'})
+[quickstart] State: {state_dir}  (server log: {state_dir / "server.log"})
 [quickstart] Loopback only; never expose this posture on a shared host.
 [quickstart] Press Ctrl-C to stop.
 """.rstrip()
@@ -234,7 +234,9 @@ def main(argv: list[str] | None = None) -> int:
             except subprocess.TimeoutExpired:
                 process.terminate()
                 process.wait(timeout=10)
-            print(f"[quickstart] Stopped. State kept in {state_dir}; run again to resume.")
+            print(
+                f"[quickstart] Stopped. State kept in {state_dir}; run again to resume."
+            )
             return 0
 
 

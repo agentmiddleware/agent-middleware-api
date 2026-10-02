@@ -288,9 +288,7 @@ async def test_public_mcp_is_404_in_production_even_if_flag_on(
 
 @pytest.mark.production_trust
 @pytest.mark.anyio
-async def test_receipt_keys_remain_public_in_production(
-    client, production_trust_flags
-):
+async def test_receipt_keys_remain_public_in_production(client, production_trust_flags):
     keys = await client.get("/.well-known/trust-keys.json")
     assert keys.status_code != 401
     assert keys.status_code != 403

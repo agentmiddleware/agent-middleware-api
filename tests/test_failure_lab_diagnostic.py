@@ -41,7 +41,12 @@ from failure_lab.diagnostic import (
     pages,
 )
 from failure_lab.report import build_comparison
-from failure_lab.scenarios.base import ConfigurationResult, Counters, ScenarioResult, Verdict
+from failure_lab.scenarios.base import (
+    ConfigurationResult,
+    Counters,
+    ScenarioResult,
+    Verdict,
+)
 
 #: The repository root, for the out-of-process driver below.
 ROOT = Path(__file__).resolve().parent.parent
@@ -119,8 +124,15 @@ def _baseline_wins():
     return [
         _comparison(
             [
-                _entry(Configuration.DIRECT_NAIVE, verdict=Verdict.OBSERVED, executions=2),
-                _entry(Configuration.DIRECT_NATIVE, verdict=Verdict.PASS, executions=1, known=2),
+                _entry(
+                    Configuration.DIRECT_NAIVE, verdict=Verdict.OBSERVED, executions=2
+                ),
+                _entry(
+                    Configuration.DIRECT_NATIVE,
+                    verdict=Verdict.PASS,
+                    executions=1,
+                    known=2,
+                ),
                 _entry(
                     Configuration.GATEWAY_NATIVE,
                     verdict=Verdict.PASS,
@@ -140,8 +152,12 @@ def _gateway_prevents():
     return [
         _comparison(
             [
-                _entry(Configuration.DIRECT_NAIVE, verdict=Verdict.OBSERVED, executions=3),
-                _entry(Configuration.DIRECT_NATIVE, verdict=Verdict.OBSERVED, executions=2),
+                _entry(
+                    Configuration.DIRECT_NAIVE, verdict=Verdict.OBSERVED, executions=3
+                ),
+                _entry(
+                    Configuration.DIRECT_NATIVE, verdict=Verdict.OBSERVED, executions=2
+                ),
                 _entry(
                     Configuration.GATEWAY_NATIVE,
                     verdict=Verdict.PASS,
@@ -160,7 +176,9 @@ def _gateway_fails():
     return [
         _comparison(
             [
-                _entry(Configuration.DIRECT_NAIVE, verdict=Verdict.OBSERVED, executions=2),
+                _entry(
+                    Configuration.DIRECT_NAIVE, verdict=Verdict.OBSERVED, executions=2
+                ),
                 _entry(Configuration.DIRECT_NATIVE, verdict=Verdict.PASS, executions=1),
                 _entry(
                     Configuration.GATEWAY_NATIVE,
@@ -204,7 +222,9 @@ class _Record:
     what a template does.
     """
 
-    def __init__(self, comparisons, *, state: str = "complete", error: str | None = None):
+    def __init__(
+        self, comparisons, *, state: str = "complete", error: str | None = None
+    ):
         self.state = state
         self.error = error
         self.run_id = "synthetic-run"
@@ -463,7 +483,10 @@ def test_following_the_external_endpoints_own_instructions_reaches_its_real_answ
     "body",
     [
         {"scenarios": ["T03"], "note": "api_key=sk-abcdefghijklmnopqrstuvwx"},
-        {"scenarios": ["T03"], "note": "Authorization: Bearer abcdefghijklmnopqrstuvwxyz"},
+        {
+            "scenarios": ["T03"],
+            "note": "Authorization: Bearer abcdefghijklmnopqrstuvwxyz",
+        },
         {"scenarios": ["T03"], "pem": "-----BEGIN PRIVATE KEY-----\\nMIIB"},
         {"scenarios": ["T03"], "client_secret": "hunter2hunter2hunter2"},
     ],
@@ -520,7 +543,10 @@ def test_a_production_like_environment_refuses_to_boot_a_sandbox():
     so a guard that read the variable after the first run would always find a
     development posture and always pass.
     """
-    from failure_lab.diagnostic.runs import ProductionRefused, assert_not_production_like
+    from failure_lab.diagnostic.runs import (
+        ProductionRefused,
+        assert_not_production_like,
+    )
 
     with pytest.raises(ProductionRefused):
         assert_not_production_like("production")
@@ -562,7 +588,12 @@ def test_the_narration_cannot_claim_an_execution_nobody_counted():
         "step": "attempt.first",
         "message": "first attempt timed out",
     }
-    without = [{**base, "data": {"status": "timeout", "client_visible_state": "no_information"}}]
+    without = [
+        {
+            **base,
+            "data": {"status": "timeout", "client_visible_state": "no_information"},
+        }
+    ]
     with_evidence = [
         {
             **base,
@@ -705,7 +736,9 @@ def test_a_real_run_serves_nothing_with_a_credential_in_it(two_runs):
     for document in two_runs["documents"]:
         body = json.dumps(document)
         assert "lab-admin-" not in body, "the sandbox admin key was served"
-        assert not re.search(r"(?<![A-Za-z0-9])(?:amw|b2a|sk)[_-][A-Za-z0-9_-]{12,}", body)
+        assert not re.search(
+            r"(?<![A-Za-z0-9])(?:amw|b2a|sk)[_-][A-Za-z0-9_-]{12,}", body
+        )
 
 
 def test_one_scenarios_narration_does_not_silence_the_next():

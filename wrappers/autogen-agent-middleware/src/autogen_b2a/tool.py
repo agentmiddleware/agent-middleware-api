@@ -38,7 +38,14 @@ class B2AFunctionTool:
     async def discover_tools(self) -> list[dict[str, Any]]:
         """Discover all available MCP tools."""
         tools = await self.client.discover_tools()
-        return [{"name": t.name, "description": t.description, "input_schema": t.input_schema} for t in tools]
+        return [
+            {
+                "name": t.name,
+                "description": t.description,
+                "input_schema": t.input_schema,
+            }
+            for t in tools
+        ]
 
     async def call_mcp_tool(
         self,
@@ -70,12 +77,15 @@ class B2AFunctionTool:
                 issuer_wallet_id=self.wallet_id,
                 subject_wallet_id=self.wallet_id,
                 max_credits=self.permit_budget,
-                expires_at=datetime.now(timezone.utc) + timedelta(minutes=self.permit_ttl_minutes),
+                expires_at=datetime.now(timezone.utc)
+                + timedelta(minutes=self.permit_ttl_minutes),
                 allowed_tools=[tool_name],
                 scopes=[f"tool:{tool_name}:invoke", "billing:charge"],
             )
 
-            permit = await self.client.create_permit(request, idempotency_key=permit_idempotency_key)
+            permit = await self.client.create_permit(
+                request, idempotency_key=permit_idempotency_key
+            )
             permit_id = permit.permit_id
             self._permit_cache[permit_idempotency_key] = permit_id
 
@@ -135,7 +145,11 @@ class B2AFunctionTool:
                                 "description": "Arguments to pass to the tool",
                             },
                         },
-                        "required": ["tool_name", "idempotency_key", "permit_idempotency_key"],
+                        "required": [
+                            "tool_name",
+                            "idempotency_key",
+                            "permit_idempotency_key",
+                        ],
                     },
                 },
             },

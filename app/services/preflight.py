@@ -26,9 +26,11 @@ logger = logging.getLogger(__name__)
 # Check Result
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class CheckResult:
     """Single preflight check outcome."""
+
     name: str
     passed: bool
     severity: str  # "critical", "warning", "info"
@@ -39,6 +41,7 @@ class CheckResult:
 @dataclass
 class PreflightReport:
     """Aggregate preflight readiness report."""
+
     checked_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     verdict: str = "NO-GO"  # "GO" or "NO-GO"
     total_checks: int = 0
@@ -107,6 +110,7 @@ def _looks_like_live_stripe_key(key: str) -> bool:
 # Preflight Engine
 # ---------------------------------------------------------------------------
 
+
 class PreflightEngine:
     """
     Runs all preflight validations and produces a PreflightReport.
@@ -152,39 +156,45 @@ class PreflightEngine:
         keys = [k.strip() for k in valid_keys.split(",") if k.strip()]
 
         if not keys:
-            results.append(CheckResult(
-                name="api_keys_configured",
-                passed=False,
-                severity="critical",
-                message="No API keys configured in VALID_API_KEYS.",
-                detail=(
-                    "Set VALID_API_KEYS in .env with production keys "
-                    "(comma-separated)."
-                ),
-            ))
+            results.append(
+                CheckResult(
+                    name="api_keys_configured",
+                    passed=False,
+                    severity="critical",
+                    message="No API keys configured in VALID_API_KEYS.",
+                    detail=(
+                        "Set VALID_API_KEYS in .env with production keys "
+                        "(comma-separated)."
+                    ),
+                )
+            )
             return results
 
         placeholder_keys = [k for k in keys if _is_placeholder(k)]
         if placeholder_keys:
-            results.append(CheckResult(
-                name="api_keys_not_placeholder",
-                passed=False,
-                severity="critical",
-                message=f"Found {len(placeholder_keys)} placeholder API key(s).",
-                # Never echo key material: a prefix of 'test-key' or
-                # 'changeme' is the whole bootstrap admin key.
-                detail=(
-                    "Placeholder values in VALID_API_KEYS are not "
-                    "production-safe. Generate real keys."
-                ),
-            ))
+            results.append(
+                CheckResult(
+                    name="api_keys_not_placeholder",
+                    passed=False,
+                    severity="critical",
+                    message=f"Found {len(placeholder_keys)} placeholder API key(s).",
+                    # Never echo key material: a prefix of 'test-key' or
+                    # 'changeme' is the whole bootstrap admin key.
+                    detail=(
+                        "Placeholder values in VALID_API_KEYS are not "
+                        "production-safe. Generate real keys."
+                    ),
+                )
+            )
         else:
-            results.append(CheckResult(
-                name="api_keys_not_placeholder",
-                passed=True,
-                severity="info",
-                message=f"{len(keys)} production API key(s) configured.",
-            ))
+            results.append(
+                CheckResult(
+                    name="api_keys_not_placeholder",
+                    passed=True,
+                    severity="info",
+                    message=f"{len(keys)} production API key(s) configured.",
+                )
+            )
 
         return results
 
@@ -196,42 +206,50 @@ class PreflightEngine:
         stripe_key = config.get("stripe_secret_key", "")
 
         if not stripe_key:
-            results.append(CheckResult(
-                name="stripe_key_present",
-                passed=False,
-                severity="warning",
-                message="No Stripe secret key provided.",
-                detail=(
-                    "Billing will use simulated mode. "
-                    "Set stripe_secret_key for live payments."
-                ),
-            ))
+            results.append(
+                CheckResult(
+                    name="stripe_key_present",
+                    passed=False,
+                    severity="warning",
+                    message="No Stripe secret key provided.",
+                    detail=(
+                        "Billing will use simulated mode. "
+                        "Set stripe_secret_key for live payments."
+                    ),
+                )
+            )
         elif _is_placeholder(stripe_key):
-            results.append(CheckResult(
-                name="stripe_key_valid",
-                passed=False,
-                severity="critical",
-                message="Stripe key is a placeholder value.",
-                detail="Replace with a live Stripe key (sk_live_...).",
-            ))
+            results.append(
+                CheckResult(
+                    name="stripe_key_valid",
+                    passed=False,
+                    severity="critical",
+                    message="Stripe key is a placeholder value.",
+                    detail="Replace with a live Stripe key (sk_live_...).",
+                )
+            )
         elif not _looks_like_live_stripe_key(stripe_key):
-            results.append(CheckResult(
-                name="stripe_key_live",
-                passed=False,
-                severity="warning",
-                message="Stripe key does not appear to be a live key.",
-                detail=(
-                    "Live keys start with sk_live_. "
-                    "Test keys (sk_test_) will not process real payments."
-                ),
-            ))
+            results.append(
+                CheckResult(
+                    name="stripe_key_live",
+                    passed=False,
+                    severity="warning",
+                    message="Stripe key does not appear to be a live key.",
+                    detail=(
+                        "Live keys start with sk_live_. "
+                        "Test keys (sk_test_) will not process real payments."
+                    ),
+                )
+            )
         else:
-            results.append(CheckResult(
-                name="stripe_key_live",
-                passed=True,
-                severity="info",
-                message="Live Stripe key detected.",
-            ))
+            results.append(
+                CheckResult(
+                    name="stripe_key_live",
+                    passed=True,
+                    severity="info",
+                    message="Live Stripe key detected.",
+                )
+            )
 
         return results
 
@@ -240,39 +258,47 @@ class PreflightEngine:
         results = []
 
         if self.settings.DEBUG:
-            results.append(CheckResult(
-                name="debug_disabled",
-                passed=False,
-                severity="warning",
-                message="DEBUG is enabled.",
-                detail="Set DEBUG=false for production deployment.",
-            ))
+            results.append(
+                CheckResult(
+                    name="debug_disabled",
+                    passed=False,
+                    severity="warning",
+                    message="DEBUG is enabled.",
+                    detail="Set DEBUG=false for production deployment.",
+                )
+            )
         else:
-            results.append(CheckResult(
-                name="debug_disabled",
-                passed=True,
-                severity="info",
-                message="DEBUG mode is off.",
-            ))
+            results.append(
+                CheckResult(
+                    name="debug_disabled",
+                    passed=True,
+                    severity="info",
+                    message="DEBUG mode is off.",
+                )
+            )
 
         if self.settings.RATE_LIMIT_PER_MINUTE < 60:
-            results.append(CheckResult(
-                name="rate_limit_reasonable",
-                passed=False,
-                severity="warning",
-                message=(
-                    f"Rate limit is very low "
-                    f"({self.settings.RATE_LIMIT_PER_MINUTE}/min)."
-                ),
-                detail="Agent consumers may hit 429s quickly. Consider >= 60/min.",
-            ))
+            results.append(
+                CheckResult(
+                    name="rate_limit_reasonable",
+                    passed=False,
+                    severity="warning",
+                    message=(
+                        f"Rate limit is very low "
+                        f"({self.settings.RATE_LIMIT_PER_MINUTE}/min)."
+                    ),
+                    detail="Agent consumers may hit 429s quickly. Consider >= 60/min.",
+                )
+            )
         else:
-            results.append(CheckResult(
-                name="rate_limit_reasonable",
-                passed=True,
-                severity="info",
-                message=f"Rate limit: {self.settings.RATE_LIMIT_PER_MINUTE}/min.",
-            ))
+            results.append(
+                CheckResult(
+                    name="rate_limit_reasonable",
+                    passed=True,
+                    severity="info",
+                    message=f"Rate limit: {self.settings.RATE_LIMIT_PER_MINUTE}/min.",
+                )
+            )
 
         return results
 
@@ -286,40 +312,48 @@ class PreflightEngine:
         base_url = config.get("base_url", "https://api.yourdomain.com")
 
         if _is_placeholder_domain(base_url):
-            results.append(CheckResult(
-                name="base_url_valid",
-                passed=False,
-                severity="critical",
-                message=f"BASE_URL '{base_url}' is a placeholder domain.",
-                detail="Set a real production domain (e.g., https://api.yourcompany.com).",
-            ))
+            results.append(
+                CheckResult(
+                    name="base_url_valid",
+                    passed=False,
+                    severity="critical",
+                    message=f"BASE_URL '{base_url}' is a placeholder domain.",
+                    detail="Set a real production domain (e.g., https://api.yourcompany.com).",
+                )
+            )
         else:
-            results.append(CheckResult(
-                name="base_url_valid",
-                passed=True,
-                severity="info",
-                message=f"BASE_URL: {base_url}",
-            ))
+            results.append(
+                CheckResult(
+                    name="base_url_valid",
+                    passed=True,
+                    severity="info",
+                    message=f"BASE_URL: {base_url}",
+                )
+            )
 
         # Check HTTPS
         if not base_url.startswith("https://"):
-            results.append(CheckResult(
-                name="base_url_https",
-                passed=False,
-                severity="warning",
-                message="BASE_URL does not use HTTPS.",
-                detail=(
-                    "Production APIs should use TLS. "
-                    "Agents may reject insecure endpoints."
-                ),
-            ))
+            results.append(
+                CheckResult(
+                    name="base_url_https",
+                    passed=False,
+                    severity="warning",
+                    message="BASE_URL does not use HTTPS.",
+                    detail=(
+                        "Production APIs should use TLS. "
+                        "Agents may reject insecure endpoints."
+                    ),
+                )
+            )
         else:
-            results.append(CheckResult(
-                name="base_url_https",
-                passed=True,
-                severity="info",
-                message="BASE_URL uses HTTPS.",
-            ))
+            results.append(
+                CheckResult(
+                    name="base_url_https",
+                    passed=True,
+                    severity="info",
+                    message="BASE_URL uses HTTPS.",
+                )
+            )
 
         return results
 
@@ -332,23 +366,27 @@ class PreflightEngine:
         llm_txt_url = f"{base_url.rstrip('/')}/llm.txt"
 
         if _is_placeholder_domain(base_url):
-            results.append(CheckResult(
-                name="manifests_resolvable",
-                passed=False,
-                severity="critical",
-                message="Cannot validate manifests — BASE_URL is placeholder.",
-                detail=(
-                    f"agent.json would serve at {agent_json_url} — "
-                    "unreachable with placeholder domain."
-                ),
-            ))
+            results.append(
+                CheckResult(
+                    name="manifests_resolvable",
+                    passed=False,
+                    severity="critical",
+                    message="Cannot validate manifests — BASE_URL is placeholder.",
+                    detail=(
+                        f"agent.json would serve at {agent_json_url} — "
+                        "unreachable with placeholder domain."
+                    ),
+                )
+            )
         else:
-            results.append(CheckResult(
-                name="manifests_resolvable",
-                passed=True,
-                severity="info",
-                message=f"Manifests will serve at {agent_json_url} and {llm_txt_url}.",
-            ))
+            results.append(
+                CheckResult(
+                    name="manifests_resolvable",
+                    passed=True,
+                    severity="info",
+                    message=f"Manifests will serve at {agent_json_url} and {llm_txt_url}.",
+                )
+            )
 
         return results
 
@@ -383,40 +421,48 @@ class PreflightEngine:
             # In preflight, we validate URL format and known-reachability
             # (actual HTTP pings would require httpx — we do structural validation)
             if _is_placeholder_domain(url):
-                results.append(CheckResult(
-                    name=f"oracle_directory_{dir_entry['directory_type']}",
-                    passed=False,
-                    severity="warning",
-                    message=f"Directory URL is placeholder: {url}",
-                    detail="Replace with a real agent directory endpoint.",
-                ))
+                results.append(
+                    CheckResult(
+                        name=f"oracle_directory_{dir_entry['directory_type']}",
+                        passed=False,
+                        severity="warning",
+                        message=f"Directory URL is placeholder: {url}",
+                        detail="Replace with a real agent directory endpoint.",
+                    )
+                )
             elif not url.startswith("https://"):
-                results.append(CheckResult(
-                    name=f"oracle_directory_{dir_entry['directory_type']}",
-                    passed=False,
-                    severity="warning",
-                    message=f"Directory URL is not HTTPS: {url}",
-                    detail="Agent directories should use TLS.",
-                ))
+                results.append(
+                    CheckResult(
+                        name=f"oracle_directory_{dir_entry['directory_type']}",
+                        passed=False,
+                        severity="warning",
+                        message=f"Directory URL is not HTTPS: {url}",
+                        detail="Agent directories should use TLS.",
+                    )
+                )
             else:
                 reachable += 1
-                results.append(CheckResult(
-                    name=f"oracle_directory_{dir_entry['directory_type']}",
-                    passed=True,
-                    severity="info",
-                    message=f"Directory configured: {url}",
-                ))
+                results.append(
+                    CheckResult(
+                        name=f"oracle_directory_{dir_entry['directory_type']}",
+                        passed=True,
+                        severity="info",
+                        message=f"Directory configured: {url}",
+                    )
+                )
 
-        results.append(CheckResult(
-            name="oracle_directories_total",
-            passed=reachable >= 2,
-            severity="warning" if reachable < 2 else "info",
-            message=f"{reachable}/{len(directories)} directory targets validated.",
-            detail=(
-                "Recommend at least 2 reachable directories "
-                "for meaningful visibility."
-            ),
-        ))
+        results.append(
+            CheckResult(
+                name="oracle_directories_total",
+                passed=reachable >= 2,
+                severity="warning" if reachable < 2 else "info",
+                message=f"{reachable}/{len(directories)} directory targets validated.",
+                detail=(
+                    "Recommend at least 2 reachable directories "
+                    "for meaningful visibility."
+                ),
+            )
+        )
 
         return results
 
@@ -431,20 +477,24 @@ class PreflightEngine:
         )
 
         if _is_placeholder_domain(source_url):
-            results.append(CheckResult(
-                name="content_source_url",
-                passed=False,
-                severity="critical",
-                message=f"Campaign source URL is placeholder: {source_url}",
-                detail="Set campaign_source_url to a real, accessible video URL.",
-            ))
+            results.append(
+                CheckResult(
+                    name="content_source_url",
+                    passed=False,
+                    severity="critical",
+                    message=f"Campaign source URL is placeholder: {source_url}",
+                    detail="Set campaign_source_url to a real, accessible video URL.",
+                )
+            )
         else:
-            results.append(CheckResult(
-                name="content_source_url",
-                passed=True,
-                severity="info",
-                message=f"Campaign source: {source_url}",
-            ))
+            results.append(
+                CheckResult(
+                    name="content_source_url",
+                    passed=True,
+                    severity="info",
+                    message=f"Campaign source: {source_url}",
+                )
+            )
 
         # Check crawl targets
         crawl_targets = [
@@ -456,15 +506,17 @@ class PreflightEngine:
             "https://api.cloudflare.com",
         ]
         external_count = sum(1 for t in crawl_targets if not _is_placeholder_domain(t))
-        results.append(CheckResult(
-            name="crawl_targets_configured",
-            passed=external_count >= 3,
-            severity="warning" if external_count < 3 else "info",
-            message=(
-                f"{external_count}/{len(crawl_targets)} crawl targets "
-                "are real external APIs."
-            ),
-        ))
+        results.append(
+            CheckResult(
+                name="crawl_targets_configured",
+                passed=external_count >= 3,
+                severity="warning" if external_count < 3 else "info",
+                message=(
+                    f"{external_count}/{len(crawl_targets)} crawl targets "
+                    "are real external APIs."
+                ),
+            )
+        )
 
         return results
 
@@ -490,8 +542,7 @@ class PreflightEngine:
             summary = "ALL CLEAR — System is production-ready. Turn the key."
         else:
             summary = (
-                f"NO-GO — {critical} critical issue(s) "
-                "must be resolved before launch."
+                f"NO-GO — {critical} critical issue(s) must be resolved before launch."
             )
 
         check_dicts = [

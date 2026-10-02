@@ -360,9 +360,7 @@ async def emergency_revoke(
             # A wallet-scoped caller's replacement is bounded by its own key,
             # never by a looser sibling it never held. Bootstrap admins keep
             # the wallet-wide donor rule.
-            bounding_key_id=(
-                None if auth.is_bootstrap_admin else (auth.key_id or "")
-            ),
+            bounding_key_id=(None if auth.is_bootstrap_admin else (auth.key_id or "")),
         )
 
         new_key = None

@@ -414,9 +414,7 @@ def test_x402_parse_evm_happy_path_and_eip712_shape():
 )
 def test_x402_evm_usdc_domain_per_network(network, chain_id, contract, domain_name):
     handler = get_x402_handler()
-    requirement = handler.parse_402(
-        402, _x402_headers(amount="0.25", network=network)
-    )
+    requirement = handler.parse_402(402, _x402_headers(amount="0.25", network=network))
     authorization = handler.build_transfer_authorization(
         requirement,
         permit_id="permit-net",
@@ -643,9 +641,7 @@ async def test_x402_settle_permit_wallet_mismatch(client, clean_database):
     assert resp.status_code == 400
     assert resp.json()["detail"] == "permit_wallet_mismatch"
     assert await _permit_spent(client, permit["permit_id"]) == Decimal("0")
-    _, total = await get_receipt_service().list_receipts(
-        permit_id=permit["permit_id"]
-    )
+    _, total = await get_receipt_service().list_receipts(permit_id=permit["permit_id"])
     assert total == 0
 
 
@@ -744,9 +740,7 @@ def test_sdk_parse_402_response_stub():
     }
     # Non-402 responses and 402s without the x402 header set are not demands.
     assert parse_402_response(_StubResponse(200, _x402_headers())) is None
-    assert (
-        parse_402_response(_StubResponse(402, {"X-402-Amount": "1.00"})) is None
-    )
+    assert parse_402_response(_StubResponse(402, {"X-402-Amount": "1.00"})) is None
 
 
 @pytest.mark.anyio
@@ -881,7 +875,10 @@ async def test_x402_settle_requires_payer_for_evm(client, clean_database):
         max_credits=100,
         idem_key="x402-payer-permit",
     )
-    for payer, reason in ((None, "x402_payer_required"), ("0xzz", "x402_payer_invalid")):
+    for payer, reason in (
+        (None, "x402_payer_required"),
+        ("0xzz", "x402_payer_invalid"),
+    ):
         resp = await client.post(
             "/v1/x402/settle",
             json=_settle_body(
@@ -1092,9 +1089,7 @@ async def test_release_tool_call_compensation_semantics(client, clean_database):
 # ---------------------------------------------------------------------------
 
 
-async def _backdate_settle_record(
-    idempotency_key: str, *, wallet_id: str
-) -> None:
+async def _backdate_settle_record(idempotency_key: str, *, wallet_id: str) -> None:
     """Age one wallet's settle record past the router's staleness threshold.
 
     Constrained by the full idempotency identity (wallet, endpoint, key), the
@@ -1118,9 +1113,7 @@ async def _backdate_settle_record(
             )
         ).scalar_one()
         assert record.response_json is None  # crashed before completion
-        record.created_at = utc_now() - timedelta(
-            seconds=_SETTLE_STALE_SECONDS + 1
-        )
+        record.created_at = utc_now() - timedelta(seconds=_SETTLE_STALE_SECONDS + 1)
         session.add(record)
         await session.commit()
 
@@ -1176,9 +1169,7 @@ async def test_x402_stale_receiptless_record_recovers_and_settles(
     settlement = ok.json()
     assert settlement["receipt_id"].startswith("rcpt-")
     assert await _permit_spent(client, permit["permit_id"]) == Decimal("30")
-    _, total = await get_receipt_service().list_receipts(
-        permit_id=permit["permit_id"]
-    )
+    _, total = await get_receipt_service().list_receipts(permit_id=permit["permit_id"])
     assert total == 1
 
     # The recovery is durable evidence on the wallet's chain, naming the
@@ -1271,9 +1262,7 @@ async def test_x402_stale_receipted_record_is_settled_unrecoverable(
 
 
 @pytest.mark.anyio
-async def test_x402_settle_never_touches_real_ledger_entries(
-    client, clean_database
-):
+async def test_x402_settle_never_touches_real_ledger_entries(client, clean_database):
     """The module docstring's settlement-freeze claim, asserted: a successful
     settle writes NO real ledger entries — the ledger_entries row count is
     unchanged across the settle and the receipt's ledger_entry_id is None

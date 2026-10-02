@@ -52,7 +52,9 @@ class UnsupportedClaimError(AssertionError):
     already treats assertion failures as build failures needs no special case.
     """
 
-    def __init__(self, claim_text: str, reason: str, *, candidates: Sequence[str] = ()) -> None:
+    def __init__(
+        self, claim_text: str, reason: str, *, candidates: Sequence[str] = ()
+    ) -> None:
         self.claim_text = claim_text
         self.reason = reason
         self.candidates = list(candidates)
@@ -137,8 +139,13 @@ class ClaimRecord:
         true while the rows beside it diverge, the rows win, as they do when
         the record is built.
         """
-        expected = {str(k): str(v) for k, v in (document.get("documented_expectation") or {}).items()}
-        observed = {str(k): str(v) for k, v in (document.get("configurations") or {}).items()}
+        expected = {
+            str(k): str(v)
+            for k, v in (document.get("documented_expectation") or {}).items()
+        }
+        observed = {
+            str(k): str(v) for k, v in (document.get("configurations") or {}).items()
+        }
         rows_diverge = bool(_divergence_limitations(expected, observed))
         reported = document.get("matches_documented_expectation")
         if reported is None:
@@ -194,7 +201,9 @@ class ClaimsManifest:
     def divergences(self) -> list[ClaimRecord]:
         """Records whose observation disagrees with the documentation."""
         return [
-            record for record in self.records if not record.matches_documented_expectation
+            record
+            for record in self.records
+            if not record.matches_documented_expectation
         ]
 
     def as_dict(self) -> dict[str, Any]:
@@ -208,7 +217,10 @@ class ClaimsManifest:
         }
 
     def to_json(self) -> str:
-        return json.dumps(self.as_dict(), indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+        return (
+            json.dumps(self.as_dict(), indent=2, sort_keys=True, ensure_ascii=False)
+            + "\n"
+        )
 
     @classmethod
     def from_dict(cls, document: Mapping[str, Any]) -> ClaimsManifest:
@@ -389,7 +401,11 @@ def build_claims_manifest(
 
 
 def _as_manifest(manifest: ClaimsManifest | Mapping[str, Any]) -> ClaimsManifest:
-    return manifest if isinstance(manifest, ClaimsManifest) else ClaimsManifest.from_dict(manifest)
+    return (
+        manifest
+        if isinstance(manifest, ClaimsManifest)
+        else ClaimsManifest.from_dict(manifest)
+    )
 
 
 def find_claim(
@@ -448,8 +464,13 @@ def assert_claim_is_supported(
                 "documented expectation to have matched, so nothing here says the "
                 "run behaved as documented. Rebuild the manifest from the run",
             )
-        divergences = [line for line in record.limitations if line.startswith("DIVERGENCE")]
-        detail = " ".join(divergences) or "the observed verdicts differ from the documented ones"
+        divergences = [
+            line for line in record.limitations if line.startswith("DIVERGENCE")
+        ]
+        detail = (
+            " ".join(divergences)
+            or "the observed verdicts differ from the documented ones"
+        )
         raise UnsupportedClaimError(
             claim_text,
             f"{record.test_id} observed PASS but diverged from its documented "
@@ -486,7 +507,9 @@ def render_markdown(manifest: ClaimsManifest | Mapping[str, Any]) -> str:
         lines.append("## Divergences from documented expectations")
         lines.append("")
         for record in divergences:
-            lines.append(f"- **{record.test_id}** ({record.status}) — {record.title or record.claim}")
+            lines.append(
+                f"- **{record.test_id}** ({record.status}) — {record.title or record.claim}"
+            )
             for limitation in record.limitations:
                 if limitation.startswith("DIVERGENCE"):
                     lines.append(f"  - {limitation}")
@@ -501,7 +524,11 @@ def render_markdown(manifest: ClaimsManifest | Mapping[str, Any]) -> str:
     for record in resolved.records:
         evidence = "—"
         if record.evidence:
-            path = record.evidence.get("path") or record.evidence.get("directory") or "bundle"
+            path = (
+                record.evidence.get("path")
+                or record.evidence.get("directory")
+                or "bundle"
+            )
             digest = str(record.evidence.get("manifest_sha256") or "")
             evidence = f"`{path}`" + (f" ({digest[:12]}…)" if digest else "")
         lines.append(
@@ -529,7 +556,9 @@ def render_markdown(manifest: ClaimsManifest | Mapping[str, Any]) -> str:
             lines.append(f"- {_cell(limitation)}")
         lines.append("")
     if not any(record.limitations for record in resolved.records):
-        lines.append("No scenario recorded a limitation. That is itself worth checking.")
+        lines.append(
+            "No scenario recorded a limitation. That is itself worth checking."
+        )
         lines.append("")
     return "\n".join(lines)
 

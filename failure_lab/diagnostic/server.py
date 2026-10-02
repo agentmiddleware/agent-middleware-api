@@ -688,7 +688,9 @@ def create_app(settings: DiagnosticSettings | None = None) -> Starlette:
                 while sent < len(record.steps):
                     payload = pages.step_payload(record.steps[sent])
                     sent += 1
-                    yield _sse("step", _guarded(service, payload, instead=_WITHHELD_STEP))
+                    yield _sse(
+                        "step", _guarded(service, payload, instead=_WITHHELD_STEP)
+                    )
                 if record.finished:
                     event = "complete" if record.state == "complete" else "failed"
                     # Redacted and guarded like every other body. This one

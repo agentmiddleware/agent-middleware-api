@@ -500,9 +500,7 @@ class AWISessionManager:
             metadata["steer_instructions_sha256"] = self._hash_text(
                 intervention.steer_instructions
             )
-            metadata["steer_instructions_length"] = len(
-                intervention.steer_instructions
-            )
+            metadata["steer_instructions_length"] = len(intervention.steer_instructions)
 
         try:
             await record_audit_event(

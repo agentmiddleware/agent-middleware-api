@@ -305,20 +305,28 @@ class WalletEngine:
 
         if session is not None:
             return await self._create_sponsor_wallet_in(
-                session, sponsor_name, email, initial_credits, currency,
-                metadata, kyc_required,
+                session,
+                sponsor_name,
+                email,
+                initial_credits,
+                currency,
+                metadata,
+                kyc_required,
             )
 
         async with self._session_factory()() as session:
             async with session.begin():
                 result = await self._create_sponsor_wallet_in(
-                    session, sponsor_name, email, initial_credits, currency,
-                    metadata, kyc_required,
+                    session,
+                    sponsor_name,
+                    email,
+                    initial_credits,
+                    currency,
+                    metadata,
+                    kyc_required,
                 )
             await session.commit()
-            logger.info(
-                f"Created sponsor wallet {result.wallet_id} for {sponsor_name}"
-            )
+            logger.info(f"Created sponsor wallet {result.wallet_id} for {sponsor_name}")
             return result
 
     async def _create_sponsor_wallet_in(
@@ -346,7 +354,9 @@ class WalletEngine:
             lifetime_credits=initial_credits,
             metadata_json=self._metadata_to_json(metadata),
             kyc_status=(
-                KYCStatus.PENDING.value if kyc_required else KYCStatus.NOT_REQUIRED.value
+                KYCStatus.PENDING.value
+                if kyc_required
+                else KYCStatus.NOT_REQUIRED.value
             ),
             status="pending_kyc" if kyc_required else "active",
         )
@@ -399,15 +409,27 @@ class WalletEngine:
 
         if session is not None:
             return await self._create_agent_wallet_in(
-                session, sponsor_wallet_id, agent_id, budget_credits,
-                daily_limit, auto_refill, auto_refill_threshold, auto_refill_amount,
+                session,
+                sponsor_wallet_id,
+                agent_id,
+                budget_credits,
+                daily_limit,
+                auto_refill,
+                auto_refill_threshold,
+                auto_refill_amount,
             )
 
         async with self._session_factory()() as session:
             async with session.begin():
                 result = await self._create_agent_wallet_in(
-                    session, sponsor_wallet_id, agent_id, budget_credits,
-                    daily_limit, auto_refill, auto_refill_threshold, auto_refill_amount,
+                    session,
+                    sponsor_wallet_id,
+                    agent_id,
+                    budget_credits,
+                    daily_limit,
+                    auto_refill,
+                    auto_refill_threshold,
+                    auto_refill_amount,
                 )
             await session.commit()
             logger.info(
@@ -446,13 +468,10 @@ class WalletEngine:
         if not sponsor:
             raise self._wallet_not_found_error(sponsor_wallet_id)
         if sponsor.wallet_type != WalletType.SPONSOR.value:
-            raise ValueError(
-                "Can only provision agent wallets from sponsor wallets"
-            )
+            raise ValueError("Can only provision agent wallets from sponsor wallets")
         if sponsor.status not in SPENDABLE_WALLET_STATUSES:
             raise ValueError(
-                f"Sponsor wallet is {sponsor.status} and cannot provision "
-                "agent wallets"
+                f"Sponsor wallet is {sponsor.status} and cannot provision agent wallets"
             )
         # Deduct from sponsor. The balance and status checks above are
         # a fast path; the guarded UPDATE is what makes them hold, so

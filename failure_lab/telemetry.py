@@ -97,7 +97,9 @@ def detect_traffic_source(environ: Mapping[str, str] | None = None) -> TrafficSo
     surface has to pass ``human_customer`` explicitly for it to appear.
     """
     env = os.environ if environ is None else environ
-    if any(env.get(name) for name in ("CI", "GITHUB_ACTIONS", "BUILDKITE", "JENKINS_URL")):
+    if any(
+        env.get(name) for name in ("CI", "GITHUB_ACTIONS", "BUILDKITE", "JENKINS_URL")
+    ):
         return TrafficSource.CI_RUN
     if any(
         env.get(name)
@@ -222,7 +224,9 @@ _CREDENTIAL_PATTERN = re.compile(
 )
 _BEARER_PATTERN = re.compile(r"(?i)\bbearer\s+\S{8,}")
 _LONG_DIGIT_RUN = re.compile(r"(?:\d[ -]?){13,}")
-_PAYMENT_WORD_PATTERN = re.compile(r"(?i)\b(?:cvv|cvc|iban|sort[_ -]?code|routing|pan)\b")
+_PAYMENT_WORD_PATTERN = re.compile(
+    r"(?i)\b(?:cvv|cvc|iban|sort[_ -]?code|routing|pan)\b"
+)
 _SUBJECT_PATTERN = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
 
 
@@ -506,8 +510,10 @@ class TelemetryClient:
     ) -> None:
         self.run_dir = Path(run_dir)
         self.traffic_source = TrafficSource(traffic_source)
-        self.subject = _check_subject(subject) if subject else pseudonymous_subject(
-            f"{self.run_dir}"
+        self.subject = (
+            _check_subject(subject)
+            if subject
+            else pseudonymous_subject(f"{self.run_dir}")
         )
         self.local_sink = JsonlSink(self.run_dir / filename)
         extra = list(sinks)
@@ -582,7 +588,9 @@ class FunnelStageSpec:
 FUNNEL_STAGES: tuple[FunnelStageSpec, ...] = (
     FunnelStageSpec("relevant_visitor", "Relevant visitor", frozenset()),
     FunnelStageSpec(
-        "diagnostic_started", "Diagnostic started", frozenset({EventName.DIAGNOSTIC_STARTED})
+        "diagnostic_started",
+        "Diagnostic started",
+        frozenset({EventName.DIAGNOSTIC_STARTED}),
     ),
     FunnelStageSpec(
         "diagnostic_completed",
@@ -741,7 +749,8 @@ def funnel(
         counted_events=len(counted),
         excluded_events_by_source=dict(sorted(excluded_events.items())),
         excluded_subjects_by_source={
-            source: len(subjects) for source, subjects in sorted(excluded_subjects.items())
+            source: len(subjects)
+            for source, subjects in sorted(excluded_subjects.items())
         },
         notes=notes,
     )
@@ -757,7 +766,9 @@ def render_funnel_text(result: Funnel) -> str:
             if stage.conversion_from_previous is not None
             else "  — "
         )
-        lines.append(f"  {stage.label:<{width}}  {stage.subjects:>6}  {rate:>6} of previous")
+        lines.append(
+            f"  {stage.label:<{width}}  {stage.subjects:>6}  {rate:>6} of previous"
+        )
     lines.append("")
     if result.excluded_events_by_source:
         lines.append("Excluded, not counted anywhere:")
@@ -793,7 +804,8 @@ def disclosure_text(*, sinks: Sequence[Sink] = ()) -> str:
         f"  - {name.value}: {EVENT_DESCRIPTIONS[name]}" for name in EventName
     )
     property_lines = "\n".join(
-        f"  - {name}: {description}" for name, description in sorted(ALLOWED_PROPERTIES.items())
+        f"  - {name}: {description}"
+        for name, description in sorted(ALLOWED_PROPERTIES.items())
     )
     destination_lines = "\n".join(f"  - {destination}" for destination in destinations)
     remote_line = (

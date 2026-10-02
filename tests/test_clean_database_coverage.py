@@ -65,8 +65,7 @@ def test_clean_and_exempt_lists_name_only_real_tables():
         f"{sorted(set(CLEAN_DATABASE_TABLES) - declared)}"
     )
     assert not PROOF_SURFACE_TABLES_EXEMPT - declared, (
-        "stale exemption: "
-        f"{sorted(PROOF_SURFACE_TABLES_EXEMPT - declared)}"
+        f"stale exemption: {sorted(PROOF_SURFACE_TABLES_EXEMPT - declared)}"
     )
     assert not PROOF_SURFACE_TABLES_EXEMPT & set(CLEAN_DATABASE_TABLES), (
         "a table cannot be both cleaned and exempt: "

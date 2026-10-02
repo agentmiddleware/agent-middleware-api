@@ -326,7 +326,9 @@ def _not_tested(comparisons: list[Comparison]) -> list[str]:
             "so nothing here bears on whether your own integration would have "
             "survived these failures."
         )
-    gateway_only = sum(1 for kind in kinds if kind is ConclusionKind.NO_BASELINE_COMPARISON)
+    gateway_only = sum(
+        1 for kind in kinds if kind is ConclusionKind.NO_BASELINE_COMPARISON
+    )
     if gateway_only and compared:
         notes.append(
             f"{gateway_only} of the {len(kinds)} scenarios exercised components "
@@ -355,7 +357,9 @@ def build_answer(comparisons: list[Comparison]) -> DiagnosticAnswer:
         key = comparison.conclusion.kind.value
         counts[key] = counts.get(key, 0) + 1
     counts["failed_gateway_guarantees"] = sum(
-        1 for c in comparisons if c.conclusion.kind is ConclusionKind.GATEWAY_DID_NOT_HOLD
+        1
+        for c in comparisons
+        if c.conclusion.kind is ConclusionKind.GATEWAY_DID_NOT_HOLD
     )
     # Kept as two numbers, never collapsed into one, because they answer two
     # different questions and the collapsed version reads as a contradiction.

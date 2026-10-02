@@ -307,4 +307,5 @@ class EffectLedger:
             connection.execute("DELETE FROM effects")
             connection.execute("DELETE FROM native_results")
 
+
 __all__ = ["EffectLedger", "EffectRecord", "ExecutionOutcome", "NativeConflictError"]

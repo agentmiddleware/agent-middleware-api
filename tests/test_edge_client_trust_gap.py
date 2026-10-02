@@ -81,9 +81,14 @@ async def test_edge_client_call_mcp_tool_double_charges_on_replay(
 
         # The edge client has no idempotency key, so both calls dispatched.
         assert calls == 2, "edge client did not dispatch twice"
-        assert first["result"]["content"][0]["text"] != second["result"]["content"][0]["text"]
+        assert (
+            first["result"]["content"][0]["text"]
+            != second["result"]["content"][0]["text"]
+        )
 
         # Started with 1000 credits, charged 2 credits twice = 4 credits spent.
-        assert wallet["balance"] == 996.0, f"balance should be 996 but was {wallet['balance']}"
+        assert wallet["balance"] == 996.0, (
+            f"balance should be 996 but was {wallet['balance']}"
+        )
     finally:
         registry.unregister_local("edge-replay-echo")

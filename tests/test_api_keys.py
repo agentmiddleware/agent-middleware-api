@@ -860,9 +860,7 @@ async def test_emergency_key_inherits_latest_expiry(
     new_key = revoke_resp.json()["new_key"]
     assert new_key["expires_at"] is not None
 
-    latest = datetime.fromisoformat(long_resp.json()["expires_at"]).replace(
-        tzinfo=None
-    )
+    latest = datetime.fromisoformat(long_resp.json()["expires_at"]).replace(tzinfo=None)
     inherited = datetime.fromisoformat(new_key["expires_at"]).replace(tzinfo=None)
     assert abs((inherited - latest).total_seconds()) < 5
 
@@ -1488,7 +1486,9 @@ async def test_auto_rotate_targets_live_key_not_expired_sibling(
 
 
 @pytest.mark.anyio
-async def test_create_api_key_replays_on_idempotency_key(client, api_headers, sponsor_wallet):
+async def test_create_api_key_replays_on_idempotency_key(
+    client, api_headers, sponsor_wallet
+):
     """A retried create with the same Idempotency-Key must not mint a second key.
 
     The replay carries the first key's metadata but ``api_key: null``: keys
@@ -1504,7 +1504,9 @@ async def test_create_api_key_replays_on_idempotency_key(client, api_headers, sp
     assert replay.json()["key_id"] == first.json()["key_id"]
     assert replay.json()["api_key"] is None
 
-    listed = await client.get(f"/v1/api-keys/{sponsor_wallet['wallet_id']}", headers=api_headers)
+    listed = await client.get(
+        f"/v1/api-keys/{sponsor_wallet['wallet_id']}", headers=api_headers
+    )
     assert listed.status_code == 200
     assert [k["key_id"] for k in listed.json()["keys"]] == [first.json()["key_id"]]
 
@@ -1516,7 +1518,9 @@ async def test_create_api_key_replays_on_idempotency_key(client, api_headers, sp
 
 
 @pytest.mark.anyio
-async def test_create_api_key_unknown_wallet_with_idempotency_key_is_404(client, api_headers):
+async def test_create_api_key_unknown_wallet_with_idempotency_key_is_404(
+    client, api_headers
+):
     headers = {**api_headers, "Idempotency-Key": "create-key-orphan-1"}
     payload = {"wallet_id": "nonexistent-wallet", "key_name": "k"}
     first = await client.post("/v1/api-keys", json=payload, headers=headers)
@@ -1528,16 +1532,25 @@ async def test_create_api_key_unknown_wallet_with_idempotency_key_is_404(client,
 
 
 @pytest.mark.anyio
-async def test_rotate_api_key_replays_on_idempotency_key(client, api_headers, sponsor_wallet):
+async def test_rotate_api_key_replays_on_idempotency_key(
+    client, api_headers, sponsor_wallet
+):
     """A retried rotate must not mint another key or 404 on the revoked key_id."""
     wallet_id = sponsor_wallet["wallet_id"]
     created = await client.post(
-        "/v1/api-keys", json={"wallet_id": wallet_id, "key_name": "to_rotate"}, headers=api_headers
+        "/v1/api-keys",
+        json={"wallet_id": wallet_id, "key_name": "to_rotate"},
+        headers=api_headers,
     )
     assert created.status_code == 201
     old_key_id = created.json()["key_id"]
 
-    payload = {"wallet_id": wallet_id, "key_id": old_key_id, "revoke_old": True, "reason": "idem"}
+    payload = {
+        "wallet_id": wallet_id,
+        "key_id": old_key_id,
+        "revoke_old": True,
+        "reason": "idem",
+    }
     headers = {**api_headers, "Idempotency-Key": "rotate-key-idem-1"}
     first = await client.post("/v1/api-keys/rotate", json=payload, headers=headers)
     assert first.status_code == 200, first.text

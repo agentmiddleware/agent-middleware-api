@@ -54,9 +54,7 @@ def upgrade() -> None:
         sa.Column(
             "status", sa.String(length=16), nullable=False, server_default="pending"
         ),
-        sa.Column(
-            "simulated", sa.Boolean(), nullable=False, server_default=sa.false()
-        ),
+        sa.Column("simulated", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("sentinel_action_id", sa.String(length=64), nullable=True),
         sa.Column("approval_url", sa.String(length=512), nullable=True),
         sa.Column("reserved_permit_id", sa.String(length=64), nullable=False),
@@ -96,9 +94,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_index("ix_permit_requests_permit_id", table_name="permit_requests")
-    op.drop_index(
-        "ix_permit_requests_sentinel_action_id", table_name="permit_requests"
-    )
+    op.drop_index("ix_permit_requests_sentinel_action_id", table_name="permit_requests")
     op.drop_index("ix_permit_requests_status", table_name="permit_requests")
     op.drop_index("ix_permit_requests_subject_key_id", table_name="permit_requests")
     op.drop_index("ix_permit_requests_subject_wallet_id", table_name="permit_requests")

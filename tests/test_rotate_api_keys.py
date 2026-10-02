@@ -29,7 +29,12 @@ def rotate():
     return _load_module()
 
 
-def _env(monkeypatch, url="https://api.example.test", old="old-key-value", new="new-key-value"):
+def _env(
+    monkeypatch,
+    url="https://api.example.test",
+    old="old-key-value",
+    new="new-key-value",
+):
     monkeypatch.setenv("AGENT_MIDDLEWARE_API_URL", url)
     monkeypatch.setenv("OLD_API_KEY", old)
     monkeypatch.setenv("NEW_API_KEY", new)

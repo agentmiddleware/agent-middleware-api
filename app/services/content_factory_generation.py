@@ -155,7 +155,7 @@ async def openai_compatible_chat_completion(
     choices = data.get("choices") or []
     if not choices:
         raise RuntimeError("LLM response missing choices")
-    msg = (choices[0].get("message") or {})
+    msg = choices[0].get("message") or {}
     text = msg.get("content") or ""
     if not isinstance(text, str):
         text = str(text)

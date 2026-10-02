@@ -1622,9 +1622,7 @@ async def test_inflight_governed_debit_blocks_effect_free_abandon_in_postgres(
     assert ledger_rows[0].amount == -credits
     assert receipts == []
 
-    await McpDispatchReconciliationService(
-        dispatch_service=dispatch
-    ).reconcile_attempt(
+    await McpDispatchReconciliationService(dispatch_service=dispatch).reconcile_attempt(
         attempt.attempt_id,
         prepared_error_code="reconciled_stale_prepared",
     )

@@ -51,9 +51,9 @@ async def _permit_with_budget(client, *, max_credits: str = "10"):
             allowed_tools=["budget-integrity-tool"],
             scopes=["tool:budget-integrity-tool:invoke"],
             max_credits=Decimal(max_credits),
-            expires_at=(
-                datetime.now(timezone.utc) + timedelta(minutes=30)
-            ).replace(tzinfo=None),
+            expires_at=(datetime.now(timezone.utc) + timedelta(minutes=30)).replace(
+                tzinfo=None
+            ),
         )
     )
     return provisioned, permit

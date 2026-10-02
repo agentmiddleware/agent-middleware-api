@@ -232,9 +232,7 @@ class X402PaymentHandler:
         byte-identical authorization instead of minting a second, differently
         nonced transfer the payer wallet might also sign.
         """
-        return hashlib.sha256(
-            f"{permit_id}:{idempotency_key}".encode()
-        ).hexdigest()
+        return hashlib.sha256(f"{permit_id}:{idempotency_key}".encode()).hexdigest()
 
     def build_transfer_authorization(
         self,
@@ -273,9 +271,7 @@ class X402PaymentHandler:
             payer = payer.strip()
             if not _EVM_ADDRESS_RE.fullmatch(payer):
                 raise X402Error("x402_payer_invalid")
-            chain_id, usdc_contract, domain_name = _EVM_NETWORKS[
-                requirement.network
-            ]
+            chain_id, usdc_contract, domain_name = _EVM_NETWORKS[requirement.network]
             return {
                 "types": {
                     "EIP712Domain": [
@@ -524,9 +520,7 @@ class X402PaymentHandler:
             try:
                 await permits.release_budget(permit_id, credits)
             except Exception:
-                logger.exception(
-                    "x402 budget release failed for permit %s", permit_id
-                )
+                logger.exception("x402 budget release failed for permit %s", permit_id)
             # authorize_and_reserve consumed one max_calls_per_tool use along
             # with the budget; a compensated failure must give both back or a
             # one-call permit's legitimate retry is denied
@@ -541,7 +535,9 @@ class X402PaymentHandler:
             # the last word on an attempt that did not settle: append a
             # compensating failure event so the chain records what actually
             # happened instead of a success with no receipt.
-            reason = exc.reason if isinstance(exc, X402Error) else "x402_settlement_failed"
+            reason = (
+                exc.reason if isinstance(exc, X402Error) else "x402_settlement_failed"
+            )
             try:
                 await record_audit_event(
                     event="x402.settlement_failed",

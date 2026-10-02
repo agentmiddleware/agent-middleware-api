@@ -44,9 +44,7 @@ def is_postgres_url(url: str) -> bool:
     a Postgres-only driver must check this first.
     """
     trimmed = (url or "").strip().lower()
-    return trimmed.startswith(
-        ("postgres://", "postgresql://", "postgresql+asyncpg://")
-    )
+    return trimmed.startswith(("postgres://", "postgresql://", "postgresql+asyncpg://"))
 
 
 def is_sqlite_url(url: str) -> bool:

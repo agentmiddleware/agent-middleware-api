@@ -185,7 +185,9 @@ class FaultInjector:
             self._sequence += 1
             crossing = Crossing(
                 sequence=self._sequence,
-                observed_at=datetime.now(timezone.utc).isoformat(timespec="microseconds"),
+                observed_at=datetime.now(timezone.utc).isoformat(
+                    timespec="microseconds"
+                ),
                 **fields,
             )
             self._crossings.append(crossing)
@@ -212,7 +214,9 @@ class FaultInjector:
 
     def reached_tool_count(self, operation_id: str | None = None) -> int:
         return sum(
-            1 for crossing in self.crossings(operation_id=operation_id) if crossing.reached_tool
+            1
+            for crossing in self.crossings(operation_id=operation_id)
+            if crossing.reached_tool
         )
 
     def reset_observations(self) -> None:
@@ -291,8 +295,12 @@ def classify_request(
             return KIND_INITIALIZE, None, request_id_text, None, None
         if method != "tools/call":
             return None, None, None, None, None
-        params = payload.get("params") if isinstance(payload.get("params"), dict) else {}
-        arguments = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
+        params = (
+            payload.get("params") if isinstance(payload.get("params"), dict) else {}
+        )
+        arguments = (
+            params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
+        )
         meta = params.get("_meta") if isinstance(params.get("_meta"), dict) else {}
         operation_id = arguments.get("operation_id")
         return (
@@ -343,7 +351,9 @@ async def _forward(
 
 
 async def _send_json(
-    send: Callable[[dict[str, Any]], Awaitable[None]], status: int, payload: dict[str, Any]
+    send: Callable[[dict[str, Any]], Awaitable[None]],
+    status: int,
+    payload: dict[str, Any],
 ) -> None:
     body = json.dumps(payload).encode("utf-8")
     await send(
@@ -390,8 +400,8 @@ class FaultInjectionMiddleware:
 
         body = await _read_body(receive)
         headers = _headers(scope)
-        kind, operation_id, request_id, idempotency_key, invocation_id = classify_request(
-            path, body, headers
+        kind, operation_id, request_id, idempotency_key, invocation_id = (
+            classify_request(path, body, headers)
         )
         replay = _replay(body)
         if kind is None:
@@ -432,7 +442,10 @@ class FaultInjectionMiddleware:
             await _forward(send, messages)
             return
 
-        if mode in (FaultMode.INITIALIZE_FAILURE, FaultMode.HTTP_ERROR_BEFORE_EXECUTION):
+        if mode in (
+            FaultMode.INITIALIZE_FAILURE,
+            FaultMode.HTTP_ERROR_BEFORE_EXECUTION,
+        ):
             self.injector._record(
                 **record_fields,
                 fault=mode.value,

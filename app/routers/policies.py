@@ -19,7 +19,9 @@ from app.services.policies import (
 router = APIRouter(prefix="/v1/policies", tags=["Policy Bundles"])
 
 
-@router.post("", response_model=PolicyBundleResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "", response_model=PolicyBundleResponse, status_code=status.HTTP_201_CREATED
+)
 async def create_policy(
     request: PolicyBundleCreate,
     auth: AuthContext = Depends(get_auth_context),
@@ -48,7 +50,10 @@ async def get_policy(
     if not policy:
         raise HTTPException(
             status_code=404,
-            detail={"error": "policy_not_found", "message": f"Policy {policy_id} not found"},
+            detail={
+                "error": "policy_not_found",
+                "message": f"Policy {policy_id} not found",
+            },
         )
     return policy
 
@@ -64,6 +69,9 @@ async def patch_policy(
     if not policy:
         raise HTTPException(
             status_code=404,
-            detail={"error": "policy_not_found", "message": f"Policy {policy_id} not found"},
+            detail={
+                "error": "policy_not_found",
+                "message": f"Policy {policy_id} not found",
+            },
         )
     return policy

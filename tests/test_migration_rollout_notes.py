@@ -76,9 +76,7 @@ def test_gate_covers_migration_040() -> None:
     assert any(name.startswith("040_") for name in names), names
 
 
-@pytest.mark.parametrize(
-    "migration", _gated_migrations(), ids=lambda path: path.stem
-)
+@pytest.mark.parametrize("migration", _gated_migrations(), ids=lambda path: path.stem)
 def test_migration_ships_a_rollout_note(migration: Path) -> None:
     note = DOCS_DIR / f"schema-{int(migration.name[:3]):03d}-rollout.md"
     assert note.exists(), (

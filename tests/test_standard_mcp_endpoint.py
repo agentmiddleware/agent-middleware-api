@@ -465,9 +465,15 @@ async def test_unechoable_body_is_refused_before_any_charge(
     client, standard_mcp_enabled, clean_database, strict_counted_tool, raw
 ):
     provisioned = await provision_agent_wallet(client)
-    headers = {**provisioned["agent_headers"], **MCP_HEADERS, "Idempotency-Key": "strict-1"}
+    headers = {
+        **provisioned["agent_headers"],
+        **MCP_HEADERS,
+        "Idempotency-Key": "strict-1",
+    }
     wallet_url = f"/v1/billing/wallets/{provisioned['agent_wallet_id']}"
-    before = (await client.get(wallet_url, headers=provisioned["agent_headers"])).json()["balance"]
+    before = (
+        await client.get(wallet_url, headers=provisioned["agent_headers"])
+    ).json()["balance"]
 
     resp = await client.post("/mcp", content=raw.encode("ascii"), headers=headers)
 
@@ -475,8 +481,12 @@ async def test_unechoable_body_is_refused_before_any_charge(
     error = resp.json()["error"]
     assert error["code"] == -32600
     assert error["message"].startswith("Invalid Request")
-    assert strict_counted_tool == [], "nothing may execute for a body the reply cannot carry"
-    after = (await client.get(wallet_url, headers=provisioned["agent_headers"])).json()["balance"]
+    assert strict_counted_tool == [], (
+        "nothing may execute for a body the reply cannot carry"
+    )
+    after = (await client.get(wallet_url, headers=provisioned["agent_headers"])).json()[
+        "balance"
+    ]
     assert after == before
 
 
@@ -492,8 +502,12 @@ async def test_non_utf8_body_is_a_parse_error_not_500(client, standard_mcp_enabl
 
 
 @pytest.mark.anyio
-async def test_malformed_json_is_still_the_sdks_parse_error(client, standard_mcp_enabled):
+async def test_malformed_json_is_still_the_sdks_parse_error(
+    client, standard_mcp_enabled
+):
     """The strict pre-check leaves syntax errors to the SDK's own -32700 path."""
-    resp = await client.post("/mcp", content=b"{not json", headers=BOOTSTRAP_MCP_HEADERS)
+    resp = await client.post(
+        "/mcp", content=b"{not json", headers=BOOTSTRAP_MCP_HEADERS
+    )
     assert resp.status_code == 400, resp.text
     assert resp.json()["error"]["code"] == -32700

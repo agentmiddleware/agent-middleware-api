@@ -210,9 +210,7 @@ async def test_db_wallet_key_unscoped_audit_list_is_scoped_to_itself(
 
     assert response.status_code == 200
     # Whatever it returns belongs to this wallet and no other.
-    assert all(
-        event["wallet_id"] == wallet_id for event in response.json()["events"]
-    )
+    assert all(event["wallet_id"] == wallet_id for event in response.json()["events"])
 
 
 @pytest.mark.anyio
@@ -377,17 +375,13 @@ async def test_audit_summary_counts_every_event_and_flags_truncated_reasons(
     """Totals stay exact past the row cap; the row-tallied bucket says it is partial."""
     await _record_summary_fixture_events("wallet-sum", "wallet-sum-other")
 
-    uncapped = await client.get(
-        "/v1/audit/summary", headers={"X-API-Key": "test-key"}
-    )
+    uncapped = await client.get("/v1/audit/summary", headers={"X-API-Key": "test-key"})
     assert uncapped.status_code == 200
     assert uncapped.json()["by_policy_reason_truncated"] is False
     assert sum(uncapped.json()["by_policy_reason"].values()) == 4
 
     _cap_audit_list_reads(monkeypatch, cap=2)
-    response = await client.get(
-        "/v1/audit/summary", headers={"X-API-Key": "test-key"}
-    )
+    response = await client.get("/v1/audit/summary", headers={"X-API-Key": "test-key"})
 
     assert response.status_code == 200
     body = response.json()
@@ -402,9 +396,7 @@ async def test_audit_summary_counts_every_event_and_flags_truncated_reasons(
 
 
 @pytest.mark.anyio
-async def test_audit_summaries_apply_time_and_outcome_filters(
-    client, clean_database
-):
+async def test_audit_summaries_apply_time_and_outcome_filters(client, clean_database):
     await record_audit_event(
         event="mcp.invoke",
         wallet_id="wallet-sum",
@@ -464,9 +456,7 @@ async def test_wallet_key_aggregated_summaries_stay_scoped_to_its_wallet(
     wallet_headers = {"X-API-Key": key_response.json()["api_key"]}
 
     await _record_summary_fixture_events(wallet_id, "wallet-sum-other")
-    await record_audit_event(
-        event="mcp.invoke", wallet_id="wallet-sum-other", ok=True
-    )
+    await record_audit_event(event="mcp.invoke", wallet_id="wallet-sum-other", ok=True)
     own_total = (
         await client.get(
             f"/v1/audit/events?wallet_id={wallet_id}",

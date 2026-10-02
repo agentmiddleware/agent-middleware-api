@@ -22,7 +22,9 @@ from tests.test_trust_helpers import BOOTSTRAP_HEADERS, provision_agent_wallet
 
 @pytest.fixture
 async def http():
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
         yield c
 
 
@@ -133,9 +135,7 @@ async def test_charge_against_app_debits_once_and_replays(http, clean_database):
 
 
 @pytest.mark.anyio
-async def test_charge_key_reuse_with_different_payload_is_refused(
-    http, clean_database
-):
+async def test_charge_key_reuse_with_different_payload_is_refused(http, clean_database):
     wallets = await provision_agent_wallet(http)
     agent = wallets["agent_wallet_id"]
     before = await _balance(http, agent)

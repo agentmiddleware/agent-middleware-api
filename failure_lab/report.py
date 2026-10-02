@@ -301,7 +301,10 @@ def _conclude(
     )
     prevented_vs_existing = (
         max(0, existing.duplicate_effects - governed.duplicate_effects)
-        if existing is not None and governed is not None and existing.ran and governed.ran
+        if existing is not None
+        and governed is not None
+        and existing.ran
+        and governed.ran
         else 0
     )
     differences, disadvantages = _differences(native, governed)
@@ -408,7 +411,11 @@ def _conclude(
             disadvantages,
         )
 
-    against = "the correct native baseline" if prevented_vs_native else "your existing integration"
+    against = (
+        "the correct native baseline"
+        if prevented_vs_native
+        else "your existing integration"
+    )
     count = prevented_vs_native or prevented_vs_existing
     return Conclusion(
         ConclusionKind.GATEWAY_PREVENTED_DUPLICATES,
@@ -606,15 +613,23 @@ def render_run_text(
     lines.append("")
     lines.append(f"Run id:       {environment.get('run_id', 'unknown')}")
     lines.append(f"Started:      {environment.get('started_at', 'unknown')}")
-    lines.append(f"Definitions:  {environment.get('test_definition_version', 'unknown')}")
+    lines.append(
+        f"Definitions:  {environment.get('test_definition_version', 'unknown')}"
+    )
     lines.append(f"Gateway:      {environment.get('gateway_version', 'unknown')}")
     lines.append(f"Source:       {environment.get('traffic_source', 'unknown')}")
     lines.append("")
     lines.append("Scenario verdicts")
     lines.append("-----------------")
     for comparison in comparisons:
-        flag = "" if comparison.matches_expectation else "   (differs from documented expectation)"
-        lines.append(f"  {comparison.test_id}  {comparison.verdict:<15}{comparison.title}{flag}")
+        flag = (
+            ""
+            if comparison.matches_expectation
+            else "   (differs from documented expectation)"
+        )
+        lines.append(
+            f"  {comparison.test_id}  {comparison.verdict:<15}{comparison.title}{flag}"
+        )
     lines.append("")
     counts: dict[str, int] = {}
     for comparison in comparisons:
@@ -723,7 +738,9 @@ def _comparison_html(comparison: Comparison) -> str:
             for column in ran
         )
         body.append(f"<tr><th>{_esc(title)}</th>{cells}</tr>")
-    verdict_cells = "".join(f"<td>{_verdict_span(column.verdict)}</td>" for column in ran)
+    verdict_cells = "".join(
+        f"<td>{_verdict_span(column.verdict)}</td>" for column in ran
+    )
     body.append(f"<tr><th>Verdict</th>{verdict_cells}</tr>")
 
     mismatch_html = ""
@@ -768,8 +785,7 @@ def _comparison_html(comparison: Comparison) -> str:
             for item in comparison.conclusion.gateway_disadvantages
         )
         differences += (
-            "<h3>What it cost, measured against the same baseline</h3>"
-            f"<ul>{items}</ul>"
+            f"<h3>What it cost, measured against the same baseline</h3><ul>{items}</ul>"
         )
     observations = "".join(
         f"<li><strong>{_esc(column.label)}:</strong> {_esc(column.observation)}</li>"
@@ -781,7 +797,7 @@ def _comparison_html(comparison: Comparison) -> str:
   <h2>{_esc(comparison.test_id)} — {_esc(comparison.title)} {_verdict_span(comparison.verdict)}</h2>
   <p class="sub">{_esc(comparison.claim)}</p>
   {mismatch_html}
-  <table><thead><tr><th></th>{header}</tr></thead><tbody>{''.join(body)}</tbody></table>
+  <table><thead><tr><th></th>{header}</tr></thead><tbody>{"".join(body)}</tbody></table>
   <h3>What each configuration observed</h3>
   <ul>{observations}</ul>
   <h3>Additional latency</h3>
