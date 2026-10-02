@@ -664,7 +664,10 @@ async def test_velocity_windows_are_tracked_per_grant(
     assert blocked.allowed is False
     assert blocked.reason == "iga_velocity_exceeded"
     long_key = (OKTA_ISS, "user-1", TOOL, "ops-long", long_policy)
-    assert list(oidc_iga._window_calls[long_key]) == [1002.0, 1003.0]
+    assert [use.recorded_at for use in oidc_iga._window_calls[long_key]] == [
+        1002.0,
+        1003.0,
+    ]
 
 
 async def test_max_uses_are_tracked_per_grant(iga_config, clean_database, rsa_key):
@@ -716,12 +719,20 @@ async def test_release_tool_use_compensates_exactly_and_clamps_at_zero(
     first = await enforce_tool_call(principal, TOOL)
     assert first.allowed is True
     await oidc_iga.release_tool_use(
-        principal, TOOL, group="payments-ops", policy_id=policy_id
+        principal,
+        TOOL,
+        group="payments-ops",
+        policy_id=policy_id,
+        reservation=first.reservation,
     )
     assert oidc_iga._lifetime_uses == {}
     # Over-release must not create negative budget.
     await oidc_iga.release_tool_use(
-        principal, TOOL, group="payments-ops", policy_id=policy_id
+        principal,
+        TOOL,
+        group="payments-ops",
+        policy_id=policy_id,
+        reservation=first.reservation,
     )
     assert oidc_iga._lifetime_uses == {}
 
