@@ -1,5 +1,6 @@
 """Synthetic lifecycle and verdict checks for the legacy load script."""
 
+from decimal import Decimal
 import subprocess
 
 import pytest
@@ -77,3 +78,63 @@ def test_cleanup_only_stops_this_process_successfully_created_id(
         if mode in {"created", "not-ready"}
         else []
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "mode",
+    [
+        "success",
+        "all-errors",
+        "all-denied",
+        "partial-errors",
+        "missing",
+        "idem",
+        "budget",
+    ],
+)
+async def test_summary_report_and_exit_require_complete_success(
+    battery, monkeypatch, tmp_path, capsys, mode
+):
+    from app.db import database
+
+    async def nothing():
+        pass
+
+    async def run_battery(concurrency, total):
+        result = battery.LoadResult(
+            concurrency, total, total, 0, 0, Decimal(total), [100.0] * total
+        )
+        if mode == "all-errors":
+            result.success_count, result.error_count = 0, total
+        elif mode == "all-denied":
+            result.success_count, result.denied_count = 0, total
+        elif mode == "partial-errors":
+            result.success_count, result.error_count = total - 1, 1
+        elif mode == "missing":
+            result.success_count -= 1
+        elif mode == "idem":
+            result.idempotency_violations.append("synthetic duplicate receipt")
+        elif mode == "budget":
+            result.budget_anomalies.append("synthetic budget mismatch")
+        return result
+
+    monkeypatch.setattr(battery, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(battery, "_ensure_postgres", lambda: "unused")
+    monkeypatch.setattr(battery, "_run_migrations", lambda: None)
+    monkeypatch.setattr(battery, "_run_battery", run_battery)
+    monkeypatch.setattr(database, "init_db", nothing)
+    monkeypatch.setattr(database, "close_db", nothing)
+    result = await battery.main()
+    output = capsys.readouterr().out
+    report = (tmp_path / "reports/load_battery_report.md").read_text()
+    passed = mode == "success"
+    assert result == (0 if passed else 1)
+    assert output.count("✅ PASS") == (3 if passed else 0)
+    assert output.count("⚠️ FAIL") == (0 if passed else 3)
+    assert report.count("| PASS |") == (3 if passed else 0)
+    assert report.count("| FAIL |") == (0 if passed else 3)
+
+
+def test_empty_workload_cannot_pass(battery):
+    assert not battery.LoadResult(10, 0, 0, 0, 0, Decimal(0)).passed

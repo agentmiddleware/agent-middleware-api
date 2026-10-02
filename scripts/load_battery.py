@@ -138,6 +138,17 @@ class LoadResult:
     budget_anomalies: list[str] = field(default_factory=list)
 
     @property
+    def passed(self) -> bool:
+        return (
+            self.total_requests > 0
+            and self.success_count == self.total_requests
+            and self.error_count == 0
+            and self.denied_count == 0
+            and not self.idempotency_violations
+            and not self.budget_anomalies
+        )
+
+    @property
     def throughput_rps(self) -> float:
         if not self.latencies_ms:
             return 0.0
@@ -389,14 +400,15 @@ Database: PostgreSQL
 
 ## Results
 
-| Concurrency | Requests | Success | Denied | Errors | Throughput (req/s) | p50 (ms) | p95 (ms) | p99 (ms) | Mean (ms) |
-|-------------|----------|---------|--------|--------|-------------------|----------|----------|----------|-----------|
+| Concurrency | Requests | Success | Denied | Errors | Throughput (req/s) | p50 (ms) | p95 (ms) | p99 (ms) | Mean (ms) | Status |
+|-------------|----------|---------|--------|--------|-------------------|----------|----------|----------|-----------|--------|
 """
     for r in results:
         report += (
             f"| {r.concurrency} | {r.total_requests} | {r.success_count} | "
             f"{r.denied_count} | {r.error_count} | {r.throughput_rps:.1f} | "
-            f"{r.p50_ms:.1f} | {r.p95_ms:.1f} | {r.p99_ms:.1f} | {r.mean_ms:.1f} |\n"
+            f"{r.p50_ms:.1f} | {r.p95_ms:.1f} | {r.p99_ms:.1f} | {r.mean_ms:.1f} | "
+            f"{'PASS' if r.passed else 'FAIL'} |\n"
         )
 
     report += "\n## Anomalies\n\n"
@@ -424,18 +436,10 @@ Database: PostgreSQL
     print("SUMMARY")
     print("=" * 60)
     for r in results:
-        status = (
-            "✅ PASS"
-            if not (r.idempotency_violations or r.budget_anomalies)
-            else "⚠️ ANOMALIES"
-        )
+        status = "✅ PASS" if r.passed else "⚠️ FAIL"
         print(f"  {r.concurrency:3d} concurrent: {status}")
 
-    return (
-        0
-        if all(not (r.idempotency_violations or r.budget_anomalies) for r in results)
-        else 1
-    )
+    return 0 if all(r.passed for r in results) else 1
 
 
 if __name__ == "__main__":
