@@ -270,7 +270,7 @@ async def create_action_permit(
     request: ActionPermitCreateRequest, auth: AuthContext
 ) -> PermitResponse:
     from app.schemas.trust import PermitCreateRequest
-    from app.services.permits import PermitError, get_permit_service
+    from app.services.permits import PermitCreationRejectedError, get_permit_service
     from app.services.service_registry import get_service_registry
 
     await authorize_action_issuer(request, auth)
@@ -279,12 +279,12 @@ async def create_action_permit(
     try:
         binding = registry.get_action_binding(record) if record else None
         if binding is None:
-            raise PermitError("action_tool_binding_required")
+            raise PermitCreationRejectedError("action_tool_binding_required")
         digest = action_payload_hash(
             binding, request.subject_wallet_id, request.arguments
         )
     except ValueError as exc:
-        raise PermitError(str(exc)) from exc
+        raise PermitCreationRejectedError(str(exc)) from exc
     permit = PermitCreateRequest(
         **request.model_dump(exclude={"tool_name", "arguments"}),
         allowed_tools=[request.tool_name],

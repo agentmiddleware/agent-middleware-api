@@ -39,6 +39,15 @@ class PermitError(RuntimeError):
         super().__init__(reason)
 
 
+class PermitCreationRejectedError(PermitError):
+    """Issuance validation rejected before permit signing or persistence.
+
+    Only raise at explicit pre-write validation boundaries. Generic signing,
+    database, commit acknowledgement and response failures may have minted a
+    permit and must retain their issuance idempotency owner.
+    """
+
+
 class PermitWriteContendedError(PermitError):
     """A guarded permit write lost write conflicts for its whole budget.
 
@@ -328,7 +337,7 @@ class PermitService:
             getattr(request, field) is not None
             for field in ActionPermitFields.model_fields
         ):
-            raise PermitError("action_permit_requires_trusted_issuance")
+            raise PermitCreationRejectedError("action_permit_requires_trusted_issuance")
         return await self._persist_permit(request, subject_key_id, permit_id)
 
     async def _persist_permit(
@@ -338,12 +347,12 @@ class PermitService:
         permit_id: str | None = None,
     ) -> PermitResponse:
         if request.max_credits <= Decimal("0"):
-            raise PermitError("max_credits_must_be_positive")
+            raise PermitCreationRejectedError("max_credits_must_be_positive")
         if (
             request.repeat_window_seconds is not None
             and not get_settings().ENABLE_PERMIT_REPEAT_WINDOW_ISSUANCE
         ):
-            raise PermitError("repeat_window_issuance_disabled")
+            raise PermitCreationRejectedError("repeat_window_issuance_disabled")
         # Normalize to naive UTC before any comparison, signing, or persistence.
         # Guarantees the signed timestamp and persisted timestamp are identical
         # on every dialect (SQLite, PostgreSQL, asyncpg).
@@ -351,7 +360,7 @@ class PermitService:
         now = utc_now()
 
         if expires_at <= now:
-            raise PermitError("permit_expired_at_creation")
+            raise PermitCreationRejectedError("permit_expired_at_creation")
 
         if request.requires_human_approval:
             # Fail at creation rather than minting a permit every invoke of
@@ -361,7 +370,9 @@ class PermitService:
 
             available, reason = human_approval_available()
             if not available:
-                raise PermitError(reason or "human_approval_not_configured")
+                raise PermitCreationRejectedError(
+                    reason or "human_approval_not_configured"
+                )
 
         scopes = request.scopes or [
             f"tool:{tool}:invoke" for tool in request.allowed_tools
@@ -374,11 +385,13 @@ class PermitService:
             issuer = await session.get(WalletModel, request.issuer_wallet_id)
             subject = await session.get(WalletModel, request.subject_wallet_id)
             if not issuer:
-                raise PermitError("issuer_wallet_not_found")
+                raise PermitCreationRejectedError("issuer_wallet_not_found")
             if not subject:
-                raise PermitError("subject_wallet_not_found")
+                raise PermitCreationRejectedError("subject_wallet_not_found")
             if subject.balance < request.max_credits:
-                raise PermitError("permit_budget_exceeds_wallet_balance")
+                raise PermitCreationRejectedError(
+                    "permit_budget_exceeds_wallet_balance"
+                )
 
         permit_id = permit_id or f"permit-{uuid.uuid4().hex[:16]}"
         nonce = request.nonce or uuid.uuid4().hex

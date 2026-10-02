@@ -6,6 +6,7 @@ Re-exports the canonical permit implementation from :mod:`app.services.permits`.
 from __future__ import annotations
 
 from app.services.permits import (
+    PermitCreationRejectedError,
     PermitError,
     PermitService,
     PermitValidation,
@@ -16,6 +17,7 @@ from app.services.permits import (
 )
 
 __all__ = [
+    "PermitCreationRejectedError",
     "PermitError",
     "PermitService",
     "PermitValidation",
