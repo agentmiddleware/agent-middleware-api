@@ -92,7 +92,9 @@ async def _governed_agent(client: AsyncClient) -> dict[str, Any]:
     return {**agent, "permit_id": permit["permit_id"]}
 
 
-def _params(agent: dict[str, Any], *, idempotency_key: str, text: str = "hi") -> dict[str, Any]:
+def _params(
+    agent: dict[str, Any], *, idempotency_key: str, text: str = "hi"
+) -> dict[str, Any]:
     return {
         "name": TOOL,
         "arguments": {"text": text},
@@ -190,12 +192,16 @@ async def test_non_finite_argument_is_refused_before_execution(
 ):
     """Same class inside ``arguments``: an echoed NaN would fail after the charge."""
     agent = await _governed_agent(client)
-    params = json.dumps(_params(agent, idempotency_key="nonfinite-arg-1", text="__NAN__"))
-    raw = ('{"jsonrpc":"2.0","id":"x","method":"tools/call","params":%s}' % params).replace(
-        '"__NAN__"', "NaN"
+    params = json.dumps(
+        _params(agent, idempotency_key="nonfinite-arg-1", text="__NAN__")
     )
+    raw = (
+        '{"jsonrpc":"2.0","id":"x","method":"tools/call","params":%s}' % params
+    ).replace('"__NAN__"', "NaN")
     resp = await client.post(
-        "/mcp/messages", content=raw.encode(), headers={**agent["agent_headers"], **JSON_HEADERS}
+        "/mcp/messages",
+        content=raw.encode(),
+        headers={**agent["agent_headers"], **JSON_HEADERS},
     )
     assert resp.status_code == 400, resp.text
     assert counted_tool == []
@@ -224,7 +230,9 @@ async def test_unpaired_surrogate_anywhere_is_refused_before_execution(
     raw = json.dumps(body).encode("ascii")
     for _ in (1, 2):
         resp = await client.post(
-            "/mcp/messages", content=raw, headers={**agent["agent_headers"], **JSON_HEADERS}
+            "/mcp/messages",
+            content=raw,
+            headers={**agent["agent_headers"], **JSON_HEADERS},
         )
         assert resp.status_code == 400, resp.text
         assert resp.json()["detail"] == "Invalid JSON"
@@ -314,9 +322,16 @@ async def test_well_formed_governed_call_still_executes_once_and_replays(
         "method": "tools/call",
         "params": _params(agent, idempotency_key="well-formed-1", text="héllo ✓"),
     }
-    first = await client.post("/mcp/messages", json=body, headers=agent["agent_headers"])
-    second = await client.post("/mcp/messages", json=body, headers=agent["agent_headers"])
-    assert first.status_code == 200 and second.status_code == 200, (first.text, second.text)
+    first = await client.post(
+        "/mcp/messages", json=body, headers=agent["agent_headers"]
+    )
+    second = await client.post(
+        "/mcp/messages", json=body, headers=agent["agent_headers"]
+    )
+    assert first.status_code == 200 and second.status_code == 200, (
+        first.text,
+        second.text,
+    )
     assert (
         first.json()["result"]["receipt"]["receipt_id"]
         == second.json()["result"]["receipt"]["receipt_id"]

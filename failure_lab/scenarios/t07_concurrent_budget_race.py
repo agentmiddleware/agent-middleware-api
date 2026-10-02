@@ -132,12 +132,18 @@ class ConcurrentBudgetRace(Scenario):
         "In-process asyncio concurrency, not distributed load.",
     )
 
-    async def run_configuration(self, target: Target, log: EventLog) -> ConfigurationResult:
+    async def run_configuration(
+        self, target: Target, log: EventLog
+    ) -> ConfigurationResult:
         gateway, tenant, _ = target.require_gateway()
         credits_per_call = Decimal(gateway.credits_per_call)
         concurrency = max(2, int(self.options.get("concurrency", DEFAULT_CONCURRENCY)))
-        timeout_seconds = float(self.options.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS))
-        case_b_calls = max(1, int(self.options.get("budget_calls", CASE_B_AUTHORIZED_CALLS)))
+        timeout_seconds = float(
+            self.options.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)
+        )
+        case_b_calls = max(
+            1, int(self.options.get("budget_calls", CASE_B_AUTHORIZED_CALLS))
+        )
 
         plans: list[dict[str, Any]] = [
             {
@@ -199,9 +205,13 @@ class ConcurrentBudgetRace(Scenario):
             all_attempts.extend(attempts)
             all_operation_ids.extend(operation_ids)
 
-        measurements = await self.measure(target, all_attempts, operation_ids=all_operation_ids)
+        measurements = await self.measure(
+            target, all_attempts, operation_ids=all_operation_ids
+        )
 
-        failures = [f"{case['case']}: {item}" for case in cases for item in case["failures"]]
+        failures = [
+            f"{case['case']}: {item}" for case in cases for item in case["failures"]
+        ]
         over_authorization = [
             f"{case['case']}: {item}"
             for case in cases
@@ -235,7 +245,9 @@ class ConcurrentBudgetRace(Scenario):
             ),
         }
 
-        observation = self._observation(cases, credits_per_call, measurements, unanswered)
+        observation = self._observation(
+            cases, credits_per_call, measurements, unanswered
+        )
         if failures:
             observation += " Guarantee not met: " + "; ".join(failures) + "."
 
@@ -345,7 +357,9 @@ class ConcurrentBudgetRace(Scenario):
         operations = []
         for index in range(calls):
             operation_id, refund = self.refund(f"pay_t07_{name}_{index}")
-            operations.append((operation_id, OperationIdentity.first_attempt(operation_id), refund))
+            operations.append(
+                (operation_id, OperationIdentity.first_attempt(operation_id), refund)
+            )
         operation_ids = [operation_id for operation_id, _, _ in operations]
         distinct_keys = {identity.idempotency_key for _, identity, _ in operations}
 
@@ -380,7 +394,9 @@ class ConcurrentBudgetRace(Scenario):
 
         after = await gateway.snapshot(tenant)
         new_debits = [row for row in after.debits if row["entry_id"] not in seen_debits]
-        new_refunds = [row for row in after.refunds if row["entry_id"] not in seen_refunds]
+        new_refunds = [
+            row for row in after.refunds if row["entry_id"] not in seen_refunds
+        ]
         debited = sum((_amount(row) for row in new_debits), Decimal("0"))
         refunded = sum((_amount(row) for row in new_refunds), Decimal("0"))
         case_receipts = [
@@ -395,7 +411,9 @@ class ConcurrentBudgetRace(Scenario):
             (row for row in after.permits if row["permit_id"] == permit_id), None
         )
         spent = (
-            _credits(permit_row.get("spent_credits")) if permit_row is not None else None
+            _credits(permit_row.get("spent_credits"))
+            if permit_row is not None
+            else None
         )
 
         #: Authorized == charged, read from the gateway's own receipts rather
@@ -418,7 +436,9 @@ class ConcurrentBudgetRace(Scenario):
         executions = {op: target.ledger.execution_count(op) for op in operation_ids}
         total_executions = sum(executions.values())
         dispatches = sum(target.injector.dispatch_count(op) for op in operation_ids)
-        refused_ops = sorted({str(a.identity["business_operation_id"]) for a in refused})
+        refused_ops = sorted(
+            {str(a.identity["business_operation_id"]) for a in refused}
+        )
         refused_with_effect = [op for op in refused_ops if executions.get(op, 0) > 0]
         #: The effect ledger says whether a refused call CHANGED anything; the
         #: fault layer says whether it was ever sent. A refused call that was
@@ -491,7 +511,9 @@ class ConcurrentBudgetRace(Scenario):
 
         record: dict[str, Any] = {
             "case": name,
-            "charged_latency_p50_ms": percentile([a.latency_ms for a in succeeded], 0.5),
+            "charged_latency_p50_ms": percentile(
+                [a.latency_ms for a in succeeded], 0.5
+            ),
             "refused_latency_p50_ms": percentile([a.latency_ms for a in refused], 0.5),
             "note": note,
             "permit_id": permit_id,

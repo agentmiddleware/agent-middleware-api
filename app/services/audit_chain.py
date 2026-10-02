@@ -497,7 +497,9 @@ async def _verify_single_chain(
         first_seq = events[0].seq
         pred_stmt = (
             select(cast(Any, ControlPlaneAuditEventModel.chain_hash))
-            .where(cast(ColumnElement[bool], ControlPlaneAuditEventModel.seq < first_seq))
+            .where(
+                cast(ColumnElement[bool], ControlPlaneAuditEventModel.seq < first_seq)
+            )
             .order_by(desc(cast(ColumnElement[Any], ControlPlaneAuditEventModel.seq)))
             .limit(1)
         )

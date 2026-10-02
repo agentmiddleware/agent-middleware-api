@@ -99,9 +99,7 @@ def test_tool_price_exact_override_is_checked_before_float_fallback():
     # A sound float does not rescue a broken exact override: the exact value
     # is the one the charge would use.
     with pytest.raises(ValueError, match="tool_price_invalid"):
-        tool_price(
-            {"credits_per_unit": 2.0, "credits_per_unit_exact": "NaN"}, CATEGORY
-        )
+        tool_price({"credits_per_unit": 2.0, "credits_per_unit_exact": "NaN"}, CATEGORY)
 
 
 @pytest.mark.parametrize(

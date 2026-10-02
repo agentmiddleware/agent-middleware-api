@@ -225,9 +225,7 @@ class QuoteService:
 
             total = (
                 await session.execute(
-                    select(func.count())
-                    .select_from(QuoteModel)
-                    .where(*filters)
+                    select(func.count()).select_from(QuoteModel).where(*filters)
                 )
             ).scalar_one()
             rows = (

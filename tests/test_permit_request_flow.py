@@ -340,9 +340,9 @@ async def test_decision_after_local_expiry_is_not_honored(
     factory = get_session_factory()
     async with factory() as session:
         model = await session.get(PermitRequestModel, request_id)
-        model.expires_at = datetime.now(timezone.utc).replace(
-            tzinfo=None
-        ) - timedelta(seconds=1)
+        model.expires_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+            seconds=1
+        )
         session.add(model)
         await session.commit()
 
@@ -484,9 +484,7 @@ async def test_mint_failure_is_terminal_with_a_reason(
     """A human approved terms the wallet can no longer support."""
     _sentinel_env(monkeypatch, simulated=False)
     agent = await provision_agent_wallet(client)
-    request_id = (
-        await _request(client, agent, max_credits=900)
-    ).json()["request_id"]
+    request_id = (await _request(client, agent, max_credits=900)).json()["request_id"]
 
     # Drain the subject wallet below the approved budget.
     factory = get_session_factory()
@@ -523,9 +521,7 @@ async def test_sentinel_outage_on_create_is_retryable(
     # Nothing was banked, so the same key works once Sentinel recovers.
     factory = get_session_factory()
     async with factory() as session:
-        assert (
-            await session.execute(select(PermitRequestModel))
-        ).scalars().all() == []
+        assert (await session.execute(select(PermitRequestModel))).scalars().all() == []
 
     sentinel.fail_with = None
     recovered = await _request(client, agent, idem="preq-retry")
@@ -714,9 +710,9 @@ async def test_requested_gate_flag_rides_onto_the_minted_permit(
 ):
     _sentinel_env(monkeypatch, simulated=False)
     agent = await provision_agent_wallet(client)
-    request_id = (
-        await _request(client, agent, requires_human_approval=True)
-    ).json()["request_id"]
+    request_id = (await _request(client, agent, requires_human_approval=True)).json()[
+        "request_id"
+    ]
 
     sentinel.status = "approved"
     resp = await client.get(
@@ -776,7 +772,7 @@ async def test_tampered_request_terms_cannot_mint_after_approval(
     client, clean_database, monkeypatch, sentinel
 ):
     """An attacker who modifies the stored terms after approval cannot escalate authority.
-    
+
     The minted permit must carry exactly the terms the human reviewed. If the stored
     terms are tampered with between approval and mint, the integrity check must fail
     and no permit may be issued.
@@ -819,7 +815,7 @@ async def test_agent_cannot_escalate_via_poll_body_injection(
     client, clean_database, monkeypatch, sentinel
 ):
     """An agent cannot escalate by injecting wider terms into the poll request.
-    
+
     The poll endpoint takes no body — only the request_id path parameter. Even
     if an attacker tried to inject terms via headers or query params, minting
     reads from the stored row, not from the poll request.
@@ -852,7 +848,7 @@ async def test_coherent_tampering_of_terms_and_hash_fails_anchor_check(
     client, clean_database, monkeypatch, sentinel
 ):
     """An attacker who tampers with both terms AND request_hash cannot mint.
-    
+
     Even if an attacker recomputes request_hash to match the tampered terms,
     the original_request_hash anchor detects the coherent tampering and refuses
     to mint.
@@ -871,6 +867,7 @@ async def test_coherent_tampering_of_terms_and_hash_fails_anchor_check(
         model.max_credits = escalated_credits
         # Attacker recomputes the hash to match the new terms.
         from app.services.permit_requests import permit_request_hash
+
         model.request_hash = permit_request_hash(
             issuer_wallet_id=model.issuer_wallet_id,
             subject_wallet_id=model.subject_wallet_id,
@@ -901,13 +898,12 @@ async def test_coherent_tampering_of_terms_and_hash_fails_anchor_check(
     async with factory() as session:
         from sqlalchemy import select
         from app.db.models import PermitModel
+
         assert (await session.execute(select(PermitModel))).scalars().all() == []
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "max_credits", ["1.123456789", "0.000000001", "1000000000000"]
-)
+@pytest.mark.parametrize("max_credits", ["1.123456789", "0.000000001", "1000000000000"])
 async def test_request_max_credits_outside_storage_scale_is_refused(
     client, clean_database, monkeypatch, sentinel, max_credits
 ):
@@ -957,7 +953,6 @@ async def test_request_at_full_storage_scale_mints_a_verifiable_permit(
     )
     assert verify.status_code == 200
     assert verify.json()["valid"] is True, verify.json()
-
 
 
 @pytest.mark.anyio

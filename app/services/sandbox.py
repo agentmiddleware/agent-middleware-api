@@ -56,9 +56,11 @@ class Difficulty(str, Enum):
 # Environment Models
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class EnvironmentState:
     """Current state of a sandbox environment."""
+
     step: int = 0
     max_steps: int = 50
     grid: list[list[Any]] = field(default_factory=list)
@@ -71,6 +73,7 @@ class EnvironmentState:
 @dataclass
 class SandboxEnvironment:
     """A headless testing environment."""
+
     env_id: str
     env_type: EnvironmentType
     difficulty: Difficulty
@@ -90,6 +93,7 @@ class SandboxEnvironment:
 @dataclass
 class ActionResult:
     """Result of an agent's action in the environment."""
+
     step: int
     action_accepted: bool
     state_changed: bool
@@ -102,6 +106,7 @@ class ActionResult:
 # ---------------------------------------------------------------------------
 # Environment Generators
 # ---------------------------------------------------------------------------
+
 
 class PatternEnvironmentGenerator:
     """Generate pattern-discovery puzzles."""
@@ -215,12 +220,14 @@ class ApiMockEnvironmentGenerator:
 
         endpoints = []
         for i in range(num_endpoints):
-            endpoints.append({
-                "path": f"/api/v1/resource_{i}",
-                "method": rng.choice(["GET", "POST", "PUT"]),
-                "schema_version": 1,
-                "fields": [f"field_{j}" for j in range(rng.randint(2, 5))],
-            })
+            endpoints.append(
+                {
+                    "path": f"/api/v1/resource_{i}",
+                    "method": rng.choice(["GET", "POST", "PUT"]),
+                    "schema_version": 1,
+                    "fields": [f"field_{j}" for j in range(rng.randint(2, 5))],
+                }
+            )
 
         rules = [
             "API schema changes every 5 interactions",
@@ -374,12 +381,14 @@ class SandboxEngine:
         env.state.score += reward
         env.state.feedback = feedback
         env.state.solved = solved
-        env.action_history.append({
-            "step": env.state.step,
-            "action": action,
-            "reward": reward,
-            "feedback": feedback,
-        })
+        env.action_history.append(
+            {
+                "step": env.state.step,
+                "action": action,
+                "reward": reward,
+                "feedback": feedback,
+            }
+        )
 
         done = solved or env.state.step >= env.state.max_steps
 
@@ -448,9 +457,11 @@ class SandboxEngine:
                 discovered = env.state.metadata["endpoints_discovered"]
                 if discovered >= total:
                     return 10.0, "All endpoints discovered and called!", True
-                return 1.0, (
-                    f"Endpoint called successfully. {discovered}/{total} discovered."
-                ), False
+                return (
+                    1.0,
+                    (f"Endpoint called successfully. {discovered}/{total} discovered."),
+                    False,
+                )
             return 0, "Try calling an endpoint.", False
 
         elif env.env_type == EnvironmentType.ADVERSARIAL:
@@ -517,7 +528,8 @@ class SandboxEngine:
             "feedback": env.state.feedback,
             "grid": env.state.grid,
             "metadata": {
-                k: v for k, v in env.state.metadata.items()
+                k: v
+                for k, v in env.state.metadata.items()
                 if k not in ("hidden_rules",)
             },
         }

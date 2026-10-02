@@ -17,8 +17,12 @@ from failure_lab.scenarios.base import (
     ScenarioResult,
     Verdict,
 )
-from failure_lab.scenarios.t01_concurrent_identical_retry import ConcurrentIdenticalRetry
-from failure_lab.scenarios.t02_same_key_different_arguments import SameKeyDifferentArguments
+from failure_lab.scenarios.t01_concurrent_identical_retry import (
+    ConcurrentIdenticalRetry,
+)
+from failure_lab.scenarios.t02_same_key_different_arguments import (
+    SameKeyDifferentArguments,
+)
 from failure_lab.scenarios.t03_execute_then_lose_response import ExecuteThenLoseResponse
 from failure_lab.scenarios.t04_crash_before_dispatch import CrashBeforeDispatch
 from failure_lab.scenarios.t05_crash_after_dispatch import CrashAfterDispatch

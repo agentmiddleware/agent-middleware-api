@@ -88,7 +88,7 @@ def provision(
     json_mode: bool = False,
 ) -> dict[str, Any]:
     """Provision sponsor → agent → key via bootstrap/admin key.
-    
+
     Args:
         json_mode: If True, print only machine-readable status to stderr (never
             the api_key or bootstrap_key). Human text goes to stderr so

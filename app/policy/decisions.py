@@ -77,7 +77,11 @@ def evaluate_governed_action(
     key_id = auth.key_id if auth else None
 
     if allowed is None:
-        allowed = bool(auth and wallet_id and (auth.is_bootstrap_admin or auth.wallet_id == wallet_id))
+        allowed = bool(
+            auth
+            and wallet_id
+            and (auth.is_bootstrap_admin or auth.wallet_id == wallet_id)
+        )
     if reason is None:
         reason = "allowed" if allowed else "wallet_access_denied"
 

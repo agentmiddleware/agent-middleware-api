@@ -243,9 +243,7 @@ async def test_aggregate_value_cap_denies_over_total(client, clean_database):
 
 
 @pytest.mark.anyio
-async def test_aggregate_value_cap_counts_in_flight_reservation(
-    client, clean_database
-):
+async def test_aggregate_value_cap_counts_in_flight_reservation(client, clean_database):
     """An in-flight reservation with no receipt yet still consumes the cap.
 
     Attack path from the call-count audit: the first invoke reserves budget
@@ -1078,7 +1076,9 @@ async def test_max_calls_fractional_limit_fails_closed(client, clean_database):
 
 
 @pytest.mark.anyio
-async def test_reconciler_constraints_snapshot_matches_live_path(client, clean_database):
+async def test_reconciler_constraints_snapshot_matches_live_path(
+    client, clean_database
+):
     """A crash-recovered receipt must sign byte-identical constraints.
 
     The live invoke path normalizes `aggregate_value_cap`

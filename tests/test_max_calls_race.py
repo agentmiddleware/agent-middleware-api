@@ -11,6 +11,7 @@ the last slot.
 schedule with a barrier; ``test_max_calls_concurrent_race`` is an end-to-end
 smoke check through ``/mcp/messages`` that does not control interleaving.
 """
+
 import asyncio
 import json
 from datetime import datetime, timedelta, timezone
@@ -171,7 +172,9 @@ async def test_max_calls_concurrent_race(client, clean_database):
         factory = get_session_factory()
         async with factory() as session:
             result = await session.execute(
-                select(func.count()).select_from(ReceiptModel).where(
+                select(func.count())
+                .select_from(ReceiptModel)
+                .where(
                     ReceiptModel.permit_id == permit_id,
                     ReceiptModel.tool == tool_name,
                     ReceiptModel.outcome == "success",

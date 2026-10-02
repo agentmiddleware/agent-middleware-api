@@ -282,9 +282,12 @@ async def test_strict_mode_missing_permit_denial_leaves_no_idempotency_record(
             headers=provisioned["agent_headers"],
             tool_name=tool_name,
         )
-        assert await _governed_idempotency_record_count(
-            wallet_id=wallet_id, idempotency_key=idempotency_key
-        ) == 0
+        assert (
+            await _governed_idempotency_record_count(
+                wallet_id=wallet_id, idempotency_key=idempotency_key
+            )
+            == 0
+        )
 
         permit = await create_tool_permit(
             client,
@@ -311,15 +314,21 @@ async def test_strict_mode_missing_permit_denial_leaves_no_idempotency_record(
     assert "error" not in granted_payload, granted_payload
     assert granted_payload["result"]["isError"] is False
     assert calls["count"] == 1
-    assert await _tool_debit_count(
-        client=client,
-        wallet_id=wallet_id,
-        headers=provisioned["agent_headers"],
-        tool_name=tool_name,
-    ) == 1
-    assert await _governed_idempotency_record_count(
-        wallet_id=wallet_id, idempotency_key=idempotency_key
-    ) == 1
+    assert (
+        await _tool_debit_count(
+            client=client,
+            wallet_id=wallet_id,
+            headers=provisioned["agent_headers"],
+            tool_name=tool_name,
+        )
+        == 1
+    )
+    assert (
+        await _governed_idempotency_record_count(
+            wallet_id=wallet_id, idempotency_key=idempotency_key
+        )
+        == 1
+    )
 
 
 @pytest.mark.anyio
@@ -374,10 +383,13 @@ async def test_strict_mode_replays_unknown_permit_denial_with_idempotency_key(
     assert replay.json()["error"]["message"] != "idempotency_in_progress"
     assert calls["count"] == 0
     # docs/failure-semantics.md: permit_not_found completes a terminal record.
-    assert await _governed_idempotency_record_count(
-        wallet_id=provisioned["agent_wallet_id"],
-        idempotency_key="strict-unknown-permit-replay-idem",
-    ) == 1
+    assert (
+        await _governed_idempotency_record_count(
+            wallet_id=provisioned["agent_wallet_id"],
+            idempotency_key="strict-unknown-permit-replay-idem",
+        )
+        == 1
+    )
     await _assert_no_tool_debits(
         client=client,
         wallet_id=provisioned["agent_wallet_id"],
@@ -420,10 +432,13 @@ async def test_strict_mode_replays_missing_tool_lookup_error_with_idempotency_ke
     assert replay.json()["error"]["message"] == f"Tool not found: {tool_name}"
     assert replay.json()["error"]["message"] != "idempotency_in_progress"
     # docs/failure-semantics.md: an unknown tool completes a terminal record.
-    assert await _governed_idempotency_record_count(
-        wallet_id=provisioned["agent_wallet_id"],
-        idempotency_key="strict-missing-lookup-idem",
-    ) == 1
+    assert (
+        await _governed_idempotency_record_count(
+            wallet_id=provisioned["agent_wallet_id"],
+            idempotency_key="strict-missing-lookup-idem",
+        )
+        == 1
+    )
     await _assert_no_tool_debits(
         client=client,
         wallet_id=provisioned["agent_wallet_id"],
@@ -475,10 +490,13 @@ async def test_strict_mode_replays_non_executable_tool_error_with_idempotency_ke
     assert replay.json()["error"]["message"] != "idempotency_in_progress"
     # docs/failure-semantics.md: a resolved but non-executable tool is
     # rejected before the governed record is begun, so nothing is recorded.
-    assert await _governed_idempotency_record_count(
-        wallet_id=provisioned["agent_wallet_id"],
-        idempotency_key="strict-non-executable-lookup-idem",
-    ) == 0
+    assert (
+        await _governed_idempotency_record_count(
+            wallet_id=provisioned["agent_wallet_id"],
+            idempotency_key="strict-non-executable-lookup-idem",
+        )
+        == 0
+    )
     await _assert_no_tool_debits(
         client=client,
         wallet_id=provisioned["agent_wallet_id"],

@@ -625,8 +625,6 @@ async def test_mcp_corrupt_policy_denies_before_charge(client, clean_database):
         registry.unregister_local("policy-echo")
 
 
-
-
 # policy_bundles stores both limits as Numeric(18, 8) (ten integer digits),
 # name as String(255) and risk_tier as String(20). Starlette parses the bare
 # JSON literals Infinity/-Infinity/NaN, and ge=0 alone let +Infinity through.

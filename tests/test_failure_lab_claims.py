@@ -27,9 +27,16 @@ from failure_lab.claims import (
     supported_claims,
 )
 from failure_lab.configurations import CONFIGURATION_LABELS, Configuration
-from failure_lab.scenarios.base import ConfigurationResult, Counters, ScenarioResult, Verdict
+from failure_lab.scenarios.base import (
+    ConfigurationResult,
+    Counters,
+    ScenarioResult,
+    Verdict,
+)
 
-CLAIM = "One accepted idempotency key admits at most one gateway dispatch and one debit."
+CLAIM = (
+    "One accepted idempotency key admits at most one gateway dispatch and one debit."
+)
 
 
 def _scenario(
@@ -75,7 +82,9 @@ def test_a_passing_test_supports_its_claim():
 def test_a_claim_nobody_tested_is_refused():
     manifest = build_claims_manifest([_scenario("T01")], environment="local")
     with pytest.raises(UnsupportedClaimError):
-        assert_claim_is_supported(manifest, "The gateway guarantees exactly-once refunds.")
+        assert_claim_is_supported(
+            manifest, "The gateway guarantees exactly-once refunds."
+        )
 
 
 def test_a_failing_test_cannot_support_a_claim():
@@ -118,18 +127,30 @@ def test_claim_matching_ignores_only_incidental_differences():
 def test_a_whole_page_of_claims_reports_every_failure_at_once():
     manifest = build_claims_manifest([_scenario("T01")], environment="local")
     with pytest.raises(UnsupportedClaimError) as caught:
-        assert_claims_are_supported(manifest, [CLAIM, "Unbacked claim one.", "Unbacked claim two."])
+        assert_claims_are_supported(
+            manifest, [CLAIM, "Unbacked claim one.", "Unbacked claim two."]
+        )
     message = str(caught.value)
     assert "Unbacked claim one" in message
     assert "Unbacked claim two" in message
 
 
 def test_the_manifest_carries_the_prd_fields_and_serialises():
-    manifest = build_claims_manifest([_scenario("T01")], environment="local", version="1.3.0")
+    manifest = build_claims_manifest(
+        [_scenario("T01")], environment="local", version="1.3.0"
+    )
     document = json.loads(json.dumps(manifest.as_dict()))
     record = document["claims"][0]
 
-    for field in ("claim", "test_id", "version", "status", "environment", "tested_at", "limitations"):
+    for field in (
+        "claim",
+        "test_id",
+        "version",
+        "status",
+        "environment",
+        "tested_at",
+        "limitations",
+    ):
         assert field in record, field
     assert record["version"] == "1.3.0"
     assert record["definition_hash"]

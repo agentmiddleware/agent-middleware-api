@@ -59,7 +59,10 @@ def _indexed(
         directory_type=directory_type,
         capabilities=[
             IndexedCapability(
-                name="search", description="full-text search", endpoint="/search", method="GET"
+                name="search",
+                description="full-text search",
+                endpoint="/search",
+                method="GET",
             )
         ],
         compatibility_tier=tier,
@@ -124,7 +127,9 @@ async def test_store_indexed_upserts_on_same_api_id():
 @pytest.mark.anyio
 async def test_list_indexed_filters_and_sorts():
     store = OracleStore()
-    await store.store_indexed(_indexed(api_id="a", tier=CompatibilityTier.NATIVE, score=0.9))
+    await store.store_indexed(
+        _indexed(api_id="a", tier=CompatibilityTier.NATIVE, score=0.9)
+    )
     await store.store_indexed(
         _indexed(api_id="b", tier=CompatibilityTier.COMPATIBLE, score=0.7)
     )
@@ -182,7 +187,9 @@ async def test_list_crawl_targets_filters_by_domain():
             "status": "failed",
         },
     )
-    rows, total = await store.list_crawl_targets(domain="foo.example", limit=10, offset=0)
+    rows, total = await store.list_crawl_targets(
+        domain="foo.example", limit=10, offset=0
+    )
     assert total == 1
     assert rows[0]["target_id"] == "ct-1"
     assert rows[0]["domain"] == "api.foo.example.com"

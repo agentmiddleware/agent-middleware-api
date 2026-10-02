@@ -55,7 +55,9 @@ def test_prepares_archive_context_with_exact_immutable_stamp(
 
     assert context.parent == tmp_path
     assert (context / "tracked.txt").read_text(encoding="utf-8") == "release source\n"
-    assert (context / ".build_commit_sha").read_text(encoding="utf-8") == f"{commit_sha}\n"
+    assert (context / ".build_commit_sha").read_text(
+        encoding="utf-8"
+    ) == f"{commit_sha}\n"
     assert (context / ".build_commit_sha").stat().st_mode & 0o777 == 0o444
     assert not (context / ".git").exists()
 

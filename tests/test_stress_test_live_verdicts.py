@@ -71,9 +71,7 @@ class FakeTrustPlane:
         try:
             max_credits = Decimal(body["max_credits"])
         except (InvalidOperation, TypeError):
-            return httpx.Response(
-                422, json={"detail": [{"type": "decimal_parsing"}]}
-            )
+            return httpx.Response(422, json={"detail": [{"type": "decimal_parsing"}]})
         if max_credits <= 0 and self.fault != "nonpositive-permit-minted":
             return httpx.Response(400, json={"detail": "max_credits_must_be_positive"})
         if max_credits > AGENT_BALANCE:
@@ -215,9 +213,7 @@ def test_healthy_server_passes_all_verdict_sub_tests_together(
     ("sub_test", "fault"),
     [
         pytest.param("test_unicode_payload", "emoji-rejected", id="unicode-error"),
-        pytest.param(
-            "test_unicode_payload", "oversized-charged", id="refusal-charged"
-        ),
+        pytest.param("test_unicode_payload", "oversized-charged", id="refusal-charged"),
         pytest.param(
             "test_timezone_extremes", "timezone-rejected", id="timezone-rejected"
         ),

@@ -19,10 +19,16 @@ def upgrade() -> None:
     op.create_table(
         "signing_keys",
         sa.Column("key_id", sa.String(length=64), primary_key=True),
-        sa.Column("alg", sa.String(length=20), nullable=False, server_default="Ed25519"),
+        sa.Column(
+            "alg", sa.String(length=20), nullable=False, server_default="Ed25519"
+        ),
         sa.Column("public_key_b64", sa.Text(), nullable=False),
-        sa.Column("status", sa.String(length=20), nullable=False, server_default="active"),
-        sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "status", sa.String(length=20), nullable=False, server_default="active"
+        ),
+        sa.Column(
+            "created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()
+        ),
         sa.Column("activated_at", sa.DateTime(), nullable=True),
         sa.Column("retired_at", sa.DateTime(), nullable=True),
     )
@@ -82,10 +88,14 @@ def upgrade() -> None:
         ),
         sa.Column("expires_at", sa.DateTime(), nullable=False),
         sa.Column("nonce", sa.String(length=64), nullable=False),
-        sa.Column("status", sa.String(length=20), nullable=False, server_default="active"),
+        sa.Column(
+            "status", sa.String(length=20), nullable=False, server_default="active"
+        ),
         sa.Column("signature", sa.Text(), nullable=False),
         sa.Column("key_id", sa.String(length=64), nullable=False),
-        sa.Column("issued_at", sa.DateTime(), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "issued_at", sa.DateTime(), nullable=False, server_default=sa.func.now()
+        ),
         sa.Column("revoked_at", sa.DateTime(), nullable=True),
         sa.ForeignKeyConstraint(["issuer_wallet_id"], ["wallets.wallet_id"]),
         sa.ForeignKeyConstraint(["subject_wallet_id"], ["wallets.wallet_id"]),
@@ -112,7 +122,9 @@ def upgrade() -> None:
         sa.Column("request_hash", sa.String(length=64), nullable=False),
         sa.Column("response_hash", sa.String(length=64), nullable=True),
         sa.Column("ledger_entry_id", sa.String(length=50), nullable=True),
-        sa.Column("credits_authorized", sa.Numeric(precision=20, scale=8), nullable=False),
+        sa.Column(
+            "credits_authorized", sa.Numeric(precision=20, scale=8), nullable=False
+        ),
         sa.Column(
             "credits_charged",
             sa.Numeric(precision=20, scale=8),
@@ -121,13 +133,17 @@ def upgrade() -> None:
         ),
         sa.Column("outcome", sa.String(length=32), nullable=False),
         sa.Column("audit_event_id", sa.String(length=50), nullable=True),
-        sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()
+        ),
         sa.Column("signature", sa.Text(), nullable=False),
         sa.Column("signature_key_id", sa.String(length=64), nullable=False),
         sa.ForeignKeyConstraint(["permit_id"], ["permits.permit_id"]),
         sa.ForeignKeyConstraint(["wallet_id"], ["wallets.wallet_id"]),
         sa.ForeignKeyConstraint(["ledger_entry_id"], ["ledger_entries.entry_id"]),
-        sa.ForeignKeyConstraint(["audit_event_id"], ["control_plane_audit_events.event_id"]),
+        sa.ForeignKeyConstraint(
+            ["audit_event_id"], ["control_plane_audit_events.event_id"]
+        ),
         sa.ForeignKeyConstraint(["signature_key_id"], ["signing_keys.key_id"]),
     )
     op.create_index("ix_receipts_permit_id", "receipts", ["permit_id"])
@@ -151,7 +167,9 @@ def upgrade() -> None:
         sa.Column("response_reference", sa.String(length=128), nullable=True),
         sa.Column("response_json", sa.Text(), nullable=True),
         sa.Column("status_code", sa.Integer(), nullable=False, server_default="200"),
-        sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()
+        ),
         sa.Column("expires_at", sa.DateTime(), nullable=True),
         sa.ForeignKeyConstraint(["wallet_id"], ["wallets.wallet_id"]),
         sa.UniqueConstraint(
@@ -161,19 +179,27 @@ def upgrade() -> None:
             name="uq_idempotency_wallet_endpoint_key",
         ),
     )
-    op.create_index("ix_idempotency_records_wallet_id", "idempotency_records", ["wallet_id"])
-    op.create_index("ix_idempotency_records_endpoint", "idempotency_records", ["endpoint"])
+    op.create_index(
+        "ix_idempotency_records_wallet_id", "idempotency_records", ["wallet_id"]
+    )
+    op.create_index(
+        "ix_idempotency_records_endpoint", "idempotency_records", ["endpoint"]
+    )
     op.create_index(
         "ix_idempotency_records_idempotency_key",
         "idempotency_records",
         ["idempotency_key"],
     )
-    op.create_index("ix_idempotency_records_created_at", "idempotency_records", ["created_at"])
+    op.create_index(
+        "ix_idempotency_records_created_at", "idempotency_records", ["created_at"]
+    )
 
 
 def downgrade() -> None:
     op.drop_index("ix_idempotency_records_created_at", table_name="idempotency_records")
-    op.drop_index("ix_idempotency_records_idempotency_key", table_name="idempotency_records")
+    op.drop_index(
+        "ix_idempotency_records_idempotency_key", table_name="idempotency_records"
+    )
     op.drop_index("ix_idempotency_records_endpoint", table_name="idempotency_records")
     op.drop_index("ix_idempotency_records_wallet_id", table_name="idempotency_records")
     op.drop_table("idempotency_records")

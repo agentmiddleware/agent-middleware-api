@@ -2733,9 +2733,12 @@ async def test_upstream_usage_constraints_fail_closed_before_reservation(
             first_result = first.json()["result"]
             replay_result = replay.json()["result"]
             assert first_result["receipt"]["outcome"] == "success"
-            assert replay_result["receipt"]["receipt_id"] == first_result["receipt"]["receipt_id"]
+            assert (
+                replay_result["receipt"]["receipt_id"]
+                == first_result["receipt"]["receipt_id"]
+            )
             assert executor.dispatch_count == 1  # Only dispatched once
-            
+
             factory = get_session_factory()
             async with factory() as session:
                 permit = await session.get(PermitModel, permit_id)
@@ -2752,7 +2755,8 @@ async def test_upstream_usage_constraints_fail_closed_before_reservation(
                     select(func.count())
                     .select_from(McpDispatchAttemptModel)
                     .where(
-                        McpDispatchAttemptModel.idempotency_record_id == record.record_id
+                        McpDispatchAttemptModel.idempotency_record_id
+                        == record.record_id
                     )
                 )
             assert permit is not None and permit.spent_credits > Decimal("0")
@@ -2762,7 +2766,9 @@ async def test_upstream_usage_constraints_fail_closed_before_reservation(
             first_error = first.json()["error"]
             replay_error = replay.json()["error"]
             assert first_error["code"] == -32003
-            assert first_error["message"] == ("permit_constraint_unsupported_for_upstream")
+            assert first_error["message"] == (
+                "permit_constraint_unsupported_for_upstream"
+            )
             assert first_error["data"]["details"] == {
                 "execution_backend": "upstream_mcp",
                 "unsupported_constraints": [constraint_name],
@@ -2772,7 +2778,9 @@ async def test_upstream_usage_constraints_fail_closed_before_reservation(
             assert replay_error["data"]["receipt"] == first_error["data"]["receipt"]
             receipt = first_error["data"]["receipt"]
             assert receipt["outcome"] == "denied"
-            assert receipt["reason_code"] == ("permit_constraint_unsupported_for_upstream")
+            assert receipt["reason_code"] == (
+                "permit_constraint_unsupported_for_upstream"
+            )
             assert receipt["ledger_entry_id"] is None
             assert receipt["dispatch_attempt_id"] is None
             assert executor.calls == []
@@ -2794,7 +2802,8 @@ async def test_upstream_usage_constraints_fail_closed_before_reservation(
                     select(func.count())
                     .select_from(McpDispatchAttemptModel)
                     .where(
-                        McpDispatchAttemptModel.idempotency_record_id == record.record_id
+                        McpDispatchAttemptModel.idempotency_record_id
+                        == record.record_id
                     )
                 )
                 debit_count = await session.scalar(
@@ -2893,6 +2902,7 @@ async def test_upstream_usage_constraint_rest_denial_keeps_call_slot_unreserved(
         assert permit.spent_credits > Decimal("0")
         # Call slot was reserved
         import json as json_lib
+
         call_counts = json_lib.loads(permit.tool_call_counts_json or "{}")
         assert call_counts.get(tool_name, 0) == 1
         assert int(attempt_count or 0) == 1

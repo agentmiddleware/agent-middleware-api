@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from failure_lab.configurations import ALL_CONFIGURATIONS, AttemptOutcome, Configuration, Target
+from failure_lab.configurations import (
+    ALL_CONFIGURATIONS,
+    AttemptOutcome,
+    Configuration,
+    Target,
+)
 from failure_lab.faults import FaultMode, FaultPlan
 from failure_lab.identity import KeyPolicy, OperationIdentity
 from failure_lab.scenarios.base import (
@@ -124,7 +129,9 @@ class AgentRestartNewKey(Scenario):
         "policy. This one exists because real agents replan.",
     )
 
-    async def run_configuration(self, target: Target, log: EventLog) -> ConfigurationResult:
+    async def run_configuration(
+        self, target: Target, log: EventLog
+    ) -> ConfigurationResult:
         hold_seconds = float(self.options.get("hold_seconds", DEFAULT_HOLD_SECONDS))
         default_timeout = (
             DEFAULT_GATEWAY_TIMEOUT_SECONDS
@@ -134,7 +141,9 @@ class AgentRestartNewKey(Scenario):
         timeout_seconds = float(self.options.get("timeout_seconds", default_timeout))
 
         operation_id, refund = self.refund("pay_t06")
-        identity = OperationIdentity.first_attempt(operation_id, key_policy=KeyPolicy.ATTEMPT)
+        identity = OperationIdentity.first_attempt(
+            operation_id, key_policy=KeyPolicy.ATTEMPT
+        )
 
         target.injector.arm(
             FaultPlan(
@@ -162,7 +171,9 @@ class AgentRestartNewKey(Scenario):
             client_timeout_seconds=timeout_seconds,
         )
 
-        first = await target.agent.submit(identity, refund, timeout_seconds=timeout_seconds)
+        first = await target.agent.submit(
+            identity, refund, timeout_seconds=timeout_seconds
+        )
 
         # Read the independent instruments BEFORE the replan. Everything the
         # narrative below says about the first attempt -- that it executed,
@@ -253,7 +264,9 @@ class AgentRestartNewKey(Scenario):
         )
 
         attempts = [first, second]
-        measurements = await self.measure(target, attempts, operation_ids=[operation_id])
+        measurements = await self.measure(
+            target, attempts, operation_ids=[operation_id]
+        )
         ledger_count = target.ledger.execution_count(operation_id)
         layer_requests = target.injector.dispatch_count(operation_id)
         replan_requests = max(0, layer_requests - requests_before_restart)
@@ -299,7 +312,10 @@ class AgentRestartNewKey(Scenario):
             "business_operation_id_unchanged": (
                 restarted.business_operation_id == identity.business_operation_id
             ),
-            "agent_generations": [identity.agent_generation, restarted.agent_generation],
+            "agent_generations": [
+                identity.agent_generation,
+                restarted.agent_generation,
+            ],
             "caller_rebuilt_after_restart": rebuilt_caller,
             "fault": FaultMode.RESPONSE_LOST_AFTER_EXECUTION.value,
             "first_attempt_fault_applied": fault_applied,
@@ -342,14 +358,35 @@ class AgentRestartNewKey(Scenario):
 
         if target.uses_gateway:
             return self._gateway_result(
-                target, log, attempts, measurements, extra, premise, ledger_count, layer_requests
+                target,
+                log,
+                attempts,
+                measurements,
+                extra,
+                premise,
+                ledger_count,
+                layer_requests,
             )
         if target.configuration is Configuration.DIRECT_NATIVE:
             return self._direct_native_result(
-                target, log, attempts, measurements, extra, premise, ledger_count, layer_requests
+                target,
+                log,
+                attempts,
+                measurements,
+                extra,
+                premise,
+                ledger_count,
+                layer_requests,
             )
         return self._direct_naive_result(
-            target, log, attempts, measurements, extra, premise, ledger_count, layer_requests
+            target,
+            log,
+            attempts,
+            measurements,
+            extra,
+            premise,
+            ledger_count,
+            layer_requests,
         )
 
     # -- what the first attempt actually did ------------------------------
@@ -416,7 +453,11 @@ class AgentRestartNewKey(Scenario):
             # In front of the tool. With a gateway there, that is the gateway;
             # on the direct path there is no layer in front, so the replan
             # simply never left the client and nothing deduplicated it.
-            return DEDUPLICATED_BY_GATEWAY if target.uses_gateway else DEDUPLICATED_BY_NOTHING
+            return (
+                DEDUPLICATED_BY_GATEWAY
+                if target.uses_gateway
+                else DEDUPLICATED_BY_NOTHING
+            )
         return DEDUPLICATED_BY_DOWNSTREAM
 
     # -- per-configuration verdicts --------------------------------------
@@ -540,7 +581,9 @@ class AgentRestartNewKey(Scenario):
         )
         if failures:
             observation += (
-                " The correct native baseline did NOT hold: " + "; ".join(failures) + "."
+                " The correct native baseline did NOT hold: "
+                + "; ".join(failures)
+                + "."
             )
         risks = [
             "The protection lives entirely in the tool and is keyed on a field "

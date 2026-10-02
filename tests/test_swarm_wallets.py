@@ -21,18 +21,26 @@ HEADERS = {"X-API-Key": "test-key"}
 
 async def _create_sponsor_and_agent(client):
     """Helper: create sponsor + agent wallet chain."""
-    sponsor = await client.post("/v1/billing/wallets/sponsor", json={
-        "sponsor_name": "Swarm Corp",
-        "email": "swarm@test.com",
-        "initial_credits": 100000.0,
-    }, headers=HEADERS)
+    sponsor = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={
+            "sponsor_name": "Swarm Corp",
+            "email": "swarm@test.com",
+            "initial_credits": 100000.0,
+        },
+        headers=HEADERS,
+    )
     sponsor_id = sponsor.json()["wallet_id"]
 
-    agent = await client.post("/v1/billing/wallets/agent", json={
-        "sponsor_wallet_id": sponsor_id,
-        "agent_id": "master-builder-01",
-        "budget_credits": 50000.0,
-    }, headers=HEADERS)
+    agent = await client.post(
+        "/v1/billing/wallets/agent",
+        json={
+            "sponsor_wallet_id": sponsor_id,
+            "agent_id": "master-builder-01",
+            "budget_credits": 50000.0,
+        },
+        headers=HEADERS,
+    )
     agent_id = agent.json()["wallet_id"]
 
     return sponsor_id, agent_id
@@ -43,13 +51,17 @@ async def test_create_child_wallet(client):
     """Agent can spawn a child wallet."""
     _, agent_id = await _create_sponsor_and_agent(client)
 
-    resp = await client.post("/v1/billing/wallets/child", json={
-        "parent_wallet_id": agent_id,
-        "child_agent_id": "code-writer-01",
-        "budget_credits": 2000.0,
-        "max_spend": 2000.0,
-        "task_description": "Write unit tests",
-    }, headers=HEADERS)
+    resp = await client.post(
+        "/v1/billing/wallets/child",
+        json={
+            "parent_wallet_id": agent_id,
+            "child_agent_id": "code-writer-01",
+            "budget_credits": 2000.0,
+            "max_spend": 2000.0,
+            "task_description": "Write unit tests",
+        },
+        headers=HEADERS,
+    )
     assert resp.status_code == 201
     data = resp.json()
     assert data["wallet_type"] == "child"
@@ -63,12 +75,16 @@ async def test_child_wallet_deducts_from_parent(client):
     """Spawning a child deducts credits from parent."""
     _, agent_id = await _create_sponsor_and_agent(client)
 
-    await client.post("/v1/billing/wallets/child", json={
-        "parent_wallet_id": agent_id,
-        "child_agent_id": "tester-01",
-        "budget_credits": 5000.0,
-        "max_spend": 5000.0,
-    }, headers=HEADERS)
+    await client.post(
+        "/v1/billing/wallets/child",
+        json={
+            "parent_wallet_id": agent_id,
+            "child_agent_id": "tester-01",
+            "budget_credits": 5000.0,
+            "max_spend": 5000.0,
+        },
+        headers=HEADERS,
+    )
 
     parent = await client.get(f"/v1/billing/wallets/{agent_id}", headers=HEADERS)
     assert parent.json()["balance"] == 45000.0  # 50K - 5K
@@ -79,15 +95,21 @@ async def test_reclaim_child_wallet(client):
     """Reclaim unspent credits from child back to parent."""
     _, agent_id = await _create_sponsor_and_agent(client)
 
-    child_resp = await client.post("/v1/billing/wallets/child", json={
-        "parent_wallet_id": agent_id,
-        "child_agent_id": "deployer-01",
-        "budget_credits": 3000.0,
-        "max_spend": 3000.0,
-    }, headers=HEADERS)
+    child_resp = await client.post(
+        "/v1/billing/wallets/child",
+        json={
+            "parent_wallet_id": agent_id,
+            "child_agent_id": "deployer-01",
+            "budget_credits": 3000.0,
+            "max_spend": 3000.0,
+        },
+        headers=HEADERS,
+    )
     child_id = child_resp.json()["wallet_id"]
 
-    reclaim = await client.post(f"/v1/billing/wallets/{child_id}/reclaim", headers=HEADERS)
+    reclaim = await client.post(
+        f"/v1/billing/wallets/{child_id}/reclaim", headers=HEADERS
+    )
     assert reclaim.status_code == 200
     data = reclaim.json()
     assert data["credits_reclaimed"] == 3000.0
@@ -100,12 +122,16 @@ async def test_swarm_budget_summary(client):
     _, agent_id = await _create_sponsor_and_agent(client)
 
     for i in range(3):
-        await client.post("/v1/billing/wallets/child", json={
-            "parent_wallet_id": agent_id,
-            "child_agent_id": f"worker-{i}",
-            "budget_credits": 1000.0,
-            "max_spend": 1000.0,
-        }, headers=HEADERS)
+        await client.post(
+            "/v1/billing/wallets/child",
+            json={
+                "parent_wallet_id": agent_id,
+                "child_agent_id": f"worker-{i}",
+                "budget_credits": 1000.0,
+                "max_spend": 1000.0,
+            },
+            headers=HEADERS,
+        )
 
     resp = await client.get(f"/v1/billing/wallets/{agent_id}/swarm", headers=HEADERS)
     assert resp.status_code == 200
@@ -120,23 +146,30 @@ async def test_child_wallet_insufficient_parent_balance(client):
     """Cannot spawn child wallet exceeding parent balance."""
     _, agent_id = await _create_sponsor_and_agent(client)
 
-    resp = await client.post("/v1/billing/wallets/child", json={
-        "parent_wallet_id": agent_id,
-        "child_agent_id": "greedy-agent",
-        "budget_credits": 999999.0,
-        "max_spend": 999999.0,
-    }, headers=HEADERS)
+    resp = await client.post(
+        "/v1/billing/wallets/child",
+        json={
+            "parent_wallet_id": agent_id,
+            "child_agent_id": "greedy-agent",
+            "budget_credits": 999999.0,
+            "max_spend": 999999.0,
+        },
+        headers=HEADERS,
+    )
     assert resp.status_code == 400
 
 
 @pytest.mark.anyio
 async def test_child_wallet_requires_api_key(client):
-    resp = await client.post("/v1/billing/wallets/child", json={
-        "parent_wallet_id": "fake",
-        "child_agent_id": "test",
-        "budget_credits": 100.0,
-        "max_spend": 100.0,
-    })
+    resp = await client.post(
+        "/v1/billing/wallets/child",
+        json={
+            "parent_wallet_id": "fake",
+            "child_agent_id": "test",
+            "budget_credits": 100.0,
+            "max_spend": 100.0,
+        },
+    )
     assert resp.status_code in (401, 403)
 
 
@@ -157,12 +190,16 @@ async def test_scoped_key_cannot_spawn_reclaim_or_view_another_wallets_swarm(
     wallet_b = tenant_b["agent_wallet_id"]
     a_headers = tenant_a["agent_headers"]
 
-    b_child_resp = await client.post("/v1/billing/wallets/child", json={
-        "parent_wallet_id": wallet_b,
-        "child_agent_id": "b-worker",
-        "budget_credits": 200.0,
-        "max_spend": 200.0,
-    }, headers=tenant_b["agent_headers"])
+    b_child_resp = await client.post(
+        "/v1/billing/wallets/child",
+        json={
+            "parent_wallet_id": wallet_b,
+            "child_agent_id": "b-worker",
+            "budget_credits": 200.0,
+            "max_spend": 200.0,
+        },
+        headers=tenant_b["agent_headers"],
+    )
     assert b_child_resp.status_code == 201, b_child_resp.text
     b_child = b_child_resp.json()["wallet_id"]
 
@@ -178,12 +215,16 @@ async def test_scoped_key_cannot_spawn_reclaim_or_view_another_wallets_swarm(
     assert b_before == 800.0
     assert b_child_before == 200.0
 
-    spawn = await client.post("/v1/billing/wallets/child", json={
-        "parent_wallet_id": wallet_b,
-        "child_agent_id": "a-stolen-worker",
-        "budget_credits": 100.0,
-        "max_spend": 100.0,
-    }, headers=a_headers)
+    spawn = await client.post(
+        "/v1/billing/wallets/child",
+        json={
+            "parent_wallet_id": wallet_b,
+            "child_agent_id": "a-stolen-worker",
+            "budget_credits": 100.0,
+            "max_spend": 100.0,
+        },
+        headers=a_headers,
+    )
     assert spawn.status_code == 403, spawn.text
     assert spawn.json()["detail"]["error"] == "wallet_access_denied"
 
@@ -209,12 +250,16 @@ async def test_scoped_key_cannot_spawn_reclaim_or_view_another_wallets_swarm(
 
     # The refusals are about ownership, not the routes: A's own key still
     # spawns from and reads its own wallet.
-    own_spawn = await client.post("/v1/billing/wallets/child", json={
-        "parent_wallet_id": wallet_a,
-        "child_agent_id": "a-worker",
-        "budget_credits": 100.0,
-        "max_spend": 100.0,
-    }, headers=a_headers)
+    own_spawn = await client.post(
+        "/v1/billing/wallets/child",
+        json={
+            "parent_wallet_id": wallet_a,
+            "child_agent_id": "a-worker",
+            "budget_credits": 100.0,
+            "max_spend": 100.0,
+        },
+        headers=a_headers,
+    )
     assert own_spawn.status_code == 201, own_spawn.text
     own_swarm = await client.get(
         f"/v1/billing/wallets/{wallet_a}/swarm", headers=a_headers

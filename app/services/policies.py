@@ -12,7 +12,11 @@ from sqlalchemy import select
 
 from app.db.database import get_session_factory
 from app.db.models import PolicyBundleModel
-from app.schemas.policies import PolicyBundleCreate, PolicyBundlePatch, PolicyBundleResponse
+from app.schemas.policies import (
+    PolicyBundleCreate,
+    PolicyBundlePatch,
+    PolicyBundleResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +118,9 @@ async def create_policy_bundle(request: PolicyBundleCreate) -> PolicyBundleRespo
         wallet_id=request.wallet_id,
         name=request.name,
         allowed_tools_json=_encode_list(request.allowed_tools),
-        allowed_service_categories_json=_encode_list(request.allowed_service_categories),
+        allowed_service_categories_json=_encode_list(
+            request.allowed_service_categories
+        ),
         max_cost_per_action=(
             Decimal(str(request.max_cost_per_action))
             if request.max_cost_per_action is not None
@@ -138,7 +144,9 @@ async def create_policy_bundle(request: PolicyBundleCreate) -> PolicyBundleRespo
     return _to_response(model)
 
 
-async def list_policy_bundles(wallet_id: str | None = None) -> list[PolicyBundleResponse]:
+async def list_policy_bundles(
+    wallet_id: str | None = None,
+) -> list[PolicyBundleResponse]:
     # SQLModel fields are typed as plain Python types (not Mapped[...]), so mypy
     # sees `.created_at`/`==` comparisons as datetime/bool rather than SQLAlchemy
     # ColumnElement expressions. Root cause lives in app/db/models.py (out of scope here).
@@ -275,7 +283,12 @@ async def evaluate_wallet_policy(
             evaluated.append(
                 {"policy_id": policy.policy_id, "corrupt_constraint": exc.field}
             )
-            return PolicyEvaluation(False, "policy_constraint_corrupt", policy.policy_id, {"evaluated": evaluated})
+            return PolicyEvaluation(
+                False,
+                "policy_constraint_corrupt",
+                policy.policy_id,
+                {"evaluated": evaluated},
+            )
         constraints = {
             "policy_id": policy.policy_id,
             "allowed_tools": allowed_tools,
@@ -297,28 +310,60 @@ async def evaluate_wallet_policy(
         evaluated.append(constraints)
         if policy.human_approval_required:
             if not approval_gate_active:
-                return PolicyEvaluation(False, "human_approval_required", policy.policy_id, {"evaluated": evaluated})
+                return PolicyEvaluation(
+                    False,
+                    "human_approval_required",
+                    policy.policy_id,
+                    {"evaluated": evaluated},
+                )
             constraints["human_approval_satisfied_by_gate"] = True
         if allowed_tools is not None and tool_name not in allowed_tools:
-            return PolicyEvaluation(False, "tool_not_allowed", policy.policy_id, {"evaluated": evaluated})
-        if allowed_categories is not None and service_category not in allowed_categories:
-            return PolicyEvaluation(False, "service_category_not_allowed", policy.policy_id, {"evaluated": evaluated})
+            return PolicyEvaluation(
+                False, "tool_not_allowed", policy.policy_id, {"evaluated": evaluated}
+            )
+        if (
+            allowed_categories is not None
+            and service_category not in allowed_categories
+        ):
+            return PolicyEvaluation(
+                False,
+                "service_category_not_allowed",
+                policy.policy_id,
+                {"evaluated": evaluated},
+            )
         if (
             policy.max_cost_per_action is not None
             and est is not None
             and est > policy.max_cost_per_action
         ):
-            return PolicyEvaluation(False, "max_cost_per_action_exceeded", policy.policy_id, {"evaluated": evaluated})
+            return PolicyEvaluation(
+                False,
+                "max_cost_per_action_exceeded",
+                policy.policy_id,
+                {"evaluated": evaluated},
+            )
         if (
             policy.daily_spend_limit is not None
             and daily is not None
             and est is not None
             and daily + est > policy.daily_spend_limit
         ):
-            return PolicyEvaluation(False, "daily_spend_limit_exceeded", policy.policy_id, {"evaluated": evaluated})
+            return PolicyEvaluation(
+                False,
+                "daily_spend_limit_exceeded",
+                policy.policy_id,
+                {"evaluated": evaluated},
+            )
         if policy.require_real_effects and simulation:
-            return PolicyEvaluation(False, "real_effects_required", policy.policy_id, {"evaluated": evaluated})
+            return PolicyEvaluation(
+                False,
+                "real_effects_required",
+                policy.policy_id,
+                {"evaluated": evaluated},
+            )
         if risk_tier is not None and policy.risk_tier != risk_tier:
             constraints["requested_risk_tier"] = risk_tier
 
-    return PolicyEvaluation(True, "allowed", models[0].policy_id, {"evaluated": evaluated})
+    return PolicyEvaluation(
+        True, "allowed", models[0].policy_id, {"evaluated": evaluated}
+    )

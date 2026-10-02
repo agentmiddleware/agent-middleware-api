@@ -57,7 +57,6 @@ PERMIT_CREDIT_HEADROOM = 3
 PERMIT_MIN_CREDITS = 20
 
 
-
 def credits_per_call(tool: dict) -> float:
     """The tool's advertised price, or 0 when the manifest states none."""
     try:
@@ -181,7 +180,7 @@ def require(condition: bool, message: str) -> None:
 
 def _get_agent_key() -> tuple[str, str, str]:
     """Read agent credential from $CI_SMOKE_AGENT_KEY or signal self-provision.
-    
+
     Returns (api_key, wallet_id, key_id). If CI_SMOKE_AGENT_KEY is set but
     wallet_id/key_id are missing, returns (key, "", "") to signal they should
     be fetched from the API. Never logs or prints the key.
@@ -189,7 +188,7 @@ def _get_agent_key() -> tuple[str, str, str]:
     key = os.environ.get("CI_SMOKE_AGENT_KEY", "").strip()
     wallet_id = os.environ.get("CI_SMOKE_WALLET_ID", "").strip()
     key_id = os.environ.get("CI_SMOKE_KEY_ID", "").strip()
-    
+
     if key and wallet_id and key_id:
         # All three provided - use them
         return (key, wallet_id, key_id)
@@ -203,22 +202,23 @@ def _get_agent_key() -> tuple[str, str, str]:
 
 def _get_api_url() -> str:
     """Read API URL from $API_URL or default to local quickstart.
-    
+
     Validates that non-loopback URLs use HTTPS to prevent cleartext key leaks.
     """
     url = os.environ.get("API_URL", DEFAULT_API_URL).rstrip("/")
-    
+
     # Enforce HTTPS for non-loopback URLs (same as partner_api_key_bootstrap.py)
     from urllib.parse import urlparse
+
     parsed = urlparse(url)
     is_loopback = parsed.hostname in ("localhost", "127.0.0.1", "::1")
-    
+
     if parsed.scheme == "http" and not is_loopback:
         raise ConfigurationError(
             f"refusing to send CI_SMOKE_AGENT_KEY over cleartext HTTP to "
             f"non-loopback host {parsed.hostname}. Use https:// or a loopback address."
         )
-    
+
     return url
 
 
@@ -309,7 +309,7 @@ def run_constant_test(
     print(f"[constant-test] target: {api_url}", file=sys.stderr)
 
     # Generate a unique run ID for this execution to make idempotency keys unique
-    run_id = datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S-%f')
+    run_id = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
 
     # If credentials not provided, self-provision
     if not agent_key:
@@ -335,31 +335,43 @@ def run_constant_test(
             "X-API-Key": agent_key,
             "Content-Type": "application/json",
         }
-        with httpx.Client(base_url=api_url, headers=headers, timeout=30.0) as fetch_client:
-            wallets_resp = _get_json(fetch_client, "/v1/billing/wallets", expected_status=200)
+        with httpx.Client(
+            base_url=api_url, headers=headers, timeout=30.0
+        ) as fetch_client:
+            wallets_resp = _get_json(
+                fetch_client, "/v1/billing/wallets", expected_status=200
+            )
             wallets = wallets_resp.get("wallets", [])
             require(len(wallets) > 0, "no wallets found for this API key")
             # Use the first wallet (agent wallet)
             wallet_id = wallets[0]["wallet_id"]
-            
+
             # Fetch key_id from the keys list
-            keys_resp = _get_json(fetch_client, f"/v1/billing/wallets/{wallet_id}/keys", expected_status=200)
+            keys_resp = _get_json(
+                fetch_client,
+                f"/v1/billing/wallets/{wallet_id}/keys",
+                expected_status=200,
+            )
             keys = keys_resp.get("keys", [])
             require(len(keys) > 0, "no keys found for this wallet")
-            
+
             # Derive key_prefix: first 8 characters (same as generate_api_key format)
             # Validate key format before deriving prefix
             if len(agent_key) < 8 or "_" not in agent_key:
-                raise ConfigurationError("malformed API key: expected format <prefix>_<suffix>")
+                raise ConfigurationError(
+                    "malformed API key: expected format <prefix>_<suffix>"
+                )
             key_prefix = agent_key[:8]
-            
+
             matching_keys = [k for k in keys if k.get("key_prefix") == key_prefix]
             if len(matching_keys) == 0:
                 raise ConfigurationError(f"no key found with prefix {key_prefix}")
             if len(matching_keys) > 1:
-                raise ConfigurationError(f"ambiguous: {len(matching_keys)} keys with prefix {key_prefix}")
+                raise ConfigurationError(
+                    f"ambiguous: {len(matching_keys)} keys with prefix {key_prefix}"
+                )
             key_id = matching_keys[0]["key_id"]
-            
+
             print(
                 f"[constant-test] fetched: wallet_id={wallet_id}, key_id={key_id}",
                 file=sys.stderr,
@@ -405,9 +417,9 @@ def run_constant_test(
 
         # Issue scoped permit
         print("[constant-test] issuing scoped permit", file=sys.stderr)
-        expires_at = (
-            datetime.now(timezone.utc) + timedelta(minutes=30)
-        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        expires_at = (datetime.now(timezone.utc) + timedelta(minutes=30)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
         # Add Idempotency-Key header for permit creation (unique per run)
         permit_headers = {
             **headers,
@@ -433,7 +445,7 @@ def run_constant_test(
         permit = resp.json()
         permit_id = permit["permit_id"]
         print(f"[constant-test] permit_id={permit_id}", file=sys.stderr)
-        
+
         # Track initial spent_credits (should be 0 for new permit)
         initial_spent = Decimal(str(permit.get("spent_credits", "0")))
 
@@ -453,9 +465,7 @@ def run_constant_test(
             idempotency_key=invoke_idempotency_key,
             arguments=governed_arguments,
         )
-        first_call = _post_json(
-            client, "/mcp/messages", call_body, expected_status=200
-        )
+        first_call = _post_json(client, "/mcp/messages", call_body, expected_status=200)
         result = _first_jsonrpc_result(first_call)
         require(result["isError"] is False, f"tool call failed: {result}")
         receipt = result["receipt"]
@@ -628,17 +638,17 @@ def run_constant_test(
 def _validate_api_url(url: str) -> str:
     """Validate API URL and enforce HTTPS for non-loopback hosts."""
     from urllib.parse import urlparse
-    
+
     url = url.rstrip("/")
     parsed = urlparse(url)
     is_loopback = parsed.hostname in ("localhost", "127.0.0.1", "::1")
-    
+
     if parsed.scheme == "http" and not is_loopback:
         raise ConfigurationError(
             f"refusing to send CI_SMOKE_AGENT_KEY over cleartext HTTP to "
             f"non-loopback host {parsed.hostname}. Use https:// or a loopback address."
         )
-    
+
     return url
 
 

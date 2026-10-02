@@ -165,8 +165,7 @@ class AgentMiddlewareClient:
             token = bearer_token.strip()
             if not token:
                 raise ValueError(
-                    "bearer_token must not be blank; omit it to send no "
-                    "Authorization header"
+                    "bearer_token must not be blank; omit it to send no Authorization header"
                 )
             headers["Authorization"] = f"Bearer {token}"
         self._client = httpx.AsyncClient(

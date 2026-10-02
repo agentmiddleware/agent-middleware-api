@@ -421,9 +421,9 @@ async def run_demo(json_output: bool = False) -> dict[str, Any]:
             )
             committed_result = committed["result"]
             committed_receipt = committed_result["receipt"]
-            committed_confirmation = json.loads(
-                committed_result["content"][0]["text"]
-            )["confirmation"]
+            committed_confirmation = json.loads(committed_result["content"][0]["text"])[
+                "confirmation"
+            ]
 
             line(f"    -> tools/call {PAYOUT_TOOL}   [key: pay-INV-4417]")
             line("       gateway: dispatched, charged, receipt written")
@@ -446,9 +446,9 @@ async def run_demo(json_output: bool = False) -> dict[str, Any]:
             )
             replayed_result = replayed["result"]
             replayed_receipt = replayed_result["receipt"]
-            replayed_confirmation = json.loads(
-                replayed_result["content"][0]["text"]
-            )["confirmation"]
+            replayed_confirmation = json.loads(replayed_result["content"][0]["text"])[
+                "confirmation"
+            ]
 
             line("       gateway: key already terminal -- no dispatch, no debit")
             line(f"       returned the stored outcome: {replayed_confirmation}")
@@ -474,8 +474,9 @@ async def run_demo(json_output: bool = False) -> dict[str, Any]:
 
             bank_state(f"{VENDOR} received:")
             line()
-            line(f"    Wallet debited:  {len(after_replay)} x "
-                 f"{CREDITS_PER_CALL} credits")
+            line(
+                f"    Wallet debited:  {len(after_replay)} x {CREDITS_PER_CALL} credits"
+            )
             line(f"    Receipt id:      {committed_receipt['receipt_id']}")
             line("    Same receipt on both attempts: yes")
             line()
@@ -508,9 +509,7 @@ async def run_demo(json_output: bool = False) -> dict[str, Any]:
             line("    -> tools/call ... $9500.00 under key 'pay-INV-4417'")
             line(f"       refused: {conflict['message']}")
 
-            after_conflict = await payout_debits(
-                client, agent_headers, agent_wallet_id
-            )
+            after_conflict = await payout_debits(client, agent_headers, agent_wallet_id)
             require(
                 conflict["message"] == "idempotency_key_reused",
                 f"expected idempotency_key_reused, got {conflict}",
@@ -542,9 +541,7 @@ async def run_demo(json_output: bool = False) -> dict[str, Any]:
 
             forged = dict(portable)
             forged["signing_input"] = portable["signing_input"].replace("a", "b", 1)
-            forged_result = verify_bundle(
-                forged, key_set_from_document(key_document)
-            )
+            forged_result = verify_bundle(forged, key_set_from_document(key_document))
             require(forged_result.is_tampered, "forged receipt verified")
 
             line()

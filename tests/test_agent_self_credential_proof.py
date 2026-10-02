@@ -72,7 +72,10 @@ class FakeTrustPlane:
                 200,
                 json={
                     "keys": [
-                        {"kid": KID, "public_key_b64": base64.b64encode(public).decode()}
+                        {
+                            "kid": KID,
+                            "public_key_b64": base64.b64encode(public).decode(),
+                        }
                     ]
                 },
             )

@@ -80,7 +80,9 @@ def _jsonrpc_error(exc: BaseException) -> dict[str, Any]:
         "jsonrpc_code": getattr(error, "code", None),
         "message": getattr(error, "message", None) or str(exc),
         "receipt_id": receipt.get("receipt_id") if isinstance(receipt, dict) else None,
-        "receipt_outcome": receipt.get("outcome") if isinstance(receipt, dict) else None,
+        "receipt_outcome": receipt.get("outcome")
+        if isinstance(receipt, dict)
+        else None,
         "credits_charged": (
             str(receipt.get("credits_charged")) if isinstance(receipt, dict) else None
         ),
@@ -209,7 +211,9 @@ class StandardMcpClient(Scenario):
         "that path rather than a caller-supplied permit.",
     )
 
-    async def run_configuration(self, target: Target, log: EventLog) -> ConfigurationResult:
+    async def run_configuration(
+        self, target: Target, log: EventLog
+    ) -> ConfigurationResult:
         from mcp.shared.exceptions import McpError
 
         gateway, tenant, _ = target.require_gateway()
@@ -229,8 +233,7 @@ class StandardMcpClient(Scenario):
             }
             log.emit(
                 f"t14.{step}",
-                f"{configuration}: {step} -> "
-                f"{'pass' if passed else 'FAIL'}: {detail}",
+                f"{configuration}: {step} -> {'pass' if passed else 'FAIL'}: {detail}",
                 scenario=self.test_id,
                 configuration=configuration,
                 passed=bool(passed),
@@ -267,7 +270,9 @@ class StandardMcpClient(Scenario):
             crossings_before_errors = len(target.injector.crossings())
             snap_before_errors = await gateway.snapshot(tenant)
 
-            async with gateway.mcp_client_session(tenant, idempotency_key=None) as session:
+            async with gateway.mcp_client_session(
+                tenant, idempotency_key=None
+            ) as session:
                 init = await session.initialize()
                 negotiated = getattr(init, "protocolVersion", None)
                 protocol_version = str(negotiated) if negotiated else ""
@@ -395,8 +400,7 @@ class StandardMcpClient(Scenario):
             error_movement = _movement(snap_before_errors, snap_after_errors)
 
             structured_errors = [
-                probe.get("shape") == "jsonrpc_error"
-                or bool(probe.get("is_error"))
+                probe.get("shape") == "jsonrpc_error" or bool(probe.get("is_error"))
                 for probe in (unknown_probe, malformed_probe)
             ]
             error_handling_ok = (
@@ -498,8 +502,7 @@ class StandardMcpClient(Scenario):
                 credentialed_control_initialized=control_worked,
                 credentialed_control_detail=credentialed["detail"],
                 refusal_status_is_credential_denial=any(
-                    status in (401, 403)
-                    for status in unauthenticated["http_statuses"]
+                    status in (401, 403) for status in unauthenticated["http_statuses"]
                 ),
             )
 
@@ -567,7 +570,9 @@ class StandardMcpClient(Scenario):
                     idempotency_key=call_key,
                     status="success" if not call_result.isError else "error",
                     client_visible_state=(
-                        "confirmed_success" if not call_result.isError else "no_information"
+                        "confirmed_success"
+                        if not call_result.isError
+                        else "no_information"
                     ),
                     latency_ms=call_latency_ms,
                     receipt=call_receipt,
@@ -669,7 +674,8 @@ class StandardMcpClient(Scenario):
                     ),
                     details={
                         "probe": "retry",
-                        "same_receipt_as_first_call": retry_receipt_id == first_receipt_id,
+                        "same_receipt_as_first_call": retry_receipt_id
+                        == first_receipt_id,
                     },
                 )
             )
@@ -709,9 +715,7 @@ class StandardMcpClient(Scenario):
                     "mcp.client.streamable_http), not this product's SDK"
                 ),
                 "exercised": True,
-                "protocol_version": steps.get("initialize", {}).get(
-                    "protocol_version"
-                ),
+                "protocol_version": steps.get("initialize", {}).get("protocol_version"),
                 "permit": "minted server-side by the endpoint",
                 "governed_calls": standard_calls,
             },
@@ -963,9 +967,7 @@ class StandardMcpClient(Scenario):
         )
         if not failed_steps:
             return f"{head} {numbers} {coverage}"
-        broken = "; ".join(
-            f"{name}: {steps[name]['detail']}" for name in failed_steps
-        )
+        broken = "; ".join(f"{name}: {steps[name]['detail']}" for name in failed_steps)
         return (
             f"The standards-compliant lifecycle did not complete: "
             f"{len(failed_steps)} step(s) failed -- {broken}. {numbers} {coverage}"

@@ -24,6 +24,7 @@ def api_headers():
 
 # --- Crawling ---
 
+
 @pytest.mark.anyio
 async def test_crawl_known_api(client, api_headers):
     """Crawl a known API from the simulated directory."""
@@ -44,7 +45,12 @@ async def test_crawl_known_api(client, api_headers):
     assert len(data["capabilities"]) > 0
     assert data["compatibility_score"] >= 0
     assert data["compatibility_score"] <= 1.0
-    assert data["compatibility_tier"] in ["native", "compatible", "bridgeable", "incompatible"]
+    assert data["compatibility_tier"] in [
+        "native",
+        "compatible",
+        "bridgeable",
+        "incompatible",
+    ]
 
 
 @pytest.mark.anyio
@@ -99,6 +105,7 @@ async def test_batch_crawl(client, api_headers):
 
 
 # --- Index ---
+
 
 @pytest.mark.anyio
 async def test_list_indexed_empty(client, api_headers):
@@ -158,6 +165,7 @@ async def test_get_indexed_not_found(client, api_headers):
 
 # --- Registration ---
 
+
 @pytest.mark.anyio
 async def test_register_in_directories(client, api_headers):
     """Register our API in external directories."""
@@ -211,6 +219,7 @@ async def test_list_registrations(client, api_headers):
 
 # --- Visibility & Network ---
 
+
 @pytest.mark.anyio
 async def test_visibility_score(client, api_headers):
     """Visibility score should include recommendations."""
@@ -249,7 +258,10 @@ async def test_network_graph_with_data(client, api_headers):
         "/v1/oracle/register",
         json={
             "targets": [
-                {"directory_url": "https://agents.dev/register", "directory_type": "agent_registry"},
+                {
+                    "directory_url": "https://agents.dev/register",
+                    "directory_type": "agent_registry",
+                },
             ],
         },
         headers=api_headers,
@@ -272,6 +284,7 @@ async def test_record_discovery(client, api_headers):
 
 
 # --- Auth ---
+
 
 @pytest.mark.anyio
 async def test_oracle_requires_api_key(client):

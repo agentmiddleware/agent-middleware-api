@@ -46,14 +46,20 @@ async def run():
     app = main_module.app
     transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
 
-    async with httpx.AsyncClient(transport=transport, base_url="http://pg-test") as client:
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://pg-test"
+    ) as client:
         headers = {"X-API-Key": "pg-test-key"}
 
         # 1. Create sponsor wallet
         sponsor = await client.post(
             "/v1/billing/wallets/sponsor",
             headers=headers,
-            json={"sponsor_name": "PG Regression", "email": "pg@example.com", "initial_credits": 1000},
+            json={
+                "sponsor_name": "PG Regression",
+                "email": "pg@example.com",
+                "initial_credits": 1000,
+            },
         )
         assert sponsor.status_code == 201, f"sponsor: {sponsor.text}"
         sponsor_id = sponsor.json()["wallet_id"]
@@ -63,7 +69,11 @@ async def run():
         agent = await client.post(
             "/v1/billing/wallets/agent",
             headers=headers,
-            json={"sponsor_wallet_id": sponsor_id, "agent_id": "agt-pg-regression", "budget_credits": 100},
+            json={
+                "sponsor_wallet_id": sponsor_id,
+                "agent_id": "agt-pg-regression",
+                "budget_credits": 100,
+            },
         )
         assert agent.status_code == 201, f"agent: {agent.text}"
         agent_id = agent.json()["wallet_id"]
@@ -114,7 +124,9 @@ async def run():
         result = invoke.json()
         assert "error" not in result, result
         assert result["result"]["receipt"]["receipt_id"]
-        print(f"✅ governed invoke succeeded, receipt: {result['result']['receipt']['receipt_id']}")
+        print(
+            f"✅ governed invoke succeeded, receipt: {result['result']['receipt']['receipt_id']}"
+        )
 
         # 7. Idempotency replay (same key, same payload → same receipt)
         replay = await client.post(
@@ -133,7 +145,10 @@ async def run():
         )
         assert replay.status_code == 200, f"replay: {replay.text}"
         replay_body = replay.json()
-        assert replay_body["result"]["receipt"]["receipt_id"] == result["result"]["receipt"]["receipt_id"]
+        assert (
+            replay_body["result"]["receipt"]["receipt_id"]
+            == result["result"]["receipt"]["receipt_id"]
+        )
         print("✅ idempotency replay returned same receipt")
 
         # 8. Fresh idempotency key with different payload → new receipt

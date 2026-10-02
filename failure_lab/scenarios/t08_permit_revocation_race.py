@@ -46,7 +46,9 @@ CHARGE_RETAINED_OUTCOMES = frozenset(
     {"success", "delivery_uncertain", "response_rejected", "failed_unrefunded"}
 )
 #: Receipt outcomes the product documents as leaving no net charge.
-CHARGE_RELEASED_OUTCOMES = frozenset({"denied", "insufficient_funds", "failed_refunded"})
+CHARGE_RELEASED_OUTCOMES = frozenset(
+    {"denied", "insufficient_funds", "failed_refunded"}
+)
 
 #: A refusal is only evidence that *revocation* bit if the product says
 #: revocation is why. ``insufficient_funds``, ``key_conflict``,
@@ -281,7 +283,9 @@ class PermitRevocationRace(Scenario):
         "deterministic rather than a natural race.",
     )
 
-    async def run_configuration(self, target: Target, log: EventLog) -> ConfigurationResult:
+    async def run_configuration(
+        self, target: Target, log: EventLog
+    ) -> ConfigurationResult:
         gateway, tenant, _ = target.require_gateway()
         attempts: list[AttemptOutcome] = []
         operation_ids: list[str] = []
@@ -815,9 +819,7 @@ class PermitRevocationRace(Scenario):
         control = {
             "submitted": len(entries),
             "refused": sum(1 for e in entries if e["refused"]),
-            "attributable": sum(
-                1 for e in entries if e["attributable_to_revocation"]
-            ),
+            "attributable": sum(1 for e in entries if e["attributable_to_revocation"]),
             "all_refused": all(e["refused"] for e in entries) if entries else False,
             "all_attributable": (
                 all(e["attributable_to_revocation"] for e in entries)

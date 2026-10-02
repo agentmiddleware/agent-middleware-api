@@ -307,9 +307,9 @@ async def test_expired_quote_denies_rather_than_repricing(
     factory = get_session_factory()
     async with factory() as session:
         model = await session.get(QuoteModel, quote["quote_id"])
-        model.expires_at = datetime.now(timezone.utc).replace(
-            tzinfo=None
-        ) - timedelta(seconds=1)
+        model.expires_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+            seconds=1
+        )
         session.add(model)
         await session.commit()
 
@@ -345,9 +345,7 @@ async def test_quote_for_another_wallet_or_tool_is_refused(
         idem_key="permit-quote-mismatch",
     )
     stranger_quote = (
-        await _quote(
-            client, stranger["agent_headers"], stranger["agent_wallet_id"]
-        )
+        await _quote(client, stranger["agent_headers"], stranger["agent_wallet_id"])
     ).json()
 
     wrong_wallet = await _invoke(
@@ -511,9 +509,7 @@ async def test_quoting_someone_elses_wallet_or_an_unknown_tool_is_refused(
     agent = await provision_agent_wallet(client)
     stranger = await provision_agent_wallet(client)
 
-    foreign = await _quote(
-        client, agent["agent_headers"], stranger["agent_wallet_id"]
-    )
+    foreign = await _quote(client, agent["agent_headers"], stranger["agent_wallet_id"])
     assert foreign.status_code == 403
 
     unknown = await _quote(
@@ -551,9 +547,7 @@ async def test_concurrent_consume_spends_a_quote_once(
 
 
 @pytest.mark.asyncio
-async def test_wallet_can_list_its_own_quotes(
-    client, clean_database, registered_tool
-):
+async def test_wallet_can_list_its_own_quotes(client, clean_database, registered_tool):
     agent = await provision_agent_wallet(client)
     stranger = await provision_agent_wallet(client)
     spendable = (
@@ -584,9 +578,9 @@ async def test_wallet_can_list_its_own_quotes(
     factory = get_session_factory()
     async with factory() as session:
         model = await session.get(QuoteModel, spendable["quote_id"])
-        model.expires_at = datetime.now(timezone.utc).replace(
-            tzinfo=None
-        ) - timedelta(seconds=1)
+        model.expires_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+            seconds=1
+        )
         session.add(model)
         await session.commit()
 

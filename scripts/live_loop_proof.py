@@ -81,9 +81,7 @@ def _child_env(prepend: Path) -> dict[str, str]:
     """
     env = dict(os.environ)
     existing = env.get("PYTHONPATH")
-    env["PYTHONPATH"] = (
-        f"{prepend}{os.pathsep}{existing}" if existing else str(prepend)
-    )
+    env["PYTHONPATH"] = f"{prepend}{os.pathsep}{existing}" if existing else str(prepend)
     return env
 
 
@@ -99,6 +97,7 @@ def _sanitize_url_for_record(url: str) -> str:
     if parts.port is not None:
         netloc = f"{netloc}:{parts.port}"
     return urlunparse((parts.scheme, netloc, parts.path, "", "", ""))
+
 
 VERIFY_MD = """\
 # Independent verification of this receipt bundle
@@ -210,8 +209,7 @@ class ProofRun:
         )
         require(
             minted.status_code in (200, 201),
-            f"self-provision refused ({minted.status_code}): "
-            f"{minted.text}{hint}",
+            f"self-provision refused ({minted.status_code}): {minted.text}{hint}",
         )
         body = minted.json()
         identity = {
@@ -222,11 +220,17 @@ class ProofRun:
         self.record("authenticate", **identity)
         return identity
 
-    def authorize(self, identity: dict[str, str], *, allowed_tool: str,
-                  label: str, record: bool = True) -> str:
-        expires_at = (
-            datetime.now(timezone.utc) + timedelta(minutes=30)
-        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    def authorize(
+        self,
+        identity: dict[str, str],
+        *,
+        allowed_tool: str,
+        label: str,
+        record: bool = True,
+    ) -> str:
+        expires_at = (datetime.now(timezone.utc) + timedelta(minutes=30)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
         permit = self.client.post(
             "/v1/permits",
             headers={"Idempotency-Key": f"proof-{self.run_id}-{label}"},
@@ -254,8 +258,9 @@ class ProofRun:
             )
         return permit_id
 
-    def _invoke_body(self, wallet_id: str, permit_id: str,
-                     idempotency_key: str, call_id: str) -> dict[str, Any]:
+    def _invoke_body(
+        self, wallet_id: str, permit_id: str, idempotency_key: str, call_id: str
+    ) -> dict[str, Any]:
         return {
             "jsonrpc": "2.0",
             "id": call_id,
@@ -296,8 +301,7 @@ class ProofRun:
         charged = Decimal(str(receipt["credits_charged"]))
         require(
             charged == EXPECTED_CREDITS_PER_CALL,
-            f"success charged {charged} credits, expected "
-            f"{EXPECTED_CREDITS_PER_CALL}",
+            f"success charged {charged} credits, expected {EXPECTED_CREDITS_PER_CALL}",
         )
         self.record(
             "invoke",
@@ -311,9 +315,7 @@ class ProofRun:
         ledger = self.client.get(f"/v1/billing/ledger/{wallet_id}")
         require(ledger.status_code == 200, "ledger read failed")
         entries = ledger.json()["entries"]
-        matching = [
-            e for e in entries if e["entry_id"] == receipt["ledger_entry_id"]
-        ]
+        matching = [e for e in entries if e["entry_id"] == receipt["ledger_entry_id"]]
         require(
             len(matching) == 1,
             "receipt's ledger_entry_id not found in the wallet ledger",
@@ -324,13 +326,11 @@ class ProofRun:
         debit_amount = Decimal(str(matching[0]["amount"]))
         require(
             debit_amount == -EXPECTED_CREDITS_PER_CALL,
-            f"ledger debit {debit_amount} != expected "
-            f"{-EXPECTED_CREDITS_PER_CALL}",
+            f"ledger debit {debit_amount} != expected {-EXPECTED_CREDITS_PER_CALL}",
         )
         require(
             -debit_amount == Decimal(str(receipt["credits_charged"])),
-            "ledger debit magnitude disagrees with the receipt's "
-            "credits_charged",
+            "ledger debit magnitude disagrees with the receipt's credits_charged",
         )
         debits = [e for e in entries if GOVERNED_TOOL in e["description"]]
         self.record(
@@ -341,9 +341,14 @@ class ProofRun:
         )
         return len(debits)
 
-    def receipt_bundle(self, receipt_id: str, filename: str, *,
-                       expected_outcome: str,
-                       expected_credits: Decimal) -> Path:
+    def receipt_bundle(
+        self,
+        receipt_id: str,
+        filename: str,
+        *,
+        expected_outcome: str,
+        expected_credits: Decimal,
+    ) -> Path:
         portable = self.client.get(f"/v1/receipts/{receipt_id}/portable")
         require(
             portable.status_code == 200,
@@ -355,7 +360,9 @@ class ProofRun:
         # signature verification proves the bytes are authentic, not that they
         # carry the right outcome; a validly-signed denial exported as a
         # success would otherwise ship in the handoff bundle unnoticed.
-        signed = json.loads(json.loads(path.read_text(encoding="utf-8"))["signing_input"])
+        signed = json.loads(
+            json.loads(path.read_text(encoding="utf-8"))["signing_input"]
+        )
         require(
             signed.get("outcome") == expected_outcome,
             f"{filename}: exported outcome {signed.get('outcome')!r} != "
@@ -444,8 +451,13 @@ class ProofRun:
             reason=verdict["reason"],
         )
 
-    def replay(self, wallet_id: str, permit_id: str,
-               receipt: dict[str, Any], debits_before: int) -> None:
+    def replay(
+        self,
+        wallet_id: str,
+        permit_id: str,
+        receipt: dict[str, Any],
+        debits_before: int,
+    ) -> None:
         replayed = self.client.post(
             "/mcp/messages",
             json=self._invoke_body(
@@ -473,8 +485,7 @@ class ProofRun:
         verdict = self.client.post("/v1/audit/verify-chain", json={})
         require(
             verdict.status_code == 200,
-            f"audit chain verification failed ({verdict.status_code}): "
-            f"{verdict.text}",
+            f"audit chain verification failed ({verdict.status_code}): {verdict.text}",
         )
         chain = verdict.json()
         require(
@@ -529,8 +540,7 @@ class ProofRun:
         )
         return denial
 
-    def verify_offline(self, bundle_path: Path, keys_path: Path,
-                       label: str) -> str:
+    def verify_offline(self, bundle_path: Path, keys_path: Path, label: str) -> str:
         result = subprocess.run(
             [
                 sys.executable,
@@ -574,15 +584,14 @@ def run(api_url: str, output_dir: Path) -> None:
 
         proof.discover()
         identity = proof.authenticate()
-        permit_id = proof.authorize(
-            identity, allowed_tool=GOVERNED_TOOL, label="grant"
-        )
+        permit_id = proof.authorize(identity, allowed_tool=GOVERNED_TOOL, label="grant")
         proof.verify_permit(identity["wallet_id"], permit_id)
         receipt = proof.invoke(identity["wallet_id"], permit_id)
         debits = proof.meter(identity["wallet_id"], receipt)
 
         receipt_path = proof.receipt_bundle(
-            receipt["receipt_id"], "receipt-bundle.json",
+            receipt["receipt_id"],
+            "receipt-bundle.json",
             expected_outcome="success",
             expected_credits=EXPECTED_CREDITS_PER_CALL,
         )
@@ -597,7 +606,8 @@ def run(api_url: str, output_dir: Path) -> None:
         proof.audit()
         denial = proof.govern(identity)
         denial_path = proof.receipt_bundle(
-            denial["receipt_id"], "denial-bundle.json",
+            denial["receipt_id"],
+            "denial-bundle.json",
             expected_outcome="denied",
             expected_credits=Decimal("0"),
         )

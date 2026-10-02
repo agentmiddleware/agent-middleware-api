@@ -361,9 +361,7 @@ class PermitRequestService:
 
         action_id = payload.get("action_id") or payload.get("id")
         if not action_id:
-            logger.error(
-                "sentinel_permit_request_malformed: keys=%s", sorted(payload)
-            )
+            logger.error("sentinel_permit_request_malformed: keys=%s", sorted(payload))
             raise HumanApprovalUnavailableError()
         model.sentinel_action_id = str(action_id)
         url = payload.get("approval_url") or payload.get("url")

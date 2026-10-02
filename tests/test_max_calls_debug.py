@@ -1,4 +1,5 @@
 """Debug test to understand max_calls enforcement."""
+
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -119,14 +120,14 @@ async def test_max_calls_sequential(client, clean_database):
         print(f"\nCall 1: {'SUCCESS' if 'result' in body1 else 'ERROR'}")
         if "error" in body1:
             print(f"  Error: {body1['error'].get('message', 'unknown')}")
-        
+
         # Check counter after call 1
         factory = get_session_factory()
         async with factory() as session:
             model = await session.get(PermitModel, permit_id)
             print(f"  Counter after call 1: {model.tool_call_counts_json}")
             print(f"  Spent credits: {model.spent_credits}")
-        
+
         # Call 2
         r2 = await _invoke_governed(
             client,
@@ -141,13 +142,13 @@ async def test_max_calls_sequential(client, clean_database):
         print(f"Call 2: {'SUCCESS' if 'result' in body2 else 'ERROR'}")
         if "error" in body2:
             print(f"  Error: {body2['error'].get('message', 'unknown')}")
-        
+
         # Check counter after call 2
         async with factory() as session:
             model = await session.get(PermitModel, permit_id)
             print(f"  Counter after call 2: {model.tool_call_counts_json}")
             print(f"  Spent credits: {model.spent_credits}")
-        
+
         # Call 3 (should fail)
         r3 = await _invoke_governed(
             client,
@@ -162,13 +163,13 @@ async def test_max_calls_sequential(client, clean_database):
         print(f"Call 3: {'SUCCESS' if 'result' in body3 else 'ERROR'}")
         if "error" in body3:
             print(f"  Error: {body3['error'].get('message', 'unknown')}")
-            
+
         # Check counter after call 3
         async with factory() as session:
             model = await session.get(PermitModel, permit_id)
             print(f"  Counter after call 3: {model.tool_call_counts_json}")
             print(f"  Spent credits: {model.spent_credits}")
-        
+
         # Verify receipts
         async with factory() as session:
             result = await session.execute(
@@ -180,11 +181,13 @@ async def test_max_calls_sequential(client, clean_database):
             )
             count = int(result.scalar() or 0)
             print(f"\nTotal successful receipts: {count}")
-        
+
         assert count == 2, f"Expected 2 successful calls, got {count}"
         assert "error" in body3, "Call 3 should have failed"
-        assert "permit_max_calls_exceeded" in body3["error"]["message"], f"Wrong error: {body3['error']['message']}"
-        
+        assert "permit_max_calls_exceeded" in body3["error"]["message"], (
+            f"Wrong error: {body3['error']['message']}"
+        )
+
     finally:
         get_service_registry().unregister_local(tool_name)
 

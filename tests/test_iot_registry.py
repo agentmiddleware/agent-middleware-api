@@ -7,7 +7,6 @@ registry directly: state persistence, audit event shape, list
 pagination, cache hit/miss behavior with a fake Redis.
 """
 
-
 import pytest
 import pytest_asyncio
 from sqlalchemy import delete
@@ -125,9 +124,7 @@ async def test_register_writes_register_event():
     await reg.register(_device())
 
     events = await reg.recent_events(limit=10)
-    assert any(
-        e["event"] == "register" and e["device_id"] == "dev-1" for e in events
-    )
+    assert any(e["event"] == "register" and e["device_id"] == "dev-1" for e in events)
 
 
 @pytest.mark.anyio
@@ -214,9 +211,7 @@ async def test_get_populates_cache_and_second_read_skips_db(monkeypatch):
     from app.services import iot_bridge as iot_mod
 
     def _boom():
-        raise AssertionError(
-            "session factory should not be called on cache hit"
-        )
+        raise AssertionError("session factory should not be called on cache hit")
 
     monkeypatch.setattr(iot_mod, "get_session_factory", _boom)
 

@@ -66,9 +66,7 @@ async def test_pod_member_keys_are_independently_usable(client):
     resp = await _create_pod(client)
     member = resp.json()["members"][0]
 
-    me = await client.get(
-        "/v1/me/authority", headers={"X-API-Key": member["api_key"]}
-    )
+    me = await client.get("/v1/me/authority", headers={"X-API-Key": member["api_key"]})
     assert me.status_code == 200
     assert me.json()["wallet_id"] == member["wallet_id"]
 
@@ -338,7 +336,9 @@ async def test_pod_budgets_refuse_unstorable_values(client, value):
     member = {"agent_id": "member-1", "key_name": "member-1-key"}
     resp = await client.post(
         "/v1/pods",
-        **_raw_json({"pod_name": "research", "budget_credits": value, "members": [member]}),
+        **_raw_json(
+            {"pod_name": "research", "budget_credits": value, "members": [member]}
+        ),
     )
     assert resp.status_code == 422, resp.text
 

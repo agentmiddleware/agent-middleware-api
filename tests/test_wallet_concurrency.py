@@ -282,8 +282,6 @@ async def test_delegation_refuses_a_parent_frozen_under_it(
     assert await _balance(parent.wallet_id) == Decimal("400")
 
 
-
-
 async def _delete_wallet(wallet_id: str) -> None:
     """Remove a wallet row, and the ledger rows that reference it."""
     factory = get_session_factory()
