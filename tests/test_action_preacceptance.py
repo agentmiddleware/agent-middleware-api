@@ -556,8 +556,21 @@ async def test_action_contention_returns_only_unaccepted_iga_use(
         permit = await session.get(PermitModel, action_runtime[2])
         assert permit.spent_credits == 0
         assert not json.loads(permit.tool_call_counts_json or "{}")
+    reservation = release.await_args.kwargs["reservation"]
+    assert reservation.released is True
+    assert reservation.counter_key == (
+        principal.issuer,
+        principal.subject,
+        "partner.pay",
+        "payer",
+        "fixture-policy",
+    )
     release.assert_awaited_once_with(
-        principal, "partner.pay", group="payer", policy_id="fixture-policy"
+        principal,
+        "partner.pay",
+        group="payer",
+        policy_id="fixture-policy",
+        reservation=reservation,
     )
     retry = await invoke_with_optional_key(action_runtime, client_key)
     assert retry.status_code == 200, retry.text
