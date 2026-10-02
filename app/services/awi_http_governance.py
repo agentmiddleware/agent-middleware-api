@@ -8,6 +8,7 @@ headers as governed MCP tools, then meter and receipt the attempt.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from collections.abc import Sequence
@@ -73,6 +74,18 @@ class AwiHttpGovernedContext:
 
 def _credits_for(tool_name: str) -> Decimal:
     return AWI_HTTP_TOOL_CREDITS.get(tool_name, Decimal("1"))
+
+
+def _request_identity(
+    wallet_id: str, permit_id: str, tool_name: str, arguments: dict[str, Any] | None
+) -> dict[str, Any]:
+    """Bind authority and full normalized semantics; stores retain only the hash."""
+    return {
+        "wallet_id": wallet_id,
+        "permit_id": permit_id,
+        "tool_name": tool_name,
+        "arguments": arguments or {},
+    }
 
 
 def consume_awi_http_replay(ctx: AwiHttpGovernedContext) -> dict[str, Any] | None:
@@ -203,6 +216,7 @@ async def begin_awi_http_governed(
         tool_name=tool_name,
         estimated_credits=credits,
         key_id=auth.key_id,
+        arguments=request_payload,
     )
     if not validation.allowed or validation.permit is None:
         detail: dict[str, Any] = {
@@ -217,18 +231,24 @@ async def begin_awi_http_governed(
             detail=detail,
         )
 
+    # HTTP AWI has no atomic per-tool invocation reservation. Refuse this
+    # authority rather than silently exceeding it; governed MCP has that path.
+    call_limits = json.loads(validation.permit.max_calls_per_tool_json or "{}")
+    if tool_name in call_limits:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"error": "awi_call_limit_unsupported", "tool": tool_name},
+        )
+
     idem = get_idempotency_service()
     try:
         begun = await idem.begin_with_record(
             wallet_id=wallet_id,
             endpoint=endpoint,
             idempotency_key=idempotency_key,
-            request_payload=request_payload
-            or {
-                "tool_name": tool_name,
-                "wallet_id": wallet_id,
-                "permit_id": permit_id.strip(),
-            },
+            request_payload=_request_identity(
+                wallet_id, permit_id.strip(), tool_name, request_payload
+            ),
         )
         replay = begun.replay
         record_id = begun.record_id
@@ -290,12 +310,14 @@ async def _complete_awi_http_failed_action(
     response_payload: dict[str, Any],
     action_status: str,
 ) -> dict[str, Any]:
-    """Finalize a governed AWI call whose action did not execute.
+    """Finalize a rejected or unsuccessful governed AWI call.
 
     No permit budget is reserved and no wallet debit is taken. A signed
-    ``failed`` receipt with ``credits_charged=0`` records the outcome, and the
+    receipt with ``credits_charged=0`` records the accounting outcome, and the
     idempotency record is completed on the failure body so a replay of the
     same key returns the same typed failure instead of re-running the action.
+    Browser failures may have effects even when no command completed. Those
+    receive delivery_uncertain, not a claim that refund/retry would be safe.
     """
     idem = get_idempotency_service()
     reason_code = _stable_awi_failure_reason(
@@ -306,12 +328,18 @@ async def _complete_awi_http_failed_action(
         wallet_id=ctx.wallet_id,
         key_id=ctx.auth.key_id,
         tool=ctx.tool_name,
-        request_payload=request_payload,
+        request_payload=_request_identity(
+            ctx.wallet_id, ctx.permit_id, ctx.tool_name, request_payload
+        ),
         response_payload=response_payload,
         ledger_entry_id=None,
         credits_authorized=ctx.credits,
         credits_charged=Decimal("0"),
-        outcome="failed",
+        outcome=(
+            "delivery_uncertain"
+            if response_payload.get("effect_status") == "unknown"
+            else "failed"
+        ),
         audit_event_id=None,
         reason_code=reason_code,
     )
@@ -359,9 +387,9 @@ async def complete_awi_http_governed(
         return ctx.replay_response
 
     # Typed AWI responses carry ``status``. Anything other than "success"
-    # (error, passkey_required, paused, max_steps_reached) means the action did
-    # not execute: take the uncharged branch. Payloads without a status field
-    # (passkey challenge/verify, DOM sync, memory index) are unaffected.
+    # (error, passkey_required, paused, max_steps_reached) takes the uncharged
+    # branch. An error does not prove absence of browser effects. Payloads
+    # without a status field (passkey challenge/verify, memory index) are unaffected.
     action_status = response_payload.get("status")
     if action_status is not None and action_status != "success":
         return await _complete_awi_http_failed_action(
@@ -541,7 +569,9 @@ async def complete_awi_http_governed(
                     wallet_id=ctx.wallet_id,
                     key_id=ctx.auth.key_id,
                     tool=ctx.tool_name,
-                    request_payload=request_payload,
+                    request_payload=_request_identity(
+                        ctx.wallet_id, ctx.permit_id, ctx.tool_name, request_payload
+                    ),
                     response_payload=response_payload,
                     ledger_entry_id=ledger_entry_id,
                     credits_authorized=ctx.credits,

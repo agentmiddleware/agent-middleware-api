@@ -39,6 +39,7 @@ from ..core.auth import (
 )
 from ..core.oidc_iga import (
     EnterprisePrincipal,
+    IGAUseReservation,
     IGAError,
     enforce_tool_call,
     is_iga_issuer_token,
@@ -1688,7 +1689,9 @@ async def _execute_registered_tool_inner(
     iga_denial_details: dict[str, Any] | None = None
     # The exact grant an ALLOW consumed a use under, kept so a later
     # pre-dispatch refusal that charges nothing can hand the use back.
-    iga_granted_use: tuple[EnterprisePrincipal, str, str] | None = None
+    iga_granted_use: (
+        tuple[EnterprisePrincipal, str, str, IGAUseReservation | None] | None
+    ) = None
     try:
         enterprise_principal = _verified_enterprise_principal(
             auth.enterprise_bearer_token
@@ -1706,6 +1709,7 @@ async def _execute_registered_tool_inner(
                     enterprise_principal,
                     iga_decision.group,
                     iga_decision.policy_id,
+                    iga_decision.reservation,
                 )
                 if action_identity is not None and owned_record is not None:
                     owned_record["iga_granted_use"] = iga_granted_use
@@ -3571,7 +3575,8 @@ async def _complete_governed_denial_idempotency(
     *,
     idem: Any,
     unaccepted_action_owner_id: str | None = None,
-    unaccepted_iga_use: tuple[EnterprisePrincipal, str, str] | None = None,
+    unaccepted_iga_use: tuple[EnterprisePrincipal, str, str, IGAUseReservation | None]
+    | None = None,
     idem_started: bool,
     wallet_id: str,
     endpoint: str,
@@ -3603,7 +3608,7 @@ async def _complete_governed_denial_idempotency(
 
 
 async def _release_iga_use(
-    iga_granted_use: tuple[Any, str, str] | None,
+    iga_granted_use: tuple[Any, str, str, IGAUseReservation | None] | None,
     tool_name: str,
     *,
     reason: str,
@@ -3628,6 +3633,7 @@ async def _release_iga_use(
             tool_name,
             group=iga_granted_use[1],
             policy_id=iga_granted_use[2],
+            reservation=iga_granted_use[3],
         )
     except Exception:
         logger.exception(
@@ -3690,7 +3696,8 @@ async def _finalize_governed_denial(
     *,
     idem: Any,
     unaccepted_action_owner_id: str | None = None,
-    unaccepted_iga_use: tuple[EnterprisePrincipal, str, str] | None = None,
+    unaccepted_iga_use: tuple[EnterprisePrincipal, str, str, IGAUseReservation | None]
+    | None = None,
     permit_model: Any,
     wallet_id: str,
     key_id: str | None,

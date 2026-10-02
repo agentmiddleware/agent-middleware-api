@@ -168,14 +168,7 @@ async def execute_action(
     gov = None
     try:
         session = await _require_session_access(request.session_id, auth)
-        request_payload = {
-            "session_id": request.session_id,
-            "action": (
-                request.action.value
-                if hasattr(request.action, "value")
-                else str(request.action)
-            ),
-        }
+        request_payload = request.model_dump(mode="json")
         gov = await begin_awi_http_governed(
             auth=auth,
             wallet_id=session.wallet_id,

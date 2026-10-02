@@ -9,6 +9,8 @@ import json
 import math
 from typing import Any, Literal
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.services.permits import PermitValidation
 
 from app.core.auth import AuthContext
@@ -268,7 +270,7 @@ async def create_action_permit(
     request: ActionPermitCreateRequest, auth: AuthContext
 ) -> PermitResponse:
     from app.schemas.trust import PermitCreateRequest
-    from app.services.permits import PermitError, get_permit_service
+    from app.services.permits import PermitCreationRejectedError, get_permit_service
     from app.services.service_registry import get_service_registry
 
     await authorize_action_issuer(request, auth)
@@ -277,12 +279,12 @@ async def create_action_permit(
     try:
         binding = registry.get_action_binding(record) if record else None
         if binding is None:
-            raise PermitError("action_tool_binding_required")
+            raise PermitCreationRejectedError("action_tool_binding_required")
         digest = action_payload_hash(
             binding, request.subject_wallet_id, request.arguments
         )
     except ValueError as exc:
-        raise PermitError(str(exc)) from exc
+        raise PermitCreationRejectedError(str(exc)) from exc
     permit = PermitCreateRequest(
         **request.model_dump(exclude={"tool_name", "arguments"}),
         allowed_tools=[request.tool_name],
@@ -397,6 +399,8 @@ async def validate_action_request(
     key_id: str | None,
     arguments: dict[str, Any],
     phase: Literal["admission", "replay"],
+    *,
+    session: AsyncSession | None = None,
 ) -> PermitValidation:
     """Non-consuming authority gate; priced admission remains atomic preparation."""
     from app.core.time import utc_now, to_naive_utc
@@ -411,7 +415,7 @@ async def validate_action_request(
         reason = f"permit_{permit.status}"
     elif to_naive_utc(permit.expires_at) <= utc_now():
         reason = "permit_expired"
-    elif not await get_permit_service().verify_signature(permit):
+    elif not await get_permit_service().verify_signature(permit, session=session):
         reason = "permit_signature_invalid"
     if reason:
         return PermitValidation(False, reason, permit)

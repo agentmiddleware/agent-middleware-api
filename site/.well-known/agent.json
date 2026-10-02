@@ -64,7 +64,7 @@
   "canonical_api": "https://api.thisisatest.tech",
   "human_site": "https://www.thisisatest.tech/",
   "github": "https://github.com/PetrefiedThunder/agent-middleware-api",
-  "github_access": "public",
+  "github_access": "private",
   "discovery": {
     "agent_manifest": "https://api.thisisatest.tech/.well-known/agent.json",
     "llm_txt": "https://api.thisisatest.tech/llm.txt",
@@ -84,7 +84,7 @@
   "try_it": {
     "mode": "local_self_hosted",
     "repository": "https://github.com/PetrefiedThunder/agent-middleware-api",
-    "repository_access": "public",
+    "repository_access": "private",
     "command": "make prove-trust-plane",
     "live_access": "operator_issued",
     "requires_live_credentials": false,
@@ -96,7 +96,7 @@
       "out_of_scope_denial",
       "offline_receipt_verification"
     ],
-    "note": "Runs the real FastAPI transaction-integrity path against a throwaway local SQLite database. This is a reproducible proof, not a production or settlement claim. The source repository is public; clone it and run the proof locally before treating it as production evidence."
+    "note": "Runs the real FastAPI transaction-integrity path against a throwaway local SQLite database. This is a reproducible proof, not a production or settlement claim. The source repository is private; clone access must be granted separately. Authorized clones can run the proof locally without live API credentials."
   },
   "authentication": {
     "type": "api_key",

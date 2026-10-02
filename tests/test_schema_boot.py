@@ -150,6 +150,18 @@ async def test_init_db_production_like_accepts_legacy_create_all_tables(
     [
         ("mcp_dispatch_attempts", "dispatch_claim_hash"),
         ("permits", "repeat_window_seconds"),
+        *[
+            (table, column)
+            for table in ("permits", "receipts")
+            for column in (
+                "action_contract_version",
+                "action_payload_hash",
+                "action_schema_id",
+                "action_schema_version",
+                "action_public_tool_id",
+                "action_upstream_binding_hash",
+            )
+        ],
     ],
 )
 async def test_init_db_rejects_unstamped_legacy_table_missing_required_column(

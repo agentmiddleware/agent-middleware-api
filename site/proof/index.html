@@ -141,7 +141,7 @@
                 "@type": "HowToStep",
                 "position": 2,
                 "name": "Install the verifier",
-                "text": "Clone the public source repository, then install the b2a SDK with its verify extra.",
+                "text": "Obtain repository access, clone the private source repository, then install the b2a SDK with its verify extra.",
                 "url": "https://www.thisisatest.tech/proof/#verify-title"
               },
               {
@@ -261,14 +261,15 @@
             business-to-agent — it is the SDK's name, not a separate product.
           </p>
           <p>
-            The verifier ships inside the public
+            The verifier ships inside the private
             <a
               href="https://github.com/PetrefiedThunder/agent-middleware-api"
               target="_blank"
               rel="noopener noreferrer"
               >source repository</a
-            >. The commands below run as written; the receipt and key snapshot
-            above stay downloadable by anyone.
+            >. The source repository is private; obtain access before running
+            the clone command below. The receipt and key snapshot above stay
+            downloadable by anyone.
           </p>
           <pre tabindex="0"><code>git clone --depth=1 https://github.com/PetrefiedThunder/agent-middleware-api.git
 python -m pip install "./agent-middleware-api/b2a_sdk[verify]"

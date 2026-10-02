@@ -228,9 +228,20 @@ jobs:
 
       - name: Judge the broken integration (must fail)
         run: |
-          if python -m failure_lab.integration_check.judge \
-              --candidate failure_lab/integration_check/broken_candidate.py; then
-            echo "::error::The judge passed an integration that retries with a fresh idempotency key. It is not discriminating."
-            exit 1
-          fi
-          echo "Judge correctly rejected the broken candidate."
+          python -m failure_lab.integration_check.judge \
+            --candidate failure_lab/integration_check/broken_candidate.py \
+            --expect fail --json "$RUNNER_TEMP/broken-integration-result.json"
+          python - "$RUNNER_TEMP/broken-integration-result.json" <<'PY'
+          import json, sys
+          document = json.load(open(sys.argv[1]))
+          assert document["schema"] == "failure_lab.integration_check/result/1"
+          assert document["passed"] is False
+          retry = next(a for a in document["assertions"] if a["assertion"] == "retry_after_lost_response")
+          evidence = retry["evidence"]
+          assert retry["passed"] is False
+          assert evidence["fault_applied"] == 1
+          assert evidence["governed_calls_for_operation"] >= 2
+          assert evidence["downstream_executions"] > 1
+          assert evidence["candidate_error"] is None
+          print("Judge rejected the broken candidate after observing the duplicate retry effect.")
+          PY

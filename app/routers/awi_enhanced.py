@@ -194,10 +194,7 @@ async def create_passkey_challenge(
     session = await get_awi_session_manager().get_session(request.session_id)
     wallet_id = session.wallet_id if session else None
 
-    request_payload = {
-        "session_id": request.session_id,
-        "action": request.action,
-    }
+    request_payload = request.model_dump(mode="json")
     gov = await begin_awi_http_governed(
         auth=auth,
         wallet_id=wallet_id,
@@ -294,7 +291,7 @@ async def verify_passkey(
     await _require_awi_session_access(challenge.session_id, auth)
     session = await get_awi_session_manager().get_session(challenge.session_id)
     wallet_id = session.wallet_id if session else None
-    request_payload = {"challenge_id": request.challenge_id}
+    request_payload = request.model_dump(mode="json")
     gov = await begin_awi_http_governed(
         auth=auth,
         wallet_id=wallet_id,
@@ -666,10 +663,7 @@ async def sync_dom(
 
     await _require_dom_session_access(request.session_id, auth)
     wallet_id = _DOM_SESSION_WALLETS.get(request.session_id)
-    request_payload = {
-        "session_id": request.session_id,
-        "action": request.action,
-    }
+    request_payload = request.model_dump(mode="json")
     gov = await begin_awi_http_governed(
         auth=auth,
         wallet_id=wallet_id,
@@ -697,10 +691,14 @@ async def sync_dom(
             commands=commands,
         )
 
-        representation = await bridge.extract_state_representation(
-            session_id=request.session_id,
-            representation_type="summary",
-            include_elements=True,
+        representation = (
+            await bridge.extract_state_representation(
+                session_id=request.session_id,
+                representation_type="summary",
+                include_elements=True,
+            )
+            if execution.success
+            else {}
         )
 
         body = DOMSyncResponse(
@@ -709,6 +707,8 @@ async def sync_dom(
             action=request.action,
             commands_generated=len(commands),
             commands_executed=execution.commands_executed,
+            status="success" if execution.success else "error",
+            effect_status=None if execution.success else "unknown",
             new_url=execution.new_url,
             state_representation=representation,
             error=execution.error,
@@ -860,10 +860,7 @@ async def index_session(
     await _require_awi_session_access(request.session_id, auth)
     session = await get_awi_session_manager().get_session(request.session_id)
     wallet_id = session.wallet_id if session else None
-    request_payload = {
-        "session_id": request.session_id,
-        "session_type": request.session_type,
-    }
+    request_payload = request.model_dump(mode="json")
     gov = await begin_awi_http_governed(
         auth=auth,
         wallet_id=wallet_id,
@@ -944,11 +941,7 @@ async def query_memories(
     from ..services.awi_rag_engine import get_awi_rag_engine
     from ..services.awi_session import get_awi_session_manager
 
-    request_payload = {
-        "query": request.query,
-        "top_k": request.top_k,
-        "session_type": request.session_type,
-    }
+    request_payload = request.model_dump(mode="json")
     gov = await begin_awi_http_governed(
         auth=auth,
         wallet_id=x_wallet_id,

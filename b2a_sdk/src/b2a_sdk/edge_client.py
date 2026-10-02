@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -364,6 +365,30 @@ class LocalPermitValidator:
             payload["allow_identical_repeats"] = True
         if permit.get("repeat_window_seconds") is not None:
             payload["repeat_window_seconds"] = int(permit["repeat_window_seconds"])
+        # Action bindings are additive signed fields. Match ActionPermitFields
+        # without importing the server or adding an SDK runtime dependency.
+        action_fields = (
+            "action_contract_version",
+            "action_payload_hash",
+            "action_schema_id",
+            "action_schema_version",
+            "action_public_tool_id",
+            "action_upstream_binding_hash",
+        )
+        action = {name: permit.get(name) for name in action_fields}
+        if any(value is not None for value in action.values()):
+            if any(value is None for value in action.values()):
+                raise ValueError("incomplete_action_binding")
+            version = action["action_contract_version"]
+            if type(version) is not int or version != 1:
+                raise ValueError("unsupported_action_contract")
+            for name in action_fields[1:]:
+                value = action[name]
+                if not isinstance(value, str) or not value:
+                    raise ValueError("invalid_action_binding")
+                if name.endswith("_hash") and re.fullmatch(r"[0-9a-f]{64}", value) is None:
+                    raise ValueError("invalid_action_binding")
+            payload.update(action)
         payload["payload_hash"] = hashlib.sha256(
             canonical_json(payload).encode("utf-8")
         ).hexdigest()
