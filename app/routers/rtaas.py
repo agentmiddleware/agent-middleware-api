@@ -13,6 +13,7 @@ from datetime import datetime
 
 from ..core.auth import AuthContext, get_auth_context
 from ..core.dependencies import get_rtaas_engine
+from ..schemas.red_team import AttackCategory
 from ..services.rtaas import RTaaSEngine, RTaaSJob
 
 router = APIRouter(
@@ -77,7 +78,7 @@ class CreateJobRequest(BaseModel):
         min_length=1,
         description="List of external endpoints to attack.",
     )
-    attack_categories: list[str] | None = Field(
+    attack_categories: list[AttackCategory] | None = Field(
         None,
         description="Attack categories to run. None = all categories.",
     )
@@ -146,7 +147,11 @@ async def create_job(
     job = await engine.create_job(
         tenant_id=request.tenant_id,
         targets=[t.model_dump() for t in request.targets],
-        attack_categories=request.attack_categories,
+        attack_categories=(
+            [category.value for category in request.attack_categories]
+            if request.attack_categories is not None
+            else None
+        ),
         intensity=request.intensity,
     )
     return _job_to_response(job)
