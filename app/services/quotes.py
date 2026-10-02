@@ -141,7 +141,7 @@ class QuoteService:
     ) -> QuoteResponse:
         if quoted_credits.is_finite() and quoted_credits < Decimal("0"):
             raise QuoteError("quoted_credits_must_not_be_negative")
-        if not credit_amount_fits_storage(quoted_credits):
+        if not credit_amount_fits_storage(quoted_credits) or quoted_credits == 0:
             raise QuoteError("quoted_credits_invalid")
 
         now = utc_now()
