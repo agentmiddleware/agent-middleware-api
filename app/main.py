@@ -618,7 +618,9 @@ app.add_middleware(HeadMethodMiddleware)
 def _json_safe_numbers(value: Any) -> Any:
     """Spell non-finite floats as strings; strict JSON has no such numbers."""
     if isinstance(value, float) and not math.isfinite(value):
-        return "NaN" if math.isnan(value) else ("Infinity" if value > 0 else "-Infinity")
+        return (
+            "NaN" if math.isnan(value) else ("Infinity" if value > 0 else "-Infinity")
+        )
     if isinstance(value, dict):
         return {key: _json_safe_numbers(item) for key, item in value.items()}
     if isinstance(value, list):
@@ -733,6 +735,7 @@ PROOF_SURFACE_ROUTERS = (
     awi_enhanced,
 )
 
+app.include_router(permits.action_router)
 for router_module in CORE_TRUST_ROUTERS:
     app.include_router(
         router_module.router,

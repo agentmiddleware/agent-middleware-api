@@ -132,18 +132,30 @@ def _trusted_issuers() -> dict[str, _IssuerConfig]:
     try:
         parsed = json.loads(raw)
     except (json.JSONDecodeError, ValueError) as exc:
-        raise IGAError("iga_config_invalid", "IGA_TRUSTED_ISSUERS is not valid JSON") from exc
+        raise IGAError(
+            "iga_config_invalid", "IGA_TRUSTED_ISSUERS is not valid JSON"
+        ) from exc
     if not isinstance(parsed, dict):
-        raise IGAError("iga_config_invalid", "IGA_TRUSTED_ISSUERS must be a JSON object")
+        raise IGAError(
+            "iga_config_invalid", "IGA_TRUSTED_ISSUERS must be a JSON object"
+        )
 
     issuers: dict[str, _IssuerConfig] = {}
     for issuer, entry in parsed.items():
-        if not isinstance(issuer, str) or not issuer.strip() or not isinstance(entry, dict):
-            raise IGAError("iga_config_invalid", "issuer entries must map URL -> object")
+        if (
+            not isinstance(issuer, str)
+            or not issuer.strip()
+            or not isinstance(entry, dict)
+        ):
+            raise IGAError(
+                "iga_config_invalid", "issuer entries must map URL -> object"
+            )
 
         audience = entry.get("audience")
         if not isinstance(audience, str) or not audience.strip():
-            raise IGAError("iga_config_invalid", f"issuer {issuer!r}: audience is required")
+            raise IGAError(
+                "iga_config_invalid", f"issuer {issuer!r}: audience is required"
+            )
 
         algorithms = entry.get("algorithms")
         if (
@@ -173,7 +185,9 @@ def _trusted_issuers() -> dict[str, _IssuerConfig]:
                 f"issuer {issuer!r}: exactly one of jwks / public_key_pem is required",
             )
         if jwks is not None and not isinstance(jwks, dict):
-            raise IGAError("iga_config_invalid", f"issuer {issuer!r}: jwks must be an object")
+            raise IGAError(
+                "iga_config_invalid", f"issuer {issuer!r}: jwks must be an object"
+            )
         if pem is not None and (not isinstance(pem, str) or not pem.strip()):
             raise IGAError(
                 "iga_config_invalid",
@@ -209,9 +223,13 @@ def _group_policy_map() -> dict[str, IGAGrant]:
     try:
         parsed = json.loads(raw)
     except (json.JSONDecodeError, ValueError) as exc:
-        raise IGAError("iga_config_invalid", "IGA_GROUP_POLICY_MAP is not valid JSON") from exc
+        raise IGAError(
+            "iga_config_invalid", "IGA_GROUP_POLICY_MAP is not valid JSON"
+        ) from exc
     if not isinstance(parsed, dict):
-        raise IGAError("iga_config_invalid", "IGA_GROUP_POLICY_MAP must be a JSON object")
+        raise IGAError(
+            "iga_config_invalid", "IGA_GROUP_POLICY_MAP must be a JSON object"
+        )
 
     def _cap(entry: dict[str, Any], name: str) -> int | None:
         value = entry.get(name)
@@ -219,16 +237,22 @@ def _group_policy_map() -> dict[str, IGAGrant]:
             return None
         # bool is an int subclass; a JSON true/false here is a config mistake.
         if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-            raise IGAError("iga_config_invalid", f"{name} must be a positive integer or null")
+            raise IGAError(
+                "iga_config_invalid", f"{name} must be a positive integer or null"
+            )
         return value
 
     grants: dict[str, IGAGrant] = {}
     for group, entry in parsed.items():
         if not isinstance(group, str) or not group or not isinstance(entry, dict):
-            raise IGAError("iga_config_invalid", "group entries must map name -> object")
+            raise IGAError(
+                "iga_config_invalid", "group entries must map name -> object"
+            )
         policy_id = entry.get("policy_id")
         if not isinstance(policy_id, str) or not policy_id.strip():
-            raise IGAError("iga_config_invalid", f"group {group!r}: policy_id is required")
+            raise IGAError(
+                "iga_config_invalid", f"group {group!r}: policy_id is required"
+            )
         window = _cap(entry, "velocity_window_seconds")
         max_calls = _cap(entry, "velocity_max_calls")
         # A velocity cap needs both a window and a limit; half a cap enforces
@@ -305,7 +329,9 @@ def is_iga_issuer_token(token: str) -> bool:
         return False
 
 
-def _resolve_verification_key(config: _IssuerConfig, header: dict[str, Any], alg: str) -> Any:
+def _resolve_verification_key(
+    config: _IssuerConfig, header: dict[str, Any], alg: str
+) -> Any:
     """Select the pinned verification key for this token's header.
 
     Key material comes exclusively from configuration; the token header only
@@ -324,18 +350,24 @@ def _resolve_verification_key(config: _IssuerConfig, header: dict[str, Any], alg
         except (jwt.exceptions.PyJWKError, jwt.exceptions.InvalidKeyError) as exc:
             # The pinned key itself is unusable — an operator problem, not a
             # caller problem.
-            raise IGAError("iga_config_invalid", "pinned JWK could not be loaded") from exc
+            raise IGAError(
+                "iga_config_invalid", "pinned JWK could not be loaded"
+            ) from exc
 
     kid = header.get("kid")
     if kid is not None:
         for jwk_dict in keys:
             if isinstance(jwk_dict, dict) and jwk_dict.get("kid") == kid:
                 return _build(jwk_dict)
-        raise IGAError("iga_signing_key_not_found", "no pinned key matches the token kid")
+        raise IGAError(
+            "iga_signing_key_not_found", "no pinned key matches the token kid"
+        )
     # No kid: unambiguous only when exactly one key is pinned.
     if len(keys) == 1 and isinstance(keys[0], dict):
         return _build(keys[0])
-    raise IGAError("iga_signing_key_not_found", "token has no kid and multiple keys are pinned")
+    raise IGAError(
+        "iga_signing_key_not_found", "token has no kid and multiple keys are pinned"
+    )
 
 
 def _normalize_groups(value: Any) -> tuple[str, ...]:
@@ -364,14 +396,18 @@ def parse_enterprise_token(token: str) -> EnterprisePrincipal:
         raise IGAError("iga_token_malformed", "token carries no issuer claim")
     config = issuers.get(iss)
     if config is None:
-        raise IGAError("iga_issuer_not_trusted", "token issuer is not a configured IGA issuer")
+        raise IGAError(
+            "iga_issuer_not_trusted", "token issuer is not a configured IGA issuer"
+        )
 
     # Fail fast on algorithm confusion (e.g. an HS256 token against an
     # RS256-only issuer) with a distinct reason. jwt.decode() below enforces
     # the same allowlist regardless — this check is not the only line.
     alg = header.get("alg")
     if not isinstance(alg, str) or alg not in config.algorithms:
-        raise IGAError("iga_algorithm_not_allowed", "token algorithm is not in the allowlist")
+        raise IGAError(
+            "iga_algorithm_not_allowed", "token algorithm is not in the allowlist"
+        )
 
     key = _resolve_verification_key(config, header, alg)
 
@@ -398,7 +434,9 @@ def parse_enterprise_token(token: str) -> EnterprisePrincipal:
     except jwt.MissingRequiredClaimError as exc:
         if exc.claim == "aud":
             raise IGAError("iga_audience_mismatch") from exc
-        raise IGAError("iga_token_malformed", f"missing required claim {exc.claim}") from exc
+        raise IGAError(
+            "iga_token_malformed", f"missing required claim {exc.claim}"
+        ) from exc
     except jwt.InvalidSignatureError as exc:
         raise IGAError("iga_signature_invalid") from exc
     except jwt.InvalidAlgorithmError as exc:
@@ -486,7 +524,9 @@ def reset_iga_counters() -> None:
     _window_calls.clear()
 
 
-async def enforce_tool_call(principal: EnterprisePrincipal, tool_name: str) -> IGADecision:
+async def enforce_tool_call(
+    principal: EnterprisePrincipal, tool_name: str, *, consume: bool = True
+) -> IGADecision:
     """Decide whether this enterprise principal may invoke ``tool_name``.
 
     First grant whose bundle is active, allows the tool, and passes the
@@ -514,12 +554,16 @@ async def enforce_tool_call(principal: EnterprisePrincipal, tool_name: str) -> I
         bundle = await get_policy_bundle(grant.policy_id)
         if bundle is None:
             candidates.append(
-                IGADecision(False, "iga_policy_not_found", grant.group, grant.policy_id, {})
+                IGADecision(
+                    False, "iga_policy_not_found", grant.group, grant.policy_id, {}
+                )
             )
             continue
         if not bundle.is_active:
             candidates.append(
-                IGADecision(False, "iga_policy_inactive", grant.group, grant.policy_id, {})
+                IGADecision(
+                    False, "iga_policy_inactive", grant.group, grant.policy_id, {}
+                )
             )
             continue
         # allowed_tools follows evaluate_wallet_policy's allow/deny semantics:
@@ -542,6 +586,10 @@ async def enforce_tool_call(principal: EnterprisePrincipal, tool_name: str) -> I
             continue
         eligible.append(grant)
 
+    if eligible and not consume:
+        # Existing-action access checks current grants without spending another use.
+        grant = eligible[0]
+        return IGADecision(True, "allowed", grant.group, grant.policy_id, {})
     if eligible:
         # Check-and-record must be atomic: the same lock covers the cap read,
         # the decision, and the increment, so two concurrent calls cannot both

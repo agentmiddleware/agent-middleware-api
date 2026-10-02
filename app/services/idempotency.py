@@ -25,10 +25,95 @@ from app.db.models import (
     LedgerEntryModel,
     McpDispatchAttemptModel,
     ReceiptModel,
+    PermitModel,
 )
 from app.services.signing_keys import sha256_hex
+from app.services.action_permits import ActionExecutionIdentity
 
 GOVERNED_MCP_IDEMPOTENCY_ENDPOINT = "/mcp/invoke"
+ACTION_MCP_IDEMPOTENCY_ENDPOINT = "/mcp/action/v1"
+
+
+async def _lock_action_cleanup(session: AsyncSession, endpoint: str) -> None:
+    if (
+        endpoint == ACTION_MCP_IDEMPOTENCY_ENDPOINT
+        and session.get_bind().dialect.name == "sqlite"
+    ):
+        from sqlalchemy import update
+
+        await session.execute(
+            update(IdempotencyRecordModel)
+            .where(col(IdempotencyRecordModel.endpoint) == endpoint)
+            .values(status_code=IdempotencyRecordModel.status_code)
+        )
+
+
+async def may_abandon_action_owner(
+    record: IdempotencyRecordModel, session: AsyncSession
+) -> bool:
+    """Prove this locked owner never reached accepted preparation.
+
+    Callers hold the owner lock through deletion. Missing registry/permit data
+    is uncertainty, not permission to discard an execution identity.
+    """
+    if (
+        record.endpoint != ACTION_MCP_IDEMPOTENCY_ENDPOINT
+        or record.operation_kind != "upstream_mcp"
+        or record.response_json is not None
+        or record.response_reference is not None
+        or record.ledger_entry_id is not None
+    ):
+        return False
+    for model, column in (
+        (McpDispatchAttemptModel, McpDispatchAttemptModel.idempotency_record_id),
+        (ReceiptModel, ReceiptModel.idempotency_record_id),
+        (LedgerEntryModel, LedgerEntryModel.operation_key),
+    ):
+        if (
+            await session.scalar(
+                select(model).where(cast(Any, column) == record.record_id)
+            )
+            is not None
+        ):
+            return False
+    from app.services.action_permits import action_execution_identity
+    from app.services.service_registry import get_service_registry
+
+    permits = (
+        (
+            await session.execute(
+                select(PermitModel)
+                .where(
+                    col(PermitModel.subject_wallet_id) == record.wallet_id,
+                    col(PermitModel.action_contract_version) == 1,
+                )
+                .with_for_update()
+            )
+        )
+        .scalars()
+        .all()
+    )
+    registry = get_service_registry()
+    for permit in permits:
+        service = await registry.get(permit.action_public_tool_id or "")
+        binding = registry.get_action_binding(service) if service else None
+        if binding is None:
+            continue
+        try:
+            identity = action_execution_identity(permit, binding)
+        except ValueError:
+            continue
+        if identity.idempotency_key != record.idempotency_key:
+            continue
+        # updated_at survives reservation release and is conservative evidence
+        # of prior accounting. Never infer non-acceptance from a zero balance.
+        return (
+            record.request_hash == sha256_hex(identity.request_payload)
+            and permit.spent_credits == 0
+            and not json.loads(permit.tool_call_counts_json or "{}")
+            and permit.updated_at is None
+        )
+    return False
 
 
 class IdempotencyConflictError(RuntimeError):
@@ -582,6 +667,58 @@ class IdempotencyService:
                 )
             ).scalar_one_or_none()
 
+    async def get_action_record(
+        self, *, wallet_id: str, internal_key: str
+    ) -> IdempotencyRecordModel | None:
+        """Look up only the dedicated owner; never adopt transport/legacy rows."""
+        return await self.get_record(
+            wallet_id=wallet_id,
+            endpoint=ACTION_MCP_IDEMPOTENCY_ENDPOINT,
+            idempotency_key=internal_key,
+        )
+
+    async def begin_action_with_record(
+        self,
+        *,
+        wallet_id: str,
+        identity: ActionExecutionIdentity,
+        wait_timeout_seconds: float = 0.0,
+        poll_interval_seconds: float = 0.05,
+        allow_new_record: bool = True,
+    ) -> IdempotencyBegin:
+        if identity.endpoint != ACTION_MCP_IDEMPOTENCY_ENDPOINT:
+            raise ValueError("invalid_action_execution_namespace")
+        if identity.request_payload.get("subject_wallet_id") != wallet_id:
+            raise ValueError("action_execution_wallet_mismatch")
+        return await self.begin_with_record(
+            wallet_id=wallet_id,
+            endpoint=ACTION_MCP_IDEMPOTENCY_ENDPOINT,
+            idempotency_key=identity.idempotency_key,
+            request_payload=identity.request_payload,
+            operation_kind="upstream_mcp",
+            wait_timeout_seconds=wait_timeout_seconds,
+            poll_interval_seconds=poll_interval_seconds,
+            allow_new_record=allow_new_record,
+        )
+
+    async def complete_action(
+        self,
+        *,
+        wallet_id: str,
+        internal_key: str,
+        response_reference: str | None,
+        response_json: dict[str, Any] | None,
+        status_code: int = 200,
+    ) -> None:
+        await self.complete(
+            wallet_id=wallet_id,
+            endpoint=ACTION_MCP_IDEMPOTENCY_ENDPOINT,
+            idempotency_key=internal_key,
+            response_reference=response_reference,
+            response_json=response_json,
+            status_code=status_code,
+        )
+
     async def get_governed_mcp_record(
         self,
         *,
@@ -655,7 +792,7 @@ class IdempotencyService:
         endpoint: str,
         idempotency_key: str,
         expected_record_id: str | None = None,
-    ) -> None:
+    ) -> bool:
         """Release an in-progress record so the caller may retry the key.
 
         Used when a governed invoke stops on a retryable, side-effect-free
@@ -673,27 +810,37 @@ class IdempotencyService:
         owned that row, and releasing it there would hand the winner's
         at-most-once protection to whoever asked next. Pass it whenever the
         caller holds a record id; a mismatch is a no-op, not an error, since
-        it means the row moved on and nothing is left to release.
+        it means the row moved on and nothing is left to release. Returns true
+        only when this call committed deletion of the eligible owner.
         """
+        if endpoint == ACTION_MCP_IDEMPOTENCY_ENDPOINT and expected_record_id is None:
+            return False
         factory = get_session_factory()
         async with factory() as session:
+            await _lock_action_cleanup(session, endpoint)
             result = await session.execute(
-                select(IdempotencyRecordModel).where(
-                    *_idempotency_predicates(wallet_id, endpoint, idempotency_key)
-                )
+                select(IdempotencyRecordModel)
+                .where(*_idempotency_predicates(wallet_id, endpoint, idempotency_key))
+                .with_for_update()
             )
             record = result.scalar_one_or_none()
             if not record:
-                return
+                return False
             if (
                 expected_record_id is not None
                 and record.record_id != expected_record_id
             ):
-                return
+                return False
             if record.response_json is not None or record.ledger_entry_id:
-                return
+                return False
+            if (
+                endpoint == ACTION_MCP_IDEMPOTENCY_ENDPOINT
+                and not await may_abandon_action_owner(record, session)
+            ):
+                return False
             await session.delete(record)
             await session.commit()
+            return True
 
     async def mark_charged(
         self,
@@ -795,6 +942,7 @@ class IdempotencyService:
                 # Local tools share the canonical replay scope but have
                 # different side-effect ordering and are excluded by the
                 # internal operation kind.
+                await _lock_action_cleanup(session, ACTION_MCP_IDEMPOTENCY_ENDPOINT)
                 unstarted = (
                     (
                         await session.execute(
@@ -802,8 +950,12 @@ class IdempotencyService:
                             .where(
                                 cast(
                                     ColumnElement[bool],
-                                    IdempotencyRecordModel.endpoint
-                                    == GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+                                    col(IdempotencyRecordModel.endpoint).in_(
+                                        [
+                                            GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+                                            ACTION_MCP_IDEMPOTENCY_ENDPOINT,
+                                        ]
+                                    ),
                                 ),
                                 cast(
                                     ColumnElement[bool],
@@ -834,6 +986,11 @@ class IdempotencyService:
                     .all()
                 )
                 for record in unstarted:
+                    if record.endpoint == ACTION_MCP_IDEMPOTENCY_ENDPOINT:
+                        if await may_abandon_action_owner(record, session):
+                            await session.delete(record)
+                            repaired += 1
+                        continue
                     attempt_id = await session.scalar(
                         select(cast(Any, McpDispatchAttemptModel.attempt_id)).where(
                             cast(

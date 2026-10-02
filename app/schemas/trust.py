@@ -4,7 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, StrictInt, field_validator
+from pydantic import BaseModel, Field, StrictInt, field_validator, model_validator
 
 from app.schemas.policies import PolicyBundleResponse
 
@@ -16,7 +16,30 @@ _CREDIT_DIGITS = 20
 _CREDIT_DECIMAL_PLACES = 8
 
 
-class PermitCreateRequest(BaseModel):
+class ActionPermitFields(BaseModel):
+    action_contract_version: int | None = Field(default=None, strict=True)
+    action_payload_hash: str | None = Field(
+        default=None, strict=True, pattern=r"^[0-9a-f]{64}$"
+    )
+    action_schema_id: str | None = Field(default=None, strict=True, min_length=1)
+    action_schema_version: str | None = Field(default=None, strict=True, min_length=1)
+    action_public_tool_id: str | None = Field(default=None, strict=True, min_length=1)
+    action_upstream_binding_hash: str | None = Field(
+        default=None, strict=True, pattern=r"^[0-9a-f]{64}$"
+    )
+
+    @model_validator(mode="after")
+    def _complete_action_binding(self) -> ActionPermitFields:
+        values = [getattr(self, name) for name in ActionPermitFields.model_fields]
+        if any(value is not None for value in values):
+            if any(value is None for value in values):
+                raise ValueError("incomplete_action_binding")
+            if self.action_contract_version != 1:
+                raise ValueError("unsupported_action_contract")
+        return self
+
+
+class PermitCreateRequest(ActionPermitFields):
     issuer_wallet_id: str
     subject_wallet_id: str
     subject_key_id: str | None = None
@@ -64,7 +87,23 @@ class PermitCreateRequest(BaseModel):
         return value
 
 
-class PermitResponse(BaseModel):
+class ActionPermitCreateRequest(BaseModel):
+    """Trusted issuer selects one action; signed binding is server-derived."""
+
+    model_config = {"extra": "forbid"}
+    issuer_wallet_id: str
+    subject_wallet_id: str
+    subject_key_id: str | None = None
+    max_credits: Decimal = Field(
+        gt=0, max_digits=_CREDIT_DIGITS, decimal_places=_CREDIT_DECIMAL_PLACES
+    )
+    expires_at: datetime
+    nonce: str | None = Field(default=None, max_length=64)
+    tool_name: str = Field(min_length=1)
+    arguments: dict[str, Any]
+
+
+class PermitResponse(ActionPermitFields):
     permit_id: str
     issuer_wallet_id: str
     subject_wallet_id: str
@@ -231,7 +270,7 @@ class PermitVerifyResponse(BaseModel):
     permit: PermitResponse | None = None
 
 
-class ReceiptResponse(BaseModel):
+class ReceiptResponse(ActionPermitFields):
     receipt_id: str
     idempotency_record_id: str | None = None
     dispatch_attempt_id: str | None = None

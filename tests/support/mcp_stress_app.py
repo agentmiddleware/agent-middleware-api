@@ -89,10 +89,33 @@ def _fault(point: str, **context: Any) -> None:
 
 
 def _install_fault_wrappers() -> None:
+    if _FAULT_POINT == "before_owner_commit":
+        from sqlalchemy.ext.asyncio import AsyncSession
+        from app.db.models import IdempotencyRecordModel
+
+        original_commit = AsyncSession.commit
+
+        async def owner_commit(self: AsyncSession) -> None:
+            owners = [
+                r
+                for r in self.new
+                if isinstance(r, IdempotencyRecordModel)
+                and r.endpoint == "/mcp/action/v1"
+            ]
+            if owners:
+                await self.flush()
+                _fault(
+                    "before_owner_commit", record_id=owners[0].record_id, flushed=True
+                )
+            await original_commit(self)
+
+        AsyncSession.commit = owner_commit
+
     original_begin_with_record = IdempotencyService.begin_with_record
     original_complete = IdempotencyService.complete
     original_mark_charged = IdempotencyService.mark_charged
     original_claim_dispatch = McpDispatchAttemptService.claim_dispatch
+    original_prepare = McpDispatchAttemptService.authorize_reserve_and_prepare
     original_complete_dispatch = McpDispatchAttemptService.complete
     original_authorize_and_reserve = PermitService.authorize_and_reserve
     original_charge = AgentMoney.charge
@@ -135,6 +158,14 @@ def _install_fault_wrappers() -> None:
             "after_dispatch_claim",
             attempt_id=getattr(result, "attempt_id", None),
         )
+        return result
+
+    async def prepare(
+        self: McpDispatchAttemptService, *args: Any, **kwargs: Any
+    ) -> Any:
+        result = await original_prepare(self, *args, **kwargs)
+        if result[1] is not None:
+            _fault("after_action_prepare", attempt_id=result[1].attempt_id)
         return result
 
     async def complete_dispatch(
@@ -191,6 +222,7 @@ def _install_fault_wrappers() -> None:
     IdempotencyService.complete = complete
     IdempotencyService.mark_charged = mark_charged
     McpDispatchAttemptService.claim_dispatch = claim_dispatch
+    McpDispatchAttemptService.authorize_reserve_and_prepare = prepare
     McpDispatchAttemptService.complete = complete_dispatch
     PermitService.authorize_and_reserve = authorize_and_reserve
     AgentMoney.charge = charge
@@ -462,3 +494,48 @@ async def stress_reconcile(
         "dispatch_failed_attempt_ids": list(dispatch.failed_attempt_ids),
         "dispatch_failed_attempts": len(dispatch.failed_attempt_ids),
     }
+
+
+if os.environ.get("MCP_STRESS_ACTION_MODE") == "1":
+    from app.services.action_permits import (
+        ActionToolBinding,
+        upstream_action_binding_hash,
+    )
+
+    @app.middleware("http")
+    async def bind_action_fixture(request, call_next):
+        registry = get_service_registry()
+        service_id = "remote-stress-governed-tool"
+        record = await registry.get(service_id)
+        if record and registry.get_action_binding(record) is None:
+            schema = record["input_schema"]
+            binding = ActionToolBinding(
+                "disposable-action-proof-v1",
+                service_id,
+                upstream_action_binding_hash(
+                    deployment_authority="disposable-action-proof-v1",
+                    public_tool_id=service_id,
+                    upstream_origin=record["upstream_origin"],
+                    upstream_tool_name=record["upstream_tool_name"],
+                    schema_id="partner-write",
+                    schema_version="1",
+                    input_schema=schema,
+                ),
+                "partner-write",
+                "1",
+                schema,
+            )
+            registry.register_upstream(
+                service_id=service_id,
+                name=record["name"],
+                description=record["description"],
+                category=ServiceCategory.AGENT_COMMS,
+                executor=registry.get_executor(service_id),
+                input_schema=schema,
+                output_schema=record["output_schema"],
+                credits_per_unit=2,
+                upstream_tool_name=record["upstream_tool_name"],
+                upstream_origin=record["upstream_origin"],
+                action_binding=binding,
+            )
+        return await call_next(request)
