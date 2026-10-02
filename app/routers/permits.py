@@ -23,6 +23,7 @@ from app.trust import (
     IdempotencyConflictError,
     IdempotencyCreationDisabledError,
     IdempotencyInProgressError,
+    PermitCreationRejectedError,
     PermitError,
     get_agent_money,
     get_idempotency_service,
@@ -139,7 +140,7 @@ async def create_permit(
         # Preserve hashes written before repeat-window support was introduced.
         request_payload.pop("repeat_window_seconds")
     try:
-        replay = await idem.begin(
+        begun = await idem.begin_with_compatible_record(
             wallet_id=request.issuer_wallet_id,
             endpoint="/v1/permits",
             idempotency_key=idempotency_key,
@@ -154,13 +155,22 @@ async def create_permit(
         raise HTTPException(status_code=400, detail="repeat_window_issuance_disabled")
     except (IdempotencyConflictError, IdempotencyInProgressError) as exc:
         raise HTTPException(status_code=409, detail=exc.args[0])
-    if replay and replay.response_json:
-        return PermitResponse(**replay.response_json)
+    if begun.replay and begun.replay.response_json:
+        return PermitResponse(**begun.replay.response_json)
 
     try:
         permit = await get_permit_service().create_permit(
             request, subject_key_id=auth.key_id
         )
+    except PermitCreationRejectedError as exc:
+        if not await idem.abandon(
+            wallet_id=request.issuer_wallet_id,
+            endpoint="/v1/permits",
+            idempotency_key=idempotency_key,
+            expected_record_id=begun.record_id,
+        ):
+            raise HTTPException(status_code=409, detail="idempotency_in_progress")
+        raise HTTPException(status_code=400, detail=exc.reason)
     except PermitError as exc:
         raise HTTPException(status_code=400, detail=exc.reason)
     await idem.complete(
@@ -321,15 +331,19 @@ async def issue_action_permit(
         idempotency_key=idempotency_key,
     )
     try:
-        replay = await idem.begin(
+        begun = await idem.begin_with_record(
             **identity, request_payload=request.model_dump(mode="json")
         )
     except (IdempotencyConflictError, IdempotencyInProgressError) as exc:
         raise HTTPException(status_code=409, detail=exc.args[0])
-    if replay and replay.response_json:
-        return PermitResponse(**replay.response_json)
+    if begun.replay and begun.replay.response_json:
+        return PermitResponse(**begun.replay.response_json)
     try:
         permit = await create_action_permit(request, auth)
+    except PermitCreationRejectedError as exc:
+        if not await idem.abandon(**identity, expected_record_id=begun.record_id):
+            raise HTTPException(status_code=409, detail="idempotency_in_progress")
+        raise HTTPException(status_code=400, detail=exc.reason)
     except PermitError as exc:
         raise HTTPException(status_code=400, detail=exc.reason)
     await idem.complete(
