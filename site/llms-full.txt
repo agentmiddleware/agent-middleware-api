@@ -70,7 +70,8 @@ trusted channel before relying on issuer identity.
 
 ## Run the whole loop yourself
 
-No live credentials required. The source repository is public. From a clone of
+No live API credentials required. The source repository is private; clone access
+must be granted separately. From an authorized clone of
 https://github.com/PetrefiedThunder/agent-middleware-api:
 
 - `make quickstart` then docs/quickstart.md — mint a wallet-scoped key, issue a

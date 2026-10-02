@@ -158,8 +158,8 @@ boundary.
 CI builds a wheel and sdist from `b2a_sdk/`. The agent manifest's
 `integrations.python_sdk` reports both the source version and the available
 release tag; do not infer a package-index install from this document. The SDK
-is **not** published to PyPI. The repository and its release assets are public;
-install from a clone:
+is **not** published to PyPI. The source repository is private; repository and
+release-asset access must be granted separately. Install from an authorized clone:
 
 ```bash
 pip install -e ./b2a_sdk
