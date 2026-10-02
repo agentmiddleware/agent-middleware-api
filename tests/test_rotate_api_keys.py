@@ -89,3 +89,66 @@ def test_verify_fails_when_new_key_rejected(rotate, monkeypatch):
         rotate, "_probe", _fake_probe({"old-key-value": 403, "new-key-value": 403})
     )
     assert rotate.verify() == 1
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "http://remote.example.test",
+        "http://127.0.0.1.remote.example.test",
+        "ftp://remote.example.test",
+        "https://user:password@remote.example.test",
+        "https://remote.example.test/path",
+        "https://remote.example.test?query=value",
+        "https://remote.example.test#fragment",
+        "https://remote.example.test:0",
+    ],
+)
+def test_verify_rejects_unsafe_origins_before_probing(rotate, monkeypatch, target):
+    _env(monkeypatch, url=target)
+
+    def unexpected_probe(*args):
+        pytest.fail("unsafe origin reached credential-bearing probe")
+
+    monkeypatch.setattr(rotate, "_probe", unexpected_probe)
+    assert rotate.verify() == 2
+
+
+@pytest.mark.parametrize(
+    "target, normalized",
+    [
+        ("https://api.example.test/", "https://api.example.test"),
+        ("https://api.thisisatest.tech", "https://api.thisisatest.tech"),
+        ("http://localhost:8000", "http://localhost:8000"),
+        ("http://127.0.0.1:8000", "http://127.0.0.1:8000"),
+        ("http://[::1]:8000", "http://[::1]:8000"),
+    ],
+)
+def test_verify_allows_safe_origins_and_disables_redirects(
+    rotate, monkeypatch, target, normalized
+):
+    _env(monkeypatch, url=target)
+    requests = []
+
+    class Client:
+        def __init__(self, *, base_url, timeout, follow_redirects):
+            assert base_url == normalized
+            assert timeout == 30
+            assert follow_redirects is False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def get(self, path, *, headers):
+            requests.append((path, headers))
+            return httpx.Response(403 if len(requests) == 1 else 200)
+
+    monkeypatch.setattr(rotate.httpx, "Client", Client)
+    assert rotate.verify() == 0
+    assert requests == [
+        (rotate.CHECK_PATH, {"X-API-Key": "old-key-value"}),
+        (rotate.CHECK_PATH, {"X-API-Key": "new-key-value"}),
+    ]
