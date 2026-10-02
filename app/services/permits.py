@@ -27,7 +27,7 @@ from app.db.models import (
     WalletModel,
 )
 from app.schemas.billing import AlertType
-from app.schemas.trust import PermitCreateRequest, PermitResponse
+from app.schemas.trust import ActionPermitFields, PermitCreateRequest, PermitResponse
 from app.services.signing_keys import get_signing_key_service, sha256_hex
 
 logger = logging.getLogger(__name__)
@@ -199,6 +199,9 @@ def _find_forbidden_field(arguments: Any, forbidden: set[str]) -> str | None:
 
 def permit_model_to_response(model: PermitModel) -> PermitResponse:
     return PermitResponse(
+        **ActionPermitFields.model_validate(
+            {name: getattr(model, name) for name in ActionPermitFields.model_fields}
+        ).model_dump(),
         permit_id=model.permit_id,
         issuer_wallet_id=model.issuer_wallet_id,
         subject_wallet_id=model.subject_wallet_id,
@@ -321,6 +324,19 @@ class PermitService:
         it, so a retried mint collides on the primary key instead of issuing a
         second permit carrying the same authority.
         """
+        if any(
+            getattr(request, field) is not None
+            for field in ActionPermitFields.model_fields
+        ):
+            raise PermitError("action_permit_requires_trusted_issuance")
+        return await self._persist_permit(request, subject_key_id, permit_id)
+
+    async def _persist_permit(
+        self,
+        request: PermitCreateRequest,
+        subject_key_id: str | None = None,
+        permit_id: str | None = None,
+    ) -> PermitResponse:
         if request.max_credits <= Decimal("0"):
             raise PermitError("max_credits_must_be_positive")
         if (
@@ -395,6 +411,12 @@ class PermitService:
             recipient_domain=request.recipient_domain,
             allow_identical_repeats=request.allow_identical_repeats,
             repeat_window_seconds=request.repeat_window_seconds,
+            action_contract_version=request.action_contract_version,
+            action_payload_hash=request.action_payload_hash,
+            action_schema_id=request.action_schema_id,
+            action_schema_version=request.action_schema_version,
+            action_public_tool_id=request.action_public_tool_id,
+            action_upstream_binding_hash=request.action_upstream_binding_hash,
         )
         # Sign the same dict verify reconstructs. Building it twice let a
         # field added on one path only keep verifying in tests that never
@@ -1917,6 +1939,10 @@ class PermitService:
             payload["allow_identical_repeats"] = True
         if model.repeat_window_seconds is not None:
             payload["repeat_window_seconds"] = model.repeat_window_seconds
+        action = ActionPermitFields.model_validate(
+            {name: getattr(model, name) for name in ActionPermitFields.model_fields}
+        )
+        payload.update(action.model_dump(exclude_none=True))
         return payload
 
     @staticmethod

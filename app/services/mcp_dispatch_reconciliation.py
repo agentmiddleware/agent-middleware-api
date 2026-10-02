@@ -721,6 +721,7 @@ class McpDispatchReconciliationService:
             valid, _, _ = await self._receipts.verify_receipt(existing.receipt_id)
             if not valid:
                 raise DispatchAttemptError("dispatch_receipt_signature_invalid")
+            await self._receipts.assert_action_receipt_binding(existing)
             self._assert_receipt_match(
                 existing,
                 attempt=attempt,
@@ -765,6 +766,7 @@ class McpDispatchReconciliationService:
             )
             if existing is None:
                 raise
+            await self._receipts.assert_action_receipt_binding(existing)
             self._assert_receipt_match(
                 existing,
                 attempt=attempt,

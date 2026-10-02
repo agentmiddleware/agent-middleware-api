@@ -11,9 +11,12 @@ Architecture:
 - Dynamic MCP proxy routes calls through existing billing layer
 """
 
+from copy import deepcopy
+from dataclasses import replace
 import inspect
 import json
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -26,6 +29,12 @@ from sqlalchemy import select
 from ..db.database import get_session_factory
 from ..db.models import ServiceRegistryModel
 from ..schemas.billing import ServiceCategory
+
+from .action_permits import (
+    ActionToolBinding,
+    _check_schema,
+    upstream_action_binding_hash,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -227,6 +236,9 @@ class ServiceRegistry:
     """
 
     def __init__(self):
+        self._action_bindings: dict[
+            str, tuple[ActionToolBinding | None, dict[str, Any]]
+        ] = {}
         self._session_factory = get_session_factory
         self._local_registry: dict[str, dict] = {}
         self._func_registry: dict[str, Callable] = {}
@@ -311,6 +323,7 @@ class ServiceRegistry:
         upstream_tool_name: str,
         upstream_origin: str,
         credits_per_unit_exact: str | None = None,
+        action_binding: ActionToolBinding | None = None,
     ) -> dict[str, Any]:
         """Register one runtime-backed remote MCP tool without persisting secrets."""
         existing = self._local_registry.get(service_id)
@@ -338,6 +351,36 @@ class ServiceRegistry:
             "upstream_origin": upstream_origin,
             "created_at": datetime.now(timezone.utc),
         }
+        if action_binding is not None:
+            if (
+                action_binding.public_tool_id != service_id
+                or action_binding.input_schema != input_schema
+                or not action_binding.deployment_authority
+            ):
+                raise ValueError("action_binding_registry_mismatch")
+            if (
+                not re.fullmatch(r"[0-9a-f]{64}", action_binding.upstream_binding_hash)
+                or not action_binding.schema_id
+                or not action_binding.schema_version
+            ):
+                raise ValueError("invalid_action_binding")
+            expected_hash = upstream_action_binding_hash(
+                deployment_authority=action_binding.deployment_authority,
+                public_tool_id=service_id,
+                upstream_origin=upstream_origin,
+                upstream_tool_name=upstream_tool_name,
+                schema_id=action_binding.schema_id,
+                schema_version=action_binding.schema_version,
+                input_schema=input_schema,
+            )
+            if action_binding.upstream_binding_hash != expected_hash:
+                raise ValueError("action_binding_registry_mismatch")
+            _check_schema(action_binding.input_schema)
+            action_binding = replace(
+                action_binding, input_schema=deepcopy(input_schema)
+            )
+        service_record["input_schema"] = deepcopy(input_schema)
+        self._action_bindings[service_id] = (action_binding, deepcopy(service_record))
         self._local_registry[service_id] = service_record
         self._executor_registry[service_id] = executor
         self._func_registry.pop(service_id, None)
@@ -408,6 +451,26 @@ class ServiceRegistry:
             "execution_backend": "metadata_only",
             "created_at": datetime.now(timezone.utc),
         }
+
+    def get_action_binding(self, record: dict[str, Any]) -> ActionToolBinding | None:
+        stored = self._action_bindings.get(record.get("service_id", ""))
+        if stored is None or stored[0] is None:
+            return None
+        binding, snapshot = stored
+        if binding is None:
+            return None
+        for field in (
+            "service_id",
+            "input_schema",
+            "execution_backend",
+            "upstream_tool_name",
+            "upstream_origin",
+            "is_executable",
+            "is_active",
+        ):
+            if record.get(field) != snapshot.get(field):
+                raise ValueError("action_binding_registry_mismatch")
+        return replace(binding, input_schema=deepcopy(binding.input_schema))
 
     def get_local(self, service_id: str) -> dict | None:
         """Get a locally registered service."""
