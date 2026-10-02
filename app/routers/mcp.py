@@ -967,7 +967,7 @@ async def _execute_registered_tool(
     Those coordinates name whichever row holds them now; only the granted id
     names ours.
     """
-    owned_record: dict[str, str] = {}
+    owned_record: dict[str, Any] = {}
     try:
         return await _execute_registered_tool_inner(
             tool_name=tool_name,
@@ -1005,7 +1005,8 @@ async def _execute_registered_tool(
         PermitWriteContendedError,
     ):
         record_id = owned_record.get("record_id")
-        if record_id and wallet_id and idempotency_key:
+        record_key = owned_record.get("key", idempotency_key)
+        if record_id and wallet_id and record_key:
             idem = get_idempotency_service()
             # The two endpoints a governed record can live under: the canonical
             # one, and the request's own when a pre-canonical legacy row was
@@ -1018,12 +1019,21 @@ async def _execute_registered_tool(
                 else {GOVERNED_MCP_IDEMPOTENCY_ENDPOINT, endpoint}
             ):
                 try:
-                    await idem.abandon(
+                    abandoned = await idem.abandon(
                         wallet_id=wallet_id,
                         endpoint=record_endpoint,
-                        idempotency_key=owned_record.get("key", idempotency_key),
+                        idempotency_key=record_key,
                         expected_record_id=record_id,
                     )
+                    if abandoned and record_endpoint == "/mcp/action/v1":
+                        # Only confirmed deletion proves this invocation's use
+                        # unaccepted. Inner cleanup may already have released
+                        # it; in that case abandon returns False, not a refund.
+                        await _release_iga_use(
+                            owned_record.get("iga_granted_use"),
+                            tool_name,
+                            reason="preacceptance_write_contended",
+                        )
                 except Exception:
                     logger.exception(
                         "mcp_audit_contended_idempotency_abandon_failed",
@@ -1182,7 +1192,7 @@ async def _execute_registered_tool_inner(
     quote_id: str | None = None,
     idempotency_key: str | None = None,
     request_payload: dict[str, Any] | None = None,
-    owned_record: dict[str, str] | None = None,
+    owned_record: dict[str, Any] | None = None,
 ) -> dict:
     if not tool_name:
         raise ValueError("Missing tool name")
@@ -1697,6 +1707,8 @@ async def _execute_registered_tool_inner(
                     iga_decision.group,
                     iga_decision.policy_id,
                 )
+                if action_identity is not None and owned_record is not None:
+                    owned_record["iga_granted_use"] = iga_granted_use
     except IGAError as exc:
         # Catches verification failures for bearers routed to the IGA layer
         # (bad signature / audience / expiry / kid from a pinned enterprise
