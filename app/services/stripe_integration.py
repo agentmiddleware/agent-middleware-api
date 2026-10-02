@@ -19,13 +19,14 @@ from uuid import uuid4
 import stripe
 from anyio import to_thread
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import select, update as sa_update
+from sqlalchemy import func, select, update as sa_update
 from sqlalchemy.sql.elements import ColumnElement
 
 from ..db.database import get_session_factory
 from ..db.models import BillingAlertModel, LedgerEntryModel, WalletModel
 from ..core.config import get_settings
 from ..core.time import utc_now
+from ..core.resilience import run_with_write_conflict_retry
 from ..schemas.billing import AlertSeverity, AlertType, WalletStatus
 from .agent_money import WalletNotFoundError
 
@@ -50,6 +51,10 @@ SUPPORTED_TOP_UP_CURRENCY = "usd"
 
 class StripeSettlementError(ValueError):
     """A verified Stripe event does not prove an acceptable top-up settlement."""
+
+
+class _RefundSnapshotChanged(RuntimeError):
+    """A competing cumulative refund committed after the ledger was read."""
 
 
 class StripeIntegration:
@@ -453,6 +458,13 @@ class StripeIntegration:
         )
 
     async def _handle_refund(self, charge: Any, event_id: str | None = None) -> None:
+        await run_with_write_conflict_retry(
+            lambda: self._handle_refund_once(charge, event_id),
+            restart_on=lambda exc: isinstance(exc, _RefundSnapshotChanged),
+            on_exhausted=lambda exc: RuntimeError("stripe_refund_write_contended"),
+        )
+
+    async def _handle_refund_once(self, charge: Any, event_id: str | None) -> None:
         """Apply only the new delta from Stripe's cumulative refund amount."""
         (
             payment_intent_id,
@@ -499,8 +511,9 @@ class StripeIntegration:
                             LedgerEntryModel.description == description,  # type: ignore[arg-type]
                         )
                     )
+                    prior_refunds = prior_result.scalars().all()
                     already_refunded = sum(
-                        (-entry.amount for entry in prior_result.scalars().all()),
+                        (-entry.amount for entry in prior_refunds),
                         Decimal("0"),
                     )
                     cumulative_refund = (
@@ -527,13 +540,36 @@ class StripeIntegration:
                     # wallet between the read and the write is silently erased,
                     # and here that discrepancy is against real fiat Stripe has
                     # already returned.
-                    await session.execute(
+                    # FOR UPDATE does not serialize readers on SQLite. Admit
+                    # this delta only while the refund ledger still matches the
+                    # snapshot used to calculate it; a loser restarts its whole
+                    # transaction. Count rows rather than summing SQL floats.
+                    refund_count = (
+                        select(func.count())
+                        .select_from(LedgerEntryModel)
+                        .where(
+                            cast(
+                                ColumnElement[bool],
+                                LedgerEntryModel.wallet_id == credit_entry.wallet_id,
+                            ),
+                            cast(
+                                ColumnElement[bool], LedgerEntryModel.action == "refund"
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                LedgerEntryModel.description == description,
+                            ),
+                        )
+                        .scalar_subquery()
+                    )
+                    clawback = await session.execute(
                         sa_update(WalletModel)
                         .where(
                             cast(
                                 ColumnElement[bool],
                                 WalletModel.wallet_id == credit_entry.wallet_id,
-                            )
+                            ),
+                            refund_count == len(prior_refunds),
                         )
                         .values(
                             balance=WalletModel.balance - refund_delta,
@@ -548,8 +584,11 @@ class StripeIntegration:
                             # UPDATE in this codebase sets it.
                             updated_at=utc_now(),
                         )
+                        .returning(cast(ColumnElement[str], WalletModel.wallet_id))
                         .execution_options(synchronize_session=False)
                     )
+                    if clawback.scalar_one_or_none() is None:
+                        raise _RefundSnapshotChanged()
                     # The liability and freeze decision below turn on the
                     # balance this clawback produced, so read it back first.
                     await session.refresh(wallet)
@@ -666,8 +705,21 @@ class StripeIntegration:
                     if wallet.wallet_type != "sponsor":
                         raise StripeSettlementError("top_up_wallet_must_be_sponsor")
 
-                    wallet.balance += amount
-                    wallet.lifetime_credits += amount
+                    await session.execute(
+                        sa_update(WalletModel)
+                        .where(
+                            cast(
+                                ColumnElement[bool], WalletModel.wallet_id == wallet_id
+                            )
+                        )
+                        .values(
+                            balance=WalletModel.balance + amount,
+                            lifetime_credits=WalletModel.lifetime_credits + amount,
+                            updated_at=utc_now(),
+                        )
+                        .execution_options(synchronize_session=False)
+                    )
+                    await session.refresh(wallet)
 
                     entry = LedgerEntryModel(
                         entry_id=str(uuid4()),
