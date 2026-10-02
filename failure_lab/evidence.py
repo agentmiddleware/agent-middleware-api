@@ -35,6 +35,7 @@ Layout (exactly these paths)::
     downstream-effects.json  the independent effect ledger's rows
     gateway-events.json      gateway-reported state, labelled as such
     receipts/<id>.json       each portable receipt bundle as exported
+    trust-keys.json          optional issuer public keys; not an issuer trust pin
     verification-results.json   the independent verifier's three claims
     summary.html             failure_lab.report.render_run_html(...)
     report.txt               failure_lab.report.render_run_text(...)
@@ -100,6 +101,10 @@ FILE_DESCRIPTIONS: dict[str, str] = {
     "summary.html": "failure_lab.report.render_run_html of this run.",
     "report.txt": "failure_lab.report.render_run_text of this run.",
     "results.json": "The raw ScenarioResult documents, redacted.",
+    "trust-keys.json": (
+        "Issuer public keys for offline signature checks. These keys travelled "
+        "with the receipts and do not establish issuer trust."
+    ),
 }
 
 # --------------------------------------------------------------------------- #
@@ -808,6 +813,7 @@ def build_evidence_bundle(
     definitions: Sequence[Mapping[str, Any]] = (),
     event_log: Any = None,
     receipts: Any = None,
+    trust_keys: Mapping[str, Any] | None = None,
     verification_results: Sequence[Mapping[str, Any]] = (),
     fault_injection_points: Sequence[Mapping[str, Any]] = (),
     random_seed: int | None = None,
@@ -944,6 +950,8 @@ def build_evidence_bundle(
 
     try:
         write_bytes("environment.json", _json_bytes(environment_document))
+        if trust_keys is not None:
+            write_bytes("trust-keys.json", _json_bytes(redact(dict(trust_keys))))
         write_bytes(
             "test-definition.json",
             _json_bytes(
