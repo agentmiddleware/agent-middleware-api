@@ -109,7 +109,7 @@ class ConfigurationView:
     latency_p50_ms: float | None
     latency_p95_ms: float | None
     observation: str
-    ran: bool
+    ran: bool  # completed with usable measurements, not a setup/execution error
 
     def as_dict(self) -> dict[str, Any]:
         return dict(self.__dict__)
@@ -204,7 +204,12 @@ def _view(entry: ConfigurationResult) -> ConfigurationView:
         latency_p50_ms=counters.latency_p50_ms,
         latency_p95_ms=counters.latency_p95_ms,
         observation=entry.observation,
-        ran=entry.verdict not in (Verdict.NOT_APPLICABLE.value, Verdict.NOT_RUN.value),
+        ran=entry.verdict
+        not in (
+            Verdict.NOT_APPLICABLE.value,
+            Verdict.NOT_RUN.value,
+            Verdict.ERROR.value,
+        ),
     )
 
 
@@ -312,8 +317,8 @@ def _conclude(
     if governed is None or not governed.ran:
         return Conclusion(
             ConclusionKind.INCONCLUSIVE,
-            "The gateway configuration did not run for this test, so this "
-            "report says nothing about what it would have done.",
+            "The gateway configuration did not produce usable measurements "
+            "for this test, so this report cannot establish its behavior.",
             prevented_vs_native,
             prevented_vs_existing,
             differences,
@@ -334,6 +339,17 @@ def _conclude(
     existing_ran = existing is not None and existing.ran
     native_ran = native is not None and native.ran
     if not existing_ran and not native_ran:
+        if any(
+            column is not None and column.verdict == Verdict.ERROR.value
+            for column in (existing, native)
+        ):
+            return Conclusion(
+                ConclusionKind.INCONCLUSIVE,
+                "Baseline configuration errors left no usable baseline measurements. "
+                "No comparison or duplicate-prevention claim can be established.",
+                0,
+                0,
+            )
         # Neither baseline column ran, so there is nothing to compare the
         # gateway against. Every "sufficient" conclusion below is a statement
         # about a baseline, and asserting one from a column that never ran
@@ -439,7 +455,7 @@ def _additional_latency(
             return None
         return round(b - a, 3)
 
-    if native is None or governed is None:
+    if native is None or governed is None or not native.ran or not governed.ran:
         return {"p50_ms": None, "p95_ms": None, "baseline": None}
     return {
         "p50_ms": delta(native.latency_p50_ms, governed.latency_p50_ms),
@@ -456,7 +472,10 @@ def build_comparison(result: ScenarioResult) -> Comparison:
     existing = views.get(Configuration.DIRECT_NAIVE.value)
     native = views.get(Configuration.DIRECT_NATIVE.value)
     governed = views.get(Configuration.GATEWAY_NATIVE.value)
-    if governed is None or not governed.ran:
+    if governed is None or governed.verdict in (
+        Verdict.NOT_APPLICABLE.value,
+        Verdict.NOT_RUN.value,
+    ):
         fallback = views.get(Configuration.GATEWAY_NAIVE.value)
         if fallback is not None and fallback.ran:
             governed = fallback
@@ -531,7 +550,8 @@ def render_comparison_text(comparison: Comparison) -> str:
         lines.append(column.label)
         lines.append("-" * max(20, len(column.label)))
         if not column.ran:
-            lines.append(f"  not run: {column.observation}")
+            lines.append(f"  {column.verdict}: {column.observation}")
+            lines.append("  no usable measurements")
             lines.append("")
             continue
         for title, attribute in rows:
@@ -729,12 +749,16 @@ def _comparison_html(comparison: Comparison) -> str:
         ("Gateway refunds", "gateway_refunds"),
         ("Receipts", "receipts"),
     )
-    ran = [column for column in comparison.columns if column.ran]
+    ran = [
+        column
+        for column in comparison.columns
+        if column.ran or column.verdict == Verdict.ERROR.value
+    ]
     header = "".join(f"<th>{_esc(column.label)}</th>" for column in ran)
     body = []
     for title, attribute in rows:
         cells = "".join(
-            f'<td class="num">{_esc(_format(getattr(column, attribute)))}</td>'
+            f'<td class="num">{_esc(_format(getattr(column, attribute)) if column.ran else "n/a")}</td>'
             for column in ran
         )
         body.append(f"<tr><th>{_esc(title)}</th>{cells}</tr>")
