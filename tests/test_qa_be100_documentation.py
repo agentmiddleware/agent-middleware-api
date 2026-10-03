@@ -15,6 +15,8 @@ def _assert_scoped_retry_guidance(relative_path: str) -> None:
     assert "no receipt" in text
     assert "Do not retry with a new idempotency key" in text
     assert "Local governed tools have no dispatch state machine" in text
+    assert "receipt reference" in text
+    assert "not the original response" in text
     assert "failure-semantics.md" in text
     assert "one authorization, one debit, one finalized receipt" not in text
     assert "The governance path is identical" not in text
@@ -33,3 +35,9 @@ def test_be100_tool_interface_scopes_retry_guarantees() -> None:
 
 def test_be100_pitch_scopes_retry_guarantees() -> None:
     _assert_scoped_retry_guidance("ELEVATOR_PITCH.md")
+    text = " ".join((ROOT / "ELEVATOR_PITCH.md").read_text().split())
+    assert "recovered outcome and receipt reference" in text
+    assert (
+        "original result and signed receipt on an identical replay after "
+        "finalization or reconciliation"
+    ) not in text

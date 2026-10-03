@@ -38,8 +38,10 @@ finalizes or reconciles. For the configured upstream MCP tool, identical
 retries under the same accepted idempotency key allow at most one gateway
 dispatch and at most one debit. This does not guarantee delivery or a
 downstream effect.
-Local governed tools have no dispatch state machine and interrupted calls fail
-closed into manual review.
+Local governed tools have no dispatch state machine and interrupted calls
+without a receipt fail closed into manual review. When a receipt exists,
+local reconciliation can recover the outcome and receipt reference, not the
+original response.
 
 The receipt arrows above describe completed paths. Effects or a debit may
 commit before an audit or receipt write fails, returning
