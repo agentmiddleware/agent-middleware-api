@@ -1530,13 +1530,18 @@ async def test_startup_helper_registers_cached_upstream_executor(monkeypatch) ->
 
 
 @pytest.mark.parametrize(
-    "credits",
-    ["0.00000001", "999999999999.99999999"],
+    ("credits", "storable"),
+    [
+        ("0.00000001", True),
+        ("999999999999", True),
+        ("999999999999.99999999", False),
+    ],
 )
 @pytest.mark.anyio
-async def test_upstream_registration_preserves_exact_min_and_max_cost(
+async def test_upstream_registration_preserves_exact_metadata_and_refuses_lossy_cost(
     monkeypatch,
     credits: str,
+    storable: bool,
 ) -> None:
     discovered = DiscoveredUpstreamTool(
         name="partner.write",
@@ -1560,10 +1565,17 @@ async def test_upstream_registration_preserves_exact_min_and_max_cost(
     expected = Decimal(credits).quantize(Decimal("0.00000001"))
     assert registered["credits_per_unit"] == float(expected)
     assert registered["credits_per_unit_exact"] == format(expected, "f")
-    assert _registered_tool_cost(
-        registered,
-        ServiceCategory.PLATFORM_FEE,
-    ) == Decimal(credits)
+    if storable:
+        assert _registered_tool_cost(
+            registered,
+            ServiceCategory.PLATFORM_FEE,
+        ) == Decimal(credits)
+    else:
+        # Numeric's upper fractional boundary rounds to 1e12 through SQLite's
+        # float binding. Discovery preserves it, but execution must refuse it
+        # before a charge or effect can produce an unverifiable signed row.
+        with pytest.raises(ValueError, match="tool_price_invalid"):
+            _registered_tool_cost(registered, ServiceCategory.PLATFORM_FEE)
     registry_tool = registry.to_mcp_tool(registered)
     generated_tool = McpGenerator(registry).generate_tools_json()["tools"][0]
     for tool in (registry_tool, generated_tool):
