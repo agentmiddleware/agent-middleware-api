@@ -67,3 +67,38 @@ test('UX-002: operator commands expose a named keyboard focus target', () => {
     assert.equal(document.activeElement, code);
   } finally {dom.window.close();}
 });
+
+test('UX-003: operator runtime links resolve on the served origin', () => {
+  const dom = page('static/dashboard.html');
+  try {
+    const {document} = dom.window;
+    const runtimePaths = ['/health/dependencies', '/.well-known/trust-keys.json',
+      '/.well-known/agent.json', '/llms.txt'];
+    const links = [...document.querySelectorAll('a[href]')];
+    for (const pathname of runtimePaths) {
+      const matches = links.filter(link => new URL(link.href).pathname === pathname);
+      assert(matches.length > 0, `Missing runtime link: ${pathname}`);
+      for (const link of matches) {
+        for (const origin of ['http://127.0.0.1:8765', 'https://operator.example']) {
+          assert.equal(new URL(link.getAttribute('href'), origin).origin, origin,
+            `${pathname} must inspect the served runtime`);
+        }
+      }
+    }
+    for (const link of links.filter(link => new URL(link.href).pathname === '/proof/')) {
+      assert.match(link.textContent, /hosted/i, 'External proof must be labeled as hosted');
+    }
+  } finally {dom.window.close();}
+});
+
+test('UX-003: inspection commands require an explicit API origin', () => {
+  const dom = page('static/dashboard.html');
+  try {
+    const code = dom.window.document.querySelector('pre').textContent;
+    assert.match(code, /export API_URL="http:\/\/127\.0\.0\.1:8000"/);
+    for (const endpoint of ['permits', 'receipts', 'audit/events']) {
+      assert(code.includes('"${API_URL}/v1/me/' + endpoint + '"'));
+    }
+    assert(!code.includes('https://api.thisisatest.tech'));
+  } finally {dom.window.close();}
+});
