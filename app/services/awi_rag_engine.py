@@ -364,8 +364,11 @@ class AWIRAGEngine:
                 ``None`` searches every tenant: bootstrap/internal use only.
 
         Returns:
-            List of SearchResult objects sorted by similarity.
+            List of SearchResult objects sorted by similarity; empty for blank queries.
         """
+        if not query.strip():
+            return []
+
         query_embedding = await self._generate_embedding(query)
 
         # Dormant legacy branch; init_chroma() leaves _use_chroma false. The
@@ -664,7 +667,7 @@ class AWIRAGEngine:
         Returns:
             Number of memories deleted.
         """
-        memory_ids = self._session_index.get(session_id, [])
+        memory_ids = list(self._session_index.get(session_id, []))
         deleted = 0
 
         for memory_id in memory_ids:
@@ -851,8 +854,11 @@ class AWIRAGEngine:
             await client.close()
 
     def _generate_mock_embedding(self, text: str) -> list[float]:
-        """Generate deterministic mock embedding from text."""
+        """Generate deterministic mock embedding; empty text has zero similarity."""
         import struct
+
+        if not text:
+            return [0.0] * self._embedding_dimension
 
         text_bytes = text.encode("utf-8")
 
