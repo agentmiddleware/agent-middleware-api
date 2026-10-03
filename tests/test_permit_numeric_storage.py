@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+import re
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -37,6 +38,35 @@ UNSTORABLE = (
     "0",
 )
 STORABLE = ("0.00000001", "1.12345678", "100000000000.125", "999999999999")
+
+
+@pytest.mark.parametrize(
+    "schema,field",
+    [
+        (PermitCreateRequest, "max_credits"),
+        (PermitCreateRequest, "aggregate_value_cap"),
+        (ActionPermitCreateRequest, "max_credits"),
+        (PermitRequestCreate, "max_credits"),
+    ],
+)
+def test_permit_credit_json_schema_preserves_positive_numeric_and_scale_bounds(
+    schema, field
+):
+    contract = schema.model_json_schema()["properties"][field]
+    branches = contract["anyOf"]
+    nullable = field == "aggregate_value_cap"
+    assert {branch.get("type") for branch in branches} == (
+        {"number", "string", "null"} if nullable else {"number", "string"}
+    )
+    number = next(branch for branch in branches if branch["type"] == "number")
+    assert number["exclusiveMinimum"] == 0
+    text = next(branch for branch in branches if branch["type"] == "string")
+    for amount in ("0.00000001", "1.12345678", "999999999999.99999999"):
+        assert re.fullmatch(text["pattern"], amount)
+    for amount in ("0.000000001", "1.123456789", "1000000000000", "NaN", "Infinity"):
+        assert re.fullmatch(text["pattern"], amount) is None
+    if nullable:
+        assert contract["default"] is None
 
 
 @pytest.fixture

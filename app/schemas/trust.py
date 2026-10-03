@@ -32,7 +32,11 @@ def _require_storable_credit(amount: Decimal) -> Decimal:
 
 # Numeric scale alone cannot detect large amounts rounded by SQLite's float
 # conversion. Apply this before signing, hashing approval terms, or acceptance.
-_StoredCredit = Annotated[Decimal, AfterValidator(_require_storable_credit)]
+_PositiveStoredCredit = Annotated[
+    Decimal,
+    Field(gt=0, max_digits=_CREDIT_DIGITS, decimal_places=_CREDIT_DECIMAL_PLACES),
+    AfterValidator(_require_storable_credit),
+]
 
 
 class ActionPermitFields(BaseModel):
@@ -64,9 +68,7 @@ class PermitCreateRequest(ActionPermitFields):
     subject_key_id: str | None = None
     scopes: list[str] = Field(default_factory=list)
     allowed_tools: list[str] = Field(default_factory=list)
-    max_credits: _StoredCredit = Field(
-        gt=0, max_digits=_CREDIT_DIGITS, decimal_places=_CREDIT_DECIMAL_PLACES
-    )
+    max_credits: _PositiveStoredCredit
     expires_at: datetime
     # permits.nonce is String(64).
     nonce: str | None = Field(default=None, max_length=64)
@@ -79,12 +81,7 @@ class PermitCreateRequest(ActionPermitFields):
     max_calls_per_tool: dict[str, Annotated[StrictInt, Field(ge=1)]] = Field(
         default_factory=dict
     )
-    aggregate_value_cap: _StoredCredit | None = Field(
-        default=None,
-        gt=0,
-        max_digits=_CREDIT_DIGITS,
-        decimal_places=_CREDIT_DECIMAL_PLACES,
-    )
+    aggregate_value_cap: _PositiveStoredCredit | None = None
     forbidden_fields: list[str] = Field(default_factory=list)
     recipient_domain: str | None = None
     # Opt-out from cross-key duplicate detection. When true, identical requests
@@ -113,9 +110,7 @@ class ActionPermitCreateRequest(BaseModel):
     issuer_wallet_id: str
     subject_wallet_id: str
     subject_key_id: str | None = None
-    max_credits: _StoredCredit = Field(
-        gt=0, max_digits=_CREDIT_DIGITS, decimal_places=_CREDIT_DECIMAL_PLACES
-    )
+    max_credits: _PositiveStoredCredit
     expires_at: datetime
     nonce: str | None = Field(default=None, max_length=64)
     tool_name: str = Field(min_length=1)
@@ -188,9 +183,7 @@ class PermitRequestCreate(BaseModel):
     scopes: list[str] = Field(default_factory=list)
     # Hashed for the human at request time and stored as Numeric(20, 8), so
     # a value the column would round fails its own integrity check at mint.
-    max_credits: _StoredCredit = Field(
-        gt=0, max_digits=_CREDIT_DIGITS, decimal_places=_CREDIT_DECIMAL_PLACES
-    )
+    max_credits: _PositiveStoredCredit
     expires_at: datetime
     # Shown to the human approver: why the agent needs this authority.
     justification: str = Field(min_length=1, max_length=2000)
