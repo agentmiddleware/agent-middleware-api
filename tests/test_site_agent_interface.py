@@ -762,7 +762,7 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
         assert "/_vercel/insights/script.js" not in page
         assert "/va-init.js" not in page
         assert "@@VERCEL_ANALYTICS_SCRIPTS@@" not in page
-        assert '<script defer src="/analytics.js?v=gateway-18"></script>' in page
+        assert '<script defer src="/analytics.js?v=gateway-19"></script>' in page
 
     enabled_output = tmp_path / "enabled"
     enabled_contacts = dict(VALID_TEST_CONTACTS)
@@ -772,7 +772,7 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
     for relative_path in pages:
         page = (enabled_output / relative_path).read_text(encoding="utf-8")
         assert '<script defer src="/_vercel/insights/script.js"></script>' in page
-        assert '<script src="/va-init.js?v=gateway-18"></script>' in page
+        assert '<script src="/va-init.js?v=gateway-19"></script>' in page
         assert (
             page.index("/va-init.js?")
             < page.index("/_vercel/insights/script.js")
