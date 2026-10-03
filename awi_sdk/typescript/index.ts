@@ -154,7 +154,9 @@ export class AWIClient {
   ): Promise<AWISession> {
     const response: AxiosResponse = await this.client.post("/v1/awi/sessions", {
       target_url: targetUrl,
-      max_steps: options?.maxSteps || 100,
+      // Nullish, not truthy: an explicit 0 must reach the API's minimum-one
+      // validation (or fail there) rather than silently become 100 actions.
+      max_steps: options?.maxSteps ?? 100,
       allow_human_pause: options?.allowHumanPause ?? true,
       wallet_id: this.config.walletId,
     });

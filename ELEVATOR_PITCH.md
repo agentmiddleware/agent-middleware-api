@@ -160,9 +160,13 @@ database administrator who can alter both the data and its chain metadata is
 inside the trust boundary, and we say so.)
 
 **"Does exactly-once really hold across the network?"** For one accepted
-idempotency key at our boundary: one gateway dispatch, one debit, one receipt.
-A *remote* tool's own side effect is exactly once only if that tool also honors
-the forwarded key. Anything broader would overstate the distributed-systems
+idempotency key at our boundary: at most one gateway dispatch to the configured
+upstream tool and at most one debit, with a receipt on every path that
+finalizes or reconciles. "Exactly-once" is the deduplication term: never a
+duplicate charge, not always a charge. A *remote* tool's own side effect is
+exactly once only if that tool also honors the forwarded key, and a receipt
+lost to write contention after effects are committed is held for manual review
+rather than invented. Anything broader would overstate the distributed-systems
 guarantee.
 
 **"Why not just use an open-source library?"** If your problem is reliability,

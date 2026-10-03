@@ -12,7 +12,7 @@ from dataclasses import dataclass, replace
 from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, Request, Security, status
-from fastapi.security import APIKeyHeader
+from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 from .config import get_settings
 from .oidc_iga import EnterprisePrincipal, IGADecision, IGAError, is_iga_issuer_token
 from .trust_mode import is_production_like_environment
@@ -29,6 +29,24 @@ api_key_header = APIKeyHeader(
     name=settings.API_KEY_HEADER,
     auto_error=False,
     description="API key for agent authentication. Pass in the X-API-Key header.",
+)
+
+# Declares the `Authorization: Bearer <jwt>` alternative in OpenAPI so a
+# generated client discovers both supported credentials (BE-002). It is a
+# documentation-only dependency: ``auto_error=False`` means it never raises,
+# and ``_resolve_auth_context`` keeps reading the raw ``Authorization`` header
+# itself, so a malformed bearer is still refused instead of falling back to a
+# concurrently supplied API key. Listed alongside ``api_key_header`` on the
+# same dependency, FastAPI emits the two schemes as alternatives (OR), which
+# matches the runtime: either credential authenticates on its own.
+bearer_scheme = HTTPBearer(
+    auto_error=False,
+    description=(
+        "Short-lived JWT for agent authentication. Pass as "
+        "'Authorization: Bearer <token>'. A presented Authorization header is "
+        "authoritative: an invalid bearer is refused even when an X-API-Key "
+        "accompanies it."
+    ),
 )
 
 
@@ -124,6 +142,8 @@ CREDENTIAL_ACCEPTANCE: ContextVar[CredentialAcceptance | None] = ContextVar(
 async def get_auth_context(
     api_key: str | None = Security(api_key_header),
     authorization: Annotated[str | None, Header()] = None,
+    # OpenAPI declaration only; the raw header above is what is parsed.
+    bearer_declared: HTTPAuthorizationCredentials | None = Security(bearer_scheme),
 ) -> AuthContext:
     """
     Validate credentials and return caller context.
