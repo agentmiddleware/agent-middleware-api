@@ -210,20 +210,21 @@ async def create_passkey_challenge(
 
     webauthn = get_webauthn_provider()
 
-    requires = await webauthn.requires_passkey(request.session_id, request.action)
-    if not requires:
-        await raise_awi_http_error(
-            gov,
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "error": "passkey_not_required",
-                "message": (
-                    f"Action '{request.action}' does not require passkey verification"
-                ),
-            },
-        )
-
     try:
+        requires = await webauthn.requires_passkey(request.session_id, request.action)
+        if not requires:
+            await raise_awi_http_error(
+                gov,
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error": "passkey_not_required",
+                    "message": (
+                        f"Action '{request.action}' does not require passkey verification"
+                    ),
+                },
+            )
+
+        gov.dispatch_started = True
         challenge = await webauthn.create_challenge(
             session_id=request.session_id,
             action=request.action,
@@ -240,7 +241,15 @@ async def create_passkey_challenge(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"error": "challenge_failed", "message": str(e)},
         )
-    except HTTPException:
+    except HTTPException as exc:
+        if gov.replay_response is None:
+            await raise_awi_http_error(
+                gov,
+                status_code=exc.status_code,
+                detail=exc.detail
+                if isinstance(exc.detail, dict)
+                else {"error": "execution_failed"},
+            )
         raise
     except Exception as e:
         logger.exception("Failed to create passkey challenge")
@@ -306,6 +315,7 @@ async def verify_passkey(
         return replayed
 
     try:
+        gov.dispatch_started = True
         result = await webauthn.verify_response(
             challenge_id=request.challenge_id,
             credential=request.credential,
@@ -322,7 +332,15 @@ async def verify_passkey(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"error": "verification_failed", "message": str(e)},
         )
-    except HTTPException:
+    except HTTPException as exc:
+        if gov.replay_response is None:
+            await raise_awi_http_error(
+                gov,
+                status_code=exc.status_code,
+                detail=exc.detail
+                if isinstance(exc.detail, dict)
+                else {"error": "execution_failed"},
+            )
         raise
     except Exception as e:
         logger.exception("Passkey verification error")
@@ -686,6 +704,7 @@ async def sync_dom(
             parameters=request.parameters,
         )
 
+        gov.dispatch_started = True
         execution = await bridge.execute_commands(
             session_id=request.session_id,
             commands=commands,
@@ -718,7 +737,15 @@ async def sync_dom(
             request_payload=request_payload,
             response_payload=body,
         )
-    except HTTPException:
+    except HTTPException as exc:
+        if gov.replay_response is None:
+            await raise_awi_http_error(
+                gov,
+                status_code=exc.status_code,
+                detail=exc.detail
+                if isinstance(exc.detail, dict)
+                else {"error": "execution_failed"},
+            )
         raise
     except ValueError as e:
         await raise_awi_http_error(
@@ -877,6 +904,7 @@ async def index_session(
     rag = get_awi_rag_engine()
 
     try:
+        gov.dispatch_started = True
         memory_id = await rag.index_session(
             session_id=request.session_id,
             session_type=request.session_type,
@@ -901,7 +929,15 @@ async def index_session(
             response_payload=body,
         )
 
-    except HTTPException:
+    except HTTPException as exc:
+        if gov.replay_response is None:
+            await raise_awi_http_error(
+                gov,
+                status_code=exc.status_code,
+                detail=exc.detail
+                if isinstance(exc.detail, dict)
+                else {"error": "execution_failed"},
+            )
         raise
     except Exception as e:
         logger.exception(f"Failed to index session: {request.session_id}")
@@ -964,6 +1000,7 @@ async def query_memories(
         # Scope by owner inside the search, before scoring and top_k truncation:
         # filtering only afterwards let other tenants' better matches empty the
         # caller's results and bumped their memories' access counters.
+        gov.dispatch_started = True
         results = await rag.search(
             query=request.query,
             session_type=request.session_type,
@@ -1014,7 +1051,15 @@ async def query_memories(
             request_payload=request_payload,
             response_payload=body,
         )
-    except HTTPException:
+    except HTTPException as exc:
+        if gov.replay_response is None:
+            await raise_awi_http_error(
+                gov,
+                status_code=exc.status_code,
+                detail=exc.detail
+                if isinstance(exc.detail, dict)
+                else {"error": "execution_failed"},
+            )
         raise
     except Exception as e:
         logger.exception("RAG query failed")
