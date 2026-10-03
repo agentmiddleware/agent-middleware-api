@@ -38,6 +38,12 @@ receipt. A remote side effect is exactly once only if the upstream tool honors
 the forwarded idempotency key. Signed receipts are evidence for this boundary,
 not a replacement for settlement, compliance, or IAM.
 
+## Contributor reference
+
+- [TypeSafe evaluation guidance](typesafe-evaluation.md) applies the vendor's
+  documentation to bounded semantic evaluations. It is not a shipped
+  integration or permission to change the deterministic trust boundary.
+
 ## Source-only and historical material
 
 The repository also contains frozen proof surfaces and historical work. Do not
