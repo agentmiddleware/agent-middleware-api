@@ -1,0 +1,20 @@
+{"event": "cors_wildcard_active: credential-less wildcard CORS is the documented default for this header-authenticated API; set CORS_ORIGINS to an explicit list to change it (see SECURITY_LIMITATIONS.md)", "level": "info", "timestamp": "2026-10-03T03:43:55.368561Z"}
+{"event": "proof_surfaces_disabled: ENABLE_PROOF_SURFACES=false; only CORE_TRUST_ROUTERS are mounted (dormant trust surfaces and proof surfaces stay unmounted and unadvertised)", "level": "info", "timestamp": "2026-10-03T03:43:55.368838Z"}
+two-workers: 20 fresh keys; owners=debits=receipts=requests=effects=1; restart retained owner
+.kill=before_owner_commit effects-at-kill=0 debits-at-kill=0 final=safe-new-admission
+.kill=after_action_prepare effects-at-kill=0 debits-at-kill=0 final=returned_error
+.kill=after_debit_commit effects-at-kill=0 debits-at-kill=1 final=returned_error
+.kill=after_dispatch_claim effects-at-kill=0 debits-at-kill=1 final=delivery_uncertain
+.kill=partner_commit_lost_ack effects-at-kill=1 debits-at-kill=1 final=delivery_uncertain
+.kill=after_receipt_commit effects-at-kill=1 debits-at-kill=1 final=succeeded
+.native controls: naive fresh retries=2 effects; retained native key=1 effect; wrong credential=0 effects
+.cross-permit boundary: owners=debits=requests=2; authoritative native business identity effects=1
+.independent partner control: requests=effects=1001; counters uncapped
+.
+=============================== warnings summary ===============================
+tests/test_action_multiprocess.py::test_twenty_fresh_keys_two_workers_and_restart
+  /Users/sellers/Projects/agent-middleware-api/.venv/lib/python3.12/site-packages/asyncpg/connect_utils.py:104: UserWarning: password file PosixPath('/dev/null') is not a plain file
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+10 passed, 1 warning in 21.56s

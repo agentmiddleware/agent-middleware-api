@@ -6,7 +6,11 @@ This work covers all **87 open GitHub issues** in PetrefiedThunder/agent-middlew
 
 [Draft PR #586](https://github.com/PetrefiedThunder/agent-middleware-api/pull/586), head `359d56393ee950dc4d826164e223f17b28ec8587`, is a separate QA evidence report with eight additional findings. Agents confirmed all eight persisted in the recovered source and prepared corrections. It is **not a fixing PR** for these unpublished repairs. No fixing PR has been created, and no issue was closed.
 
-Final aggregate validation and final review are being collected. Local fixes do not establish hosted CI, deployment, provider behavior or customer acceptance. Detailed status and remaining scope are below and in each domain report.
+Independent review found no blocking findings. Final aggregate validation is being collected. Local fixes do not establish hosted CI, deployment, provider behavior or customer acceptance. Detailed status and remaining scope are below and in each domain report.
+
+## Publication scope inherited from the recovered branch
+
+The local candidate includes the earlier single-action foundation and schema migration042, inherited through baseline `dc3da89f278832fdfe1e968737b250530be8790a` and original feature commit `62066eed2e3632cba821ee30003518b9a2017396`. It is a substantial unpublished integration: the recovered pre-audit foundation alone differs from GitHub main in263 files, including prior formatting and tooling work. The full candidate is broader than the eight follow-up fixes. [Schema042 rollout prerequisites](../schema-042-rollout.md) remain release requirements. Publishing a fixing PR must make this inherited scope clear; production rollout is a separate decision.
 
 ## Complete documentation map
 
@@ -60,6 +64,10 @@ The supplied team instruction explicitly requires Christopher's reply before pus
 - The Dockerfile base tag is not digest-pinned and full requirements include development tools; the enterprise container charter is not complete.
 - Uncertain tool delivery/receipt persistence retains authority for manual reconciliation. This is deliberate fail-closed behavior, not a guarantee of automatic recovery.
 - Existing general outbound guard DNS-rebinding limitations remain; the additional repair specifically rejects multicast destinations.
+
+## Retained fresh evidence
+
+Safe command outputs and result records from each worker are copied into [evidence/manifest.json](evidence/manifest.json), with byte sizes, SHA-256 digests and original source hashes. Retained text removes trailing whitespace; original logs remain byte-for-byte unchanged. Logs use the .txt extension so repository ignore rules do not omit them. Original raw logs remain at the task-specific temporary paths referenced by lane reports. The original 82-finding audit evidence remains preserved in the prior task directory; those links are local and are not represented as GitHub-hosted attachments.
 
 ## Verification closeout
 

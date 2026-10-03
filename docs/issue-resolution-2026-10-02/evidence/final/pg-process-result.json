@@ -1,0 +1,18 @@
+{
+  "mode": "pg-process",
+  "command": [
+    "/Users/sellers/Projects/agent-middleware-api/.venv/bin/python",
+    "-m",
+    "pytest",
+    "tests/test_action_multiprocess.py",
+    "-s",
+    "--basetemp=/tmp/amw-all-issues-20261002/final/process-artifacts",
+    "-x",
+    "-q",
+    "-ra"
+  ],
+  "head": "0db19631f8a2de879e77d9b57246c41fb261c243",
+  "exit_code": 0,
+  "started": "2026-10-03T03:43:54.382916+00:00",
+  "finished": "2026-10-03T03:44:16.487915+00:00"
+}

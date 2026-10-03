@@ -94,7 +94,16 @@ async def test_public_operator_index_has_no_fake_data_or_browser_key_handling(
     assert "railway.app" not in page
     assert "vercel.app" not in page
     assert "https://www.thisisatest.tech/proof/" in page
-    assert "https://api.thisisatest.tech/health/dependencies" in page
+    for target in (
+        "/health/dependencies",
+        "/.well-known/trust-keys.json",
+        "/.well-known/agent.json",
+        "/llms.txt",
+    ):
+        assert f'href="{target}"' in page
+    assert "https://api.thisisatest.tech/" not in page
+    for resource in ("permits", "receipts", "audit/events"):
+        assert f"${{API_URL}}/v1/me/{resource}" in page
     assert "Keep the key in your environment" in page
     assert "Public governed-tool catalog" not in page
     assert 'href="https://api.thisisatest.tech/mcp/tools.json"' not in page

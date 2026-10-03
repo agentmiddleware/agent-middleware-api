@@ -1,0 +1,28 @@
+[
+  {
+    "command": [
+      "/Users/sellers/Projects/agent-middleware-api/.venv/bin/python",
+      "-m",
+      "failure_lab.integration_check.judge",
+      "--candidate",
+      "failure_lab/integration_check/reference_candidate.py",
+      "--json",
+      "/tmp/amw-all-issues-20261002/infra/judge-reference.json"
+    ],
+    "exit_code": 0
+  },
+  {
+    "command": [
+      "/Users/sellers/Projects/agent-middleware-api/.venv/bin/python",
+      "-m",
+      "failure_lab.integration_check.judge",
+      "--candidate",
+      "failure_lab/integration_check/broken_candidate.py",
+      "--json",
+      "/tmp/amw-all-issues-20261002/infra/judge-broken.json",
+      "--expect",
+      "fail"
+    ],
+    "exit_code": 0
+  }
+]
