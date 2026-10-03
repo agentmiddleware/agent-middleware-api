@@ -183,6 +183,7 @@ async def execute_action(
             return replayed
 
         manager = get_awi_session_manager()
+        gov.dispatch_started = True
         result = await manager.execute_action(request)
         body = (
             result.model_dump(mode="json")
@@ -194,7 +195,15 @@ async def execute_action(
             request_payload=request_payload,
             response_payload=body,
         )
-    except HTTPException:
+    except HTTPException as exc:
+        if gov is not None and gov.replay_response is None:
+            await raise_awi_http_error(
+                gov,
+                status_code=exc.status_code,
+                detail=exc.detail
+                if isinstance(exc.detail, dict)
+                else {"error": "execution_failed"},
+            )
         raise
     except Exception as e:
         logger.exception(f"AWI execution failed: {request.session_id}")
