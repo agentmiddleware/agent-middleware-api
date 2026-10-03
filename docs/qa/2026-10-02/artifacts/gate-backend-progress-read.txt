@@ -1,0 +1,64 @@
+xcept ImportError', 'wrappers/autogen-agent-middleware/src', 'wrappers/crewai-agent-middleware/src', 'wrappers/langchain-agent-middleware/src', 'wrappers/openai-agent-middleware/src']`
+
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:44:35Z. [Output](artifacts/backend-wrapper-runtime-imports.txt).
+
+### 2026-10-03T00:44:53Z — posture-test-environment
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', '-c', 'from pathlib import Path; print("\\n".join(Path("tests/test_production_trust_posture.py").read_text().splitlines()[:145])); print("CI STRICT ENV"); print("\\n".join(Path(".github/workflows/ci.yml").read_text().splitlines()[430:450]))']`
+
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:44:53Z. [Output](artifacts/backend-posture-test-environment.txt).
+
+### 2026-10-03T00:45:10Z — branch-diff-scope
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['git', 'status', '--short']`
+
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:45:10Z. [Output](artifacts/backend-branch-diff-scope.txt).
+
+### 2026-10-03T00:45:10Z — sdk-wheel-install
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['uv', 'pip', 'install', '--python', '/private/tmp/amw-qa-python/bin/python', '--no-deps', './b2a_sdk', './wrappers/openai-agent-middleware']`
+
+Outcome: exit 0; 0.7s; ended 2026-10-03T00:45:11Z. [Output](artifacts/backend-sdk-wheel-install.txt).
+
+### 2026-10-03T00:45:35Z — ruff-current-qa
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['/private/tmp/amw-qa-python/bin/ruff', 'check', '.']`
+
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:45:35Z. [Output](artifacts/backend-ruff-current-qa.txt).
+
+### 2026-10-03T00:46:03Z — report-scope-clarifications
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', '-']`
+
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:46:03Z. [Output](artifacts/backend-report-scope-clarifications.txt).
+
+### 2026-10-03T00:47:11Z — checkpoint-baseline-final
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', '-']`
+
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:47:11Z. [Output](artifacts/backend-checkpoint-baseline-final.txt).
+
+# QA sweep summary — 2026-10-02
+
+PR: opened by orchestrator
+
+CI status: pending at time of writing
+
+Status: three QA group reviews and independent findings review are complete; the backend before/after execution comparison is still running at this interim edit. No product behavior, deployment configuration, migrations, environment files or secret-scan exceptions changed. Work remains uncommitted on `qa/2026-10-02-sweep` at baseline `d45754e`.
+
+Counts: Critical=0 High=0 Medium=5 Low=3
+
+| Group | 
+NEW FILES ['backend-ruff-after-qa.txt']

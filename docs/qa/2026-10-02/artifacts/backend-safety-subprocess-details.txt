@@ -1,0 +1,297 @@
+FILE tests/test_minimal_path_e2e.py
+30: from mcp import ClientSession
+31: 
+32: # streamablehttp_client is soft-deprecated in newer SDKs, but its replacement
+33: # (streamable_http_client) does not exist at the mcp>=1.28.1 floor and takes a
+34: # pre-built httpx client instead of headers. Keep the entry point that spans
+35: # the pinned range.
+36: from mcp.client.streamable_http import streamablehttp_client
+37: 
+38: from tests.test_trust_helpers import provision_agent_wallet
+39: 
+40: REPO_ROOT = Path(__file__).resolve().parent.parent
+41: GOVERNED_TOOL = "partner.notes.write"  # the one dogfood tool
+42: RECEIPT_META_KEY = "io.agentmiddleware/receipt"
+43: 
+44: 
+45: def _free_port() -> int:
+46:     with socket.socket() as sock:
+47:         sock.bind(("127.0.0.1", 0))
+48:         return sock.getsockname()[1]
+49: 
+50: 
+51: @pytest.fixture(scope="module")
+52: def live_server(tmp_path_factory):
+53:     """A real uvicorn process in strict trust mode with one governed tool."""
+54:     tmp_path = tmp_path_factory.mktemp("minimal-path-e2e")
+55:     port = _free_port()
+56:     env = {
+57:         **os.environ,
+58:         "PYTHONPATH": str(REPO_ROOT),
+59:         "ENVIRONMENT": "local",
+60:         "DATABASE_URL": f"sqlite+aiosqlite:///{tmp_path}/e2e.db",
+61:         "ALLOW_METADATA_CREATE_ALL": "true",
+62:         "VALID_API_KEYS": "test-key",
+63:         "TRUST_MODE_ENABLED": "true",
+64:         "ALLOW_LEGACY_UNPERMITTED_MCP": "false",
+65:         "TRUST_SIGNING_PRIVATE_KEY_B64": base64.b64encode(
+66:             secrets.token_bytes(32)
+67:         ).decode(),
+68:         "ENABLE_STANDARD_MCP_ENDPOINT": "true",
+69:         "ENABLE_DOGFOOD_TOOL": "true",
+70:         "ENABLE_PROOF_SURFACES": "false",
+71:     }
+72:     process = subprocess.Popen(
+73:         [
+74:             sys.executable,
+75:             "-m",
+76:             "uvicorn",
+77:             "app.main:app",
+78:             "--host",
+79:             "127.0.0.1",
+80:             "--port",
+81:             str(port),
+82:             "--log-level",
+83:             "warning",
+84:         ],
+85:         cwd=tmp_path,
+86:         env=env,
+87:         stdout=subprocess.PIPE,
+88:         stderr=subprocess.STDOUT,
+89:     )
+90:     base_url = f"http://127.0.0.1:{port}"
+91:     try:
+92:         deadline = time.monotonic() + 90
+93:         while True:
+94:             if process.poll() is not None:
+95:                 output = process.stdout.read().decode(errors="replace")
+96:                 raise RuntimeError(f"server exited during startup:\n{output}")
+97:             try:
+98:                 if httpx.get(f"{base_url}/health", timeout=2).status_code == 200:
+99:                     break
+100:             except httpx.HTTPError:
+101:                 pass
+102:             if time.monotonic() > deadline:
+103:                 process.kill()
+104:                 output = process.stdout.read().decode(errors="replace")
+105:                 raise RuntimeError(f"server never became healthy:\n{output}")
+106:             time.sleep(0.25)
+107:         yield base_url
+108:     finally:
+109:         process.terminate()
+110:         try:
+111:             process.wait(timeout=10)
+112:         except subprocess.TimeoutExpired:
+113:             process.kill()
+114: 
+115: 
+FILE tests/test_quickstart_path.py
+30: import pytest
+31: 
+32: REPO_ROOT = Path(__file__).resolve().parent.parent
+33: GOVERNED_TOOL = "partner.notes.write"
+34: TOOL_COST = "2.00000000"  # documented: 2 credits per call
+35: PERMIT_MAX_CREDITS = 7  # documented: 3 calls fit, the 4th must be denied
+36: 
+37: 
+38: def _free_port() -> int:
+39:     with socket.socket() as sock:
+40:         sock.bind(("127.0.0.1", 0))
+41:         return sock.getsockname()[1]
+42: 
+43: 
+44: @pytest.fixture(scope="module")
+45: def quickstart_server(tmp_path_factory):
+46:     """The quickstart entry point itself, serving on a free loopback port."""
+47:     state_dir = tmp_path_factory.mktemp("quickstart-state")
+48:     port = _free_port()
+49:     log_path = state_dir / "quickstart-stdout.log"
+50:     with log_path.open("wb") as log_file:
+51:         process = subprocess.Popen(
+52:             [
+53:                 sys.executable,
+54:                 str(REPO_ROOT / "scripts" / "quickstart.py"),
+55:                 "--port",
+56:                 str(port),
+57:                 "--state-dir",
+58:                 str(state_dir),
+59:             ],
+60:             cwd=REPO_ROOT,
+61:             env={**os.environ, "PYTHONPATH": str(REPO_ROOT)},
+62:             stdout=log_file,
+63:             stderr=subprocess.STDOUT,
+64:             start_new_session=True,
+65:         )
+66:     base_url = f"http://127.0.0.1:{port}"
+67:     try:
+68:         deadline = time.monotonic() + 120
+69:         while time.monotonic() < deadline:
+70:             if process.poll() is not None:
+71:                 raise RuntimeError(
+72:                     "quickstart exited early:\n"
+73:                     + log_path.read_text(encoding="utf-8", errors="replace")
+74:                 )
+75:             try:
+76:                 if httpx.get(f"{base_url}/health", timeout=2).status_code == 200:
+77:                     break
+78:             except httpx.HTTPError:
+79:                 pass
+80:             time.sleep(0.5)
+81:         else:
+82:             raise RuntimeError("quickstart server never became healthy")
+83:         yield base_url
+84:     finally:
+85:         # SIGINT exercises the script's own graceful-shutdown path; the
+86:         # killpg fallback covers the uvicorn child if that path wedges.
+87:         process.send_signal(signal.SIGINT)
+88:         try:
+89:             process.wait(timeout=20)
+90:         except subprocess.TimeoutExpired:
+91:             os.killpg(process.pid, signal.SIGKILL)
+92:             process.wait(timeout=10)
+93: 
+94: 
+95: def _prepend_pythonpath(path: Path) -> dict:
+96:     """Environment with ``path`` prepended to (not replacing) PYTHONPATH."""
+97:     env = dict(os.environ)
+98:     existing = env.get("PYTHONPATH")
+99:     env["PYTHONPATH"] = f"{path}{os.pathsep}{existing}" if existing else str(path)
+100:     return env
+101: 
+102: 
+103: def _verify_cli(bundle_path: Path, keys_path: Path) -> subprocess.CompletedProcess:
+104:     """Run the offline verifier exactly as the doc does: CLI, branchable exit."""
+105:     return subprocess.run(
+FILE tests/test_failure_lab.py
+1: """The failure lab is a published claim about the baseline as much as the gateway.
+2: 
+3: CI runs it so the numbers the report prints cannot drift from the code: the
+4: existing integration pays twice, a correctly used native idempotency key pays
+5: once with no gateway involved, the gateway pays once at either fault hop, an
+6: ambiguous dispatch is receipted and never repeated, and an agent restart with a
+7: new key defeats every configuration. The saved artifacts must exist and carry
+8: no credential material.
+9: """
+10: 
+11: from __future__ import annotations
+12: 
+13: import json
+14: import subprocess
+15: import sys
+16: from pathlib import Path
+17: from typing import Any
+18: 
+19: import pytest
+20: 
+21: 
+22: ROOT = Path(__file__).resolve().parents[1]
+23: LATENCY_SAMPLES = 2
+24: 
+25: ADMIN_KEY = "failure-lab-admin-key"
+26: UPSTREAM_BEARER = "failure-lab-upstream-bearer"
+27: SIGNING_SEED = "[REDACTED]"
+28: 
+29: 
+30: @pytest.fixture(scope="module")
+31: def lab_run(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
+32:     output_dir = tmp_path_factory.mktemp("failure-lab")
+33:     result = subprocess.run(
+34:         [
+35:             sys.executable,
+36:             "scripts/failure_lab.py",
+37:             "--json",
+38:             "--output-dir",
+39:             str(output_dir),
+40:             "--latency-samples",
+41:             str(LATENCY_SAMPLES),
+42:         ],
+43:         cwd=ROOT,
+44:         check=False,
+45:         capture_output=True,
+46:         text=True,
+47:         timeout=300,
+48:     )
+49:     assert result.returncode == 0, result.stderr[-4000:]
+50:     return json.loads(result.stdout)
+51: 
+52: 
+53: def _scenario(summary: dict[str, Any], name: str) -> dict[str, Any]:
+54:     for item in summary["scenarios"]:
+55:         if item["scenario"] == name:
+56:             return item
+57:     raise AssertionError(f"scenario {name!r} missing from the run")
+58: 
+FILE tests/test_partner_mcp.py
+210:     )
+211:     fake_uvicorn.chmod(0o700)
+212: 
+213:     environment: dict[str, Any] = os.environ.copy()
+214:     environment.update(
+215:         {
+216:             "CAPTURE_PATH": str(capture_path),
+217:             "PATH": f"{tmp_path}{os.pathsep}{environment['PATH']}",
+218:             "PORT": "9123",
+219:             "RUN_MIGRATIONS_ON_START": "false",
+220:         }
+221:     )
+222:     if app_module is None:
+223:         environment.pop("APP_MODULE", None)
+224:     else:
+225:         environment["APP_MODULE"] = app_module
+226: 
+227:     result = subprocess.run(
+228:         ["sh", "scripts/docker_entrypoint.sh"],
+229:         env=environment,
+230:         capture_output=True,
+231:         text=True,
+232:         timeout=10,
+233:         check=False,
+234:     )
+235: 
+236:     assert result.returncode == 0, result.stderr
+237:     assert capture_path.read_text(encoding="utf-8").splitlines() == [
+238:         expected,
+239:         "--host",
+240:         "0.0.0.0",
+FILE tests/test_site_agent_interface.py
+130:         if self._collecting is not None and self._nested_dl_depth == 0:
+131:             self._parts.append(data)
+132: 
+133: 
+134: def _visible_text(markup: str) -> str:
+135:     parser = _RunTogetherExtractor()
+136:     parser.feed(markup)
+137:     parser.close()
+138:     return " ".join("".join(parser.parts).split())
+139: 
+140: 
+141: def _page_text(markup: str) -> str:
+142:     parser = _TextExtractor()
+143:     parser.feed(markup)
+144:     parser.close()
+145:     return " ".join(parser.parts)
+146: 
+147: 
+148: def _render_site(output: Path, contacts: dict[str, str] | None = None):
+149:     environment = dict(os.environ)
+150:     for name in (*VALID_TEST_CONTACTS, "PUBLIC_ENABLE_VERCEL_ANALYTICS"):
+151:         environment.pop(name, None)
+152:     if contacts:
+153:         environment.update(contacts)
+154:     return subprocess.run(
+155:         [sys.executable, str(SITE / "build_site.py"), "--output", str(output)],
+156:         cwd=SITE,
+157:         env=environment,
+158:         capture_output=True,
+159:         text=True,
+160:         check=False,
+161:     )
+162: 
+163: 
+164: def _png_dimensions(path: Path) -> tuple[int, int]:
+165:     with path.open("rb") as handle:
+166:         assert handle.read(8) == b"\x89PNG\r\n\x1a\n"
+167:         length = struct.unpack(">I", handle.read(4))[0]
+168:         assert handle.read(4) == b"IHDR"
+169:         width, height = struct.unpack(">II", handle.read(8))
+170:         assert length == 13

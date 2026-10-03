@@ -1,0 +1,25 @@
+tests/test_postgres_datetime_binding.py:17:driver and is skipped unless ``TEST_POSTGRES_URL`` is set (CI sets it).
+tests/test_postgres_datetime_binding.py:77:POSTGRES_URL = os.environ.get("TEST_POSTGRES_URL", "").strip()
+tests/test_postgres_datetime_binding.py:80:@pytest.mark.skipif(
+tests/test_postgres_datetime_binding.py:81:    not POSTGRES_URL,
+tests/test_postgres_datetime_binding.py:82:    reason="TEST_POSTGRES_URL not set; Postgres-dialect coverage skipped",
+tests/test_postgres_datetime_binding.py:110:                "DATABASE_URL",
+tests/test_postgres_datetime_binding.py:113:                "ALLOW_LEGACY_UNPERMITTED_MCP",
+tests/test_postgres_datetime_binding.py:118:        os.environ["DATABASE_URL"] = POSTGRES_URL
+tests/test_postgres_datetime_binding.py:121:        os.environ["ALLOW_LEGACY_UNPERMITTED_MCP"] = "false"
+tests/test_duplicate_guard_postgres_concurrency.py:37:        pytest.skip("requires a PostgreSQL DATABASE_URL for real row-lock semantics")
+tests/test_duplicate_guard_postgres_concurrency.py:38:    if os.environ.get("RUN_POSTGRES_CONCURRENCY_TESTS") != "1":
+tests/test_duplicate_guard_postgres_concurrency.py:40:            "set RUN_POSTGRES_CONCURRENCY_TESTS=1 only with an isolated "
+tests/test_mcp_postgres_multiprocess.py:118:    if os.environ.get("RUN_MCP_MULTIPROCESS_TESTS") != "1":
+tests/test_mcp_postgres_multiprocess.py:120:            "set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated "
+tests/test_mcp_postgres_multiprocess.py:130:    database_url = os.environ.get("DATABASE_URL", "").strip()
+tests/test_mcp_postgres_multiprocess.py:132:        pytest.fail("DATABASE_URL is required for the opt-in harness", pytrace=False)
+tests/test_mcp_postgres_multiprocess.py:137:            "the opt-in harness requires a PostgreSQL DATABASE_URL",
+tests/test_mcp_postgres_multiprocess.py:514:            "ALLOW_LEGACY_UNPERMITTED_MCP": "false",
+tests/test_mcp_postgres_multiprocess.py:515:            "ALLOW_METADATA_CREATE_ALL": "false",
+tests/test_mcp_postgres_multiprocess.py:516:            "DATABASE_URL": harness.database_url,
+tests/test_mcp_postgres_multiprocess.py:547:            "RUN_MCP_MULTIPROCESS_TESTS": "1",
+tests/test_permit_postgres_concurrency.py:147:        pytest.skip("requires a PostgreSQL DATABASE_URL for real row-lock semantics")
+tests/test_permit_postgres_concurrency.py:148:    if os.environ.get("RUN_POSTGRES_CONCURRENCY_TESTS") != "1":
+tests/test_permit_postgres_concurrency.py:150:            "set RUN_POSTGRES_CONCURRENCY_TESTS=1 only with an isolated "
+CI workflows ['.github/workflows/failure-lab.yml', '.github/workflows/docker-publish.yml', '.github/workflows/railway-deploy.yml', '.github/workflows/python-sdk-release.yml', '.github/workflows/publish-mcp.yml', '.github/workflows/auto-pr.yml', '.github/workflows/ci.yml']

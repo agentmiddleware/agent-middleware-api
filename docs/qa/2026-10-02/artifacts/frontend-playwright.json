@@ -1,0 +1,783 @@
+{
+  "config": {
+    "argv": [
+      "/opt/homebrew/Cellar/node/26.7.0/bin/node",
+      "/private/tmp/amw-qa-browser/node_modules/@playwright/test/cli.js",
+      "test",
+      "--config",
+      "docs/qa/2026-10-02/playwright.config.cjs",
+      "--list"
+    ],
+    "configFile": "/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api/docs/qa/2026-10-02/playwright.config.cjs",
+    "rootDir": "/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api/docs/qa/2026-10-02",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {},
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api/docs/qa/2026-10-02/artifacts/frontend-playwright",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {},
+        "id": "chromium",
+        "name": "chromium",
+        "testDir": "/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api/docs/qa/2026-10-02",
+        "testIgnore": [],
+        "testMatch": [
+          "frontend.spec.cjs",
+          "ux-regressions.spec.cjs"
+        ],
+        "timeout": 30000
+      },
+      {
+        "outputDir": "/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api/docs/qa/2026-10-02/artifacts/frontend-playwright",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {},
+        "id": "firefox",
+        "name": "firefox",
+        "testDir": "/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api/docs/qa/2026-10-02",
+        "testIgnore": [],
+        "testMatch": [
+          "frontend.spec.cjs",
+          "ux-regressions.spec.cjs"
+        ],
+        "timeout": 30000
+      },
+      {
+        "outputDir": "/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api/docs/qa/2026-10-02/artifacts/frontend-playwright",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {},
+        "id": "webkit",
+        "name": "webkit",
+        "testDir": "/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api/docs/qa/2026-10-02",
+        "testIgnore": [],
+        "testMatch": [
+          "frontend.spec.cjs",
+          "ux-regressions.spec.cjs"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list",
+        null
+      ],
+      [
+        "json",
+        {
+          "outputFile": "/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api/docs/qa/2026-10-02/artifacts/frontend-playwright.json"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.63.0",
+    "workers": 1,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "frontend.spec.cjs",
+      "file": "frontend.spec.cjs",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "main public pages load without browser or resource errors",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [],
+              "status": "skipped"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-0c54c00d0bd18734b72e",
+          "file": "frontend.spec.cjs",
+          "line": 9,
+          "column": 1
+        },
+        {
+          "title": "calculator valid, boundary, invalid and cleared states stay local",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [],
+              "status": "skipped"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-27cbb056d39c5ec5bdc2",
+          "file": "frontend.spec.cjs",
+          "line": 21,
+          "column": 1
+        },
+        {
+          "title": "receipt evidence loads without claiming cryptographic verification",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [],
+              "status": "skipped"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-2032e5cbf7c1bb4f378c",
+          "file": "frontend.spec.cjs",
+          "line": 48,
+          "column": 1
+        },
+        {
+          "title": "receipt load failure removes published data and verification claims",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [],
+              "status": "skipped"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-29e0bda360dfe2197a23",
+          "file": "frontend.spec.cjs",
+          "line": 54,
+          "column": 1
+        },
+        {
+          "title": "malformed receipt payload fails closed",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [],
+              "status": "skipped"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-7eadad4c864ed9674ba6",
+          "file": "frontend.spec.cjs",
+          "line": 62,
+          "column": 1
+        },
+        {
+          "title": "mobile pages do not overflow",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [],
+              "status": "skipped"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-d7d375bb599ed2306e8b",
+          "file": "frontend.spec.cjs",
+          "line": 68,
+          "column": 1
+        },
+        {
+          "title": "operator index is static and does not ask for credentials",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [],
+              "status": "skipped"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-b227e6aeb69733a99592",
+          "file": "frontend.spec.cjs",
+          "line": 77,
+          "column": 1
+        },
+        {
+          "title": "no JavaScript retains the pilot and proof entry path",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [],
+              "status": "skipped"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-555c64b9cb4662e07e56",
+          "file": "frontend.spec.cjs",
+          "line": 84,
+          "column": 1
+        },
+        {
+          "title": "main public pages load without browser or resource errors",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [],
+              "status": "skipped"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-a4ce00f6a3251474301d",
+          "file": "frontend.spec.cjs",
+          "line": 9,
+          "column": 1
+        },
+        {
+          "title": "calculator valid, boundary, invalid and cleared states stay local",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [],
+              "status": "skipped"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-1db6cdfa42c29c53baff",
+          "file": "frontend.spec.cjs",
+          "line": 21,
+          "column": 1
+        },
+        {
+          "title": "receipt evidence loads without claiming cryptographic verification",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [],
+              "status": "skipped"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-e80428eb7568a1884abb",
+          "file": "frontend.spec.cjs",
+          "line": 48,
+          "column": 1
+        },
+        {
+          "title": "receipt load failure removes published data and verification claims",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [],
+              "status": "skipped"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-2220ad01a9e802083bfa",
+          "file": "frontend.spec.cjs",
+          "line": 54,
+          "column": 1
+        },
+        {
+          "title": "malformed receipt payload fails closed",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [],
+              "status": "skipped"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-68c8b5bd43f4fc793a2f",
+          "file": "frontend.spec.cjs",
+          "line": 62,
+          "column": 1
+        },
+        {
+          "title": "mobile pages do not overflow",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [],
+              "status": "skipped"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-2b9a46a4e20c4cffde41",
+          "file": "frontend.spec.cjs",
+          "line": 68,
+          "column": 1
+        },
+        {
+          "title": "operator index is static and does not ask for credentials",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [],
+              "status": "skipped"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-127e726e61aaa5007d53",
+          "file": "frontend.spec.cjs",
+          "line": 77,
+          "column": 1
+        },
+        {
+          "title": "no JavaScript retains the pilot and proof entry path",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [],
+              "status": "skipped"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-5d58a37e3cecdb939f22",
+          "file": "frontend.spec.cjs",
+          "line": 84,
+          "column": 1
+        },
+        {
+          "title": "main public pages load without browser or resource errors",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [],
+              "status": "skipped"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-6a21f14bcdbc8f865cc5",
+          "file": "frontend.spec.cjs",
+          "line": 9,
+          "column": 1
+        },
+        {
+          "title": "calculator valid, boundary, invalid and cleared states stay local",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [],
+              "status": "skipped"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-df97b96c319501f354a8",
+          "file": "frontend.spec.cjs",
+          "line": 21,
+          "column": 1
+        },
+        {
+          "title": "receipt evidence loads without claiming cryptographic verification",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [],
+              "status": "skipped"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-82200e3f2e166ce0adb5",
+          "file": "frontend.spec.cjs",
+          "line": 48,
+          "column": 1
+        },
+        {
+          "title": "receipt load failure removes published data and verification claims",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [],
+              "status": "skipped"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-1590a5288c782ed46c7b",
+          "file": "frontend.spec.cjs",
+          "line": 54,
+          "column": 1
+        },
+        {
+          "title": "malformed receipt payload fails closed",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [],
+              "status": "skipped"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-3ea4c77a6b0c77953725",
+          "file": "frontend.spec.cjs",
+          "line": 62,
+          "column": 1
+        },
+        {
+          "title": "mobile pages do not overflow",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [],
+              "status": "skipped"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-369fbbd6f586883919a2",
+          "file": "frontend.spec.cjs",
+          "line": 68,
+          "column": 1
+        },
+        {
+          "title": "operator index is static and does not ask for credentials",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [],
+              "status": "skipped"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-8f59ec664c8ed0793185",
+          "file": "frontend.spec.cjs",
+          "line": 77,
+          "column": 1
+        },
+        {
+          "title": "no JavaScript retains the pilot and proof entry path",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [],
+              "status": "skipped"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-2436b34e5b25e2046b88",
+          "file": "frontend.spec.cjs",
+          "line": 84,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "ux-regressions.spec.cjs",
+      "file": "ux-regressions.spec.cjs",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "UX-001: comparison fit text meets minimum contrast",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [],
+              "status": "skipped"
+            }
+          ],
+          "id": "9f4e50e9645c543619a5-468b062b07a91190dd34",
+          "file": "ux-regressions.spec.cjs",
+          "line": 15,
+          "column": 1
+        },
+        {
+          "title": "UX-002: dashboard scrollable commands have explicit keyboard access",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [],
+              "status": "skipped"
+            }
+          ],
+          "id": "9f4e50e9645c543619a5-058c1616a89d83d5d7d3",
+          "file": "ux-regressions.spec.cjs",
+          "line": 28,
+          "column": 1
+        },
+        {
+          "title": "UX-003: operator runtime links remain on the served origin",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [],
+              "status": "skipped"
+            }
+          ],
+          "id": "9f4e50e9645c543619a5-e26c7deb5e9918d3f66f",
+          "file": "ux-regressions.spec.cjs",
+          "line": 42,
+          "column": 1
+        },
+        {
+          "title": "UX-001: comparison fit text meets minimum contrast",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [],
+              "status": "skipped"
+            }
+          ],
+          "id": "9f4e50e9645c543619a5-a01f16e63a6f67c2da3b",
+          "file": "ux-regressions.spec.cjs",
+          "line": 15,
+          "column": 1
+        },
+        {
+          "title": "UX-002: dashboard scrollable commands have explicit keyboard access",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [],
+              "status": "skipped"
+            }
+          ],
+          "id": "9f4e50e9645c543619a5-7f23a4661a2901974e3e",
+          "file": "ux-regressions.spec.cjs",
+          "line": 28,
+          "column": 1
+        },
+        {
+          "title": "UX-003: operator runtime links remain on the served origin",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [],
+              "status": "skipped"
+            }
+          ],
+          "id": "9f4e50e9645c543619a5-8c42fabd072a69a61ed1",
+          "file": "ux-regressions.spec.cjs",
+          "line": 42,
+          "column": 1
+        },
+        {
+          "title": "UX-001: comparison fit text meets minimum contrast",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [],
+              "status": "skipped"
+            }
+          ],
+          "id": "9f4e50e9645c543619a5-31b31a88bae625de39d2",
+          "file": "ux-regressions.spec.cjs",
+          "line": 15,
+          "column": 1
+        },
+        {
+          "title": "UX-002: dashboard scrollable commands have explicit keyboard access",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [],
+              "status": "skipped"
+            }
+          ],
+          "id": "9f4e50e9645c543619a5-8fc971df99e51848dec7",
+          "file": "ux-regressions.spec.cjs",
+          "line": 28,
+          "column": 1
+        },
+        {
+          "title": "UX-003: operator runtime links remain on the served origin",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [],
+              "status": "skipped"
+            }
+          ],
+          "id": "9f4e50e9645c543619a5-235fd87a094d2e1938c5",
+          "file": "ux-regressions.spec.cjs",
+          "line": 42,
+          "column": 1
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-10-03T00:44:24.354Z",
+    "duration": 58.658000000000015,
+    "expected": 0,
+    "skipped": 33,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

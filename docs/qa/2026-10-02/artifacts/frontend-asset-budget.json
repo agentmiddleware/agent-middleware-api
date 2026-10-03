@@ -1,0 +1,231 @@
+{
+  "scope": "Static byte inventory only. No Lighthouse or runtime Web Vitals measured.",
+  "total_bytes": 1324673,
+  "assets": [
+    {
+      "path": ".well-known/agent.json",
+      "bytes": 4407,
+      "gzip_bytes": 1590
+    },
+    {
+      "path": ".well-known/security.txt",
+      "bytes": 942,
+      "gzip_bytes": 595
+    },
+    {
+      "path": "404.html",
+      "bytes": 5922,
+      "gzip_bytes": 1782
+    },
+    {
+      "path": "a11y-preload.js",
+      "bytes": 841,
+      "gzip_bytes": 466
+    },
+    {
+      "path": "a11y.js",
+      "bytes": 7337,
+      "gzip_bytes": 1881
+    },
+    {
+      "path": "analytics.js",
+      "bytes": 700,
+      "gzip_bytes": 406
+    },
+    {
+      "path": "arcade-boot.js",
+      "bytes": 4394,
+      "gzip_bytes": 1760
+    },
+    {
+      "path": "arcade.css",
+      "bytes": 34290,
+      "gzip_bytes": 9404
+    },
+    {
+      "path": "arcade.js",
+      "bytes": 610364,
+      "gzip_bytes": 143737
+    },
+    {
+      "path": "compare/index.html",
+      "bytes": 31604,
+      "gzip_bytes": 7764
+    },
+    {
+      "path": "concept/concept.css",
+      "bytes": 260,
+      "gzip_bytes": 210
+    },
+    {
+      "path": "concept/index.html",
+      "bytes": 7254,
+      "gzip_bytes": 2183
+    },
+    {
+      "path": "favicon.svg",
+      "bytes": 788,
+      "gzip_bytes": 516
+    },
+    {
+      "path": "fonts/OFL.txt",
+      "bytes": 5762,
+      "gzip_bytes": 2472
+    },
+    {
+      "path": "fonts/ibm-plex-mono-400-latin-ext.6bc0f226.woff2",
+      "bytes": 13348,
+      "gzip_bytes": 13371
+    },
+    {
+      "path": "fonts/ibm-plex-mono-400-latin.08949f72.woff2",
+      "bytes": 14708,
+      "gzip_bytes": 14731
+    },
+    {
+      "path": "fonts/ibm-plex-mono-500-latin-ext.6bb06407.woff2",
+      "bytes": 13432,
+      "gzip_bytes": 13455
+    },
+    {
+      "path": "fonts/ibm-plex-mono-500-latin.01d28544.woff2",
+      "bytes": 14888,
+      "gzip_bytes": 14911
+    },
+    {
+      "path": "fonts/ibm-plex-mono-600-latin-ext.32057cf5.woff2",
+      "bytes": 14328,
+      "gzip_bytes": 14351
+    },
+    {
+      "path": "fonts/ibm-plex-mono-600-latin.0d1f0b8d.woff2",
+      "bytes": 15620,
+      "gzip_bytes": 15643
+    },
+    {
+      "path": "fonts/instrument-serif-400-latin-ext.290e6267.woff2",
+      "bytes": 11604,
+      "gzip_bytes": 11627
+    },
+    {
+      "path": "fonts/instrument-serif-400-latin.5eb09b5a.woff2",
+      "bytes": 21032,
+      "gzip_bytes": 21053
+    },
+    {
+      "path": "fonts/libre-franklin-latin-ext.61216d8e.woff2",
+      "bytes": 25692,
+      "gzip_bytes": 25720
+    },
+    {
+      "path": "fonts/libre-franklin-latin.52e60585.woff2",
+      "bytes": 29292,
+      "gzip_bytes": 29320
+    },
+    {
+      "path": "fonts/press-start-2p-400-latin-ext.3c7df3a1.woff2",
+      "bytes": 9856,
+      "gzip_bytes": 9879
+    },
+    {
+      "path": "fonts/press-start-2p-400-latin.afec8699.woff2",
+      "bytes": 12512,
+      "gzip_bytes": 12535
+    },
+    {
+      "path": "fonts/public-sans-latin-ext.3a00a32f.woff2",
+      "bytes": 18472,
+      "gzip_bytes": 18500
+    },
+    {
+      "path": "fonts/public-sans-latin.5ed4d31c.woff2",
+      "bytes": 26832,
+      "gzip_bytes": 26860
+    },
+    {
+      "path": "fonts.css",
+      "bytes": 8686,
+      "gzip_bytes": 954
+    },
+    {
+      "path": "index.html",
+      "bytes": 58631,
+      "gzip_bytes": 13568
+    },
+    {
+      "path": "llm.txt",
+      "bytes": 3644,
+      "gzip_bytes": 1670
+    },
+    {
+      "path": "llms-full.txt",
+      "bytes": 5815,
+      "gzip_bytes": 2620
+    },
+    {
+      "path": "llms.txt",
+      "bytes": 3644,
+      "gzip_bytes": 1670
+    },
+    {
+      "path": "pilot-fit.js",
+      "bytes": 3686,
+      "gzip_bytes": 1341
+    },
+    {
+      "path": "proof/index.html",
+      "bytes": 19612,
+      "gzip_bytes": 4673
+    },
+    {
+      "path": "proof/proof.js",
+      "bytes": 2254,
+      "gzip_bytes": 823
+    },
+    {
+      "path": "proof/receipt.json",
+      "bytes": 1237,
+      "gzip_bytes": 756
+    },
+    {
+      "path": "proof/transcript.json",
+      "bytes": 6196,
+      "gzip_bytes": 2082
+    },
+    {
+      "path": "proof/trust-keys.json",
+      "bytes": 944,
+      "gzip_bytes": 502
+    },
+    {
+      "path": "robots.txt",
+      "bytes": 776,
+      "gzip_bytes": 355
+    },
+    {
+      "path": "sitemap.xml",
+      "bytes": 412,
+      "gzip_bytes": 187
+    },
+    {
+      "path": "social-card.png",
+      "bytes": 158388,
+      "gzip_bytes": 156050
+    },
+    {
+      "path": "styles.css",
+      "bytes": 51901,
+      "gzip_bytes": 12373
+    },
+    {
+      "path": "va-init.js",
+      "bytes": 351,
+      "gzip_bytes": 276
+    },
+    {
+      "path": "wave.js",
+      "bytes": 42015,
+      "gzip_bytes": 13400
+    }
+  ]
+}

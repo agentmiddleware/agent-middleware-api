@@ -1,0 +1,26 @@
+UTC 2026-10-03T00:54:17.331753+00:00
+Coverage artifacts ['backend-baseline-final-coverage.json', 'backend-baseline-coverage.json']
+Latest backend outcomes
+rd-source.txt).
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:41:57Z. [Output](artifacts/backend-retire-disproved-surrogate-finding.txt).
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:42:26Z. [Output](artifacts/backend-runtime-progress-and-charter.txt).
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:42:35Z. [Output](artifacts/backend-sdk-production-gates.txt).
+Outcome: exit 1; 364.1s; ended 2026-10-03T00:42:38Z. [Output](artifacts/backend-baseline-suite.txt).
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:43:08Z. [Output](artifacts/backend-backend-report-draft.txt).
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:43:35Z. [Output](artifacts/backend-numeric-address-guard-calibration.txt).
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:43:47Z. [Output](artifacts/backend-baseline-failure-classification.txt).
+Outcome: exit 0; 0.1s; ended 2026-10-03T00:44:14Z. [Output](artifacts/backend-sdk-import-safety.txt).
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:44:35Z. [Output](artifacts/backend-wrapper-runtime-imports.txt).
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:44:53Z. [Output](artifacts/backend-posture-test-environment.txt).
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:45:10Z. [Output](artifacts/backend-branch-diff-scope.txt).
+Outcome: exit 0; 0.7s; ended 2026-10-03T00:45:11Z. [Output](artifacts/backend-sdk-wheel-install.txt).
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:45:35Z. [Output](artifacts/backend-ruff-current-qa.txt).
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:46:03Z. [Output](artifacts/backend-report-scope-clarifications.txt).
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:47:11Z. [Output](artifacts/backend-checkpoint-baseline-final.txt).
+Outcome: exit 0; 338.8s; ended 2026-10-03T00:49:13Z. [Output](artifacts/backend-baseline-final.txt).
+Outcome: exit 0; 4.8s; ended 2026-10-03T00:49:21Z. [Output](artifacts/backend-added-tests.txt).
+Outcome: exit 0; 0.1s; ended 2026-10-03T00:49:49Z. [Output](artifacts/backend-optional-framework-availability.txt).
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:49:49Z. [Output](artifacts/backend-report-confirm-added-tests.txt).
+Outcome: exit 0; 0.4s; ended 2026-10-03T00:51:08Z. [Output](artifacts/backend-dependency-consistency.txt).
+Outcome for `backend-after-checkpoint`: exit 0; 0.0s; ended 2026-10-03T00:54:08Z. [Output](artifacts/backend-after-checkpoint.txt).
+Tracked product files unchanged is still required at closeout.

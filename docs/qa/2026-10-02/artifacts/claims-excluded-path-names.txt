@@ -1,0 +1,6 @@
+Excluded path names only; no contents read:
+.env.example
+docs/agent-self-credentialing.md
+scripts/agent_self_credential_proof.py
+tests/test_agent_self_credential_proof.py
+tests/test_secret_persistence.py
