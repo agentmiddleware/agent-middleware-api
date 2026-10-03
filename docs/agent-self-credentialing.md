@@ -113,7 +113,9 @@ Not proven by this harness, and not claimed:
   local JSONL file and is labeled `simulation: true` in discovery.
   `partner.echo` uses the configured upstream MCP adapter and durable dispatch
   state machine. Local governed tools have no dispatch state machine and
-  interrupted calls fail closed into manual review.
+  interrupted calls without a receipt fail closed into manual review. When a
+  receipt exists, local reconciliation can recover the outcome and receipt
+  reference, not the original response.
 - **Receipt completion.** A call can commit effects or a debit but fail to
   write its audit event or receipt, returning `manual_review_required` with
   no receipt. Do not retry with a new idempotency key: that can execute and
