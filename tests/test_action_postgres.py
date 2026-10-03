@@ -66,6 +66,53 @@ async def test_twenty_fresh_action_keys_share_accounting(action_runtime):
     await action.test_twenty_fresh_action_keys_share_accounting(action_runtime)
 
 
+async def test_fifty_parallel_action_requests_share_one_verified_receipt(
+    action_runtime,
+):
+    import asyncio
+    import json
+    from app.services.receipts import get_receipt_service
+
+    surfaces = ("standard", "legacy", "rest")
+    responses = await asyncio.wait_for(
+        asyncio.gather(
+            *(
+                action.invoke_action(
+                    action_runtime, surfaces[index % 3], f"fifty-parallel-{index}"
+                )
+                for index in range(50)
+            )
+        ),
+        timeout=30,
+    )
+    await action.assert_action_accounting(action_runtime)
+    owner = (await action.action_rows())[0]
+    receipt_id = json.loads(owner.response_json)["receipt"]["receipt_id"]
+    valid, reason, receipt = await get_receipt_service().verify_receipt(receipt_id)
+    assert valid, reason
+    assert receipt.receipt_id == receipt_id
+    for response in responses:
+        assert response.status_code in (200, 409), response.text
+        if "idempotency_in_progress" not in response.text:
+            assert response.status_code == 200, response.text
+            assert receipt_id in response.text
+    for surface in surfaces:
+        replay = await action.invoke_action(
+            action_runtime, surface, f"fifty-replay-{surface}"
+        )
+        assert replay.status_code == 200 and "error" not in replay.json(), replay.text
+        assert receipt_id in replay.text
+        assert (await action.action_rows())[0].model_dump() == owner.model_dump()
+    await action.assert_action_accounting(action_runtime)
+    (
+        valid_after,
+        reason_after,
+        receipt_after,
+    ) = await get_receipt_service().verify_receipt(receipt_id)
+    assert valid_after, reason_after
+    assert receipt_after.model_dump() == receipt.model_dump()
+
+
 async def test_new_trusted_permit_intentionally_repeats(action_runtime):
     await action.test_new_trusted_permit_intentionally_repeats(action_runtime)
 
