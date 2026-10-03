@@ -335,9 +335,11 @@ html[data-a11y-contrast="high"] .site-nav {
 
 .nav-links a {
   color: var(--text-dim);
+  min-width: 44px;
   min-height: 44px;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
 }
 
 .nav-links a:hover {
@@ -1541,6 +1543,10 @@ main,
 .footer-directory a {
   color: var(--text);
   width: fit-content;
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
 }
 
 .footer-directory a:hover {

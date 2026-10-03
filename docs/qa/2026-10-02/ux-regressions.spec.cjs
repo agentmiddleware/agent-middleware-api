@@ -61,3 +61,46 @@ test('UX-003: operator runtime links remain on the served origin', async ({page}
     }
   }
 });
+
+for (const width of [360, 768, 1280, 1920]) {
+  test(`TC-FE-004: navigation and footer touch targets at ${width}px`, async ({page}) => {
+    await page.setViewportSize({width, height: 1000});
+    for (const route of ['/', '/proof/', '/compare/', '/concept/', '/404.html',
+      'http://127.0.0.1:8766/dashboard.html']) {
+      await page.goto(route);
+      await page.evaluate(() => document.fonts.ready);
+      const layout = await page.evaluate(() => {
+        // Standalone navigation and footer links have touch targets; inline
+        // prose links retain text flow and are outside this regression's scope.
+        const targets = [...document.querySelectorAll('.site-nav a, .site-footer a, body > header a, body > footer a')];
+        const small = targets.filter(element => {
+          const bounds = element.getBoundingClientRect();
+          return bounds.width < 44 || bounds.height < 44;
+        }).map(element => ({text: element.textContent.trim(),
+          width: element.getBoundingClientRect().width,
+          height: element.getBoundingClientRect().height}));
+        const controls = [...document.querySelectorAll('a[href],button,input,select,textarea,[tabindex="0"]')]
+          .filter(element => getComputedStyle(element).visibility !== 'hidden');
+        const overlaps = [];
+        for (let i = 0; i < controls.length; i++) {
+          for (let j = i + 1; j < controls.length; j++) {
+            const a = controls[i], b = controls[j];
+            if (a.contains(b) || b.contains(a)) continue;
+            // A wrapped inline link's bounding box includes empty line space;
+            // compare its actual rendered fragments to avoid false collisions.
+            const intersects = [...a.getClientRects()].some(x => [...b.getClientRects()].some(y =>
+              Math.min(x.right, y.right) - Math.max(x.left, y.left) > 2 &&
+              Math.min(x.bottom, y.bottom) - Math.max(x.top, y.top) > 2));
+            if (intersects) overlaps.push([a.textContent.trim(), b.textContent.trim()]);
+          }
+        }
+        return {targetCount: targets.length, small, overlaps,
+          horizontalOverflow: document.documentElement.scrollWidth > innerWidth};
+      });
+      expect(layout.targetCount, route).toBeGreaterThan(0);
+      expect(layout.small, `${route} at ${width}px`).toEqual([]);
+      expect(layout.horizontalOverflow, `${route} at ${width}px`).toBe(false);
+      expect(layout.overlaps, `${route} at ${width}px`).toEqual([]);
+    }
+  });
+}
