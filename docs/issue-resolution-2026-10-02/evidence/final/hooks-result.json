@@ -1,0 +1,12 @@
+{
+  "command": [
+    "pre-commit",
+    "run",
+    "--all-files"
+  ],
+  "head": "0db19631f8a2de879e77d9b57246c41fb261c243",
+  "mode": "hooks",
+  "exit_code": 0,
+  "started": "2026-10-03T03:43:32.870474+00:00",
+  "finished": "2026-10-03T03:43:41.807410+00:00"
+}

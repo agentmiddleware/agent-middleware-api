@@ -1,0 +1,29 @@
+✖ explicit zero reaches the API unchanged and its rejection propagates (2.357125ms)
+✔ only omitted maxSteps defaults to 100; explicit limits stay unchanged (1.101167ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 1
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 103.840583
+
+✖ failing tests:
+
+test at ../../../../../private/tmp/amw-all-issues-20261002/frontend/sdk-baseline/tests/session.test.cjs:14:1
+✖ explicit zero reaches the API unchanged and its rejection propagates (2.357125ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  100 !== 0
+
+      at TestContext.<anonymous> (/private/tmp/amw-all-issues-20261002/frontend/sdk-baseline/tests/session.test.cjs:26:10)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 100,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

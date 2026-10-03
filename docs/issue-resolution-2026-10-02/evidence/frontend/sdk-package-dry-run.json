@@ -1,0 +1,51 @@
+[
+  {
+    "id": "@agent-middleware/awi-sdk@0.1.0",
+    "name": "@agent-middleware/awi-sdk",
+    "version": "0.1.0",
+    "size": 5363,
+    "unpackedSize": 21602,
+    "shasum": "5d7cb7733cfaa18858931f4400b84327367f2273",
+    "integrity": "sha512-+dUqZI+Mapb9FLJaHGRTN3CXLXYzoyZ9nmMeRGO+xX6QUwE5rpLfM6mZSoSOj7X2gDvdmf4yflPRdHpOHlY0/w==",
+    "filename": "agent-middleware-awi-sdk-0.1.0.tgz",
+    "files": [
+      {
+        "path": "LICENSE",
+        "size": 1076,
+        "mode": 420
+      },
+      {
+        "path": "dist/index.d.ts",
+        "size": 4356,
+        "mode": 420
+      },
+      {
+        "path": "dist/index.js",
+        "size": 5611,
+        "mode": 420
+      },
+      {
+        "path": "index.ts",
+        "size": 7970,
+        "mode": 420
+      },
+      {
+        "path": "package.json",
+        "size": 582,
+        "mode": 420
+      },
+      {
+        "path": "tests/session.test.cjs",
+        "size": 1804,
+        "mode": 420
+      },
+      {
+        "path": "tsconfig.json",
+        "size": 203,
+        "mode": 420
+      }
+    ],
+    "entryCount": 7,
+    "bundled": []
+  }
+]

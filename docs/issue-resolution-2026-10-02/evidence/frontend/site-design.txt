@@ -1,0 +1,1 @@
+78 design scenarios passed: shared shell, theme, responsive layout, keyboard, accessibility preferences, and no-JavaScript rendering.

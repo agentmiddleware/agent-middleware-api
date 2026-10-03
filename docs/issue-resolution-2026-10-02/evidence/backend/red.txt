@@ -1,0 +1,843 @@
+Using CPython 3.13.14
+Creating virtual environment at: .venv
+Downloading ast-serialize (1.2MiB)
+Downloading mypy (13.6MiB)
+ Downloaded ast-serialize
+ Downloaded mypy
+Installed 69 packages in 217ms
+FFFF............FFFFFFFFFFFFFFFFFFFFFFFF                                 [100%]
+=================================== FAILURES ===================================
+___________ test_openapi_declares_bearer_or_api_key[/v1/permits-get] ___________
+
+path = '/v1/permits', method = 'get'
+
+    @pytest.mark.parametrize(
+        "path,method",
+        [
+            ("/v1/permits", "get"),
+            ("/v1/permits", "post"),
+            ("/v1/receipts", "get"),
+            ("/v1/me/authority", "get"),
+        ],
+    )
+    def test_openapi_declares_bearer_or_api_key(path, method):
+        previous_schema = app.openapi_schema
+        try:
+            app.openapi_schema = None
+            schema = app.openapi()
+            schemes = schema["components"]["securitySchemes"]
+>           assert schemes["HTTPBearer"]["type"] == "http"
+                   ^^^^^^^^^^^^^^^^^^^^^
+E           KeyError: 'HTTPBearer'
+
+tests/test_backend_contract_regressions.py:34: KeyError
+__________ test_openapi_declares_bearer_or_api_key[/v1/permits-post] ___________
+
+path = '/v1/permits', method = 'post'
+
+    @pytest.mark.parametrize(
+        "path,method",
+        [
+            ("/v1/permits", "get"),
+            ("/v1/permits", "post"),
+            ("/v1/receipts", "get"),
+            ("/v1/me/authority", "get"),
+        ],
+    )
+    def test_openapi_declares_bearer_or_api_key(path, method):
+        previous_schema = app.openapi_schema
+        try:
+            app.openapi_schema = None
+            schema = app.openapi()
+            schemes = schema["components"]["securitySchemes"]
+>           assert schemes["HTTPBearer"]["type"] == "http"
+                   ^^^^^^^^^^^^^^^^^^^^^
+E           KeyError: 'HTTPBearer'
+
+tests/test_backend_contract_regressions.py:34: KeyError
+__________ test_openapi_declares_bearer_or_api_key[/v1/receipts-get] ___________
+
+path = '/v1/receipts', method = 'get'
+
+    @pytest.mark.parametrize(
+        "path,method",
+        [
+            ("/v1/permits", "get"),
+            ("/v1/permits", "post"),
+            ("/v1/receipts", "get"),
+            ("/v1/me/authority", "get"),
+        ],
+    )
+    def test_openapi_declares_bearer_or_api_key(path, method):
+        previous_schema = app.openapi_schema
+        try:
+            app.openapi_schema = None
+            schema = app.openapi()
+            schemes = schema["components"]["securitySchemes"]
+>           assert schemes["HTTPBearer"]["type"] == "http"
+                   ^^^^^^^^^^^^^^^^^^^^^
+E           KeyError: 'HTTPBearer'
+
+tests/test_backend_contract_regressions.py:34: KeyError
+________ test_openapi_declares_bearer_or_api_key[/v1/me/authority-get] _________
+
+path = '/v1/me/authority', method = 'get'
+
+    @pytest.mark.parametrize(
+        "path,method",
+        [
+            ("/v1/permits", "get"),
+            ("/v1/permits", "post"),
+            ("/v1/receipts", "get"),
+            ("/v1/me/authority", "get"),
+        ],
+    )
+    def test_openapi_declares_bearer_or_api_key(path, method):
+        previous_schema = app.openapi_schema
+        try:
+            app.openapi_schema = None
+            schema = app.openapi()
+            schemes = schema["components"]["securitySchemes"]
+>           assert schemes["HTTPBearer"]["type"] == "http"
+                   ^^^^^^^^^^^^^^^^^^^^^
+E           KeyError: 'HTTPBearer'
+
+tests/test_backend_contract_regressions.py:34: KeyError
+___________ test_outbound_guard_rejects_multicast[literal-224.0.0.1] ___________
+
+address = '224.0.0.1', source = 'literal'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10e81a150>
+
+    @pytest.mark.parametrize(
+        "address", ["224.0.0.1", "239.255.255.250", "ff02::1", "ff05::1"]
+    )
+    @pytest.mark.parametrize("source", ["literal", "dns", "mixed_dns"])
+    async def test_outbound_guard_rejects_multicast(address, source, monkeypatch):
+        monkeypatch.setattr(get_settings(), "ALLOW_PRIVATE_NETWORK_TARGETS", False)
+
+        async def resolve(_host):
+            addresses = ["93.184.216.34", address] if source == "mixed_dns" else [address]
+            return [(None, None, None, None, (item, 0)) for item in addresses]
+
+        monkeypatch.setattr(url_guard, "_resolve_host", resolve)
+        host = f"[{address}]" if ":" in address else address
+        if source != "literal":
+            host = "partner.example"
+>       assert (
+            await url_guard.check_outbound_url(f"https://{host}/")
+            == "private_address_blocked"
+        )
+E       AssertionError: assert None == 'private_address_blocked'
+
+tests/test_backend_contract_regressions.py:81: AssertionError
+________ test_outbound_guard_rejects_multicast[literal-239.255.255.250] ________
+
+address = '239.255.255.250', source = 'literal'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10e90d910>
+
+    @pytest.mark.parametrize(
+        "address", ["224.0.0.1", "239.255.255.250", "ff02::1", "ff05::1"]
+    )
+    @pytest.mark.parametrize("source", ["literal", "dns", "mixed_dns"])
+    async def test_outbound_guard_rejects_multicast(address, source, monkeypatch):
+        monkeypatch.setattr(get_settings(), "ALLOW_PRIVATE_NETWORK_TARGETS", False)
+
+        async def resolve(_host):
+            addresses = ["93.184.216.34", address] if source == "mixed_dns" else [address]
+            return [(None, None, None, None, (item, 0)) for item in addresses]
+
+        monkeypatch.setattr(url_guard, "_resolve_host", resolve)
+        host = f"[{address}]" if ":" in address else address
+        if source != "literal":
+            host = "partner.example"
+>       assert (
+            await url_guard.check_outbound_url(f"https://{host}/")
+            == "private_address_blocked"
+        )
+E       AssertionError: assert None == 'private_address_blocked'
+
+tests/test_backend_contract_regressions.py:81: AssertionError
+____________ test_outbound_guard_rejects_multicast[literal-ff02::1] ____________
+
+address = 'ff02::1', source = 'literal'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10e8a11d0>
+
+    @pytest.mark.parametrize(
+        "address", ["224.0.0.1", "239.255.255.250", "ff02::1", "ff05::1"]
+    )
+    @pytest.mark.parametrize("source", ["literal", "dns", "mixed_dns"])
+    async def test_outbound_guard_rejects_multicast(address, source, monkeypatch):
+        monkeypatch.setattr(get_settings(), "ALLOW_PRIVATE_NETWORK_TARGETS", False)
+
+        async def resolve(_host):
+            addresses = ["93.184.216.34", address] if source == "mixed_dns" else [address]
+            return [(None, None, None, None, (item, 0)) for item in addresses]
+
+        monkeypatch.setattr(url_guard, "_resolve_host", resolve)
+        host = f"[{address}]" if ":" in address else address
+        if source != "literal":
+            host = "partner.example"
+>       assert (
+            await url_guard.check_outbound_url(f"https://{host}/")
+            == "private_address_blocked"
+        )
+E       AssertionError: assert None == 'private_address_blocked'
+
+tests/test_backend_contract_regressions.py:81: AssertionError
+____________ test_outbound_guard_rejects_multicast[literal-ff05::1] ____________
+
+address = 'ff05::1', source = 'literal'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10eb81c50>
+
+    @pytest.mark.parametrize(
+        "address", ["224.0.0.1", "239.255.255.250", "ff02::1", "ff05::1"]
+    )
+    @pytest.mark.parametrize("source", ["literal", "dns", "mixed_dns"])
+    async def test_outbound_guard_rejects_multicast(address, source, monkeypatch):
+        monkeypatch.setattr(get_settings(), "ALLOW_PRIVATE_NETWORK_TARGETS", False)
+
+        async def resolve(_host):
+            addresses = ["93.184.216.34", address] if source == "mixed_dns" else [address]
+            return [(None, None, None, None, (item, 0)) for item in addresses]
+
+        monkeypatch.setattr(url_guard, "_resolve_host", resolve)
+        host = f"[{address}]" if ":" in address else address
+        if source != "literal":
+            host = "partner.example"
+>       assert (
+            await url_guard.check_outbound_url(f"https://{host}/")
+            == "private_address_blocked"
+        )
+E       AssertionError: assert None == 'private_address_blocked'
+
+tests/test_backend_contract_regressions.py:81: AssertionError
+_____________ test_outbound_guard_rejects_multicast[dns-224.0.0.1] _____________
+
+address = '224.0.0.1', source = 'dns'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10e8958d0>
+
+    @pytest.mark.parametrize(
+        "address", ["224.0.0.1", "239.255.255.250", "ff02::1", "ff05::1"]
+    )
+    @pytest.mark.parametrize("source", ["literal", "dns", "mixed_dns"])
+    async def test_outbound_guard_rejects_multicast(address, source, monkeypatch):
+        monkeypatch.setattr(get_settings(), "ALLOW_PRIVATE_NETWORK_TARGETS", False)
+
+        async def resolve(_host):
+            addresses = ["93.184.216.34", address] if source == "mixed_dns" else [address]
+            return [(None, None, None, None, (item, 0)) for item in addresses]
+
+        monkeypatch.setattr(url_guard, "_resolve_host", resolve)
+        host = f"[{address}]" if ":" in address else address
+        if source != "literal":
+            host = "partner.example"
+>       assert (
+            await url_guard.check_outbound_url(f"https://{host}/")
+            == "private_address_blocked"
+        )
+E       AssertionError: assert None == 'private_address_blocked'
+
+tests/test_backend_contract_regressions.py:81: AssertionError
+__________ test_outbound_guard_rejects_multicast[dns-239.255.255.250] __________
+
+address = '239.255.255.250', source = 'dns'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10e8952b0>
+
+    @pytest.mark.parametrize(
+        "address", ["224.0.0.1", "239.255.255.250", "ff02::1", "ff05::1"]
+    )
+    @pytest.mark.parametrize("source", ["literal", "dns", "mixed_dns"])
+    async def test_outbound_guard_rejects_multicast(address, source, monkeypatch):
+        monkeypatch.setattr(get_settings(), "ALLOW_PRIVATE_NETWORK_TARGETS", False)
+
+        async def resolve(_host):
+            addresses = ["93.184.216.34", address] if source == "mixed_dns" else [address]
+            return [(None, None, None, None, (item, 0)) for item in addresses]
+
+        monkeypatch.setattr(url_guard, "_resolve_host", resolve)
+        host = f"[{address}]" if ":" in address else address
+        if source != "literal":
+            host = "partner.example"
+>       assert (
+            await url_guard.check_outbound_url(f"https://{host}/")
+            == "private_address_blocked"
+        )
+E       AssertionError: assert None == 'private_address_blocked'
+
+tests/test_backend_contract_regressions.py:81: AssertionError
+______________ test_outbound_guard_rejects_multicast[dns-ff02::1] ______________
+
+address = 'ff02::1', source = 'dns'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10e973e70>
+
+    @pytest.mark.parametrize(
+        "address", ["224.0.0.1", "239.255.255.250", "ff02::1", "ff05::1"]
+    )
+    @pytest.mark.parametrize("source", ["literal", "dns", "mixed_dns"])
+    async def test_outbound_guard_rejects_multicast(address, source, monkeypatch):
+        monkeypatch.setattr(get_settings(), "ALLOW_PRIVATE_NETWORK_TARGETS", False)
+
+        async def resolve(_host):
+            addresses = ["93.184.216.34", address] if source == "mixed_dns" else [address]
+            return [(None, None, None, None, (item, 0)) for item in addresses]
+
+        monkeypatch.setattr(url_guard, "_resolve_host", resolve)
+        host = f"[{address}]" if ":" in address else address
+        if source != "literal":
+            host = "partner.example"
+>       assert (
+            await url_guard.check_outbound_url(f"https://{host}/")
+            == "private_address_blocked"
+        )
+E       AssertionError: assert None == 'private_address_blocked'
+
+tests/test_backend_contract_regressions.py:81: AssertionError
+______________ test_outbound_guard_rejects_multicast[dns-ff05::1] ______________
+
+address = 'ff05::1', source = 'dns'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10e970fa0>
+
+    @pytest.mark.parametrize(
+        "address", ["224.0.0.1", "239.255.255.250", "ff02::1", "ff05::1"]
+    )
+    @pytest.mark.parametrize("source", ["literal", "dns", "mixed_dns"])
+    async def test_outbound_guard_rejects_multicast(address, source, monkeypatch):
+        monkeypatch.setattr(get_settings(), "ALLOW_PRIVATE_NETWORK_TARGETS", False)
+
+        async def resolve(_host):
+            addresses = ["93.184.216.34", address] if source == "mixed_dns" else [address]
+            return [(None, None, None, None, (item, 0)) for item in addresses]
+
+        monkeypatch.setattr(url_guard, "_resolve_host", resolve)
+        host = f"[{address}]" if ":" in address else address
+        if source != "literal":
+            host = "partner.example"
+>       assert (
+            await url_guard.check_outbound_url(f"https://{host}/")
+            == "private_address_blocked"
+        )
+E       AssertionError: assert None == 'private_address_blocked'
+
+tests/test_backend_contract_regressions.py:81: AssertionError
+__________ test_outbound_guard_rejects_multicast[mixed_dns-224.0.0.1] __________
+
+address = '224.0.0.1', source = 'mixed_dns'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10e971c50>
+
+    @pytest.mark.parametrize(
+        "address", ["224.0.0.1", "239.255.255.250", "ff02::1", "ff05::1"]
+    )
+    @pytest.mark.parametrize("source", ["literal", "dns", "mixed_dns"])
+    async def test_outbound_guard_rejects_multicast(address, source, monkeypatch):
+        monkeypatch.setattr(get_settings(), "ALLOW_PRIVATE_NETWORK_TARGETS", False)
+
+        async def resolve(_host):
+            addresses = ["93.184.216.34", address] if source == "mixed_dns" else [address]
+            return [(None, None, None, None, (item, 0)) for item in addresses]
+
+        monkeypatch.setattr(url_guard, "_resolve_host", resolve)
+        host = f"[{address}]" if ":" in address else address
+        if source != "literal":
+            host = "partner.example"
+>       assert (
+            await url_guard.check_outbound_url(f"https://{host}/")
+            == "private_address_blocked"
+        )
+E       AssertionError: assert None == 'private_address_blocked'
+
+tests/test_backend_contract_regressions.py:81: AssertionError
+_______ test_outbound_guard_rejects_multicast[mixed_dns-239.255.255.250] _______
+
+address = '239.255.255.250', source = 'mixed_dns'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10e971240>
+
+    @pytest.mark.parametrize(
+        "address", ["224.0.0.1", "239.255.255.250", "ff02::1", "ff05::1"]
+    )
+    @pytest.mark.parametrize("source", ["literal", "dns", "mixed_dns"])
+    async def test_outbound_guard_rejects_multicast(address, source, monkeypatch):
+        monkeypatch.setattr(get_settings(), "ALLOW_PRIVATE_NETWORK_TARGETS", False)
+
+        async def resolve(_host):
+            addresses = ["93.184.216.34", address] if source == "mixed_dns" else [address]
+            return [(None, None, None, None, (item, 0)) for item in addresses]
+
+        monkeypatch.setattr(url_guard, "_resolve_host", resolve)
+        host = f"[{address}]" if ":" in address else address
+        if source != "literal":
+            host = "partner.example"
+>       assert (
+            await url_guard.check_outbound_url(f"https://{host}/")
+            == "private_address_blocked"
+        )
+E       AssertionError: assert None == 'private_address_blocked'
+
+tests/test_backend_contract_regressions.py:81: AssertionError
+___________ test_outbound_guard_rejects_multicast[mixed_dns-ff02::1] ___________
+
+address = 'ff02::1', source = 'mixed_dns'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10e9720b0>
+
+    @pytest.mark.parametrize(
+        "address", ["224.0.0.1", "239.255.255.250", "ff02::1", "ff05::1"]
+    )
+    @pytest.mark.parametrize("source", ["literal", "dns", "mixed_dns"])
+    async def test_outbound_guard_rejects_multicast(address, source, monkeypatch):
+        monkeypatch.setattr(get_settings(), "ALLOW_PRIVATE_NETWORK_TARGETS", False)
+
+        async def resolve(_host):
+            addresses = ["93.184.216.34", address] if source == "mixed_dns" else [address]
+            return [(None, None, None, None, (item, 0)) for item in addresses]
+
+        monkeypatch.setattr(url_guard, "_resolve_host", resolve)
+        host = f"[{address}]" if ":" in address else address
+        if source != "literal":
+            host = "partner.example"
+>       assert (
+            await url_guard.check_outbound_url(f"https://{host}/")
+            == "private_address_blocked"
+        )
+E       AssertionError: assert None == 'private_address_blocked'
+
+tests/test_backend_contract_regressions.py:81: AssertionError
+___________ test_outbound_guard_rejects_multicast[mixed_dns-ff05::1] ___________
+
+address = 'ff05::1', source = 'mixed_dns'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10e972ac0>
+
+    @pytest.mark.parametrize(
+        "address", ["224.0.0.1", "239.255.255.250", "ff02::1", "ff05::1"]
+    )
+    @pytest.mark.parametrize("source", ["literal", "dns", "mixed_dns"])
+    async def test_outbound_guard_rejects_multicast(address, source, monkeypatch):
+        monkeypatch.setattr(get_settings(), "ALLOW_PRIVATE_NETWORK_TARGETS", False)
+
+        async def resolve(_host):
+            addresses = ["93.184.216.34", address] if source == "mixed_dns" else [address]
+            return [(None, None, None, None, (item, 0)) for item in addresses]
+
+        monkeypatch.setattr(url_guard, "_resolve_host", resolve)
+        host = f"[{address}]" if ":" in address else address
+        if source != "literal":
+            host = "partner.example"
+>       assert (
+            await url_guard.check_outbound_url(f"https://{host}/")
+            == "private_address_blocked"
+        )
+E       AssertionError: assert None == 'private_address_blocked'
+
+tests/test_backend_contract_regressions.py:81: AssertionError
+___________ test_upstream_guard_rejects_multicast[literal-224.0.0.1] ___________
+
+address = '224.0.0.1', source = 'literal'
+
+    @pytest.mark.parametrize(
+        "address", ["224.0.0.1", "239.255.255.250", "ff02::1", "ff05::1"]
+    )
+    @pytest.mark.parametrize("source", ["literal", "dns", "mixed_dns"])
+    async def test_upstream_guard_rejects_multicast(address, source):
+        async def resolve(_host, _port):
+            return ("93.184.216.34", address) if source == "mixed_dns" else (address,)
+
+        host = f"[{address}]" if ":" in address else address
+        if source != "literal":
+            host = "partner.example"
+        configuration = UpstreamMcpConfiguration(
+            url=f"https://{host}/mcp",
+            origin=f"https://{host}",
+            tool_name="notes.write",
+            public_tool_id="partner.notes.write",
+            bearer_token=SecretStr(""),
+            credits_per_call=Decimal("1"),
+            connect_timeout_seconds=1.0,
+            call_timeout_seconds=1.0,
+            max_response_bytes=1024,
+            environment="production",
+        )
+>       with pytest.raises(UpstreamMcpConfigurationError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE UpstreamMcpConfigurationError
+
+tests/test_backend_contract_regressions.py:110: Failed
+________ test_upstream_guard_rejects_multicast[literal-239.255.255.250] ________
+
+address = '239.255.255.250', source = 'literal'
+
+    @pytest.mark.parametrize(
+        "address", ["224.0.0.1", "239.255.255.250", "ff02::1", "ff05::1"]
+    )
+    @pytest.mark.parametrize("source", ["literal", "dns", "mixed_dns"])
+    async def test_upstream_guard_rejects_multicast(address, source):
+        async def resolve(_host, _port):
+            return ("93.184.216.34", address) if source == "mixed_dns" else (address,)
+
+        host = f"[{address}]" if ":" in address else address
+        if source != "literal":
+            host = "partner.example"
+        configuration = UpstreamMcpConfiguration(
+            url=f"https://{host}/mcp",
+            origin=f"https://{host}",
+            tool_name="notes.write",
+            public_tool_id="partner.notes.write",
+            bearer_token=SecretStr(""),
+            credits_per_call=Decimal("1"),
+            connect_timeout_seconds=1.0,
+            call_timeout_seconds=1.0,
+            max_response_bytes=1024,
+            environment="production",
+        )
+>       with pytest.raises(UpstreamMcpConfigurationError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE UpstreamMcpConfigurationError
+
+tests/test_backend_contract_regressions.py:110: Failed
+____________ test_upstream_guard_rejects_multicast[literal-ff02::1] ____________
+
+address = 'ff02::1', source = 'literal'
+
+    @pytest.mark.parametrize(
+        "address", ["224.0.0.1", "239.255.255.250", "ff02::1", "ff05::1"]
+    )
+    @pytest.mark.parametrize("source", ["literal", "dns", "mixed_dns"])
+    async def test_upstream_guard_rejects_multicast(address, source):
+        async def resolve(_host, _port):
+            return ("93.184.216.34", address) if source == "mixed_dns" else (address,)
+
+        host = f"[{address}]" if ":" in address else address
+        if source != "literal":
+            host = "partner.example"
+        configuration = UpstreamMcpConfiguration(
+            url=f"https://{host}/mcp",
+            origin=f"https://{host}",
+            tool_name="notes.write",
+            public_tool_id="partner.notes.write",
+            bearer_token=SecretStr(""),
+            credits_per_call=Decimal("1"),
+            connect_timeout_seconds=1.0,
+            call_timeout_seconds=1.0,
+            max_response_bytes=1024,
+            environment="production",
+        )
+>       with pytest.raises(UpstreamMcpConfigurationError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE UpstreamMcpConfigurationError
+
+tests/test_backend_contract_regressions.py:110: Failed
+____________ test_upstream_guard_rejects_multicast[literal-ff05::1] ____________
+
+address = 'ff05::1', source = 'literal'
+
+    @pytest.mark.parametrize(
+        "address", ["224.0.0.1", "239.255.255.250", "ff02::1", "ff05::1"]
+    )
+    @pytest.mark.parametrize("source", ["literal", "dns", "mixed_dns"])
+    async def test_upstream_guard_rejects_multicast(address, source):
+        async def resolve(_host, _port):
+            return ("93.184.216.34", address) if source == "mixed_dns" else (address,)
+
+        host = f"[{address}]" if ":" in address else address
+        if source != "literal":
+            host = "partner.example"
+        configuration = UpstreamMcpConfiguration(
+            url=f"https://{host}/mcp",
+            origin=f"https://{host}",
+            tool_name="notes.write",
+            public_tool_id="partner.notes.write",
+            bearer_token=SecretStr(""),
+            credits_per_call=Decimal("1"),
+            connect_timeout_seconds=1.0,
+            call_timeout_seconds=1.0,
+            max_response_bytes=1024,
+            environment="production",
+        )
+>       with pytest.raises(UpstreamMcpConfigurationError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE UpstreamMcpConfigurationError
+
+tests/test_backend_contract_regressions.py:110: Failed
+_____________ test_upstream_guard_rejects_multicast[dns-224.0.0.1] _____________
+
+address = '224.0.0.1', source = 'dns'
+
+    @pytest.mark.parametrize(
+        "address", ["224.0.0.1", "239.255.255.250", "ff02::1", "ff05::1"]
+    )
+    @pytest.mark.parametrize("source", ["literal", "dns", "mixed_dns"])
+    async def test_upstream_guard_rejects_multicast(address, source):
+        async def resolve(_host, _port):
+            return ("93.184.216.34", address) if source == "mixed_dns" else (address,)
+
+        host = f"[{address}]" if ":" in address else address
+        if source != "literal":
+            host = "partner.example"
+        configuration = UpstreamMcpConfiguration(
+            url=f"https://{host}/mcp",
+            origin=f"https://{host}",
+            tool_name="notes.write",
+            public_tool_id="partner.notes.write",
+            bearer_token=SecretStr(""),
+            credits_per_call=Decimal("1"),
+            connect_timeout_seconds=1.0,
+            call_timeout_seconds=1.0,
+            max_response_bytes=1024,
+            environment="production",
+        )
+>       with pytest.raises(UpstreamMcpConfigurationError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE UpstreamMcpConfigurationError
+
+tests/test_backend_contract_regressions.py:110: Failed
+__________ test_upstream_guard_rejects_multicast[dns-239.255.255.250] __________
+
+address = '239.255.255.250', source = 'dns'
+
+    @pytest.mark.parametrize(
+        "address", ["224.0.0.1", "239.255.255.250", "ff02::1", "ff05::1"]
+    )
+    @pytest.mark.parametrize("source", ["literal", "dns", "mixed_dns"])
+    async def test_upstream_guard_rejects_multicast(address, source):
+        async def resolve(_host, _port):
+            return ("93.184.216.34", address) if source == "mixed_dns" else (address,)
+
+        host = f"[{address}]" if ":" in address else address
+        if source != "literal":
+            host = "partner.example"
+        configuration = UpstreamMcpConfiguration(
+            url=f"https://{host}/mcp",
+            origin=f"https://{host}",
+            tool_name="notes.write",
+            public_tool_id="partner.notes.write",
+            bearer_token=SecretStr(""),
+            credits_per_call=Decimal("1"),
+            connect_timeout_seconds=1.0,
+            call_timeout_seconds=1.0,
+            max_response_bytes=1024,
+            environment="production",
+        )
+>       with pytest.raises(UpstreamMcpConfigurationError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE UpstreamMcpConfigurationError
+
+tests/test_backend_contract_regressions.py:110: Failed
+______________ test_upstream_guard_rejects_multicast[dns-ff02::1] ______________
+
+address = 'ff02::1', source = 'dns'
+
+    @pytest.mark.parametrize(
+        "address", ["224.0.0.1", "239.255.255.250", "ff02::1", "ff05::1"]
+    )
+    @pytest.mark.parametrize("source", ["literal", "dns", "mixed_dns"])
+    async def test_upstream_guard_rejects_multicast(address, source):
+        async def resolve(_host, _port):
+            return ("93.184.216.34", address) if source == "mixed_dns" else (address,)
+
+        host = f"[{address}]" if ":" in address else address
+        if source != "literal":
+            host = "partner.example"
+        configuration = UpstreamMcpConfiguration(
+            url=f"https://{host}/mcp",
+            origin=f"https://{host}",
+            tool_name="notes.write",
+            public_tool_id="partner.notes.write",
+            bearer_token=SecretStr(""),
+            credits_per_call=Decimal("1"),
+            connect_timeout_seconds=1.0,
+            call_timeout_seconds=1.0,
+            max_response_bytes=1024,
+            environment="production",
+        )
+>       with pytest.raises(UpstreamMcpConfigurationError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE UpstreamMcpConfigurationError
+
+tests/test_backend_contract_regressions.py:110: Failed
+______________ test_upstream_guard_rejects_multicast[dns-ff05::1] ______________
+
+address = 'ff05::1', source = 'dns'
+
+    @pytest.mark.parametrize(
+        "address", ["224.0.0.1", "239.255.255.250", "ff02::1", "ff05::1"]
+    )
+    @pytest.mark.parametrize("source", ["literal", "dns", "mixed_dns"])
+    async def test_upstream_guard_rejects_multicast(address, source):
+        async def resolve(_host, _port):
+            return ("93.184.216.34", address) if source == "mixed_dns" else (address,)
+
+        host = f"[{address}]" if ":" in address else address
+        if source != "literal":
+            host = "partner.example"
+        configuration = UpstreamMcpConfiguration(
+            url=f"https://{host}/mcp",
+            origin=f"https://{host}",
+            tool_name="notes.write",
+            public_tool_id="partner.notes.write",
+            bearer_token=SecretStr(""),
+            credits_per_call=Decimal("1"),
+            connect_timeout_seconds=1.0,
+            call_timeout_seconds=1.0,
+            max_response_bytes=1024,
+            environment="production",
+        )
+>       with pytest.raises(UpstreamMcpConfigurationError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE UpstreamMcpConfigurationError
+
+tests/test_backend_contract_regressions.py:110: Failed
+__________ test_upstream_guard_rejects_multicast[mixed_dns-224.0.0.1] __________
+
+address = '224.0.0.1', source = 'mixed_dns'
+
+    @pytest.mark.parametrize(
+        "address", ["224.0.0.1", "239.255.255.250", "ff02::1", "ff05::1"]
+    )
+    @pytest.mark.parametrize("source", ["literal", "dns", "mixed_dns"])
+    async def test_upstream_guard_rejects_multicast(address, source):
+        async def resolve(_host, _port):
+            return ("93.184.216.34", address) if source == "mixed_dns" else (address,)
+
+        host = f"[{address}]" if ":" in address else address
+        if source != "literal":
+            host = "partner.example"
+        configuration = UpstreamMcpConfiguration(
+            url=f"https://{host}/mcp",
+            origin=f"https://{host}",
+            tool_name="notes.write",
+            public_tool_id="partner.notes.write",
+            bearer_token=SecretStr(""),
+            credits_per_call=Decimal("1"),
+            connect_timeout_seconds=1.0,
+            call_timeout_seconds=1.0,
+            max_response_bytes=1024,
+            environment="production",
+        )
+>       with pytest.raises(UpstreamMcpConfigurationError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE UpstreamMcpConfigurationError
+
+tests/test_backend_contract_regressions.py:110: Failed
+_______ test_upstream_guard_rejects_multicast[mixed_dns-239.255.255.250] _______
+
+address = '239.255.255.250', source = 'mixed_dns'
+
+    @pytest.mark.parametrize(
+        "address", ["224.0.0.1", "239.255.255.250", "ff02::1", "ff05::1"]
+    )
+    @pytest.mark.parametrize("source", ["literal", "dns", "mixed_dns"])
+    async def test_upstream_guard_rejects_multicast(address, source):
+        async def resolve(_host, _port):
+            return ("93.184.216.34", address) if source == "mixed_dns" else (address,)
+
+        host = f"[{address}]" if ":" in address else address
+        if source != "literal":
+            host = "partner.example"
+        configuration = UpstreamMcpConfiguration(
+            url=f"https://{host}/mcp",
+            origin=f"https://{host}",
+            tool_name="notes.write",
+            public_tool_id="partner.notes.write",
+            bearer_token=SecretStr(""),
+            credits_per_call=Decimal("1"),
+            connect_timeout_seconds=1.0,
+            call_timeout_seconds=1.0,
+            max_response_bytes=1024,
+            environment="production",
+        )
+>       with pytest.raises(UpstreamMcpConfigurationError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE UpstreamMcpConfigurationError
+
+tests/test_backend_contract_regressions.py:110: Failed
+___________ test_upstream_guard_rejects_multicast[mixed_dns-ff02::1] ___________
+
+address = 'ff02::1', source = 'mixed_dns'
+
+    @pytest.mark.parametrize(
+        "address", ["224.0.0.1", "239.255.255.250", "ff02::1", "ff05::1"]
+    )
+    @pytest.mark.parametrize("source", ["literal", "dns", "mixed_dns"])
+    async def test_upstream_guard_rejects_multicast(address, source):
+        async def resolve(_host, _port):
+            return ("93.184.216.34", address) if source == "mixed_dns" else (address,)
+
+        host = f"[{address}]" if ":" in address else address
+        if source != "literal":
+            host = "partner.example"
+        configuration = UpstreamMcpConfiguration(
+            url=f"https://{host}/mcp",
+            origin=f"https://{host}",
+            tool_name="notes.write",
+            public_tool_id="partner.notes.write",
+            bearer_token=SecretStr(""),
+            credits_per_call=Decimal("1"),
+            connect_timeout_seconds=1.0,
+            call_timeout_seconds=1.0,
+            max_response_bytes=1024,
+            environment="production",
+        )
+>       with pytest.raises(UpstreamMcpConfigurationError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE UpstreamMcpConfigurationError
+
+tests/test_backend_contract_regressions.py:110: Failed
+___________ test_upstream_guard_rejects_multicast[mixed_dns-ff05::1] ___________
+
+address = 'ff05::1', source = 'mixed_dns'
+
+    @pytest.mark.parametrize(
+        "address", ["224.0.0.1", "239.255.255.250", "ff02::1", "ff05::1"]
+    )
+    @pytest.mark.parametrize("source", ["literal", "dns", "mixed_dns"])
+    async def test_upstream_guard_rejects_multicast(address, source):
+        async def resolve(_host, _port):
+            return ("93.184.216.34", address) if source == "mixed_dns" else (address,)
+
+        host = f"[{address}]" if ":" in address else address
+        if source != "literal":
+            host = "partner.example"
+        configuration = UpstreamMcpConfiguration(
+            url=f"https://{host}/mcp",
+            origin=f"https://{host}",
+            tool_name="notes.write",
+            public_tool_id="partner.notes.write",
+            bearer_token=SecretStr(""),
+            credits_per_call=Decimal("1"),
+            connect_timeout_seconds=1.0,
+            call_timeout_seconds=1.0,
+            max_response_bytes=1024,
+            environment="production",
+        )
+>       with pytest.raises(UpstreamMcpConfigurationError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE UpstreamMcpConfigurationError
+
+tests/test_backend_contract_regressions.py:110: Failed
+=========================== short test summary info ============================
+FAILED tests/test_backend_contract_regressions.py::test_openapi_declares_bearer_or_api_key[/v1/permits-get]
+FAILED tests/test_backend_contract_regressions.py::test_openapi_declares_bearer_or_api_key[/v1/permits-post]
+FAILED tests/test_backend_contract_regressions.py::test_openapi_declares_bearer_or_api_key[/v1/receipts-get]
+FAILED tests/test_backend_contract_regressions.py::test_openapi_declares_bearer_or_api_key[/v1/me/authority-get]
+FAILED tests/test_backend_contract_regressions.py::test_outbound_guard_rejects_multicast[literal-224.0.0.1]
+FAILED tests/test_backend_contract_regressions.py::test_outbound_guard_rejects_multicast[literal-239.255.255.250]
+FAILED tests/test_backend_contract_regressions.py::test_outbound_guard_rejects_multicast[literal-ff02::1]
+FAILED tests/test_backend_contract_regressions.py::test_outbound_guard_rejects_multicast[literal-ff05::1]
+FAILED tests/test_backend_contract_regressions.py::test_outbound_guard_rejects_multicast[dns-224.0.0.1]
+FAILED tests/test_backend_contract_regressions.py::test_outbound_guard_rejects_multicast[dns-239.255.255.250]
+FAILED tests/test_backend_contract_regressions.py::test_outbound_guard_rejects_multicast[dns-ff02::1]
+FAILED tests/test_backend_contract_regressions.py::test_outbound_guard_rejects_multicast[dns-ff05::1]
+FAILED tests/test_backend_contract_regressions.py::test_outbound_guard_rejects_multicast[mixed_dns-224.0.0.1]
+FAILED tests/test_backend_contract_regressions.py::test_outbound_guard_rejects_multicast[mixed_dns-239.255.255.250]
+FAILED tests/test_backend_contract_regressions.py::test_outbound_guard_rejects_multicast[mixed_dns-ff02::1]
+FAILED tests/test_backend_contract_regressions.py::test_outbound_guard_rejects_multicast[mixed_dns-ff05::1]
+FAILED tests/test_backend_contract_regressions.py::test_upstream_guard_rejects_multicast[literal-224.0.0.1]
+FAILED tests/test_backend_contract_regressions.py::test_upstream_guard_rejects_multicast[literal-239.255.255.250]
+FAILED tests/test_backend_contract_regressions.py::test_upstream_guard_rejects_multicast[literal-ff02::1]
+FAILED tests/test_backend_contract_regressions.py::test_upstream_guard_rejects_multicast[literal-ff05::1]
+FAILED tests/test_backend_contract_regressions.py::test_upstream_guard_rejects_multicast[dns-224.0.0.1]
+FAILED tests/test_backend_contract_regressions.py::test_upstream_guard_rejects_multicast[dns-239.255.255.250]
+FAILED tests/test_backend_contract_regressions.py::test_upstream_guard_rejects_multicast[dns-ff02::1]
+FAILED tests/test_backend_contract_regressions.py::test_upstream_guard_rejects_multicast[dns-ff05::1]
+FAILED tests/test_backend_contract_regressions.py::test_upstream_guard_rejects_multicast[mixed_dns-224.0.0.1]
+FAILED tests/test_backend_contract_regressions.py::test_upstream_guard_rejects_multicast[mixed_dns-239.255.255.250]
+FAILED tests/test_backend_contract_regressions.py::test_upstream_guard_rejects_multicast[mixed_dns-ff02::1]
+FAILED tests/test_backend_contract_regressions.py::test_upstream_guard_rejects_multicast[mixed_dns-ff05::1]
+28 failed, 12 passed in 4.11s

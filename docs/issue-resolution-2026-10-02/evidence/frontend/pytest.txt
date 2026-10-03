@@ -1,0 +1,14 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/sellers/.openclaw/worktrees/amw-issues-20261002-frontend
+configfile: pyproject.toml
+plugins: cov-7.1.0, asyncio-1.4.0, anyio-4.15.1
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 85 items
+
+tests/test_dashboard_design.py ..                                        [  2%]
+tests/test_wedge_honesty.py ..........                                   [ 14%]
+tests/test_site_agent_interface.py ..................................... [ 57%]
+....................................                                     [100%]
+
+============================== 85 passed in 7.70s ==============================

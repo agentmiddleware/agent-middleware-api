@@ -1,0 +1,12 @@
+{
+  "command": [
+    "/Users/sellers/Projects/agent-middleware-api/.venv/bin/python",
+    "scripts/export_openapi.py",
+    "--check"
+  ],
+  "head": "0db19631f8a2de879e77d9b57246c41fb261c243",
+  "mode": "openapi",
+  "exit_code": 0,
+  "started": "2026-10-03T03:43:41.807765+00:00",
+  "finished": "2026-10-03T03:43:43.115899+00:00"
+}
