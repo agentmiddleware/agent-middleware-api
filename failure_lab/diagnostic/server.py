@@ -502,13 +502,19 @@ def _baseline_column(comparison: Comparison) -> Any:
 
 
 async def _read_json(request: Request) -> dict[str, Any]:
-    body = await request.body()
-    if len(body) > MAX_REQUEST_BYTES:
-        raise SubmissionRefused(
-            f"a body larger than {MAX_REQUEST_BYTES} bytes was refused without "
-            "being read. Nothing this surface accepts is that big.",
-            status_code=413,
-        )
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > MAX_REQUEST_BYTES:
+            raise SubmissionRefused(
+                f"a body larger than {MAX_REQUEST_BYTES} bytes was refused "
+                "while reading; remaining chunks were not consumed. "
+                "Nothing this surface accepts is that big.",
+                status_code=413,
+            )
+        chunks.append(chunk)
+    body = b"".join(chunks)
     raw = body.decode("utf-8", "replace")
     if not raw.strip():
         return {}
