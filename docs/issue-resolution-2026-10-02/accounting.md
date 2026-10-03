@@ -10,10 +10,10 @@ Related tracking: [parent #499](https://github.com/PetrefiedThunder/agent-middle
 
 | Batch | Result | Evidence |
 | --- | --- | --- |
-| Permit approval, permits, x402, Stripe concurrency, billing boundaries, schema boot, billing, ledger integrity | 264 passed in 10.31 seconds | [Log](evidence/accounting/focused.log), [command and source](evidence/accounting/focused-result.json) |
-| Signed quotes, price validation, migration interruption, profitability and numeric storage | 145 passed; one PostgreSQL opt-in skipped in 2.77 seconds | [Log](evidence/accounting/numeric-migration.log), [command](evidence/accounting/numeric-migration-result.json) |
-| Fresh PostgreSQL17 migration038 interruption/recovery, incompatible-schema refusal, upgrade through042 | 1 passed; the previous SQLite-batch skip is exercised here | [Log](evidence/accounting/postgres/dispatch.log), [command](evidence/accounting/postgres/dispatch-result.json) |
-| Fresh PostgreSQL17 approval row-lock wait crossing expiry | 1 passed; both competing claims expire without minting | [Log](evidence/accounting/postgres/permit.log), [command](evidence/accounting/postgres/permit-result.json) |
+| Permit approval, permits, x402, Stripe concurrency, billing boundaries, schema boot, billing, ledger integrity | 264 passed in 10.31 seconds | [Log](evidence/accounting/focused.txt), [command and source](evidence/accounting/focused-result.json) |
+| Signed quotes, price validation, migration interruption, profitability and numeric storage | 145 passed; one PostgreSQL opt-in skipped in 2.77 seconds | [Log](evidence/accounting/numeric-migration.txt), [command](evidence/accounting/numeric-migration-result.json) |
+| Fresh PostgreSQL17 migration038 interruption/recovery, incompatible-schema refusal, upgrade through042 | 1 passed; the previous SQLite-batch skip is exercised here | [Log](evidence/accounting/postgres/dispatch.txt), [command](evidence/accounting/postgres/dispatch-result.json) |
+| Fresh PostgreSQL17 approval row-lock wait crossing expiry | 1 passed; both competing claims expire without minting | [Log](evidence/accounting/postgres/permit.txt), [command](evidence/accounting/postgres/permit-result.json) |
 
 PostgreSQL used two newly created task-only databases on loopback 127.0.0.1:55439 with ENVIRONMENT=test and repository target guards. No production credentials were read. The benign asyncpg warning reports that /dev/null is not a regular password file; tests passed without passwords. Database service shutdown is recorded in the final coordinator report.
 
