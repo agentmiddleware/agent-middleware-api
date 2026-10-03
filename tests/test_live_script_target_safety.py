@@ -407,7 +407,11 @@ def _load_battery(
         sent.append((request.full_url, dict(request.header_items())))  # type: ignore[attr-defined]
         raise _RequestAttempted
 
-    monkeypatch.setattr(module.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(
+        module.urllib.request.OpenerDirector,
+        "open",
+        lambda _self, request, timeout=None: fake_urlopen(request, timeout),
+    )
     return module, sent
 
 
