@@ -23,7 +23,11 @@ from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 from app.services.audit_log import list_audit_events
-from app.services.receipts import ReceiptService, get_receipt_service
+from app.services.receipts import (
+    ReceiptService,
+    ReceiptWriteContendedError,
+    get_receipt_service,
+)
 from app.services.shadow_ledger import get_shadow_ledger
 from app.services.x402_engine import X402Error, get_x402_handler
 from b2a_sdk.errors import PermitDeniedError
@@ -154,7 +158,7 @@ async def test_x402_atomic_settlement(client, clean_database, monkeypatch):
     assert await _permit_spent(client, permit_id) == Decimal("0")
 
     async def _induced_receipt_failure(self, **kwargs):
-        raise RuntimeError("induced receipt failure")
+        raise ReceiptWriteContendedError("induced rolled-back receipt failure")
 
     monkeypatch.setattr(ReceiptService, "create_receipt", _induced_receipt_failure)
     failed = await client.post("/v1/x402/settle", json=body, headers=headers)
@@ -914,7 +918,7 @@ async def test_x402_failed_settlement_appends_compensating_audit_event(
     )
 
     async def _induced_receipt_failure(self, **kwargs):
-        raise RuntimeError("induced receipt failure")
+        raise ReceiptWriteContendedError("induced rolled-back receipt failure")
 
     monkeypatch.setattr(ReceiptService, "create_receipt", _induced_receipt_failure)
     failed = await client.post(
@@ -973,7 +977,7 @@ async def test_x402_max_calls_released_on_failed_settlement(
     headers = {**provisioned["agent_headers"], "Idempotency-Key": "x402-maxcall-1"}
 
     async def _induced_receipt_failure(self, **kwargs):
-        raise RuntimeError("induced receipt failure")
+        raise ReceiptWriteContendedError("induced rolled-back receipt failure")
 
     monkeypatch.setattr(ReceiptService, "create_receipt", _induced_receipt_failure)
     failed = await client.post("/v1/x402/settle", json=body, headers=headers)
@@ -1410,3 +1414,179 @@ async def test_x402_settle_never_touches_real_ledger_entries(client, clean_datab
     )
     assert total == 1
     assert receipts[0].ledger_entry_id is None
+
+
+async def _one_call_x402_permit(client, owner, idem_key):
+    wallet_id = owner["agent_wallet_id"]
+    response = await client.post(
+        "/v1/permits",
+        json={
+            "issuer_wallet_id": wallet_id,
+            "subject_wallet_id": wallet_id,
+            "subject_key_id": owner["key_id"],
+            "allowed_tools": ["x402.payment"],
+            "max_credits": 100,
+            "max_calls_per_tool": {"x402.payment": 1},
+            "expires_at": (
+                datetime.now(timezone.utc) + timedelta(minutes=10)
+            ).isoformat(),
+        },
+        headers={**BOOTSTRAP_HEADERS, "Idempotency-Key": idem_key},
+    )
+    assert response.status_code == 201
+    return response.json()
+
+
+async def _x402_call_count(permit_id):
+    import json
+    from app.db.database import get_session_factory
+    from app.db.models import PermitModel
+
+    async with get_session_factory()() as session:
+        row = await session.get(PermitModel, permit_id)
+        return json.loads(row.tool_call_counts_json)["x402.payment"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("release", ["release_budget", "release_tool_call"])
+async def test_x402_incomplete_compensation_preserves_original_owner(
+    client, clean_database, monkeypatch, release
+):
+    from app.services.idempotency import get_idempotency_service
+    from app.services.permits import get_permit_service
+
+    owner = await provision_agent_wallet(client)
+    wallet_id = owner["agent_wallet_id"]
+    permit = await _one_call_x402_permit(client, owner, "release-failure-permit")
+    body = _settle_body(permit_id=permit["permit_id"], wallet_id=wallet_id)
+    headers = {**owner["agent_headers"], "Idempotency-Key": "release-failure"}
+
+    async def receipt_failure(*args, **kwargs):
+        raise ReceiptWriteContendedError("known rolled-back receipt write")
+
+    async def release_failure(*args, **kwargs):
+        raise RuntimeError("synthetic compensation failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(ReceiptService, "create_receipt", receipt_failure)
+        patch.setattr(get_permit_service(), release, release_failure)
+        first = await client.post("/v1/x402/settle", json=body, headers=headers)
+    assert first.status_code == 409
+    assert first.json()["detail"] == "x402_settlement_needs_review"
+    expected_spent = Decimal("30") if release == "release_budget" else Decimal("0")
+    expected_calls = 1 if release == "release_tool_call" else 0
+    assert await _permit_spent(client, permit["permit_id"]) == expected_spent
+    assert await _x402_call_count(permit["permit_id"]) == expected_calls
+    idem = get_idempotency_service()
+    original = await idem.get_record(
+        wallet_id=wallet_id,
+        endpoint="/v1/x402/settle",
+        idempotency_key="release-failure",
+    )
+    assert original is not None and original.response_json is None
+    for stale in (False, True):
+        if stale:
+            await _backdate_settle_record("release-failure", wallet_id=wallet_id)
+        retry = await client.post("/v1/x402/settle", json=body, headers=headers)
+        assert retry.status_code == 409
+        assert await _permit_spent(client, permit["permit_id"]) == expected_spent
+        assert await _x402_call_count(permit["permit_id"]) == expected_calls
+    retained = await idem.get_record(
+        wallet_id=wallet_id,
+        endpoint="/v1/x402/settle",
+        idempotency_key="release-failure",
+    )
+    assert retained.record_id == original.record_id
+    _, total = await get_receipt_service().list_receipts(permit_id=permit["permit_id"])
+    assert total == 0
+    events = await list_audit_events(
+        event="x402.settlement_failed", wallet_id=wallet_id
+    )
+    assert len(events) == 1
+    assert events[0].metadata["compensation_complete"] is False
+    assert events[0].metadata["credits_released"] == (
+        None if release == "release_budget" else "30.000"
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "receipt_committed,lookup_fails", [(False, False), (True, False), (True, True)]
+)
+async def test_x402_uncertain_receipt_write_never_releases_authority_or_owner(
+    client, clean_database, monkeypatch, receipt_committed, lookup_fails
+):
+    from app.services.idempotency import get_idempotency_service
+    from app.services.permits import get_permit_service
+
+    owner = await provision_agent_wallet(client)
+    wallet_id = owner["agent_wallet_id"]
+    permit = await _one_call_x402_permit(client, owner, "uncertain-receipt-permit")
+    body = _settle_body(permit_id=permit["permit_id"], wallet_id=wallet_id)
+    headers = {**owner["agent_headers"], "Idempotency-Key": "uncertain-receipt"}
+    original_create = ReceiptService.create_receipt
+
+    async def uncertain_receipt(self, **kwargs):
+        if receipt_committed:
+            await original_create(self, **kwargs)
+        raise RuntimeError("synthetic receipt acknowledgement lost")
+
+    async def no_release(*args, **kwargs):
+        pytest.fail("uncertain receipt writes must retain budget and call authority")
+
+    async def failed_lookup(*args, **kwargs):
+        raise RuntimeError("synthetic receipt lookup outage")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(ReceiptService, "create_receipt", uncertain_receipt)
+        patch.setattr(get_permit_service(), "release_budget", no_release)
+        patch.setattr(get_permit_service(), "release_tool_call", no_release)
+        if lookup_fails:
+            patch.setattr(
+                ReceiptService, "get_receipt_by_idempotency_record_id", failed_lookup
+            )
+        first = await client.post("/v1/x402/settle", json=body, headers=headers)
+    assert first.status_code == 409
+    assert first.json()["detail"] == (
+        "x402_settled_unrecoverable_replay"
+        if receipt_committed and not lookup_fails
+        else "x402_settlement_needs_review"
+    )
+    assert await _permit_spent(client, permit["permit_id"]) == Decimal("30")
+    idem = get_idempotency_service()
+    original = await idem.get_record(
+        wallet_id=wallet_id,
+        endpoint="/v1/x402/settle",
+        idempotency_key="uncertain-receipt",
+    )
+    assert original is not None and original.response_json is None
+    await _backdate_settle_record("uncertain-receipt", wallet_id=wallet_id)
+    retry = await client.post("/v1/x402/settle", json=body, headers=headers)
+    assert retry.status_code == 409
+    assert retry.json()["detail"] == (
+        "x402_settled_unrecoverable_replay"
+        if receipt_committed
+        else "x402_settlement_needs_review"
+    )
+    assert await _permit_spent(client, permit["permit_id"]) == Decimal("30")
+    assert await _x402_call_count(permit["permit_id"]) == 1
+    receipts, total = await get_receipt_service().list_receipts(
+        permit_id=permit["permit_id"]
+    )
+    assert total == int(receipt_committed)
+    if receipts:
+        valid, reason, _ = await get_receipt_service().verify_receipt(
+            receipts[0].receipt_id
+        )
+        assert valid, reason
+    # No false compensation event claims released authority for a durable receipt.
+    assert (
+        await list_audit_events(event="x402.settlement_failed", wallet_id=wallet_id)
+        == []
+    )
+    retained = await idem.get_record(
+        wallet_id=wallet_id,
+        endpoint="/v1/x402/settle",
+        idempotency_key="uncertain-receipt",
+    )
+    assert retained.record_id == original.record_id

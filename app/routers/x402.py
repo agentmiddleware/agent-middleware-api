@@ -9,7 +9,11 @@ from pydantic import BaseModel, Field
 
 from app.core.auth import AuthContext, get_auth_context
 from app.core.time import utc_now
-from app.services.x402_engine import X402Error, get_x402_handler
+from app.services.x402_engine import (
+    X402Error,
+    X402SettlementUncertainError,
+    get_x402_handler,
+)
 from app.trust import (
     IdempotencyConflictError,
     IdempotencyInProgressError,
@@ -197,10 +201,11 @@ async def settle_payment_required(
             payer=request.payer,
             idempotency_record_id=begun.record_id,
         )
+    except X402SettlementUncertainError as exc:
+        raise HTTPException(status_code=409, detail=exc.reason)
     except X402Error as exc:
-        # Every settle failure is fully compensated (budget released, no
-        # receipt), so release the key for retry rather than freezing a
-        # transient denial into a permanent replay.
+        # Only confirmed pre-reservation or fully compensated failures release
+        # this owner. Uncertain settlement/compensation keeps it above.
         await idem.abandon(
             wallet_id=request.wallet_id,
             endpoint=_SETTLE_ENDPOINT,
