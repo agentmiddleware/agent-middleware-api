@@ -20,6 +20,7 @@ def _assert_scoped_retry_guidance(relative_path: str) -> None:
     assert "The governance path is identical" not in text
     assert "exactly-once dispatch" not in text
     assert "one gateway dispatch, one debit, one receipt" not in text
+    assert "charge exactly once" not in text
 
 
 def test_be100_self_credentialing_scopes_retry_guarantees() -> None:
