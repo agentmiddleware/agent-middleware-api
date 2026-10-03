@@ -44,9 +44,9 @@ def _address_blocked(address: str) -> bool:
     except ValueError:
         return False
     # is_global is False for loopback, RFC1918/ULA, link-local (including
-    # 169.254.169.254 metadata), CGNAT shared space, multicast, reserved,
-    # and unspecified addresses.
-    return not ip.is_global
+    # 169.254.169.254 metadata), CGNAT shared space, reserved, and unspecified
+    # addresses. Multicast needs an explicit check: it can be classified global.
+    return ip.is_multicast or not ip.is_global
 
 
 async def _resolve_host(host: str):
