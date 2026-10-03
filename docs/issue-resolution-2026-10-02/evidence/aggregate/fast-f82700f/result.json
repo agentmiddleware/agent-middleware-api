@@ -1,0 +1,40 @@
+{
+  "command": [
+    "/Users/sellers/Projects/agent-middleware-api/.venv/bin/python",
+    "-m",
+    "pytest",
+    "tests/",
+    "-x",
+    "-q",
+    "-m",
+    "not proof",
+    "-ra",
+    "--basetemp=/tmp/amw-all-issues-20261002/aggregate/fast-f82700f/pytest-artifacts"
+  ],
+  "workdir": "/Users/sellers/.openclaw/worktrees/amw-issues-20261002-aggregate",
+  "head_before": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+  "branch": "openclaw/amw-issues-20261002-aggregate",
+  "remote": "https://github.com/PetrefiedThunder/agent-middleware-api.git",
+  "started_at": "2026-10-03T03:37:24.174721+00:00",
+  "environment": {
+    "HOME": "/Users/sellers",
+    "USER": "sellers",
+    "LOGNAME": "sellers",
+    "TMPDIR": "/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/",
+    "LANG": "C.UTF-8",
+    "PATH": "/Users/sellers/Projects/agent-middleware-api/.venv/bin:/opt/homebrew/bin:/Library/Frameworks/Python.framework/Versions/3.12/bin:/usr/bin:/bin",
+    "ENVIRONMENT": "test",
+    "UV_OFFLINE": "1",
+    "UV_NO_SYNC": "1",
+    "PGPASSFILE": "/dev/null",
+    "PGSERVICEFILE": "/dev/null",
+    "PRE_COMMIT_HOME": "/Users/sellers/Documents/Codex/2026-10-01/task-4/precommit-cache",
+    "UV_CACHE_DIR": "/Users/sellers/Documents/Codex/2026-10-01/task-4/uv-cache",
+    "UV_PROJECT_ENVIRONMENT": "/Users/sellers/Projects/agent-middleware-api/.venv",
+    "DATABASE_URL": "sqlite+aiosqlite:////tmp/amw-all-issues-20261002/aggregate/fast-f82700f/fast.db"
+  },
+  "head_after": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+  "worktree_after": "",
+  "exit_code": 1,
+  "finished_at": "2026-10-03T03:42:21.215479+00:00"
+}

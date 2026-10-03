@@ -131,9 +131,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "accounting.md"
+      "review_document": "accounting.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "ACCT-002",
@@ -173,9 +174,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "accounting.md"
+      "review_document": "accounting.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "ACCT-003",
@@ -216,9 +218,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "accounting.md"
+      "review_document": "accounting.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "ACCT-004",
@@ -258,9 +261,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "accounting.md"
+      "review_document": "accounting.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "ACCT-005",
@@ -299,9 +303,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "accounting.md"
+      "review_document": "accounting.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "ACCT-006",
@@ -340,9 +345,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "accounting.md"
+      "review_document": "accounting.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "ACCT-007",
@@ -381,9 +387,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "accounting.md"
+      "review_document": "accounting.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "ACCT-008",
@@ -422,9 +429,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "accounting.md"
+      "review_document": "accounting.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "ACCT-009",
@@ -463,9 +471,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "accounting.md"
+      "review_document": "accounting.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "ACCT-010",
@@ -504,9 +513,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "accounting.md"
+      "review_document": "accounting.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "ACCT-011",
@@ -545,9 +555,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "accounting.md"
+      "review_document": "accounting.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "ACCT-012",
@@ -586,9 +597,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "accounting.md"
+      "review_document": "accounting.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "ACCT-013",
@@ -627,9 +639,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "accounting.md"
+      "review_document": "accounting.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "ACCT-014",
@@ -669,9 +682,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "accounting.md"
+      "review_document": "accounting.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "ACCT-015",
@@ -714,9 +728,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "accounting.md"
+      "review_document": "accounting.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "AE-001",
@@ -757,9 +772,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "security-actions-integrations.md"
+      "review_document": "security-actions-integrations.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "AE-002",
@@ -799,9 +815,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "security-actions-integrations.md"
+      "review_document": "security-actions-integrations.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "AE-003",
@@ -842,9 +859,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "security-actions-integrations.md"
+      "review_document": "security-actions-integrations.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "INFRA-001",
@@ -883,9 +901,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "infrastructure.md"
+      "review_document": "infrastructure.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "INFRA-002",
@@ -924,9 +943,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "infrastructure.md"
+      "review_document": "infrastructure.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "INFRA-003",
@@ -965,9 +985,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "infrastructure.md"
+      "review_document": "infrastructure.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "INFRA-004",
@@ -1006,9 +1027,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "infrastructure.md"
+      "review_document": "infrastructure.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "INFRA-005",
@@ -1047,9 +1069,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "infrastructure.md"
+      "review_document": "infrastructure.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "INFRA-006",
@@ -1088,9 +1111,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "infrastructure.md"
+      "review_document": "infrastructure.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "INFRA-007",
@@ -1129,9 +1153,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "infrastructure.md"
+      "review_document": "infrastructure.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "INFRA-008",
@@ -1170,9 +1195,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "infrastructure.md"
+      "review_document": "infrastructure.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "INFRA-009",
@@ -1211,9 +1237,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "infrastructure.md"
+      "review_document": "infrastructure.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "INFRA-010",
@@ -1252,9 +1279,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "infrastructure.md"
+      "review_document": "infrastructure.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "INFRA-011",
@@ -1293,9 +1321,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "infrastructure.md"
+      "review_document": "infrastructure.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "INFRA-012",
@@ -1334,9 +1363,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "infrastructure.md"
+      "review_document": "infrastructure.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "INFRA-013",
@@ -1375,9 +1405,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "infrastructure.md"
+      "review_document": "infrastructure.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "INFRA-014",
@@ -1416,9 +1447,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "infrastructure.md"
+      "review_document": "infrastructure.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "INFRA-015",
@@ -1457,9 +1489,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "infrastructure.md"
+      "review_document": "infrastructure.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "INFRA-016",
@@ -1498,9 +1531,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "infrastructure.md"
+      "review_document": "infrastructure.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "INFRA-017",
@@ -1539,9 +1573,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "infrastructure.md"
+      "review_document": "infrastructure.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "INFRA-018",
@@ -1580,9 +1615,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "infrastructure.md"
+      "review_document": "infrastructure.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "INFRA-019",
@@ -1621,9 +1657,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "infrastructure.md"
+      "review_document": "infrastructure.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "IP-001",
@@ -1662,9 +1699,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "security-actions-integrations.md"
+      "review_document": "security-actions-integrations.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "IP-002",
@@ -1703,9 +1741,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "security-actions-integrations.md"
+      "review_document": "security-actions-integrations.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "IP-003",
@@ -1747,9 +1786,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "security-actions-integrations.md"
+      "review_document": "security-actions-integrations.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "IP-004",
@@ -1791,9 +1831,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "security-actions-integrations.md"
+      "review_document": "security-actions-integrations.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "IP-005",
@@ -1835,9 +1876,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "security-actions-integrations.md"
+      "review_document": "security-actions-integrations.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "IP-006",
@@ -1879,9 +1921,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "security-actions-integrations.md"
+      "review_document": "security-actions-integrations.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "IP-007",
@@ -1920,9 +1963,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "security-actions-integrations.md"
+      "review_document": "security-actions-integrations.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "IP-008",
@@ -1963,9 +2007,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "security-actions-integrations.md"
+      "review_document": "security-actions-integrations.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "IP-009",
@@ -2003,9 +2048,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "security-actions-integrations.md"
+      "review_document": "security-actions-integrations.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "IP-010",
@@ -2043,9 +2089,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "security-actions-integrations.md"
+      "review_document": "security-actions-integrations.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "IP-011",
@@ -2082,9 +2129,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "security-actions-integrations.md"
+      "review_document": "security-actions-integrations.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "IP-012",
@@ -2122,9 +2170,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "security-actions-integrations.md"
+      "review_document": "security-actions-integrations.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "IP-013",
@@ -2162,9 +2211,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "security-actions-integrations.md"
+      "review_document": "security-actions-integrations.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "IP-014",
@@ -2202,9 +2252,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "security-actions-integrations.md"
+      "review_document": "security-actions-integrations.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "QA-ACTION-TRANSPORT-001",
@@ -2243,9 +2294,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "clients-and-docs.md"
+      "review_document": "clients-and-docs.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "QA-ACTION-TRANSPORT-002",
@@ -2286,9 +2338,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "security-actions-integrations.md"
+      "review_document": "security-actions-integrations.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "QA-CLIENT-001",
@@ -2328,9 +2381,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "clients-and-docs.md"
+      "review_document": "clients-and-docs.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "QA-CLIENT-002",
@@ -2370,9 +2424,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "clients-and-docs.md"
+      "review_document": "clients-and-docs.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "QA-CLIENT-003",
@@ -2412,9 +2467,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "clients-and-docs.md"
+      "review_document": "clients-and-docs.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "QA-CLIENT-004",
@@ -2454,9 +2510,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "clients-and-docs.md"
+      "review_document": "clients-and-docs.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "QA-CLIENT-005",
@@ -2496,9 +2553,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "clients-and-docs.md"
+      "review_document": "clients-and-docs.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "QA-CLIENT-006",
@@ -2674,9 +2732,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "clients-and-docs.md"
+      "review_document": "clients-and-docs.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "QA-CLIENT-007",
@@ -2716,9 +2775,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "clients-and-docs.md"
+      "review_document": "clients-and-docs.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "QA-CLIENT-008",
@@ -2759,9 +2819,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "clients-and-docs.md"
+      "review_document": "clients-and-docs.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "QA-CLIENT-009",
@@ -2802,9 +2863,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "clients-and-docs.md"
+      "review_document": "clients-and-docs.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "QA-CLIENT-010",
@@ -2845,9 +2907,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "clients-and-docs.md"
+      "review_document": "clients-and-docs.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "QA-CLIENT-011",
@@ -2886,9 +2949,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "clients-and-docs.md"
+      "review_document": "clients-and-docs.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "QA-CLIENT-012",
@@ -2927,9 +2991,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "clients-and-docs.md"
+      "review_document": "clients-and-docs.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "QA-CLIENT-013",
@@ -2968,9 +3033,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "clients-and-docs.md"
+      "review_document": "clients-and-docs.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "QA-CLIENT-014",
@@ -3009,9 +3075,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "clients-and-docs.md"
+      "review_document": "clients-and-docs.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "QA-CLIENT-015",
@@ -3050,9 +3117,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "clients-and-docs.md"
+      "review_document": "clients-and-docs.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "QA-CLIENT-016",
@@ -3089,9 +3157,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "clients-and-docs.md"
+      "review_document": "clients-and-docs.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "QA-CLIENT-017",
@@ -3130,9 +3199,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "clients-and-docs.md"
+      "review_document": "clients-and-docs.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "QA-CLIENT-018",
@@ -3171,9 +3241,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "clients-and-docs.md"
+      "review_document": "clients-and-docs.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "QA-CLIENT-019",
@@ -3210,9 +3281,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "clients-and-docs.md"
+      "review_document": "clients-and-docs.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "QA-CLIENT-020",
@@ -3249,9 +3321,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "clients-and-docs.md"
+      "review_document": "clients-and-docs.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "SEC-001",
@@ -3288,9 +3361,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "security-actions-integrations.md"
+      "review_document": "security-actions-integrations.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "SEC-002",
@@ -3327,9 +3401,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "security-actions-integrations.md"
+      "review_document": "security-actions-integrations.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "SEC-003",
@@ -3366,9 +3441,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "security-actions-integrations.md"
+      "review_document": "security-actions-integrations.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "SEC-004",
@@ -3405,9 +3481,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "security-actions-integrations.md"
+      "review_document": "security-actions-integrations.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "SEC-005",
@@ -3444,9 +3521,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "security-actions-integrations.md"
+      "review_document": "security-actions-integrations.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "SEC-006",
@@ -3483,9 +3561,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "security-actions-integrations.md"
+      "review_document": "security-actions-integrations.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "SEC-007",
@@ -3522,9 +3601,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "security-actions-integrations.md"
+      "review_document": "security-actions-integrations.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "SEC-008",
@@ -3565,9 +3645,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "security-actions-integrations.md"
+      "review_document": "security-actions-integrations.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "id": "SEC-009",
@@ -3611,9 +3692,10 @@
       "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
       "current_issue_state": "OPEN",
       "fixing_pr_url": null,
-      "acceptance_status": "aggregate_validation_in_progress",
+      "acceptance_status": "local_aggregate_passed_release_unverified",
       "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
-      "review_document": "accounting.md"
+      "review_document": "accounting.md",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     }
   ],
   "additional_report_fixes": [
@@ -3622,56 +3704,78 @@
       "evidence_pr": 586,
       "parent_issue": 556,
       "worker_commit": "eefd1c1d7d57c59e53d12774298545e0dbabe799",
-      "status": "locally_fixed_aggregate_pending"
+      "status": "locally_fixed_aggregate_passed_release_unverified",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "finding": "BE-003",
       "evidence_pr": 586,
       "parent_issue": 556,
       "worker_commit": "eefd1c1d7d57c59e53d12774298545e0dbabe799",
-      "status": "locally_fixed_aggregate_pending"
+      "status": "locally_fixed_aggregate_passed_release_unverified",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "finding": "FE-001",
       "evidence_pr": 586,
       "parent_issue": 554,
       "worker_commit": "45eccbcc4b797967ab9559af2c7073eaea610f6f",
-      "status": "locally_fixed_aggregate_pending"
+      "status": "locally_fixed_aggregate_passed_release_unverified",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "finding": "FE-002",
       "evidence_pr": 586,
       "parent_issue": 554,
       "worker_commit": "45eccbcc4b797967ab9559af2c7073eaea610f6f",
-      "status": "locally_fixed_aggregate_pending"
+      "status": "locally_fixed_aggregate_passed_release_unverified",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "finding": "UX-001",
       "evidence_pr": 586,
       "parent_issue": 553,
       "worker_commit": "45eccbcc4b797967ab9559af2c7073eaea610f6f",
-      "status": "locally_fixed_aggregate_pending"
+      "status": "locally_fixed_aggregate_passed_release_unverified",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "finding": "UX-002",
       "evidence_pr": 586,
       "parent_issue": 553,
       "worker_commit": "45eccbcc4b797967ab9559af2c7073eaea610f6f",
-      "status": "locally_fixed_aggregate_pending"
+      "status": "locally_fixed_aggregate_passed_release_unverified",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "finding": "UX-003",
       "evidence_pr": 586,
       "parent_issue": 553,
       "worker_commit": "45eccbcc4b797967ab9559af2c7073eaea610f6f",
-      "status": "locally_fixed_aggregate_pending"
+      "status": "locally_fixed_aggregate_passed_release_unverified",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     },
     {
       "finding": "BE-100",
       "evidence_pr": 586,
       "parent_issue": 556,
       "worker_commit": "7aa67f48e7c84cc5e996eddbdb94b833e460c0de",
-      "status": "locally_fixed_aggregate_pending"
+      "status": "locally_fixed_aggregate_passed_release_unverified",
+      "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b"
     }
-  ]
+  ],
+  "tested_integration_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b",
+  "local_aggregate_validation": {
+    "passed": 4866,
+    "skipped": 85,
+    "warnings": 6,
+    "failed": 0,
+    "deselected": 0,
+    "includes_proof": true,
+    "exit_code": 0,
+    "duration_seconds": 309.54,
+    "result": "evidence/aggregate/full-4ac5a56/result.json",
+    "snapshot": "evidence/aggregate/full-4ac5a56/snapshot.json"
+  },
+  "release_status": "unpublished_not_deployed_charters_partially_verified"
 }

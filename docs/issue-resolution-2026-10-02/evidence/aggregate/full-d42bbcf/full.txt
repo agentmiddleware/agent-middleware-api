@@ -1,0 +1,115 @@
+........................................................................ [  1%]
+........................................................................ [  2%]
+........................................................................ [  4%]
+..sssssssssss.....................ssssssssssss.......................... [  5%]
+........................................................................ [  7%]
+........................................................................ [  8%]
+........................................................................ [ 10%]
+........................................................................ [ 11%]
+........................................................................ [ 13%]
+........................................................................ [ 14%]
+........................................................................ [ 15%]
+........................................................................ [ 17%]
+.......s................................................................ [ 18%]
+........................................................................ [ 20%]
+........................................................................ [ 21%]
+........................................................................ [ 23%]
+..................................s..................................... [ 24%]
+......s................................................................. [ 26%]
+........................................................................ [ 27%]
+........................s...........................................sss. [ 29%]
+........................................................................ [ 30%]
+........................................................................ [ 31%]
+........................................................................ [ 33%]
+........................................................................ [ 34%]
+...........sssssssssssss................................................ [ 36%]
+...........................................................F
+=================================== FAILURES ===================================
+_ test_public_operator_index_has_no_fake_data_or_browser_key_handling[/dashboard-headers0] _
+
+client = <httpx.AsyncClient object at 0x1107b9d30>, path = '/dashboard'
+headers = {}
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        "path,headers", [("/dashboard", {}), ("/", {"Accept": "text/html"})]
+    )
+    async def test_public_operator_index_has_no_fake_data_or_browser_key_handling(
+        client, path, headers
+    ):
+        resp = await client.get(path, headers=headers)
+        assert resp.status_code == 200
+        page = resp.text
+
+        fabricated_markers = (
+            "agent_synth_01",
+            "agent_finance_bot",
+            "rcpt_99a8b7",
+            "pmt_8f9a2c",
+            "1,428",
+            "metric-permits",
+            'verification_status: "VALID"',
+            "Verify Ed25519 Signature",
+            "Load Sample",
+            "Control Plane Active",
+            "INTACT",
+        )
+        for marker in fabricated_markers:
+            assert marker not in page
+
+        browser_secret_markers = (
+            "localStorage",
+            "sessionStorage",
+            'type="password"',
+            "fetch('/v1/permits",
+            'fetch("/v1/permits',
+        )
+        for marker in browser_secret_markers:
+            assert marker not in page
+
+        assert "<script" not in page
+        assert "railway.app" not in page
+        assert "vercel.app" not in page
+        assert "https://www.thisisatest.tech/proof/" in page
+>       assert "https://api.thisisatest.tech/health/dependencies" in page
+E       assert 'https://api.thisisatest.tech/health/dependencies' in '<!doctype html>\n<html lang="en">\n<head>\n  <meta charset="utf-8">\n  <meta name="viewport" content="width=device-wi...t.tech/proof/">Hosted proof</a>\n    <a href="/health/dependencies">Runtime truth</a>\n  </footer>\n</body>\n</html>\n'
+
+tests/test_human_accessibility.py:97: AssertionError
+=============================== warnings summary ===============================
+tests/test_failure_lab_diagnostic.py:32
+  /Users/sellers/.openclaw/worktrees/amw-issues-20261002-aggregate/tests/test_failure_lab_diagnostic.py:32: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient
+
+../../../Projects/agent-middleware-api/.venv/lib/python3.12/site-packages/starlette/testclient.py:53
+  /Users/sellers/Projects/agent-middleware-api/.venv/lib/python3.12/site-packages/starlette/testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+tests/test_dispatch_claim_migration.py::test_dispatch_claim_migration_preserves_legacy_rows_and_downgrades
+  /Users/sellers/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/contextlib.py:144: SAWarning: Skipped unsupported reflection of expression-based index uq_idempotency_governed_mcp_identity
+    next(self.gen)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+SKIPPED [1] tests/test_action_migrations.py:167: requires fresh disposable local action migration DB
+SKIPPED [1] tests/test_action_multiprocess.py:213: set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness
+SKIPPED [6] tests/test_action_multiprocess.py:254: set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness
+SKIPPED [1] tests/test_action_multiprocess.py:362: set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness
+SKIPPED [1] tests/test_action_multiprocess.py:386: set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness
+SKIPPED [1] tests/test_action_multiprocess.py:406: set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness
+SKIPPED [2] tests/test_action_postgres.py:58: requires explicitly opted-in disposable local amw_action PostgreSQL database
+SKIPPED [1] tests/test_action_postgres.py:65: requires explicitly opted-in disposable local amw_action PostgreSQL database
+SKIPPED [1] tests/test_action_postgres.py:69: requires explicitly opted-in disposable local amw_action PostgreSQL database
+SKIPPED [2] tests/test_action_postgres.py:96: requires explicitly opted-in disposable local amw_action PostgreSQL database
+SKIPPED [1] tests/test_action_postgres.py:181: requires explicitly opted-in disposable local amw_action PostgreSQL database
+SKIPPED [5] tests/test_action_postgres.py:185: requires explicitly opted-in disposable local amw_action PostgreSQL database
+SKIPPED [1] tests/test_awi_phase9.py:708: Playwright not installed
+SKIPPED [1] tests/test_ci_second_tool_denial.py:165: CI workflow test only runs on Linux (GitHub Actions environment)
+SKIPPED [1] tests/test_constant_test_loop.py:345: Set RUN_CONSTANT_TEST_LOOP_INTEGRATION=1 to run full integration test
+SKIPPED [1] tests/test_dispatch_call_slot_migration.py:28: requires fresh disposable migration PostgreSQL
+SKIPPED [3] tests/test_duplicate_guard_postgres_concurrency.py:37: requires a PostgreSQL DATABASE_URL for real row-lock semantics
+SKIPPED [6] tests/test_framework_legacy_tools.py:260: could not import 'langchain_core.tools': No module named 'langchain_core'
+SKIPPED [1] tests/test_framework_legacy_tools.py:273: could not import 'langchain_core.tools': No module named 'langchain_core'
+SKIPPED [6] tests/test_framework_legacy_tools.py:285: could not import 'llama_index.core.tools': No module named 'llama_index'
+FAILED tests/test_human_accessibility.py::test_public_operator_index_has_no_fake_data_or_browser_key_handling[/dashboard-headers0]
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!
+1 failed, 1816 passed, 43 skipped, 3 warnings in 191.33s (0:03:11)

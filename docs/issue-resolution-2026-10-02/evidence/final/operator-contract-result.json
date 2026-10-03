@@ -1,0 +1,18 @@
+{
+  "command": [
+    "/Users/sellers/Projects/agent-middleware-api/.venv/bin/python",
+    "-m",
+    "pytest",
+    "tests/test_human_accessibility.py",
+    "tests/test_dashboard_design.py",
+    "tests/test_site_agent_interface.py",
+    "-x",
+    "-q",
+    "-ra"
+  ],
+  "head": "0db19631f8a2de879e77d9b57246c41fb261c243",
+  "uncommitted_test_contract_change": true,
+  "exit_code": 0,
+  "started": "2026-10-03T03:47:19.533022+00:00",
+  "finished": "2026-10-03T03:47:26.597180+00:00"
+}

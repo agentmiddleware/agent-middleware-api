@@ -257,3 +257,7 @@ Read-only review found no blocking defect in documentation commit `7aa67f48e7c84
 - Backend generated contract cross-check: after removing only HTTPBearer scheme/alternative additions, parsed `docs/openapi.json` at `eefd1c1` is identical to the base. This confirms the declared schema scope without relying solely on the owner's report.
 
 Final combined-candidate execution and release acceptance remain coordinator-owned. These focused reviews do not silently extend the independently executed 576-test result to new source revisions.
+
+## Aggregate operator-contract follow-up
+
+The first full integration run exposed an old test that required the hardcoded production health URL removed by UX-003. The coordinator replaced that single requirement with four same-origin href checks, a prohibition on production API URLs and three API_URL command checks. Every existing no-fake-data, no-browser-key/storage/fetch/script, hosted-proof and authenticated-catalog check remains. Gate independently reviewed the exact diff and found no blocker: none of eight new checks pass the original markup; all eight pass the fixed markup. The coordinator then ran 83 focused cases and required hooks successfully; the complete 4ac5a56 suite passed 4,866 with 85 skips. No additional runtime change was needed.
