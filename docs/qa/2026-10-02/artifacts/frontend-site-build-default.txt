@@ -1,0 +1,5 @@
+
+> agent-middleware-marketing-site@1.0.0 build
+> python3 build_site.py
+
+site build blocked: missing required launch contact values: PUBLIC_CONTACT_EMAIL, PUBLIC_DISPLAY_NAME

@@ -1,0 +1,168 @@
+FILE pyproject.toml
+[project]
+name = "agent-native-middleware"
+version = "1.3.0"
+description = "Governed MCP authorization, metering, signed receipts, and audit evidence"
+license = "BUSL-1.1"
+requires-python = ">=3.11"
+
+[project.optional-dependencies]
+# mcp <2 is deliberate and must match requirements.txt: 2.x renamed FastMCP to
+# MCPServer and moved McpError. Dependabot major bumps are ignored (#460).
+mcp = ["mcp>=1.29.0,<2", "httpx>=0.28.1,<0.29", "httpcore==1.0.9", "anyio>=4.14.2", "pydantic-settings>=2.14.2"]
+playwright = ["playwright>=1.40.0"]
+browser = ["playwright>=1.40.0"]
+webauthn = ["webauthn>=1.0.0", "cryptography>=50.0.0", "pyasn1>=0.6.4"]
+# Deprecated no-op extras keep existing install commands valid, but intentionally
+# provide no persistent backend while the Dependabot alert reports no patch.
+chromadb = []
+rag = []
+observability = ["structlog>=24.1.0"]
+resilience = ["tenacity>=8.0.0"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = [".", "b2a_sdk/src", "wrappers/openai-agent-middleware/src"]
+markers = [
+    "proof: exercises an example proof-surface workload, not the trust-plane product. Skipped by `make test`; run the full suite with `make test-all`.",
+    "dormant: exercises a dormant trust surface (JWT auth, KYC, planner, Stripe webhooks, billing expansion) that production leaves unmounted; the conftest fixture mounts those routes for these tests. Stays in the fast core loop.",
+    "production_trust: runs under production-like trust flags (TRUST_MODE_ENABLED=true, ALLOW_LEGACY_UNPERMITTED_MCP=false, ENABLE_PROOF_SURFACES=false). Dedicated CI job sets those env vars.",
+]
+filterwarnings = [
+    # Pydantic v2 calls the deprecated datetime.utcnow() internally
+    # (pydantic/_internal/_fields.py), emitting ~1,600 warnings that bury real
+    # signal. Scoped to pydantic so any utcnow reintroduction in our own code
+    # still surfaces.
+    "ignore::DeprecationWarning:pydantic._internal._fields",
+]
+
+[tool.coverage.run]
+# SQLAlchemy's asyncio bridge switches greenlets on every awaited statement
+# inside a session. Without greenlet-aware tracing, coverage's tracer is
+# dropped after the first such switch, so every line that follows it in a
+# session body is reported as never executed even though the tests ran it.
+# The trust coverage gate measures exactly those bodies.
+concurrency = ["greenlet"]
+
+FILE requirements.txt
+# Agent Middleware API - Dependencies
+# Python 3.11+
+
+# --- Core Framework ---
+fastapi>=0.141.1
+uvicorn[standard]>=0.53.0
+pydantic>=2.13.5
+pydantic-settings>=2.14.2
+email-validator>=2.3.0  # Keep FastAPI/Pydantic OpenAPI email schema stable in CI
+structlog>=24.1.0       # Structured startup/runtime logging
+
+# --- IoT Protocol Bridge ---
+aiomqtt>=2.5.1          # Async MQTT client
+aiocoap>=0.4.17          # CoAP protocol support
+
+# --- Telemetry / Autonomous PM ---
+httpx>=0.28.1,<0.29     # Upstream MCP DNS pinning relies on httpcore's sni_hostname extension contract
+httpcore==1.0.9         # Verified implementation of the DNS-pin + TLS SNI handoff; update only with its integration test
+anyio>=4.14.2           # Transitive via httpx/starlette; >=4.14.2 fixes CVE-2026-63374 (TLSStream IDNA 2003 cert spoofing, critical) and CVE-2026-64847 (process-pool stderr block)
+
+# --- Media Engine ---
+python-multipart>=0.0.32 # File upload support (>=0.0.30 fixes CVE-2026-53538/53539, >=0.0.31 fixes CVE-2026-53540)
+
+# --- Utilities ---
+python-dotenv>=1.2.3    # .env file loading
+cryptography>=50.0.0       # Ed25519 trust-plane signatures (>=50.0.0 fixes GHSA-g6cj-pr64-35w5)
+PyJWT>=2.15.0           # JWT auth (app/core/jwt.py, oidc_iga); explicit — previously only transitive via mcp's pyjwt[crypto]
+redis>=8.1.0            # Redis-backed rate limiting and runtime persistence
+asyncpg>=0.31.0         # PostgreSQL-backed runtime persistence
+greenlet>=3.5.6         # SQLAlchemy async engine support
+stripe>=15.6.1           # Stripe payment processing
+mcp>=1.29.0,<2         # MCP SDK; >=1.29.0 provides the pre-parse request-body guard used by public/partner transports; <2 is deliberate: 2.x renamed FastMCP to MCPServer, moved McpError, and changed the lowlevel Server internals that mcp_public/mcp_standard override. Dependabot major bumps are ignored (#460); lift only in a dedicated migration PR.
+
+# --- Database ---
+sqlmodel>=0.0.47,<0.0.48  # Naive-UTC mappings are qualified with this minor release.
+alembic>=1.20.0        # Database migrations
+aiosqlite>=0.22.1      # Async SQLite driver for testing
+
+# --- Development ---
+pytest>=9.1.1
+pytest-asyncio>=1.4.0
+pytest-cov>=7.1.0
+mypy>=2.3.1            # Type checking
+
+FILE site/package.json
+{
+  "name": "agent-middleware-marketing-site",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "build": "python3 build_site.py"
+  }
+}
+
+FILE awi_sdk/typescript/package.json
+{
+  "name": "@agent-middleware/awi-sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for Agentic Web Interface (AWI)",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "publish": "npm publish"
+  },
+  "dependencies": {
+    "axios": "^1.18.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0",
+    "@types/node": "^20.0.0"
+  },
+  "keywords": [
+    "awi",
+    "agent",
+    "web-automation",
+    "mcp",
+    "agentic"
+  ],
+  "license": "MIT"
+}
+
+FILE ruff.toml
+[lint]
+# Pyflakes: unused imports/variables, undefined names, redefinitions.
+# Previously this file selected only E501 and then immediately ignored it,
+# so `ruff check` passed with zero rules actually enforced.
+select = ["F"]
+
+FILE mypy.ini
+[mypy]
+python_version = 3.11
+strict = false
+warn_return_any = false
+warn_unused_configs = false
+disallow_untyped_defs = false
+ignore_missing_imports = true
+check_untyped_defs = true
+
+[mypy-tests.*]
+ignore_errors = true
+
+# numpy arrives transitively (chromadb → onnxruntime) and its bundled stubs use
+# `type` statements, which mypy rejects while checking under python_version =
+# 3.11 even though CI's lint job runs on 3.12. Nothing in app/ is typed against
+# numpy, so skip its stubs rather than loosen the target version.
+[mypy-numpy.*]
+follow_imports = skip
+follow_imports_for_stubs = true
+
+# SQLModel's `table=True` metaclass typing is unreliable under mypy when the
+# checker runs without a fully resolved SQLModel install (pre-commit
+# `uv run --with mypy`). Ignore this module so the hook stays useful for the
+# rest of `app/`.
+[mypy-app.db.models]
+ignore_errors = true
+
+AGENTS ['AGENTS.md', 'tests/AGENTS.md', 'app/services/AGENTS.md']
+ENV FILE EXISTS ONLY []
+WORKFLOWS ['.github/workflows/failure-lab.yml', '.github/workflows/docker-publish.yml', '.github/workflows/railway-deploy.yml', '.github/workflows/python-sdk-release.yml', '.github/workflows/publish-mcp.yml', '.github/workflows/auto-pr.yml', '.github/workflows/ci.yml']

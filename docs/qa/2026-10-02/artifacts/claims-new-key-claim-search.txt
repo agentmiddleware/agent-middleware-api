@@ -1,0 +1,90 @@
+README.md:157:- **Not universal exactly-once.** Gateway replay safety makes the *remote* side
+README.md:158:  effect exactly once only if the upstream tool also honors the forwarded
+ELEVATOR_PITCH.md:65:differentiating primitive is **exactly-once economic authorization at the
+ELEVATOR_PITCH.md:115:| Enterprise authz for MCP | Who may call | Meter, receipt, and charge exactly once |
+ELEVATOR_PITCH.md:162:**"Does exactly-once really hold across the network?"** For one accepted
+ELEVATOR_PITCH.md:164:A *remote* tool's own side effect is exactly once only if that tool also honors
+ELEVATOR_PITCH.md:221:- Distributed exactly-once side effects in arbitrary upstream MCP servers.
+WEDGE.md:1:# Wedge: Replay-safe MCP permits and exactly-once debits
+WEDGE.md:6:> Exactly-once gateway authorization, debit, and receipt finalization for
+WEDGE.md:16:**What "exactly-once" means here, precisely.** It is the distributed-systems
+WEDGE.md:47:differentiating primitive is exactly-once economic authorization at the
+WEDGE.md:283:- Distributed exactly-once side effects in arbitrary upstream MCP servers.
+static/dashboard.html:394:        <li>The public proof demonstrates one gateway-controlled action, not end-to-end exactly-once behavior for arbitrary upstream side effects.</li>
+docs/agentmarket-listing.md:13:Credible wedge: exactly-once gateway debit, dispatch checkpoint, and receipt
+docs/agentmarket-listing.md:14:finalization for metered MCP calls. Remote side effects are exactly once only
+docs/failure-lab-suite.md:187:- **It does not prove exactly-once downstream execution.** The gateway's
+docs/failure-lab-suite.md:189:  effect is exactly once only if that tool honours the forwarded idempotency
+app/services/pods.py:21:commits exactly once. ``WalletEngine.create_sponsor_wallet``,
+app/services/upstream_mcp.py:846:                "configured upstream tool must appear exactly once in tools/list"
+app/services/permits.py:1313:        """Release one remote attempt's reservation exactly once.
+docs/partner-first-tool-runbook.md:105:exactly-once side effects.
+docs/partner-first-tool-runbook.md:174:  side effect is exactly once only if the partner tool honors the forwarded
+site/compare/index.html:177:              its own side effect exactly once depends on that tool honouring
+site/compare/index.html:429:          <dt>Does exactly-once hold all the way to my tool?</dt>
+site/compare/index.html:436:            Whether your <em>upstream</em> tool's own side effect happens exactly once depends
+app/services/billing_engine.py:1164:                    # daily_spent is incremented exactly once per charge (by the
+app/main.py:505:        "the downstream effect. A remote side effect is exactly once only when "
+app/main.py:1246:        "duplicate_request_new_key across the service lifetime) and the scope "
+app/services/mcp_phase9_tools.py:340:    """Ensure Phase 9 tools are registered exactly once when proof surfaces are on."""
+app/services/mcp_dispatch_attempts.py:57:DUPLICATE_DENIAL_REASON_CODE = "duplicate_request_new_key"
+app/services/mcp_dispatch_attempts.py:80:            "Denied receipts with reason_code duplicate_request_new_key across "
+app/services/mcp_dispatch_attempts.py:836:                                        "duplicate_request_new_key",
+app/services/mcp_dispatch_attempts.py:1478:        """Acquire the durable, non-reacquirable right to send exactly once.
+failure_lab/diagnostic/runs.py:264:    before ``app.main`` is imported, which happens exactly once per process, so
+site/llms-full.txt:105:- No exactly-once upstream side effects without upstream support. The
+app/schemas/iot.py:159:            "2=exactly once)."
+site/index.html:724:            <li>Exactly-once upstream side effects without upstream support</li>
+docs/permit-requests.md:67:## Minting happens exactly once
+app/core/resilience.py:183:# waits and the helpers below run their operation exactly once. SQLite in WAL
+app/schemas/trust.py:53:    # When set, identical requests under new keys are blocked for this duration
+failure_lab/scenarios/t01_concurrent_identical_retry.py:110:    5. The observation string MUST NOT use the words "exactly once" about the
+failure_lab/scenarios/t01_concurrent_identical_retry.py:137:        "exactly-once downstream execution in general.",
+app/core/config.py:147:    # - "enforce": refuse duplicate requests with duplicate_request_new_key
+app/services/human_approval.py:145:    single approval and page the human exactly once.
+failure_lab/scenarios/t08_permit_revocation_race.py:246:        charge; or (b) admitted exactly once -- at most one dispatch, at most
+app/services/signing_keys.py:155:        """Reject attempts to bind existing key metadata to new key material."""
+app/services/permit_requests.py:23:**Minting happens exactly once.** The ``pending -> minting`` transition is a
+docs/permit-validation-rerun-2026-08-25.md:41:| Receipt ↔ ledger linkage | PASS | receipt's `ledger_entry_id` present exactly once in the wallet ledger |
+docs/denial-details.md:71:| `duplicate_request_new_key` | `prior_attempt_id`, `prior_state`, `request_hash` | A new idempotency key carried arguments identical to a prior effectful call on the same permit and tool within the duplicate window (global `MCP_UPSTREAM_DUPLICATE_WINDOW_SECONDS` or permit-specific `repeat_window_seconds`). Returned only when `MCP_UPSTREAM_DUPLICATE_GUARD=enforce` and the permit does not set `allow_identical_repeats`; in the default `log` mode the call is logged and dispatched. Repeating the identical request under another new key is denied again while the prior attempt is in the window, and replaying this denied key returns the stored denial. To get the prior call's result, replay the prior call's own idempotency key; to run the call again on purpose, change the arguments or use a permit with `allow_identical_repeats`. |
+docs/trust-release-gate-branch-protection.md:41:| `postgres_permit_concurrency` | `postgres_permit_concurrency` | Two-process exactly-once / permit row-lock concurrency regressed |
+docs/POLICY_ENFORCEMENT.md:192:  `critical` billing alerts exactly once per threshold.
+docs/POLICY_ENFORCEMENT.md:222:blocks the new key.
+docs/POLICY_ENFORCEMENT.md:227:to deny duplicates with `duplicate_request_new_key`, or disable detection
+docs/POLICY_ENFORCEMENT.md:238:`duplicate_request_new_key` across the service lifetime; it is `null` when no
+docs/POLICY_ENFORCEMENT.md:264:| `duplicate_request_new_key` | B | Cross-key duplicate detection denied an identical new-key retry (remote tools, enforce mode only) |
+docs/failure-semantics.md:55:| `failed_unrefunded` | A refund was owed and the refund **itself** failed | Charged; a durable operator work item is created atomically with the receipt | Depends on the underlying failure | 500 / `-32603` | `test_governed_refund_failure_keeps_permit_budget_reserved`, `test_refund_reconciliation_retries_exactly_once_and_preserves_agent_replay` |
+docs/failure-semantics.md:120:  `retries=0`, the adapter invokes the tool exactly once, the claim transition
+docs/failure-semantics.md:140:| **A′. A, proved by an actual process kill** (worker killed the instant the debit commits, before `attach_charge`) | Stale-active sweep, after a real `SIGKILL` across two OS processes | `failed_refunded`; the orphaned debit is adopted by operation identity and the upstream is never contacted | **Refunded** exactly once, budget released |
+docs/failure-semantics.md:179:`refund-{ledger_entry_id}`, budget release is exactly-once, and receipts are
+docs/failure-semantics.md:289:## Exactly-once refunds
+docs/failure-semantics.md:296:later. That retry is exactly-once under concurrency: the refund entry id is
+docs/failure-semantics.md:300:`test_concurrent_refund_reconciliation_is_exactly_once_in_postgres`). A forged
+docs/failure-semantics.md:310:2. **Remote exactly-once and downstream-effect proof are not claimed.** The gateway forwards
+docs/failure-semantics.md:312:   in the MCP call metadata; a remote side effect is exactly-once only if the
+docs/PROOF_SURFACES.md:80:exactly-once MCP permit wedge. It is superseded by this freeze decision:
+docs/aegis/work/2026-08-27-pre-demo-audit-hardening/20-checkpoint.md:61:- Aggregate review questioned whether the mandated 401 wording describes malformed `X-API-Key` input precisely enough and found an adjacent exactly-once sentence that overstated the gateway boundary.
+docs/aegis/work/2026-08-27-pre-demo-audit-hardening/20-checkpoint.md:63:- The exactly-once paragraph now states the actual boundary: one accepted idempotency key maps to at most one gateway dispatch and debit plus one terminal receipt. Visible FAQ and generated JSON-LD equality are pinned by a focused regression.
+docs/tool-interface-authority.md:37:permit → meter → exactly-once dispatch → signed receipt pipeline.
+docs/owasp-agentic-top10-mapping.md:154:- Gap: exactly-once at the gateway does not make the remote side effect
+docs/owasp-agentic-top10-mapping.md:155:  exactly-once unless the upstream honors the forwarded idempotency key.
+docs/articles/intent-is-not-authority.md:9:AMW provides an operator-controlled boundary for consequential tool calls. Scoped permits constrain gateway-authorized actions; idempotency controls deduplicate tested same-key requests; signed receipts provide verifiable records of gateway decisions and observed outcomes. These controls do not guarantee exactly-once downstream effects. Their effectiveness depends on deployment configuration, protected signing keys, closed bypass routes, durable state and upstream reconciliation.
+docs/articles/intent-is-not-authority.md:17:**"Exactly-once downstream."** No. The gateway guarantees at most one dispatch and at most one wallet debit per accepted idempotency key. The dispatch claim is committed before the network send, so it records the authority to send, not that a send happened, and never that the tool acted. The remote effect is once only if the upstream tool also honours the forwarded key (README.md:157-162; WEDGE.md:16-23).
+docs/articles/intent-is-not-authority.md:47:**Fresh key, identical arguments, ENFORCE mode.** Refused before dispatch with `duplicate_request_new_key`; `dispatch_count == 1`. On PostgreSQL, five concurrent identical new-key calls yield one dispatch, one debit, one success receipt and four denials. Detection runs by default in log mode; enforcement is opt-in. The guard covers upstream tools only (documented, not tested on local tools) and matches on permit id, tool and argument hash. It is bypassed by a permit's `allow_identical_repeats`, by OFF mode (measured on PostgreSQL only), and by the detection window expiring. The default window is 24 hours; the only expiry test uses a 60-second per-permit override, so the 24-hour window itself is not exercised. Proof: tests/test_upstream_retry_cap_enforcement.py:460-461, 534-597, 843-847; tests/test_duplicate_guard_postgres_concurrency.py:210-279, 286-468; app/core/config.py:144-151; docs/POLICY_ENFORCEMENT.md:212-227.
+docs/articles/intent-is-not-authority.md:67:- Enforce mode might refuse the lab's exact agent-restart rows, because both labs reuse the permit and resend byte-identical arguments under a new key inside the window, and unit tests refuse identical-argument new keys there (tests/test_upstream_retry_cap_enforcement.py:460-461). Neither lab ever ran under enforce; enforce applies only to the configured upstream tool and not to permits with `allow_identical_repeats` (app/services/mcp_dispatch_attempts.py:633-636; docs/POLICY_ENFORCEMENT.md:214-227); and a restart that re-requests a permit or changes any argument (a timestamp, a request id, or the native `idempotency_key` field the native-plus-gateway rows carry in the arguments) produces a new request hash that no mode detects.
+docs/invariant-attack-report.md:545:- `tests/test_permit_postgres_concurrency.py` (attack 2 row-lock + exactly-once receipts/refunds/dispatch) — **11/11 passed**
+docs/PROOF_MATRIX.md:22:| `make dogfood-trust-plane` | Exactly-once against a **real durable side effect** (a file on disk), not just a ledger row | Throwaway SQLite |
+docs/PROOF_MATRIX.md:242:- **Exactly-once is gateway-scoped.** A remote tool's side effect is exactly
+docs/hard-run-report-2026-08-12.md:338:| Idempotency / exactly-once | replay of an invoke with a fixed `Idempotency-Key` | requires a live invoke (gated) |
+docs/hard-run-report-2026-08-12.md:349:3. **Idempotency & metering**: replay the identical invoke and assert the receipt ID is unchanged with no second ledger debit (`GET /v1/billing/ledger/{wallet}`); then fire a small handful (3–5) of concurrent duplicates with the same `Idempotency-Key` and confirm exactly-once (single debit, single receipt) — the small-count race check the brief allows.
+docs/README.md:37:receipt. A remote side effect is exactly once only if the upstream tool honors
+docs/partner-interview-script.md:27:   exactly-once, or audit until they do. Note verbatim which words *they*
+docs/security-review-kit.md:98:- Gateway exactly-once does not make the upstream side effect exactly-once
+docs/30-day-customer-validation.md:101:effect is exactly once only when the upstream tool also honors the forwarded
+docs/tech-debt-remediation-plan.md:4:**Product lens:** [`AGENTS.md`](../AGENTS.md) + [`WEDGE.md`](../WEDGE.md) — exactly-once MCP permits  
+docs/tech-debt-remediation-plan.md:274:1. Rewrite or freeze `docs/agentmarket-listing.md` / MCP registry submission text to exactly-once permits (no AWI/RAG/sandbox as product).
+docs/agent-self-credentialing.md:92:Proven against this code: exactly-once gateway authorization, debit, and
+docs/agent-self-credentialing.md:101:- **Remote exactly-once.** The gateway guarantees one authorization, one
+docs/agent-self-credentialing.md:102:  debit, one finalized receipt. A remote side effect is exactly-once only if
+docs/deploy-railway.md:478:  `/.well-known/trust-keys.json` must always publish that id exactly once as an
+docs/deploy-railway.md:814:`$API_URL` issuer, to publish the manifest's key id exactly once as an active

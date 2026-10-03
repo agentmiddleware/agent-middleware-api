@@ -1,0 +1,9 @@
+axe results
+ux-axe-404-mobile.json []
+ux-axe-compare-mobile.json [('color-contrast', 'serious', 4)]
+ux-axe-concept-mobile.json []
+ux-axe-dashboard-mobile.json [('scrollable-region-focusable', 'serious', 1)]
+ux-axe-home-mobile.json []
+ux-axe-proof-mobile.json []
+reports ['UX-REPORT.md', 'FRONTEND-REPORT.md', 'BACKEND-REPORT.md', 'GATE-REPORT.md', 'CLAIMS-REPORT.md']
+coverage files ['coordination-screenshot-review-and-coverage-checkpoint.txt', 'backend-baseline-coverage.json']

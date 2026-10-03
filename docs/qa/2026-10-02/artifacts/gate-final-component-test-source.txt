@@ -1,0 +1,92 @@
+91:   let config;
+92:   const transport = {};
+93:   for (const method of ['get', 'post', 'delete']) transport[method] = async (...args) => {
+94:     requests.push({method, args}); return {data: {status: 'synthetic'}};
+95:   };
+96:   const fakeAxios = {create(options) {config = options; return transport;}};
+97:   const module = {exports: {}};
+98:   const source = fs.readFileSync(path.join(root, 'awi_sdk/typescript/index.ts'), 'utf8');
+99:   const compiled = ts.transpileModule(source, {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true}}).outputText;
+100:   vm.runInNewContext(compiled, {exports: module.exports, module, require(name) {
+101:     assert.equal(name, 'axios'); return fakeAxios;
+102:   }}, {filename: 'qa-transpiled-awi-sdk.js'});
+103:   const sdk = new module.exports.AWIClient({baseUrl: 'http://127.0.0.1:8769', apiKey: [REDACTED];
+104:   return {sdk, requests, config};
+105: }
+106: 
+107: test('SDK fails before transport for missing permit and invalid idempotency keys', async () => {
+108:   const {sdk, requests, config} = client();
+109:   assert.equal(config.maxRedirects, 0);
+110:   for (const options of [undefined, {}, {permitId: ' '}, {permitId: 'permit', idempotencyKey: ' '}, {permitId: 'permit', idempotencyKey: 'a'.repeat(129)}]) {
+111:     await assert.rejects(sdk.execute('session', 'get_representation', {}, options));
+112:   }
+113:   assert.equal(requests.length, 0);
+114: });
+115: 
+116: test('SDK preserves retry identity, astral boundary and governed headers', async () => {
+117:   const {sdk, requests} = client();
+118:   const options = {permitId: ' permit ', idempotencyKey: 'a'.repeat(128)};
+119:   await sdk.execute('session', 'get_representation', {}, options);
+120:   await sdk.execute('session', 'get_representation', {}, options);
+121:   assert.equal(requests.length, 2);
+122:   assert.deepEqual(requests[0].args[2], requests[1].args[2]);
+123:   assert.equal(requests[0].args[2].headers['X-Permit-Id'], 'permit');
+124:   await sdk.execute('session', 'get_representation', {}, {...options, idempotencyKey: '😀'.repeat(128)});
+125:   assert.equal(requests.length, 3);
+126:   await assert.rejects(sdk.execute('session', 'get_representation', {}, {...options, idempotencyKey: '😀'.repeat(129)}));
+127:   assert.equal(requests.length, 3);
+128: });
+129: 
+130: test('FE-001: declared SDK build produces its advertised entrypoints', {todo: 'FE-001: npm run build exits 1 because tsconfig.json is absent'}, () => {
+131:   const target = fs.mkdtempSync(path.join(os.tmpdir(), 'amw-qa-sdk-build-'));
+132:   // Copy tracked package source only; no credential or environment files.
+133:   for (const name of ['index.ts', 'package.json', 'LICENSE', 'tsconfig.json']) {
+134:     const source = path.join(root, 'awi_sdk/typescript', name);
+135:     if (fs.existsSync(source)) fs.copyFileSync(source, path.join(target, name));
+136:   }
+137:   fs.symlinkSync(modules, path.join(target, 'node_modules'), 'dir');
+138:   const result = spawnSync('npm', ['run', 'build'], {cwd: target, encoding: 'utf8', timeout: 30000,
+139:     env: {PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: os.tmpdir(), npm_config_cache: path.join(os.tmpdir(), 'amw-qa-npm-cache')}});
+140:   assert.equal(result.status, 0, 'Declared npm run build must succeed');
+141:   const pkg = JSON.parse(fs.readFileSync(path.join(target, 'package.json'), 'utf8'));
+142:   for (const entrypoint of [pkg.main, pkg.types]) assert.equal(fs.existsSync(path.join(target, entrypoint)), true);
+143: });
+144: 
+145: test('FE-002: maxSteps=0 is not silently promoted to 100 actions', {todo: 'FE-002: preserve invalid zero for API rejection or reject locally'}, async () => {
+146:   const {sdk, requests} = client();
+147:   try {await sdk.createSession('http://127.0.0.1:8769/synthetic', {maxSteps: 0});}
+148:   catch {assert.equal(requests.length, 0); return;}
+149:   assert.equal(requests[0].args[1].max_steps, 0);
+150: });
+QA NEW SCRIPT LIST ['package_audit.py', 'artifacts', 'FRONTEND-SESSION.md', 'UX-REPORT.md', 'SUMMARY.md', 'GATE-SESSION.md', 'secret_scan.py', 'frontend-components.test.cjs', 'FRONTEND-REPORT.md', 'CLAIMS-INVENTORY.md', 'frontend.spec.cjs', 'ux_browser_qa.cjs', 'UX-SESSION.md', 'requirements-qa.txt', 'COORDINATION-SESSION.md', 'backend_safety', 'CLAIMS-SESSION.md', 'browser-loopback.mjs', 'build_claim_inventory.py', 'PLAN.md', 'FINDINGS.md', 'COVERAGE.md', 'ux_csp_server.py', 'playwright.config.cjs', 'run_logged.py', 'BACKEND-SESSION.md', 'SESSION-LOG.md', 'GATE-REPORT.md', 'CLAIMS-REPORT.md']
+SCHEMA 150: 
+151: 
+152: class AWISessionCreate(BaseModel):
+153:     """Request to create an AWI session."""
+154: 
+155:     target_url: str = Field(..., description="Target website URL")
+156:     wallet_id: str | None = Field(None, description="Wallet for billing")
+157:     max_steps: int = Field(
+158:         default=100, ge=1, le=1000, description="Max steps per session"
+159:     )
+160:     timeout_seconds: int = Field(
+161:         default=300, ge=10, le=3600, description="Session timeout"
+162:     )
+163:     allow_human_pause: bool = Field(
+164:         default=True, description="Allow human intervention"
+165:     )
+166:     representation_preference: AWIRepresentationType = Field(
+269:     task_type: str = Field(..., description="Type of AWI task")
+270:     target_url: str = Field(..., description="Target URL")
+271:     action_sequence: list[dict[str, Any]] = Field(
+272:         default_factory=list,
+273:         description="Sequence of AWI actions to execute",
+274:     )
+275:     priority: int = Field(
+276:         default=5, ge=1, le=10, description="Task priority (1=highest)"
+277:     )
+278:     max_concurrent: int = Field(
+279:         default=1, ge=1, le=10, description="Max concurrent steps"
+280:     )
+281:     callback_url: str | None = Field(
+282:         None, description="Webhook for completion notification"

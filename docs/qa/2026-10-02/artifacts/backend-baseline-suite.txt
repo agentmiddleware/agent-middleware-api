@@ -1,0 +1,789 @@
+........................................................................ [  1%]
+...............FFFF..................................................... [  3%]
+........................................................................ [  5%]
+........................................................................ [  7%]
+........................................................................ [  9%]
+........................................................................ [ 11%]
+..............................................s......................... [ 13%]
+........................................................................ [ 15%]
+........................................................................ [ 17%]
+.........................................................s.............. [ 19%]
+.............................s.......................................... [ 21%]
+........................................................................ [ 23%]
+.......................................................................s [ 25%]
+ss...................................................................... [ 27%]
+........................................................................ [ 29%]
+........................................................................ [ 31%]
+........................................sssssssssssss................... [ 33%]
+........................................................................ [ 35%]
+........................................................................ [ 37%]
+........................................................................ [ 39%]
+........................................................................ [ 40%]
+........................................................................ [ 42%]
+........................................................................ [ 44%]
+........................................................................ [ 46%]
+........................................................................ [ 48%]
+........................................................................ [ 50%]
+.sss.sssssssssssss...................................................... [ 52%]
+........................................................................ [ 54%]
+........................................................................ [ 56%]
+.........FFFF........................................................... [ 58%]
+.........................sssssssssssssssssss............................ [ 60%]
+........................................................................ [ 62%]
+........................................................................ [ 64%]
+........................................................................ [ 66%]
+...............................................sssss.................... [ 68%]
+........................................................................ [ 70%]
+........................................................................ [ 72%]
+........................................................................ [ 74%]
+........................................................................ [ 76%]
+........................................................................ [ 78%]
+.........................................s.............................. [ 79%]
+........................................................................ [ 81%]
+........................................................................ [ 83%]
+........................................................................ [ 85%]
+........................................................................ [ 87%]
+........................................................................ [ 89%]
+........................................................................ [ 91%]
+........................................................................ [ 93%]
+........................................................................ [ 95%]
+........................................................................ [ 97%]
+........................................................................ [ 99%]
+....................                                                     [100%]
+=================================== FAILURES ===================================
+_ TestOutboundUrlGuard.test_ip_encoding_tricks_are_blocked[http://2130706433/] _
+tests/test_agent_url_and_input_hardening.py:104: in test_ip_encoding_tricks_are_blocked
+    assert await check_outbound_url(url) == "private_address_blocked"
+E   AssertionError: assert 'dns_resolution_failed' == 'private_address_blocked'
+E     
+E     - private_address_blocked
+E     + dns_resolution_failed
+_ TestOutboundUrlGuard.test_ip_encoding_tricks_are_blocked[http://0x7f000001/] _
+tests/test_agent_url_and_input_hardening.py:104: in test_ip_encoding_tricks_are_blocked
+    assert await check_outbound_url(url) == "private_address_blocked"
+E   AssertionError: assert 'dns_resolution_failed' == 'private_address_blocked'
+E     
+E     - private_address_blocked
+E     + dns_resolution_failed
+_ TestOutboundUrlGuard.test_ip_encoding_tricks_are_blocked[http://017700000001/] _
+tests/test_agent_url_and_input_hardening.py:104: in test_ip_encoding_tricks_are_blocked
+    assert await check_outbound_url(url) == "private_address_blocked"
+E   AssertionError: assert 'dns_resolution_failed' == 'private_address_blocked'
+E     
+E     - private_address_blocked
+E     + dns_resolution_failed
+_____ TestOutboundUrlGuard.test_ip_encoding_tricks_are_blocked[http://0/] ______
+tests/test_agent_url_and_input_hardening.py:104: in test_ip_encoding_tricks_are_blocked
+    assert await check_outbound_url(url) == "private_address_blocked"
+E   AssertionError: assert 'dns_resolution_failed' == 'private_address_blocked'
+E     
+E     - private_address_blocked
+E     + dns_resolution_failed
+_________________ test_signing_seed_is_a_visible_required_key __________________
+tests/test_onboarding_contract.py:51: in test_signing_seed_is_a_visible_required_key
+    assignments = _uncommented_assignments()
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_onboarding_contract.py:34: in _uncommented_assignments
+    for raw in ENV_EXAMPLE.read_text().splitlines():
+               ^^^^^^^^^^^^^^^^^^^^^^^
+../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/pathlib/_local.py:546: in read_text
+    return PathBase.read_text(self, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/pathlib/_abc.py:632: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/pathlib/_local.py:537: in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+docs/qa/2026-10-02/backend_safety/sitecustomize.py:36: in guard
+    ???
+E   PermissionError: QA guard: environment file access denied
+_________ test_signing_seed_ships_empty_rather_than_with_a_real_value __________
+tests/test_onboarding_contract.py:60: in test_signing_seed_ships_empty_rather_than_with_a_real_value
+    assignments = _uncommented_assignments()
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_onboarding_contract.py:34: in _uncommented_assignments
+    for raw in ENV_EXAMPLE.read_text().splitlines():
+               ^^^^^^^^^^^^^^^^^^^^^^^
+../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/pathlib/_local.py:546: in read_text
+    return PathBase.read_text(self, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/pathlib/_abc.py:632: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/pathlib/_local.py:537: in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+docs/qa/2026-10-02/backend_safety/sitecustomize.py:36: in guard
+    ???
+E   PermissionError: QA guard: environment file access denied
+_____________ test_env_example_documents_how_to_generate_the_seed ______________
+tests/test_onboarding_contract.py:68: in test_env_example_documents_how_to_generate_the_seed
+    text = ENV_EXAMPLE.read_text()
+           ^^^^^^^^^^^^^^^^^^^^^^^
+../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/pathlib/_local.py:546: in read_text
+    return PathBase.read_text(self, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/pathlib/_abc.py:632: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/pathlib/_local.py:537: in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+docs/qa/2026-10-02/backend_safety/sitecustomize.py:36: in guard
+    ???
+E   PermissionError: QA guard: environment file access denied
+___________________ test_default_state_backend_boots_locally ___________________
+tests/test_onboarding_contract.py:83: in test_default_state_backend_boots_locally
+    assignments = _uncommented_assignments()
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_onboarding_contract.py:34: in _uncommented_assignments
+    for raw in ENV_EXAMPLE.read_text().splitlines():
+               ^^^^^^^^^^^^^^^^^^^^^^^
+../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/pathlib/_local.py:546: in read_text
+    return PathBase.read_text(self, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/pathlib/_abc.py:632: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/pathlib/_local.py:537: in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+docs/qa/2026-10-02/backend_safety/sitecustomize.py:36: in guard
+    ???
+E   PermissionError: QA guard: environment file access denied
+=============================== warnings summary ===============================
+tests/test_failure_lab_diagnostic.py:31
+  /Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api/tests/test_failure_lab_diagnostic.py:31: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient
+
+tests/test_dispatch_claim_migration.py::test_dispatch_claim_migration_preserves_legacy_rows_and_downgrades
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/contextlib.py:148: SAWarning: Skipped unsupported reflection of expression-based index uq_idempotency_governed_mcp_identity
+    next(self.gen)
+
+tests/test_failure_lab_harness.py::test_lost_response_workload_across_configurations
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1149fa7a0>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_harness.py::test_lost_response_workload_across_configurations
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1149fbf10>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_harness.py::test_lost_response_workload_across_configurations
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1149fb6a0>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_harness.py::test_lost_response_workload_across_configurations
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1149f8d60>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_harness.py::test_lost_response_workload_across_configurations
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1149f8310>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_harness.py::test_lost_response_workload_across_configurations
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1149fb790>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_harness.py::test_lost_response_workload_across_configurations
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1149fb5b0>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_harness.py::test_lost_response_workload_across_configurations
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1149f96c0>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_harness.py::test_lost_response_workload_across_configurations
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1149f9b70>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_harness.py::test_lost_response_workload_across_configurations
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1149fbe20>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_harness.py::test_lost_response_workload_across_configurations
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1149f8c70>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_harness.py::test_lost_response_workload_across_configurations
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1149fb4c0>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_harness.py::test_lost_response_workload_across_configurations
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x114300040>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_harness.py::test_lost_response_workload_across_configurations
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1149f8220>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_harness.py::test_lost_response_workload_across_configurations
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1149f8e50>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_harness.py::test_lost_response_workload_across_configurations
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1149fba60>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_harness.py::test_lost_response_workload_across_configurations
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x114300f40>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_harness.py::test_lost_response_workload_across_configurations
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1149f93f0>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_harness.py::test_lost_response_workload_across_configurations
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1134bd990>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_harness.py::test_lost_response_workload_across_configurations
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1134bd5d0>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_harness.py::test_lost_response_workload_across_configurations
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1149cea70>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_harness.py::test_lost_response_workload_across_configurations
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1149f8a90>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_harness.py::test_lost_response_workload_across_configurations
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1134be5c0>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_scenarios.py::test_every_scenario_is_actually_implemented[T01]
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/ast.py:50: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x114a505e0>
+    return compile(source, filename, mode, flags,
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_scenarios.py::test_every_scenario_is_actually_implemented[T01]
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/ast.py:50: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1143015d0>
+    return compile(source, filename, mode, flags,
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_scenarios.py::test_every_scenario_is_actually_implemented[T09]
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/ast.py:50: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1149fa2f0>
+    return compile(source, filename, mode, flags,
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_scenarios.py::test_a_scenario_runs_end_to_end_and_matches_its_documentation
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x113b4dc60>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_scenarios.py::test_a_scenario_runs_end_to_end_and_matches_its_documentation
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1149f95d0>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_scenarios.py::test_a_scenario_runs_end_to_end_and_matches_its_documentation
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1149f86d0>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_scenarios.py::test_a_scenario_runs_end_to_end_and_matches_its_documentation
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1149fa6b0>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_scenarios.py::test_a_scenario_runs_end_to_end_and_matches_its_documentation
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1149fa200>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_scenarios.py::test_a_scenario_runs_end_to_end_and_matches_its_documentation
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1149f8f40>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_scenarios.py::test_a_scenario_runs_end_to_end_and_matches_its_documentation
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1149f84f0>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_scenarios.py::test_a_scenario_runs_end_to_end_and_matches_its_documentation
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x114303100>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_scenarios.py::test_a_scenario_runs_end_to_end_and_matches_its_documentation
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1149fb970>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_scenarios.py::test_a_scenario_runs_end_to_end_and_matches_its_documentation
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x113b4f880>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_scenarios.py::test_a_scenario_runs_end_to_end_and_matches_its_documentation
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x114302e30>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_scenarios.py::test_a_scenario_runs_end_to_end_and_matches_its_documentation
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1143007c0>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_scenarios.py::test_a_scenario_runs_end_to_end_and_matches_its_documentation
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x114302200>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_scenarios.py::test_a_scenario_runs_end_to_end_and_matches_its_documentation
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1149f9990>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_scenarios.py::test_a_scenario_runs_end_to_end_and_matches_its_documentation
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1149f85e0>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_scenarios.py::test_a_scenario_runs_end_to_end_and_matches_its_documentation
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x114300130>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_scenarios.py::test_a_scenario_runs_end_to_end_and_matches_its_documentation
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x114301210>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_scenarios.py::test_a_scenario_runs_end_to_end_and_matches_its_documentation
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x114301a80>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_scenarios.py::test_a_scenario_runs_end_to_end_and_matches_its_documentation
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1149f88b0>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_scenarios.py::test_a_scenario_runs_end_to_end_and_matches_its_documentation
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:414: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1149cd300>
+    def __getitem__(self, key):
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_scenarios.py::test_a_scenario_runs_end_to_end_and_matches_its_documentation
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:414: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1134be200>
+    def __getitem__(self, key):
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_scenarios.py::test_a_scenario_runs_end_to_end_and_matches_its_documentation
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:414: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x11433cf40>
+    def __getitem__(self, key):
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_scenarios.py::test_a_scenario_runs_end_to_end_and_matches_its_documentation
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:414: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x11433ea70>
+    def __getitem__(self, key):
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_scenarios.py::test_a_scenario_runs_end_to_end_and_matches_its_documentation
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:414: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x11433c5e0>
+    def __getitem__(self, key):
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_scenarios.py::test_a_scenario_runs_end_to_end_and_matches_its_documentation
+  /private/tmp/amw-qa-python/lib/python3.13/site-packages/sqlalchemy/orm/loading.py:957: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x11433e890>
+    populators = {key: list(value) for key, value in cached_populators.items()}
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_scenarios.py::test_a_scenario_runs_end_to_end_and_matches_its_documentation
+  /private/tmp/amw-qa-python/lib/python3.13/site-packages/sqlalchemy/orm/loading.py:957: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1143018a0>
+    populators = {key: list(value) for key, value in cached_populators.items()}
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_scenarios.py::test_a_scenario_runs_end_to_end_and_matches_its_documentation
+  /private/tmp/amw-qa-python/lib/python3.13/site-packages/sqlalchemy/orm/loading.py:957: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1149f9300>
+    populators = {key: list(value) for key, value in cached_populators.items()}
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_stateful.py::test_a_short_exploration_runs_and_reports_honestly
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:414: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1149cd120>
+    def __getitem__(self, key):
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_stateful.py::test_a_short_exploration_runs_and_reports_honestly
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:414: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x11433f1f0>
+    def __getitem__(self, key):
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_stateful.py::test_a_short_exploration_runs_and_reports_honestly
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:414: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x11433f4c0>
+    def __getitem__(self, key):
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_stateful.py::test_a_short_exploration_runs_and_reports_honestly
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:414: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x11433d3f0>
+    def __getitem__(self, key):
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_stateful.py::test_a_short_exploration_runs_and_reports_honestly
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:414: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x11433df30>
+    def __getitem__(self, key):
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_stateful.py::test_a_short_exploration_runs_and_reports_honestly
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:414: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x114a52d40>
+    def __getitem__(self, key):
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_stateful.py::test_a_short_exploration_runs_and_reports_honestly
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:414: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x114302b60>
+    def __getitem__(self, key):
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_stateful.py::test_a_short_exploration_runs_and_reports_honestly
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:414: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x114301f30>
+    def __getitem__(self, key):
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_stateful.py::test_a_short_exploration_runs_and_reports_honestly
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x11433d030>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_stateful.py::test_a_short_exploration_runs_and_reports_honestly
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x11433d7b0>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_stateful.py::test_a_short_exploration_runs_and_reports_honestly
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x114cb5990>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_failure_lab_stateful.py::test_a_short_exploration_runs_and_reports_honestly
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:415: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x114cb72e0>
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_framework_inprocess_validator.py::test_governed_tool_end_to_end_receipt_and_replay
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:414: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1149cee30>
+    def __getitem__(self, key):
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_framework_inprocess_validator.py::test_governed_tool_end_to_end_receipt_and_replay
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/weakref.py:414: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x11384b5b0>
+    def __getitem__(self, key):
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_human_approval_gate.py::test_locally_expired_approval_denies
+  /private/tmp/amw-qa-python/lib/python3.13/site-packages/aiosqlite/core.py:63: DeprecationWarning: The default datetime adapter is deprecated as of Python 3.12; see the sqlite3 documentation for suggested replacement recipes
+    result = function()
+
+tests/test_minimal_path_e2e.py::test_minimal_viable_path
+  /Users/sellers/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/contextlib.py:109: DeprecationWarning: Use `streamable_http_client` instead.
+    self.gen = func(*args, **kwds)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================================ tests coverage ================================
+______________ coverage: platform darwin, python 3.13.14-final-0 _______________
+
+Name                                          Stmts   Miss  Cover
+-----------------------------------------------------------------
+app/__init__.py                                   1      0   100%
+app/audit/__init__.py                             2      0   100%
+app/audit/lightweight.py                          8      0   100%
+app/core/__init__.py                              0      0   100%
+app/core/auth.py                                142      4    97%
+app/core/blob.py                                 87     11    87%
+app/core/build_metadata.py                       36      2    94%
+app/core/config.py                              142      0   100%
+app/core/db_urls.py                              53      3    94%
+app/core/dependencies.py                         56     14    75%
+app/core/durable_state.py                       317     92    71%
+app/core/health.py                              177     40    77%
+app/core/jwt.py                                  74      1    99%
+app/core/oidc_iga.py                            285     35    88%
+app/core/product_positioning.py                  16      0   100%
+app/core/public_contact.py                       31      0   100%
+app/core/rate_limiter.py                        263     42    84%
+app/core/resilience.py                          106     23    78%
+app/core/runtime_degradation.py                  20      0   100%
+app/core/runtime_mode.py                         21      0   100%
+app/core/scopes.py                               25      8    68%
+app/core/sentinel_target.py                      78      4    95%
+app/core/time.py                                  8      0   100%
+app/core/trust_mode.py                           98      0   100%
+app/core/url_guard.py                            45      3    93%
+app/db/__init__.py                                3      0   100%
+app/db/converters.py                            113     20    82%
+app/db/database.py                              182     38    79%
+app/db/models.py                                555      0   100%
+app/db/sql_expressions.py                         7      0   100%
+app/db/types.py                                  14      0   100%
+app/main.py                                     236    110    53%
+app/middleware/head_method.py                    16      0   100%
+app/middleware/request_body_limit.py             52      4    92%
+app/middleware/security_headers.py               48      3    94%
+app/optimizer/candidates.py                       4      0   100%
+app/optimizer/planner.py                         73      0   100%
+app/optimizer/policy.py                          13      0   100%
+app/partner_mcp.py                              129     12    91%
+app/policy/__init__.py                            2      0   100%
+app/policy/decisions.py                          30      1    97%
+app/routers/__init__.py                           0      0   100%
+app/routers/agent_comms_durable.py               69      0   100%
+app/routers/ai.py                               103      0   100%
+app/routers/api_keys.py                         117     17    85%
+app/routers/audit.py                             56      3    95%
+app/routers/auth.py                              75     14    81%
+app/routers/awi.py                              137     46    66%
+app/routers/awi_enhanced.py                     371    158    57%
+app/routers/billing.py                          382     36    91%
+app/routers/broadcast.py                         92      2    98%
+app/routers/comms.py                             94      1    99%
+app/routers/content_generation.py                48      1    98%
+app/routers/dev_keys.py                          53      1    98%
+app/routers/discover.py                         101     10    90%
+app/routers/docs.py                              19      4    79%
+app/routers/evidence.py                          15      0   100%
+app/routers/factory.py                           78      1    99%
+app/routers/http_idempotency.py                  30      2    93%
+app/routers/iot.py                               71      5    93%
+app/routers/keys.py                              18      1    94%
+app/routers/kyc.py                               35      2    94%
+app/routers/mcp.py                             1022     74    93%
+app/routers/mcp_public.py                       176     26    85%
+app/routers/mcp_standard.py                     310     22    93%
+app/routers/me.py                                68      0   100%
+app/routers/media.py                             59      3    95%
+app/routers/oracle.py                            67      3    96%
+app/routers/permit_requests.py                   55      2    96%
+app/routers/permits.py                           93      6    94%
+app/routers/planner.py                           35      0   100%
+app/routers/pods.py                              31      4    87%
+app/routers/policies.py                          29      2    93%
+app/routers/preflight.py                         39      0   100%
+app/routers/protocol.py                          47      0   100%
+app/routers/quotes.py                            38      3    92%
+app/routers/receipts.py                         106     18    83%
+app/routers/red_team.py                          41      1    98%
+app/routers/rtaas.py                             73      2    97%
+app/routers/sandbox.py                           97      6    94%
+app/routers/sandbox_behavioral.py                77     21    73%
+app/routers/static.py                            51      5    90%
+app/routers/telemetry.py                         56      1    98%
+app/routers/telemetry_scope.py                   92      2    98%
+app/routers/webhooks.py                          32      0   100%
+app/routers/well_known.py                       148      2    99%
+app/routers/x402.py                             107      8    93%
+app/schemas/__init__.py                           0      0   100%
+app/schemas/acp.py                               52      1    98%
+app/schemas/audit.py                             38      0   100%
+app/schemas/auth.py                              20      0   100%
+app/schemas/awi.py                              199      2    99%
+app/schemas/awi_enhanced.py                     188      0   100%
+app/schemas/billing.py                          457      2    99%
+app/schemas/content_factory.py                  153      0   100%
+app/schemas/content_generation.py                21      0   100%
+app/schemas/iot.py                               71      4    94%
+app/schemas/media.py                             77      0   100%
+app/schemas/optimizer.py                         53      0   100%
+app/schemas/oracle.py                           117      1    99%
+app/schemas/pods.py                              52      1    98%
+app/schemas/policies.py                          44      0   100%
+app/schemas/red_team.py                          81      0   100%
+app/schemas/sandbox_behavioral.py                88      0   100%
+app/schemas/telemetry.py                         60      0   100%
+app/schemas/trust.py                            269      0   100%
+app/services/__init__.py                          0      0   100%
+app/services/acp_bridge.py                      173     20    88%
+app/services/agent_comms.py                     373     55    85%
+app/services/agent_comms_store.py                54      3    94%
+app/services/agent_intelligence.py              143     18    87%
+app/services/agent_money.py                     106     11    90%
+app/services/api_key_service.py                 284     22    92%
+app/services/approval_card.py                    96      2    98%
+app/services/audit_chain.py                     171     15    91%
+app/services/audit_log.py                       130      3    98%
+app/services/awi_action_vocab.py                 82      5    94%
+app/services/awi_external_adapter.py             80     16    80%
+app/services/awi_http_governance.py             182     42    77%
+app/services/awi_playwright_bridge.py           750    233    69%
+app/services/awi_rag_engine.py                  396     98    75%
+app/services/awi_representation.py               87      8    91%
+app/services/awi_session.py                     285     82    71%
+app/services/awi_task_queue.py                  188     61    68%
+app/services/behavioral_sandbox.py              260     81    69%
+app/services/billing_engine.py                  337     60    82%
+app/services/content_factory.py                 389     39    90%
+app/services/content_factory_generation.py      102     18    82%
+app/services/dogfood_tool.py                     91     25    73%
+app/services/governance.py                       12      0   100%
+app/services/governed_metering.py                13      0   100%
+app/services/human_approval.py                  279     25    91%
+app/services/idempotency.py                     295     31    89%
+app/services/iot_bridge.py                      340     48    86%
+app/services/kyc_service.py                     170     50    71%
+app/services/llm.py                             140    103    26%
+app/services/mcp_dispatch_attempts.py           617     86    86%
+app/services/mcp_dispatch_reconciliation.py     350     52    85%
+app/services/mcp_generator.py                   122     18    85%
+app/services/mcp_integration_truth.py            12      1    92%
+app/services/mcp_phase9_tools.py                109     17    84%
+app/services/media_engine.py                    174     21    88%
+app/services/notifications.py                    95     26    73%
+app/services/oracle.py                          290     23    92%
+app/services/oracle_broadcast.py                128      8    94%
+app/services/permit_requests.py                 269     22    92%
+app/services/permits.py                         537     22    96%
+app/services/pods.py                             89      5    94%
+app/services/policies.py                        132      3    98%
+app/services/preflight.py                       146     11    92%
+app/services/pricing.py                          20      0   100%
+app/services/protocol_engine.py                 131     14    89%
+app/services/quotes.py                          131      7    95%
+app/services/receipts.py                        269     34    87%
+app/services/red_team.py                        277     25    91%
+app/services/refund_reconciliation.py           245     31    87%
+app/services/rtaas.py                           167     11    93%
+app/services/sandbox.py                         196     47    76%
+app/services/service_registry.py                221     48    78%
+app/services/shadow_ledger.py                   256     31    88%
+app/services/signing_keys.py                    210      5    98%
+app/services/stripe_integration.py              239     39    84%
+app/services/telemetry_pm.py                    293     31    89%
+app/services/telemetry_scope.py                 106      9    92%
+app/services/upstream_mcp.py                    531     55    90%
+app/services/velocity_monitor.py                134      4    97%
+app/services/wallet_engine.py                   307     29    91%
+app/services/wallet_status.py                     2      0   100%
+app/services/webauthn_provider.py               210     39    81%
+app/services/x402_engine.py                     193     16    92%
+app/tools/awi_manifest_generator.py              80     28    65%
+app/trust/__init__.py                            15      0   100%
+app/trust/adapters.py                            91      3    97%
+app/trust/approvals.py                            3      0   100%
+app/trust/audit_chain.py                          4      0   100%
+app/trust/evidence.py                           223     19    91%
+app/trust/idempotency.py                          3      0   100%
+app/trust/metering.py                             3      0   100%
+app/trust/permit_requests.py                      4      0   100%
+app/trust/permits.py                              3      0   100%
+app/trust/policy.py                               6      0   100%
+app/trust/quotes.py                               4      0   100%
+app/trust/receipts.py                            85      8    91%
+app/trust/refund_reconciliation.py                2      0   100%
+app/trust/signing.py                              3      0   100%
+-----------------------------------------------------------------
+TOTAL                                         24266   3018    88%
+Coverage JSON written to file docs/qa/2026-10-02/artifacts/backend-baseline-coverage.json
+=========================== short test summary info ============================
+FAILED tests/test_agent_url_and_input_hardening.py::TestOutboundUrlGuard::test_ip_encoding_tricks_are_blocked[http://2130706433/] - AssertionError: assert 'dns_resolution_failed' == 'private_address_blocked'
+  
+  - private_address_blocked
+  + dns_resolution_failed
+FAILED tests/test_agent_url_and_input_hardening.py::TestOutboundUrlGuard::test_ip_encoding_tricks_are_blocked[http://0x7f000001/] - AssertionError: assert 'dns_resolution_failed' == 'private_address_blocked'
+  
+  - private_address_blocked
+  + dns_resolution_failed
+FAILED tests/test_agent_url_and_input_hardening.py::TestOutboundUrlGuard::test_ip_encoding_tricks_are_blocked[http://017700000001/] - AssertionError: assert 'dns_resolution_failed' == 'private_address_blocked'
+  
+  - private_address_blocked
+  + dns_resolution_failed
+FAILED tests/test_agent_url_and_input_hardening.py::TestOutboundUrlGuard::test_ip_encoding_tricks_are_blocked[http://0/] - AssertionError: assert 'dns_resolution_failed' == 'private_address_blocked'
+  
+  - private_address_blocked
+  + dns_resolution_failed
+FAILED tests/test_onboarding_contract.py::test_signing_seed_is_a_visible_required_key - PermissionError: QA guard: environment file access denied
+FAILED tests/test_onboarding_contract.py::test_signing_seed_ships_empty_rather_than_with_a_real_value - PermissionError: QA guard: environment file access denied
+FAILED tests/test_onboarding_contract.py::test_env_example_documents_how_to_generate_the_seed - PermissionError: QA guard: environment file access denied
+FAILED tests/test_onboarding_contract.py::test_default_state_backend_boots_locally - PermissionError: QA guard: environment file access denied
+8 failed, 3624 passed, 60 skipped, 71 warnings in 360.54s (0:06:00)
