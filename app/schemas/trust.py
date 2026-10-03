@@ -4,8 +4,16 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, StrictInt, field_validator, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    Field,
+    StrictInt,
+    field_validator,
+    model_validator,
+)
 
+from app.core.credits import credit_amount_fits_storage
 from app.schemas.policies import PolicyBundleResponse
 
 # Permit and permit-request credit columns are Numeric(20, 8). A permit is
@@ -14,6 +22,17 @@ from app.schemas.policies import PolicyBundleResponse
 # permit whose stored terms no longer match its signature. Refuse those here.
 _CREDIT_DIGITS = 20
 _CREDIT_DECIMAL_PLACES = 8
+
+
+def _require_storable_credit(amount: Decimal) -> Decimal:
+    if not credit_amount_fits_storage(amount):
+        raise ValueError("credit_amount_not_storable")
+    return amount
+
+
+# Numeric scale alone cannot detect large amounts rounded by SQLite's float
+# conversion. Apply this before signing, hashing approval terms, or acceptance.
+_StoredCredit = Annotated[Decimal, AfterValidator(_require_storable_credit)]
 
 
 class ActionPermitFields(BaseModel):
@@ -45,7 +64,7 @@ class PermitCreateRequest(ActionPermitFields):
     subject_key_id: str | None = None
     scopes: list[str] = Field(default_factory=list)
     allowed_tools: list[str] = Field(default_factory=list)
-    max_credits: Decimal = Field(
+    max_credits: _StoredCredit = Field(
         gt=0, max_digits=_CREDIT_DIGITS, decimal_places=_CREDIT_DECIMAL_PLACES
     )
     expires_at: datetime
@@ -60,7 +79,7 @@ class PermitCreateRequest(ActionPermitFields):
     max_calls_per_tool: dict[str, Annotated[StrictInt, Field(ge=1)]] = Field(
         default_factory=dict
     )
-    aggregate_value_cap: Decimal | None = Field(
+    aggregate_value_cap: _StoredCredit | None = Field(
         default=None,
         gt=0,
         max_digits=_CREDIT_DIGITS,
@@ -94,7 +113,7 @@ class ActionPermitCreateRequest(BaseModel):
     issuer_wallet_id: str
     subject_wallet_id: str
     subject_key_id: str | None = None
-    max_credits: Decimal = Field(
+    max_credits: _StoredCredit = Field(
         gt=0, max_digits=_CREDIT_DIGITS, decimal_places=_CREDIT_DECIMAL_PLACES
     )
     expires_at: datetime
@@ -169,7 +188,7 @@ class PermitRequestCreate(BaseModel):
     scopes: list[str] = Field(default_factory=list)
     # Hashed for the human at request time and stored as Numeric(20, 8), so
     # a value the column would round fails its own integrity check at mint.
-    max_credits: Decimal = Field(
+    max_credits: _StoredCredit = Field(
         gt=0, max_digits=_CREDIT_DIGITS, decimal_places=_CREDIT_DECIMAL_PLACES
     )
     expires_at: datetime

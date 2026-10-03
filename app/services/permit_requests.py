@@ -51,6 +51,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.config import get_settings, public_api_origin
+from app.core.credits import credit_amount_fits_storage
 from app.core.runtime_mode import is_simulation
 from app.core.time import to_naive_utc, utc_now
 from app.core.trust_mode import is_production_like_environment
@@ -271,8 +272,10 @@ class PermitRequestService:
         now = utc_now()
         if expires_at <= now:
             raise PermitRequestError("permit_expired_at_request")
-        if max_credits <= Decimal("0"):
+        if max_credits.is_finite() and max_credits <= Decimal("0"):
             raise PermitRequestError("max_credits_must_be_positive")
+        if not credit_amount_fits_storage(max_credits):
+            raise PermitRequestError("max_credits_not_storable")
 
         effective_scopes = scopes or [f"tool:{tool}:invoke" for tool in allowed_tools]
         if "billing:charge" not in effective_scopes:
