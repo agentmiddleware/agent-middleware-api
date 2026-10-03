@@ -1,0 +1,81 @@
+        )
+    except socket.gaierror as exc:
+        raise UpstreamMcpConfigurationError(
+            "MCP_UPSTREAM_URL host could not be resolved"
+        ) from exc
+    return tuple(dict.fromkeys(str(info[4][0]) for info in infos))
+
+
+async def validate_upstream_url(
+    configuration: UpstreamMcpConfiguration,
+    *,
+    resolver: Resolver | None = None,
+) -> str:
+    """Validate the destination and return the address to pin for connection."""
+    parts = _parse_url_shape(configuration.url)
+    host = (parts.hostname or "").strip("[]").rstrip(".").lower()
+    if host in _BLOCKED_HOSTNAMES or host.endswith(_BLOCKED_HOST_SUFFIXES):
+        raise UpstreamMcpConfigurationError(
+            "MCP_UPSTREAM_URL host is reserved for internal infrastructure"
+        )
+
+    literal: ipaddress.IPv4Address | ipaddress.IPv6Address | None
+    try:
+        literal = ipaddress.ip_address(host)
+    except ValueError:
+        literal = None
+
+    explicit_loopback = host == "localhost" or host.endswith(".localhost")
+    addresses: Sequence[str]
+    if literal is not None:
+        explicit_loopback = literal.is_loopback
+        addresses = (str(literal),)
+    elif explicit_loopback:
+        addresses = ("127.0.0.1", "::1")
+    else:
+        try:
+            async with asyncio.timeout(configuration.connect_timeout_seconds):
+                addresses = tuple(
+                    await (resolver or _default_resolver)(host, parts.port)
+                )
+        except UpstreamMcpConfigurationError:
+            raise
+        except Exception:
+            raise UpstreamMcpConfigurationError(
+                "MCP_UPSTREAM_URL host could not be resolved"
+            ) from None
+
+    if not addresses:
+        raise UpstreamMcpConfigurationError(
+            "MCP_UPSTREAM_URL host resolved to no addresses"
+        )
+
+    parsed_addresses: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
+    for address in addresses:
+        try:
+            parsed_addresses.append(ipaddress.ip_address(address))
+        except ValueError as exc:
+            raise UpstreamMcpConfigurationError(
+                "MCP_UPSTREAM_URL resolution returned an invalid address"
+            ) from exc
+
+    local_environment = not is_production_like_environment(configuration.environment)
+    loopback_exception = (
+        local_environment
+        and explicit_loopback
+        and all(address.is_loopback for address in parsed_addresses)
+    )
+    if parts.scheme.lower() == "http" and not loopback_exception:
+        raise UpstreamMcpConfigurationError(
+            "MCP_UPSTREAM_URL must use https except for loopback local/test servers"
+        )
+    if not loopback_exception and any(
+        not address.is_global for address in parsed_addresses
+    ):
+        raise UpstreamMcpConfigurationError(
+            "MCP_UPSTREAM_URL must not resolve to private, loopback, link-local, metadata, or reserved addresses"
+        )
+    return str(parsed_addresses[0])
+
+
+@dataclass

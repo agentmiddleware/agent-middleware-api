@@ -1,0 +1,1 @@
+site build blocked: output must be site/dist or a new path under the system temp directory

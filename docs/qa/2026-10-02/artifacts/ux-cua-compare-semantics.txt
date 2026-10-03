@@ -1,0 +1,248 @@
+- link "Skip to content":
+  - /url: "#main"
+- navigation "Primary":
+  - link "Agent Middleware API home":
+    - /url: /
+    - generic: Agent Middleware API
+  - link "Pilot":
+    - /url: /#pilot
+  - link "Proof":
+    - /url: /proof/
+  - link "Compare":
+    - /url: /compare/
+  - link "Machine discovery":
+    - /url: /#machine-discovery
+  - link "Start a pilot by email (opens your mail app)":
+    - /url: mailto:qa@qa-sweep-build.dev?subject=One-tool%20paid%20pilot%20enquiry&body=One-tool%20paid%20pilot%20enquiry%0A%0A1.%20Tool%20or%20action%20%28synthetic%20or%20redacted%20only%29%3A%0A2.%20What%20goes%20wrong%20on%20retry%3A%0A3.%20How%20we%20check%20whether%20the%20action%20ran%3A%0A4.%20Cost%20of%20one%20duplicate%20or%20unproven%20call%20%28money%2C%20recovery%20hours%2C%20or%20customer%20consequence%3B%20measured%20or%20estimated%29%3A%0A5.%20Budget%20owner%20and%20target%20decision%20date%3A%0A%0AOptional%20workflow%20assumptions%3A%20monthly%20actions%2C%20baseline%20duplicate%20rate%2C%20expected%20reduction%2C%20and%20total%20monthly%20cost.%0A%0ADo%20not%20include%20production%20secrets%2C%20credentials%2C%20or%20customer%20data.%0A
+    - text: Start a pilot by email
+- main:
+  - paragraph: Comparison / Build vs buy
+  - heading "Several tools sign receipts. One debit is the difference." [level=1]
+  - paragraph: This page names competitors and says plainly where they do the same job we do. If one of them fits your problem better, use it — a governed boundary you do not need is operational cost with no return.
+  - region "Signed, offline-verifiable receipts are no longer rare in this field.":
+    - paragraph: 01 / What is not unique
+    - heading "Signed, offline-verifiable receipts are no longer rare in this field." [level=2]
+    - paragraph:
+      - text: When this project started, per-call cryptographic evidence for MCP tool calls was unusual. It is not unusual now. Policy gateways and safety frameworks emit signed receipts, and at least one verifies offline without calling its issuer — the same property our
+      - link "proof page":
+        - /url: /proof/
+      - text: demonstrates. Audit layers publish hash-chained receipts; whether those also carry an issuer signature you can check without the vendor, we have not confirmed either way.
+    - paragraph: "So the receipt is not the argument. The argument is what the receipt is bound to: a ledger debit that cannot happen twice under the same accepted idempotency key."
+  - region "The comparison, including the rows we lose.":
+    - paragraph: 02 / Where each tool sits
+    - heading "The comparison, including the rows we lose." [level=2]
+    - region "The comparison, including the rows we lose.":
+      - 'table "Assessed August 2026 from each project''s public source and documentation. “Not documented” means we did not find the capability described — not that we proved it absent. Capabilities change; verify before deciding. Retry protection is scoped to this gateway: for an authorized request, one accepted idempotency key permits at most one dispatch from here — a call denied or failed before dispatch produces a terminal receipt and no debit at all. Whether your upstream tool then runs its own side effect exactly once depends on that tool honouring the forwarded key."':
+        - caption:
+          - text: "Assessed August 2026 from each project's public source and documentation. “Not documented” means we did not find the capability described — not that we proved it absent. Capabilities change; verify before deciding. Retry protection is scoped to this gateway: for an authorized request, one accepted idempotency key permits"
+          - emphasis: at most one
+          - text: dispatch from here — a call denied or failed before dispatch produces a terminal receipt and no debit at all. Whether your upstream tool then runs its own side effect exactly once depends on that tool honouring the forwarded key.
+        - rowgroup:
+          - row "Capability Agent Middleware API Policy gateways Audit layers Reliability libraries":
+            - columnheader "Capability"
+            - columnheader "Agent Middleware API"
+            - columnheader "Policy gateways"
+            - columnheader "Audit layers"
+            - columnheader "Reliability libraries"
+        - rowgroup:
+          - row "Enforces at a boundary the agent cannot bypass Yes Yes Not documented No — in-process":
+            - rowheader "Enforces at a boundary the agent cannot bypass"
+            - cell "Yes"
+            - cell "Yes"
+            - cell "Not documented"
+            - cell "No — in-process"
+          - row "Per-tool scope and policy Signed permits Yes No No":
+            - rowheader "Per-tool scope and policy"
+            - cell "Signed permits"
+            - cell "Yes"
+            - cell "No"
+            - cell "No"
+          - row "Signed receipts, verifiable without the vendor Yes Yes Chained, signature unverified No":
+            - rowheader "Signed receipts, verifiable without the vendor"
+            - cell "Yes"
+            - cell "Yes"
+            - cell "Chained, signature unverified"
+            - cell "No"
+          - row "Tamper-evident chained audit Per-account hash chain Varies Yes No":
+            - rowheader "Tamper-evident chained audit"
+            - cell "Per-account hash chain"
+            - cell "Varies"
+            - cell "Yes"
+            - cell "No"
+          - row "Budget enforced before execution Budget ledger Varies No Call and cost caps":
+            - rowheader "Budget enforced before execution"
+            - cell "Budget ledger"
+            - cell "Varies"
+            - cell "No"
+            - cell "Call and cost caps"
+          - row "Duplicate gateway dispatch prevented on retry Yes Varies No N/A — dedupes in-process, and only at call sites that use the wrapper":
+            - rowheader "Duplicate gateway dispatch prevented on retry"
+            - cell "Yes"
+            - cell "Varies"
+            - cell "No"
+            - cell "N/A — dedupes in-process, and only at call sites that use the wrapper"
+          - row "Debit bound to the idempotency record Yes Not documented Not documented Not documented":
+            - rowheader "Debit bound to the idempotency record"
+            - cell "Yes"
+            - cell "Not documented"
+            - cell "Not documented"
+            - cell "Not documented"
+          - row "Ambiguous outcome is a distinct receipted state Yes Not documented Not documented Not documented":
+            - rowheader "Ambiguous outcome is a distinct receipted state"
+            - cell "Yes"
+            - cell "Not documented"
+            - cell "Not documented"
+            - cell "Not documented"
+          - row "Human approval before an action Permit requests Varies Authority trails No":
+            - rowheader "Human approval before an action"
+            - cell "Permit requests"
+            - cell "Varies"
+            - cell "Authority trails"
+            - cell "No"
+          - row "Compliance framework mapping No No Yes No":
+            - rowheader "Compliance framework mapping"
+            - cell "No":
+              - strong: "No"
+            - cell "No"
+            - cell "Yes":
+              - strong: "Yes"
+            - cell "No"
+          - row "Free and self-serve No Often Varies Yes":
+            - rowheader "Free and self-serve"
+            - cell "No":
+              - strong: "No"
+            - cell "Often"
+            - cell "Varies"
+            - cell "Yes":
+              - strong: "Yes"
+    - paragraph:
+      - text: "Representative projects in each column:"
+      - link "protect-mcp":
+        - /url: https://github.com/tomjwxf/scopeblind-gateway
+      - text: and
+      - link "jamjet":
+        - /url: https://github.com/jamjet-labs/jamjet
+      - text: (policy gateways),
+      - link "TraceAgent":
+        - /url: https://www.traceagent.dev/
+      - text: (audit layers), and
+      - link "latch":
+        - /url: https://github.com/sangaraju1988/latch
+      - text: (reliability libraries).
+  - region "Versus a decorator library you can install today.":
+    - paragraph: 03 / Build vs buy
+    - heading "Versus a decorator library you can install today." [level=2]
+    - paragraph: The most common alternative is not a competing gateway. It is an afternoon with an open-source Python library — idempotency, circuit breaker, timeout, and budget guardrail as decorators on your tool functions. It is MIT-licensed, free, and adds no infrastructure. For a lot of teams that is the correct answer, and we would rather say so than sell past it.
+    - list:
+      - generic: Choose the library
+      - strong: Your problem is reliability
+      - paragraph: You control every call site, you trust your own agents, and you need retries to stop costing money. Nobody outside your team has to believe the result.
+      - generic: Choose a boundary
+      - strong: Your problem is evidence
+      - paragraph: Someone who is not you — a finance owner, an auditor, the tool's operator — has to be able to check what ran and what it cost, without trusting the process that ran it.
+      - generic: Choose a boundary
+      - strong: The agent must not be able to opt out
+      - paragraph: "A decorator protects the call sites that import it. An agent that constructs a call another way is simply not covered. A gateway is a boundary you can actually close: once the tool is reachable only through it, there is no way around."
+    - paragraph: "The honest summary: an in-process cache is not evidence, and a library the agent can route around is not a boundary. If neither of those distinctions matters for your tool, install the library and keep your afternoon."
+  - region "Who this is actually for.":
+    - paragraph: 04 / Fit
+    - heading "Who this is actually for." [level=2]
+    - article:
+      - generic: A good fit
+      - generic: worth a call
+      - list:
+        - listitem: You run one internal MCP tool where a duplicate call costs real money or causes a real side effect.
+        - listitem: An agent retried something expensive and you could not prove afterwards what actually ran.
+        - listitem: Someone outside the engineering team needs to check the record.
+        - listitem: You can bring one real tool and one engineer to a pilot.
+    - article:
+      - generic: A poor fit
+      - generic: use something else
+      - list:
+        - listitem: You want governance across every tool and framework at once. That is a platform; this is one boundary.
+        - listitem: Your tool calls are cheap and idempotent already. Nothing here pays for itself.
+        - listitem: You need a certified compliance product with regulatory mappings. See the audit layers above.
+        - listitem: You need identity and SSO for agents. Keep your IAM; this sits downstream of it.
+  - region "Compliance, pricing, and other honest answers.":
+    - paragraph: 05 / Questions we get asked
+    - heading "Compliance, pricing, and other honest answers." [level=2]
+    - term: Can these receipts satisfy a SOC 2 or EU AI Act audit?
+    - definition:
+      - text: Not on their own, and we will not claim otherwise. A signed receipt records the
+      - emphasis: authorization decision
+      - text: and the call's
+      - emphasis: terminal outcome
+      - text: ", and shows the record has not been altered since. Only a success receipt evidences that the call executed and was charged; a denial receipt evidences that the call was refused and never ran, and a refunded-failure or unconfirmed-outcome receipt evidences exactly that. Ledger linkage appears where there is a ledger record to link — a debit, or the compensating entry that reversed it — so a pre-dispatch denial has no debit to point at. It is deliberately not a success certificate: refusals and failures get signed too, which is what makes the evidence worth anything when something goes wrong. Whether that evidence satisfies a given control is a question for your auditor, not for us. We publish no regulatory mappings and hold no certifications. If a mapped compliance report is the deliverable you need, an audit-layer product is a better purchase."
+    - term: Why is there no pricing page or free tier?
+    - definition: Because we qualify fit before we deploy. This is a design-partner stage product, and most of the value of the first deployments is in being wrong quickly with someone who will tell us. A self-serve signup would get us installations we cannot support and cannot learn from. You can still run the entire loop yourself, locally, with no credentials and no contact with us.
+    - term: Is this production-ready?
+    - definition: "Production beta, not production complete. The supported beta is vendor-managed and dedicated per customer: each customer receives separate API, PostgreSQL, Redis, signing material, and administrator resources. It is not a shared multi-tenant SaaS, and optional proof-surface routers are outside the supported production posture. There are no replicas or consensus. Read the security limitations before deciding."
+    - term: Does exactly-once hold all the way to my tool?
+    - definition:
+      - text: "At our boundary: one accepted idempotency key maps to at most one gateway dispatch and debit, and to one terminal receipt on the upstream path and every reconcilable outcome. The exception is a local governed tool that crashes after its side effect: that leaves one execution and one debit with no receipt, pending manual review. Whether your"
+      - emphasis: upstream
+      - text: tool's own side effect happens exactly once depends on whether that tool honors the forwarded key. When the outcome after dispatch is genuinely unknowable, we mark it uncertain and route it to manual review rather than guessing.
+    - paragraph:
+      - text: "Full detail:"
+      - link "security limitations":
+        - /url: https://api.thisisatest.tech/SECURITY_LIMITATIONS.md
+      - text: . The dated competitive sweep this page is built from is
+      - code: docs/market-research-2026-08.md
+      - text: in the public source repository.
+  - region "Do not take the table on faith.":
+    - paragraph: 06 / Check it yourself
+    - heading "Do not take the table on faith." [level=2]
+    - paragraph:
+      - text: The core trust-plane claims in the left-hand column are executable — the rest, like the absence of compliance mapping or a self-serve tier, are product facts you can only take us at our word on. The source repository is public; clone it and run
+      - code: make prove-trust-plane
+      - text: to walk permit → invoke → charge → receipt → replay → deny with no credentials and no signup. Then verify a published receipt offline, without us.
+    - paragraph:
+      - link "Source repository":
+        - /url: https://github.com/PetrefiedThunder/agent-middleware-api
+      - text: ·
+      - link "Design partner guide":
+        - /url: https://api.thisisatest.tech/DESIGN_PARTNER_GUIDE.md
+    - heading "Still think it fits?" [level=2]
+    - paragraph:
+      - text: The pilot is paid, bounded to one tool, and priced after fit is established. Email the action, retry failure, current evidence, cost of one duplicate, budget owner, and decision date. You get a written answer on fit. A call is available only when a scenario needs one.
+      - link "Estimate economic fit":
+        - /url: /#economic-fit
+      - text: and
+      - link "read the pilot scope":
+        - /url: /#pilot
+      - text: before writing.
+    - link "Start a pilot by email (opens your mail app)":
+      - /url: mailto:qa@qa-sweep-build.dev?subject=One-tool%20paid%20pilot%20enquiry&body=One-tool%20paid%20pilot%20enquiry%0A%0A1.%20Tool%20or%20action%20%28synthetic%20or%20redacted%20only%29%3A%0A2.%20What%20goes%20wrong%20on%20retry%3A%0A3.%20How%20we%20check%20whether%20the%20action%20ran%3A%0A4.%20Cost%20of%20one%20duplicate%20or%20unproven%20call%20%28money%2C%20recovery%20hours%2C%20or%20customer%20consequence%3B%20measured%20or%20estimated%29%3A%0A5.%20Budget%20owner%20and%20target%20decision%20date%3A%0A%0AOptional%20workflow%20assumptions%3A%20monthly%20actions%2C%20baseline%20duplicate%20rate%2C%20expected%20reduction%2C%20and%20total%20monthly%20cost.%0A%0ADo%20not%20include%20production%20secrets%2C%20credentials%2C%20or%20customer%20data.%0A
+      - text: Start a pilot by email
+    - link "Run the local proof":
+      - /url: /proof/
+- contentinfo:
+  - generic: Agent Middleware API
+  - paragraph: Authorize one agent action. Charge it once. Prove what happened.
+  - paragraph: Human contact
+  - link "Start a pilot by email (opens your mail app)":
+    - /url: mailto:qa@qa-sweep-build.dev?subject=One-tool%20paid%20pilot%20enquiry&body=One-tool%20paid%20pilot%20enquiry%0A%0A1.%20Tool%20or%20action%20%28synthetic%20or%20redacted%20only%29%3A%0A2.%20What%20goes%20wrong%20on%20retry%3A%0A3.%20How%20we%20check%20whether%20the%20action%20ran%3A%0A4.%20Cost%20of%20one%20duplicate%20or%20unproven%20call%20%28money%2C%20recovery%20hours%2C%20or%20customer%20consequence%3B%20measured%20or%20estimated%29%3A%0A5.%20Budget%20owner%20and%20target%20decision%20date%3A%0A%0AOptional%20workflow%20assumptions%3A%20monthly%20actions%2C%20baseline%20duplicate%20rate%2C%20expected%20reduction%2C%20and%20total%20monthly%20cost.%0A%0ADo%20not%20include%20production%20secrets%2C%20credentials%2C%20or%20customer%20data.%0A
+    - text: Start a pilot by email
+  - link "Email qa@qa-sweep-build.dev":
+    - /url: mailto:qa@qa-sweep-build.dev
+    - text: qa@qa-sweep-build.dev
+  - generic: "Accountable contact: QA-Sweep"
+  - paragraph: Evidence and discovery
+  - link "Receipt proof":
+    - /url: /proof/
+  - link "Agent manifest":
+    - /url: https://api.thisisatest.tech/.well-known/agent.json
+  - link "OpenAPI":
+    - /url: https://api.thisisatest.tech/openapi.json
+  - link "Live dependency status":
+    - /url: https://api.thisisatest.tech/health/dependencies
+  - paragraph: Source and policy
+  - link "Source repository":
+    - /url: https://github.com/PetrefiedThunder/agent-middleware-api
+  - link "Design partner guide":
+    - /url: https://api.thisisatest.tech/DESIGN_PARTNER_GUIDE.md
+  - link "Security limitations":
+    - /url: https://api.thisisatest.tech/SECURITY_LIMITATIONS.md
+  - link "Report a vulnerability":
+    - /url: /.well-known/security.txt
+- button "Accessibility options": Aa

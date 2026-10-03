@@ -1,0 +1,819 @@
+FILE WEDGE.md
+1:# Wedge: Replay-safe MCP permits and exactly-once debits
+2:
+3:Agent Middleware API should not initially sell itself as a full platform for
+4:autonomous economic actors. The credible wedge is narrower:
+5:
+6:> Exactly-once gateway authorization, debit, and receipt finalization for
+7:> metered MCP calls.
+8:
+9:Or in one line:
+10:
+11:> Authorize one agent action. Charge it once. Prove what happened.
+12:
+13:Start with the [documentation guide](docs/README.md) for the supported
+14:evaluation, integration, SDK, security, and pilot paths.
+15:
+16:**What "exactly-once" means here, precisely.** It is the distributed-systems
+17:term of art for the *deduplication* guarantee — no duplicate dispatch, no
+18:duplicate debit — not a promise that every accepted call results in a charge.
+19:Two paths produce no net debit at all: a crash before dispatch reconciles to a
+20:refund, and an out-of-scope or over-budget call is denied before money moves.
+21:The enforceable claim is **never a duplicate charge, not always a charge.**
+22:Every precise statement of the guarantee below says "at most one" for that
+23:reason. See [`docs/failure-semantics.md`](docs/failure-semantics.md).
+24:
+25:The core job is to put one enforceable **economic** boundary between autonomous
+26:agents and tools:
+27:
+28:```text
+29:scoped signed permit -> governed MCP invoke -> wallet charge -> signed receipt
+30:-> ledger -> audit chain -> replay no double charge -> out-of-scope denial
+31:```
+32:
+33:The loop now has a front door. Two questions an agent has to answer *before*
+34:it can act — "may I?" and "what will it cost?" — are answered in the same
+35:signed, checkable way as the action itself:
+36:
+37:```text
+38:permit request -> human approves -> minted permit
+39:signed quote   -> price locked   -> charge honors it
+40:```
+41:
+42:Both feed the same loop rather than sitting beside it: the human's decision
+43:mints an ordinary signed permit, and the quote is honored by the ordinary
+44:metered charge. Neither adds a second way to authorize or to spend.
+45:
+46:Category language (“MCP trust plane,” “governance gateway”) is occupied. The
+47:differentiating primitive is exactly-once economic authorization at the
+48:gateway boundary: one idempotency key returns the original receipt without a
+49:second gateway dispatch or debit. A remote tool's own side effect is exactly
+50:once only when that tool also honors the forwarded idempotency key.
+51:
+52:## Positioning vs nearby products
+53:
+54:Stay a **closed-loop credit and delegated-authority** system for internal AI
+55:platform teams—not a general MCP gateway and not merchant settlement.
+56:
+57:| Nearby | Their center of gravity | Our difference |
+58:|--------|-------------------------|----------------|
+59:| MCP “trust” gateways (e.g. signed receipts + replay) | Policy / evidence | Wallet debit + economic idempotency |
+60:| MCP monetization / pay-per-tool | Payments rails | Internal budgets; no settlement claim |
+61:| Enterprise authz for MCP | Who may call | Meter + receipt + charge-once |
+62:| Agent reliability libraries (in-process decorators) | Retry safety inside the caller | A boundary the agent cannot route around; evidence a third party can check |
+63:
+64:Do not pitch as production payments, compliance-grade ledger, or IAM
+65:replacement (see [`SECURITY_LIMITATIONS.md`](SECURITY_LIMITATIONS.md)).
+66:
+67:### Signed receipts are table stakes now (2026-08)
+68:
+69:The 2026 competitive sweep in
+70:[`docs/market-research-2026-08.md`](docs/market-research-2026-08.md) verified
+FILE README.md
+95:Then prove the rest of the loop asserts correctly:
+96:
+97:```bash
+98:make prove-trust-plane
+99:```
+100:
+101:That boots a local instance against a throwaway SQLite database and walks
+102:discover, authenticate, authorize, invoke, meter, receipt, audit, govern. It
+103:**asserts** rather than prints: the call charges once, the replay returns the
+104:same receipt with no second debit, the audit chain verifies, the out-of-scope
+105:call is denied, and a tampered receipt fails verification. It exits non-zero the
+106:moment any invariant breaks.
+107:
+108:To measure the same fault against a correct baseline instead of a naive one:
+109:
+110:```bash
+111:make failure-lab
+112:```
+113:
+114:That runs the lost-response fault against three integrations of one
+115:simulated payment rail — no idempotency key, a correctly used native
+116:idempotency key, and the gateway — with downstream effects counted by a
+117:record the gateway cannot reach. It reports when the native control already
+118:handles the fault (it does, for a client that keeps its key), what the
+119:gateway adds and does not add, and the one failure every configuration
+120:shares: an agent that restarts with a new key pays twice. Mechanism, report
+121:layout, and limits: [docs/failure-lab.md](docs/failure-lab.md).
+122:
+123:To drive the loop yourself instead of watching it:
+124:
+125:```bash
+126:make quickstart        # boots a real strict-trust server on 127.0.0.1:8000
+127:```
+128:
+129:Then follow [docs/quickstart.md](docs/quickstart.md): mint your own
+130:wallet-scoped key with no operator and no pre-shared secret, issue yourself a
+131:permit, invoke a governed tool, deliberately try to double-charge and overspend,
+132:and finish holding a signed receipt you verified offline. Every step runs in CI
+133:(`make quickstart-check`), so the documented path cannot silently rot.
+134:
+135:`make live-loop-proof` (against a running quickstart) writes a handoff bundle to
+136:`data/live-loop-proof/` — portable receipts, the issuer key set, and a
+137:`VERIFY.md` another engineer can follow with no account and no network access to
+138:this server.
+139:
+140:## What it guarantees
+141:
+142:| Guarantee | What it means | Proof |
+143:|---|---|---|
+144:| **Charge-once under retry** | Same idempotency key → same receipt, no second dispatch, no second debit. A changed payload under that key conflicts. | `tests/test_adversarial_five_claims.py` |
+145:| **Budget containment** | A permit's `max_credits` is reserved by one atomic guarded `UPDATE`; concurrent invocations cannot over-spend it, including on SQLite. | `tests/test_permits.py`, `postgres_permit_concurrency` CI job |
+146:| **Interrupted-call accounting** | For the configured upstream tool, one persisted chain links the idempotency record, reservation, debit, dispatch attempt, receipt, and audit event. Ambiguity after the send claim is receipted `delivery_uncertain`, never silently redispatched. Local governed tools have no dispatch state machine and fail closed into manual review. | [docs/failure-semantics.md](docs/failure-semantics.md) |
+147:| **Offline-verifiable receipts** | Ed25519-signed; verifiable with no credentials and no network access to the issuer, using the SDK verifier or any JOSE tooling. | `GET /v1/receipts/{id}/portable`, `/.well-known/jwks.json` |
+148:| **Authority before money** | Out-of-scope, expired, revoked, or tampered permits are denied with a reason code *before* any charge. When a valid permit was present, that refusal is itself a signed receipt. Unpermitted and unknown-tool calls fail closed without one. | `tests/test_adversarial_five_claims.py` |
+149:
+150:CI runs the full release gate as one required check (`trust_release_gate`), so
+151:these claims cannot regress into `main` unproven.
+152:[docs/PROOF_MATRIX.md](docs/PROOF_MATRIX.md) maps every proof command to the
+153:invariant it asserts — and to what it does not prove.
+154:
+155:## What it does not do
+156:
+157:- **Not universal exactly-once.** Gateway replay safety makes the *remote* side
+158:  effect exactly once only if the upstream tool also honors the forwarded
+159:  idempotency key.
+160:- **Not proof of downstream effect.** The dispatch claim is committed *before*
+161:  the network send, so it records the authority to send — not that a send
+162:  happened, and never that the tool acted.
+163:- **Not settlement or compliance.** An internal credit ledger, not merchant
+164:  settlement, dispute handling, or a certified compliance record.
+165:- **Not an IAM replacement.** Wallet isolation is application-layer
+166:  authorization and query scoping; PostgreSQL RLS and a public multi-tenant
+167:  isolation guarantee are not implemented.
+168:- **Not a transparency log.** Receipts verify offline, but nothing is anchored
+169:  externally, and audit chains are tamper-evident rather than immutable against
+170:  an administrator who controls both the database and its chain metadata.
+171:- **One adapter, one upstream.** MCP is the only live governed adapter, and
+172:  upstream execution is limited to one operator-configured Streamable HTTP
+173:  server and one exact tool.
+174:- **No delegation chains.** Permits are reusable budget envelopes; parent
+175:  delegation containment is not implemented.
+176:- **No public SLA**, no KMS integration, and no approval for PHI, PCI, or
+177:  regulated production records.
+FILE ELEVATOR_PITCH.md
+55:## Two minutes (design-partner version)
+56:
+57:**The problem to test.** Give me one tool you are afraid to let an autonomous
+58:agent invoke. If the call times out, can you tell whether the gateway dispatched
+59:it, whether a retry creates another debit, who authorized the economic exposure,
+60:and what evidence survives afterward? Existing IAM, gateway, or logging controls
+61:may already be sufficient; the first conversation must establish that they are
+62:not before this product is proposed.
+63:
+64:**The wedge.** Not a general MCP gateway, and not payments. The narrow,
+65:differentiating primitive is **exactly-once economic authorization at the
+66:gateway boundary**:
+67:
+68:```text
+69:scoped signed permit -> governed MCP invoke -> wallet charge -> signed receipt
+70:-> ledger -> audit chain -> replay no double charge -> out-of-scope denial
+71:```
+72:
+73:**What that buys you.**
+74:
+75:- **Budgets that bind.** Decimal wallet balances with row-locked debits. Final
+76:  permit checks and budget reservation happen while the permit row is locked,
+77:  so competing invokes and revoke-versus-invoke races resolve correctly.
+78:- **Charge-once under failure.** A repeated idempotency key returns the original
+100:| `make red-team-trust-plane` | Adversarial attempts against the boundary |
+101:
+102:**The ask.** One partner-owned agent, one real staging tool, and one partner
+103:engineer behind the proxy. Intentionally retry the action, verify the receipt
+104:in the partner's environment, and ask whether removing the boundary would
+105:restore an unacceptable risk. If it does not earn a commercial next step, stop.
+106:
+107:---
+108:
+109:## Positioning in one table
+110:
+111:| Nearby category | Their center of gravity | Our difference |
+112:|---|---|---|
+113:| MCP trust gateways | Policy and evidence | Wallet debit plus economic idempotency |
+114:| MCP monetization / pay-per-tool | Payment rails | Internal budgets, no settlement claim |
+115:| Enterprise authz for MCP | Who may call | Meter, receipt, and charge exactly once |
+116:| Agent reliability libraries | Retry safety inside the caller | A boundary the agent cannot route around, and evidence a third party can check |
+117:| Agent audit / compliance layers | Regulatory mapping and exports | The economic consequence, not just the record of the call |
+118:
+119:Named projects, verification levels, and the rows we lose:
+120:[`docs/market-research-2026-08.md`](docs/market-research-2026-08.md).
+155:
+156:**"Can't we just log tool calls?"** Logs are written by the same system that
+157:made the call and can be rewritten by anyone with database access. Receipts are
+158:signed and chained, so tampering is *evident*. (Evident, not impossible — a
+159:database administrator who can alter both the data and its chain metadata is
+160:inside the trust boundary, and we say so.)
+161:
+162:**"Does exactly-once really hold across the network?"** For one accepted
+163:idempotency key at our boundary: one gateway dispatch, one debit, one receipt.
+164:A *remote* tool's own side effect is exactly once only if that tool also honors
+165:the forwarded key. Anything broader would overstate the distributed-systems
+166:guarantee.
+167:
+168:**"Why not just use an open-source library?"** If your problem is reliability,
+169:do. A decorator library gives you idempotency, timeouts, and budget caps for
+170:free, with no infrastructure. Two things it cannot give you: it protects only
+171:the call sites that import it, so an agent that constructs a call another way is
+172:simply not covered; and an in-process result cache is not evidence anyone
+173:outside your team can check. Buy a boundary when you need those two properties.
+FILE docs/denial-details.md
+150:`PermitWriteContendedError`, which rolls back the entire reservation
+151:transaction and frees the idempotency record. Nothing is spent, no counter
+152:moves, and no attempt row is created.
+153:
+154:The caller receives JSON-RPC error code **`-32005`** (from `POST /mcp/messages`)
+155:or HTTP **409** (from `POST /mcp/tools/{id}/invoke`), with the message
+156:`permit_write_contended`. **Retry with the same idempotency key** — the rollback
+157:freed that record, leaving no persisted reservation or dispatch state, so the
+158:same-key retry runs a fresh compare-and-swap without replaying a denial. A
+159:new-key retry is a separate call: it can dispatch in addition to a retry of the
+160:original key, bounded only by the per-tool call cap when the permit sets
+161:`max_calls_per_tool` (otherwise by the permit's budget and expiry). The cap
+162:bounds the number of calls; it does not deduplicate across keys. The cross-key
+163:duplicate guard (`MCP_UPSTREAM_DUPLICATE_GUARD`, validated at startup to be `off`, `log`, or `enforce`) runs in log-only mode by default
+164:and does not prevent new-key retries. On Postgres, the permit row lock serializes
+165:concurrent reservations, making this contention path practically unreachable; it
+166:remains reachable on SQLite under high concurrency.
+167:
+168:## What details deliberately do not say
+169:
+170:**Binding mismatches carry no values.** A caller that presents a permit bound
+171:to a different wallet or key has not proved it is the subject, so the denial
+172:names the binding that failed (`{"bound_to": "subject_wallet_id"}`) and nothing
+173:about which wallet or key the permit actually belongs to. Everything else in
+174:the table describes the caller's *own* permit, which it can already read at
+175:`GET /v1/permits/{permit_id}`.
+176:
+177:**Forbidden fields echo the name, never the value.** The value is the thing the
+178:permit forbade carrying.
+179:
+180:Reading a denial still requires being authorized for the permit: a foreign
+181:wallet key is refused at `POST /v1/permits/verify` (403) before any verdict is
+182:computed. Details enrich a refusal you were already entitled to see; they do
+183:not widen who can ask.
+184:
+185:## Example
+186:
+187:```json
+188:{
+189:  "detail": {
+190:    "error": "permit_budget_exceeded",
+191:    "receipt": { "outcome": "denied", "...": "..." },
+192:    "details": {
+193:      "required_credits": "5.0",
+194:      "remaining_credits": "3",
+FILE app/services/mcp_dispatch_attempts.py
+680:                        session,
+681:                        idempotency_record_id,
+682:                    )
+683:                    if existing is not None:
+684:                        self._assert_prepared_match(
+685:                            existing,
+686:                            idempotency_record_id=idempotency_record_id,
+687:                            wallet_id=wallet_id,
+688:                            permit_id=permit_id,
+689:                            approval_id=approval_id,
+690:                            key_id=key_id,
+691:                            public_tool_id=public_tool_id,
+692:                            upstream_tool_name=upstream_tool_name,
+693:                            upstream_origin=upstream_origin,
+694:                            request_hash=request_hash,
+695:                            credits_authorized=credits_authorized,
+696:                        )
+697:                        if unsupported_constraints:
+698:                            # A row created by an older worker may already hold a
+699:                            # reservation. Do not turn that uncertain rollout
+700:                            # state into a new denial receipt or a remote send;
+701:                            # the reconciler owns its terminal classification.
+702:                            raise DispatchPrepareCommitUncertainError(
+703:                                "dispatch_prepare_constraint_unsupported"
+704:                            )
+705:                        if existing.state != DISPATCH_PREPARED:
+706:                            raise DispatchPrepareCommitUncertainError(
+707:                                "dispatch_prepare_already_advanced"
+708:                            )
+709:                        replay_access = await permits.validate_replay_access(
+710:                            permit_id=permit_id,
+711:                            wallet_id=wallet_id,
+712:                            tool_name=public_tool_id,
+713:                            key_id=key_id,
+714:                            session=session,
+715:                        )
+716:                        return replay_access, existing
+717:
+718:                    validation = await permits._validate_model_for_action(
+719:                        session=session,
+720:                        model=permit,
+721:                        wallet_id=wallet_id,
+722:                        tool_name=public_tool_id,
+723:                        estimated_credits=credits_authorized,
+724:                        key_id=key_id,
+725:                        arguments=arguments,
+726:                    )
+727:                    if not validation.allowed:
+728:                        return validation, None
+729:
+730:                    # Cross-key duplicate detection: check for prior attempts with the
+731:                    # same (permit_id, public_tool_id, request_hash) that are still
+732:                    # active or succeeded. This catches new-key retries with identical
+733:                    # arguments.
+734:                    settings = get_settings()
+735:                    duplicate_mode = settings.MCP_UPSTREAM_DUPLICATE_GUARD
+736:                    if (
+737:                        duplicate_mode != DuplicateGuardMode.OFF
+738:                        and not permit.allow_identical_repeats
+739:                    ):
+740:                        # Use permit-specific window if set, else global default
+741:                        window_seconds = (
+742:                            permit.repeat_window_seconds
+743:                            if permit.repeat_window_seconds is not None
+744:                            else settings.MCP_UPSTREAM_DUPLICATE_WINDOW_SECONDS
+745:                        )
+746:                        cutoff = utc_now() - timedelta(seconds=window_seconds)
+747:                        # States that could block a duplicate if the attempt was
+748:                        # effectful (actually dispatched). We check all matching attempts,
+749:                        # not just the newest, because an older effectful attempt should
+750:                        # block even if newer non-effectful attempts exist.
+751:                        blocking_states = {
+752:                            DISPATCH_PREPARED,
+753:                            *DISPATCH_SENT_STATES,
+754:                            *DISPATCH_TERMINAL_STATES,
+755:                        }
+756:                        priors = (
+757:                            (
+758:                                await session.execute(
+759:                                    select(McpDispatchAttemptModel)
+760:                                    .where(
+761:                                        cast(
+762:                                            ColumnElement[bool],
+763:                                            McpDispatchAttemptModel.permit_id
+764:                                            == permit_id,
+765:                                        ),
+766:                                        cast(
+767:                                            ColumnElement[bool],
+768:                                            McpDispatchAttemptModel.public_tool_id
+769:                                            == public_tool_id,
+770:                                        ),
+771:                                        cast(
+772:                                            ColumnElement[bool],
+773:                                            McpDispatchAttemptModel.request_hash
+774:                                            == request_hash,
+775:                                        ),
+776:                                        cast(
+777:                                            ColumnElement[bool],
+778:                                            McpDispatchAttemptModel.created_at
+779:                                            >= cutoff,
+780:                                        ),
+781:                                        cast(
+782:                                            ColumnElement[bool],
+783:                                            cast(
+784:                                                Any, McpDispatchAttemptModel.state
+785:                                            ).in_(blocking_states),
+786:                                        ),
+787:                                    )
+788:                                    .order_by(
+789:                                        cast(
+790:                                            Any, McpDispatchAttemptModel.created_at
+791:                                        ).desc()
+792:                                    )
+793:                                )
+794:                            )
+795:                            .scalars()
+796:                            .all()
+797:                        )
+798:
+799:                        # Check if ANY prior attempt in the window was effectful
+800:                        # (dispatched or terminal effectful state).
+801:                        blocking_prior = None
+802:                        blocks = False
+803:                        for prior in priors:
+804:                            # An attempt blocks if it's in an effectful state:
+805:                            # - prepared or dispatched/claimed (may still dispatch)
+806:                            # - succeeded or delivery_uncertain (known effectful)
+807:                            # - returned_error AFTER dispatch (was effectful)
+808:                            # Exclude returned_error that never dispatched (pre-dispatch failure).
+809:                            if (
+810:                                prior.state == "returned_error"
+811:                                and prior.dispatched_at is None
+812:                            ):
+813:                                continue  # Non-effectful, does not block
+814:                            # All other states in blocking_states are effectful
+815:                            blocking_prior = prior
+816:                            blocks = True
+817:                            break
+818:
+819:                        if blocks and blocking_prior is not None:
+820:                            msg = (
+821:                                f"Duplicate request detected: new idempotency key with "
+822:                                f"identical request hash (permit={permit_id}, "
+823:                                f"tool={public_tool_id}, request_hash={request_hash[:16]}..., "
+824:                                f"prior_attempt={blocking_prior.attempt_id}, "
+825:                                f"prior_state={blocking_prior.state})"
+826:                            )
+827:                            if duplicate_mode == DuplicateGuardMode.LOG:
+828:                                logger.warning(f"{msg} - allowing in observe mode")
+829:                                _duplicate_guard_metrics["log_mode_blocks"] += 1
+830:                            else:  # DuplicateGuardMode.ENFORCE
+831:                                logger.info(msg)
+832:                                _duplicate_guard_metrics["enforce_mode_blocks"] += 1
+833:                                return (
+834:                                    PermitValidation(
+835:                                        False,
+836:                                        "duplicate_request_new_key",
+837:                                        permit,
+838:                                        {
+839:                                            "prior_attempt_id": blocking_prior.attempt_id,
+840:                                            "prior_state": blocking_prior.state,
+841:                                            "request_hash": request_hash,
+842:                                        },
+843:                                    ),
+844:                                    None,
+845:                                )
+846:
+847:                    if unsupported_constraints:
+848:                        # aggregate_value_cap requires folding in-flight reservations,
+849:                        # which the atomic reservation does not yet support. Refuse
+850:                        # constrained permits before creating any attempt or moving budget.
+851:                        return (
+852:                            PermitValidation(
+853:                                False,
+854:                                "permit_constraint_unsupported_for_upstream",
+855:                                permit,
+856:                                {
+857:                                    "execution_backend": "upstream_mcp",
+858:                                    "unsupported_constraints": unsupported_constraints,
+859:                                },
+860:                            ),
+1460:            # classify the durable row; never emit the legacy denial response.
+1461:            try:
+1462:                async with factory() as recovery_session:
+1463:                    recovered = await recovery_session.get(
+1464:                        McpDispatchAttemptModel,
+1465:                        attempt_id,
+1466:                    )
+1467:            except Exception as recovery_exc:
+1468:                raise DispatchClaimUnavailableError(
+1469:                    "dispatch_abandon_commit_uncertain"
+1470:                ) from recovery_exc
+1471:            if recovered is None:
+1472:                return
+1473:            raise DispatchClaimUnavailableError(
+1474:                "dispatch_abandon_commit_uncertain"
+1475:            ) from exc
+1476:
+1477:    async def claim_dispatch(self, attempt_id: str) -> McpDispatchAttemptModel:
+1478:        """Acquire the durable, non-reacquirable right to send exactly once.
+1479:
+1480:        Every activation generates a fresh process-local secret and persists
+1481:        only its hash. A later activation can never adopt an existing claim.
+1482:        If the database commits but its acknowledgement is lost, this still-
+1483:        live call may recover only the row carrying its own generated hash.
+1484:        """
+1485:        claim_hash = hashlib.sha256(secrets.token_bytes(32)).hexdigest()
+1486:        factory = get_session_factory()
+1487:        claim_written = False
+1488:        try:
+1489:            async with factory() as session:
+1490:                async with session.begin():
+1491:                    observed = await session.get(
+1492:                        McpDispatchAttemptModel,
+1493:                        attempt_id,
+1494:                        with_for_update=True,
+1495:                    )
+1496:                    if observed is None:
+1497:                        raise DispatchAttemptError("dispatch_attempt_not_found")
+1498:                    if (
+1499:                        observed.state == DISPATCH_PREPARED
+1500:                        and observed.dispatch_claim_hash is None
+1501:                        and observed.dispatched_at is None
+1502:                        and not await _claim_debit_is_valid(session, observed)
+1503:                    ):
+1504:                        raise DispatchAttemptConflictError(
+1505:                            "dispatch_claim_evidence_invalid"
+1506:                        )
+1507:                    now = utc_now()
+1508:                    claimed = await session.execute(
+1509:                        sa_update(McpDispatchAttemptModel)
+1510:                        .where(
+1511:                            cast(
+1512:                                ColumnElement[bool],
+1513:                                McpDispatchAttemptModel.attempt_id == attempt_id,
+1514:                            ),
+1515:                            cast(
+1516:                                ColumnElement[bool],
+1517:                                McpDispatchAttemptModel.state == DISPATCH_PREPARED,
+1518:                            ),
+1519:                            cast(
+1520:                                ColumnElement[bool],
+1521:                                cast(
+1522:                                    Any,
+1523:                                    McpDispatchAttemptModel.dispatch_claim_hash,
+1524:                                ).is_(None),
+1525:                            ),
+1526:                            cast(
+1527:                                ColumnElement[bool],
+1528:                                cast(
+1529:                                    Any,
+1530:                                    McpDispatchAttemptModel.ledger_entry_id,
+1531:                                ).is_not(None),
+1532:                            ),
+1533:                            cast(
+1534:                                ColumnElement[bool],
+1535:                                cast(
+1536:                                    Any,
+1537:                                    McpDispatchAttemptModel.dispatched_at,
+1538:                                ).is_(None),
+1539:                            ),
+1540:                        )
+1541:                        .values(
+1542:                            state=DISPATCH_CLAIMED,
+1543:                            dispatch_claim_hash=claim_hash,
+1544:                            dispatched_at=now,
+1545:                            updated_at=now,
+1546:                        )
+1547:                        .execution_options(synchronize_session=False)
+1548:                    )
+1549:                    if cast(Any, claimed).rowcount == 1:
+1550:                        claim_written = True
+1551:                    await session.refresh(observed)
+1552:                    attempt = observed
+1553:                    if claim_written:
+1554:                        return attempt
+1555:                    if attempt.state in DISPATCH_TERMINAL_STATES:
+FILE app/core/config.py
+125:    # When true, registers a second harmless read-only tool for CI to test
+126:    # out-of-scope denial (permit allows first tool, denies second).
+127:    # Default false: only enable in test/CI environments.
+128:    ENABLE_DOGFOOD_SECOND_TOOL: bool = False
+129:
+130:    # --- Governed upstream MCP partner tool ---
+131:    # One explicitly configured Streamable HTTP server/tool for the
+132:    # design-partner pilot. The adapter fails closed at startup when enabled
+133:    # with incomplete or unsafe configuration.
+134:    MCP_UPSTREAM_ENABLED: bool = False
+135:    MCP_UPSTREAM_URL: str = ""
+136:    MCP_UPSTREAM_TOOL_NAME: str = ""
+137:    MCP_UPSTREAM_PUBLIC_TOOL_ID: str = ""
+138:    MCP_UPSTREAM_BEARER_TOKEN: [REDACTED] = SecretStr("")
+139:    MCP_UPSTREAM_CREDITS_PER_CALL: Decimal = Decimal("0")
+140:    MCP_UPSTREAM_CONNECT_TIMEOUT_SECONDS: float = 5.0
+141:    MCP_UPSTREAM_CALL_TIMEOUT_SECONDS: float = 30.0
+142:    MCP_UPSTREAM_MAX_RESPONSE_BYTES: int = 1_048_576
+143:
+144:    # Cross-key duplicate detection for upstream tools. Modes:
+145:    # - "off": disabled (new-key retries with identical request hashes are allowed)
+146:    # - "log": detect and log duplicates but allow them (observe mode, default)
+147:    # - "enforce": refuse duplicate requests with duplicate_request_new_key
+148:    MCP_UPSTREAM_DUPLICATE_GUARD: DuplicateGuardMode = DuplicateGuardMode.LOG
+149:    # Default repeat detection window in seconds. Duplicates outside this window
+150:    # are not detected.
+151:    MCP_UPSTREAM_DUPLICATE_WINDOW_SECONDS: int = 86400  # 24 hours
+152:    # Enable only after all workers can verify and enforce repeat-window permits.
+153:    # Disabling issuance never disables validation of already-issued permits.
+154:    ENABLE_PERMIT_REPEAT_WINDOW_ISSUANCE: bool = False
+155:
+156:    # --- Inbound request size ---
+157:    # Ceiling on any request body the API will buffer, enforced for every
+158:    # route by `app.middleware.request_body_limit`. Mirrors the 1 MiB bound
+159:    # already placed on upstream MCP *responses* above: the gateway should not
+160:    # accept more from a caller than it is willing to relay from a tool.
+161:    # The opt-in MCP transports keep their own tighter caps (256 KiB public,
+162:    # 64 KiB partner); this is the floor under everything, `/mcp/messages`
+FILE app/services/idempotency.py
+1:from __future__ import annotations
+2:
+3:import asyncio
+4:import json
+5:import re
+6:import time
+7:import uuid
+8:from collections.abc import Sequence
+9:from dataclasses import dataclass
+10:from datetime import timedelta
+11:from typing import Any, cast
+12:
+13:from sqlalchemy import or_, select
+14:from sqlalchemy.exc import IntegrityError, OperationalError
+15:from sqlalchemy.ext.asyncio import AsyncSession
+16:from sqlalchemy.sql.elements import ColumnElement
+17:from sqlmodel import col
+18:
+19:from app.core.resilience import run_with_write_conflict_retry
+20:from app.core.config import get_settings
+21:from app.core.time import to_naive_utc, utc_now
+22:from app.db.database import get_session_factory
+23:from app.db.models import (
+24:    IdempotencyRecordModel,
+25:    LedgerEntryModel,
+26:    McpDispatchAttemptModel,
+27:    ReceiptModel,
+28:)
+29:from app.services.signing_keys import sha256_hex
+30:
+31:GOVERNED_MCP_IDEMPOTENCY_ENDPOINT = "/mcp/invoke"
+32:
+33:
+34:class IdempotencyConflictError(RuntimeError):
+35:    """Raised when an idempotency key is reused for a different request."""
+36:
+37:
+38:class IdempotencyInProgressError(RuntimeError):
+39:    """Raised when an idempotency key is already executing without a result."""
+40:
+41:
+42:class IdempotencyCreationDisabledError(RuntimeError):
+43:    """Raised when only existing requests may be replayed."""
+44:
+45:
+46:# Caller-supplied replay keys are stored verbatim in the
+47:# idempotency_records.idempotency_key column, a String(128) since migration
+48:# 016, so 128 is the durable limit; the Python SDK enforces the same bound
+49:# before sending. Accepting a longer key would pass on SQLite in tests and be
+50:# refused by PostgreSQL mid-call, after the caller's retry protection had
+51:# already been promised.
+52:MAX_CLIENT_IDEMPOTENCY_KEY_LENGTH = 128
+53:_CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f]")
+54:
+55:
+56:class InvalidIdempotencyKeyError(ValueError):
+57:    """A caller explicitly supplied a replay key the gateway cannot honor.
+58:
+59:    This is distinct from an absent key. Absence means an un-keyed call, and
+60:    the transports document what that costs. Presence with an unusable value
+61:    means the caller asked for retry protection and would silently not get
+62:    it, so the call is refused before any permit, debit, or dispatch.
+63:    """
+64:
+65:    def __init__(self, reason_code: str, message: str, *, source: str) -> None:
+66:        super().__init__(message)
+67:        self.reason_code = reason_code
+68:        self.source = source
+69:
+70:    def as_error_data(self) -> dict[str, Any]:
+71:        """Machine-actionable detail for the transport's error envelope."""
+72:        return {
+73:            "error": "invalid_idempotency_key",
+74:            "reason_code": self.reason_code,
+75:            "source": self.source,
+76:            "remediation": {
+77:                "type": "retry_with_valid_idempotency_key",
+78:                "detail": (
+79:                    "Send exactly one idempotency key: a non-blank string of at "
+80:                    f"most {MAX_CLIENT_IDEMPOTENCY_KEY_LENGTH} characters with no "
+81:                    "control characters (UTF-8 bytes when sent as a header), or "
+82:                    "the same key in every source. Nothing was minted, charged, "
+83:                    "or dispatched."
+84:                ),
+85:            },
+86:        }
+87:
+88:
+89:def validate_client_idempotency_key(value: object, *, source: str) -> str:
+90:    """Return ``value`` exactly as supplied or raise ``InvalidIdempotencyKeyError``.
+91:
+92:    A usable key is a JSON string with at least one non-whitespace character,
+93:    at most ``MAX_CLIENT_IDEMPOTENCY_KEY_LENGTH`` characters, and no C0 control
+94:    characters or DEL. The value is never stripped, truncated, stringified,
+95:    or otherwise normalized: two distinct valid keys must stay two distinct
+96:    keys, and the key the caller sent is the key the ledger records.
+97:    """
+98:    if not isinstance(value, str):
+99:        raise InvalidIdempotencyKeyError(
+100:            "idempotency_key_not_a_string",
+101:            f"invalid_idempotency_key: {source} must be a JSON string",
+102:            source=source,
+103:        )
+104:    if not value.strip():
+105:        raise InvalidIdempotencyKeyError(
+106:            "idempotency_key_blank",
+107:            f"invalid_idempotency_key: {source} must contain a non-whitespace "
+108:            "character",
+109:            source=source,
+110:        )
+111:    if len(value) > MAX_CLIENT_IDEMPOTENCY_KEY_LENGTH:
+112:        raise InvalidIdempotencyKeyError(
+113:            "idempotency_key_too_long",
+114:            f"invalid_idempotency_key: {source} must be at most "
+115:            f"{MAX_CLIENT_IDEMPOTENCY_KEY_LENGTH} characters",
+116:            source=source,
+117:        )
+118:    if _CONTROL_CHARACTERS.search(value):
+119:        raise InvalidIdempotencyKeyError(
+120:            "idempotency_key_control_characters",
+121:            f"invalid_idempotency_key: {source} must not contain control characters",
+122:            source=source,
+123:        )
+124:    return value
+125:
+126:
+127:IDEMPOTENCY_KEY_HEADER_SOURCE = "Idempotency-Key header"
+128:
+129:
+130:def decode_idempotency_key_header(line: str) -> str:
+131:    """Return an ``Idempotency-Key`` header line as the text the client sent.
+132:
+133:    Header bytes reach the application decoded as latin-1, so a key a client
+134:    sent as UTF-8 would otherwise arrive as mojibake: it would not equal the
+135:    same key sent in the body, and UTF-8 continuation bytes in 0x80-0x9F
+136:    would read as C1 control characters. The line is re-read as UTF-8 and
+137:    nothing else, so every wire value has at most one reading and two
+138:    different byte sequences can never alias to one key; bytes that are not
+139:    valid UTF-8 are refused (``idempotency_key_not_utf8``) rather than kept
+140:    as latin-1 text.
+141:    """
+142:    try:
+143:        return line.encode("latin-1").decode("utf-8")
+144:    except UnicodeError as exc:
+145:        raise InvalidIdempotencyKeyError(
+146:            "idempotency_key_not_utf8",
+147:            f"invalid_idempotency_key: {IDEMPOTENCY_KEY_HEADER_SOURCE} must be "
+148:            "valid UTF-8",
+149:            source=IDEMPOTENCY_KEY_HEADER_SOURCE,
+150:        ) from exc
+151:
+152:
+153:def resolve_client_idempotency_key(
+154:    sources: Sequence[tuple[str, object]],
+155:) -> str | None:
+156:    """Reduce every explicitly supplied key source to the one key to honor.
+157:
+158:    ``sources`` holds ``(source_name, value)`` for each source the caller
+159:    actually sent; absent sources are simply not listed. Every present value
+160:    must validate, and when more than one source is present they must agree
+161:    exactly. Disagreement is refused as ambiguous rather than letting one
+162:    source silently win. Returns ``None`` only when no source was supplied.
+163:    """
+164:    validated: list[tuple[str, str]] = []
+165:    for source, value in sources:
+166:        validated.append(
+167:            (source, validate_client_idempotency_key(value, source=source))
+168:        )
+169:    if not validated:
+170:        return None
+171:    first_source, first_key = validated[0]
+172:    for source, key in validated[1:]:
+173:        if key != first_key:
+174:            raise InvalidIdempotencyKeyError(
+175:                "idempotency_key_conflict",
+176:                f"invalid_idempotency_key: {first_source} and {source} disagree; "
+177:                "send one key, or the same key in both",
+178:                source=f"{first_source}, {source}",
+179:            )
+180:    return first_key
+181:
+182:
+183:@dataclass(frozen=True)
+184:class IdempotencyReplay:
+185:    response_reference: str | None
+186:    response_json: dict[str, Any] | None
+187:    status_code: int
+188:
+189:
+190:@dataclass(frozen=True)
+191:class IdempotencyBegin:
+192:    """Identity and replay result for one idempotent request."""
+193:
+194:    record_id: str
+195:    request_hash: str
+196:    replay: IdempotencyReplay | None
+197:
+198:
+199:def _idempotency_predicates(
+200:    wallet_id: str, endpoint: str, idempotency_key: str
+201:) -> tuple[ColumnElement[bool], ...]:
+202:    return (
+203:        cast(ColumnElement[bool], IdempotencyRecordModel.wallet_id == wallet_id),
+204:        cast(ColumnElement[bool], IdempotencyRecordModel.endpoint == endpoint),
+205:        cast(
+206:            ColumnElement[bool],
+207:            IdempotencyRecordModel.idempotency_key == idempotency_key,
+208:        ),
+209:    )
+210:
+211:
+212:def _replay_from_record(
+213:    existing: IdempotencyRecordModel, request_hash: str
+214:) -> IdempotencyReplay | None:
+215:    if existing.request_hash != request_hash:
+216:        raise IdempotencyConflictError("idempotency_key_reused")
+217:    if existing.response_json:
+218:        try:
+219:            decoded = json.loads(existing.response_json)
+220:        except json.JSONDecodeError:
+221:            decoded = None
+222:        if isinstance(decoded, dict):
+223:            return IdempotencyReplay(
+224:                response_reference=existing.response_reference,
+225:                response_json=decoded,
+226:                status_code=existing.status_code,
+227:            )
+228:    raise IdempotencyInProgressError("idempotency_in_progress")
+229:
+230:
+231:class IdempotencyService:
+232:    async def _try_reconcile_and_replay(
+233:        self,
+234:        session: AsyncSession,
+235:        *,

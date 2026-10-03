@@ -1,0 +1,1 @@
+Added optional schema/property QA checks, 24-route auth matrix, and xfail repros BE-001/BE-002; pending execution.

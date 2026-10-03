@@ -1,0 +1,75 @@
+- link "Skip to content":
+  - /url: "#main-content"
+- banner:
+  - link "Agent Middleware API":
+    - /url: https://www.thisisatest.tech/
+  - generic: Private experiment
+- main:
+  - generic: Operator index
+  - heading "Inspect the trust plane without invented telemetry." [level=1]
+  - paragraph: This origin is a private experiment, not a public product. Tool catalogs and invoke require an operator-issued key. This page only points at runtime posture and portable verification keys.
+  - paragraph: No tenant records or aggregate customer counts are rendered here. This page does not request API keys, make authenticated calls, or store credentials in the browser.
+  - region "Core contract":
+    - heading "Core contract" [level=2]
+    - paragraph: The governed path is intentionally narrow.
+    - article:
+      - heading "Scoped authorization" [level=3]
+      - paragraph: Signed permits bind a subject, tool scope, budget, expiry, and nonce.
+      - generic: discover → authenticate → authorize
+    - article:
+      - heading "Idempotent metering" [level=3]
+      - paragraph: Retries reuse the same operation boundary so one accepted action is charged once.
+      - generic: invoke → meter
+    - article:
+      - heading "Portable receipts" [level=3]
+      - paragraph: Governed outcomes can be exported with the issuer key material required for offline verification.
+      - generic: receipt → verify
+    - article:
+      - heading "Durable evidence" [level=3]
+      - paragraph: Dispatch state and account audit events are persisted for authenticated operator inspection.
+      - generic: audit → govern
+  - region "Status and evidence":
+    - heading "Status and evidence" [level=2]
+    - paragraph: The proof is self-issued live gateway proof, not customer traction.
+    - link "Portable receipt proof Artifact, matching key snapshot, and offline verification command.":
+      - /url: https://www.thisisatest.tech/proof/
+      - strong: Portable receipt proof
+      - text: Artifact, matching key snapshot, and offline verification command.
+    - link "Runtime truth Dependency posture, feature flags, build SHA, and metric scope metadata.":
+      - /url: https://api.thisisatest.tech/health/dependencies
+      - strong: Runtime truth
+      - text: Dependency posture, feature flags, build SHA, and metric scope metadata.
+    - link "Current trust keys Public issuer keys exposed by the live API.":
+      - /url: https://api.thisisatest.tech/.well-known/trust-keys.json
+      - strong: Current trust keys
+      - text: Public issuer keys exposed by the live API.
+  - region "Machine discovery":
+    - heading "Machine discovery" [level=2]
+    - link "Agent manifest Bootstrap metadata. Tool lists on this origin require a key.":
+      - /url: https://api.thisisatest.tech/.well-known/agent.json
+      - strong: Agent manifest
+      - text: Bootstrap metadata. Tool lists on this origin require a key.
+    - link "llms.txt Machine-readable integration guidance.":
+      - /url: https://api.thisisatest.tech/llms.txt
+      - strong: llms.txt
+      - text: Machine-readable integration guidance.
+  - region "Authenticated inspection":
+    - heading "Authenticated inspection" [level=2]
+    - paragraph: Inspect your own permits, receipts, and audit events from a trusted terminal. Keep the key in your environment; do not paste it into a public web page.
+    - code: "export AGENT_MIDDLEWARE_API_KEY='replace-in-your-terminal' curl --fail-with-body \\ -H \"X-API-Key: ${AGENT_MIDDLEWARE_API_KEY}\" \\ \"https://api.thisisatest.tech/v1/me/permits\" curl --fail-with-body \\ -H \"X-API-Key: ${AGENT_MIDDLEWARE_API_KEY}\" \\ \"https://api.thisisatest.tech/v1/me/receipts\" curl --fail-with-body \\ -H \"X-API-Key: ${AGENT_MIDDLEWARE_API_KEY}\" \\ \"https://api.thisisatest.tech/v1/me/audit/events\""
+  - region "How to read the runtime data":
+    - heading "How to read the runtime data" [level=2]
+    - list:
+      - code: upstream_mcp.call_metrics
+      - text: are process-local and reset on restart.
+      - code: upstream_mcp.dispatch_metrics
+      - text: summarize durable dispatch records.
+      - listitem: A healthy dependency report is operational posture, not evidence of customer usage.
+      - listitem: The public proof demonstrates one gateway-controlled action, not end-to-end exactly-once behavior for arbitrary upstream side effects.
+- contentinfo:
+  - link "Agent Middleware API":
+    - /url: https://www.thisisatest.tech/
+  - link "Proof":
+    - /url: https://www.thisisatest.tech/proof/
+  - link "Runtime truth":
+    - /url: https://api.thisisatest.tech/health/dependencies

@@ -1,0 +1,10 @@
+127.0.0.1 global= False multicast= False guard= private_address_blocked
+169.254.169.254 global= False multicast= False guard= private_address_blocked
+10.0.0.1 global= False multicast= False guard= private_address_blocked
+100.64.0.1 global= False multicast= False guard= private_address_blocked
+0.0.0.0 global= False multicast= False guard= private_address_blocked
+224.0.0.1 global= True multicast= True guard= None
+239.255.255.250 global= True multicast= True guard= None
+ff02::1 global= True multicast= True guard= None
+ff05::1 global= True multicast= True guard= None
+::1 global= False multicast= False guard= private_address_blocked

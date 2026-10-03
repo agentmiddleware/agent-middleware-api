@@ -1,0 +1,48 @@
+{'startTime': '2026-10-03T00:38:04.225Z', 'duration': 16775.043999999998, 'expected': 0, 'skipped': 0, 'unexpected': 24, 'flaky': 0}
+chromium Error: browserType.launch: Target page, context or browser has been closed
+Browser logs:
+
+<launching> /private/tmp/amw-qa-playwright-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-Ku6FVe --remote-debugging-pipe --no-startup-window
+<launched> pid=23758
+[pid=23758][err] [1002/173804.495387:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+[pid=23758][err] [1002/173804.496906:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+[pid=23758][err] [1002/173804.497381:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPor
+firefox Error: browserType.launch: Failed to launch the browser process.
+Browser logs:
+
+<launching> /private/tmp/amw-qa-playwright-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox -no-remote -headless -profile /var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_firefoxdev_profile-xPXXEd -juggler-pipe -silent
+<launched> pid=24308
+[pid=24308][err] *** You are running in headless mode.
+[pid=24308] <process did exit: exitCode=null, signal=SIGABRT>
+[pid=24308] starting temporary directories cleanup
+Call log:
+[2m  - <launching> /private/tmp/amw-qa-playwright-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox -no-remote -headless -profile /var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_firefoxdev_profile-xPXXEd -juggler-pipe -silent[22m
+[2m  - <launched> pid=24308[22m
+[2m  - [pid=24308][err] *** You are running in headless mode.[22m
+[2m  - [pid=24308] <process did exit: exitCode=null, signal=SIGABRT>[22m
+[2m  - [pid=24308] starting temporary directories cleanup[22m
+[2m  - [pid=24308] <gracefully close start>[22m
+[2m  - [pid=24308] <kill>[22m
+[2m  - [pid=24308] <skipped force kill spawnedProcess.killed=false processClosed=true>[22m
+[2m  - [pid=24308] finished temporary directories cleanup[22m
+[2m  - [pid=24308] <gracefully close end>[22m
+
+webkit Error: browserType.launch: Target page, context or browser has been closed
+Browser logs:
+
+<launching> /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh --inspector-pipe --headless --no-startup-window
+<launched> pid=24833
+[pid=24833][err] /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh: line 7: 24840 Abort trap: 6              DYLD_FRAMEWORK_PATH="$DYLIB_PATH" DYLD_LIBRARY_PATH="$DYLIB_PATH" "$PLAYWRIGHT" "$@"
+Call log:
+[2m  - <launching> /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh --inspector-pipe --headless --no-startup-window[22m
+[2m  - <launched> pid=24833[22m
+[2m  - [pid=24833][err] /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh: line 7: 24840 Abort trap: 6              DYLD_FRAMEWORK_PATH="$DYLIB_PATH" DYLD_LIBRARY_PATH="$DYLIB_PATH" "$PLAYWRIGHT" "$@"[22m
+[2m  - [pid=24833] <gracefully close start>[22m
+[2m  - [pid=24833] <kill>[22m
+[2m  - [pid=24833] <will force kill>[22m
+[2m  - [pid=24833] exception while trying to kill process: Error: kill EPERM[22m
+[2m  - [pid=24833] <process did exit: exitCode=134, signal=null>[22m
+[2m  - [pid=24833] starting temporary directories cleanup[22m
+[2m  - [pid=24833] finished temporary directories cleanup[22m
+[2m  - [pid=24833] <gracefully close end>[22m
+
