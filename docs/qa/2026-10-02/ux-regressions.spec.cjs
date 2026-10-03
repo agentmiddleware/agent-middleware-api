@@ -1,4 +1,4 @@
-// Known issues are expected failures until the corresponding product fix lands.
+// Regression coverage for the 2026-10-02 UX findings.
 const modules = process.env.QA_NODE_MODULES || '/private/tmp/amw-qa-browser/node_modules';
 const {test, expect} = require(`${modules}/@playwright/test`);
 const axe = require(`${modules}/axe-core`);
@@ -47,8 +47,13 @@ test('UX-002: dashboard scrollable commands have explicit keyboard access', asyn
 });
 
 test('UX-003: operator runtime links remain on the served origin', async ({page}) => {
-  test.fail(true, 'UX-003: runtime links target a fixed production origin from local dashboard.');
   await page.goto('http://127.0.0.1:8766/dashboard.html');
-  const href = await page.getByRole('link', {name: /Runtime truth/}).first().getAttribute('href');
-  expect(new URL(href, page.url()).origin).toBe(new URL(page.url()).origin);
+  for (const name of [/Runtime truth/, /Current trust keys/, /Agent manifest/, /llms.txt/]) {
+    const links = page.getByRole('link', {name});
+    await expect(links.first()).toBeVisible();
+    for (const link of await links.all()) {
+      const href = await link.getAttribute('href');
+      expect(new URL(href, page.url()).origin).toBe(new URL(page.url()).origin);
+    }
+  }
 });
