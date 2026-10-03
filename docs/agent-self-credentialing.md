@@ -93,23 +93,32 @@ Two behaviors worth knowing before you read the output as a bug:
 
 ## 4. What this proves — and what it does not
 
-Proven against this code: exactly-once gateway authorization, debit, and
-receipt finalization under replay, concurrency, conflict, and denial; and
-that receipts are tamper-evident under the published key.
+Proven by this local harness: identical same-key replay creates no second
+debit or file append, the tested calls finalize receipts under replay,
+concurrency, conflict, and denial, and those receipts are tamper-evident
+under the published key. This does not prove receipt completion under every
+failure.
 
 Not proven by this harness, and not claimed:
 
 - **Production behavior.** Same code, different infrastructure (Postgres,
   Redis, a real upstream MCP server). A local pass is strong evidence about
   the logic, not a measurement of the production deployment.
-- **Remote exactly-once.** The gateway guarantees one authorization, one
-  debit, one finalized receipt. A remote side effect is exactly-once only if
-  the upstream honors the forwarded idempotency key — the OpenAPI contract
-  narrows the claim to exactly that, correctly.
-- **The local tool is simulated.** `partner.notes.write` appends to a local
-  JSONL file and is labeled `simulation: true` in discovery. Production's
-  `partner.echo` is a real upstream call. The governance path is identical;
-  the work at the end of it is not.
+- **Remote effects.** For the configured upstream MCP tool, identical retries
+  under the same accepted idempotency key allow at most one gateway dispatch
+  and at most one debit. This does not guarantee delivery or a downstream
+  effect; downstream replay safety also requires the upstream to honor the
+  forwarded key.
+- **Local and upstream execution differ.** `partner.notes.write` appends to a
+  local JSONL file and is labeled `simulation: true` in discovery.
+  `partner.echo` uses the configured upstream MCP adapter and durable dispatch
+  state machine. Local governed tools have no dispatch state machine and
+  interrupted calls fail closed into manual review.
+- **Receipt completion.** A call can commit effects or a debit but fail to
+  write its audit event or receipt, returning `manual_review_required` with
+  no receipt. Do not retry with a new idempotency key: that can execute and
+  charge the call again. Reconcile from the ledger and audit chain as described
+  in [failure semantics](failure-semantics.md).
 
 To reproduce the invariants against production, an operator must issue a
 wallet-scoped key and funded permit out of band. No agent should manufacture
