@@ -32,7 +32,7 @@ Broad QA charters: #553, #554, #555, #556. Their 36 acceptance checks are mapped
 
 ## Validation
 
-Final combined-suite result is recorded in [README](README.md) and retained evidence. Per-domain counts overlap and are not summed. Independent gate review found no blocking finding across reviewed repairs and follow-up commits. Fresh PostgreSQL checks passed 12 accounting, 10 process/crash-recovery and 1 migration, in addition to targeted migration038 and approval-expiry proofs. All-files Ruff, format, mypy, generated OpenAPI and documentation/inventory checks passed. Frontend negative controls and fixed checks passed in Chromium, Firefox and WebKit.
+Final combined suite at `4ac5a56`: **4,866 passed, 85 skipped, 6 warnings, zero failures**, including proof surfaces. Exact command, source identity and skip reasons are recorded in [README](README.md) and retained evidence. Per-domain counts overlap and are not summed. Independent gate review found no blocking finding across reviewed repairs and follow-up commits. Fresh PostgreSQL checks passed 12 accounting, 10 process/crash-recovery and 1 migration, in addition to targeted migration038 and approval-expiry proofs. All-files Ruff, format, mypy, generated OpenAPI and documentation/inventory checks passed. Frontend negative controls and fixed checks passed in Chromium, Firefox and WebKit.
 
 The original interrupted audit run, a temporary-directory mismatch in the first resumed suite, and the corrected runner result remain documented. No test expectation, security boundary or scanner suppression was weakened to obtain a pass.
 

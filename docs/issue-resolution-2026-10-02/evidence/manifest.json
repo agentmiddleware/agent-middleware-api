@@ -418,5 +418,131 @@
     "original_source": "/tmp/amw-all-issues-20261002/infra/uncertain-receipt.log",
     "original_sha256": "2ab62fe48f5f60b58b6aa1603601e86a1158562eb8a12c2c1ac434226fffdeaa",
     "normalization": "none"
+  },
+  "aggregate/full-4ac5a56/full.txt": {
+    "size": 13283,
+    "sha256": "8205b3f170f4a114ea3171f5b03cfe2aacd7e1931e2ee664b88a55689bd034c3",
+    "original_source": "/tmp/amw-all-issues-20261002/aggregate/full-4ac5a56/full.log",
+    "original_sha256": "8205b3f170f4a114ea3171f5b03cfe2aacd7e1931e2ee664b88a55689bd034c3",
+    "normalization": "none"
+  },
+  "aggregate/full-4ac5a56/result.json": {
+    "size": 1595,
+    "sha256": "de410fd0027b7e941796a7b636bf8af2b7164550d9df6eb59f3e501c6b51ab48",
+    "original_source": "/tmp/amw-all-issues-20261002/aggregate/full-4ac5a56/result.json",
+    "original_sha256": "de410fd0027b7e941796a7b636bf8af2b7164550d9df6eb59f3e501c6b51ab48",
+    "normalization": "none"
+  },
+  "aggregate/full-4ac5a56/snapshot.json": {
+    "size": 14391,
+    "sha256": "99893998c2b4aef9c003cf402e185b7150074ef87ddf8f328afba1540199834a",
+    "original_source": "/tmp/amw-all-issues-20261002/aggregate/full-4ac5a56/snapshot.json",
+    "original_sha256": "99893998c2b4aef9c003cf402e185b7150074ef87ddf8f328afba1540199834a",
+    "normalization": "none"
+  },
+  "aggregate/full-4ac5a56/skips.txt": {
+    "size": 5709,
+    "sha256": "0e5457d5a293b6ae28a63047dcbd9a03bf248f5d2d3ffed9dc82ad3dfcd62fc8",
+    "original_source": "/tmp/amw-all-issues-20261002/aggregate/full-4ac5a56/skips.txt",
+    "original_sha256": "0e5457d5a293b6ae28a63047dcbd9a03bf248f5d2d3ffed9dc82ad3dfcd62fc8",
+    "normalization": "none"
+  },
+  "aggregate/full-4ac5a56/start.json": {
+    "size": 1440,
+    "sha256": "efbd0a0b0fdbb82a906ee42e9ae8ab097d01efd8cd5c2a85d708989a20962745",
+    "original_source": "/tmp/amw-all-issues-20261002/aggregate/full-4ac5a56/start.json",
+    "original_sha256": "efbd0a0b0fdbb82a906ee42e9ae8ab097d01efd8cd5c2a85d708989a20962745",
+    "normalization": "none"
+  },
+  "aggregate/full-d42bbcf/full.txt": {
+    "size": 8094,
+    "sha256": "dff1c6f40ea3e979689a2e4b58e1e0bb0ff638e8098a6ee35870c7c53bc752f6",
+    "original_source": "/tmp/amw-all-issues-20261002/aggregate/full-d42bbcf/full.log",
+    "original_sha256": "bd85f1ed03f9afa82378b4751ba4e3742e6a905e8bb702d4f765932eecc2e634",
+    "normalization": "trailing whitespace and extra final blank lines removed"
+  },
+  "aggregate/full-d42bbcf/result.json": {
+    "size": 1595,
+    "sha256": "a15e4e85e13620e1d634d72d8cdae6576f7463674521ad4de06156201dcbd020",
+    "original_source": "/tmp/amw-all-issues-20261002/aggregate/full-d42bbcf/result.json",
+    "original_sha256": "a15e4e85e13620e1d634d72d8cdae6576f7463674521ad4de06156201dcbd020",
+    "normalization": "none"
+  },
+  "aggregate/human-contract-d42bbcf/targeted.txt": {
+    "size": 4362,
+    "sha256": "31b5f1d135a3cccea6e5bf5502a5b3f6a2a093aee9e92620224806bbe64fdb74",
+    "original_source": "/tmp/amw-all-issues-20261002/aggregate/human-contract-d42bbcf/targeted.log",
+    "original_sha256": "95334bac5f063822236937a49a91bcc679b3c4935f354d216502ec2da46172c2",
+    "normalization": "trailing whitespace and extra final blank lines removed"
+  },
+  "aggregate/human-contract-d42bbcf/result.json": {
+    "size": 1636,
+    "sha256": "6e7a1633c3a53a54635990c296fe0b8f614c4231c97db6f27c270cb69f8b6567",
+    "original_source": "/tmp/amw-all-issues-20261002/aggregate/human-contract-d42bbcf/result.json",
+    "original_sha256": "6e7a1633c3a53a54635990c296fe0b8f614c4231c97db6f27c270cb69f8b6567",
+    "normalization": "none"
+  },
+  "aggregate/fast-f82700f/fast.txt": {
+    "size": 13042,
+    "sha256": "f92d6af4021c327e4f470e5d509a9deab2d7f5cc92c518fe8e15c4e6442eb591",
+    "original_source": "/tmp/amw-all-issues-20261002/aggregate/fast-f82700f/fast.log",
+    "original_sha256": "98d6eaa13377759a8a123f658ae25723968e985ee6b31186d3a41cae438b5497",
+    "normalization": "trailing whitespace and extra final blank lines removed"
+  },
+  "aggregate/fast-f82700f/result.json": {
+    "size": 1599,
+    "sha256": "ba3d096838b71be7395271d86719e2e7a0554a61f167a79d9e70de52fdee59c7",
+    "original_source": "/tmp/amw-all-issues-20261002/aggregate/fast-f82700f/result.json",
+    "original_sha256": "ba3d096838b71be7395271d86719e2e7a0554a61f167a79d9e70de52fdee59c7",
+    "normalization": "none"
+  },
+  "aggregate/baseline-site-env-check/targeted.txt": {
+    "size": 98,
+    "sha256": "142e711fac20a466998c8bbeb42619edb1e1722cf84dfe39f564f9b894494392",
+    "original_source": "/tmp/amw-all-issues-20261002/aggregate/baseline-site-env-check/targeted.log",
+    "original_sha256": "142e711fac20a466998c8bbeb42619edb1e1722cf84dfe39f564f9b894494392",
+    "normalization": "none"
+  },
+  "aggregate/baseline-site-env-check/result.json": {
+    "size": 1542,
+    "sha256": "2ca847203af2dfc76b59eee3a40fd0fbd02ff1379c3680f36d05fdca2625ba49",
+    "original_source": "/tmp/amw-all-issues-20261002/aggregate/baseline-site-env-check/result.json",
+    "original_sha256": "2ca847203af2dfc76b59eee3a40fd0fbd02ff1379c3680f36d05fdca2625ba49",
+    "normalization": "none"
+  },
+  "aggregate/report.md": {
+    "size": 16791,
+    "sha256": "3775b4e6703dfbd4eb8d20987b31761f825126230bba77b90f825e3457d902f8",
+    "original_source": "/tmp/amw-all-issues-20261002/aggregate/report.md",
+    "original_sha256": "3775b4e6703dfbd4eb8d20987b31761f825126230bba77b90f825e3457d902f8",
+    "normalization": "none"
+  },
+  "final/operator-contract.txt": {
+    "size": 179,
+    "sha256": "f163dc0fe7e4463f3b5c8d096106b6f665967db32217be833f443eeffa7b88d2",
+    "original_source": "/tmp/amw-all-issues-20261002/final/operator-contract.txt",
+    "original_sha256": "f163dc0fe7e4463f3b5c8d096106b6f665967db32217be833f443eeffa7b88d2",
+    "normalization": "none"
+  },
+  "final/operator-contract-result.json": {
+    "size": 482,
+    "sha256": "d2dd22f9c09b2950f799ca7aac208e76b01b04f02d564e1131aa82de0af5abbe",
+    "original_source": "/tmp/amw-all-issues-20261002/final/operator-contract-result.json",
+    "original_sha256": "d2dd22f9c09b2950f799ca7aac208e76b01b04f02d564e1131aa82de0af5abbe",
+    "normalization": "none"
+  },
+  "final/operator-hooks.txt": {
+    "size": 240,
+    "sha256": "ae025d88afb881010817b47052c756c3f5c84d1646d2c51b7cbed533a37cb488",
+    "original_source": "/tmp/amw-all-issues-20261002/final/operator-hooks.txt",
+    "original_sha256": "ae025d88afb881010817b47052c756c3f5c84d1646d2c51b7cbed533a37cb488",
+    "normalization": "none"
+  },
+  "final/operator-hooks-result.json": {
+    "size": 322,
+    "sha256": "f24063f519862061980ab0a706a7a84ade6f3accb36c74b69d03708c00fe3261",
+    "original_source": "/tmp/amw-all-issues-20261002/final/operator-hooks-result.json",
+    "original_sha256": "f24063f519862061980ab0a706a7a84ade6f3accb36c74b69d03708c00fe3261",
+    "normalization": "none"
   }
 }
