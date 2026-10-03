@@ -350,8 +350,11 @@ def main() -> int:
                 [PY, "-m", "ruff", "check", "app", "tests", "scripts"], timeout=300
             )
             results.append(("ruff (full)", ok2, dt2, tail2))
-            if ok:  # only advance the fingerprint when the suite is green
+            if ok and ok2:  # cache only a fully green test and lint sweep
                 SWEEP_FINGERPRINT.write_text(fp)
+            else:
+                # A forced sweep can invalidate an earlier green result.
+                SWEEP_FINGERPRINT.unlink(missing_ok=True)
         else:
             results.append(
                 (
