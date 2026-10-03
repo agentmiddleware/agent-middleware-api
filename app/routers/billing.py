@@ -1321,9 +1321,11 @@ async def get_pricing(
     summary="Get arbitrage report",
 )
 async def get_arbitrage_report(
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     money: AgentMoney = Depends(get_agent_money),
 ):
+    """Operator profitability across wallets for the preceding 24 hours."""
+    auth.require_bootstrap_admin()
     return await money.get_arbitrage_report()
 
 
