@@ -1,18 +1,34 @@
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4e0016 AS base
 
-WORKDIR /app
+FROM base AS builder
+
+WORKDIR /build
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-# Install system dependencies
+# Compilers are needed only while building Python dependencies.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
+# The shared manifest keeps development tools after this required marker.
+# Fail the build if that boundary is missing or duplicated.
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN test "$(grep -c -x '# --- Development ---' requirements.txt)" -eq 1 \
+    && sed '/^# --- Development ---$/,$d' requirements.txt > requirements-runtime.txt \
+    && python -m venv /opt/venv \
+    && /opt/venv/bin/pip install --no-cache-dir -r requirements-runtime.txt
+
+FROM base AS runtime
+
+WORKDIR /app
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/opt/venv/bin:$PATH"
+
+COPY --from=builder /opt/venv /opt/venv
 
 # Copy application code
 COPY . .
