@@ -93,23 +93,32 @@ Two behaviors worth knowing before you read the output as a bug:
 
 ## 4. What this proves — and what it does not
 
-Proven against this code: exactly-once gateway authorization, debit, and
-receipt finalization under replay, concurrency, conflict, and denial; and
-that receipts are tamper-evident under the published key.
+A passing run verifies this local scenario: one debit and one tool execution
+for the accepted identity under replay and concurrency, no debit for the
+exercised conflicts and denials, and tamper-evident receipts on the paths
+that finalize. It does not establish receipt completion after every failure.
 
 Not proven by this harness, and not claimed:
 
 - **Production behavior.** Same code, different infrastructure (Postgres,
   Redis, a real upstream MCP server). A local pass is strong evidence about
   the logic, not a measurement of the production deployment.
-- **Remote exactly-once.** The gateway guarantees one authorization, one
-  debit, one finalized receipt. A remote side effect is exactly-once only if
-  the upstream honors the forwarded idempotency key — the OpenAPI contract
-  narrows the claim to exactly that, correctly.
+- **Remote exactly-once.** For the configured upstream MCP tool, an accepted
+  idempotency identity permits at most one gateway dispatch and at most one
+  debit. This is not a guarantee that a network send or downstream effect
+  occurred. Downstream deduplication depends on the upstream honoring the
+  forwarded key. This local harness does not exercise upstream crash recovery.
+- **A receipt after every effect.** A local crash or exhausted receipt/audit
+  write after committed effects can leave no receipt and require manual
+  review. An ambiguous upstream outcome is receipted as `delivery_uncertain`
+  only when finalization or reconciliation succeeds. Do not retry an unresolved
+  action with a new key; that can execute and charge again. See
+  [failure-semantics.md](failure-semantics.md).
 - **The local tool is simulated.** `partner.notes.write` appends to a local
-  JSONL file and is labeled `simulation: true` in discovery. Production's
-  `partner.echo` is a real upstream call. The governance path is identical;
-  the work at the end of it is not.
+  JSONL file and is labeled `simulation: true` in discovery. The configured
+  upstream MCP tool uses a durable dispatch state machine; local governed
+  tools do not. Both enforce permits and accounting, but the local replay
+  proof does not establish the upstream recovery guarantees.
 
 To reproduce the invariants against production, an operator must issue a
 wallet-scoped key and funded permit out of band. No agent should manufacture
