@@ -89,23 +89,37 @@ Two behaviors worth knowing before you read the output as a bug:
 
 ## 4. What this proves — and what it does not
 
-Proven against this code: exactly-once gateway authorization, debit, and
-receipt finalization under replay, concurrency, conflict, and denial; and
-that receipts are tamper-evident under the published key.
+Proven against this code: for one accepted idempotency key, at most one
+gateway authorization and at most one debit under replay, concurrency,
+conflict, and denial, with a signed receipt on every path that finalizes or
+is denied; and that receipts are tamper-evident under the published key.
 
 Not proven by this harness, and not claimed:
 
 - **Production behavior.** Same code, different infrastructure (Postgres,
   Redis, a real upstream MCP server). A local pass is strong evidence about
   the logic, not a measurement of the production deployment.
-- **Remote exactly-once.** The gateway guarantees one authorization, one
-  debit, one finalized receipt. A remote side effect is exactly-once only if
-  the upstream honors the forwarded idempotency key — the OpenAPI contract
-  narrows the claim to exactly that, correctly.
+- **Remote exactly-once.** The gateway guarantees *at most* one
+  authorization and *at most* one debit per accepted key — "exactly-once" is
+  the deduplication term, never a duplicate charge, not always a charge. A
+  remote side effect is exactly-once only if the upstream honors the
+  forwarded idempotency key — the OpenAPI contract narrows the claim to
+  exactly that, correctly.
+- **A receipt on every finalized path, not on every charged call.** If the
+  audit event or receipt write is lost to contention *after* the call has run
+  and the wallet has moved, the call answers `manual_review_required` with
+  committed effects and no receipt, and the record is held for an operator;
+  retrying it under a fresh key would run and charge it again. The local
+  harness does not drive that window. See
+  [failure-semantics.md § When no terminal accounting can be written](failure-semantics.md#when-no-terminal-accounting-can-be-written).
 - **The local tool is simulated.** `partner.notes.write` appends to a local
   JSONL file and is labeled `simulation: true` in discovery. Production's
-  `partner.echo` is a real upstream call. The governance path is identical;
-  the work at the end of it is not.
+  `partner.echo` is a real upstream call. Authorization, metering, and
+  receipting are the same code on both; execution is not. Only the
+  configured upstream tool has the durable dispatch state machine that
+  receipts an ambiguous post-send outcome as `delivery_uncertain`. A local
+  governed tool has no dispatch record and fails closed into manual review
+  instead, so a local pass does not exercise the upstream crash semantics.
 
 To reproduce the invariants against production, an operator must issue a
 wallet-scoped key and funded permit out of band. No agent should manufacture

@@ -336,16 +336,16 @@
       </p>
       <div class="links">
         <a href="https://www.thisisatest.tech/proof/">
-          <strong>Portable receipt proof</strong>
-          <span>Artifact, matching key snapshot, and offline verification command.</span>
+          <strong>Portable receipt proof (hosted sample)</strong>
+          <span>Separately hosted public artifact, matching key snapshot, and offline verification command. Not this runtime.</span>
         </a>
-        <a href="https://api.thisisatest.tech/health/dependencies">
+        <a href="/health/dependencies">
           <strong>Runtime truth</strong>
-          <span>Dependency posture, feature flags, build SHA, and metric scope metadata.</span>
+          <span>Dependency posture, feature flags, build SHA, and metric scope metadata for the API origin serving this page.</span>
         </a>
-        <a href="https://api.thisisatest.tech/.well-known/trust-keys.json">
+        <a href="/.well-known/trust-keys.json">
           <strong>Current trust keys</strong>
-          <span>Public issuer keys exposed by the live API.</span>
+          <span>Public issuer keys exposed by this API origin.</span>
         </a>
       </div>
     </section>
@@ -353,11 +353,11 @@
     <section aria-labelledby="discovery-heading">
       <h2 id="discovery-heading">Machine discovery</h2>
       <div class="links">
-        <a href="https://api.thisisatest.tech/.well-known/agent.json">
+        <a href="/.well-known/agent.json">
           <strong>Agent manifest</strong>
           <span>Bootstrap metadata. Tool lists on this origin require a key.</span>
         </a>
-        <a href="https://api.thisisatest.tech/llms.txt">
+        <a href="/llms.txt">
           <strong>llms.txt</strong>
           <span>Machine-readable integration guidance.</span>
         </a>
@@ -369,20 +369,23 @@
       <p class="section-copy">
         Inspect your own permits, receipts, and audit events from a trusted terminal.
         Keep the key in your environment; do not paste it into a public web page.
+        Set <code>API_URL</code> to the origin you are inspecting; the hosted
+        experiment is shown as the example, a local or staging runtime uses its own.
       </p>
-      <pre><code>export AGENT_MIDDLEWARE_API_KEY='replace-in-your-terminal'
+      <pre tabindex="0" role="region" aria-label="Authenticated inspection commands"><code>export API_URL='https://api.thisisatest.tech'   # or http://127.0.0.1:8000
+export AGENT_MIDDLEWARE_API_KEY='replace-in-your-terminal'
 
 curl --fail-with-body \
   -H "X-API-Key: ${AGENT_MIDDLEWARE_API_KEY}" \
-  "https://api.thisisatest.tech/v1/me/permits"
+  "${API_URL}/v1/me/permits"
 
 curl --fail-with-body \
   -H "X-API-Key: ${AGENT_MIDDLEWARE_API_KEY}" \
-  "https://api.thisisatest.tech/v1/me/receipts"
+  "${API_URL}/v1/me/receipts"
 
 curl --fail-with-body \
   -H "X-API-Key: ${AGENT_MIDDLEWARE_API_KEY}" \
-  "https://api.thisisatest.tech/v1/me/audit/events"</code></pre>
+  "${API_URL}/v1/me/audit/events"</code></pre>
     </section>
 
     <section aria-labelledby="limits-heading">
@@ -398,8 +401,8 @@ curl --fail-with-body \
 
   <footer>
     <a href="https://www.thisisatest.tech/">Agent Middleware API</a>
-    <a href="https://www.thisisatest.tech/proof/">Proof</a>
-    <a href="https://api.thisisatest.tech/health/dependencies">Runtime truth</a>
+    <a href="https://www.thisisatest.tech/proof/">Hosted proof</a>
+    <a href="/health/dependencies">Runtime truth</a>
   </footer>
 </body>
 </html>

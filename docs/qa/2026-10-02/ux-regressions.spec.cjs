@@ -1,4 +1,4 @@
-// Known issues are expected failures until the corresponding product fix lands.
+// Finding-linked regressions. Each was an expected failure until its product fix landed.
 const modules = process.env.QA_NODE_MODULES || '/private/tmp/amw-qa-browser/node_modules';
 const {test, expect} = require(`${modules}/@playwright/test`);
 const axe = require(`${modules}/axe-core`);
@@ -13,7 +13,6 @@ test.beforeEach(async ({context, page}) => {
 });
 
 test('UX-001: comparison fit text meets minimum contrast', async ({page}) => {
-  test.fail(true, 'UX-001: paper card inherits dark-surface text color (2.13:1).');
   await page.goto('/compare/');
   await page.addScriptTag({content: axe.source});
   const violations = await page.evaluate(async () => {
@@ -26,7 +25,6 @@ test('UX-001: comparison fit text meets minimum contrast', async ({page}) => {
 });
 
 test('UX-002: dashboard scrollable commands have explicit keyboard access', async ({page}) => {
-  test.fail(true, 'UX-002: scrollable pre has neither tabindex nor focusable content.');
   await page.goto('http://127.0.0.1:8766/dashboard.html');
   const code = page.locator('pre');
   const state = await code.evaluate(element => ({
@@ -39,7 +37,6 @@ test('UX-002: dashboard scrollable commands have explicit keyboard access', asyn
 });
 
 test('UX-003: operator runtime links remain on the served origin', async ({page}) => {
-  test.fail(true, 'UX-003: runtime links target a fixed production origin from local dashboard.');
   await page.goto('http://127.0.0.1:8766/dashboard.html');
   const href = await page.getByRole('link', {name: /Runtime truth/}).first().getAttribute('href');
   expect(new URL(href, page.url()).origin).toBe(new URL(page.url()).origin);

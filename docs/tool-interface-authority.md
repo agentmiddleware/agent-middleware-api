@@ -33,8 +33,17 @@ DENY              constraint violated -> machine-actionable denial
 ### ALLOW
 
 Unchanged: the server mints a bounded, signed, single-tool, short-lived
-permit from the caller's wallet and runs the full
-permit → meter → exactly-once dispatch → signed receipt pipeline.
+permit from the caller's wallet and runs the governed
+permit → meter → execute → signed receipt pipeline. The economic guarantee
+is the gateway's: for one accepted idempotency key, at most one dispatch and
+at most one debit. Only the configured upstream MCP tool has the durable
+dispatch state machine that receipts an ambiguous post-send outcome as
+`delivery_uncertain`; a local governed tool has no dispatch record and fails
+closed into manual review. A receipt is written on every path that
+finalizes or is denied, but a receipt or audit write lost to contention
+*after* effects are committed answers `manual_review_required` with no
+receipt, and must not be retried under a new key. See
+[failure-semantics.md](failure-semantics.md).
 
 ### REQUIRE_APPROVAL
 

@@ -44,9 +44,12 @@ def _address_blocked(address: str) -> bool:
     except ValueError:
         return False
     # is_global is False for loopback, RFC1918/ULA, link-local (including
-    # 169.254.169.254 metadata), CGNAT shared space, multicast, reserved,
-    # and unspecified addresses.
-    return not ip.is_global
+    # 169.254.169.254 metadata), CGNAT shared space, reserved, and
+    # unspecified addresses. It is NOT False for multicast: the stdlib
+    # classifies 224.0.0.0/4 and ff00::/8 as global because IANA does not
+    # list them in the special-purpose registries is_global consults, so a
+    # multicast destination is refused explicitly (BE-003).
+    return not ip.is_global or ip.is_multicast
 
 
 async def _resolve_host(host: str):
