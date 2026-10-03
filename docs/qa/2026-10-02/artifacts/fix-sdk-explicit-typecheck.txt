@@ -1,0 +1,2 @@
+Isolated TypeScript explicit-source strict check: node /private/tmp/amw-fix-node/node_modules/typescript/bin/tsc --noEmit --strict --target ES2020 --module Node16 --moduleResolution Node16 --esModuleInterop index.ts
+Typecheck exit: 0

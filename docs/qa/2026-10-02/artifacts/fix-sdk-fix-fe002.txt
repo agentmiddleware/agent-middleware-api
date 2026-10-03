@@ -1,0 +1,1 @@
+Changed max_steps default from truthy to nullish; logged scoped FE-002 fix and FE-001 deferral.

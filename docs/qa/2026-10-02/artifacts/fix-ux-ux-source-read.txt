@@ -1,0 +1,217 @@
+---
+name: debug-bug
+description: Use when diagnosing and fixing a bug in any repository. Prioritize reproduction, root cause, minimal fix, regression tests, negative-path coverage, and verification.
+---
+
+# Debug Bug
+
+## Process
+
+1. Reproduce the failure or locate the failing path from tests, logs, reports,
+   routes, services, or docs.
+2. Inspect related code before changing anything.
+3. Identify the smallest likely root cause.
+4. Make the minimal fix.
+5. Add a regression test when practical.
+6. Add negative-path tests if the bug touches auth, authorization, tenant
+   isolation, billing, secrets, deployment, tool execution, or data integrity.
+7. Run targeted tests first, then broader checks if the changed surface is
+   shared.
+8. Explain root cause, fix, verification, untested areas, remaining risk, and
+   next step.
+
+## Rules
+
+- Do not rewrite surrounding systems just to fix one bug.
+- Do not mask errors without understanding them.
+- Do not delete or weaken tests to make the suite pass.
+- If the issue cannot be reproduced, state that clearly and provide the closest
+  evidence found.
+
+1:# Task Group: agent-middleware-api dead rate-limiter removal and PR closeout
+132:- 700743, codex-backlog-2026-09-27.md, team-worktree, git remote get-url origin, agent-middleware-api, RegEngine, Dollarloop, test.db, SQLite, one pytest per worktree
+163:- Parallel pytest processes in one AMW checkout corrupt shared relative `./test.db`; run one pytest process per worktree/CWD or give concurrent tests separate worktrees. [Task 1]
+
+// Known issues are expected failures until the corresponding product fix lands.
+const modules = process.env.QA_NODE_MODULES || '/private/tmp/amw-qa-browser/node_modules';
+const {test, expect} = require(`${modules}/@playwright/test`);
+const axe = require(`${modules}/axe-core`);
+
+test.beforeEach(async ({context, page}) => {
+  await context.route('**/*', route => {
+    const host = new URL(route.request().url()).hostname;
+    return ['127.0.0.1', 'localhost', '[::1]'].includes(host)
+      ? route.continue() : route.abort('blockedbyclient');
+  });
+  await page.setViewportSize({width: 390, height: 844});
+});
+
+test('UX-001: comparison fit text meets minimum contrast', async ({page}) => {
+  test.fail(true, 'UX-001: paper card inherits dark-surface text color (2.13:1).');
+  await page.goto('/compare/');
+  await page.addScriptTag({content: axe.source});
+  const violations = await page.evaluate(async () => {
+    const result = await window.axe.run('.proof-col:not(.replay) .fit-list', {
+      runOnly: {type: 'rule', values: ['color-contrast']},
+    });
+    return result.violations.map(v => v.id);
+  });
+  expect(violations).toEqual([]);
+});
+
+test('UX-002: dashboard scrollable commands have explicit keyboard access', async ({page}) => {
+  test.fail(true, 'UX-002: scrollable pre has neither tabindex nor focusable content.');
+  await page.goto('http://127.0.0.1:8766/dashboard.html');
+  const code = page.locator('pre');
+  const state = await code.evaluate(element => ({
+    scrolls: element.scrollWidth > element.clientWidth,
+    keyboardAccessible: element.tabIndex >= 0 || element.querySelector(
+      'a[href],button,input,select,textarea,[tabindex="0"]',
+    ) !== null,
+  }));
+  expect(!state.scrolls || state.keyboardAccessible).toBe(true);
+});
+
+test('UX-003: operator runtime links remain on the served origin', async ({page}) => {
+  test.fail(true, 'UX-003: runtime links target a fixed production origin from local dashboard.');
+  await page.goto('http://127.0.0.1:8766/dashboard.html');
+  const href = await page.getByRole('link', {name: /Runtime truth/}).first().getAttribute('href');
+  expect(new URL(href, page.url()).origin).toBe(new URL(page.url()).origin);
+});
+
+"""Run a QA command with UTC timestamps and scrubbed output; no shell expansion."""
+
+import argparse
+import datetime as dt
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+import time
+
+ROOT = Path(__file__).resolve().parents[3]
+HERE = Path(__file__).resolve().parent
+
+
+def scrub(text):
+    text = re.sub(r"-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----.*?-----END (?:[A-Z]+ )?PRIVATE KEY-----", "[REDACTED]", text, flags=re.DOTALL)
+    text = re.sub(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b", "[REDACTED]", text)
+    text = re.sub(r"(?<=://)[^/@\s]+:[^/@\s]+@", "[REDACTED]@", text)
+    text = re.sub(r"(?i)(bearer\s+)[\w.\-]+", r"\1[REDACTED]", text)
+    text = re.sub(r"\b(?:amw_(?:dev_|live_)?|sk-(?:proj-)?)[A-Za-z0-9_-]{12,}\b", "[REDACTED]", text)
+    text = re.sub(r"(?i)((?:api[_-]?key|token|secret|password|private_key)\s*[=:]\s*)[^\s,;]+", r"\1[REDACTED]", text)
+    # Generated local fixture signing seeds must not enter shared QA logs.
+    text = re.sub(r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{43}=(?![A-Za-z0-9+/=])", "[REDACTED]", text)
+    text = re.sub(r"(?<![A-Fa-f0-9])[A-Fa-f0-9]{64,}(?![A-Fa-f0-9])", "[REDACTED]", text)
+    return text
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--group", required=True)
+    parser.add_argument("--label", required=True)
+    parser.add_argument("--cwd", default=str(ROOT))
+    parser.add_argument("--timeout", type=int, default=1800)
+    parser.add_argument("--aggregate-session", action="store_true", help="Refresh SESSION-LOG.md after this command outcome is written")
+    parser.add_argument("command", nargs=argparse.REMAINDER)
+    args = parser.parse_args()
+    command = args.command[1:] if args.command[:1] == ["--"] else args.command
+    now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    log = HERE / f"{args.group.upper()}-SESSION.md"
+    artifacts = HERE / "artifacts"
+    artifacts.mkdir(exist_ok=True)
+    output_path = artifacts / f"{args.group.lower()}-{args.label}.txt"
+    env = {k: v for k, v in os.environ.items() if k in {"PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "SYSTEMROOT"}}
+    env.update({"UV_CACHE_DIR": "/private/tmp/amw-qa-uv-cache", "PIP_CACHE_DIR": "/private/tmp/amw-qa-pip-cache", "PYTHONDONTWRITEBYTECODE": "1", "NO_COLOR": "1", "CI": "true"})
+    with log.open("a") as handle:
+        handle.write(f"\n### {now} — {args.label}\n\nCWD: `{args.cwd}`\n\nCommand (argv): `{scrub(repr(command))}`\n\n")
+    started = time.monotonic()
+    try:
+        result = subprocess.run(command, cwd=args.cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=args.timeout)
+        output, code = result.stdout, result.returncode
+    except subprocess.TimeoutExpired as exc:
+        output = exc.stdout or b""
+        output = output.decode(errors="replace") if isinstance(output, bytes) else output
+        output += "\nQA timeout reached.\n"
+        code = 124
+    except OSError as exc:
+        output, code = str(exc), 127
+    output = scrub(output)
+    output_path.write_text(output)
+    end = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    with log.open("a") as handle:
+        handle.write(f"Outcome for `{args.group.lower()}-{args.label}`: exit {code}; {time.monotonic() - started:.1f}s; ended {end}. [Output](artifacts/{output_path.name}).\n")
+    if args.aggregate_session:
+        from assemble_session_log import assemble
+
+        assemble()
+    print(output[-16000:])
+    print(f"\nQA exit={code}; artifact={output_path.relative_to(ROOT)}")
+    return code
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+
+static/dashboard.html:22:      --text-dim: #9ca8cb;
+static/dashboard.html:214:    pre {
+static/dashboard.html:234:    pre code { font-size: inherit; border: 0; padding: 0; overflow-wrap: normal; }
+static/dashboard.html:269:    @media (prefers-reduced-motion: reduce) {
+static/dashboard.html:368:      <h2 id="inspection-heading">Authenticated inspection</h2>
+static/dashboard.html:373:      <pre><code>export AGENT_MIDDLEWARE_API_KEY=[REDACTED]
+static/dashboard.html:385:  "https://api.thisisatest.tech/v1/me/audit/events"</code></pre>
+site/compare/index.html:118:    <!-- Blocking on purpose: saved accessibility preferences must apply before
+site/compare/index.html:121:    <script src="/a11y-preload.js?v=gateway-18"></script>
+site/compare/index.html:226:                <th scope="row">Duplicate gateway dispatch prevented on retry</th>
+site/compare/index.html:271:          Representative projects in each column:
+site/compare/index.html:401:            reversed it — so a pre-dispatch denial has no debit to point at. It
+site/styles.css:4:   surfaces are reserved for paper artifacts (the pilot ticket and the live
+site/styles.css:27:  --paper: #f6f3e9;
+site/styles.css:28:  --paper-shade: #e8e3d2;
+site/styles.css:29:  --paper-ink: #121629;
+site/styles.css:30:  --paper-dim: #4c526b;
+site/styles.css:32:  --text-dim: #9ca8cb;
+site/styles.css:38:     for paper surfaces (the approval card resolves it as a literal because
+site/styles.css:40:  --danger-on-paper: #b0281a;
+site/styles.css:52:  --paper-line: rgba(18, 22, 41, 0.17);
+site/styles.css:87:  --paper: #ffffff;
+site/styles.css:88:  --paper-shade: #f1f1f1;
+site/styles.css:89:  --paper-ink: #000000;
+site/styles.css:90:  --paper-dim: #26292f;
+site/styles.css:102:  --paper-line: rgba(0, 0, 0, 0.5);
+site/styles.css:126:@media (prefers-reduced-motion: reduce) {
+site/styles.css:224:/* brass fails 3:1 against the paper cards; use a darker ring there */
+site/styles.css:428:   content, its state directed by the sections' data-wave presets and its
+site/styles.css:779:  background: var(--paper);
+site/styles.css:780:  color: var(--paper-ink);
+site/styles.css:787:   accent touches paper — so the offer reads as a ticket, not a note. */
+site/styles.css:806:  background: radial-gradient(circle at 7px -2px, transparent 7px, var(--paper) 8px);
+site/styles.css:813:  color: var(--paper-dim);
+site/styles.css:827:  color: var(--paper-dim);
+site/styles.css:837:  border-bottom: 1px solid var(--paper-line);
+site/styles.css:853:  color: var(--paper-ink);
+site/styles.css:854:  border: 1px solid var(--paper-line);
+site/styles.css:887:  border-bottom: 1px solid var(--paper-line);
+site/styles.css:906:  color: var(--paper-dim);
+site/styles.css:1112:  color: var(--paper-dim);
+site/styles.css:1113:  border-bottom: 1px solid var(--paper-line);
+site/styles.css:1124:  background: var(--paper-shade);
+site/styles.css:1125:  color: var(--paper-ink);
+site/styles.css:1142:  border-bottom: 1px solid var(--paper-line);
+site/styles.css:1146:  color: var(--paper-dim);
+site/styles.css:1665:@media (prefers-reduced-motion: reduce) {
+site/styles.css:1699:.verify-section pre {
+site/styles.css:1712:.verify-section pre:focus-visible {
+site/styles.css:1955:.amw-a11y-switch[aria-pressed="true"] {
+site/styles.css:1986:/* Reduced motion: every pressable travel, in one place ------------------------------------
+site/styles.css:1988:   the OS-level `prefers-reduced-motion` query, and the `data-a11y-motion`
+site/styles.css:1993:@media (prefers-reduced-motion: reduce) {
+site/styles.css:2152:  white-space: pre-wrap;
+site/styles.css:2331:    --paper: #ffffff;
+site/styles.css:2332:    --paper-shade: #dddddd;
+site/styles.css:2333:    --paper-ink: #000000;
+site/styles.css:2334:    --paper-dim: #333333;
+site/styles.css:2335:    /* Danger resolves to its paper value: the dark-ground --danger holds
+site/styles.css:2379:  /* On paper an offset of ink behind a stamp is a smudge, not depth. */
+site/styles.css:2388:  .verify-section pre,

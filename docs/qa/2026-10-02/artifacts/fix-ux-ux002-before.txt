@@ -1,0 +1,30 @@
+✖ UX-002: operator commands expose a named keyboard focus target (76.240458ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 330.261625
+
+✖ failing tests:
+
+test at docs/qa/2026-10-02/ux-contracts.test.cjs:58:1
+✖ UX-002: operator commands expose a named keyboard focus target (76.240458ms)
+  AssertionError [ERR_ASSERTION]: Scrollable commands must join sequential keyboard navigation
+
+  -1 !== 0
+
+      at TestContext.<anonymous> (/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api/docs/qa/2026-10-02/ux-contracts.test.cjs:63:12)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.start (node:internal/test_runner/test:1257:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: -1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

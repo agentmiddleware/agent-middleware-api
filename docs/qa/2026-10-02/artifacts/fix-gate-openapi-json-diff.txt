@@ -1,0 +1,5 @@
+operations with only appended HTTPBearer [REDACTED] alternative: 52
+unexpected changed operations: []
+public health security: None
+security scheme names: ['APIKeyHeader', 'HTTPBearer']
+top-level key changes excluding paths/components: []

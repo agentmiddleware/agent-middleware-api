@@ -1,0 +1,9 @@
+Using Python 3.13.14 environment at: /private/tmp/amw-fix-python
+Resolved 8 packages in 257ms
+Prepared 5 packages in 59ms
+Installed 5 packages in 3ms
+ + build==1.6.1
+ + hatchling==1.32.4
+ + pyproject-hooks==1.3.3
+ + tomlkit==0.15.1
+ + trove-classifiers==2026.9.21.13

@@ -1,0 +1,3 @@
+[qa/2026-10-02-fixes 1a98a30] fix(UX-001): use readable fit text on paper comparison cards
+ 3 files changed, 60 insertions(+), 1 deletion(-)
+ create mode 100644 docs/qa/2026-10-02/ux-contracts.test.cjs

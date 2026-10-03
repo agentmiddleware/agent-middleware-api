@@ -1,0 +1,7 @@
+POST-FIX PASS: test_be100_self_credentialing_scopes_retry_guarantees
+POST-FIX PASS: test_be100_tool_interface_scopes_retry_guarantees
+POST-FIX PASS: test_be100_pitch_scopes_retry_guarantees
+PRE-FIX EXPECTED FAILURE: test_be100_self_credentialing_scopes_retry_guarantees
+PRE-FIX EXPECTED FAILURE: test_be100_tool_interface_scopes_retry_guarantees
+PRE-FIX EXPECTED FAILURE: test_be100_pitch_scopes_retry_guarantees
+READY: 3 post-fix passes, 3 original-doc failures; pytest and commit remain root-owned.
