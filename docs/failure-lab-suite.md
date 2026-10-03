@@ -406,7 +406,7 @@ not own.
 
 ```bash
 make failure-lab-list                        # the suite, with claims and expectations
-make failure-lab                             # fast tier
+make failure-lab-suite                       # fast tier
 make failure-lab-all                         # everything
 make failure-lab-explore SEED=7              # seeded state-machine exploration
 make failure-lab-diagnostic                  # the self-serve diagnostic, on loopback
