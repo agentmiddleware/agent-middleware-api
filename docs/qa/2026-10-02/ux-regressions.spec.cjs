@@ -13,7 +13,6 @@ test.beforeEach(async ({context, page}) => {
 });
 
 test('UX-001: comparison fit text meets minimum contrast', async ({page}) => {
-  test.fail(true, 'UX-001: paper card inherits dark-surface text color (2.13:1).');
   await page.goto('/compare/');
   await page.addScriptTag({content: axe.source});
   const violations = await page.evaluate(async () => {
