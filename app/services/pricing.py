@@ -20,6 +20,7 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from app.core.credits import credit_amount_fits_storage
 from app.schemas.billing import ServiceCategory
 
 
@@ -110,21 +111,6 @@ PROOF_SURFACE_CATEGORIES: frozenset[ServiceCategory] = frozenset(
         ServiceCategory.RTAAS,
     }
 )
-
-
-def credit_amount_fits_storage(amount: Decimal) -> bool:
-    """Whether a non-negative credit amount survives the signed-row round trip.
-
-    Quotes and receipts use Numeric(20, 8). SQLite also converts the bound
-    Decimal through a float and reconstructs eight fractional places, so even
-    some in-scale large values lose precision there. Use the same conservative
-    contract on both supported backends; never silently round a signed amount.
-    """
-    return (
-        amount.is_finite()
-        and Decimal("0") <= amount < Decimal("1000000000000")
-        and Decimal(f"{float(amount):.8f}") == amount
-    )
 
 
 def tool_price(service: dict[str, Any], category: ServiceCategory) -> Decimal:

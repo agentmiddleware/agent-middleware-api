@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.config import get_settings
+from app.core.credits import credit_amount_fits_storage
 from app.core.resilience import (
     WRITE_CONFLICT_MAX_ATTEMPTS,
     run_with_write_conflict_retry,
@@ -337,8 +338,15 @@ class PermitService:
         subject_key_id: str | None = None,
         permit_id: str | None = None,
     ) -> PermitResponse:
-        if request.max_credits <= Decimal("0"):
+        if request.max_credits.is_finite() and request.max_credits <= Decimal("0"):
             raise PermitError("max_credits_must_be_positive")
+        if not credit_amount_fits_storage(request.max_credits):
+            raise PermitError("max_credits_not_storable")
+        if request.aggregate_value_cap is not None and (
+            not credit_amount_fits_storage(request.aggregate_value_cap)
+            or request.aggregate_value_cap == 0
+        ):
+            raise PermitError("aggregate_value_cap_not_storable")
         if (
             request.repeat_window_seconds is not None
             and not get_settings().ENABLE_PERMIT_REPEAT_WINDOW_ISSUANCE
