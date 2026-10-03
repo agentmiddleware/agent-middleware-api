@@ -1,0 +1,131 @@
+diff --git a/ELEVATOR_PITCH.md b/ELEVATOR_PITCH.md
+index 8963010..588d5f4 100644
+--- a/ELEVATOR_PITCH.md
++++ b/ELEVATOR_PITCH.md
+@@ -159,11 +159,17 @@ signed and chained, so tampering is *evident*. (Evident, not impossible — a
+ database administrator who can alter both the data and its chain metadata is
+ inside the trust boundary, and we say so.)
+
+-**"Does exactly-once really hold across the network?"** For one accepted
+-idempotency key at our boundary: one gateway dispatch, one debit, one receipt.
+-A *remote* tool's own side effect is exactly once only if that tool also honors
+-the forwarded key. Anything broader would overstate the distributed-systems
+-guarantee.
++**"What happens when the call is retried?"** For the configured upstream MCP
++tool, identical retries under the same accepted idempotency key allow at most
++one gateway dispatch and at most one debit. This does not guarantee delivery or
++a downstream effect; downstream replay safety also requires the upstream to
++honor the forwarded key. Local governed tools have no dispatch state machine
++and interrupted calls fail closed into manual review.
++
++A call can commit effects or a debit but return `manual_review_required` with
++no receipt if an audit or receipt write fails. Do not retry with a new idempotency key:
++that can execute and charge the call again. Reconcile from the ledger and audit
++chain as described in [failure semantics](docs/failure-semantics.md).
+
+ **"Why not just use an open-source library?"** If your problem is reliability,
+ do. A decorator library gives you idempotency, timeouts, and budget caps for
+@@ -177,8 +183,9 @@ Otherwise the library is the correct answer and we will say so.
+ least one verifies offline without calling its issuer. We do not claim to be
+ alone here. What no project we surveyed *documents* is binding the debit to the
+ idempotency record:
+-one accepted key, one dispatch, one ledger debit, one receipt, in a single
+-persisted chain. (One *debit* — a refunded failure correctly writes a second,
++one accepted key, at most one dispatch and ledger debit, and a receipt when
++finalization succeeds, in a single persisted chain for the configured upstream
++tool. (At most one *debit* — a refunded failure correctly writes a second,
+ compensating ledger entry against that debit.) Several of them enforce budgets
+ and several dedupe replays; whether any binds the two is unresolved, and we say
+ so rather than claiming the cell outright. The signature proves what happened;
+diff --git a/docs/agent-self-credentialing.md b/docs/agent-self-credentialing.md
+index e2addc3..ef28624 100644
+--- a/docs/agent-self-credentialing.md
++++ b/docs/agent-self-credentialing.md
+@@ -89,23 +89,32 @@ Two behaviors worth knowing before you read the output as a bug:
+
+ ## 4. What this proves — and what it does not
+
+-Proven against this code: exactly-once gateway authorization, debit, and
+-receipt finalization under replay, concurrency, conflict, and denial; and
+-that receipts are tamper-evident under the published key.
++Proven by this local harness: identical same-key replay creates no second
++debit or file append, the tested calls finalize receipts under replay,
++concurrency, conflict, and denial, and those receipts are tamper-evident
++under the published key. This does not prove receipt completion under every
++failure.
+
+ Not proven by this harness, and not claimed:
+
+ - **Production behavior.** Same code, different infrastructure (Postgres,
+   Redis, a real upstream MCP server). A local pass is strong evidence about
+   the logic, not a measurement of the production deployment.
+-- **Remote exactly-once.** The gateway guarantees one authorization, one
+-  debit, one finalized receipt. A remote side effect is exactly-once only if
+-  the upstream honors the forwarded idempotency key — the OpenAPI contract
+-  narrows the claim to exactly that, correctly.
+-- **The local tool is simulated.** `partner.notes.write` appends to a local
+-  JSONL file and is labeled `simulation: true` in discovery. Production's
+-  `partner.echo` is a real upstream call. The governance path is identical;
+-  the work at the end of it is not.
++- **Remote effects.** For the configured upstream MCP tool, identical retries
++  under the same accepted idempotency key allow at most one gateway dispatch
++  and at most one debit. This does not guarantee delivery or a downstream
++  effect; downstream replay safety also requires the upstream to honor the
++  forwarded key.
++- **Local and upstream execution differ.** `partner.notes.write` appends to a
++  local JSONL file and is labeled `simulation: true` in discovery.
++  `partner.echo` uses the configured upstream MCP adapter and durable dispatch
++  state machine. Local governed tools have no dispatch state machine and
++  interrupted calls fail closed into manual review.
++- **Receipt completion.** A call can commit effects or a debit but fail to
++  write its audit event or receipt, returning `manual_review_required` with
++  no receipt. Do not retry with a new idempotency key: that can execute and
++  charge the call again. Reconcile from the ledger and audit chain as described
++  in [failure semantics](failure-semantics.md).
+
+ To reproduce the invariants against production, an operator must issue a
+ wallet-scoped key and funded permit out of band. No agent should manufacture
+diff --git a/docs/tool-interface-authority.md b/docs/tool-interface-authority.md
+index 9a7a090..0484c5b 100644
+--- a/docs/tool-interface-authority.md
++++ b/docs/tool-interface-authority.md
+@@ -32,9 +32,19 @@ DENY              constraint violated -> machine-actionable denial
+
+ ### ALLOW
+
+-Unchanged: the server mints a bounded, signed, single-tool, short-lived
+-permit from the caller's wallet and runs the full
+-permit → meter → exactly-once dispatch → signed receipt pipeline.
++The server mints a bounded, signed, single-tool, short-lived permit from the
++caller's wallet, meters the call, and writes a signed receipt when the outcome
++finalizes. For the configured upstream MCP tool, identical retries under the
++same accepted idempotency key allow at most one gateway dispatch and at most
++one debit. This does not guarantee delivery or a downstream effect.
++Local governed tools have no dispatch state machine and interrupted calls fail
++closed into manual review.
++
++The receipt arrows above describe completed paths. Effects or a debit may
++commit before an audit or receipt write fails, returning
++`manual_review_required` with no receipt. Do not retry with a new idempotency key:
++that can execute and charge the call again. Reconcile from the ledger and audit
++chain; see [failure semantics](failure-semantics.md).
+
+ ### REQUIRE_APPROVAL
+
+MEMORY.md:119:# Task Group: Cross-repository backlog coordination and evidence-first release boundaries
+MEMORY.md:120:
+MEMORY.md:121:scope: Route broad backlogs to verified repositories, run isolated local validation, and close with explicit authorization boundaries across agent-middleware-api, RegEngine, Notion, outreach, and operations.
+MEMORY.md:122:applies_to: cwd=/Users/sellers/Documents/Codex/2026-09-27/how-x20; reuse_rule=reuse repository-routing, evidence categorization, and approval gates across multi-repo delivery; branch SHAs, PRs, provider state, and local paths are time-specific.
+MEMORY.md:123:
+MEMORY.md:124:## Task 1: Route and delegate the 33-item backlog to the correct repositories
+MEMORY.md:125:
+MEMORY.md:126:### rollout_summary_files
+MEMORY.md:127:
+MEMORY.md:128:- rollout_summaries/2026-09-28T02-47-54-1DNd-delegated_33_item_backlog_audit_amw_regengine.md (cwd=/Users/sellers/Documents/Codex/2026-09-27/how-x20, rollout_path=/Users/sellers/.codex/sessions/2026/09/27/rollout-2026-09-27T19-47-54-01a0e5e9-6970-75f2-bace-54db160ab20f.jsonl, updated_at=2026-09-28T07:14:10+00:00, thread_id=01a0e5e9-6970-75f2-bace-54db160ab20f, partial; eight disjoint lanes plus integrator)
+MEMORY.md:129:
+MEMORY.md:130:### keywords
+MEMORY.md:131:
+MEMORY.md:132:- 700743, codex-backlog-2026-09-27.md, team-worktree, git remote get-url origin, agent-middleware-api, RegEngine, Dollarloop, test.db, SQLite, one pytest per worktree
+MEMORY.md:133:
+MEMORY.md:134:## Task 2: Harden AMW retry proof and Railway release-source guard locally
+MEMORY.md:135:

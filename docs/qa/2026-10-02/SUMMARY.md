@@ -52,3 +52,5 @@ Files changed are confined to `docs/qa/2026-10-02/` and `tests/test_qa_20261002_
 The orchestrator must review the final diff, perform its secret scan, commit, push this QA branch and open **one draft PR**, then record hosted CI. No PR URL exists in this run because the orchestrator explicitly retained those actions. Local QA does not establish customer validation or deployment success.
 
 The final register is [FINDINGS.md](FINDINGS.md), with methods in [PLAN.md](PLAN.md), execution evidence in [SESSION-LOG.md](SESSION-LOG.md), and measured scope in [COVERAGE.md](COVERAGE.md).
+
+Fix pass: see FIXES.md

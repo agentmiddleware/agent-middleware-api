@@ -1,0 +1,45 @@
+130-# Durable state stays in memory for the suite. State this explicitly: the tests
+131-# always ran on memory state, but only as an accident of auto-resolution
+132-# choosing postgres and asyncpg then failing on the SQLite DSN above. Once a
+133-# SQLite DATABASE_URL resolves to the SQLite backend, "auto" opens a real
+134-# aiosqlite connection whose worker thread is not a daemon, and an unclosed one
+135-# blocks interpreter shutdown. See the teardown in setup_database.
+136-os.environ.setdefault("STATE_BACKEND", "memory")
+137-# Ephemeral SQLite create_all even when a job sets ENVIRONMENT=production
+138:# (production_trust CI). Never applies to Postgres — see allows_metadata_create_all.
+139-os.environ.setdefault("ALLOW_METADATA_CREATE_ALL", "true")
+140-# Match the application default. Proof-marked tests opt in through the fixture
+141-# below, so importing the app in an ordinary test never silently mounts demos.
+142-os.environ.setdefault("ENABLE_PROOF_SURFACES", "false")
+143-# Configure auth so tests don't hit the fail-safe 503 in verify_api_key.
+144-# Tests authenticate with X-API-Key: [REDACTED] (see RateLimitMiddleware, which
+145-# also special-cases this value to bypass rate limiting).
+146-os.environ.setdefault("VALID_API_KEYS", "test-key")
+147:# Production now defaults to strict trust mode (TRUST_MODE_ENABLED=true,
+148:# ALLOW_LEGACY_UNPERMITTED_MCP=false). Many tests predate that flip and
+149-# exercise MCP paths without supplying permits; opt the test suite back into
+150-# legacy/permissive behavior unless an individual test explicitly monkeypatches
+151-# strict mode (see test_mcp_trust_mode.py and test_trust_negative_security.py
+152-# for examples that flip back to strict at the test boundary).
+153:os.environ.setdefault("TRUST_MODE_ENABLED", "false")
+154:os.environ.setdefault("ALLOW_LEGACY_UNPERMITTED_MCP", "true")
+155-# Stop the suite from self-throttling. RateLimitMiddleware exempts only the
+156-# literal "test-key"; unauthenticated requests all share the "anonymous"
+157-# bucket and provisioned agent keys each get their own, so a fast full-suite
+158-# run can cross the 120/min default and return 429 where a test expects
+159-# 401/403 (observed as a flaky `assert 429 == 401` in
+160-# test_tenant_isolation_hardening). Raising the limit for tests removes the
+161-# cross-test coupling without changing production behavior; the one test that
+162-# exercises limiting (test_runtime_degradation) builds its own middleware with
+163-# an explicit per-instance limit and is unaffected.
+164-os.environ.setdefault("RATE_LIMIT_PER_MINUTE", "1000000")
+165-
+166-
+167-def interleaving_factory(real_factory, hook, state, *, fire_on: int = 1):
+168-    """Wrap a session factory so `hook` runs once, mid-transaction.
+169-
+170-    Fires after ``fire_on`` statements have been issued on the wrapped session,
+171-    which places it after the value under test has been read and before it is
+172-    written back.
+173-
+174-    ``fire_on`` counts statements that reach ``Session.execute``. ``session.get``

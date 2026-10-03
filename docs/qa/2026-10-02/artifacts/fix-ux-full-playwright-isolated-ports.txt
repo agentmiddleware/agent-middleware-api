@@ -1,0 +1,1 @@
+Temporary test copies preserve assertions and route guards; only dashboard loopback port changed 8766 -> 18766. Config base/site port 18765. Original tests and baseline artifacts unchanged.
