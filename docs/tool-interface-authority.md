@@ -33,8 +33,17 @@ DENY              constraint violated -> machine-actionable denial
 ### ALLOW
 
 Unchanged: the server mints a bounded, signed, single-tool, short-lived
-permit from the caller's wallet and runs the full
-permit → meter → exactly-once dispatch → signed receipt pipeline.
+permit from the caller's wallet and runs the governed execution path. For
+the configured upstream MCP tool, one accepted idempotency identity permits
+at most one gateway dispatch and at most one debit. Local governed tools
+have no dispatch state machine.
+
+The arrows above describe paths that finalize successfully. They do not
+guarantee a receipt after every effect: a local crash or exhausted receipt/audit
+write after committed effects can leave no receipt and require manual review.
+Upstream ambiguity is receipted as `delivery_uncertain` when finalization or
+reconciliation succeeds. Do not retry an unresolved action with a new key;
+follow [failure-semantics.md](failure-semantics.md) for recovery.
 
 ### REQUIRE_APPROVAL
 
