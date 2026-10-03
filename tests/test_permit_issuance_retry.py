@@ -7,6 +7,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services import idempotency, permits, signing_keys
 from app.core.time import utc_now
 from app.db.database import get_session_factory
 from app.db.models import IdempotencyRecordModel, PermitModel
@@ -20,6 +21,18 @@ from tests.test_action_permits import _action_request
 from tests.test_trust_helpers import BOOTSTRAP_HEADERS, provision_agent_wallet
 
 action_registry = _action_registry
+
+
+@pytest.fixture(autouse=True)
+def isolated_issuance_services(monkeypatch):
+    # Restoring an instance method patch writes its old bound method onto that
+    # instance, shadowing later class patches. Keep these fault-injection
+    # instances local to each test instead of altering shared singletons.
+    monkeypatch.setattr(idempotency, "_service", idempotency.IdempotencyService())
+    monkeypatch.setattr(permits, "_service", permits.PermitService())
+    monkeypatch.setattr(
+        signing_keys, "_signing_key_service", signing_keys.SigningKeyService()
+    )
 
 
 @pytest.fixture(params=["envelope", "action"])
