@@ -80,10 +80,23 @@ def test_openapi_schema_is_valid_with_unique_operation_ids():
         app.openapi_schema = old_schema
 
 
-@pytest.mark.xfail(strict=True, reason="BE-002: Bearer authentication is absent from OpenAPI security schemes")
 def test_openapi_declares_supported_bearer_authentication():
-    schemes = app.openapi()["components"]["securitySchemes"].values()
-    assert any(s.get("type") == "http" and s.get("scheme") == "bearer" for s in schemes)
+    old_schema = app.openapi_schema
+    try:
+        app.openapi_schema = None
+        schema = app.openapi()
+        schemes = schema["components"]["securitySchemes"]
+        bearer = [name for name, definition in schemes.items()
+                  if definition.get("type") == "http" and definition.get("scheme") == "bearer"]
+        assert len(bearer) == 1
+        security = schema["paths"]["/v1/permits"]["get"]["security"]
+        assert {bearer[0]: []} in security
+        assert {"APIKeyHeader": []} in security
+        assert all(len(alternative) == 1 for alternative in security)
+        for path in ("/health", "/.well-known/agent.json"):
+            assert not schema["paths"][path]["get"].get("security")
+    finally:
+        app.openapi_schema = old_schema
 
 
 def test_scalar_unicode_replay_keys_roundtrip_without_normalization():
