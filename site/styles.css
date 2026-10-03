@@ -1803,6 +1803,10 @@ html[data-a11y-motion="reduce"].arcade-open .site-footer {
   line-height: 1.65;
 }
 
+.proof-col:not(.replay) .fit-list li {
+  color: var(--paper-dim);
+}
+
 .faq-list {
   margin-top: 2rem;
   display: grid;
