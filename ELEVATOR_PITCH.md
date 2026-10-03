@@ -45,10 +45,11 @@ show the economic consequence afterward?
 
 Agent Middleware API is a transaction boundary for metered MCP calls. An agent
 uses a wallet-scoped key and an Ed25519-signed permit bound to tool, scope,
-budget, and expiry. The gateway records one accepted request key, returns the
-original result and signed receipt on an identical replay after finalization
-or reconciliation, and rejects changed input under that key. Out-of-scope and
-over-budget calls fail before a debit.
+budget, and expiry. The gateway records one accepted request key and rejects
+changed input under that key. An identical replay returns the stored response
+after finalization. Receipt-only reconciliation can instead return the
+recovered outcome and receipt reference, not the original response.
+Out-of-scope and over-budget calls fail before a debit.
 
 Run the [executable proof](README.md#see-it-in-sixty-seconds) locally,
 then evaluate the supported vendor-managed, single-tenant pilot with one real
@@ -77,11 +78,12 @@ scoped signed permit -> governed MCP invoke -> wallet charge -> signed receipt
 - **Budgets that bind.** Decimal wallet balances with row-locked debits. Final
   permit checks and budget reservation happen while the permit row is locked,
   so competing invokes and revoke-versus-invoke races resolve correctly.
-- **Same-key replay after finalization or reconciliation.** An identical replay
-  returns the original result and receipt with no second gateway dispatch or
-  debit. For the configured upstream MCP tool, one persisted chain links the
-  idempotency record, permit reservation, ledger debit, dispatch attempt,
-  receipt, and audit event.
+- **Same-key replay.** An identical replay returns the stored response after
+  finalization, or the recovered outcome and receipt reference after
+  receipt-only reconciliation. For the configured upstream MCP tool, that
+  replay creates no second gateway dispatch or debit. One persisted chain
+  links the idempotency record, permit reservation, ledger debit, dispatch
+  attempt, receipt, and audit event.
 - **Honest failure accounting.** For the configured upstream MCP tool,
   confirmed pre-dispatch failures and upstream-returned errors are refunded
   and receipted when finalization or reconciliation succeeds. Genuinely
@@ -168,7 +170,7 @@ tool, identical retries under the same accepted idempotency key allow at most
 one gateway dispatch and at most one debit. This does not guarantee delivery or
 a downstream effect; downstream replay safety also requires the upstream to
 honor the forwarded key. Local governed tools have no dispatch state machine
-and interrupted calls fail closed into manual review.
+and interrupted calls without a receipt fail closed into manual review.
 
 A call can commit effects or a debit but return `manual_review_required` with
 no receipt if an audit or receipt write fails. Do not retry with a new
