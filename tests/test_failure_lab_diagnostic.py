@@ -22,6 +22,7 @@ design: see :data:`_TWO_RUNS_DRIVER`.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import sys
@@ -29,6 +30,7 @@ from pathlib import Path
 
 import pytest
 from starlette.testclient import TestClient
+from starlette.requests import Request
 
 from failure_lab.configurations import CONFIGURATION_LABELS, Configuration
 from failure_lab.diagnostic import (
@@ -499,7 +501,7 @@ def test_a_credential_shaped_submission_is_refused_before_it_is_parsed(body):
     assert "credential" in response.json()["reason"]
 
 
-def test_an_oversized_submission_is_refused_without_being_read():
+def test_an_oversized_submission_is_refused():
     from failure_lab.diagnostic.server import MAX_REQUEST_BYTES
 
     with _client() as client:
@@ -509,6 +511,83 @@ def test_an_oversized_submission_is_refused_without_being_read():
             headers={"content-type": "application/json"},
         )
     assert response.status_code == 413
+
+
+@pytest.mark.parametrize("declared_length", [None, b"1"])
+@pytest.mark.parametrize("first_chunk_overflows", [False, True])
+def test_body_reader_stops_at_first_oversized_chunk(
+    declared_length, first_chunk_overflows
+):
+    from failure_lab.diagnostic.server import (
+        MAX_REQUEST_BYTES,
+        SubmissionRefused,
+        _read_json,
+    )
+
+    reads = []
+
+    async def receive():
+        reads.append(1)
+        return {
+            "type": "http.request",
+            "body": b"x" * (MAX_REQUEST_BYTES + int(first_chunk_overflows)),
+            "more_body": len(reads) < 4,
+        }
+
+    headers = [] if declared_length is None else [(b"content-length", declared_length)]
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/diagnostic/run",
+            "headers": headers,
+        },
+        receive,
+    )
+    with pytest.raises(SubmissionRefused) as exc:
+        asyncio.run(_read_json(request))
+    assert exc.value.status_code == 413
+    assert len(reads) == (1 if first_chunk_overflows else 2)
+
+
+@pytest.mark.parametrize("body", [b"", b"{}", b'{"ok": true}', None])
+def test_body_reader_accepts_bounded_and_exact_limit_json(body):
+    from failure_lab.diagnostic.server import MAX_REQUEST_BYTES, _read_json
+
+    if body is None:
+        body = b"{}" + b" " * (MAX_REQUEST_BYTES - 2)
+    chunks = iter([body[:1], body[1:]])
+    reads = []
+
+    async def receive():
+        reads.append(1)
+        return {
+            "type": "http.request",
+            "body": next(chunks),
+            "more_body": len(reads) < 2,
+        }
+
+    request = Request(
+        {"type": "http", "method": "POST", "path": "/diagnostic/run", "headers": []},
+        receive,
+    )
+    assert asyncio.run(_read_json(request)) == (json.loads(body) if body else {})
+
+
+@pytest.mark.parametrize("body", [b"not JSON", b"[]", b"null"])
+def test_body_reader_preserves_bounded_json_refusals(body):
+    from failure_lab.diagnostic.server import SubmissionRefused, _read_json
+
+    async def receive():
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    request = Request(
+        {"type": "http", "method": "POST", "path": "/diagnostic/run", "headers": []},
+        receive,
+    )
+    with pytest.raises(SubmissionRefused) as exc:
+        asyncio.run(_read_json(request))
+    assert exc.value.status_code == 400
 
 
 def test_a_scenario_outside_the_allowlist_is_refused():
