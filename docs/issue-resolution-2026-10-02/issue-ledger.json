@@ -1,0 +1,3677 @@
+{
+  "schema_version": 1,
+  "snapshot_date_local": "2026-10-02",
+  "repository": "https://github.com/PetrefiedThunder/agent-middleware-api",
+  "upstream_sha": "d45754e5c1fe743158b08494dfef6c87d48b8bec",
+  "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+  "open_issue_count": 87,
+  "finding_count": 82,
+  "charter_issue_numbers": [
+    553,
+    554,
+    555,
+    556
+  ],
+  "parent_issue_number": 499,
+  "local_remedies": {
+    "fixed": 79,
+    "retired_with_explicit_refusal": 3
+  },
+  "existing_report_pr": {
+    "number": 586,
+    "url": "https://github.com/PetrefiedThunder/agent-middleware-api/pull/586",
+    "head": "359d56393ee950dc4d826164e223f17b28ec8587",
+    "role": "Separate QA evidence report, not a fixing PR"
+  },
+  "fixing_pr_url": null,
+  "fixing_pr_status": "Not created; publication requires explicit user approval under supplied team instructions",
+  "ancestry_checks": {
+    "d978982c615d84a5c597c350c47f3d823eadeef0": true,
+    "0620f6f45ea5c272f6c5819d4d86527c16e1ee0d": true,
+    "ee54ae16e635e6a4c66dc73f57db1a5539514619": true,
+    "0e2d2f1c92909fb3db9eee6e8f275d960ed6936d": true,
+    "ea73b3c76491aa6e64dc3aaa9e29f0fe770fb792": true,
+    "1cd4d0c31ed2873f370b65f20d6a52fc3af30e6d": true,
+    "6387945279ac7254c672ff7010975f0de57f5cbd": true,
+    "ef64d0291cbf50c8f00fbf5d2e4be22d2c781916": true,
+    "edfd71a8088cc1aabaa42ba88a1fba94e46a3eec": true,
+    "d446f0b554307040654526f318699873d1b2e305": true,
+    "2cc557d69172df14d369167899fb81e50adcdda7": true,
+    "d9275789138a1f22e3adb9c62a1e6868f3dce650": true,
+    "9d8c962301a35705c184534979ec7f8c06da9af0": true,
+    "0e4b1411d494722fb4f592d13eb3764503c7fbce": true,
+    "59d24e24df94bd0a59ea641c8164e59308343e3e": true,
+    "61cb0ca630993f11bb0818a87bad07a8020ab21c": true,
+    "043705c822b22afa685fdde713e48d9d09a94816": true,
+    "dd25465b2c19342c2ba983b576cdb9e1303ce181": true,
+    "24b955dfb20f343f3d67c6de056aae6fc3a740d3": true,
+    "93b3ee722f7c6025accf7ab76bd9e8b98d07ad9f": true,
+    "56e6cecf1ef6c5c0ef58924b16dfcf31dcf9258a": true,
+    "aa96e51596490bb0f960cd94bcc88fef28488d8c": true,
+    "037e590086c2b1807979dba759a89991f786d20b": true,
+    "2efbc36cd12b57cd17a2035c60af37897e02b023": true,
+    "902893fdf20d08797b9876c549e38aa404bb1839": true,
+    "ad6330cb1d3869bb12a073a9019b37e2b7c527c4": true,
+    "da8ffd3a684c5ec320cca917ace355267efb2f08": true,
+    "4aa33e9b461dc5fa90c065be6c0bf5617e4111cd": true,
+    "2009fdf1c2b7369e57f3df0284d878dddb8bf2db": true,
+    "03372935385202c277d31956c618eb7d753e719d": true,
+    "98cd3eed11908a44cce77b3c6c4c481a23e20811": true,
+    "322be7f522dca93c4cddba00b6427abf36ba2765": true,
+    "ad108fb0b88fc9e2627ce1089224741d209f6461": true,
+    "88828e8f4b963305a0233ab5f5aea237f5e6070c": true,
+    "f20abec84ee618b55af15506a486144f2d017a2d": true,
+    "19fe8c2ff2d0ff2fa498556fb348ea9f4ac8cdfe": true,
+    "cb8d2f816badf7f504c6cb51153f91cf94ab15ed": true,
+    "9b26b35b17aaa1196892dd31604cc14f500e0508": true,
+    "527f3b7fc2e69042fa642266f871a28786efa65f": true,
+    "8d3ed08b053ca9c9a9e09972f39db3f0f9d358b7": true,
+    "f6e9f51947ca18587ec399493f5569f2d48b1db1": true,
+    "636f8cf3d37fef6a007f3d7c4e4bdefbfdeccc87": true,
+    "c3385e9c87bd65d841015ce6602eb382383877bd": true,
+    "e4a046bc65c833c9765315355be0c4c1fd99e08b": true,
+    "1f47952b302eaa89256af41ff4f358b2b7eda87f": true,
+    "02622db97980975d26377235c1ce4d606a0c0774": true,
+    "0bf6151eb94bbb35562e3d2f856fa16bc259b153": true,
+    "8e5e684d3d2fcae9a53330b45be4e467e80fba64": true,
+    "740098d11c30e04f3f6fb534ed627e8865f6e44a": true,
+    "817ccd52e3efde57b8be3ebdbf171e674663ec30": true,
+    "028e36e8cf66a0b80ce0d232b724e3df483db92e": true,
+    "3e6d52e404f724d62a3b8d52e5a9ee3172afa2d0": true,
+    "dd834f0c80d8d77cf5ac62165801657fd3f1ae93": true,
+    "ed6b396d0290de8904b9ac6db6e90626ad0ad1aa": true,
+    "7cb38a46581ae6f172f8e21e349c87b5afa83699": true,
+    "9edad00dfcde0a1daa79b2da47faadd9221f46f5": true,
+    "cd9440c62d8a2e7540e161e7522fcec6e72b8c43": true,
+    "4a4fc75089e323d2d413874cce4108558d2a7ba2": true,
+    "13c709711f06ee28ca848c75212d2ff3503ab6ed": true,
+    "ee32061580c6ac70b7a0e78cb9f8f95550b4925c": true,
+    "2c6f4291a042bbf88ffbe9cb891c61aa516ae68c": true,
+    "f27c213cd2e48c2fd1c9927a8fea85d4af5479ee": true,
+    "34040b3ad1e574445ad1ead70622967b58e3240a": true
+  },
+  "missing_evidence_paths": [],
+  "findings": [
+    {
+      "id": "ACCT-001",
+      "title": "Accepted sub-credit tool prices produce unverifiable quotes and receipts",
+      "severity": "P2",
+      "domain": "accounting_data",
+      "repair_domain": "accounting_data",
+      "status": "local_fixed",
+      "behavior_correction": "Reject unsupported precision before signing/pricing and preserve exact stored credit amounts.",
+      "fix_commits": [
+        "d978982c615d84a5c597c350c47f3d823eadeef0",
+        "0620f6f45ea5c272f6c5819d4d86527c16e1ee0d"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/accounting_data/ACCT-001.md",
+        "evidence/qa-20261002/reviews/accounting_data/test_precision_review.py",
+        "evidence/qa-20261002/reviews/accounting_data/precision-red-v2.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/accounting_data/resume-remediation-manifest.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/accounting_data/accounting-fast-suite-final.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/security_runtime/independent-fix-review.md",
+        "evidence/qa-20261002/reviews/independent_review/audit-report.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/accounting_data/resume-remediation-manifest.json"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/502",
+        "issue_number": 502
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "accounting.md"
+    },
+    {
+      "id": "ACCT-002",
+      "title": "New client request keys can reuse one human approval to mint additional permits",
+      "severity": "P1",
+      "domain": "accounting_data",
+      "repair_domain": "accounting_data",
+      "status": "local_fixed",
+      "behavior_correction": "Bind the provider approval identity to the logical local request; a new client key cannot reuse one approval to mint another permit.",
+      "fix_commits": [
+        "ee54ae16e635e6a4c66dc73f57db1a5539514619"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/accounting_data/ACCT-002.md",
+        "evidence/qa-20261002/reviews/accounting_data/test_permit_request_review.py",
+        "evidence/qa-20261002/reviews/accounting_data/permit-request-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/accounting_data/resume-remediation-manifest.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/accounting_data/accounting-fast-suite-final.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/security_runtime/independent-fix-review.md",
+        "evidence/qa-20261002/reviews/independent_review/audit-report.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/accounting_data/resume-remediation-manifest.json"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/500",
+        "issue_number": 500
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "accounting.md"
+    },
+    {
+      "id": "ACCT-003",
+      "title": "Permit-request approval can cross its local deadline while polling and still mint",
+      "severity": "P2",
+      "domain": "accounting_data",
+      "repair_domain": "accounting_data",
+      "status": "local_fixed",
+      "behavior_correction": "Recheck approval expiry through polling and transaction contention; roll back mint claims crossing the deadline.",
+      "fix_commits": [
+        "ee54ae16e635e6a4c66dc73f57db1a5539514619",
+        "0e2d2f1c92909fb3db9eee6e8f275d960ed6936d"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/accounting_data/ACCT-003.md",
+        "evidence/qa-20261002/reviews/accounting_data/test_permit_request_review.py",
+        "evidence/qa-20261002/reviews/accounting_data/permit-request-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/accounting_data/resume-remediation-manifest.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/accounting_data/accounting-fast-suite-final.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/security_runtime/independent-fix-review.md",
+        "evidence/qa-20261002/reviews/independent_review/audit-report.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/accounting_data/resume-remediation-manifest.json"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/501",
+        "issue_number": 501
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "accounting.md"
+    },
+    {
+      "id": "ACCT-004",
+      "title": "Startup schema verification misses every required single-action column",
+      "severity": "P2",
+      "domain": "accounting_data",
+      "repair_domain": "accounting_data",
+      "status": "local_fixed",
+      "behavior_correction": "Startup validates all required action-binding columns rather than only table presence.",
+      "fix_commits": [
+        "ea73b3c76491aa6e64dc3aaa9e29f0fe770fb792"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/accounting_data/ACCT-004.md",
+        "evidence/qa-20261002/reviews/accounting_data/test_schema_guard_review.py",
+        "evidence/qa-20261002/reviews/accounting_data/schema-guard-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/accounting_data/resume-remediation-manifest.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/accounting_data/accounting-fast-suite-final.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/security_runtime/independent-fix-review.md",
+        "evidence/qa-20261002/reviews/independent_review/audit-report.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/accounting_data/resume-remediation-manifest.json"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/520",
+        "issue_number": 520
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "accounting.md"
+    },
+    {
+      "id": "ACCT-005",
+      "title": "Concurrent Stripe top-ups lose settled credits on SQLite",
+      "severity": "P2",
+      "domain": "accounting_data",
+      "repair_domain": "accounting_data",
+      "status": "local_fixed",
+      "behavior_correction": "Apply settled Stripe top-up credits atomically so concurrent SQLite updates do not lose credits.",
+      "fix_commits": [
+        "1cd4d0c31ed2873f370b65f20d6a52fc3af30e6d"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/accounting_data/ACCT-005.md",
+        "evidence/qa-20261002/reviews/accounting_data/test_stripe_race_review.py",
+        "evidence/qa-20261002/reviews/accounting_data/stripe-races-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/accounting_data/resume-remediation-manifest.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/accounting_data/accounting-fast-suite-final.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/audit-report.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/accounting_data/resume-remediation-manifest.json"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/521",
+        "issue_number": 521
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "accounting.md"
+    },
+    {
+      "id": "ACCT-006",
+      "title": "Concurrent Stripe cumulative refunds double-claw back on SQLite",
+      "severity": "P2",
+      "domain": "accounting_data",
+      "repair_domain": "accounting_data",
+      "status": "local_fixed",
+      "behavior_correction": "Serialize cumulative Stripe refund deltas and apply each newly observed amount once.",
+      "fix_commits": [
+        "1cd4d0c31ed2873f370b65f20d6a52fc3af30e6d"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/accounting_data/ACCT-006.md",
+        "evidence/qa-20261002/reviews/accounting_data/test_stripe_race_review.py",
+        "evidence/qa-20261002/reviews/accounting_data/stripe-races-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/accounting_data/resume-remediation-manifest.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/accounting_data/accounting-fast-suite-final.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/audit-report.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/accounting_data/resume-remediation-manifest.json"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/522",
+        "issue_number": 522
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "accounting.md"
+    },
+    {
+      "id": "ACCT-007",
+      "title": "PostgreSQL migration 038 cannot recover after concurrent-index interruption",
+      "severity": "P2",
+      "domain": "accounting_data",
+      "repair_domain": "accounting_data",
+      "status": "local_fixed",
+      "behavior_correction": "Recover interrupted PostgreSQL concurrent-index construction safely on migration 038 retry.",
+      "fix_commits": [
+        "6387945279ac7254c672ff7010975f0de57f5cbd"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/accounting_data/ACCT-007.md",
+        "evidence/qa-20261002/reviews/accounting_data/prove_migration038_retry.py",
+        "evidence/qa-20261002/reviews/accounting_data/migration038-retry-red-escalated.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/accounting_data/resume-remediation-manifest.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/accounting_data/accounting-fast-suite-final.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/audit-report.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/accounting_data/resume-remediation-manifest.json"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/523",
+        "issue_number": 523
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "accounting.md"
+    },
+    {
+      "id": "ACCT-008",
+      "title": "Zero-price tools receive signed quotes but cannot execute",
+      "severity": "P2",
+      "domain": "accounting_data",
+      "repair_domain": "accounting_data",
+      "status": "local_fixed",
+      "behavior_correction": "Refuse unsupported zero-price governed quotes before issuing an unusable signed quote.",
+      "fix_commits": [
+        "ef64d0291cbf50c8f00fbf5d2e4be22d2c781916"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/accounting_data/ACCT-008.md",
+        "evidence/qa-20261002/reviews/accounting_data/test_zero_price_review.py",
+        "evidence/qa-20261002/reviews/accounting_data/zero-price-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/accounting_data/resume-remediation-manifest.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/accounting_data/accounting-fast-suite-final.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/audit-report.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/accounting_data/resume-remediation-manifest.json"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/539",
+        "issue_number": 539
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "accounting.md"
+    },
+    {
+      "id": "ACCT-009",
+      "title": "Terminal billing-policy denial leaves its idempotency key in progress",
+      "severity": "P2",
+      "domain": "accounting_data",
+      "repair_domain": "accounting_data",
+      "status": "local_fixed",
+      "behavior_correction": "Complete/release keyed terminal billing denial correctly instead of leaving the key in progress.",
+      "fix_commits": [
+        "edfd71a8088cc1aabaa42ba88a1fba94e46a3eec"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/accounting_data/ACCT-009.md",
+        "evidence/qa-20261002/reviews/accounting_data/test_billing_boundary_review.py",
+        "evidence/qa-20261002/reviews/accounting_data/billing-boundaries-red-v2.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/accounting_data/resume-remediation-manifest.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/accounting_data/accounting-fast-suite-final.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/audit-report.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/accounting_data/resume-remediation-manifest.json"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/541",
+        "issue_number": 541
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "accounting.md"
+    },
+    {
+      "id": "ACCT-010",
+      "title": "Keyed billing charge for unknown wallet returns500 instead of404",
+      "severity": "P2",
+      "domain": "accounting_data",
+      "repair_domain": "accounting_data",
+      "status": "local_fixed",
+      "behavior_correction": "Preserve the unknown-wallet 404 at the keyed billing boundary instead of converting it to 500.",
+      "fix_commits": [
+        "edfd71a8088cc1aabaa42ba88a1fba94e46a3eec"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/accounting_data/ACCT-010.md",
+        "evidence/qa-20261002/reviews/accounting_data/test_billing_boundary_review.py",
+        "evidence/qa-20261002/reviews/accounting_data/billing-boundaries-red-v2.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/accounting_data/resume-remediation-manifest.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/accounting_data/accounting-fast-suite-final.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/audit-report.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/accounting_data/resume-remediation-manifest.json"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/542",
+        "issue_number": 542
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "accounting.md"
+    },
+    {
+      "id": "ACCT-011",
+      "title": "Ledger period exact totals are calculated from binary floats",
+      "severity": "P3",
+      "domain": "accounting_data",
+      "repair_domain": "accounting_data",
+      "status": "local_fixed",
+      "behavior_correction": "Calculate exact ledger period totals with decimal arithmetic rather than binary floats.",
+      "fix_commits": [
+        "edfd71a8088cc1aabaa42ba88a1fba94e46a3eec"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/accounting_data/ACCT-011.md",
+        "evidence/qa-20261002/reviews/accounting_data/test_billing_boundary_review.py",
+        "evidence/qa-20261002/reviews/accounting_data/billing-boundaries-red-v2.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/accounting_data/resume-remediation-manifest.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/accounting_data/accounting-fast-suite-final.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/audit-report.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/accounting_data/resume-remediation-manifest.json"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/543",
+        "issue_number": 543
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "accounting.md"
+    },
+    {
+      "id": "ACCT-012",
+      "title": "Wallet-scoped credentials can read global profitability and other tenants' ledger details",
+      "severity": "P2",
+      "domain": "accounting_data",
+      "repair_domain": "accounting_data",
+      "status": "local_fixed",
+      "behavior_correction": "Require administrator authority for global profitability and cross-tenant ledger detail.",
+      "fix_commits": [
+        "d446f0b554307040654526f318699873d1b2e305"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/accounting_data/ACCT-012.md",
+        "evidence/qa-20261002/reviews/accounting_data/test_arbitrage_review.py",
+        "evidence/qa-20261002/reviews/accounting_data/arbitrage-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/accounting_data/resume-remediation-manifest.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/accounting_data/resume-arbitrage-green-v2.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/audit-report.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/accounting_data/resume-remediation-manifest.json"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/557",
+        "issue_number": 557
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "accounting.md"
+    },
+    {
+      "id": "ACCT-013",
+      "title": "Profitability report labels all-history totals as a one-day period",
+      "severity": "P3",
+      "domain": "accounting_data",
+      "repair_domain": "accounting_data",
+      "status": "local_fixed",
+      "behavior_correction": "Restrict profitability rows and totals to the stated report interval.",
+      "fix_commits": [
+        "d446f0b554307040654526f318699873d1b2e305"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/accounting_data/ACCT-013.md",
+        "evidence/qa-20261002/reviews/accounting_data/test_arbitrage_review.py",
+        "evidence/qa-20261002/reviews/accounting_data/arbitrage-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/accounting_data/resume-remediation-manifest.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/accounting_data/resume-arbitrage-green-v2.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/audit-report.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/accounting_data/resume-remediation-manifest.json"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/558",
+        "issue_number": 558
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "accounting.md"
+    },
+    {
+      "id": "ACCT-014",
+      "title": "Receiptless x402 crash recovery consumes permit budget twice",
+      "severity": "P2",
+      "domain": "accounting_data",
+      "repair_domain": "accounting_data",
+      "status": "local_fixed",
+      "behavior_correction": "Retain ambiguous receiptless x402 owners and reservations for review; recovery cannot consume authority twice.",
+      "fix_commits": [
+        "2cc557d69172df14d369167899fb81e50adcdda7"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/accounting_data/ACCT-014.md",
+        "evidence/qa-20261002/reviews/accounting_data/test_x402_crash_review.py",
+        "evidence/qa-20261002/reviews/accounting_data/x402-crash-red-v4.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/accounting_data/resume-remediation-manifest.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/accounting_data/resume-x402-green.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/final-review.md",
+        "evidence/qa-20261002/reviews/independent_review/audit-report.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/accounting_data/resume-remediation-manifest.json"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/559",
+        "issue_number": 559
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "accounting.md"
+    },
+    {
+      "id": "ACCT-015",
+      "title": "Failed x402 compensation releases the accepted request owner",
+      "severity": "P2",
+      "domain": "accounting_data",
+      "repair_domain": "accounting_data",
+      "status": "local_fixed",
+      "behavior_correction": "Retain x402 request ownership when settlement compensation is uncertain or incomplete; do not release authority for another retry.",
+      "fix_commits": [
+        "d9275789138a1f22e3adb9c62a1e6868f3dce650",
+        "9d8c962301a35705c184534979ec7f8c06da9af0"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/independent_review/findings.json",
+        "evidence/qa-20261002/reviews/independent_review/x402-compensation-red-targeted.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/independent_review/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/accounting_data/resume-compensation-stable.log",
+        "evidence/qa-20261002/reviews/independent_review/x402-compensation-green-34040b3-targeted.log",
+        "evidence/qa-20261002/reviews/independent_review/x402-independent-controls-34040b3-targeted.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/final-review.md",
+        "evidence/qa-20261002/reviews/independent_review/x402-compensation-green-34040b3-targeted.json"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/accounting_data/resume-remediation-manifest.json"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/585",
+        "issue_number": 585
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "local_finding_id": "INDEP-001",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "accounting.md"
+    },
+    {
+      "id": "AE-001",
+      "title": "Release exact issuance ownership after a proven pre-persistence rejection",
+      "severity": "P3",
+      "domain": "action_execution",
+      "repair_domain": "action_execution",
+      "status": "local_fixed",
+      "behavior_correction": "Release only the exact issuance owner after an explicit proven pre-signing/pre-persistence rejection; retain ambiguous post-mint ownership.",
+      "fix_commits": [
+        "0e4b1411d494722fb4f592d13eb3764503c7fbce"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/action_execution/probes/test_issuance_retry.py",
+        "evidence/qa-20261002/reviews/action_execution/run_probe.py",
+        "evidence/qa-20261002/reviews/action_execution/issuance-retry-red-run.log",
+        "evidence/qa-20261002/reviews/action_execution/issuance-retry-red-run-result.json"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/action_execution/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/action_execution/ae001-focused-green.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/final-review.md",
+        "evidence/qa-20261002/reviews/security_runtime/independent-fix-review.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/action_execution/remediation-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/512",
+        "issue_number": 512
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "security-actions-integrations.md"
+    },
+    {
+      "id": "AE-002",
+      "title": "Reuse the preparation transaction for action signature verification",
+      "severity": "P2",
+      "domain": "action_execution",
+      "repair_domain": "action_execution",
+      "status": "local_fixed",
+      "behavior_correction": "Reuse the action preparation transaction for signature verification rather than acquiring a second pooled connection.",
+      "fix_commits": [
+        "59d24e24df94bd0a59ea641c8164e59308343e3e"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/action_execution/probes/test_action_pool.py",
+        "evidence/qa-20261002/reviews/action_execution/action-pool-red.log",
+        "evidence/qa-20261002/reviews/action_execution/action-pool-red-result.json"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/action_execution/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/action_execution/ae002-focused.log",
+        "evidence/qa-20261002/reviews/action_execution/ae002-postgres-test.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/security_runtime/independent-fix-review.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/action_execution/remediation-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/519",
+        "issue_number": 519
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "security-actions-integrations.md"
+    },
+    {
+      "id": "AE-003",
+      "title": "Retry local call-counter contention instead of caching false budget denial",
+      "severity": "P2",
+      "domain": "action_execution",
+      "repair_domain": "action_execution",
+      "status": "local_fixed",
+      "behavior_correction": "Distinguish optimistic local permit counter contention from genuine authority/budget denial and retry before debit/effect.",
+      "fix_commits": [
+        "61cb0ca630993f11bb0818a87bad07a8020ab21c"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/action_execution/probes/test_local_call_counter_race.py",
+        "evidence/qa-20261002/reviews/action_execution/local-counter-race.log",
+        "evidence/qa-20261002/reviews/action_execution/local-counter-race-result.json",
+        "evidence/qa-20261002/reviews/action_execution/local-counter-http-race.log",
+        "evidence/qa-20261002/reviews/action_execution/local-counter-http-race-result.json"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/action_execution/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/action_execution/ae003-focused-green.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/security_runtime/independent-fix-review.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/action_execution/remediation-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/540",
+        "issue_number": 540
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "security-actions-integrations.md"
+    },
+    {
+      "id": "INFRA-001",
+      "title": "Failure Lab negative-control CI promotes judge crashes to success",
+      "severity": "P2",
+      "domain": "infrastructure_proofs",
+      "repair_domain": "infrastructure_proofs",
+      "status": "local_fixed",
+      "behavior_correction": "Require valid completed observed-duplicate evidence for the CI negative control; a judge crash cannot count as success.",
+      "fix_commits": [
+        "043705c822b22afa685fdde713e48d9d09a94816"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/INFRA-001.md",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/test_proof_boundaries.py",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/proof-boundaries-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/infrastructure_proofs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/infra-third-slice-stable.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/security_runtime/independent-infrastructure-fix-review.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/repair-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/533",
+        "issue_number": 533
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "infrastructure.md"
+    },
+    {
+      "id": "INFRA-002",
+      "title": "Downloaded Failure Lab ZIP omits keys needed by its offline verifier",
+      "severity": "P2",
+      "domain": "infrastructure_proofs",
+      "repair_domain": "infrastructure_proofs",
+      "status": "local_fixed",
+      "behavior_correction": "Include receipt public keys in integrity-covered offline archives so extracted bundles can be signature-checked.",
+      "fix_commits": [
+        "dd25465b2c19342c2ba983b576cdb9e1303ce181"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/INFRA-002.md",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/test_proof_boundaries.py",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/proof-boundaries-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/infrastructure_proofs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/infra-third-slice-stable.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/security_runtime/independent-infrastructure-fix-review.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/repair-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/534",
+        "issue_number": 534
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "infrastructure.md"
+    },
+    {
+      "id": "INFRA-003",
+      "title": "Live release preflight certifies missing posture fields as safe",
+      "severity": "P2",
+      "domain": "infrastructure_proofs",
+      "repair_domain": "infrastructure_proofs",
+      "status": "local_fixed",
+      "behavior_correction": "Require explicit safe public posture fields; missing/malformed nested evidence fails live preflight.",
+      "fix_commits": [
+        "24b955dfb20f343f3d67c6de056aae6fc3a740d3"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/INFRA-003.md",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/test_preflight_boundaries.py",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/preflight-boundaries-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/infrastructure_proofs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/infra-third-slice-stable.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/security_runtime/independent-infrastructure-fix-review.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/repair-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/535",
+        "issue_number": 535
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "infrastructure.md"
+    },
+    {
+      "id": "INFRA-004",
+      "title": "Database-only preflight silently drops explicit release identity expectations",
+      "severity": "P2",
+      "domain": "infrastructure_proofs",
+      "repair_domain": "infrastructure_proofs",
+      "status": "local_fixed",
+      "behavior_correction": "Refuse DB-only selections that would silently discard requested live release-identity expectations.",
+      "fix_commits": [
+        "93b3ee722f7c6025accf7ab76bd9e8b98d07ad9f"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/INFRA-004.md",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/test_preflight_boundaries.py",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/preflight-boundaries-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/infrastructure_proofs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/infra-third-slice-stable.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/security_runtime/independent-infrastructure-fix-review.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/repair-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/536",
+        "issue_number": 536
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "infrastructure.md"
+    },
+    {
+      "id": "INFRA-005",
+      "title": "Development Compose hot reload command is ignored by the entrypoint",
+      "severity": "P3",
+      "domain": "infrastructure_proofs",
+      "repair_domain": "infrastructure_proofs",
+      "status": "local_fixed",
+      "behavior_correction": "Honor explicit container command overrides after the migration gate.",
+      "fix_commits": [
+        "56e6cecf1ef6c5c0ef58924b16dfcf31dcf9258a"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/INFRA-005.md",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/test_compose_entrypoint.py",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/compose-entrypoint-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/infrastructure_proofs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/infra-third-slice-stable.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/security_runtime/independent-infrastructure-fix-review.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/repair-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/537",
+        "issue_number": 537
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "infrastructure.md"
+    },
+    {
+      "id": "INFRA-006",
+      "title": "Make crash-proof wrapper migrates before isolation checks",
+      "severity": "P2",
+      "domain": "infrastructure_proofs",
+      "repair_domain": "infrastructure_proofs",
+      "status": "local_fixed",
+      "behavior_correction": "Run crash-proof isolation guards before any database operation; Make no longer migrates first.",
+      "fix_commits": [
+        "aa96e51596490bb0f960cd94bcc88fef28488d8c"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/INFRA-006.md",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/test_operator_boundaries.py",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/operator-boundaries-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/infrastructure_proofs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/infra-third-slice-stable.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/security_runtime/independent-infrastructure-fix-review.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/repair-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/547",
+        "issue_number": 547
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "infrastructure.md"
+    },
+    {
+      "id": "INFRA-007",
+      "title": "Rotation verification transmits bootstrap keys over remote HTTP",
+      "severity": "P2",
+      "domain": "infrastructure_proofs",
+      "repair_domain": "infrastructure_proofs",
+      "status": "local_fixed",
+      "behavior_correction": "Validate rotation-verifier origins before sending keys and refuse redirects/remote plaintext HTTP.",
+      "fix_commits": [
+        "037e590086c2b1807979dba759a89991f786d20b"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/INFRA-007.md",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/test_operator_boundaries.py",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/operator-boundaries-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/infrastructure_proofs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/infra-third-slice-stable.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/security_runtime/independent-infrastructure-fix-review.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/repair-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/548",
+        "issue_number": 548
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "infrastructure.md"
+    },
+    {
+      "id": "INFRA-008",
+      "title": "Partner bootstrap ignores successful --key-only output mode",
+      "severity": "P2",
+      "domain": "infrastructure_proofs",
+      "repair_domain": "infrastructure_proofs",
+      "status": "local_fixed",
+      "behavior_correction": "Emit only the minted key plus newline for successful --key-only bootstrap output.",
+      "fix_commits": [
+        "2efbc36cd12b57cd17a2035c60af37897e02b023"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/INFRA-008.md",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/test_bootstrap_load_boundaries.py",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/bootstrap-load-boundaries-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/infrastructure_proofs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/infra-third-slice-stable.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/security_runtime/independent-infrastructure-fix-review.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/repair-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/549",
+        "issue_number": 549
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "infrastructure.md"
+    },
+    {
+      "id": "INFRA-009",
+      "title": "Load battery stops a container it did not create",
+      "severity": "P2",
+      "domain": "infrastructure_proofs",
+      "repair_domain": "infrastructure_proofs",
+      "status": "local_fixed",
+      "behavior_correction": "Stop only containers created by the load script itself, including failed-readiness cleanup.",
+      "fix_commits": [
+        "902893fdf20d08797b9876c549e38aa404bb1839"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/INFRA-009.md",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/test_bootstrap_load_boundaries.py",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/bootstrap-load-boundaries-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/infrastructure_proofs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/infra-third-slice-stable.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/security_runtime/independent-infrastructure-fix-review.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/repair-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/550",
+        "issue_number": 550
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "infrastructure.md"
+    },
+    {
+      "id": "INFRA-010",
+      "title": "Load battery labels an all-error run PASS and exits zero",
+      "severity": "P2",
+      "domain": "infrastructure_proofs",
+      "repair_domain": "infrastructure_proofs",
+      "status": "local_fixed",
+      "behavior_correction": "Require complete successful workload and no error/denial/accounting anomaly for load PASS and zero exit.",
+      "fix_commits": [
+        "ad6330cb1d3869bb12a073a9019b37e2b7c527c4"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/INFRA-010.md",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/test_bootstrap_load_boundaries.py",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/bootstrap-load-boundaries-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/infrastructure_proofs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/infra-third-slice-stable.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/security_runtime/independent-infrastructure-fix-review.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/repair-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/551",
+        "issue_number": 551
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "infrastructure.md"
+    },
+    {
+      "id": "INFRA-011",
+      "title": "Loaded claim manifest promotes a PASS summary over FAIL/ERROR rows",
+      "severity": "P2",
+      "domain": "infrastructure_proofs",
+      "repair_domain": "infrastructure_proofs",
+      "status": "local_fixed",
+      "behavior_correction": "Preserve negative FAIL/ERROR observations when loading manifests rather than trusting a contradictory PASS summary.",
+      "fix_commits": [
+        "da8ffd3a684c5ec320cca917ace355267efb2f08"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/INFRA-011.md",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/test_claim_manifest_boundary.py",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/claims-boundary-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/infrastructure_proofs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/infra-third-slice-stable.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/security_runtime/independent-infrastructure-fix-review.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/repair-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/552",
+        "issue_number": 552
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "infrastructure.md"
+    },
+    {
+      "id": "INFRA-012",
+      "title": "Repo guardian caches failed full lint as a successful sweep",
+      "severity": "P2",
+      "domain": "infrastructure_proofs",
+      "repair_domain": "infrastructure_proofs",
+      "status": "local_fixed",
+      "behavior_correction": "Cache guardian full sweeps only when both tests and lint succeed; invalidate older cached success after a forced failure.",
+      "fix_commits": [
+        "4aa33e9b461dc5fa90c065be6c0bf5617e4111cd"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/INFRA-012.md",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/test_guardian_boundary.py",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/guardian-boundary-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/infrastructure_proofs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/infra-third-slice-stable.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/coordinator-rag-infra-review.md"
+      ],
+      "independent_review_status": "independent_code_review_and_selected_regressions_recorded",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/repair-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/573",
+        "issue_number": 573
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "infrastructure.md"
+    },
+    {
+      "id": "INFRA-013",
+      "title": "Live stress checks accept HTTP failures and absent receipt IDs",
+      "severity": "P2",
+      "domain": "infrastructure_proofs",
+      "repair_domain": "infrastructure_proofs",
+      "status": "local_fixed",
+      "behavior_correction": "Require successful HTTP/JSON-RPC responses and nonblank receipt IDs from every stress result; use identical same-key payloads and checks that survive -O.",
+      "fix_commits": [
+        "2009fdf1c2b7369e57f3df0284d878dddb8bf2db"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/INFRA-013.md",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/test_stress_response_boundaries.py",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/stress-redirect-boundaries-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/infrastructure_proofs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/infra-third-slice-stable.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/coordinator-rag-infra-review.md"
+      ],
+      "independent_review_status": "independent_code_review_and_selected_regressions_recorded",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/repair-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/574",
+        "issue_number": 574
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "infrastructure.md"
+    },
+    {
+      "id": "INFRA-014",
+      "title": "Adversarial battery forwards API keys across redirect origins",
+      "severity": "P2",
+      "domain": "infrastructure_proofs",
+      "repair_domain": "infrastructure_proofs",
+      "status": "local_fixed",
+      "behavior_correction": "Refuse redirects for authenticated adversarial requests so credentials and mutations stay at the chosen destination.",
+      "fix_commits": [
+        "03372935385202c277d31956c618eb7d753e719d"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/INFRA-014.md",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/test_adversarial_redirect_boundary.py",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/stress-redirect-boundaries-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/infrastructure_proofs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/infra-third-slice-stable.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/coordinator-rag-infra-review.md"
+      ],
+      "independent_review_status": "independent_code_review_and_selected_regressions_recorded",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/repair-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/575",
+        "issue_number": 575
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "infrastructure.md"
+    },
+    {
+      "id": "INFRA-015",
+      "title": "Comparison report interprets configuration errors as successful measurements",
+      "severity": "P2",
+      "domain": "infrastructure_proofs",
+      "repair_domain": "infrastructure_proofs",
+      "status": "local_fixed",
+      "behavior_correction": "Exclude ERROR configuration counters from prevention/latency arithmetic while rendering errors and retaining valid partial baseline comparisons.",
+      "fix_commits": [
+        "98cd3eed11908a44cce77b3c6c4c481a23e20811"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/INFRA-015.md",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/test_report_error_boundary.py",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/report-error-boundary-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/infrastructure_proofs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/infra-third-slice-stable.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/coordinator-rag-infra-review.md"
+      ],
+      "independent_review_status": "independent_code_review_and_selected_regressions_recorded",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/repair-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/576",
+        "issue_number": 576
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "infrastructure.md"
+    },
+    {
+      "id": "INFRA-016",
+      "title": "Diagnostic request size limit applies only after full buffering",
+      "severity": "P2",
+      "domain": "infrastructure_proofs",
+      "repair_domain": "infrastructure_proofs",
+      "status": "local_fixed",
+      "behavior_correction": "Enforce the diagnostic body limit while consuming ASGI chunks, including absent/false Content-Length.",
+      "fix_commits": [
+        "322be7f522dca93c4cddba00b6427abf36ba2765"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/INFRA-016.md",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/test_diagnostic_body_boundary.py",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/diagnostic-body-boundary-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/infrastructure_proofs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/infra-third-slice-stable.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/coordinator-rag-infra-review.md"
+      ],
+      "independent_review_status": "independent_code_review_and_selected_regressions_recorded",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/repair-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/577",
+        "issue_number": 577
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "infrastructure.md"
+    },
+    {
+      "id": "INFRA-017",
+      "title": "Agent-facing documentation advertises a nonexistent rate-limit burst",
+      "severity": "P3",
+      "domain": "infrastructure_proofs",
+      "repair_domain": "infrastructure_proofs",
+      "status": "local_fixed",
+      "behavior_correction": "Document the configurable default 120/min, zero extra burst and fixed Redis versus rolling local windows.",
+      "fix_commits": [
+        "ad108fb0b88fc9e2627ce1089224741d209f6461"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/INFRA-017.md",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/probe_documentation_contracts.py",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/documentation-contract-evidence.json"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/infrastructure_proofs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/infra-third-slice-stable.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/coordinator-rag-infra-review.md"
+      ],
+      "independent_review_status": "independent_code_review_and_selected_regressions_recorded",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/repair-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/578",
+        "issue_number": 578
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "infrastructure.md"
+    },
+    {
+      "id": "INFRA-018",
+      "title": "Agent endpoint table labels production discovery authentication optional",
+      "severity": "P3",
+      "domain": "infrastructure_proofs",
+      "repair_domain": "infrastructure_proofs",
+      "status": "local_fixed",
+      "behavior_correction": "Document production-like discovery authentication and anonymous local-compatible quickstart accurately.",
+      "fix_commits": [
+        "ad108fb0b88fc9e2627ce1089224741d209f6461"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/INFRA-018.md",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/probe_documentation_contracts.py",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/documentation-contract-evidence.json"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/infrastructure_proofs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/infra-third-slice-stable.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/coordinator-rag-infra-review.md"
+      ],
+      "independent_review_status": "independent_code_review_and_selected_regressions_recorded",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/repair-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/579",
+        "issue_number": 579
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "infrastructure.md"
+    },
+    {
+      "id": "INFRA-019",
+      "title": "Troubleshooting treats an uncertain-delivery receipt as proof of acceptance",
+      "severity": "P3",
+      "domain": "infrastructure_proofs",
+      "repair_domain": "infrastructure_proofs",
+      "status": "local_fixed",
+      "behavior_correction": "Explain that delivery_uncertain proves neither acceptance nor execution and requires authoritative downstream reconciliation.",
+      "fix_commits": [
+        "ad108fb0b88fc9e2627ce1089224741d209f6461"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/INFRA-019.md",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/probe_documentation_contracts.py",
+        "evidence/qa-20261002/reviews/infrastructure_proofs/documentation-contract-evidence.json"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/infrastructure_proofs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/infra-third-slice-stable.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/coordinator-rag-infra-review.md"
+      ],
+      "independent_review_status": "independent_code_review_and_selected_regressions_recorded",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/infrastructure_proofs/repair-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/580",
+        "issue_number": 580
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "infrastructure.md"
+    },
+    {
+      "id": "IP-001",
+      "title": "Rehydrate durable AI decisions and heals before exposing them through typed routes",
+      "severity": "P2",
+      "domain": "integrations_product",
+      "repair_domain": "integrations_product",
+      "status": "local_fixed",
+      "behavior_correction": "Rehydrate durable decision/heal records and timestamps and initialize read routes after restart.",
+      "fix_commits": [
+        "88828e8f4b963305a0233ab5f5aea237f5e6070c"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/integrations_product/test_ai_durable_probe.py",
+        "evidence/qa-20261002/reviews/integrations_product/ai-probe-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/integrations_product/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/integrations_product/ai-fix-green.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/audit-report.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/integrations_product/remediation-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/513",
+        "issue_number": 513
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "independent_review_scope_note": "Linked interim independent review concerns later integration repairs; it does not claim independent rereading of these earlier fix commits. Original owner tests and combined integration checks remain distinct.",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "security-actions-integrations.md"
+    },
+    {
+      "id": "IP-002",
+      "title": "Use the configured API root once when building OpenAI chat URLs",
+      "severity": "P2",
+      "domain": "integrations_product",
+      "repair_domain": "integrations_product",
+      "status": "local_fixed",
+      "behavior_correction": "Treat the configured OpenAI URL as the API root and append the chat path only once.",
+      "fix_commits": [
+        "f20abec84ee618b55af15506a486144f2d017a2d"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/integrations_product/test_ai_durable_probe.py",
+        "evidence/qa-20261002/reviews/integrations_product/ai-probe-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/integrations_product/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/integrations_product/llm-fix-green.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/audit-report.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/integrations_product/remediation-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/514",
+        "issue_number": 514
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "independent_review_scope_note": "Linked interim independent review concerns later integration repairs; it does not claim independent rereading of these earlier fix commits. Original owner tests and combined integration checks remain distinct.",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "security-actions-integrations.md"
+    },
+    {
+      "id": "IP-003",
+      "title": "Propagate structured DOM execution failure to AWI top-level status before accounting",
+      "severity": "P2",
+      "domain": "integrations_product",
+      "repair_domain": "integrations_product",
+      "status": "local_fixed",
+      "behavior_correction": "Propagate structured browser failure as uncertain effect status and truthful governed accounting; preserve precharge/owner semantics from SEC-008.",
+      "fix_commits": [
+        "19fe8c2ff2d0ff2fa498556fb348ea9f4ac8cdfe",
+        "cb8d2f816badf7f504c6cb51153f91cf94ab15ed"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/integrations_product/test_awi_boundary_probe.py",
+        "evidence/qa-20261002/reviews/integrations_product/awi-boundary-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/integrations_product/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/integrations_product/awi-stable-green.log",
+        "evidence/qa-20261002/reviews/awi_ordering/final-sqlite.log",
+        "evidence/qa-20261002/reviews/awi_ordering/pg-final.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/awi-review.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/integrations_product/remediation-report.md",
+        "evidence/qa-20261002/reviews/awi_ordering/remediation-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/515",
+        "issue_number": 515
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "security-actions-integrations.md"
+    },
+    {
+      "id": "IP-004",
+      "title": "Prevent browser dispatch when AWI callers explicitly request a dry run",
+      "severity": "P2",
+      "domain": "integrations_product",
+      "repair_domain": "integrations_product",
+      "status": "local_fixed",
+      "behavior_correction": "Reject unsupported dry run without browser commands or step mutation; final AWI precharge is refunded only on trusted not-dispatched evidence.",
+      "fix_commits": [
+        "19fe8c2ff2d0ff2fa498556fb348ea9f4ac8cdfe",
+        "cb8d2f816badf7f504c6cb51153f91cf94ab15ed"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/integrations_product/test_awi_boundary_probe.py",
+        "evidence/qa-20261002/reviews/integrations_product/awi-boundary-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/integrations_product/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/integrations_product/awi-stable-green.log",
+        "evidence/qa-20261002/reviews/awi_ordering/final-sqlite.log",
+        "evidence/qa-20261002/reviews/awi_ordering/pg-final.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/awi-review.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/integrations_product/remediation-report.md",
+        "evidence/qa-20261002/reviews/awi_ordering/remediation-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/516",
+        "issue_number": 516
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "security-actions-integrations.md"
+    },
+    {
+      "id": "IP-005",
+      "title": "Bind all effect-bearing AWI arguments into the idempotency identity",
+      "severity": "P2",
+      "domain": "integrations_product",
+      "repair_domain": "integrations_product",
+      "status": "local_fixed",
+      "behavior_correction": "Bind all normalized effect-bearing arguments plus wallet/tool/permit to AWI request identity; changed same-key semantics conflict.",
+      "fix_commits": [
+        "19fe8c2ff2d0ff2fa498556fb348ea9f4ac8cdfe",
+        "cb8d2f816badf7f504c6cb51153f91cf94ab15ed"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/integrations_product/test_awi_governance_probe.py",
+        "evidence/qa-20261002/reviews/integrations_product/awi-governance-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/integrations_product/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/integrations_product/awi-stable-green.log",
+        "evidence/qa-20261002/reviews/awi_ordering/final-sqlite.log",
+        "evidence/qa-20261002/reviews/awi_ordering/pg-final.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/awi-review.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/integrations_product/remediation-report.md",
+        "evidence/qa-20261002/reviews/awi_ordering/remediation-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/517",
+        "issue_number": 517
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "security-actions-integrations.md"
+    },
+    {
+      "id": "IP-006",
+      "title": "Enforce signed AWI argument prohibitions and atomic per-tool call limits before execution",
+      "severity": "P2",
+      "domain": "integrations_product",
+      "repair_domain": "integrations_product",
+      "status": "local_fixed",
+      "behavior_correction": "Enforce signed forbidden-field constraints and refuse unsupported per-tool call-limit authority before callbacks.",
+      "fix_commits": [
+        "19fe8c2ff2d0ff2fa498556fb348ea9f4ac8cdfe",
+        "cb8d2f816badf7f504c6cb51153f91cf94ab15ed"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/integrations_product/test_awi_governance_probe.py",
+        "evidence/qa-20261002/reviews/integrations_product/awi-governance-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/integrations_product/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/integrations_product/awi-stable-green.log",
+        "evidence/qa-20261002/reviews/awi_ordering/final-sqlite.log",
+        "evidence/qa-20261002/reviews/awi_ordering/pg-final.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/awi-review.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/integrations_product/remediation-report.md",
+        "evidence/qa-20261002/reviews/awi_ordering/remediation-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/518",
+        "issue_number": 518
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "security-actions-integrations.md"
+    },
+    {
+      "id": "IP-007",
+      "title": "Honor write-only and explicit-deny IoT topic ACLs",
+      "severity": "P2",
+      "domain": "integrations_product",
+      "repair_domain": "integrations_product",
+      "status": "local_fixed",
+      "behavior_correction": "Enforce READ/WRITE direction and precedence of every matching IoT DENY rule.",
+      "fix_commits": [
+        "9b26b35b17aaa1196892dd31604cc14f500e0508"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/integrations_product/test_iot_acl_probe.py",
+        "evidence/qa-20261002/reviews/integrations_product/iot-acl-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/integrations_product/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/integrations_product/iot-fix-green.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/audit-report.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/integrations_product/remediation-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/527",
+        "issue_number": 527
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "independent_review_scope_note": "Linked interim independent review concerns later integration repairs; it does not claim independent rereading of these earlier fix commits. Original owner tests and combined integration checks remain distinct.",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "security-actions-integrations.md"
+    },
+    {
+      "id": "IP-008",
+      "title": "Persist completed content campaigns and their pipeline links",
+      "severity": "P2",
+      "domain": "integrations_product",
+      "repair_domain": "integrations_product",
+      "status": "local_fixed",
+      "behavior_correction": "Persist campaign pipeline links and terminal status, including failed render state, across restart.",
+      "fix_commits": [
+        "527f3b7fc2e69042fa642266f871a28786efa65f"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/integrations_product/test_factory_durable_probe.py",
+        "evidence/qa-20261002/reviews/integrations_product/factory-durable-red.log",
+        "evidence/qa-20261002/reviews/integrations_product/factory-durable-initial-fixture-error.log",
+        "evidence/qa-20261002/reviews/integrations_product/factory-durable-async-fixture-error.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/integrations_product/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/integrations_product/factory-fix-green.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/audit-report.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/integrations_product/remediation-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/528",
+        "issue_number": 528
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "independent_review_scope_note": "Linked interim independent review concerns later integration repairs; it does not claim independent rereading of these earlier fix commits. Original owner tests and combined integration checks remain distinct.",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "security-actions-integrations.md"
+    },
+    {
+      "id": "IP-009",
+      "title": "Generate valid Python literals in the behavioral sandbox wrapper",
+      "severity": "P2",
+      "domain": "integrations_product",
+      "repair_domain": "integrations_product",
+      "status": "local_fixed",
+      "behavior_correction": "Generate valid Python values in behavioral runner wrappers while preserving captured output.",
+      "fix_commits": [
+        "8d3ed08b053ca9c9a9e09972f39db3f0f9d358b7"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/integrations_product/test_behavioral_wrapper_probe.py",
+        "evidence/qa-20261002/reviews/integrations_product/sandbox-validation-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/integrations_product/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/integrations_product/behavioral-runner-green.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/audit-report.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/integrations_product/remediation-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/544",
+        "issue_number": 544
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "security-actions-integrations.md"
+    },
+    {
+      "id": "IP-010",
+      "title": "Validate RTaaS attack categories at the request boundary",
+      "severity": "P3",
+      "domain": "integrations_product",
+      "repair_domain": "integrations_product",
+      "status": "local_fixed",
+      "behavior_correction": "Validate RTaaS attack category values at the request boundary and return 422 before engine execution.",
+      "fix_commits": [
+        "f6e9f51947ca18587ec399493f5569f2d48b1db1"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/integrations_product/test_rtaas_validation_probe.py",
+        "evidence/qa-20261002/reviews/integrations_product/sandbox-validation-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/integrations_product/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/integrations_product/rtaas-fix-green.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/audit-report.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/integrations_product/remediation-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/545",
+        "issue_number": 545
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "security-actions-integrations.md"
+    },
+    {
+      "id": "IP-011",
+      "title": "Remove live security-testing and CI-gate claims from simulated scan route metadata",
+      "severity": "P3",
+      "domain": "integrations_product",
+      "repair_domain": "integrations_product",
+      "status": "local_fixed",
+      "behavior_correction": "Describe simulated security-scan behavior accurately in route metadata while keeping execution gates.",
+      "fix_commits": [
+        "636f8cf3d37fef6a007f3d7c4e4bdefbfdeccc87"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/integrations_product/findings.json"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/integrations_product/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/integrations_product/simulation-metadata-check.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/audit-report.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/integrations_product/remediation-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/546",
+        "issue_number": 546
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "security-actions-integrations.md"
+    },
+    {
+      "id": "IP-012",
+      "title": "Delete every memory before removing the AWI session index",
+      "severity": "P2",
+      "domain": "integrations_product",
+      "repair_domain": "integrations_product",
+      "status": "local_fixed",
+      "behavior_correction": "Iterate a snapshot of session memory IDs so deletion removes every owned record without skipping mutated-index entries.",
+      "fix_commits": [
+        "c3385e9c87bd65d841015ce6602eb382383877bd"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/integrations_product/test_rag_lifecycle_probe.py",
+        "evidence/qa-20261002/reviews/integrations_product/rag-parser-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/integrations_product/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/integrations_product/rag-stable-c3385e9.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/coordinator-rag-infra-review.md"
+      ],
+      "independent_review_status": "independent_code_review_and_selected_regressions_recorded",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/integrations_product/remediation-continuation-c3385e9.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/581",
+        "issue_number": 581
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "security-actions-integrations.md"
+    },
+    {
+      "id": "IP-013",
+      "title": "Reject or safely handle empty AWI RAG queries",
+      "severity": "P3",
+      "domain": "integrations_product",
+      "repair_domain": "integrations_product",
+      "status": "local_fixed",
+      "behavior_correction": "Reject blank RAG queries at the HTTP schema boundary and safely return no results for direct empty search without embedding/access mutations.",
+      "fix_commits": [
+        "c3385e9c87bd65d841015ce6602eb382383877bd"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/integrations_product/test_rag_lifecycle_probe.py",
+        "evidence/qa-20261002/reviews/integrations_product/rag-parser-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/integrations_product/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/integrations_product/rag-stable-c3385e9.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/coordinator-rag-infra-review.md"
+      ],
+      "independent_review_status": "independent_code_review_and_selected_regressions_recorded",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/integrations_product/remediation-continuation-c3385e9.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/582",
+        "issue_number": 582
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "security-actions-integrations.md"
+    },
+    {
+      "id": "IP-014",
+      "title": "Do not report malformed or failed Python runner output as success",
+      "severity": "P2",
+      "domain": "integrations_product",
+      "repair_domain": "integrations_product",
+      "status": "local_fixed",
+      "behavior_correction": "Reject malformed, nonobject or failed Python runner output and process errors instead of reporting success.",
+      "fix_commits": [
+        "8d3ed08b053ca9c9a9e09972f39db3f0f9d358b7"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/integrations_product/test_behavioral_parser_probe.py",
+        "evidence/qa-20261002/reviews/integrations_product/rag-parser-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/integrations_product/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/integrations_product/behavioral-runner-green.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/audit-report.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/integrations_product/remediation-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/583",
+        "issue_number": 583
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "security-actions-integrations.md"
+    },
+    {
+      "id": "QA-ACTION-TRANSPORT-001",
+      "title": "Standalone MCP generator emits Python that cannot start",
+      "severity": "P3",
+      "domain": "action_execution",
+      "repair_domain": "clients_docs",
+      "status": "retired_with_explicit_refusal",
+      "behavior_correction": "Retire the server standalone generator with explicit refusal before registry traversal or output writes; retain callable argument compatibility and active metadata generation.",
+      "fix_commits": [
+        "e4a046bc65c833c9765315355be0c4c1fd99e08b"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/action_execution/test_transports_generator_probe.py",
+        "evidence/qa-20261002/reviews/action_execution/transports-generator-probe.log",
+        "evidence/qa-20261002/reviews/action_execution/transports-generator-probe-result.json"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/action_execution/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/resumed-stable-suite.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/clients-review-infra.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/clients_docs/resumed-repair-dispositions.json"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/529",
+        "issue_number": 529
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "clients-and-docs.md"
+    },
+    {
+      "id": "QA-ACTION-TRANSPORT-002",
+      "title": "A valid no-argument local tool breaks standard MCP discovery",
+      "severity": "P2",
+      "domain": "action_execution",
+      "repair_domain": "action_execution",
+      "status": "local_fixed",
+      "behavior_correction": "Normalize absent/null no-argument tool schemas to an object schema for standard MCP discovery, preserving explicit schemas.",
+      "fix_commits": [
+        "1f47952b302eaa89256af41ff4f358b2b7eda87f"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/action_execution/test_transports_discovery_probe.py",
+        "evidence/qa-20261002/reviews/action_execution/transports-discovery-probe.log",
+        "evidence/qa-20261002/reviews/action_execution/transports-discovery-repair-control.log",
+        "evidence/qa-20261002/reviews/action_execution/transports-discovery-probe-result.json",
+        "evidence/qa-20261002/reviews/action_execution/transports-discovery-repair-control-result.json"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/action_execution/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/action_execution/transport002-focused.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/security_runtime/independent-fix-review.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/action_execution/remediation-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/524",
+        "issue_number": 524
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "security-actions-integrations.md"
+    },
+    {
+      "id": "QA-CLIENT-001",
+      "title": "SDK local permit verification rejects valid action-bound permits",
+      "severity": "P2",
+      "domain": "clients_docs",
+      "repair_domain": "clients_docs",
+      "status": "local_fixed",
+      "behavior_correction": "Include all six signed action-binding fields in SDK canonical permit verification; preserve legacy envelope bytes.",
+      "fix_commits": [
+        "02622db97980975d26377235c1ce4d606a0c0774"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/run_checks.py",
+        "evidence/qa-20261002/reviews/clients_docs/test_sdk_action_signature.py",
+        "evidence/qa-20261002/reviews/clients_docs/sdk-action-red.log",
+        "evidence/qa-20261002/reviews/clients_docs/sdk-action-red-result.json"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/clients_docs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/action-fix-stable.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/action_execution/independent-security-client-review.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/clients_docs/report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/509",
+        "issue_number": 509
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "clients-and-docs.md"
+    },
+    {
+      "id": "QA-CLIENT-002",
+      "title": "Framework wrapper retry changes permit body after a lost creation response",
+      "severity": "P2",
+      "domain": "clients_docs",
+      "repair_domain": "clients_docs",
+      "status": "local_fixed",
+      "behavior_correction": "Retain the original permit issuance body before the first await in framework wrappers, including expiry, across ambiguous same-key retries.",
+      "fix_commits": [
+        "0bf6151eb94bbb35562e3d2f856fa16bc259b153"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/run_checks.py",
+        "evidence/qa-20261002/reviews/clients_docs/test_wrapper_retry_contract.py",
+        "evidence/qa-20261002/reviews/clients_docs/wrapper-retry-red.log",
+        "evidence/qa-20261002/reviews/clients_docs/wrapper-retry-red-result.json"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/clients_docs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/wrapper-fix-tests.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/action_execution/independent-security-client-review.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/clients_docs/report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/510",
+        "issue_number": 510
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "clients-and-docs.md"
+    },
+    {
+      "id": "QA-CLIENT-003",
+      "title": "Legacy SDK standalone MCP command and generated scripts are unusable",
+      "severity": "P2",
+      "domain": "clients_docs",
+      "repair_domain": "clients_docs",
+      "status": "retired_with_explicit_refusal",
+      "behavior_correction": "Retire standalone SDK generation with explicit refusal before tool discovery or output writes; accept existing CLI/callable arguments and return controlled CLI exit 2.",
+      "fix_commits": [
+        "e4a046bc65c833c9765315355be0c4c1fd99e08b"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/run_checks.py",
+        "evidence/qa-20261002/reviews/clients_docs/test_sdk_mcp_cli_contract.py",
+        "evidence/qa-20261002/reviews/clients_docs/sdk-mcp-red.log",
+        "evidence/qa-20261002/reviews/clients_docs/sdk-mcp-red-result.json"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/clients_docs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/resumed-stable-suite.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/clients-review-infra.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/clients_docs/resumed-repair-dispositions.json"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/511",
+        "issue_number": 511
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "clients-and-docs.md"
+    },
+    {
+      "id": "QA-CLIENT-004",
+      "title": "Legacy framework client omits current discovery authentication and AWI governance inputs",
+      "severity": "P2",
+      "domain": "clients_docs",
+      "repair_domain": "clients_docs",
+      "status": "local_fixed",
+      "behavior_correction": "Forward credentials for discovery and require caller-owned AWI permit/idempotency arguments.",
+      "fix_commits": [
+        "8e5e684d3d2fcae9a53330b45be4e467e80fba64"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/run_checks.py",
+        "evidence/qa-20261002/reviews/clients_docs/test_framework_discovery_contract.py",
+        "evidence/qa-20261002/reviews/clients_docs/framework-discovery-red.log",
+        "evidence/qa-20261002/reviews/clients_docs/framework-discovery-red-result.json"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/clients_docs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/legacy-client-stable.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/action_execution/independent-security-client-review.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/clients_docs/report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/530",
+        "issue_number": 530
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "clients-and-docs.md"
+    },
+    {
+      "id": "QA-CLIENT-005",
+      "title": "AWI discovery still denies permit enforcement on governed HTTP routes",
+      "severity": "P3",
+      "domain": "clients_docs",
+      "repair_domain": "clients_docs",
+      "status": "local_fixed",
+      "behavior_correction": "Advertise the six actual governed AWI HTTP routes and their permit requirements accurately.",
+      "fix_commits": [
+        "740098d11c30e04f3f6fb534ed627e8865f6e44a"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/run_checks.py",
+        "evidence/qa-20261002/reviews/clients_docs/test_framework_discovery_contract.py",
+        "evidence/qa-20261002/reviews/clients_docs/framework-discovery-red.log",
+        "evidence/qa-20261002/reviews/clients_docs/framework-discovery-red-result.json"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/clients_docs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/discovery-claims-stable.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/action_execution/independent-security-client-review.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/clients_docs/report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/531",
+        "issue_number": 531
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "clients-and-docs.md"
+    },
+    {
+      "id": "QA-CLIENT-006",
+      "title": "Public site and bootstrap manifests claim private source repository is public",
+      "severity": "P3",
+      "domain": "clients_docs",
+      "repair_domain": "clients_docs",
+      "status": "local_fixed",
+      "behavior_correction": "Describe private source access separately from publicly downloadable proof artifacts.",
+      "fix_commits": [
+        "817ccd52e3efde57b8be3ebdbf171e674663ec30"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_pages_name_no_second_bran0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_customer_facing_outputs_d0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_branded_404_offers_a_way_0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_robots_states_an_explicit0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_concept_page_is_an_unlist0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_live_verifier_output_matc0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_site_build_blocks_missing0/email-only/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_typography_is_self_hosted0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_vercel_insights_loader_re0/default/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_vercel_insights_loader_re0/enabled/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_rendered_landing_is_human0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_every_indexable_page_is_c0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_pages_carry_no_inline_scr0/analytics-on/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_pages_carry_no_inline_scr0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_rendered_site_has_truthfu0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_every_page_loads_the_acce0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_cta_aria_labels_preserve_0/email-only/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_cta_aria_labels_preserve_0/with-booking/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_booking_identity_names_on2/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_navigation_is_identical_a1/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_stylesheet_cache_key_trac0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_navigation_is_identical_a0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_html_pages_point_crawlers0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_pilot_draft_encodes_conta0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_all_pages_share_the_curre0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_booking_identity_names_on4/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_booking_identity_names_on3/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_landing_hero_wave_is_prog0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_pointer_files_render_the_0/pointers/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_footer_reaches_the_same_p0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_comparison_page_names_alt0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_landing_console_renders_t0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_external_links_carry_noop0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_pages_publish_valid_json_0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_preloaded_fonts_exist_and0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_faq_structured_data_is_ge0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_vendored_font_license_is_0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_search_social_and_analyti0/email-only/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_search_social_and_analyti0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_public_surfaces_separate_0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_arcade_ships_as_progressi0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_llms_full_extends_the_sho0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_security_txt_is_routable_0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_booking_identity_names_on1/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_booking_identity_names_on0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-12/test_sitemap_publishes_lastmod0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_pages_name_no_second_bran0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_customer_facing_outputs_d0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_branded_404_offers_a_way_0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_robots_states_an_explicit0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_concept_page_is_an_unlist0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_live_verifier_output_matc0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_site_build_blocks_missing0/email-only/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_typography_is_self_hosted0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_vercel_insights_loader_re0/default/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_vercel_insights_loader_re0/enabled/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_rendered_landing_is_human0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_every_indexable_page_is_c0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_pages_carry_no_inline_scr0/analytics-on/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_pages_carry_no_inline_scr0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_rendered_site_has_truthfu0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_every_page_loads_the_acce0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_cta_aria_labels_preserve_0/email-only/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_cta_aria_labels_preserve_0/with-booking/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_booking_identity_names_on2/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_navigation_is_identical_a1/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_stylesheet_cache_key_trac0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_navigation_is_identical_a0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_html_pages_point_crawlers0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_pilot_draft_encodes_conta0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_all_pages_share_the_curre0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_booking_identity_names_on4/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_booking_identity_names_on3/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_landing_hero_wave_is_prog0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_pointer_files_render_the_0/pointers/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_footer_reaches_the_same_p0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_comparison_page_names_alt0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_landing_console_renders_t0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_external_links_carry_noop0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_pages_publish_valid_json_0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_preloaded_fonts_exist_and0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_faq_structured_data_is_ge0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_vendored_font_license_is_0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_search_social_and_analyti0/email-only/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_search_social_and_analyti0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_public_surfaces_separate_0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_arcade_ships_as_progressi0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_llms_full_extends_the_sho0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_security_txt_is_routable_0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_booking_identity_names_on1/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_booking_identity_names_on0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/pytest-of-sellers/pytest-13/test_sitemap_publishes_lastmod0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_pages_name_no_second_bran0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_customer_facing_outputs_d0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_branded_404_offers_a_way_0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_robots_states_an_explicit0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_concept_page_is_an_unlist0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_live_verifier_output_matc0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_site_build_blocks_missing0/email-only/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_typography_is_self_hosted0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_vercel_insights_loader_re0/default/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_vercel_insights_loader_re0/enabled/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_rendered_landing_is_human0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_every_indexable_page_is_c0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_pages_carry_no_inline_scr0/analytics-on/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_pages_carry_no_inline_scr0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_rendered_site_has_truthfu0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_every_page_loads_the_acce0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_cta_aria_labels_preserve_0/email-only/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_cta_aria_labels_preserve_0/with-booking/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_booking_identity_names_on2/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_navigation_is_identical_a1/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_stylesheet_cache_key_trac0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_navigation_is_identical_a0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_html_pages_point_crawlers0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_pilot_draft_encodes_conta0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_all_pages_share_the_curre0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_booking_identity_names_on4/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_booking_identity_names_on3/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_landing_hero_wave_is_prog0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_pointer_files_render_the_0/pointers/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_footer_reaches_the_same_p0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_comparison_page_names_alt0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_landing_console_renders_t0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_external_links_carry_noop0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_pages_publish_valid_json_0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_preloaded_fonts_exist_and0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_faq_structured_data_is_ge0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_vendored_font_license_is_0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_search_social_and_analyti0/email-only/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_search_social_and_analyti0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_public_surfaces_link_to_p0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_arcade_ships_as_progressi0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_llms_full_extends_the_sho0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_security_txt_is_routable_0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_booking_identity_names_on1/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_booking_identity_names_on0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/state/tmp-client-site-existing-isolated/test_sitemap_publishes_lastmod0/site/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/ux-pilot/built-site-design-rerun/.well-known/agent.json",
+        "evidence/qa-20261002/reviews/clients_docs/ux-pilot/built-site/.well-known/agent.json"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/clients_docs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/source-claims-stable.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/action_execution/independent-security-client-review.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/clients_docs/report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/532",
+        "issue_number": 532
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "clients-and-docs.md"
+    },
+    {
+      "id": "QA-CLIENT-007",
+      "title": "Agent self-credentialing guide writes unevaluated shell substitution into dotenv signing key",
+      "severity": "P3",
+      "domain": "clients_docs",
+      "repair_domain": "clients_docs",
+      "status": "local_fixed",
+      "behavior_correction": "Generate the local signing seed in the invoking shell rather than storing unevaluated shell substitution in dotenv.",
+      "fix_commits": [
+        "028e36e8cf66a0b80ce0d232b724e3df483db92e"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/run_checks.py",
+        "evidence/qa-20261002/reviews/clients_docs/test_doc_credentialing_seed.py",
+        "evidence/qa-20261002/reviews/clients_docs/credentialing-doc-red.log",
+        "evidence/qa-20261002/reviews/clients_docs/credentialing-doc-red-result.json"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/clients_docs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/credentialing-doc-stable.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/action_execution/independent-security-client-review.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/clients_docs/report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/538",
+        "issue_number": 538
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "clients-and-docs.md"
+    },
+    {
+      "id": "QA-CLIENT-008",
+      "title": "Key Rotation can consume multiple lives in one update despite granting invulnerability",
+      "severity": "P3",
+      "domain": "clients_docs",
+      "repair_domain": "clients_docs",
+      "status": "local_fixed",
+      "behavior_correction": "Honor collision invulnerability inside each sweeper iteration; one update cannot deduct multiple lives after respawn. Bust cached script references so deployed clients receive the corrected arcade code.",
+      "fix_commits": [
+        "3e6d52e404f724d62a3b8d52e5a9ee3172afa2d0",
+        "dd834f0c80d8d77cf5ac62165801657fd3f1ae93"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/check_arcade_cabinets.cjs",
+        "evidence/qa-20261002/reviews/clients_docs/arcade-cabinet-check.json"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/clients_docs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/resumed-stable-suite.log",
+        "evidence/qa-20261002/reviews/clients_docs/resumed-stable-arcade.log",
+        "evidence/qa-20261002/reviews/clients_docs/ux-cache-site-tests.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/clients-review-infra.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/clients_docs/resumed-repair-dispositions.json"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/560",
+        "issue_number": 560
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "clients-and-docs.md"
+    },
+    {
+      "id": "QA-CLIENT-009",
+      "title": "Happy Path draws the player twelve pixels above its collision position",
+      "severity": "P3",
+      "domain": "clients_docs",
+      "repair_domain": "clients_docs",
+      "status": "local_fixed",
+      "behavior_correction": "Align the rendered player body with its ground/platform collision origin. Bust cached script references so deployed clients receive the corrected arcade code.",
+      "fix_commits": [
+        "3e6d52e404f724d62a3b8d52e5a9ee3172afa2d0",
+        "dd834f0c80d8d77cf5ac62165801657fd3f1ae93"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/check_arcade_cabinets.cjs",
+        "evidence/qa-20261002/reviews/clients_docs/arcade-cabinet-check.json"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/clients_docs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/resumed-stable-suite.log",
+        "evidence/qa-20261002/reviews/clients_docs/resumed-stable-arcade.log",
+        "evidence/qa-20261002/reviews/clients_docs/ux-cache-site-tests.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/clients-review-infra.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/clients_docs/resumed-repair-dispositions.json"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/561",
+        "issue_number": 561
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "clients-and-docs.md"
+    },
+    {
+      "id": "QA-CLIENT-010",
+      "title": "Tap Forge discards passive quota earnings on every animation frame",
+      "severity": "P3",
+      "domain": "clients_docs",
+      "repair_domain": "clients_docs",
+      "status": "local_fixed",
+      "behavior_correction": "Carry fractional passive quota earnings across animation frames and clear the carry on reset. Bust cached script references so deployed clients receive the corrected arcade code.",
+      "fix_commits": [
+        "3e6d52e404f724d62a3b8d52e5a9ee3172afa2d0",
+        "dd834f0c80d8d77cf5ac62165801657fd3f1ae93"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/check_arcade_progress.cjs",
+        "evidence/qa-20261002/reviews/clients_docs/arcade-progress-check.json"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/clients_docs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/resumed-stable-suite.log",
+        "evidence/qa-20261002/reviews/clients_docs/resumed-stable-arcade.log",
+        "evidence/qa-20261002/reviews/clients_docs/ux-cache-site-tests.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/clients-review-infra.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/clients_docs/resumed-repair-dispositions.json"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/562",
+        "issue_number": 562
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "clients-and-docs.md"
+    },
+    {
+      "id": "QA-CLIENT-011",
+      "title": "Security reviewer claim omits local invocations that cannot produce a receipt",
+      "severity": "P3",
+      "domain": "clients_docs",
+      "repair_domain": "clients_docs",
+      "status": "local_fixed",
+      "behavior_correction": "Qualify receipt guarantees for terminalized/reconciled paths and identify local crashes requiring manual review without a receipt.",
+      "fix_commits": [
+        "ed6b396d0290de8904b9ac6db6e90626ad0ad1aa"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/run_checks.py",
+        "evidence/qa-20261002/reviews/clients_docs/test_docs_contracts.py",
+        "evidence/qa-20261002/reviews/clients_docs/docs-contract-controls.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/clients_docs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/resumed-stable-suite.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/clients-review-infra.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/clients_docs/resumed-repair-dispositions.json"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/563",
+        "issue_number": 563
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "clients-and-docs.md"
+    },
+    {
+      "id": "QA-CLIENT-012",
+      "title": "Golden-path dogfood substitution leaves incompatible message arguments",
+      "severity": "P2",
+      "domain": "clients_docs",
+      "repair_domain": "clients_docs",
+      "status": "local_fixed",
+      "behavior_correction": "Use the dogfood tool text argument for both first invocation and replay.",
+      "fix_commits": [
+        "ed6b396d0290de8904b9ac6db6e90626ad0ad1aa"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/run_checks.py",
+        "evidence/qa-20261002/reviews/clients_docs/test_docs_contracts.py",
+        "evidence/qa-20261002/reviews/clients_docs/docs-contract-controls.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/clients_docs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/resumed-stable-suite.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/clients-review-infra.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/clients_docs/resumed-repair-dispositions.json"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/564",
+        "issue_number": 564
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "clients-and-docs.md"
+    },
+    {
+      "id": "QA-CLIENT-013",
+      "title": "Partner offline-verification install command omits required verify extra",
+      "severity": "P2",
+      "domain": "clients_docs",
+      "repair_domain": "clients_docs",
+      "status": "local_fixed",
+      "behavior_correction": "Install the SDK verify extra for source and wheel offline-verifier recipes.",
+      "fix_commits": [
+        "ed6b396d0290de8904b9ac6db6e90626ad0ad1aa"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/run_checks.py",
+        "evidence/qa-20261002/reviews/clients_docs/test_docs_contracts.py",
+        "evidence/qa-20261002/reviews/clients_docs/docs-contract-controls.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/clients_docs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/resumed-stable-suite.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/clients-review-infra.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/clients_docs/resumed-repair-dispositions.json"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/565",
+        "issue_number": 565
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "clients-and-docs.md"
+    },
+    {
+      "id": "QA-CLIENT-014",
+      "title": "CI bootstrap recipe combines credentials from three separate provisioning runs",
+      "severity": "P2",
+      "domain": "clients_docs",
+      "repair_domain": "clients_docs",
+      "status": "local_fixed",
+      "behavior_correction": "Extract API key, wallet and key ID from one provisioning response.",
+      "fix_commits": [
+        "ed6b396d0290de8904b9ac6db6e90626ad0ad1aa"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/run_checks.py",
+        "evidence/qa-20261002/reviews/clients_docs/test_bootstrap_docs.py",
+        "evidence/qa-20261002/reviews/clients_docs/bootstrap-doc-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/clients_docs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/resumed-stable-suite.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/clients-review-infra.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/clients_docs/resumed-repair-dispositions.json"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/566",
+        "issue_number": 566
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "clients-and-docs.md"
+    },
+    {
+      "id": "QA-CLIENT-015",
+      "title": "Legacy database guidance recommends stamping current head without schema equivalence",
+      "severity": "P2",
+      "domain": "clients_docs",
+      "repair_domain": "clients_docs",
+      "status": "local_fixed",
+      "behavior_correction": "Require physical schema/data-history review for unstamped existing databases; stamp only a proven matching historical revision.",
+      "fix_commits": [
+        "7cb38a46581ae6f172f8e21e349c87b5afa83699"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/run_checks.py",
+        "evidence/qa-20261002/reviews/clients_docs/test_operator_docs.py",
+        "evidence/qa-20261002/reviews/clients_docs/operator-doc-controls.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/clients_docs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/resumed-stable-suite.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/clients-review-infra.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/clients_docs/resumed-repair-dispositions.json"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/567",
+        "issue_number": 567
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "clients-and-docs.md"
+    },
+    {
+      "id": "QA-CLIENT-016",
+      "title": "Lockdown and key-rotation runbooks retain deployment paths contradicted by current immutable release SOP",
+      "severity": "P3",
+      "domain": "clients_docs",
+      "repair_domain": "clients_docs",
+      "status": "local_fixed",
+      "behavior_correction": "Use qualified exact-SHA release contexts and schema-compatible recovery in lockdown/key-rotation runbooks.",
+      "fix_commits": [
+        "7cb38a46581ae6f172f8e21e349c87b5afa83699"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/findings.json"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/clients_docs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/resumed-stable-suite.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/clients-review-infra.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/clients_docs/resumed-repair-dispositions.json"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/568",
+        "issue_number": 568
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "clients-and-docs.md"
+    },
+    {
+      "id": "QA-CLIENT-017",
+      "title": "Local demo Compose recipe omits DATABASE_URL required for its key and trust workflow",
+      "severity": "P2",
+      "domain": "clients_docs",
+      "repair_domain": "clients_docs",
+      "status": "local_fixed",
+      "behavior_correction": "Replace the broken local Compose example with the supported persistent SQLite/signing-seed quickstart.",
+      "fix_commits": [
+        "7cb38a46581ae6f172f8e21e349c87b5afa83699"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/run_checks.py",
+        "evidence/qa-20261002/reviews/clients_docs/test_operator_docs.py",
+        "evidence/qa-20261002/reviews/clients_docs/operator-doc-controls.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/clients_docs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/resumed-stable-suite.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/clients-review-infra.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/clients_docs/resumed-repair-dispositions.json"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/569",
+        "issue_number": 569
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "clients-and-docs.md"
+    },
+    {
+      "id": "QA-CLIENT-018",
+      "title": "Historical external diagnostic harness reports zero findings for unauthenticated200 responses",
+      "severity": "P3",
+      "domain": "clients_docs",
+      "repair_domain": "clients_docs",
+      "status": "retired_with_explicit_refusal",
+      "behavior_correction": "Retire historical gauntlet CLI and raw transport with explicit refusal; preserve archived raw output and label counts non-gating.",
+      "fix_commits": [
+        "9edad00dfcde0a1daa79b2da47faadd9221f46f5"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/run_checks.py",
+        "evidence/qa-20261002/reviews/clients_docs/test_historical_gauntlet.py",
+        "evidence/qa-20261002/reviews/clients_docs/historical-gauntlet-red.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/clients_docs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/resumed-stable-suite.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/clients-review-infra.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/clients_docs/resumed-repair-dispositions.json"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/570",
+        "issue_number": 570
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "clients-and-docs.md"
+    },
+    {
+      "id": "QA-CLIENT-019",
+      "title": "Partner checklist uses GET for the POST-only receipt verification operation",
+      "severity": "P3",
+      "domain": "clients_docs",
+      "repair_domain": "clients_docs",
+      "status": "local_fixed",
+      "behavior_correction": "Use authenticated POST with receipt_id for receipt verification.",
+      "fix_commits": [
+        "ed6b396d0290de8904b9ac6db6e90626ad0ad1aa"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/findings.json"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/clients_docs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/resumed-stable-suite.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/clients-review-infra.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/clients_docs/resumed-repair-dispositions.json"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/571",
+        "issue_number": 571
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "clients-and-docs.md"
+    },
+    {
+      "id": "QA-CLIENT-020",
+      "title": "Failure-lab suite quick commands select the older lab instead of the advertised fast tier",
+      "severity": "P3",
+      "domain": "clients_docs",
+      "repair_domain": "clients_docs",
+      "status": "local_fixed",
+      "behavior_correction": "Point the advertised fast-tier Failure Lab command to the actual suite target.",
+      "fix_commits": [
+        "ed6b396d0290de8904b9ac6db6e90626ad0ad1aa"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/findings.json"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/clients_docs/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/clients_docs/resumed-stable-suite.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/clients-review-infra.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/clients_docs/resumed-repair-dispositions.json"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/572",
+        "issue_number": 572
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "clients-and-docs.md"
+    },
+    {
+      "id": "SEC-001",
+      "title": "Refresh widens an attenuated JWT scope set",
+      "severity": "P2",
+      "domain": "security_runtime",
+      "repair_domain": "security_runtime",
+      "status": "local_fixed",
+      "behavior_correction": "Preserve attenuated or empty JWT scopes across refresh and reject unbound/malformed refresh authority.",
+      "fix_commits": [
+        "cd9440c62d8a2e7540e161e7522fcec6e72b8c43"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/security_runtime/jwt-authority.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/security_runtime/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/security_runtime/fix-regression-stable.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/action_execution/independent-security-client-review.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/security_runtime/report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/503",
+        "issue_number": 503
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "security-actions-integrations.md"
+    },
+    {
+      "id": "SEC-002",
+      "title": "Scoped access tokens can mint unrestricted wallet API keys",
+      "severity": "P2",
+      "domain": "security_runtime",
+      "repair_domain": "security_runtime",
+      "status": "local_fixed",
+      "behavior_correction": "Reject JWT callers that attempt to mint or replace unrestricted persistent API credentials.",
+      "fix_commits": [
+        "cd9440c62d8a2e7540e161e7522fcec6e72b8c43"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/security_runtime/jwt-authority.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/security_runtime/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/security_runtime/fix-regression-stable.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/action_execution/independent-security-client-review.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/security_runtime/report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/504",
+        "issue_number": 504
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "security-actions-integrations.md"
+    },
+    {
+      "id": "SEC-003",
+      "title": "Derived JWT authentication bypasses the originating key use budget",
+      "severity": "P2",
+      "domain": "security_runtime",
+      "repair_domain": "security_runtime",
+      "status": "local_fixed",
+      "behavior_correction": "Atomically consume the originating live key use budget when authenticating derived JWTs.",
+      "fix_commits": [
+        "cd9440c62d8a2e7540e161e7522fcec6e72b8c43"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/security_runtime/jwt-authority.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/security_runtime/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/security_runtime/fix-regression-stable.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/action_execution/independent-security-client-review.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/security_runtime/report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/505",
+        "issue_number": 505
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "security-actions-integrations.md"
+    },
+    {
+      "id": "SEC-004",
+      "title": "Bearer callers choose fresh rate buckets with ignored API-key headers",
+      "severity": "P2",
+      "domain": "security_runtime",
+      "repair_domain": "security_runtime",
+      "status": "local_fixed",
+      "behavior_correction": "Select rate buckets from the accepted authentication path, ignoring spoofed unused key headers and stabilizing JWT rotation identity.",
+      "fix_commits": [
+        "cd9440c62d8a2e7540e161e7522fcec6e72b8c43"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/security_runtime/authority-runtime-expanded2.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/security_runtime/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/security_runtime/fix-regression-stable.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/action_execution/independent-security-client-review.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/security_runtime/report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/506",
+        "issue_number": 506
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "security-actions-integrations.md"
+    },
+    {
+      "id": "SEC-005",
+      "title": "Readiness probe returns healthy HTTP status during dependency failure",
+      "severity": "P2",
+      "domain": "security_runtime",
+      "repair_domain": "security_runtime",
+      "status": "local_fixed",
+      "behavior_correction": "Probe required ORM and durable-state dependencies with bounded waits; return HTTP 503 when unavailable.",
+      "fix_commits": [
+        "4a4fc75089e323d2d413874cce4108558d2a7ba2"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/security_runtime/authority-runtime-expanded2.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/security_runtime/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/security_runtime/fix-regression-stable.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/action_execution/independent-security-client-review.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/security_runtime/report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/507",
+        "issue_number": 507
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "security-actions-integrations.md"
+    },
+    {
+      "id": "SEC-006",
+      "title": "Late IGA compensation erases a different invocation velocity reservation",
+      "severity": "P2",
+      "domain": "security_runtime",
+      "repair_domain": "security_runtime",
+      "status": "local_fixed",
+      "behavior_correction": "Compensate the exact identity-bearing IGA velocity reservation once; never remove a newer invocation reservation.",
+      "fix_commits": [
+        "13c709711f06ee28ca848c75212d2ff3503ab6ed"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/security_runtime/authority-runtime-expanded2.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/security_runtime/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/security_runtime/fix-regression-stable.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/action_execution/independent-security-client-review.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/security_runtime/report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/508",
+        "issue_number": 508
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "security-actions-integrations.md"
+    },
+    {
+      "id": "SEC-007",
+      "title": "Concurrent valid append makes audit verification falsely report truncation",
+      "severity": "P2",
+      "domain": "security_runtime",
+      "repair_domain": "security_runtime",
+      "status": "local_fixed",
+      "behavior_correction": "Read audit head and bounded event stream from one SQL statement snapshot, retaining real truncation detection.",
+      "fix_commits": [
+        "ee32061580c6ac70b7a0e78cb9f8f95550b4925c"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/security_runtime/audit-snapshot.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/security_runtime/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/security_runtime/fix-regression-stable.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/action_execution/independent-security-client-review.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/security_runtime/report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/525",
+        "issue_number": 525
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "security-actions-integrations.md"
+    },
+    {
+      "id": "SEC-008",
+      "title": "AWI performs effects before budget/debit and repeats them after reservation contention",
+      "severity": "P2",
+      "domain": "security_runtime",
+      "repair_domain": "awi_ordering",
+      "status": "local_fixed",
+      "behavior_correction": "Reserve permit authority and checkpoint an operation-key debit before any of six AWI callbacks. Preserve owners across ambiguous errors/process death; refund only proven non-dispatch, and replay receipts without redispatch.",
+      "fix_commits": [
+        "cb8d2f816badf7f504c6cb51153f91cf94ab15ed",
+        "2c6f4291a042bbf88ffbe9cb891c61aa516ae68c"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/security_runtime/awi-ordering2.log"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/security_runtime/findings.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/awi_ordering/original-green.log",
+        "evidence/qa-20261002/reviews/awi_ordering/final-sqlite.log",
+        "evidence/qa-20261002/reviews/awi_ordering/pg-final.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/final-review.md",
+        "evidence/qa-20261002/reviews/independent_review/awi-review.md"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/awi_ordering/remediation-report.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/526",
+        "issue_number": 526
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "security-actions-integrations.md"
+    },
+    {
+      "id": "SEC-009",
+      "title": "SQLite permit issuance signs values that change during persistence",
+      "severity": "P2",
+      "domain": "security_runtime",
+      "repair_domain": "accounting_data",
+      "status": "local_fixed",
+      "behavior_correction": "Reject permit max_credits/aggregate caps that cannot survive exact storage before signing; preserve the numeric bounds in generated schemas.",
+      "fix_commits": [
+        "f27c213cd2e48c2fd1c9927a8fea85d4af5479ee",
+        "34040b3ad1e574445ad1ead70622967b58e3240a"
+      ],
+      "commit_reference_kind": "exact_fix_and_relevant_followup_commits",
+      "all_commits_are_ancestors_of_integration_head": true,
+      "original_negative_evidence": [
+        "evidence/qa-20261002/reviews/security_runtime/test_permit_numeric_followup.py",
+        "evidence/qa-20261002/reviews/security_runtime/independent-permit-numeric-ef64d02.log",
+        "evidence/qa-20261002/reviews/security_runtime/independent-permit-numeric-ef64d02-result.json"
+      ],
+      "original_finding_record": "evidence/qa-20261002/reviews/security_runtime/findings-followup.json",
+      "green_regression_evidence": [
+        "evidence/qa-20261002/reviews/accounting_data/resume-numeric-green.log",
+        "evidence/qa-20261002/reviews/accounting_data/resume-numeric-postgres-v2.log",
+        "evidence/qa-20261002/reviews/accounting_data/resume-schema-green.log"
+      ],
+      "independent_review_paths": [
+        "evidence/qa-20261002/reviews/independent_review/final-review.md",
+        "evidence/qa-20261002/reviews/independent_review/accounting-2cc557d-followup-targeted.json"
+      ],
+      "independent_review_status": "artifact_recorded_with_its_own_scope",
+      "repair_provenance": [
+        "evidence/qa-20261002/reviews/accounting_data/SEC009-remediation.md"
+      ],
+      "github": {
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/584",
+        "issue_number": 584
+      },
+      "deployment_status": "not_deployed_by_this_task",
+      "local_finding_id": "SEC009",
+      "recovered_integration_sha": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+      "current_issue_state": "OPEN",
+      "fixing_pr_url": null,
+      "acceptance_status": "aggregate_validation_in_progress",
+      "evidence_root": "/Users/sellers/Documents/Codex/2026-10-01/task-4",
+      "review_document": "accounting.md"
+    }
+  ],
+  "additional_report_fixes": [
+    {
+      "finding": "BE-002",
+      "evidence_pr": 586,
+      "parent_issue": 556,
+      "worker_commit": "eefd1c1d7d57c59e53d12774298545e0dbabe799",
+      "status": "locally_fixed_aggregate_pending"
+    },
+    {
+      "finding": "BE-003",
+      "evidence_pr": 586,
+      "parent_issue": 556,
+      "worker_commit": "eefd1c1d7d57c59e53d12774298545e0dbabe799",
+      "status": "locally_fixed_aggregate_pending"
+    },
+    {
+      "finding": "FE-001",
+      "evidence_pr": 586,
+      "parent_issue": 554,
+      "worker_commit": "45eccbcc4b797967ab9559af2c7073eaea610f6f",
+      "status": "locally_fixed_aggregate_pending"
+    },
+    {
+      "finding": "FE-002",
+      "evidence_pr": 586,
+      "parent_issue": 554,
+      "worker_commit": "45eccbcc4b797967ab9559af2c7073eaea610f6f",
+      "status": "locally_fixed_aggregate_pending"
+    },
+    {
+      "finding": "UX-001",
+      "evidence_pr": 586,
+      "parent_issue": 553,
+      "worker_commit": "45eccbcc4b797967ab9559af2c7073eaea610f6f",
+      "status": "locally_fixed_aggregate_pending"
+    },
+    {
+      "finding": "UX-002",
+      "evidence_pr": 586,
+      "parent_issue": 553,
+      "worker_commit": "45eccbcc4b797967ab9559af2c7073eaea610f6f",
+      "status": "locally_fixed_aggregate_pending"
+    },
+    {
+      "finding": "UX-003",
+      "evidence_pr": 586,
+      "parent_issue": 553,
+      "worker_commit": "45eccbcc4b797967ab9559af2c7073eaea610f6f",
+      "status": "locally_fixed_aggregate_pending"
+    },
+    {
+      "finding": "BE-100",
+      "evidence_pr": 586,
+      "parent_issue": 556,
+      "worker_commit": "7aa67f48e7c84cc5e996eddbdb94b833e460c0de",
+      "status": "locally_fixed_aggregate_pending"
+    }
+  ]
+}
