@@ -11,6 +11,14 @@ The next release consolidates the accumulated trust-plane and public-product
 work as `v1.3.0`. Create that tag only from the exact commit that passes the
 full release gate; do not backfill a final `v1.2.0` tag.
 
+### Fixed — QA documentation guarantees
+
+- **BE-100**: Integration guidance and the elevator pitch scope same-key
+  dispatch guarantees to the configured upstream MCP tool and receipts to
+  finalized or reconciled outcomes. They disclose local-tool manual review,
+  committed effects without a receipt, and the duplicate-execution risk of
+  retrying with a fresh key. The working local signing-seed setup is preserved.
+
 ### Changed — duplicate guard observability and release gates
 
 - **Durable duplicate-denial count**: `/health/duplicate-guard` now also
