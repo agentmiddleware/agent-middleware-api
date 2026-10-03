@@ -1,0 +1,121 @@
+UTC 2026-10-03T00:38:36.462151+00:00
+FILES ['docs/qa/2026-10-02/package_audit.py', 'docs/qa/2026-10-02/artifacts', 'docs/qa/2026-10-02/FRONTEND-SESSION.md', 'docs/qa/2026-10-02/UX-REPORT.md', 'docs/qa/2026-10-02/secret_scan.py', 'docs/qa/2026-10-02/frontend.spec.cjs', 'docs/qa/2026-10-02/ux_browser_qa.cjs', 'docs/qa/2026-10-02/UX-SESSION.md', 'docs/qa/2026-10-02/COORDINATION-SESSION.md', 'docs/qa/2026-10-02/backend_safety', 'docs/qa/2026-10-02/CLAIMS-SESSION.md', 'docs/qa/2026-10-02/browser-loopback.mjs', 'docs/qa/2026-10-02/PLAN.md', 'docs/qa/2026-10-02/ux_csp_server.py', 'docs/qa/2026-10-02/playwright.config.cjs', 'docs/qa/2026-10-02/run_logged.py', 'docs/qa/2026-10-02/BACKEND-SESSION.md', 'docs/qa/2026-10-02/SESSION-LOG.md']
+docs/qa/2026-10-02/BACKEND-SESSION.md
+t("operationId") for _,_,op in ops).items() if n>1]; print("OpenAPI validates; paths",len(schema["paths"]),"operations",len(ops),"duplicate operationIds",dup); print("securitySchemes",schema.get("components",{}).get("securitySchemes")); print("Endpoints",[(p,m,op.get("security")) for p,m,op in ops]); Path("docs/qa/2026-10-02/artifacts/backend-openapi-summary.json").write_text(json.dumps({"version":schema["openapi"],"paths":len(schema["paths"]),"operations":len(ops),"duplicates":dup,"securitySchemes":schema.get("components",{}).get("securitySchemes")},indent=2))']`
+
+Outcome: exit 0; 3.1s; ended 2026-10-03T00:37:39Z. [Output](artifacts/backend-openapi-contract-probe.txt).
+
+### 2026-10-03T00:37:40Z — focused-key-validation-source
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['sed', '-n', '1,153p', 'app/services/idempotency.py']`
+
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:37:40Z. [Output](artifacts/backend-focused-key-validation-source.txt).
+
+### 2026-10-03T00:37:46Z — unicode-contract-tests-map
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['rg', '-n', 'surrogate|ud800|d800|utf8|unicode|Unicode', 'tests/test_mcp_idempotency_key_validation.py', 'tests/test_idempotency.py', 'app/services/signing_keys.py']`
+
+Outcome: exit 1; 0.0s; ended 2026-10-03T00:37:46Z. [Output](artifacts/backend-unicode-contract-tests-map.txt).
+
+### 2026-10-03T00:37:46Z — suite-progress
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', '-c', 'from pathlib import Path; import subprocess; subprocess.run(["ps","-Ao","pid,etime,comm"]); p=Path("/private/tmp/amw-qa-baseline.coverage"); print("coverage_written",p.exists())']`
+
+Outcome: exit 1; 0.0s; ended 2026-10-03T00:37:46Z. [Output](artifacts/backend-suite-progress.txt).
+
+### 2026-10-03T00:38:00Z — new-test-fixtures
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', '-c', 'from pathlib import Path; paths={"tests/test_mcp_idempotency_key_validation.py":(1,165),"tests/test_trust_negative_security.py":(1,83),"tests/trust_helpers.py":(1,230),"app/services/signing_keys.py":(1,100)}; [(print("FILE",p),print("\\n".join(f"{i+1}: {l}" for i,l in enumerate(Path(p).read_text().splitlines()) if a<=i+1<=b))) for p,(a,b) in paths.items() if Path(p).exists()]']`
+
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:38:00Z. [Output](artifacts/backend-new-test-fixtures.txt).
+
+docs/qa/2026-10-02/FRONTEND-SESSION.md
+node', 'tests/test_site_design.mjs', 'http://127.0.0.1:8765', 'docs/qa/2026-10-02/browser-loopback.mjs', 'docs/qa/2026-10-02/artifacts/frontend-existing']`
+
+Outcome: exit 1; 1.8s; ended 2026-10-03T00:37:26Z. [Output](artifacts/frontend-existing-design-browser-tests.txt).
+Outcome: exit 1; 3.2s; ended 2026-10-03T00:37:26Z. [Output](artifacts/frontend-existing-pilot-browser-tests.txt).
+
+### 2026-10-03T00:38:03Z — cross-browser-regressions
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['env', 'PLAYWRIGHT_BROWSERS_PATH=/private/tmp/amw-qa-playwright-browsers', '/private/tmp/amw-qa-browser/node_modules/.bin/playwright', 'test', '--config', 'docs/qa/2026-10-02/playwright.config.cjs']`
+
+Outcome: exit 1; 17.1s; ended 2026-10-03T00:38:21Z. [Output](artifacts/frontend-cross-browser-regressions.txt).
+
+### 2026-10-03T00:38:31Z — sdk-isolate
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', '-c', 'from pathlib import Path; import shutil; p=Path("/private/tmp/amw-qa-sdk"); p.mkdir(exist_ok=True); [(shutil.copy2(Path("awi_sdk/typescript")/f,p/f)) for f in ["package.json","index.ts","LICENSE"]]; print("Isolated tracked TypeScript SDK sources without env or credentials",p)']`
+
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:38:31Z. [Output](artifacts/frontend-sdk-isolate.txt).
+
+### 2026-10-03T00:38:31Z — sdk-install-declared
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['npm', 'install', '--cache', '/private/tmp/amw-qa-npm-cache', '--prefix', '/private/tmp/amw-qa-sdk', '--ignore-scripts', '--no-fund', '--no-audit']`
+
+Outcome: exit 0; 0.7s; ended 2026-10-03T00:38:31Z. [Output](artifacts/frontend-sdk-install-declared.txt).
+
+### 2026-10-03T00:38:31Z — frontend-static-checks
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', '-c', 'from pathlib import Path; import subprocess; files=list(Path("site").rglob("*.js")); errors=[]; [(print(str(p), (r:=subprocess.run(["node","--check",str(p)],capture_output=True,text=True)).returncode),errors.append((str(p),r.stderr)) if r.returncode else None) for p in files]; print("scripts",len(files),"errors",errors); print("lint script","none declared in site/package.json"); print("tsconfig paths",list(Path("awi_sdk/typescript").glob("tsconfig*")))']`
+
+Outcome: exit 0; 0.3s; ended 2026-10-03T00:38:32Z. [Output](artifacts/frontend-frontend-static-checks.txt).
+
+docs/qa/2026-10-02/UX-SESSION.md
+al server readiness.\\n"""; Path("docs/qa/2026-10-02/UX-REPORT.md").write_text(text); print(text)']`
+
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:36:29Z. [Output](artifacts/ux-charters.txt).
+
+### 2026-10-03T00:36:37Z — accessibility-source
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', '-c', 'from pathlib import Path; specs=[("site/a11y.js",55,143),("site/styles.css",1,90),("site/pilot-fit.js",1,260)]; [(print("FILE",p),[(print(f"{i}: {l}")) for i,l in enumerate(Path(p).read_text().splitlines(),1) if a <= i <= b]) for p,a,b in specs]']`
+
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:36:37Z. [Output](artifacts/ux-accessibility-source.txt).
+
+### 2026-10-03T00:36:42Z — docs-and-build-links
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', '-c', 'from pathlib import Path; import re; files=["site/README.md","site/build_site.py","README.md","docs/quickstart.md"]; [(print("FILE",p),[(print(f"{i}: {l[:400]}")) for i,l in enumerate(Path(p).read_text().splitlines(),1) if re.search(r"output|dist|PUBLIC_|\\.env|quickstart|curl|sixty|15 minutes|same.*key|restart|reset|except|return",l,re.I)]) for p in files]; print("AGENT subdirs", [str(p) for p in Path("static").rglob("AGENTS.md")])']`
+
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:36:42Z. [Output](artifacts/ux-docs-and-build-links.txt).
+
+### 2026-10-03T00:36:57Z — page-semantics-source
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', '-c', 'from pathlib import Path; import re; files=["site/proof/index.html","site/compare/index.html","site/concept/index.html","site/arcade-boot.js"]; [(print("FILE",p),[(print(f"{i}: {l[:350]}")) for i,l in enumerate(Path(p).read_text().splitlines(),1) if re.search(r"<h[1-6]|<main|<table|<button|<input|<a |aria-|role=|fetch\\(|keydown|hidden",l)]) for p in files]']`
+
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:36:57Z. [Output](artifacts/ux-page-semantics-source.txt).
+
+### 2026-10-03T00:37:38Z — browser-accessibility
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['node', 'docs/qa/2026-10-02/ux_browser_qa.cjs']`
+
+Outcome: exit 1; 0.4s; ended 2026-10-03T00:37:38Z. [Output](artifacts/ux-browser-accessibility.txt).
+
+### 2026-10-03T00:38:33Z — csp-server
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', 'docs/qa/2026-10-02/ux_csp_server.py']`
+
+

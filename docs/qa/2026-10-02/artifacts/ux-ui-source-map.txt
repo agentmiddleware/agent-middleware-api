@@ -1,0 +1,101 @@
+npx /opt/homebrew/bin/npx
+FILE site/index.html
+184:     <div class="wave-fallback" aria-hidden="true"></div>
+189:         aria-hidden="true"
+194:     <main id="main">
+199:             <span class="eyebrow-mark" aria-hidden="true"></span>
+204:             <span class="eyebrow-mark" aria-hidden="true"></span>
+206:           <h1>Authorize one agent action. Charge it once. Prove what happened.</h1>
+219:               aria-label="Start a pilot by email (opens your mail app)"
+226:               aria-label="Run the local proof — opens the verification page"
+256:       <section class="section offer-band" aria-label="How the gateway works and the pilot offer" data-wave="condense">
+287:         <aside class="agent-entry pilot-card" aria-labelledby="pilot-card-title">
+291:               <h2 id="pilot-card-title">Bring one real MCP tool.</h2>
+329:             role="group"
+330:             aria-label="Diagram: the governed boundary is the only path from the agent to the tool"
+334:               role="img"
+335:               aria-labelledby="bf-title bf-desc"
+388:       <section class="section thesis-section" aria-labelledby="thesis-title" data-wave="order">
+391:           <h2 id="thesis-title">Agent intent is not authority—or evidence.</h2>
+429:       <section class="protocol-section" aria-labelledby="protocol-title" data-wave="stream">
+432:           <h2 id="protocol-title">One control loop from intent to evidence.</h2>
+449:       <section class="section proof-section" id="proof" aria-labelledby="proof-title" data-wave="crystal">
+453:             <h2 id="proof-title">Inspect the receipt, then verify it offline.</h2>
+467:         <div class="proof-grid artifact-grid" aria-live="polite">
+469:             <span class="receipt-seal" aria-hidden="true">Ed25519 · self-issued</span>
+503:       <section class="section pilot-section" id="pilot" aria-labelledby="pilot-title" data-wave="quiet">
+506:           <h2 id="pilot-title">Start with one tool, not a platform migration.</h2>
+524:           <h3>What the pilot includes</h3>
+532:           <h3>Five things to include in your email</h3>
+573:               aria-label="Start a pilot by email (opens your mail app)"
+587:               aria-label="Book a call if your scenario needs one (opens in a new tab)"
+588:               >Book a call if your scenario needs one <span aria-hidden="true">↗</span></a
+595:         <div class="pilot-fit" id="economic-fit" aria-labelledby="economic-fit-title">
+596:           <h3 id="economic-fit-title">Does avoiding duplicates justify the cost?</h3>
+611:           <fieldset class="fit-fields" aria-describedby="fit-assumptions" data-fit-inputs hidden>
+614:               <input id="fit-actions" type="number" min="0" step="1" required inputmode="numeric" />
+617:               <input id="fit-rate" type="number" min="0" max="100" step="any" required inputmode="decimal" aria-describedby="fit-rate-help" />
+621:               <input id="fit-loss" type="number" min="0" step="any" required inputmode="decimal" />
+624:               <input id="fit-reduction" type="number" min="0" max="100" step="any" required inputmode="decimal" />
+627:               <input id="fit-cost" type="number" min="0" step="any" inputmode="decimal" aria-describedby="fit-cost-help" />
+631:           <div class="fit-result" role="status" aria-live="polite" aria-atomic="true" data-fit-result hidden>
+655:         aria-labelledby="machine-title"
+660:           <h2 id="machine-title">Public pointers for agents and operators.</h2>
+674:               >Agent manifest <span class="ext" aria-hidden="true">↗</span></span
+684:               <span class="ext" aria-hidden="true">↗</span></span
+693:               >MCP discovery <span class="ext" aria-hidden="true">↗</span></span
+703:               <span class="ext" aria-hidden="true">↗</span></span
+714:       <section class="boundary-section" aria-labelledby="boundary-title" data-wave="dark">
+718:             <h2 id="boundary-title">What this proof does not establish.</h2>
+733:         aria-labelledby="provenance-title"
+739:             <h2 id="provenance-title">Built and run by one accountable operator.</h2>
+770:             <h2>Bring one tool. Keep the evidence.</h2>
+781:                 aria-label="Start a pilot by email (opens your mail app)"
+796:                 aria-label="Book a call if your scenario needs one (opens in a new tab)"
+797:                 >Book a call if your scenario needs one <span aria-hidden="true">↗</span></a
+814:           <button
+822:             <span aria-hidden="true">▶</span> HUMANS: PRESS START
+FILE site/a11y.js
+23:       var raw = window.localStorage.getItem(STORAGE_KEY);
+36:       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+74:     toggle.setAttribute("aria-expanded", "false");
+75:     toggle.setAttribute("aria-controls", "amw-a11y-panel");
+76:     toggle.setAttribute("aria-label", "Accessibility options");
+83:     panel.setAttribute("aria-label", "Accessibility options");
+100:     sizeControls.setAttribute("aria-labelledby", "amw-a11y-size-label");
+105:     smaller.setAttribute("aria-label", "Decrease text size");
+108:     readout.setAttribute("aria-live", "polite");
+113:     larger.setAttribute("aria-label", "Increase text size");
+127:     smaller.addEventListener("click", function () {
+133:     larger.addEventListener("click", function () {
+161:       control.setAttribute("aria-pressed", state[item.key] ? "true" : "false");
+162:       control.setAttribute("aria-labelledby", label.id + " " + control.id);
+165:       control.addEventListener("click", function () {
+167:         control.setAttribute("aria-pressed", state[item.key] ? "true" : "false");
+184:     reset.addEventListener("click", function () {
+190:         switchButtons[key].setAttribute("aria-pressed", "false");
+198:       toggle.setAttribute("aria-expanded", "true");
+204:       toggle.setAttribute("aria-expanded", "false");
+208:     toggle.addEventListener("click", function () {
+216:     document.addEventListener("keydown", function (event) {
+222:     document.addEventListener("click", function (event) {
+233:     document.addEventListener("DOMContentLoaded", build);
+FILE site/a11y-preload.js
+7:     var prefs = JSON.parse(window.localStorage.getItem("amw-a11y") || "{}");
+FILE static/dashboard.html
+291:   <main id="main-content" tabindex="-1">
+293:     <h1>Inspect the trust plane without invented telemetry.</h1>
+305:     <section aria-labelledby="posture-heading">
+306:       <h2 id="posture-heading">Core contract</h2>
+310:           <h3>Scoped authorization</h3>
+315:           <h3>Idempotent metering</h3>
+320:           <h3>Portable receipts</h3>
+325:           <h3>Durable evidence</h3>
+332:     <section aria-labelledby="evidence-heading">
+333:       <h2 id="evidence-heading">Status and evidence</h2>
+353:     <section aria-labelledby="discovery-heading">
+354:       <h2 id="discovery-heading">Machine discovery</h2>
+367:     <section aria-labelledby="inspection-heading">
+368:       <h2 id="inspection-heading">Authenticated inspection</h2>
+388:     <section aria-labelledby="limits-heading">
+389:       <h2 id="limits-heading">How to read the runtime data</h2>

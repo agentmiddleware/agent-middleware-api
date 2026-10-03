@@ -1,0 +1,249 @@
+BE tests tail
+"""QA sweep: public auth contract and replay-key encoding boundaries.
+
+Optional generative/schema tooling is installed by docs/qa/2026-10-02/
+requirements-qa.txt. Product behavior is deliberately unchanged.
+"""
+from __future__ import annotations
+
+import json
+from collections import Counter
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from app.main import app
+from app.services.idempotency import (
+    InvalidIdempotencyKeyError,
+    decode_idempotency_key_header,
+    resolve_client_idempotency_key,
+)
+from tests.test_mcp_idempotency_key_validation import CountedTool, _snapshot
+from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
+
+
+@pytest.fixture
+async def qa_client():
+    async with AsyncClient(
+        transport=ASGITransport(app=app, raise_app_exceptions=False),
+        base_url="http://test",
+    ) as client:
+        yield client
+
+
+@pytest.mark.parametrize("method,path", [
+    ("GET", "/v1/permits"),
+    ("POST", "/v1/permits"),
+    ("GET", "/v1/receipts"),
+    ("GET", "/v1/receipts/missing"),
+    ("GET", "/v1/billing/wallets"),
+    ("POST", "/v1/billing/charge"),
+    ("GET", "/v1/audit/events"),
+    ("POST", "/v1/audit/verify-chain"),
+    ("GET", "/v1/me/authority"),
+    ("GET", "/v1/api-keys/missing"),
+    ("POST", "/mcp/messages"),
+    ("POST", "/mcp/tools/missing/invoke"),
+])
+@pytest.mark.parametrize("credential", ["absent", "invalid-bearer"])
+async def test_sensitive_route_rejects_unauthenticated_caller(
+    qa_client, method, path, credential
+):
+    # A malformed Authorization header must not fall back to a valid bootstrap key.
+    headers = {} if credential == "absent" else {
+        "Authorization": "Bearer [REDACTED]",
+        "X-API-Key": "test-key",
+    }
+    response = await qa_client.request(method, path, headers=headers, json={})
+    assert response.status_code == 401
+    assert response.headers["content-type"].startswith("application/json")
+    assert "traceback" not in response.text.lower()
+    assert "X-Credential-Rejected" not in response.headers
+
+
+def test_openapi_schema_is_valid_with_unique_operation_ids():
+    validator = pytest.importorskip("openapi_spec_validator")
+    # Force a fresh schema: other tests mount dormant routers dynamically.
+    old_schema = app.openapi_schema
+    try:
+        app.openapi_schema = None
+        schema = app.openapi()
+        validator.validate(schema)
+        operations = [
+            operation
+            for path in schema["paths"].values()
+            for method, operation in path.items()
+            if method in {"get", "post", "put", "patch", "delete"}
+        ]
+        counts = Counter(operation["operationId"] for operation in operations)
+        assert all(count == 1 for count in counts.values())
+    finally:
+        app.openapi_schema = old_schema
+
+
+@pytest.mark.xfail(strict=True, reason="BE-002: Bearer [REDACTED] is absent from OpenAPI security schemes")
+def test_openapi_declares_supported_bearer_authentication():
+    schemes = app.openapi()["components"]["securitySchemes"].values()
+    assert any(s.get("type") == "http" and s.get("scheme") == "bearer" for s in schemes)
+
+
+def test_scalar_unicode_replay_keys_roundtrip_without_normalization():
+    hypothesis = pytest.importorskip("hypothesis")
+    from hypothesis import strategies as st
+
+    alphabet = st.characters(
+        exclude_categories=("Cs",),
+        exclude_characters="".join(chr(i) for i in [*range(32), 127]),
+    )
+
+    @hypothesis.settings(max_examples=200, derandomize=True, deadline=None)
+    @hypothesis.given(st.text(alphabet=alphabet, min_size=1, max_size=128).filter(str.strip))
+    def check(key):
+        decoded = decode_idempotency_key_header(key.encode("utf-8").decode("latin-1"))
+        assert decoded == key
+        assert resolve_client_idempotency_key([("header", decoded), ("body", key)]) == key
+        with pytest.raises(InvalidIdempotencyKeyError):
+            resolve_client_idempotency_key([("header", key), ("body", key + " ")])
+
+    check()
+
+
+async def test_lone_surrogate_replay_key_is_rejected_before_effect_or_debit(
+    qa_client, clean_database
+):
+    tool = CountedTool("qa.encoding.effect")
+    try:
+        caller = await provision_agent_wallet(qa_client)
+        permit = await create_tool_permit(
+            qa_client,
+            wallet_id=caller["agent_wallet_id"],
+            key_id=caller["key_id"],
+            tool_name=tool.name,
+        )
+        before = await _snapshot(qa_client, caller, tool)
+        body = {
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {
+                "name": tool.name, "arguments": {"text": "one"},
+                "mcpContext": {
+                    "wallet_id": caller["agent_wallet_id"],
+                    "permit_id": permit["permit_id"],
+                    "idempotency_key": "\ud800",
+                },
+            },
+        }
+        response = await qa_client.post(
+            "/mcp/messages",
+            content=json.dumps(body).encode("ascii"),
+            headers={**caller["agent_headers"], "Content-Type": "application/json"},
+        )
+        assert await _snapshot(qa_client, caller, tool) == before
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Invalid JSON"
+    finally:
+        tool.close()
+
+
+@pytest.mark.parametrize("address", ["224.0.0.1", "239.255.255.250", "ff02::1", "ff05::1"])
+@pytest.mark.xfail(strict=True, reason="BE-003: is_global alone permits multicast addresses through outbound guards")
+async def test_outbound_url_guard_rejects_multicast(address, monkeypatch):
+    from app.core.config import get_settings
+    from app.core.url_guard import check_outbound_url
+
+    monkeypatch.setattr(get_settings(), "ALLOW_PRIVATE_NETWORK_TARGETS", False)
+    host = f"[{address}]" if ":" in address else address
+    assert await check_outbound_url(f"http://{host}/") == "private_address_blocked"
+
+
+@pytest.mark.parametrize("address", ["224.0.0.1", "ff02::1"])
+@pytest.mark.xfail(strict=True, reason="BE-003: is_global alone permits multicast addresses through upstream guard")
+async def test_upstream_url_guard_rejects_multicast(address):
+    from decimal import Decimal
+    from app.services.upstream_mcp import (
+        UpstreamMcpConfiguration,
+        UpstreamMcpConfigurationError,
+        validate_upstream_url,
+    )
+
+    host = f"[{address}]" if ":" in address else address
+    configuration = UpstreamMcpConfiguration(
+        url=f"https://{host}/mcp",
+        origin=f"https://{host}",
+        tool_name="notes.write",
+        public_tool_id="partner.notes.write",
+        bearer_token=[REDACTED],
+        credits_per_call=Decimal("1"),
+        connect_timeout_seconds=1.0,
+        call_timeout_seconds=1.0,
+        max_response_bytes=1024,
+        environment="production",
+    )
+    with pytest.raises(UpstreamMcpConfigurationError):
+        await validate_upstream_url(configuration)
+
+UX latest log tail
+5.339Z — invalid-screenshot-retake
+
+Tool: CUA. Action: Navigate #economic-fit, enter -1 actions and capture at confirmed390x844,100% text.
+
+Outcome: Prior invalid screenshot suffered CUA capture scaling; use ux-cua-calculator-invalid-retake.jpg. Product result unchanged.
+
+### 2026-10-03T00:44:00Z — test-config-and-dashboard-route
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', '-c', 'from pathlib import Path; specs=[("docs/qa/2026-10-02/playwright.config.cjs",1,100),("app/routers/static.py",146,180),("site/styles.css",1790,1808)]; [(print("FILE",p),[(print(f"{i}: {l}")) for i,l in enumerate(Path(p).read_text().splitlines(),1) if a<=i<=b]) for p,a,b in specs]']`
+
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:44:00Z. [Output](artifacts/ux-test-config-and-dashboard-route.txt).
+
+### 2026-10-03T00:44:23Z — regression-test-syntax
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['node', '--check', 'docs/qa/2026-10-02/ux-regressions.spec.cjs']`
+
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:44:23Z. [Output](artifacts/ux-regression-test-syntax.txt).
+
+### 2026-10-03T00:44:24Z — regression-test-list
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['node', '/private/tmp/amw-qa-browser/node_modules/@playwright/test/cli.js', 'test', '--config', 'docs/qa/2026-10-02/playwright.config.cjs', '--list']`
+
+Outcome: exit 0; 0.3s; ended 2026-10-03T00:44:24Z. [Output](artifacts/ux-regression-test-list.txt).
+
+### 2026-10-03T00:44:57.314Z — cua-deadline
+
+Tool: CUA. Action: Attempt additional reduced-motion and skip-sequence checks.
+
+Outcome: Click Accessibility options exceeded CDP deadline before dispatch; no result claimed. Fetching fresh state before cleanup.
+
+BACKEND latest log tail
+nai-agent-middleware/src']`
+
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:44:35Z. [Output](artifacts/backend-wrapper-runtime-imports.txt).
+
+### 2026-10-03T00:44:53Z — posture-test-environment
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', '-c', 'from pathlib import Path; print("\\n".join(Path("tests/test_production_trust_posture.py").read_text().splitlines()[:145])); print("CI STRICT ENV"); print("\\n".join(Path(".github/workflows/ci.yml").read_text().splitlines()[430:450]))']`
+
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:44:53Z. [Output](artifacts/backend-posture-test-environment.txt).
+
+### 2026-10-03T00:45:10Z — branch-diff-scope
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['git', 'status', '--short']`
+
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:45:10Z. [Output](artifacts/backend-branch-diff-scope.txt).
+
+### 2026-10-03T00:45:10Z — sdk-wheel-install
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['uv', 'pip', 'install', '--python', '/private/tmp/amw-qa-python/bin/python', '--no-deps', './b2a_sdk', './wrappers/openai-agent-middleware']`
+
+Outcome: exit 0; 0.7s; ended 2026-10-03T00:45:11Z. [Output](artifacts/backend-sdk-wheel-install.txt).
+

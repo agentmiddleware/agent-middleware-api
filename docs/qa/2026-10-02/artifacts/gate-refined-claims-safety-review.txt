@@ -1,0 +1,42 @@
+54:     unreadable = 0
+55:     for name in tracked:
+56:         if not name:
+57:             continue
+58:         path = ROOT / name
+59:         if (
+60:             any(
+61:                 part.startswith(".env")
+62:                 or part in {"node_modules", ".git", ".venv", ".aws", ".ssh"}
+63:                 for part in path.parts
+64:             )
+65:             or path.suffix.lower() in {".pem", ".key", ".p12", ".pfx"}
+66:             or path.name.lower() in {
+67:                 "credentials", "credentials.json", "credentials.toml",
+68:                 "credential-store.json", "secret-store.json", "token-cache.json",
+69:                 "private_key", "id_rsa", "id_ed25519", "id_dsa", "id_ecdsa",
+70:             }
+71:         ):
+72:             excluded += 1
+73:             continue
+74:         if not path.is_file():
+75:             unreadable += 1
+76:             continue
+77:         data = path.read_bytes()
+78:         if b"\0" in data:
+79:             continue
+80:         try:
+81:             lines = data.decode("utf-8").splitlines()
+82:         except UnicodeDecodeError:
+83:             continue
+84:         for number, text in enumerate(lines, 1):
+85:             if PATTERN.search(text):
+86:                 group, status = family(name, number, text)
+87:                 rows.append({
+88:                     "id": f"BE-C{len(rows) + 1:03}",
+89:                     "file": name,
+90:                     "line": number,
+91:                     "text": scrub(text.strip()),
+COUNTS 350 135
+CREDENTIALING_DOC_INCLUDED True
+REPORT WORDING ['Every matched occurrence in the searched file scope is retained with file and line in [CLAIMS-INVENTORY.md](CLAIMS-INVENTORY.md) and [claims-inventory.json](artifacts/claims-inventory.json). Environment files and actual key/credential-store paths are excluded; ordinary code and documentation about secrets or credentials are included, including the BE-100 self-credentialing page. The following finding IDs classify the substantive families; verified or documented-limitation rows are explicitly **not defects** and do not inflate severity counts. References in tests, historical reports, games, MQTT QoS definitions and one-time registration helpers are identified separately from an end-to-end processing guarantee. Enumeration does not claim that every historical proof was rerun or that arbitrary paraphrases match the lexical search.', 'No new production vulnerability is claimed from this lane. No secrets were intentionally read or recorded. The lexical search omitted environment and actual key/credential-store paths. No live PostgreSQL, upstream MCP, external approval, distributed execution, or billing system was contacted; no dependency-advisory service was queried. Same-key races, refund recovery and auth tests must be read with the separate Backend QA outcomes. Correct BE-100 documentation first, then explicitly test the standard-MCP fresh-key boundary if that surface is part of an active pilot.']
+BACKEND FINAL ['backend-ruff-after-qa.txt', 'backend-after-coverage.json', 'backend-after-full.txt', 'backend-after-checkpoint.txt']

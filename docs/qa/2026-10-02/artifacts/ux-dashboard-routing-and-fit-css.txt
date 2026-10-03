@@ -1,0 +1,12 @@
+tests/test_dashboard_design.py:9:DASHBOARD = ROOT / "static" / "dashboard.html"
+site/styles.css:1794:.fit-list {
+site/styles.css:1801:.fit-list li {
+app/main.py:798:        dashboard_path = _REPO_ROOT / "static" / "dashboard.html"
+app/middleware/security_headers.py:108:        "/dashboard",
+app/routers/well_known.py:156:            "human_dashboard_url": "/dashboard",
+app/routers/well_known.py:160:                "The /dashboard is a status and evidence index. "
+app/routers/well_known.py:390:            "human_dashboard": "/dashboard",
+app/routers/well_known.py:460:        "human_dashboard": "/dashboard",
+app/routers/static.py:159:    "/dashboard",
+app/routers/static.py:169:    dashboard_path = _REPO_ROOT / "static" / "dashboard.html"
+app/routers/static.py:171:        raise HTTPException(status_code=404, detail="dashboard.html not found")

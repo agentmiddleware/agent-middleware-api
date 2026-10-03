@@ -1,0 +1,1 @@
+DNS guard now allows local resolver classification of numeric-only legacy IPv4 inputs; outbound connections remain loopback-only. Environment-file access remains denied.

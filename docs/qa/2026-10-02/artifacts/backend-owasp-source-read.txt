@@ -1,0 +1,333 @@
+FILE app/middleware/request_body_limit.py
+1: """Bound the size of inbound HTTP request bodies.
+2: 
+3: The governed MCP invoke path accepts caller-supplied tool arguments, which are
+4: parsed, hashed, and persisted. Without a ceiling, one request can force the
+5: gateway to buffer and process an arbitrarily large payload before any permit,
+6: wallet, or rate-limit decision has a chance to reject it — the work is done on
+7: the attacker's terms and charged to nobody.
+8: 
+9: Two MCP transports already cap their own bodies (``mcp_public`` at 256 KiB,
+10: ``partner_mcp`` at 64 KiB), but both are opt-in surfaces. This middleware puts
+11: the same floor under every route, including ``/mcp/messages``, which is always
+12: mounted and is the product.
+13: 
+14: Enforcement is two-stage. A declared ``Content-Length`` over the limit is
+15: refused without reading a byte, so the common case costs nothing. Otherwise the
+16: body is drained up to the limit and replayed to the application; a stream that
+17: exceeds the limit mid-flight is refused at the moment it does. Buffering is
+18: bounded by the limit itself, so the check cannot become the exhaustion it
+19: prevents.
+20: """
+21: 
+22: from __future__ import annotations
+23: 
+24: from collections import deque
+25: 
+26: from starlette.datastructures import Headers
+27: from starlette.responses import JSONResponse
+28: from starlette.types import ASGIApp, Message, Receive, Scope, Send
+29: 
+30: # Methods that carry a body. A GET has none to bound, and passing it straight
+31: # through keeps the read side of the API free of buffering.
+32: BODY_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+33: 
+34: 
+35: def _too_large(limit: int) -> JSONResponse:
+36:     """413 in the API's error shape, naming the limit so a caller can adapt."""
+37:     return JSONResponse(
+38:         status_code=413,
+39:         content={
+40:             "detail": f"Request body exceeds the {limit}-byte limit.",
+41:             "max_request_body_bytes": limit,
+42:         },
+43:     )
+44: 
+45: 
+46: class RequestBodyLimitMiddleware:
+47:     """Reject request bodies larger than ``max_body_size`` with a 413."""
+48: 
+49:     def __init__(self, app: ASGIApp, max_body_size: int) -> None:
+50:         self.app = app
+51:         self.max_body_size = max_body_size
+52: 
+53:     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+54:         if scope["type"] != "http" or scope.get("method") not in BODY_METHODS:
+55:             await self.app(scope, receive, send)
+56:             return
+57: 
+58:         declared = Headers(scope=scope).get("content-length")
+59:         if declared is not None:
+60:             try:
+61:                 declared_size = int(declared)
+62:             except ValueError:
+63:                 # A malformed header is not proof of an oversized body; fall
+64:                 # through to the streaming check, which measures the real one.
+65:                 pass
+66:             else:
+67:                 if declared_size > self.max_body_size:
+68:                     await _too_large(self.max_body_size)(scope, receive, send)
+69:                     return
+70: 
+71:         # A truthful Content-Length is not guaranteed (chunked encoding omits
+72:         # it, a hostile client can understate it), so measure what arrives.
+73:         buffered = bytearray()
+74:         saw_body = False
+75:         complete = False
+76:         trailing: Message | None = None
+77:         while True:
+78:             message = await receive()
+79:             if message["type"] != "http.request":
+80:                 # A disconnect (or anything else) ends the body; hand it on so
+81:                 # the application observes the same event we did.
+82:                 trailing = message
+83:                 break
+84: 
+85:             saw_body = True
+86:             buffered.extend(message.get("body", b""))
+87:             if len(buffered) > self.max_body_size:
+88:                 await _too_large(self.max_body_size)(scope, receive, send)
+89:                 return
+90:             if not message.get("more_body", False):
+91:                 complete = True
+92:                 break
+93: 
+94:         replayed: deque[Message] = deque()
+95:         if saw_body:
+96:             replayed.append(
+97:                 {
+98:                     "type": "http.request",
+99:                     "body": bytes(buffered),
+100:                     "more_body": not complete,
+101:                 }
+102:             )
+103:         if trailing is not None:
+104:             replayed.append(trailing)
+105: 
+106:         async def replay() -> Message:
+107:             if replayed:
+108:                 return replayed.popleft()
+109:             return await receive()
+110: 
+111:         await self.app(scope, replay, send)
+FILE app/core/url_guard.py
+1: """Outbound-URL guard for agent-driven navigation and proxied requests.
+2: 
+3: Agent-supplied URLs reach two genuinely dangerous sinks: the AWI Playwright
+4: bridge (a real headless browser that will happily open ``file://`` and
+5: intranet URLs) and the behavioral sandbox's HTTP proxy mode (a raw
+6: ``aiohttp`` request). Both run inside our infrastructure, so an unchecked
+7: URL is an SSRF primitive against link-local metadata services, RFC1918
+8: networks, and the host filesystem.
+9: 
+10: ``check_outbound_url`` returns ``None`` when the URL is safe to fetch and a
+11: short machine-readable reason string when it must be blocked. Scheme and
+12: literal-address checks are unconditional; hostname checks resolve DNS and
+13: block names that resolve to non-global addresses. Resolution failure fails
+14: closed (``dns_resolution_failed``): the guard cannot vouch for a name it
+15: could not resolve, and the fetching client (a headless browser with its own
+16: resolver, or a later retry) may well resolve it — possibly to an intranet
+17: address. This matches the upstream MCP URL guard. Tests that exercise
+18: public hostnames pin ``_resolve_host`` instead of relying on live DNS. This
+19: is a pre-flight guard, not a substitute for network-level egress policy,
+20: and it intentionally does not try to defeat DNS rebinding.
+21: 
+22: Setting ``ALLOW_PRIVATE_NETWORK_TARGETS=true`` (local development against
+23: mock servers) skips only the private-address checks; non-http(s) schemes
+24: such as ``file://`` and ``javascript:`` are never allowed.
+25: """
+26: 
+27: from __future__ import annotations
+28: 
+29: import asyncio
+30: import ipaddress
+31: import socket
+32: from urllib.parse import urlsplit
+33: 
+34: from app.core.config import get_settings
+35: 
+36: _ALLOWED_SCHEMES = {"http", "https"}
+37: _BLOCKED_HOSTNAMES = {"localhost", "metadata.google.internal"}
+38: _BLOCKED_SUFFIXES = (".localhost", ".local", ".internal")
+39: 
+40: 
+41: def _address_blocked(address: str) -> bool:
+42:     try:
+43:         ip = ipaddress.ip_address(address)
+44:     except ValueError:
+45:         return False
+46:     # is_global is False for loopback, RFC1918/ULA, link-local (including
+47:     # 169.254.169.254 metadata), CGNAT shared space, multicast, reserved,
+48:     # and unspecified addresses.
+49:     return not ip.is_global
+50: 
+51: 
+52: async def _resolve_host(host: str):
+53:     """Resolve a hostname through the event loop; split out for deterministic tests."""
+54: 
+55:     return await asyncio.get_running_loop().getaddrinfo(
+56:         host, None, type=socket.SOCK_STREAM
+57:     )
+58: 
+59: 
+60: async def check_outbound_url(url: str) -> str | None:
+61:     """Return a block reason for an agent-supplied outbound URL, or None."""
+62:     try:
+63:         parts = urlsplit(url)
+64:     except ValueError:
+65:         return "unparseable_url"
+66: 
+67:     if parts.scheme.lower() not in _ALLOWED_SCHEMES:
+68:         return "scheme_not_allowed"
+69: 
+70:     host = parts.hostname
+71:     if not host:
+72:         return "missing_host"
+73: 
+74:     if get_settings().ALLOW_PRIVATE_NETWORK_TARGETS:
+75:         return None
+76: 
+77:     host = host.strip("[]").rstrip(".").lower()
+78:     if host in _BLOCKED_HOSTNAMES or host.endswith(_BLOCKED_SUFFIXES):
+79:         return "private_host_blocked"
+80: 
+81:     if _address_blocked(host):
+82:         return "private_address_blocked"
+83: 
+84:     try:
+85:         ipaddress.ip_address(host)
+86:     except ValueError:
+87:         # A hostname, not a literal address: resolve it and require every
+88:         # resolved address to be globally routable.
+89:         try:
+90:             infos = await _resolve_host(host)
+91:         except (OSError, UnicodeError):
+92:             # socket.gaierror is an OSError; UnicodeError covers names the
+93:             # IDNA codec rejects (e.g. an over-long label). Fail closed.
+94:             return "dns_resolution_failed"
+95:         for info in infos:
+96:             if _address_blocked(str(info[4][0])):
+97:                 return "private_address_blocked"
+98: 
+99:     return None
+FILE tests/test_route_auth_inventory.py
+1: from __future__ import annotations
+2: 
+3: from fastapi.routing import APIRoute
+4: 
+5: from app.main import app
+6: from tests.conftest import iter_routes
+7: 
+8: 
+9: PUBLIC_PATH_PREFIXES = (
+10:     "/docs",
+11:     "/redoc",
+12:     "/llm.txt",
+13:     "/static",
+14:     "/.well-known",
+15: )
+16: PUBLIC_PATHS = {"/", "/openapi.json", "/mcp/tools", "/mcp/tools.json"}
+17: 
+18: 
+19: def test_state_changing_core_trust_routes_have_auth_dependencies():
+20:     checked = 0
+21:     for route in iter_routes(app.routes):
+22:         if not isinstance(route, APIRoute):
+23:             continue
+24:         if not (set(route.methods or set()) & {"POST", "PUT", "PATCH", "DELETE"}):
+25:             continue
+26:         # The feature-gated public MCP route is deliberately anonymous and
+27:         # separately pins its exact GET/POST/DELETE route inventory. Refuse to
+28:         # exempt any future mutating method added under this path.
+29:         if route.path == "/mcp/public":
+30:             assert set(route.methods or set()) <= {"GET", "POST", "DELETE"}
+31:             continue
+32:         if route.path in PUBLIC_PATHS:
+33:             continue
+34:         if route.path.startswith(PUBLIC_PATH_PREFIXES):
+35:             continue
+36:         dependency_names = {
+37:             getattr(dependency.call, "__name__", "")
+38:             for dependency in route.dependant.dependencies
+39:         }
+40:         if route.path.startswith(("/v1/permits", "/v1/receipts", "/v1/audit", "/mcp")):
+41:             checked += 1
+42:             assert "get_auth_context" in dependency_names
+43:     assert checked >= 4
+FILE app/core/auth.py
+20: settings = get_settings()
+21: 
+22: # Static development/training keys (STATIC_DEV_API_KEYS) must carry this
+23: # prefix. It keeps dev keys greppable/scannable and means a rotated
+24: # amw_live_ bootstrap key pasted into the wrong variable never
+25: # authenticates through the static-dev path.
+26: STATIC_DEV_KEY_PREFIX = "amw_dev_"
+27: 
+28: api_key_header = APIKeyHeader(
+29:     name=settings.API_KEY_HEADER,
+30:     auto_error=False,
+31:     description="API key for agent authentication. Pass in the X-API-Key header.",
+32: )
+33: 
+34: 
+35: @dataclass(frozen=True)
+36: class AuthContext:
+37:     """Authenticated caller details used for tenant-scoped authorization."""
+38: 
+39:     source: str
+40:     raw_key: str
+41:     key_id: str | None = None
+42:     wallet_id: str | None = None
+43:     is_bootstrap_admin: bool = False
+44:     scopes: list[str] = None  # type: ignore[assignment]
+45:     # Enterprise (Okta/Entra) bearer [REDACTED] accompanied an X-API-Key call. Set
+46:     # ONLY when the Authorization header carried a token whose UNVERIFIED
+47:     # issuer names a pinned IGA issuer (see get_auth_context). It is identity
+48:     # attribution for the human behind the agent, NEVER an API credential:
+49:     # enforcement points (app/core/oidc_iga.parse_enterprise_token +
+50:     # enforce_tool_call) fully verify it before any trust decision.
+51:     enterprise_bearer_token: [REDACTED] | None = None
+52: 
+53:     def __post_init__(self):
+54:         if self.scopes is None:
+55:             object.__setattr__(self, "scopes", [])
+56: 
+57:     def require_wallet_access(self, wallet_id: str | None) -> None:
+58:         """Allow bootstrap admins or the exact wallet owning a DB-backed key.
+59: 
+60:         ``wallet_id`` may be ``None`` for a resource with no owning wallet (e.g.
+61:         a sandbox environment created by a bootstrap admin). A non-admin caller
+62:         always has a concrete ``self.wallet_id``, so an ownerless resource is
+63:         correctly denied to everyone but bootstrap admins.
+64:         """
+65:         if self.is_bootstrap_admin:
+66:             return
+67:         if self.wallet_id is not None and self.wallet_id == wallet_id:
+68:             return
+69:         raise HTTPException(
+70:             status_code=status.HTTP_403_FORBIDDEN,
+71:             detail={
+72:                 "error": "wallet_access_denied",
+73:                 "message": "API key is not authorized for this wallet.",
+74:                 "wallet_id": wallet_id,
+75:             },
+76:         )
+77: 
+78:     def require_bootstrap_admin(self) -> None:
+79:         """Allow only trusted bootstrap/admin environment keys."""
+80:         if self.is_bootstrap_admin:
+81:             return
+82:         raise HTTPException(
+83:             status_code=status.HTTP_403_FORBIDDEN,
+84:             detail={
+85:                 "error": "admin_access_denied",
+86:                 "message": "This operation requires a bootstrap admin API key.",
+87:             },
+88:         )
+89: 
+90: 
+91: # Internal marker on a response that failed *authentication* rather than
+92: # authorization. RateLimitMiddleware charges those to its shared
+93: # rejected-credential bucket and strips the header before the response leaves
+94: # the innermost middleware, so it is never a public surface. It exists because
+95: # an unknown-but-well-formed key is refused with 403, not 401, and the limiter

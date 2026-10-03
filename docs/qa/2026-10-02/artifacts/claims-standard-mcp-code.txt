@@ -1,0 +1,190 @@
+FILE app/routers/mcp_standard.py
+225:) -> str | None:
+226:    """Resolve the caller's replay key from every source it actually sent.
+227:
+228:    Runs before the auto-permit mint, so a refused key has no effect at all:
+229:    no permit, no idempotency record, no debit, no dispatch. ``None`` means
+230:    the caller sent no key anywhere.
+231:    """
+232:    sources: list[tuple[str, object]] = []
+233:    try:
+234:        if http_request is not None:
+235:            sources.extend(_header_idempotency_key_sources(http_request))
+236:        meta_source = _meta_idempotency_key_source(params)
+237:        if meta_source is not None:
+238:            sources.append(meta_source)
+239:        # A client written against the legacy transport may send its key in
+240:        # params.mcpContext. This endpoint mints its own permit and ignores
+241:        # the rest of that object, but a key the caller explicitly sent must
+242:        # not be silently dropped: it is one more source, validated and
+243:        # conflict-checked like the others. JSON null reads as absent, as
+244:        # everywhere else.
+245:        legacy_context = (params.model_extra or {}).get("mcpContext")
+246:        if isinstance(legacy_context, dict):
+247:            context_value = legacy_context.get("idempotency_key")
+248:            if context_value is not None:
+249:                sources.append((_LEGACY_CONTEXT_KEY_SOURCE, context_value))
+250:        elif legacy_context is not None:
+251:            raise _mcp_error(-32602, "Invalid params: mcpContext must be an object")
+252:        return resolve_client_idempotency_key(sources)
+253:    except InvalidIdempotencyKeyError as exc:
+254:        raise _mcp_error(-32602, str(exc), exc.as_error_data()) from exc
+255:
+256:
+257:async def _mint_auto_permit(
+258:    *,
+259:    auth: AuthContext,
+260:    tool_name: str,
+261:    record: dict[str, Any],
+262:    client_key: str | None,
+263:    requires_human_approval: bool = False,
+264:) -> str:
+265:    """Mint the bounded single-tool permit backing this call.
+266:
+267:    The governed replay hash covers the permit id, so a retried idempotency
+268:    key must resolve to the SAME auto-minted permit — mint through an
+269:    idempotency record keyed off the client's key. Generated keys are unique
+270:    per call and skip this bookkeeping.
+271:    """
+272:    wallet_id = auth.wallet_id
+273:    if not wallet_id:  # narrowed by the caller; fail closed regardless
+274:        raise _mcp_error(-32003, "wallet_scoped_key_required")
+275:    settings = get_settings()
+276:    # An approval-gated permit must stay valid for the whole decision window
+277:    # plus the normal TTL as execution margin: permit expiry is validated
+278:    # before the approval is polled, so a shorter-lived permit would strand a
+279:    # decision made late in the window as a terminal permit_expired denial.
+280:    ttl_seconds = settings.STANDARD_MCP_PERMIT_TTL_SECONDS
+281:    if requires_human_approval:
+282:        ttl_seconds += approval_window_seconds()
+283:    permit_request = PermitCreateRequest(
+284:        issuer_wallet_id=wallet_id,
+285:        subject_wallet_id=wallet_id,
+286:        subject_key_id=auth.key_id,
+287:        allowed_tools=[tool_name],
+288:        max_credits=_tool_call_budget(record),
+289:        expires_at=utc_now() + timedelta(seconds=ttl_seconds),
+290:        requires_human_approval=requires_human_approval,
+291:    )
+292:
+293:    if not client_key:
+294:        try:
+295:            permit = await get_permit_service().create_permit(
+318:            endpoint=_AUTO_PERMIT_ENDPOINT,
+319:            idempotency_key=mint_key,
+320:            request_payload=mint_payload,
+321:        )
+322:    except IdempotencyConflictError as exc:
+323:        raise _mcp_error(-32003, "idempotency_key_reused") from exc
+324:    except IdempotencyInProgressError as exc:
+325:        raise _mcp_error(-32005, "idempotency_in_progress") from exc
+326:    if mint_replay and mint_replay.response_json:
+327:        return mint_replay.response_json["permit_id"]
+328:
+329:    try:
+330:        permit = await get_permit_service().create_permit(
+331:            permit_request, subject_key_id=auth.key_id
+332:        )
+333:    except PermitError as exc:
+334:        await idem.abandon(
+335:            wallet_id=wallet_id,
+336:            endpoint=_AUTO_PERMIT_ENDPOINT,
+337:            idempotency_key=mint_key,
+338:        )
+339:        raise _permit_error(exc, tool_name=tool_name, record=record) from exc
+340:    await idem.complete(
+341:        wallet_id=wallet_id,
+342:        endpoint=_AUTO_PERMIT_ENDPOINT,
+343:        idempotency_key=mint_key,
+344:        response_reference=permit.permit_id,
+345:        response_json={"permit_id": permit.permit_id},
+346:        status_code=201,
+347:    )
+348:    return permit.permit_id
+349:
+350:
+351:async def _governed_tools_call(
+352:    *,
+353:    auth: AuthContext,
+354:    tool_name: str,
+355:    arguments: dict[str, Any],
+356:    client_idempotency_key: str | None,
+357:    request_id: str | None,
+358:) -> dict[str, Any]:
+359:    """Auto-mint the permit, then run the single governed invoke pipeline."""
+360:    if not tool_name:
+FILE app/routers/mcp.py
+915:async def _execute_registered_tool(
+1008:async def _execute_registered_tool_inner(
+1137:    if execution_backend == "local" and func is None:
+1149:    if execution_backend == "upstream_mcp" and upstream_executor is None:
+1298:                    if execution_backend == "upstream_mcp"
+1609:        and execution_backend == "upstream_mcp"
+1658:        if execution_backend == "upstream_mcp"
+1676:                    idempotency_record_id=idem_begin.record_id,
+1743:                    idempotency_record_id=idem_begin.record_id,
+1943:            idempotency_record_id=(
+2156:                idempotency_record_id=(
+2185:    if execution_backend == "upstream_mcp":
+2206:            idempotency_record_id=idem_begin.record_id,
+2491:                            idempotency_record_id=(
+2581:    idempotency_record_id: str | None,
+2597:        operation_key=idempotency_record_id if governed_call else None,
+2643:    idempotency_record_id: str,
+2713:            invocation_id=idempotency_record_id,
+2904:            idempotency_record_id=idempotency_record_id,
+3086:        idempotency_record_id=dispatch_attempt.idempotency_record_id,
+3167:            idempotency_record_id=dispatch_attempt.idempotency_record_id,
+3381:    idempotency_record_id: str | None = None,
+3409:    if idempotency_record_id is None and idempotency_key:
+3415:        idempotency_record_id = record.record_id if record is not None else None
+3430:            idempotency_record_id=idempotency_record_id,
+3441:            # exists and its NOT NULL idempotency_record_id pins the record.
+3956:                # exists and its NOT NULL idempotency_record_id pins the
+FILE app/services/upstream_mcp.py
+950:                dispatch_started = True
+951:                try:
+952:                    async with asyncio.timeout(self.configuration.call_timeout_seconds):
+953:                        result = await _await_guarded_response(
+954:                            session.call_tool(
+955:                                self.configuration.tool_name,
+956:                                arguments,
+957:                                read_timeout_seconds=timedelta(
+958:                                    seconds=self.configuration.call_timeout_seconds
+959:                                ),
+960:                                meta={
+961:                                    "io.agentmiddleware/invocation_id": invocation_id,
+962:                                    "io.agentmiddleware/idempotency_key": idempotency_key,
+963:                                },
+964:                            ),
+965:                            response_guard=response_guard,
+966:                        )
+967:                    canonical_result = self._canonicalize_result(result)
+968:                except UpstreamMcpResponseRejectedError as exc:
+969:                    response_rejected = exc
+970:        except UpstreamMcpError:
+971:            if dispatch_claim_unavailable is not None:
+972:                # A context-manager cleanup failure can itself use one of our
+973:                # typed errors. The saved claim contention still takes
+974:                # precedence so the router cannot enter a refund path.
+975:                raise dispatch_claim_unavailable
+976:            if response_guard.rejection_code is not None:
+977:                if dispatch_started:
+978:                    raise UpstreamMcpResponseRejectedError(
+979:                        response_guard.rejection_code
+980:                    ) from None
+981:                raise UpstreamMcpPreDispatchError(
+982:                    response_guard.rejection_code
+983:                ) from None
+984:            if canonical_result is not None or response_rejected is not None:
+985:                # Cleanup may raise one of our typed transport exceptions too.
+986:                # A canonical result or a known rejection still outranks that
+987:                # close-time failure just as it does for an untyped exception.
+988:                logger.warning(
+989:                    "upstream_mcp_session_cleanup_failed",
+990:                    extra={
+FILE app/db/models.py
+829:    idempotency_record_id: Optional[str] = Field(
+1041:            name="uq_idempotency_wallet_endpoint_key",
+1048:            "uq_idempotency_governed_mcp_identity",
+1088:    idempotency_record_id: str = Field(

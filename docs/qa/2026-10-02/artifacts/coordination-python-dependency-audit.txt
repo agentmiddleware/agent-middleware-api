@@ -1,0 +1,7 @@
+{
+  "source": "Public PyPI per-version JSON package metadata; no private registry or advisory API",
+  "scope": "Resolved isolated Python QA environment, including development tools",
+  "package_count": 100,
+  "vulnerable_package_count": 0,
+  "unverified_package_count": 0
+}

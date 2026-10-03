@@ -1,0 +1,4 @@
+Report links missing: []
+Five required docs have required orchestrator metadata. Eight accepted defects agree with current summary. Source inventory link issue corrected; previous failed check preserved.
+Late discovery-copy candidate reviewed: adjacent401 qualification makes it a documented protected request, not a new anonymous-success defect.
+UTC 2026-10-03T00:51:11.351268+00:00
