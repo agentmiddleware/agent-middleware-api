@@ -1,4 +1,4 @@
-"""A registered tool's price must be a finite, non-negative number.
+"""A registered tool's price must be a finite, positive number.
 
 ``tool_price`` is the one definition of what a governed invoke and a signed
 quote charge. It used to return whatever the registration held, so a
@@ -47,6 +47,7 @@ INVALID_FLOAT_PRICES = [
     float("inf"),
     float("-inf"),
     -1.0,
+    0.0,
     0.123456789,
     0.000000001,
     1000000000000.0,
@@ -97,6 +98,8 @@ def priced_tool():
         "Infinity",
         "-Infinity",
         "-1",
+        "0",
+        "-0",
         "-0.00000001",
         "abc",
         "",
@@ -128,15 +131,13 @@ def test_tool_price_exact_override_is_checked_before_float_fallback():
     ("service", "expected"),
     [
         ({"credits_per_unit_exact": "2.50000000"}, Decimal("2.50000000")),
-        ({"credits_per_unit_exact": "0"}, Decimal("0")),
         ({"credits_per_unit_exact": "0.123456780"}, Decimal("0.12345678")),
         ({"credits_per_unit_exact": "0.00000001"}, Decimal("0.00000001")),
         ({"credits_per_unit": 3.0}, Decimal("3.0")),
-        ({"credits_per_unit": 0.0}, Decimal("0.0")),
         ({}, DEFAULT_PRICING[CATEGORY][1]),
     ],
 )
-def test_tool_price_accepts_finite_non_negative(service, expected):
+def test_tool_price_accepts_finite_positive(service, expected):
     assert tool_price(service, CATEGORY) == expected
 
 
@@ -307,9 +308,9 @@ async def test_quote_for_another_wallet_is_refused_before_pricing(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "amount", ["NaN", "Infinity", "0.123456789", "100000000000.12345678"]
+    "amount", ["0", "NaN", "Infinity", "0.123456789", "100000000000.12345678"]
 )
-async def test_direct_quote_service_rejects_non_storable_amount_before_signing(
+async def test_direct_quote_service_rejects_invalid_amount_before_signing(
     amount, monkeypatch
 ):
     from unittest.mock import AsyncMock

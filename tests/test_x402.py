@@ -14,6 +14,7 @@ signed receipts only (docs/settlement-rails.md settlement freeze).
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -1119,14 +1120,15 @@ async def _backdate_settle_record(idempotency_key: str, *, wallet_id: str) -> No
 
 
 @pytest.mark.anyio
-async def test_x402_stale_receiptless_record_recovers_and_settles(
+async def test_x402_stale_receiptless_record_retains_owner_for_review(
     client, clean_database
 ):
-    """A settle key wedged by an attempt that died BEFORE any receipt was
-    written (the fully compensated crash shape) must not be wedged forever:
-    once the record is stale it is abandoned — with an x402_settle_recovered
-    audit event — and the retry settles fresh. A FRESH in-progress record
-    (possibly a live concurrent settle) stays a hard 409."""
+    """No receipt cannot prove whether the attempt reserved permit authority.
+
+    Retain even an empty stale owner: it has no durable reservation checkpoint
+    distinguishing it from a crash after reservation. Fresh owners still get
+    the ordinary in-progress conflict.
+    """
     from app.routers.x402 import _SETTLE_ENDPOINT, X402SettleRequest
     from app.services.idempotency import get_idempotency_service
 
@@ -1163,32 +1165,128 @@ async def test_x402_stale_receiptless_record_recovers_and_settles(
 
     await _backdate_settle_record("x402-recover-1", wallet_id=wallet_id)
 
-    # Stale + receiptless: recovered — the retry runs the settle for real.
-    ok = await client.post("/v1/x402/settle", json=body, headers=headers)
-    assert ok.status_code == 200, ok.text
-    settlement = ok.json()
-    assert settlement["receipt_id"].startswith("rcpt-")
+    for _ in range(2):
+        blocked = await client.post("/v1/x402/settle", json=body, headers=headers)
+        assert blocked.status_code == 409
+        assert blocked.json()["detail"] == "x402_settlement_needs_review"
+    assert await _permit_spent(client, permit["permit_id"]) == Decimal("0")
+    _, total = await get_receipt_service().list_receipts(permit_id=permit["permit_id"])
+    assert total == 0
+    retained = await idem.get_record(
+        wallet_id=wallet_id,
+        endpoint=_SETTLE_ENDPOINT,
+        idempotency_key="x402-recover-1",
+    )
+    assert retained.record_id == begun.record_id
+    assert retained.response_json is None
+
+
+@pytest.mark.anyio
+async def test_x402_crash_after_reservation_refuses_overlapping_stale_retries(
+    client, clean_database, monkeypatch
+):
+    from app.routers.x402 import _SETTLE_ENDPOINT
+    from app.services.idempotency import get_idempotency_service
+
+    class SimulatedProcessDeath(BaseException):
+        pass
+
+    owner = await provision_agent_wallet(client)
+    wallet_id = owner["agent_wallet_id"]
+    permit = await create_tool_permit(
+        client,
+        wallet_id=wallet_id,
+        key_id=owner["key_id"],
+        tool_name="x402.payment",
+        max_credits=100,
+        idem_key="crash-permit",
+    )
+    body = _settle_body(permit_id=permit["permit_id"], wallet_id=wallet_id)
+    headers = {**owner["agent_headers"], "Idempotency-Key": "crash-settle"}
+    handler = get_x402_handler()
+
+    def die_after_committed_reservation(*args, **kwargs):
+        raise SimulatedProcessDeath()
+
+    with monkeypatch.context() as context:
+        context.setattr(
+            handler, "build_transfer_authorization", die_after_committed_reservation
+        )
+        with pytest.raises(BaseExceptionGroup) as crash:
+            await client.post("/v1/x402/settle", json=body, headers=headers)
+        assert crash.value.subgroup(SimulatedProcessDeath) is not None
+    assert await _permit_spent(client, permit["permit_id"]) == Decimal("30")
+    idem = get_idempotency_service()
+    original = await idem.get_record(
+        wallet_id=wallet_id, endpoint=_SETTLE_ENDPOINT, idempotency_key="crash-settle"
+    )
+    await _backdate_settle_record("crash-settle", wallet_id=wallet_id)
+
+    retries = await asyncio.gather(
+        *(client.post("/v1/x402/settle", json=body, headers=headers) for _ in range(2))
+    )
+    for retry in retries:
+        assert retry.status_code == 409
+        assert retry.json()["detail"] == "x402_settlement_needs_review"
+    assert await _permit_spent(client, permit["permit_id"]) == Decimal("30")
+    _, total = await get_receipt_service().list_receipts(permit_id=permit["permit_id"])
+    assert total == 0
+    retained = await idem.get_record(
+        wallet_id=wallet_id, endpoint=_SETTLE_ENDPOINT, idempotency_key="crash-settle"
+    )
+    assert retained.record_id == original.record_id
+    assert retained.response_json is None
+
+
+@pytest.mark.anyio
+async def test_x402_live_worker_crossing_stale_threshold_keeps_its_owner(
+    client, clean_database, monkeypatch
+):
+    from app.services.signing_keys import get_signing_key_service
+
+    owner = await provision_agent_wallet(client)
+    wallet_id = owner["agent_wallet_id"]
+    permit = await create_tool_permit(
+        client,
+        wallet_id=wallet_id,
+        key_id=owner["key_id"],
+        tool_name="x402.payment",
+        max_credits=100,
+        idem_key="live-permit",
+    )
+    body = _settle_body(permit_id=permit["permit_id"], wallet_id=wallet_id)
+    headers = {**owner["agent_headers"], "Idempotency-Key": "live-settle"}
+    reserved, finish = asyncio.Event(), asyncio.Event()
+    signing = get_signing_key_service()
+    original_sign = signing.sign_payload
+
+    async def pause_after_reservation(payload):
+        if "authorization" in payload and not reserved.is_set():
+            reserved.set()
+            await finish.wait()
+        return await original_sign(payload)
+
+    monkeypatch.setattr(signing, "sign_payload", pause_after_reservation)
+    live = asyncio.create_task(
+        client.post("/v1/x402/settle", json=body, headers=headers)
+    )
+    try:
+        await asyncio.wait_for(reserved.wait(), timeout=5)
+        await _backdate_settle_record("live-settle", wallet_id=wallet_id)
+        retry = await client.post("/v1/x402/settle", json=body, headers=headers)
+        assert retry.status_code == 409
+        assert retry.json()["detail"] == "x402_settlement_needs_review"
+        assert await _permit_spent(client, permit["permit_id"]) == Decimal("30")
+    finally:
+        finish.set()
+        result = await asyncio.wait_for(live, timeout=5)
+    assert result.status_code == 200, result.text
+    replay = await client.post("/v1/x402/settle", json=body, headers=headers)
+    assert replay.status_code == 200
+    assert replay.json() == result.json()
     assert await _permit_spent(client, permit["permit_id"]) == Decimal("30")
     _, total = await get_receipt_service().list_receipts(permit_id=permit["permit_id"])
     assert total == 1
-
-    # The recovery is durable evidence on the wallet's chain, naming the
-    # abandoned record so an operator can read the shape as crash recovery.
-    recovered = await list_audit_events(
-        event="x402_settle_recovered", wallet_id=wallet_id
-    )
-    assert len(recovered) == 1
-    assert recovered[0].ok is True
-    assert recovered[0].metadata["abandoned_record_id"] == begun.record_id
-    assert recovered[0].metadata["idempotency_key"] == "x402-recover-1"
-    assert recovered[0].metadata["permit_id"] == permit["permit_id"]
-
-    # The recovered key now replays like any settled one: same settlement,
-    # no double reservation.
-    replay = await client.post("/v1/x402/settle", json=body, headers=headers)
-    assert replay.status_code == 200
-    assert replay.json()["receipt_id"] == settlement["receipt_id"]
-    assert await _permit_spent(client, permit["permit_id"]) == Decimal("30")
 
 
 @pytest.mark.anyio

@@ -913,7 +913,10 @@ async def test_coherent_tampering_of_terms_and_hash_fails_anchor_check(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("max_credits", ["1.123456789", "0.000000001", "1000000000000"])
+@pytest.mark.parametrize(
+    "max_credits",
+    ["1.123456789", "0.000000001", "1000000000000", "100000000000.12345678"],
+)
 async def test_request_max_credits_outside_storage_scale_is_refused(
     client, clean_database, monkeypatch, sentinel, max_credits
 ):

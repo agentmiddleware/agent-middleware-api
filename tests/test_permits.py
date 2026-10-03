@@ -836,9 +836,9 @@ async def test_permit_at_full_storage_scale_mints_and_verifies(client, clean_dat
     assert verify_resp.json()["valid"] is True, verify_resp.json()
 
 
-@pytest.mark.parametrize("amount", ["0.00000001", "999999999999.99999999"])
-def test_permit_credit_fields_accept_the_full_column_range(amount):
-    """Smallest and largest values Numeric(20, 8) holds pass every bound."""
+@pytest.mark.parametrize("amount", ["0.00000001", "999999999999"])
+def test_permit_credit_fields_accept_lossless_small_and_large_values(amount):
+    """Boundary values must survive both Numeric(20, 8) and SQLite storage."""
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=30)
     permit = PermitCreateRequest(
         issuer_wallet_id="w",
