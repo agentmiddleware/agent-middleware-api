@@ -136,8 +136,9 @@ POST /mcp/messages
 - Operators provision partner credits; public self-serve top-up is out of scope.
 
 ### Rate Limits
-- 120 requests/minute per API key
-- Burst allowance: 20 extra
+- Default: 120 requests/minute per API key, configurable by the operator.
+- No extra burst allowance. Check `/v1/discover` rate-limit metadata for the current limit.
+- Shared Redis counts fixed 60-second windows; the local in-memory fallback counts a rolling 60 seconds.
 
 ### Velocity Monitoring
 Wallets are auto-frozen if spending exceeds:
@@ -191,7 +192,7 @@ clients require `/mcp` after the operator enables the Streamable HTTP transport.
 
 | Category | Prefix | Auth |
 |----------|--------|------|
-| Discovery | `/v1/discover` | Optional |
+| Discovery | `/v1/discover` | Required on production-like boots; anonymous for local-compatible quickstart |
 | Billing | `/v1/billing` | Required |
 | Permits | `/v1/permits` | Required |
 | Receipts | `/v1/receipts` | Required |
