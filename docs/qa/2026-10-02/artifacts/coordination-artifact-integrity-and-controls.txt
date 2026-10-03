@@ -1,0 +1,8 @@
+Screenshots retained 14 all JPEG signatures True
+PyPI snapshot {'package_count': 100, 'vulnerable_package_count': 0, 'unverified_package_count': 0}
+Axe sampled pages 6
+Backend optional QA deps: # Optional QA-only checks; no runtime dependency change.
+hypothesis==6.168.3
+openapi-spec-validator==0.9.0
+
+All report/tooling additions remain QA-only; no product, environment, migration or CI-ignore mutation.

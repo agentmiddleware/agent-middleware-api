@@ -1,0 +1,257 @@
+FILE app/routers/mcp_standard.py
+300:        return permit.permit_id
+301:
+302:    idem = get_idempotency_service()
+303:    mint_key = "smcp-" + hashlib.sha256(client_key.encode("utf-8")).hexdigest()[:48]
+304:    mint_payload: dict[str, Any] = {
+305:        "kind": "standard-mcp-auto-permit",
+306:        "tool": tool_name,
+307:        "wallet_id": wallet_id,
+308:        "subject_key_id": auth.key_id,
+309:    }
+310:    # Included only when set so pre-existing mint records (created before the
+311:    # approval bit existed) still replay. A policy flip between attempts
+312:    # changes the payload and conflicts — fail closed, use a fresh key.
+313:    if requires_human_approval:
+314:        mint_payload["requires_human_approval"] = True
+315:    try:
+316:        mint_replay = await idem.begin(
+317:            wallet_id=wallet_id,
+318:            endpoint=_AUTO_PERMIT_ENDPOINT,
+319:            idempotency_key=mint_key,
+320:            request_payload=mint_payload,
+321:        )
+FILE app/routers/mcp.py
+2175:        raise ValueError(denial_reason)
+2176:
+2177:    # money.charge() is only ever invoked here without dry_run=True, so a real
+2178:    # (non-simulated) LedgerEntry is the only non-error outcome; this also
+2179:    # narrows the type for the ledger_entry_id/entry_id accesses below.
+2180:    assert isinstance(charge_result, LedgerEntry), (
+2181:        f"Expected LedgerEntry from non-dry-run charge, got {type(charge_result).__name__}"
+2182:    )
+2183:    assert credits_charged is not None
+2184:
+2185:    if execution_backend == "upstream_mcp":
+2186:        assert upstream_executor is not None
+2187:        assert dispatch_service is not None
+2188:        assert dispatch_attempt is not None
+2189:        assert permit_model is not None
+2190:        assert idem_begin is not None
+2191:        assert idempotency_key is not None
+2192:        return await _execute_upstream_after_charge(
+2193:            executor=upstream_executor,
+2194:            dispatch_service=dispatch_service,
+2195:            dispatch_attempt=dispatch_attempt,
+2196:            decision=decision,
+2197:            money=money,
+2198:            idem=idem,
+2199:            permit_model=permit_model,
+2200:            wallet_id=wallet_id,
+2201:            key_id=auth.key_id,
+2202:            endpoint=endpoint,
+2203:            idempotency_endpoint=idempotency_endpoint,
+2204:            transport=transport,
+2205:            idempotency_key=idempotency_key,
+2206:            idempotency_record_id=idem_begin.record_id,
+2207:            tool_name=tool_name,
+2208:            request_payload=effective_request_payload,
+2209:            arguments=arguments,
+2210:            registered_cost=registered_cost,
+2211:            credits_charged=credits_charged,
+2212:            ledger_entry_id=charge_result.entry_id,
+2213:            description=description,
+2214:            policy_metadata=policy_metadata,
+2215:            approval_check=approval_check,
+2216:        )
+2217:
+2218:    assert func is not None
+2219:    try:
+2220:        if inspect.iscoroutinefunction(func):
+2221:            result = await func(**arguments)
+2222:        else:
+2223:            result = func(**arguments)
+2224:    except Exception as exc:
+2225:        try:
+2226:            await money.refund_charge(
+2227:                wallet_id=wallet_id,
+2228:                charge_entry_id=charge_result.entry_id,
+2229:                description=f"Refund {description}",
+2230:            )
+2231:        except Exception as refund_exc:
+2232:            # Two reasons. The diagnostic one carries the refund store's (and,
+2233:            # below, the audit store's) own text and goes to the server log
+2234:            # and the audit event. The one that travels — error message,
+2235:            # replayed envelope, receipt reason — names the tool's error but
+2236:            # never infrastructure text, matching the upstream-dispatch shape.
+2237:            diagnostic_error = f"refund_failed:{refund_exc}; tool_error:{exc}"
+2238:            error = f"refund_failed; tool_error:{exc}"
+2239:            logger.error(
+2240:                "Failed to refund MCP charge %s after tool error: %s",
+2241:                charge_result.entry_id,
+2242:                refund_exc,
+2243:            )
+2244:            audit_event = None
+2245:            try:
+FILE app/db/models.py
+1030:
+1031:
+1032:class IdempotencyRecordModel(SQLModel, table=True):
+1033:    """Wallet-scoped replay protection for state-changing trust endpoints."""
+1034:
+1035:    __tablename__ = "idempotency_records"
+1036:    __table_args__ = (
+1037:        UniqueConstraint(
+1038:            "wallet_id",
+1039:            "endpoint",
+1040:            "idempotency_key",
+1041:            name="uq_idempotency_wallet_endpoint_key",
+1042:        ),
+1043:        # Pre-023 workers keyed governed MCP calls by their physical transport
+1044:        # endpoint. Current workers use /mcp/invoke. Keep both generations in
+1045:        # one database identity so a rolling deployment cannot create one row
+1046:        # (and therefore one debit/dispatch) under each endpoint spelling.
+1047:        Index(
+1048:            "uq_idempotency_governed_mcp_identity",
+1049:            "wallet_id",
+1050:            text(
+1051:                "(CASE WHEN endpoint = '/mcp/invoke' "
+1052:                "OR endpoint = '/mcp/messages' "
+1053:                "OR endpoint LIKE '/mcp/tools/%/invoke' "
+1054:                "THEN '/mcp/invoke' ELSE endpoint END)"
+1055:            ),
+1056:            "idempotency_key",
+1057:            unique=True,
+1058:        ),
+1059:    )
+1060:
+1061:    record_id: str = Field(primary_key=True, max_length=64)
+1062:    wallet_id: str = Field(max_length=50, foreign_key="wallets.wallet_id", index=True)
+1075:    expires_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
+1076:    # Set right after a governed invoke charges a wallet, before the
+1077:    # receipt/audit/complete finalization sequence runs. Lets a reconciliation
+1078:    # sweep tell "never charged" apart from "charged but never finalized".
+1079:    ledger_entry_id: Optional[str] = Field(default=None, max_length=64, index=True)
+1080:
+1081:
+1082:class McpDispatchAttemptModel(SQLModel, table=True):
+1083:    """Durable state for one governed dispatch to an upstream MCP server."""
+1084:
+1085:    __tablename__ = "mcp_dispatch_attempts"
+1086:
+1087:    attempt_id: str = Field(primary_key=True, max_length=64)
+1088:    idempotency_record_id: str = Field(
+1089:        max_length=64,
+1090:        foreign_key="idempotency_records.record_id",
+1091:        index=True,
+1092:        unique=True,
+1093:    )
+1094:    wallet_id: str = Field(max_length=50, foreign_key="wallets.wallet_id", index=True)
+1095:    permit_id: str = Field(max_length=64, foreign_key="permits.permit_id", index=True)
+1096:    approval_id: Optional[str] = Field(
+1097:        default=None,
+1098:        max_length=64,
+1099:        foreign_key="human_approvals.approval_id",
+1100:        index=True,
+1101:    )
+1102:    key_id: Optional[str] = Field(
+1103:        default=None,
+1104:        max_length=50,
+1105:        foreign_key="api_keys.key_id",
+1106:        index=True,
+1107:    )
+1108:    public_tool_id: str = Field(max_length=128, index=True)
+1109:    upstream_tool_name: str = Field(max_length=128)
+1110:    # Scheme + host + optional port only. Credentials, paths, query strings,
+1111:    # and fragments are deliberately excluded by the upstream adapter.
+FILE app/services/permits.py
+1307:                tool_name,
+1308:            )
+1309:
+1310:        await self._run_with_write_retry(_once)
+1311:
+1312:    async def release_dispatch_budget_once(self, attempt_id: str) -> bool:
+1313:        """Release one remote attempt's reservation exactly once.
+1314:
+1315:        The permit mutation and attempt checkpoint share one transaction. This
+1316:        closes the crash window that exists when a plain ``release_budget``
+1317:        call succeeds but the caller dies before recording that it succeeded.
+1318:        Returns ``True`` only for the transaction that performed the release.
+1319:        """
+1320:        factory = get_session_factory()
+1321:
+1322:        async def _once() -> bool:
+1323:            async with factory() as session:
+1324:                async with session.begin():
+1325:                    attempt = await session.get(McpDispatchAttemptModel, attempt_id)
+1326:                    if attempt is None:
+1327:                        raise PermitError("dispatch_attempt_not_found")
+1328:                    # Only a terminal returned_error attempt has a reservation
+1329:                    # to give back. Releasing budget for a prepared or
+1330:                    # dispatched attempt frees credits that attempt may still
+1331:                    # go on to spend, so the cap would be enforced against a
+1332:                    # reservation that no longer exists. This pre-check is the
+1333:                    # contract; the guarded claim below is the once-only gate.
+1334:                    if attempt.state != "returned_error":
+1335:                        raise PermitError("dispatch_budget_release_state_invalid")
+1336:                    if attempt.budget_released_at is not None:
+1337:                        return False
+1338:                    now = utc_now()
+1339:                    # Claim the release atomically before touching the permit.
+1340:                    # The read above is guarded by a row lock, but SQLAlchemy
+1341:                    # silently drops FOR UPDATE on engines that do not support
+1342:                    # it (SQLite), so on those two concurrent callers would both
+1343:                    # observe budget_released_at IS NULL and both decrement.
+1344:                    # This guarded UPDATE is the once-only gate on every engine:
+1345:                    # exactly one caller can flip NULL -> now, and only that
+1346:                    # caller proceeds to release the budget.
+1347:                    claimed = await session.execute(
+1348:                        sa_update(McpDispatchAttemptModel)
+1349:                        .where(
+1350:                            cast(
+1351:                                ColumnElement[bool],
+1352:                                McpDispatchAttemptModel.attempt_id == attempt_id,
+1353:                            ),
+1354:                            cast(
+1355:                                ColumnElement[bool],
+1356:                                cast(
+1357:                                    Any, McpDispatchAttemptModel.budget_released_at
+FILE app/services/permit_requests.py
+1:"""Permit requests: an agent asks, a human approves, the middleware mints.
+2:
+3:The invoke-time gate (``app.services.human_approval``) pauses a call under a
+4:permit that already exists. This module covers the step before that: an agent
+5:that has *no* authority asks a human for some, and gets a signed permit only
+6:if a human says yes.
+7:
+8:    request -> notify -> approve -> mint -> poll
+9:
+10:    POST /v1/permit-requests   agent states scope, budget, and why
+11:                               -> Sentinel pages the human, 202 pending
+12:    GET  /v1/permit-requests/{id}
+13:                               -> agent polls; on approval the permit is
+14:                                  minted from the STORED terms and returned
+15:
+16:Three properties carry the security of the flow:
+17:
+18:**The human's decision binds to the reviewed terms.** Scopes, tools, budget,
+19:and permit expiry are frozen on the row at request time and hashed into
+20:``request_hash``. Minting reads that row — never the polling request — so
+21:there is no window in which an approved request can be re-aimed.
+22:
+23:**Minting happens exactly once.** The ``pending -> minting`` transition is a
+24:conditional UPDATE, so one caller wins even with concurrent pollers or two
+25:workers. The permit id is reserved when the human is paged and used as the
+26:minted permit's primary key, which makes a mint retried after a crash collide
+27:on that key rather than issue a second permit carrying the same authority.
+28:
+29:**Expiry is enforced here.** Sentinel has no expired state (a timed-out
+30:approval stays "pending" there forever), so ``expires_at`` is checked locally
+31:before every poll and a decision arriving after the window is not honored.
+32:
+33:Fail-closed posture matches the invoke gate: simulated approvals are refused
+34:in production-like environments, real mode without Sentinel configuration
+35:refuses at request time, and a Sentinel outage is retryable rather than
+36:silently minting.
+37:"""
+38:

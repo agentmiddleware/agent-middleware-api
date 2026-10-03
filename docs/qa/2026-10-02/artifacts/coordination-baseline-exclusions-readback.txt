@@ -1,0 +1,46 @@
+## Results and limitations
+
+Comparable existing-suite baseline: **3,628 passed, 60 skipped, 4 deselected**, 336.82 seconds, exit 0. Before coverage: **21,249 / 24,266 executable app lines = 87.566966%**. The four deselections and three excluded modules above are identical for the before/after comparison.
+
+Added QA module: **27 passed, 7 strict expected failures**, 3.55 seconds, exit 0 (`artifacts/backend-added-tests.txt`). The seven xfails comprise one BE-002 schema repro and six BE-003 multicast repros. The 27 passing cases include 24 auth/credential-precedence checks, fresh OpenAPI schema validation, the 200-example Unicode property, and the disproved surrogate candidate retained as an HTTP400/no-side-effect regression. Expected failures document known behavior and do not count as passing fixes.
+
+
+Initial attempted baseline: 3,624 passed, 60 skipped, 8 failures, 360.54 seconds. All eight were caused by the task safety boundary: four encoded-loopback tests received `dns_resolution_failed` because the guard blocked numeric resolver classification, and four onboarding tests were denied environment-file reads. Numeric classification was calibrated without permitting external network calls, and prohibited file-reading nodes were deselected for both comparable runs. This attempted run remains in `artifacts/backend-baseline-suite.txt` and is not presented as a product failure or a passing gate. Full final baseline, added-test, production-posture, SDK, and before/after coverage results will be inserted after execution. Local coverage cannot establish hosted PostgreSQL locks, real upstream side effects, provider behavior, or customer evidence. Dependency vulnerability metadata is owned by the coordination pass.
+
+baseline command
+ — baseline-final
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['env', 'PYTHONPATH=docs/qa/2026-10-02/backend_safety:.', 'DATABASE_URL=sqlite+aiosqlite:///./test.db', 'STATE_BACKEND=memory', 'TRUST_MODE_ENABLED=false', 'ALLOW_LEGACY_UNPERMITTED_MCP=true', 'COVERAGE_FILE=/private/tmp/amw-qa-baseline-final.coverage', '/private/tmp/amw-qa-python/bin/python', '-m', 'pytest', 'tests', '-q', '--tb=short', '--cov=app', '--cov-report=json:docs/qa/2026-10-02/artifacts/backend-baseline-final-coverage.json', '--cov-report=term', '--ignore=tests/test_qa_20261002_backend.py', '--ignore=tests/test_prepare_railway_release.py', '--ignore=tests/test_railway_preflight.py', '--ignore=tests/test_railway_iac_config.py', '-k', 'not test_signing_seed_is_a_visible_required_key and not test_signing_seed_ships_empty_rather_than_with_a_real_value and not test_env_example_documents_how_to_generate_the_seed and not test_default_state_backend_boots_locally']`
+
+
+### 2026-10-03T00:43:47Z — baseline-failure-classification
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', '-']`
+
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:43:47Z. [Output](artifacts/backend-baseline-failure-classification.txt).
+
+### 2026-10-03T00:44:14Z — sdk-import-safety
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', '-c', 'from pathlib import Path; import subprocess; subprocess.run(["rg","-n","^(import|from) |https?://|subprocess|Popen","b2a_sdk/tests","wrappers/openai-agent-middleware/tests","wrappers/autogen-agent-middleware/tests","wrappers/crewai-agent-middleware/tests","wrappers/langchain-agent-middleware/tests"]); print("CI SDK command", "\\n".join(Path(".github/workflows/ci.yml").read_text().splitlines()[295:325]))']`
+
+Outcome: exit 0; 0.1s; ended 2026-10-03T00:44:14Z. [Output](artifacts/backend-sdk-import-safety.txt).
+
+### 2026-10-03T00:44:35Z — wrapper-runtime-imports
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['rg', '-n', '^(import|from)|except ImportError', 'wrappers/autogen-agent-middleware/src', 'wrappers/crewai-agent-middleware/src', 'wrappers/langchain-agent-middleware/src', 'wrappers/openai-agent-middleware/src']`
+
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:44:35Z. [Output](artifacts/backend-wrapper-runtime-imports.txt).
+
+### 2026-10-03T00:44:53Z — posture-test-environment
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', '-c', 'from pathlib import Path; print("\\n".join(Path("tests/test_production_trust_posture.py").read_text().splitlines()[:145])); 

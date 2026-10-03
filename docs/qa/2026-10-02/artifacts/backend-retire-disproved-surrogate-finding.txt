@@ -1,0 +1,1 @@
+Disproved BE-001: strict transport already rejects lone surrogates. Kept route regression with correct existing 400 contract; removed speculative validator-only xfails.

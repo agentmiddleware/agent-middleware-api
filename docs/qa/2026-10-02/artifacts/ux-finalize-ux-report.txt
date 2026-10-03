@@ -1,0 +1,5 @@
+report_lines 78
+axe_reports 6
+screenshots 14
+source/script changes: UX-REPORT.md, UX-SESSION.md, ux_browser_qa.cjs, ux_csp_server.py, ux-regressions.spec.cjs, playwright.config.cjs testMatch, ux artifacts
+No product changes; 2 Medium, 1 Low findings; 3 expected-failure browser tests discovered but runtime blocked.

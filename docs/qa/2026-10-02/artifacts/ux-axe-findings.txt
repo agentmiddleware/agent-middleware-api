@@ -1,0 +1,211 @@
+ux-axe-compare-mobile.json
+[
+  {
+    "id": "color-contrast",
+    "impact": "serious",
+    "tags": [
+      "cat.color",
+      "wcag2aa",
+      "wcag143",
+      "TTv5",
+      "TT13.c",
+      "EN-301-549",
+      "EN-9.1.4.3",
+      "ACT",
+      "RGAAv4",
+      "RGAA-3.2.1"
+    ],
+    "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",
+    "help": "Elements must meet minimum color contrast ratio thresholds",
+    "helpUrl": "https://dequeuniversity.com/rules/axe/4.13/color-contrast?application=axeAPI",
+    "nodes": [
+      {
+        "any": [
+          {
+            "id": "color-contrast",
+            "data": {
+              "fgColor": "#9ca8cb",
+              "bgColor": "#f6f3e9",
+              "contrastRatio": 2.13,
+              "fontSize": "12.8pt (17px)",
+              "fontWeight": "normal",
+              "messageKey": null,
+              "expectedContrastRatio": "4.5:1"
+            },
+            "relatedNodes": [
+              {
+                "html": "<article class=\"proof-col\">",
+                "target": [
+                  "article:nth-child(1)"
+                ]
+              }
+            ],
+            "impact": "serious",
+            "message": "Element has insufficient color contrast of 2.13 (foreground color: #9ca8cb, background color: #f6f3e9, font size: 12.8pt (17px), font weight: normal). Expected contrast ratio of 4.5:1"
+          }
+        ],
+        "all": [],
+        "none": [],
+        "impact": "serious",
+        "html": "<li>You run one internal MCP tool where a duplicate call costs real money or causes a real side effect.</li>",
+        "target": [
+          "article:nth-child(1) > ul > li:nth-child(1)"
+        ],
+        "failureSummary": "Fix any of the following:\n  Element has insufficient color contrast of 2.13 (foreground color: #9ca8cb, background color: #f6f3e9, font size: 12.8pt (17px), font weight: normal). Expected contrast ratio of 4.5:1"
+      },
+      {
+        "any": [
+          {
+            "id": "color-contrast",
+            "data": {
+              "fgColor": "#9ca8cb",
+              "bgColor": "#f6f3e9",
+              "contrastRatio": 2.13,
+              "fontSize": "12.8pt (17px)",
+              "fontWeight": "normal",
+              "messageKey": null,
+              "expectedContrastRatio": "4.5:1"
+            },
+            "relatedNodes": [
+              {
+                "html": "<article class=\"proof-col\">",
+                "target": [
+                  "article:nth-child(1)"
+                ]
+              }
+            ],
+            "impact": "serious",
+            "message": "Element has insufficient color contrast of 2.13 (foreground color: #9ca8cb, background color: #f6f3e9, font size: 12.8pt (17px), font weight: normal). Expected contrast ratio of 4.5:1"
+          }
+        ],
+        "all": [],
+        "none": [],
+        "impact": "serious",
+        "html": "<li>An agent retried something expensive and you could not prove afterwards what actually ran.</li>",
+        "target": [
+          "article:nth-child(1) > ul > li:nth-child(2)"
+        ],
+        "failureSummary": "Fix any of the following:\n  Element has insufficient color contrast of 2.13 (foreground color: #9ca8cb, background color: #f6f3e9, font size: 12.8pt (17px), font weight: normal). Expected contrast ratio of 4.5:1"
+      },
+      {
+        "any": [
+          {
+            "id": "color-contrast",
+            "data": {
+              "fgColor": "#9ca8cb",
+              "bgColor": "#f6f3e9",
+              "contrastRatio": 2.13,
+              "fontSize": "12.8pt (17px)",
+              "fontWeight": "normal",
+              "messageKey": null,
+              "expectedContrastRatio": "4.5:1"
+            },
+            "relatedNodes": [
+              {
+                "html": "<article class=\"proof-col\">",
+                "target": [
+                  "article:nth-child(1)"
+                ]
+              }
+            ],
+            "impact": "serious",
+            "message": "Element has insufficient color contrast of 2.13 (foreground color: #9ca8cb, background color: #f6f3e9, font size: 12.8pt (17px), font weight: normal). Expected contrast ratio of 4.5:1"
+          }
+        ],
+        "all": [],
+        "none": [],
+        "impact": "serious",
+        "html": "<li>Someone outside the engineering team needs to check the record.</li>",
+        "target": [
+          "article:nth-child(1) > ul > li:nth-child(3)"
+        ],
+        "failureSummary": "Fix any of the following:\n  Element has insufficient color contrast of 2.13 (foreground color: #9ca8cb, background color: #f6f3e9, font size: 12.8pt (17px), font weight: normal). Expected contrast ratio of 4.5:1"
+      },
+      {
+        "any": [
+          {
+            "id": "color-contrast",
+            "data": {
+              "fgColor": "#9ca8cb",
+              "bgColor": "#f6f3e9",
+              "contrastRatio": 2.13,
+              "fontSize": "12.8pt (17px)",
+              "fontWeight": "normal",
+              "messageKey": null,
+              "expectedContrastRatio": "4.5:1"
+            },
+            "relatedNodes": [
+              {
+                "html": "<article class=\"proof-col\">",
+                "target": [
+                  "article:nth-child(1)"
+                ]
+              }
+            ],
+            "impact": "serious",
+            "message": "Element has insufficient color contrast of 2.13 (foreground color: #9ca8cb, background color: #f6f3e9, font size: 12.8pt (17px), font weight: normal). Expected contrast ratio of 4.5:1"
+          }
+        ],
+        "all": [],
+        "none": [],
+        "impact": "serious",
+        "html": "<li>You can bring one real tool and one engineer to a pilot.</li>",
+        "target": [
+          "article:nth-child(1) > ul > li:nth-child(4)"
+        ],
+        "failureSummary": "Fix any of the following:\n  Element has insufficient color contrast of 2.13 (foreground color: #9ca8cb, background color: #f6f3e9, font size: 12.8pt (17px), font weight: normal). Expected contrast ratio of 4.5:1"
+      }
+    ]
+  }
+]
+ux-axe-dashboard-mobile.json
+[
+  {
+    "id": "scrollable-region-focusable",
+    "impact": "serious",
+    "tags": [
+      "cat.keyboard",
+      "wcag2a",
+      "wcag211",
+      "wcag213",
+      "TTv5",
+      "TT4.a",
+      "EN-301-549",
+      "EN-9.2.1.1",
+      "EN-9.2.1.3",
+      "RGAAv4",
+      "RGAA-7.3.2"
+    ],
+    "description": "Ensure elements that have scrollable content are accessible by keyboard in Safari",
+    "help": "Scrollable region must have keyboard access",
+    "helpUrl": "https://dequeuniversity.com/rules/axe/4.13/scrollable-region-focusable?application=axeAPI",
+    "nodes": [
+      {
+        "any": [
+          {
+            "id": "focusable-content",
+            "data": null,
+            "relatedNodes": [],
+            "impact": "serious",
+            "message": "Element should have focusable content"
+          },
+          {
+            "id": "focusable-element",
+            "data": null,
+            "relatedNodes": [],
+            "impact": "serious",
+            "message": "Element should be focusable"
+          }
+        ],
+        "all": [],
+        "none": [],
+        "impact": "serious",
+        "html": "<pre>",
+        "target": [
+          "pre"
+        ],
+        "failureSummary": "Fix any of the following:\n  Element should have focusable content\n  Element should be focusable"
+      }
+    ]
+  }
+]

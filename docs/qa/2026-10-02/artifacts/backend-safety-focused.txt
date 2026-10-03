@@ -1,0 +1,520 @@
+scripts/quickstart.py:138:def wait_for_health(port: int, process: subprocess.Popen) -> bool:
+scripts/quickstart.py:195:        process = subprocess.Popen(
+scripts/quickstart.py:209:            stderr=subprocess.STDOUT,
+scripts/quickstart.py:234:            except subprocess.TimeoutExpired:
+tests/test_demo_trust_plane.py:13:    result = subprocess.run(
+tests/test_upstream_mcp.py:65:    return Settings(_env_file=None, **values)
+tests/test_postgres_datetime_binding.py:17:driver and is skipped unless ``TEST_POSTGRES_URL`` is set (CI sets it).
+tests/test_postgres_datetime_binding.py:77:POSTGRES_URL = os.environ.get("TEST_POSTGRES_URL", "").strip()
+tests/test_postgres_datetime_binding.py:81:    not POSTGRES_URL,
+tests/test_postgres_datetime_binding.py:82:    reason="TEST_POSTGRES_URL not set; Postgres-dialect coverage skipped",
+tests/test_postgres_datetime_binding.py:118:        os.environ["DATABASE_URL"] = POSTGRES_URL
+tests/test_postgres_datetime_binding.py:125:        subprocess.run(["alembic", "upgrade", "head"], check=True, env=dict(os.environ))
+tests/test_failure_lab.py:33:    result = subprocess.run(
+tests/test_failure_lab.py:279:    result = subprocess.run(
+tests/test_failure_lab_verifier.py:77:    completed = subprocess.run(
+tests/test_public_mcp_endpoint.py:276:    completed = subprocess.run(
+tests/test_agent_ops_war_room_demo.py:96:    result = subprocess.run(
+tests/test_mcp_postgres_multiprocess.py:61:    process: subprocess.Popen[str]
+tests/test_mcp_postgres_multiprocess.py:71:    process: subprocess.Popen[str]
+tests/test_mcp_postgres_multiprocess.py:346:            except subprocess.TimeoutExpired:
+tests/test_mcp_postgres_multiprocess.py:380:            except subprocess.TimeoutExpired:
+tests/test_mcp_postgres_multiprocess.py:435:        process = subprocess.Popen(
+tests/test_mcp_postgres_multiprocess.py:454:            stderr=subprocess.STDOUT,
+tests/test_mcp_postgres_multiprocess.py:561:        process = subprocess.Popen(
+tests/test_mcp_postgres_multiprocess.py:580:            stderr=subprocess.STDOUT,
+tests/test_mcp_postgres_multiprocess.py:1240:    result = subprocess.run(
+tests/test_mcp_postgres_multiprocess.py:1244:        stdout=subprocess.PIPE,
+tests/test_mcp_postgres_multiprocess.py:1245:        stderr=subprocess.STDOUT,
+tests/test_minimal_path_e2e.py:72:    process = subprocess.Popen(
+tests/test_minimal_path_e2e.py:87:        stdout=subprocess.PIPE,
+tests/test_minimal_path_e2e.py:88:        stderr=subprocess.STDOUT,
+tests/test_minimal_path_e2e.py:112:        except subprocess.TimeoutExpired:
+tests/test_red_team_trust_plane.py:26:    result = subprocess.run(
+tests/test_schema_boot.py:276:    result = subprocess.run(
+tests/test_dogfood_trust_plane.py:14:    result = subprocess.run(
+tests/test_permit_repeat_window_rollout.py:42:    assert Settings(_env_file=None).ENABLE_PERMIT_REPEAT_WINDOW_ISSUANCE is False
+tests/test_quickstart_path.py:51:        process = subprocess.Popen(
+tests/test_quickstart_path.py:63:            stderr=subprocess.STDOUT,
+tests/test_quickstart_path.py:90:        except subprocess.TimeoutExpired:
+tests/test_quickstart_path.py:103:def _verify_cli(bundle_path: Path, keys_path: Path) -> subprocess.CompletedProcess:
+tests/test_quickstart_path.py:105:    return subprocess.run(
+tests/test_quickstart_path.py:305:) -> subprocess.CompletedProcess:
+tests/test_quickstart_path.py:309:    return subprocess.run(
+tests/test_quickstart_path.py:395:    result = subprocess.run(
+tests/test_human_preflight.py:106:    return subprocess.run(
+tests/test_demo_ambiguous_retry.py:20:    result = subprocess.run(
+tests/test_rtaas.py:323:    proc = subprocess.run(
+tests/test_onboarding_contract.py:261:        ignore_check = subprocess.run(
+tests/test_production_trust_posture.py:162:    result = subprocess.run(
+tests/test_trust_mode_guardrails.py:645:            _env_file=None,
+tests/test_trust_mode_guardrails.py:655:        settings = Settings(_env_file=None, ENVIRONMENT="dev")
+tests/test_prepare_railway_release.py:15:    result = subprocess.run(
+tests/test_site_agent_interface.py:154:    return subprocess.run(
+tests/test_site_agent_interface.py:3583:    result = subprocess.run(
+tests/test_db_urls_durable_state.py:359:        proc = subprocess.run(
+tests/test_db_urls_durable_state.py:366:    except subprocess.TimeoutExpired as exc:
+tests/test_db_urls_durable_state.py:533:        proc = subprocess.run(
+tests/test_db_urls_durable_state.py:539:    except subprocess.TimeoutExpired as exc:
+tests/test_db_urls_durable_state.py:540:        # The child is killed by subprocess.run before this propagates, so a
+tests/test_db_urls_durable_state.py:652:        proc = subprocess.run(
+tests/test_db_urls_durable_state.py:659:    except subprocess.TimeoutExpired as exc:
+tests/test_partner_mcp.py:227:    result = subprocess.run(
+tests/test_constant_test_loop.py:75:        process = subprocess.Popen(
+tests/test_constant_test_loop.py:89:            stderr=subprocess.STDOUT,
+tests/test_constant_test_loop.py:115:        except subprocess.TimeoutExpired:
+tests/test_constant_test_loop.py:126:    result = subprocess.run(
+tests/test_constant_test_loop.py:148:    result = subprocess.run(
+tests/test_constant_test_loop.py:293:    result = subprocess.run(
+tests/test_constant_test_loop.py:330:    not os.environ.get("RUN_CONSTANT_TEST_LOOP_INTEGRATION"),
+tests/test_constant_test_loop.py:331:    reason="Set RUN_CONSTANT_TEST_LOOP_INTEGRATION=1 to run full integration test",
+tests/test_constant_test_loop.py:338:    2. Run test: RUN_CONSTANT_TEST_LOOP_INTEGRATION=1 pytest tests/test_constant_test_loop.py -v
+tests/test_constant_test_loop.py:340:    result = subprocess.run(
+tests/test_constant_test_loop.py:372:    result = subprocess.run(
+tests/test_constant_test_loop.py:542:    result = subprocess.run(
+tests/test_constant_test_loop.py:559:    result = subprocess.run(
+tests/test_constant_test_loop.py:580:    result = subprocess.run(
+tests/test_constant_test_loop.py:597:    result = subprocess.run(
+tests/test_constant_test_loop.py:625:    result = subprocess.run(
+tests/test_constant_test_loop.py:643:    result = subprocess.run(
+tests/test_constant_test_loop.py:735:    result = subprocess.run(
+tests/test_failure_lab_diagnostic.py:655:    completed = subprocess.run(
+tests/test_railway_iac_config.py:166:        result = subprocess.run(
+tests/test_railway_preflight.py:466:    result = subprocess.run(
+tests/test_railway_preflight.py:563:    return subprocess.run(
+tests/test_railway_preflight.py:676:    result = subprocess.run(
+tests/test_railway_preflight.py:709:    return subprocess.run(
+tests/test_railway_preflight.py:1683:    production = config.Settings(_env_file=None, ENVIRONMENT="production")
+tests/test_railway_preflight.py:2067:def test_runtime_posture_is_not_blocked_by_other_dotenv_files(
+tests/test_railway_preflight.py:2079:def test_runtime_image_never_contains_a_dotenv_file():
+app/services/behavioral_sandbox.py:413:                stdout=asyncio.subprocess.PIPE,
+app/services/behavioral_sandbox.py:414:                stderr=asyncio.subprocess.PIPE,
+app/services/behavioral_sandbox.py:477:                    stdout=asyncio.subprocess.PIPE,
+app/services/behavioral_sandbox.py:478:                    stderr=asyncio.subprocess.PIPE,
+app/core/config.py:401:        env_file=".env",
+app/core/config.py:402:        env_file_encoding="utf-8",
+issuer URL to its pinned
+    # verification material, e.g.
+    #   {"https://example.okta.com/oauth2/default": {
+    #      "audience": "api://agent-middleware",
+    #      "algorithms": ["RS256"],
+    #      "provider": "okta",            # optional; inferred from the host
+    #      "jwks": {"keys": [...]}}}      # or "public_key_pem": "-----BEGIN..."
+    # Keys are pinned here on purpose: there is NO network JWKS fetch, so a
+    # compromised IdP hostname cannot rotate keys under us — rotation is an
+    # explicit config change. Parsed lazily and fail-closed by
+    # app.core.oidc_iga (malformed JSON raises at use time, never at import).
+    # Empty string (the default) disables the IGA layer entirely: no bearer
+    # token is ever treated as an enterprise token and every existing auth
+    # path is untouched.
+    IGA_TRUSTED_ISSUERS: str = ""
+    # JSON object mapping an enterprise group/role name to a PolicyBundle
+    # grant with optional runtime caps, e.g.
+    #   {"payments-ops": {"policy_id": "polb-...", "max_uses": 100,
+    #     "velocity_window_seconds": 60, "velocity_max_calls": 10}}
+    # Caps are nullable (null = uncapped) and enforced by in-process,
+    # per-instance counters in app.core.oidc_iga — PolicyBundle rows carry no
+    # such columns by design. Empty string (the default) grants nothing:
+    # every enterprise principal is blocked with iga_no_matching_role.
+    IGA_GROUP_POLICY_MAP: str = ""
+
+    # --- Proof surfaces ---
+    # When false, only CORE_TRUST_ROUTERS (+ MCP) are mounted. Production-like
+    # environments must set this false — see validate_trust_mode_guardrails.
+    ENABLE_PROOF_SURFACES: bool = False
+
+    # --- Dogfood tool (opt-in executable partner.notes.write) ---
+    # When true, registers a safe local notes-write MCP tool so live
+    # /mcp/tools.json is non-empty for permit→invoke→receipt dogfood.
+    # Default false: no stub pollution. Independent of ENABLE_PROOF_SURFACES.
+    ENABLE_DOGFOOD_TOOL: bool = False
+
+    # --- Second dogfood tool (opt-in read-only partner.notes.count) ---
+    # When true, registers a second harmless read-only tool for CI to test
+    # out-of-scope denial (permit allows first tool, denies second).
+    # Default false: only enable in test/CI environments.
+    ENABLE_DOGFOOD_SECOND_TOOL: bool = False
+
+    # --- Governed upstream MCP partner tool ---
+    # One explicitly configured Streamable HTTP server/tool for the
+    # design-partner pilot. The adapter fails closed at startup when enabled
+    # with incomplete or unsafe configuration.
+    MCP_UPSTREAM_ENABLED: bool = False
+    MCP_UPSTREAM_URL: str = ""
+    MCP_UPSTREAM_TOOL_NAME: str = ""
+    MCP_UPSTREAM_PUBLIC_TOOL_ID: str = ""
+    MCP_UPSTREAM_BEARER_TOKEN: [REDACTED] = SecretStr("")
+    MCP_UPSTREAM_CREDITS_PER_CALL: Decimal = Decimal("0")
+    MCP_UPSTREAM_CONNECT_TIMEOUT_SECONDS: float = 5.0
+    MCP_UPSTREAM_CALL_TIMEOUT_SECONDS: float = 30.0
+    MCP_UPSTREAM_MAX_RESPONSE_BYTES: int = 1_048_576
+
+    # Cross-key duplicate detection for upstream tools. Modes:
+    # - "off": disabled (new-key retries with identical request hashes are allowed)
+    # - "log": detect and log duplicates but allow them (observe mode, default)
+    # - "enforce": refuse duplicate requests with duplicate_request_new_key
+    MCP_UPSTREAM_DUPLICATE_GUARD: DuplicateGuardMode = DuplicateGuardMode.LOG
+    # Default repeat detection window in seconds. Duplicates outside this window
+    # are not detected.
+    MCP_UPSTREAM_DUPLICATE_WINDOW_SECONDS: int = 86400  # 24 hours
+    # Enable only after all workers can verify and enforce repeat-window permits.
+    # Disabling issuance never disables validation of already-issued permits.
+    ENABLE_PERMIT_REPEAT_WINDOW_ISSUANCE: bool = False
+
+    # --- Inbound request size ---
+    # Ceiling on any request body the API will buffer, enforced for every
+    # route by `app.middleware.request_body_limit`. Mirrors the 1 MiB bound
+    # already placed on upstream MCP *responses* above: the gateway should not
+    # accept more from a caller than it is willing to relay from a tool.
+    # The opt-in MCP transports keep their own tighter caps (256 KiB public,
+    # 64 KiB partner); this is the floor under everything, `/mcp/messages`
+    # included. Raise it only for an operator who has a route that needs it.
+    MAX_REQUEST_BODY_BYTES: int = 1_048_576
+
+    # --- Phase 9: WebAuthn mock (tests/local only) ---
+    # When true and py_webauthn is absent, verification can short-circuit.
+    # Production-like environments must keep this false.
+    WEBAUTHN_ALLOW_MOCK: bool = False
+
+    # --- Trust Plane ---
+    # Strict trust mode is the default and the only supported production
+    # posture: every governed MCP invocation must present a signed permit,
+    # legacy unpermitted calls are denied with `permit_required`, and a
+    # signing private key is required.
+    #
+    # To run a local demo or a legacy integration without permits, set both
+    # `TRUST_MODE_ENABLED=false` and `ALLOW_LEGACY_UNPERMITTED_MCP=true`
+    # explicitly in the environment. The startup banner in
+    # `app.core.trust_mode.warn_if_trust_mode_permissive` makes it loud when
+    # this opt-out is in effect, and the
+    # `app.core.trust_mode.validate_trust_mode_guardrails` check refuses to
+    # boot a production-like environment under any permissive combination.
+    TRUST_MODE_ENABLED: bool = True
+    ALLOW_LEGACY_UNPERMITTED_MCP: bool = False
+    TRUST_SIGNING_KEY_ID: str = "local-dev-ed25519"
+    TRUST_SIGNING_PRIVATE_KEY_B64: str = ""
+
+    # --- Standard MCP endpoint (POST /mcp) ---
+    # Spec-compliant stateless Streamable HTTP surface for standard MCP
+    # clients. tools/call mints a bounded single-tool permit from the
+    # caller's wallet before entering the governed invoke path, so the
+    # permit -> meter -> receipt -> audit loop is unchanged. Off by default:
+    # do not advertise (or registry-publish) a transport that is not
+    # deliberately enabled.
+    ENABLE_STANDARD_MCP_ENDPOINT: bool = False
+    STANDARD_MCP_PERMIT_TTL_SECONDS: int = 120
+
+    # --- Public MCP endpoint (POST /mcp/public) ---
+    # Unauthenticated, read-only Streamable HTTP surface for MCP clients
+    # that cannot hold an API key (public plugin runtimes such as ChatGPT
+    # apps). Serves only verification and discovery tools; nothing behind
+    # it can create signing authority, mint permits, debit wallets, change
+    # governed tool registration, or reach the governed invoke path. Off by
+    # default. Production-like environments refuse to boot with this true
+    # (and the handler 404s there even if the flag is set): a stranger must
+    # not list governed tools. Receipt verification stays on
+    # /.well-known/trust-keys.json.
+    ENABLE_PUBLIC_MCP_ENDPOINT: bool = False
+
+    # --- Stripe Payment Processing ---
+    STRIPE_SECRET_KEY: str = ""
+    STRIPE_WEBHOOK_SECRET: [REDACTED] = ""
+    STRIPE_PUBLISHABLE_KEY: str = ""
+
+    # --- KYC Verification ---
+    # Require KYC verification before allowing fiat top-ups (default: false for dev)
+    KYC_REQUIRED_FOR_TOPUP: bool = False
+
+    # --- Credit Exchange Rate ---
+    # Credits minted per $1.00 USD settled (1000 credits = $1.00, 1 credit =
+    # $0.001). This is the single source of truth: Stripe settlement mints
+    # credits at this rate and /v1/billing/pricing advertises it. Do not
+    # re-declare it as a module constant — a second copy silently lets the
+    # advertised rate drift from the rate real money converts at.
+    EXCHANGE_RATE: Decimal = Decimal("1000.0")
+
+    @field_validator("EXCHANGE_RATE")
+    @classmethod
+    def _validate_exchange_rate(cls, value: Decimal) -> Decimal:
+        """Refuse a rate that cannot convert settled fiat into credits.
+
+        Credit issuance multiplies settled fiat by this rate, so a zero or
+        negative value converts a real payment into no credits (or negative
+        ones). Fail at construction rather than at the first settlement.
+        NaN and infinities need no check here: pydantic's Decimal parsing
+        rejects them before this runs.
+        """
+        if value <= 0:
+            raise ValueError("EXCHANGE_RATE must be a positive decimal")
+        return value
+
+    # --- Notification Service ---
+    RESEND_API_KEY: [REDACTED] = ""
+    SLACK_WEBHOOK_URL: str = ""
+    # Sender for Resend email. Empty by default so no placeholder sender ships;
+    # set it, to an address the operator controls, together with RESEND_API_KEY.
+    ALERT_FROM_EMAIL: str = ""
+
+    # --- Sentinel Human Approval (pauseapi.app) ---
+    # Backs the per-permit requires_human_approval gate on governed invokes.
+    # Real mode needs both URL and key; used only when
+    # SIMULATION_MODE_HUMAN_APPROVAL=false.
+    SENTINEL_API_URL: str = ""
+    SENTINEL_API_KEY: [REDACTED] = ""
+    # Forwarded to Sentinel as timeout_seconds (its magic-link expiry, 1..86400)
+    # and enforced locally as the approval's expiry — Sentinel itself never
+    # expires a pending approval.
+    SENTINEL_APPROVAL_TIMEOUT_SECONDS: int = 300
+    # >0: on first invoke, long-poll Sentinel this many seconds for an instant
+    # decision before returning human_approval_pending (max 300).
+    SENTINEL_WAIT_SECONDS: float = 0.0
+    # Comma-separated approver list (email, mailto:, or sms:+E164). Empty defers
+    # to the Sentinel tenant's default approvers.
+    SENTINEL_APPROVERS: str = ""
+    # Sentinel risk_level attached to approval requests: low|medium|high|critical.
+    SENTINEL_RISK_LEVEL: str = "high"
+    # --- Signed quotes ---
+    # How long a signed price quote stays valid. A quote locks the price for
+    # exactly one invoke inside this window; long enough for a human hop,
+    # short enough to bound exposure to price drift. Clamped to 30..3600.
+    QUOTE_TTL_SECONDS: int = 600
+
+    # How long a human has to decide a permit REQUEST (agent asking for
+    # authority) before it expires locally. Longer than the invoke gate's
+    # window: the agent polls rather than holding an invoke open. Clamped to
+    # Sentinel's 1..86400 bound.
+    PERMIT_REQUEST_TIMEOUT_SECONDS: int = 3600
+
+    # --- Velocity Monitoring ---
+    VELOCITY_HOURLY_LIMIT: Decimal = Decimal("1000.0")
+    VELOCITY_DAILY_LIMIT: Decimal = Decimal("10000.0")
+    # Reserved: read into VelocityMonitor but used by no check today (there is
+    # no standard-deviation detection). Changing it has no effect.
+    VELOCITY_ALERT_THRESHOLD: int = 2
+    VELOCITY_FREEZE_THRESHOLD: int = 3
+
+    # --- IoT Protocol Bridge ---
+    MQTT_BROKER_URL: str = "mqtt://localhost:1883"
+    MQTT_DEFAULT_QOS: int = 1
+    # Enforce topic-level ACLs to prevent the DJI Romo-style breach pattern
+    MQTT_ENFORCE_TOPIC_ACL: bool = True
+
+    # --- Telemetry / Autonomous PM ---
+    TELEMETRY_RETENTION_HOURS: int = 168  # 7 days
+    AUTO_PR_ENABLED: bool = False
+    GIT_REMOTE_URL: str = ""
+    GIT_BRANCH_PREFIX: str = "auto-pm/"
+
+    # --- Media Engine ---
+    MAX_UPLOAD_SIZE_MB: int = 500
+    SUPPORTED_VIDEO_FORMATS: str = "mp4,mov,webm,mkv"
+    CAPTION_LANGUAGE: str = "en"
+
+    # --- Rate Limiting ---
+    # Authenticated routes use the API key. The unauthenticated public MCP
+    # route uses a canonical client IP plus a deployment-wide backstop.
+    RATE_LIMIT_PER_MINUTE: int = 120
+
+    # --- LLM / AI Agent Intelligence ---
+    # Provider: openai, azure, anthropic, ollama
+    LLM_PROVIDER: str = "openai"
+    LLM_API_KEY: [REDACTED] = ""
+    LLM_MODEL: str = "gpt-4o"
+    LLM_BASE_URL: str = "https://api.openai.com/v1"
+    LLM_MAX_TOKENS: int = 4096
+    LLM_TEMPERATURE: float = 0.7
+    # Azure OpenAI specific
+    AZURE_OPENAI_ENDPOINT: str = ""
+    AZURE_OPENAI_DEPLOYMENT: str = ""
+    # Ollama (local) specific
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    OLLAMA_MODEL: str = "llama3"
+
+    # --- Phase 9: WebAuthn / Passkey ---
+    # Relying Party configuration for FIDO2/WebAuthn
+    WEBAUTHN_RP_ID: str = "localhost"
+    WEBAUTHN_RP_NAME: str = "Agent Middleware API"
+    WEBAUTHN_TIMEOUT_MS: int = 60000
+    WEBAUTHN_CHALLENGE_EXPIRY: int = 300
+    WEBAUTHN_VERIFICATION_VALIDITY: int = 300
+    WEBAUTHN_ALLOWED_ORIGINS: str = (
+        "https://localhost,http://localhost:8000"  # Comma-separated
+    )
+
+    # --- Phase 9: Playwright Bridge ---
+    PLAYWRIGHT_HEADLESS: bool = True
+    PLAYWRIGHT_BROWSER_TYPE: str = "chromium"
+    PLAYWRIGHT_TIMEOUT_MS: int = 30000
+    PLAYWRIGHT_MAX_SESSIONS: int = 8
+    PLAYWRIGHT_SESSION_TTL_SECONDS: int = 900
+
+    # --- Behavioral Sandbox ---
+    # Python execution backend: disabled, docker, or unsafe_host. Docker is the
+    # only built-in backend intended to provide an actual process boundary.
+    BEHAVIORAL_SANDBOX_PYTHON_BACKEND: str = "disabled"
+    BEHAVIORAL_SANDBOX_DOCKER_IMAGE: str = "python:3.12-slim"
+
+    # Legacy local-development escape hatch. Host Python execution is not a
+    # production sandbox; keep this false unless an external isolation layer
+    # such as a container runtime, gVisor, or Firecracker owns the boundary.
+    ALLOW_UNSAFE_HOST_PYTHON_SANDBOX: bool = False
+
+    # Local-development escape hatch for the outbound-URL guard
+    # (app.core.url_guard): allows agent-supplied navigation/proxy targets to
+    # reach loopback/RFC1918/link-local addresses (e.g. a mock server on
+    # localhost). Never enable in production — it re-opens SSRF against
+    # cloud metadata endpoints and internal services. Non-http(s) schemes
+    # stay blocked regardless.
+    ALLOW_PRIVATE_NETWORK_TARGETS: bool = False
+
+    # Directory that AWI upload_file actions may read from. Empty (the
+    # default) disables file uploads entirely; when set, requested paths are
+    # resolved and must stay inside this directory, so an agent can only
+    # upload files that were deliberately staged for it — not arbitrary
+    # host files like credentials or keys.
+    AWI_UPLOAD_DIR: str = ""
+
+    # --- Phase 9: RAG Engine ---
+    RAG_VECTOR_STORE_PATH: str = "./data/awi_vectors"
+    RAG_EMBEDDING_MODEL: str = "text-embedding-3-small"
+    RAG_EMBEDDING_DIMENSION: int = 1536
+
+    # --- Simulation Mode ---
+    # Per-service flag. True = use the frozen mock/synthetic implementation.
+    # False is reserved for an explicitly approved real adapter and otherwise
+    # raises NotImplementedError. Production-like deployments also disable the
+    # proof-surface routers. See docs/PROOF_SURFACES.md.
+    SIMULATION_MODE_ORACLE: bool = True
+    SIMULATION_MODE_RED_TEAM: bool = True
+    SIMULATION_MODE_RTAAS: bool = True
+    SIMULATION_MODE_MEDIA_ENGINE: bool = True
+    SIMULATION_MODE_IOT_BRIDGE: bool = True
+    SIMULATION_MODE_TELEMETRY_PM: bool = True
+    SIMULATION_MODE_AGENT_COMMS: bool = True
+    SIMULATION_MODE_CONTENT_FACTORY: bool = True
+    # Frozen proof-surface categories whose only registered tools are preview
+    # stubs (app/services/mcp_phase9_tools.py returns a contract-only response
+    # and wires no side effects). They sit in pricing.PROOF_SURFACE_CATEGORIES
+    # and their routers are in PROOF_SURFACE_ROUTERS, so the runtime has to
+    # report them as simulated: without a flag here a require_real_effects
+    # wallet policy would let one of those stubs through as a real effect.
+    SIMULATION_MODE_PROTOCOL_GEN: bool = True
+    SIMULATION_MODE_SANDBOX: bool = True
+    # Human-approval gate. Simulated approvals auto-approve (marked simulated)
+    # in local/dev only; production-like environments fail closed instead of
+    # honoring a simulated approval. False requires SENTINEL_API_URL + KEY.
+    SIMULATION_MODE_HUMAN_APPROVAL: bool = True
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+    )
+
+
+@lru_cache()
+def get_settings() -> Settings:
+    return Settings()
+
+
+def public_api_origin() -> str:
+    """Absolute public API origin from PUBLIC_URL (empty when unset).
+
+    Returns empty rather than guessing localhost: a manifest or an exported
+    receipt that names the wrong issuer is worse than one that names none.
+    """
+    return (get_settings().PUBLIC_URL or "").strip().rstrip("/")
+
+DEPS LOG ialize==0.12.0
+ + asyncpg==0.31.0
+ + attrs==26.1.0
+ + boolean-py==5.0
+ + cachecontrol==0.14.4
+ + certifi==2026.7.22
+ + cffi==2.1.1
+ + charset-normalizer==3.5.2
+ + click==8.5.0
+ + coverage==7.16.2
+ + cryptography==50.0.2
+ + cyclonedx-python-lib==11.12.0
+ + defusedxml==0.7.1
+ + dnspython==2.8.0
+ + email-validator==2.3.0
+ + fastapi==0.142.2
+ + filelock==4.0.9
+ + greenlet==3.5.6
+ + h11==0.16.0
+ + httpcore==1.0.9
+ + httptools==0.8.0
+ + httpx==0.28.1
+ + httpx-sse==0.4.3
+ + hypothesis==6.168.3
+ + idna==3.20
+ + iniconfig==2.3.0
+ + jsonschema==4.26.0
+ + jsonschema-path==0.5.0
+ + jsonschema-specifications==2025.9.1
+ + lazy-object-proxy==1.12.0
+ + librt==0.16.0
+ + license-expression==30.4.4
+ + mako==1.4.3
+ + markdown-it-py==4.2.0
+ + markupsafe==3.0.4
+ + mcp==1.30.0
+ + mdurl==0.1.2
+ + msgpack==1.2.3
+ + mypy==2.4.0
+ + mypy-extensions==1.1.0
+ + openapi-schema-validator==0.9.0
+ + openapi-spec-validator==0.9.0
+ + opentelemetry-api==1.45.0
+ + packageurl-python==0.17.6
+ + packaging==26.3
+ + paho-mqtt==2.1.0
+ + pathable==0.6.0
+ + pathspec==1.1.1
+ + pip==26.2.1
+ + pip-api==0.0.35
+ + pip-audit==2.10.1
+ + pip-requirements-parser==32.0.1
+ + platformdirs==4.12.2
+ + pluggy==1.6.0
+ + py-serializable==2.1.0
+ + pycparser==3.0
+ + pydantic==2.13.5
+ + pydantic-core==2.46.5
+ + pydantic-settings==2.15.0
+ + pygments==2.21.0
+ + pyjwt==2.15.1
+ + pyparsing==3.3.3
+ + pytest==9.1.1
+ + pytest-asyncio==1.4.0
+ + pytest-cov==7.1.0
+ + pytest-socket==0.8.1
+ + python-dotenv==1.2.4
+ + python-multipart==0.0.32
+ + pyyaml==6.0.3
+ + redis==8.1.0
+ + referencing==0.37.0
+ + requests==2.34.2
+ + rfc3339-validator==0.1.4
+ + rich==15.0.0
+ + rpds-py==2026.6.3
+ + ruff==0.16.10
+ + six==1.17.0
+ + sortedcontainers==2.4.0
+ + sqlalchemy==2.0.54
+ + sqlmodel==0.0.47
+ + sse-starlette==3.5.0
+ + starlette==1.7.0
+ + stripe==16.0.0
+ + structlog==26.1.0
+ + tomli==2.4.1
+ + tomli-w==1.2.0
+ + typing-extensions==4.16.0
+ + typing-inspection==0.4.4
+ + urllib3==2.8.0
+ + uvicorn==0.54.0
+ + uvloop==0.23.0
+ + watchfiles==1.3.0
+ + websockets==17.1
+

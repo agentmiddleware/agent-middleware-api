@@ -1,0 +1,70 @@
+✔ calculator covers empty, valid, equal, zero, invalid and overflow classes (129.396042ms)
+✔ receipt component handles http without network (18.703459ms)
+✔ receipt component handles json without network (11.708833ms)
+✔ receipt component handles key-mismatch without network (11.481458ms)
+✔ receipt component handles missing-payload without network (11.398792ms)
+✔ receipt component handles valid artifacts without network (11.692ms)
+✔ SDK fails before transport for missing permit and invalid idempotency keys (44.473208ms)
+✔ SDK preserves retry identity, astral boundary and governed headers (11.313125ms)
+⚠ FE-001: declared SDK build has a project configuration (0.564125ms) # FE-001: npm run build exits 1 because tsconfig.json is absent
+⚠ FE-002: maxSteps=0 is not silently promoted to 100 actions (9.338625ms) # FE-002: preserve invalid zero for API rejection or reject locally
+ℹ tests 10
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 2
+ℹ duration_ms 653.424541
+ℹ start of coverage report
+ℹ ---------------------------------------------------------------
+ℹ file           | line % | branch % | funcs % | uncovered lines
+ℹ ---------------------------------------------------------------
+ℹ site           |        |          |         | 
+ℹ  pilot-fit.js  | 100.00 |    96.15 |  100.00 | 
+ℹ  proof         |        |          |         | 
+ℹ   proof.js     | 100.00 |    84.62 |  100.00 | 
+ℹ ---------------------------------------------------------------
+ℹ all files      | 100.00 |    90.38 |  100.00 | 
+ℹ ---------------------------------------------------------------
+ℹ end of coverage report
+
+✖ failing tests:
+
+test at docs/qa/2026-10-02/frontend-components.test.cjs:128:1
+⚠ FE-001: declared SDK build has a project configuration (0.564125ms) # FE-001: npm run build exits 1 because tsconfig.json is absent
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  false !== true
+  
+      at TestContext.<anonymous> (/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api/docs/qa/2026-10-02/frontend-components.test.cjs:129:10)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at docs/qa/2026-10-02/frontend-components.test.cjs:132:1
+⚠ FE-002: maxSteps=0 is not silently promoted to 100 actions (9.338625ms) # FE-002: preserve invalid zero for API rejection or reject locally
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  100 !== 0
+  
+      at TestContext.<anonymous> (/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api/docs/qa/2026-10-02/frontend-components.test.cjs:136:10)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 100,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

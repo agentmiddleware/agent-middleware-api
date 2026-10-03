@@ -1,0 +1,111 @@
+app/services/idempotency.py-143-        return line.encode("latin-1").decode("utf-8")
+app/services/idempotency.py-144-    except UnicodeError as exc:
+app/services/idempotency.py-145-        raise InvalidIdempotencyKeyError(
+app/services/idempotency.py-146-            "idempotency_key_not_utf8",
+app/services/idempotency.py-147-            f"invalid_idempotency_key: {IDEMPOTENCY_KEY_HEADER_SOURCE} must be "
+app/services/idempotency.py-148-            "valid UTF-8",
+app/services/idempotency.py-149-            source=IDEMPOTENCY_KEY_HEADER_SOURCE,
+app/services/idempotency.py-150-        ) from exc
+app/services/idempotency.py-151-
+app/services/idempotency.py-152-
+app/services/idempotency.py:153:def resolve_client_idempotency_key(
+app/services/idempotency.py-154-    sources: Sequence[tuple[str, object]],
+app/services/idempotency.py-155-) -> str | None:
+app/services/idempotency.py-156-    """Reduce every explicitly supplied key source to the one key to honor.
+app/services/idempotency.py-157-
+app/services/idempotency.py-158-    ``sources`` holds ``(source_name, value)`` for each source the caller
+app/services/idempotency.py-159-    actually sent; absent sources are simply not listed. Every present value
+app/services/idempotency.py-160-    must validate, and when more than one source is present they must agree
+app/services/idempotency.py-161-    exactly. Disagreement is refused as ambiguous rather than letting one
+app/services/idempotency.py-162-    source silently win. Returns ``None`` only when no source was supplied.
+app/services/idempotency.py-163-    """
+app/services/idempotency.py-164-    validated: list[tuple[str, str]] = []
+app/services/idempotency.py-165-    for source, value in sources:
+app/services/idempotency.py-166-        validated.append(
+app/services/idempotency.py-167-            (source, validate_client_idempotency_key(value, source=source))
+app/services/idempotency.py-168-        )
+app/services/idempotency.py-169-    if not validated:
+app/services/idempotency.py-170-        return None
+app/services/idempotency.py-171-    first_source, first_key = validated[0]
+app/services/idempotency.py-172-    for source, key in validated[1:]:
+app/services/idempotency.py-173-        if key != first_key:
+app/services/idempotency.py-174-            raise InvalidIdempotencyKeyError(
+app/services/idempotency.py-175-                "idempotency_key_conflict",
+app/services/idempotency.py-176-                f"invalid_idempotency_key: {first_source} and {source} disagree; "
+app/services/idempotency.py-177-                "send one key, or the same key in both",
+app/services/idempotency.py-178-                source=f"{first_source}, {source}",
+app/services/idempotency.py-179-            )
+app/services/idempotency.py-180-    return first_key
+app/services/idempotency.py-181-
+app/services/idempotency.py-182-
+app/services/idempotency.py-183-@dataclass(frozen=True)
+app/services/idempotency.py-184-class IdempotencyReplay:
+app/services/idempotency.py-185-    response_reference: str | None
+app/services/idempotency.py-186-    response_json: dict[str, Any] | None
+app/services/idempotency.py-187-    status_code: int
+app/services/idempotency.py-188-
+app/services/idempotency.py-189-
+app/services/idempotency.py-190-@dataclass(frozen=True)
+app/services/idempotency.py-191-class IdempotencyBegin:
+app/services/idempotency.py-192-    """Identity and replay result for one idempotent request."""
+app/services/idempotency.py-193-
+app/services/idempotency.py-194-    record_id: str
+app/services/idempotency.py-195-    request_hash: str
+app/services/idempotency.py-196-    replay: IdempotencyReplay | None
+app/services/idempotency.py-197-
+app/services/idempotency.py-198-
+app/services/idempotency.py-199-def _idempotency_predicates(
+app/services/idempotency.py-200-    wallet_id: str, endpoint: str, idempotency_key: str
+app/services/idempotency.py-201-) -> tuple[ColumnElement[bool], ...]:
+app/services/idempotency.py-202-    return (
+app/services/idempotency.py-203-        cast(ColumnElement[bool], IdempotencyRecordModel.wallet_id == wallet_id),
+app/services/idempotency.py-204-        cast(ColumnElement[bool], IdempotencyRecordModel.endpoint == endpoint),
+app/services/idempotency.py-205-        cast(
+app/services/idempotency.py-206-            ColumnElement[bool],
+app/services/idempotency.py-207-            IdempotencyRecordModel.idempotency_key == idempotency_key,
+app/services/idempotency.py-208-        ),
+app/services/idempotency.py-209-    )
+app/services/idempotency.py-210-
+app/services/idempotency.py-211-
+app/services/idempotency.py-212-def _replay_from_record(
+app/services/idempotency.py-213-    existing: IdempotencyRecordModel, request_hash: str
+app/services/idempotency.py-214-) -> IdempotencyReplay | None:
+app/services/idempotency.py-215-    if existing.request_hash != request_hash:
+app/services/idempotency.py-216-        raise IdempotencyConflictError("idempotency_key_reused")
+app/services/idempotency.py-217-    if existing.response_json:
+app/services/idempotency.py-218-        try:
+app/services/idempotency.py-219-            decoded = json.loads(existing.response_json)
+app/services/idempotency.py-220-        except json.JSONDecodeError:
+app/services/idempotency.py-221-            decoded = None
+app/services/idempotency.py-222-        if isinstance(decoded, dict):
+app/services/idempotency.py-223-            return IdempotencyReplay(
+app/services/idempotency.py-224-                response_reference=existing.response_reference,
+app/services/idempotency.py-225-                response_json=decoded,
+app/services/idempotency.py-226-                status_code=existing.status_code,
+app/services/idempotency.py-227-            )
+app/services/idempotency.py-228-    raise IdempotencyInProgressError("idempotency_in_progress")
+app/services/idempotency.py-229-
+app/services/idempotency.py-230-
+app/services/idempotency.py-231-class IdempotencyService:
+app/services/idempotency.py-232-    async def _try_reconcile_and_replay(
+app/services/idempotency.py-233-        self,
+app/services/idempotency.py-234-        session: AsyncSession,
+app/services/idempotency.py-235-        *,
+app/services/idempotency.py-236-        existing: IdempotencyRecordModel,
+app/services/idempotency.py-237-        request_hash: str,
+app/services/idempotency.py-238-        wallet_id: str,
+app/services/idempotency.py-239-        endpoint: str,
+app/services/idempotency.py-240-        idempotency_key: str,
+app/services/idempotency.py-241-        wait_timeout_seconds: float,
+app/services/idempotency.py-242-        poll_interval_seconds: float,
+app/services/idempotency.py-243-    ) -> IdempotencyReplay:
+app/services/idempotency.py-244-        """Try immediate reconciliation for dispatched/terminal attempts before wait."""
+app/services/idempotency.py-245-        # Check if there's a dispatch attempt linked to this idempotency record
+app/services/idempotency.py-246-        # that is either dispatched (ambiguous) or terminal but not finalized.
+app/services/idempotency.py-247-        dispatch_attempt = (
+app/services/idempotency.py-248-            await session.execute(
+app/services/idempotency.py-249-                select(McpDispatchAttemptModel).where(
+app/services/idempotency.py-250-                    cast(
+app/services/idempotency.py-251-                        ColumnElement[bool],
+app/services/idempotency.py-252-                        McpDispatchAttemptModel.idempotency_record_id
+app/services/idempotency.py-253-                        == existing.record_id,

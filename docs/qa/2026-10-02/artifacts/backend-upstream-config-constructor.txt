@@ -1,0 +1,73 @@
+        super().__init__("upstream_returned_error", dispatch_started=True)
+        self.result = result
+
+
+@dataclass(frozen=True)
+class DiscoveredUpstreamTool:
+    name: str
+    description: str
+    input_schema: dict[str, Any]
+    output_schema: dict[str, Any] | None
+
+
+@dataclass(frozen=True)
+class UpstreamMcpConfiguration:
+    url: str
+    origin: str
+    tool_name: str
+    public_tool_id: str
+    bearer_token: [REDACTED] = field(repr=False)
+    credits_per_call: Decimal
+    connect_timeout_seconds: float
+    call_timeout_seconds: float
+    max_response_bytes: int
+    environment: str
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> UpstreamMcpConfiguration:
+        """Build validated non-network configuration from application settings."""
+        required_strings = {
+            "MCP_UPSTREAM_URL": settings.MCP_UPSTREAM_URL,
+            "MCP_UPSTREAM_TOOL_NAME": settings.MCP_UPSTREAM_TOOL_NAME,
+            "MCP_UPSTREAM_PUBLIC_TOOL_ID": settings.MCP_UPSTREAM_PUBLIC_TOOL_ID,
+        }
+        missing = sorted(name for name, value in required_strings.items() if not value)
+        token = [REDACTED]
+        if not token:
+            [REDACTED]
+        if missing:
+            raise UpstreamMcpConfigurationError(
+                "missing required settings: " + ", ".join(missing)
+            )
+
+        if token != token.strip() or any(ord(char) < 32 for char in token):
+            raise UpstreamMcpConfigurationError(
+                "MCP_UPSTREAM_BEARER_TOKEN contains surrounding whitespace or control characters"
+            )
+
+        public_configuration = (
+            settings.MCP_UPSTREAM_URL,
+            settings.MCP_UPSTREAM_TOOL_NAME,
+            settings.MCP_UPSTREAM_PUBLIC_TOOL_ID,
+            _GATEWAY_TOOL_DESCRIPTION,
+        )
+        if any(token in value for value in public_configuration):
+            raise UpstreamMcpConfigurationError(
+                "MCP_UPSTREAM_BEARER_TOKEN must differ from public upstream configuration"
+            )
+
+        for setting_name, tool_id in (
+            ("MCP_UPSTREAM_TOOL_NAME", settings.MCP_UPSTREAM_TOOL_NAME),
+            ("MCP_UPSTREAM_PUBLIC_TOOL_ID", settings.MCP_UPSTREAM_PUBLIC_TOOL_ID),
+        ):
+            if not _SAFE_TOOL_ID.fullmatch(tool_id):
+                raise UpstreamMcpConfigurationError(
+                    f"{setting_name} must use only the MCP tool-name characters A-Z, a-z, 0-9, _, -, and ."
+                )
+
+        credits = settings.MCP_UPSTREAM_CREDITS_PER_CALL
+        if not credits.is_finite() or credits <= 0:
+            raise UpstreamMcpConfigurationError(
+                "MCP_UPSTREAM_CREDITS_PER_CALL must be finite and greater than zero"
+            )
+        if credits > _MAX_NUMERIC_20_8:

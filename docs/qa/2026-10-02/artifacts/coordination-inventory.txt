@@ -1,0 +1,20 @@
+tools {'uv': '/Users/sellers/.local/bin/uv', 'node': '/opt/homebrew/bin/node', 'npm': '/opt/homebrew/bin/npm', 'ruff': '/Library/Frameworks/Python.framework/Versions/3.12/bin/ruff', 'mypy': '/Library/Frameworks/Python.framework/Versions/3.12/bin/mypy', 'gitleaks': '/opt/homebrew/bin/gitleaks', 'coderabbit': '/Users/sellers/.local/bin/coderabbit'}
+venv False
+roots ['SECURITY_LIMITATIONS.md', 'CODE_OF_CONDUCT.md', 'wrappers', 'migrations', 'LICENSING.md', 'failure_lab', 'DESIGN_PARTNER_GUIDE.md', 'app', 'LICENSE', 'requirements.txt', 'server.json', 'CONTEXT.md', 'CHANGELOG.md', 'TROUBLESHOOTING.md', 'alembic.ini', 'Dockerfile', 'Makefile', 'CODEOWNERS', 'GOVERNANCE.md', 'pyproject.toml', 'tests', 'b2a_sdk', 'docs', 'WEDGE.md', 'README.md', 'awi_sdk', 'Dockerfile.dev', 'ELEVATOR_PITCH.md', 'TRUST_MODEL.md', 'mypy.ini', 'framework_integrations', 'static', 'CONTRIBUTING.md', 'examples', 'ruff.toml', 'scripts', 'DEMO_SCRIPT.md', 'site', 'docker-compose.yml', 'QUOTE_VERTICAL_SLICE_VERIFICATION.md', 'FINAL_SUMMARY.md', 'AGENTS.md', 'CLAUDE.md', 'SECURITY.md']
+# AGENTS.md — Tests
+
+Tests should verify business-critical behavior, not just happy paths.
+
+Prefer:
+
+- negative-path tests
+- authorization failure tests
+- tenant isolation tests
+- billing/idempotency tests
+- receipt verification tests
+- replay prevention tests
+- malformed input tests
+
+Do not remove tests unless replacing them with equal or better coverage.
+
+manifests ['.railway/package.json', 'site/package.json', 'awi_sdk/typescript/package.json']

@@ -1,0 +1,3 @@
+BE-C174 literal brackets True True
+Inventory count, stable IDs, links and Python syntax: PASS
+git diff --check: PASS

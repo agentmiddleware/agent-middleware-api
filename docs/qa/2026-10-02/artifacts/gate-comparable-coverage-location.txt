@@ -1,0 +1,31 @@
+backend-after-coverage.json 2026-10-02T17:54:34.359886 {"covered_lines": 21249, "num_statements": 24266, "percent_covered": 87.566966125443, "percent_covered_display": "88", "missing_lines": 3017, "excluded_lines": 45, "percent_statements_covered": 87.566966125443, "percent_statements_covered_display": "88"}
+backend-baseline-coverage.json 2026-10-02T17:42:35.983442 {"covered_lines": 21248, "num_statements": 24266, "percent_covered": 87.56284513310806, "percent_covered_display": "88", "missing_lines": 3018, "excluded_lines": 45, "percent_statements_covered": 87.56284513310806, "percent_statements_covered_display": "88"}
+backend-baseline-final-coverage.json 2026-10-02T17:49:11.156779 {"covered_lines": 21249, "num_statements": 24266, "percent_covered": 87.566966125443, "percent_covered_display": "88", "missing_lines": 3017, "excluded_lines": 45, "percent_statements_covered": 87.566966125443, "percent_statements_covered_display": "88"}
+backend-openai-wrapper-coverage.json 2026-10-02T17:55:24.551449 {"covered_lines": 237, "num_statements": 249, "percent_covered": 95.18072289156626, "percent_covered_display": "95", "missing_lines": 12, "excluded_lines": 10, "percent_statements_covered": 95.18072289156626, "percent_statements_covered_display": "95"}
+backend-sdk-coverage.json 2026-10-02T17:55:03.703020 {"covered_lines": 960, "num_statements": 1418, "percent_covered": 67.70098730606487, "percent_covered_display": "68", "missing_lines": 458, "excluded_lines": 14, "percent_statements_covered": 67.70098730606487, "percent_statements_covered_display": "68"}
+# QA coverage — 2026-10-02
+
+PR: opened by orchestrator
+
+CI status: pending at time of writing
+
+## Measurement rules
+
+Backend coverage uses the same `app` source denominator before and after retained QA tests, with greenlet-aware tracing from `pyproject.toml`. Pass/fail counts and exclusions are reported separately from executed-line coverage. Coverage does not prove correctness, PostgreSQL parity, crash safety or production readiness.
+
+The existing backend baseline and focused QA probes are running. Their final measured totals and artifacts are added when the backend pass closes. No percentage is inferred from prior runs.
+
+## Frontend component scope
+
+The browser-free fallback executes the real `site/pilot-fit.js` and `site/proof/proof.js` with jsdom and mocked local data, plus a transpiled TypeScript SDK with a fake transport. Node V8 coverage for the **two named web scripts only** is 100% lines, 90.38% branches and 100% functions. This is not whole-site or SDK coverage. Exact artifacts and final command results are listed in the frontend report at closeout.
+
+The native Chromium, Firefox and WebKit baseline could not launch under the macOS sandbox. A blocked baseline is **not 0% coverage**. The separate Chrome computer-use fallback is exploratory evidence and is not substituted for the blocked cross-browser Playwright suite.
+
+## Untested or incomplete areas
+
+- Real remote MCP effects, databases, billing and provider integrations: prohibited.
+- PostgreSQL-specific multiprocess locking/crash recovery: requires isolated local infrastructure, not supplied by SQLite tests.
+- Hosted CI and deployed configuration/performance: orchestrator follow-up only.
+- Full browser matrix and whole-site JS branch coverage: constrained by sandbox/tooling; final UX report records actual fallback evidence.
+- Real screen-reader use and complete WCAG certification: beyond automated axe and DOM/keyboard checks.
+

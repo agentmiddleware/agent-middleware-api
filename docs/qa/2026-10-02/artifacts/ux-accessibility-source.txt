@@ -1,0 +1,259 @@
+FILE site/a11y.js
+55:       root.setAttribute("data-a11y-spacing", "wide");
+56:     } else {
+57:       root.removeAttribute("data-a11y-spacing");
+58:     }
+59:     if (state.underline) {
+60:       root.setAttribute("data-a11y-underline", "on");
+61:     } else {
+62:       root.removeAttribute("data-a11y-underline");
+63:     }
+64:   }
+65: 
+66:   var state = loadState();
+67:   applyState(state);
+68: 
+69:   function build() {
+70:     if (document.getElementById("amw-a11y-panel")) return;
+71:     var toggle = document.createElement("button");
+72:     toggle.type = "button";
+73:     toggle.className = "amw-a11y-toggle";
+74:     toggle.setAttribute("aria-expanded", "false");
+75:     toggle.setAttribute("aria-controls", "amw-a11y-panel");
+76:     toggle.setAttribute("aria-label", "Accessibility options");
+77:     toggle.textContent = "Aa";
+78: 
+79:     var panel = document.createElement("div");
+80:     panel.className = "amw-a11y-panel";
+81:     panel.id = "amw-a11y-panel";
+82:     panel.setAttribute("role", "dialog");
+83:     panel.setAttribute("aria-label", "Accessibility options");
+84:     panel.setAttribute("tabindex", "-1");
+85:     panel.hidden = true;
+86: 
+87:     var heading = document.createElement("h2");
+88:     heading.textContent = "Accessibility";
+89:     panel.appendChild(heading);
+90: 
+91:     /* Text size row */
+92:     var sizeRow = document.createElement("div");
+93:     sizeRow.className = "amw-a11y-row";
+94:     var sizeLabel = document.createElement("span");
+95:     sizeLabel.textContent = "Text size";
+96:     sizeLabel.id = "amw-a11y-size-label";
+97:     var sizeControls = document.createElement("span");
+98:     sizeControls.className = "amw-a11y-size";
+99:     sizeControls.setAttribute("role", "group");
+100:     sizeControls.setAttribute("aria-labelledby", "amw-a11y-size-label");
+101: 
+102:     var smaller = document.createElement("button");
+103:     smaller.type = "button";
+104:     smaller.textContent = "−";
+105:     smaller.setAttribute("aria-label", "Decrease text size");
+106: 
+107:     var readout = document.createElement("output");
+108:     readout.setAttribute("aria-live", "polite");
+109: 
+110:     var larger = document.createElement("button");
+111:     larger.type = "button";
+112:     larger.textContent = "+";
+113:     larger.setAttribute("aria-label", "Increase text size");
+114: 
+115:     sizeControls.appendChild(smaller);
+116:     sizeControls.appendChild(readout);
+117:     sizeControls.appendChild(larger);
+118:     sizeRow.appendChild(sizeLabel);
+119:     sizeRow.appendChild(sizeControls);
+120:     panel.appendChild(sizeRow);
+121: 
+122:     function renderScale() {
+123:       readout.value = Math.round(state.scale * 100) + "%";
+124:     }
+125:     renderScale();
+126: 
+127:     smaller.addEventListener("click", function () {
+128:       state.scale = Math.max(MIN_SCALE, Math.round((state.scale - STEP) * 10) / 10);
+129:       applyState(state);
+130:       saveState(state);
+131:       renderScale();
+132:     });
+133:     larger.addEventListener("click", function () {
+134:       state.scale = Math.min(MAX_SCALE, Math.round((state.scale + STEP) * 10) / 10);
+135:       applyState(state);
+136:       saveState(state);
+137:       renderScale();
+138:     });
+139: 
+140:     /* Switch rows */
+141:     var switches = [
+142:       { key: "contrast", label: "High contrast" },
+143:       { key: "motion", label: "Reduce motion" },
+FILE site/styles.css
+1: /* ==========================================================================
+2:    Agent Middleware API — "ledger night" design system
+3:    Ground: deep navy ink, the colour of a ledger's cloth binding. Light
+4:    surfaces are reserved for paper artifacts (the pilot ticket and the live
+5:    receipt) — a receipt has to read as a document, not as a panel. Gold marks
+6:    authority (the seal, the primary action); green is spent only on
+7:    verification status; cyan and magenta are the arcade's trim and never
+8:    carry meaning on a page.
+9: 
+10:    Type is a three-role system: a serif display face for the headlines,
+11:    because this product's promise is a signed document; a workhorse sans for
+12:    card titles and controls; a mono for everything that is data — kickers,
+13:    badges, receipt rows, code.
+14: 
+15:    This system replaced the full arcade-cabinet treatment. The 8-bit idea was
+16:    fun, and it survives in exactly two places: the footer's PRESS START
+17:    control and the waiting room it opens (/arcade.css). Everything the buyer
+18:    reads is set in a sans and a mono, on hairlines and soft corners, with no
+19:    scanlines, no hard-offset shadows, and no pixel upscaling.
+20:    ========================================================================== */
+21: 
+22: :root {
+23:   --ink: #0b1020;
+24:   --panel: #121a30;
+25:   --rule: #34457a;
+26:   --rule-soft: #1f2b4a;
+27:   --paper: #f6f3e9;
+28:   --paper-shade: #e8e3d2;
+29:   --paper-ink: #121629;
+30:   --paper-dim: #4c526b;
+31:   --text: #e9edf8;
+32:   --text-dim: #9ca8cb;
+33:   --brass: #f0b43c;
+34:   --brass-bright: #ffd166;
+35:   --verify: #4ade80;
+36:   --danger: #ff7b6b;
+37:   /* --danger holds 4.5:1 only on the dark grounds; this is its resolution
+38:      for paper surfaces (the approval card resolves it as a literal because
+39:      mail clients cannot read var()). */
+40:   --danger-on-paper: #b0281a;
+41:   /* Arcade trim. Decorative only, and only inside the waiting room. */
+42:   --arcade-cyan: #47e0ff;
+43:   --arcade-magenta: #ff5cc8;
+44:   /* One step below --ink. The arcade drops its hard shadows onto it; the
+45:      page uses it as the darkest end of a soft shadow. */
+46:   --shadow-ink: #05070f;
+47: 
+48:   /* Hairlines are the text-dim hue at low alpha, so they sit inside the
+49:      palette on every ground rather than reading as a third purple. */
+50:   --line: rgba(156, 168, 203, 0.18);
+51:   --line-strong: rgba(156, 168, 203, 0.34);
+52:   --paper-line: rgba(18, 22, 41, 0.17);
+53: 
+54:   --font-display: "Instrument Serif", Georgia, "Times New Roman", serif;
+55:   --font-title: "Libre Franklin", "Helvetica Neue", Arial, sans-serif;
+56:   --font-body: "Public Sans", "Segoe UI", system-ui, sans-serif;
+57:   --font-mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+58:   /* The pixel face. Spent on the footer's PRESS START control and inside
+59:      the arcade, and nowhere else on the page. */
+60:   --font-pixel: "Press Start 2P", "Courier New", ui-monospace, monospace;
+61: 
+62:   --radius: 10px;
+63:   --radius-sm: 6px;
+64:   --radius-xs: 3px;
+65:   --shadow-soft: 0 24px 48px -24px rgba(0, 0, 0, 0.7);
+66:   --shadow-lift: 0 12px 32px -16px rgba(0, 0, 0, 0.8);
+67: 
+68:   --measure: 62ch;
+69:   --page-max: 1120px;
+70:   --pad-x: clamp(1.25rem, 4vw, 2.5rem);
+71:   --focus-ring: 2px solid var(--brass);
+72: }
+73: 
+74: /* Accessibility panel overrides ------------------------------------------ */
+75: 
+76: html {
+77:   font-size: calc(100% * var(--a11y-scale, 1));
+78:   /* keep in-page anchor targets clear of the sticky nav */
+79:   scroll-padding-top: 7rem;
+80: }
+81: 
+82: html[data-a11y-contrast="high"] {
+83:   --ink: #000000;
+84:   --panel: #0b0b12;
+85:   --rule: #8f86d6;
+86:   --rule-soft: #5b53a0;
+87:   --paper: #ffffff;
+88:   --paper-shade: #f1f1f1;
+89:   --paper-ink: #000000;
+90:   --paper-dim: #26292f;
+FILE site/pilot-fit.js
+1: (function () {
+2:   "use strict";
+3: 
+4:   const calculator = document.querySelector(".pilot-fit");
+5:   if (!calculator) return;
+6: 
+7:   const fields = Array.from(calculator.querySelectorAll("input"));
+8:   const summary = calculator.querySelector("[data-fit-summary]");
+9:   const guidance = calculator.querySelector("[data-fit-guidance]");
+10:   const next = calculator.querySelector("[data-fit-next]");
+11:   const alternative = calculator.querySelector("[data-fit-alternative]");
+12:   const money = new Intl.NumberFormat("en-US", {
+13:     style: "currency",
+14:     currency: "USD",
+15:     maximumFractionDigits: 2,
+16:   });
+17:   const roundedAmount = new Intl.NumberFormat("en-US", {
+18:     useGrouping: false,
+19:     maximumFractionDigits: 2,
+20:   });
+21: 
+22:   function update() {
+23:     next.hidden = true;
+24:     alternative.hidden = true;
+25:     guidance.textContent = "";
+26:     for (const field of fields) {
+27:       const invalid = field.validity.badInput ||
+28:         (field.value !== "" && (!field.checkValidity() ||
+29:           !Number.isFinite(field.valueAsNumber)));
+30:       field.setAttribute("aria-invalid", String(invalid));
+31:     }
+32:     const invalid = fields.find((field) => field.getAttribute("aria-invalid") === "true");
+33:     if (invalid) {
+34:       summary.textContent = "Check your inputs: use non-negative numbers, whole actions, and percentages from 0 to 100.";
+35:       return;
+36:     }
+37:     if (fields.some((field) => field.required && field.value === "")) {
+38:       summary.textContent = "Enter the four workflow assumptions to estimate avoided loss.";
+39:       return;
+40:     }
+41: 
+42:     const [actions, rate, loss, reduction, cost] = fields.map((field) => field.valueAsNumber);
+43:     const avoidedDuplicates = actions * (rate / 100) * (reduction / 100);
+44:     const avoidedLoss = avoidedDuplicates * loss;
+45:     const hasCost = fields[4].value !== "";
+46:     const threshold = hasCost && avoidedDuplicates > 0 ? cost / avoidedDuplicates : 0;
+47:     if (![avoidedDuplicates, avoidedLoss, threshold].every(Number.isFinite)) {
+48:       summary.textContent = "These values are too large to calculate. Use smaller estimates.";
+49:       return;
+50:     }
+51: 
+52:     summary.textContent = "Estimated avoided duplicate loss: " + money.format(avoidedLoss) + " / month.";
+53:     if (avoidedDuplicates === 0) {
+54:       guidance.textContent = "These assumptions imply no avoided duplicates, so duplicate prevention alone cannot justify an added cost.";
+55:       alternative.hidden = false;
+56:     } else if (!hasCost) {
+57:       guidance.textContent = "Economic fit is still unknown. Add your total monthly cost to compare; a service quote and operating scope are needed before deciding.";
+58:     } else {
+59:       const comparison = " Break-even loss per duplicate: " + money.format(threshold) + ".";
+60:       // Use the same decimal rounding as the displayed currency amounts.
+61:       const displayedLoss = Number(roundedAmount.format(avoidedLoss));
+62:       const displayedCost = Number(roundedAmount.format(cost));
+63:       if (displayedLoss > displayedCost) {
+64:         guidance.textContent = "Estimated avoided loss exceeds total monthly cost by " + money.format(displayedLoss - displayedCost) + "." + comparison + " This is a reason to validate the assumptions in a paid pilot, not evidence of savings.";
+65:         next.hidden = false;
+66:       } else {
+67:         guidance.textContent = "Estimated avoided loss does not exceed total monthly cost." + comparison + " Start with simpler reliability or upstream idempotency controls. Any separate operational benefit needs its own evidence.";
+68:         alternative.hidden = false;
+69:       }
+70:     }
+71:   }
+72: 
+73:   calculator.addEventListener("input", update);
+74:   calculator.querySelector("[data-fit-inputs]").hidden = false;
+75:   calculator.querySelector("[data-fit-result]").hidden = false;
+76:   update();
+77: })();

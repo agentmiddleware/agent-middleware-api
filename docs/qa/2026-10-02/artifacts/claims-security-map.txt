@@ -1,0 +1,76 @@
+rg: app/routers/wallets.py: No such file or directory (os error 2)
+app/services/upstream_mcp.py:362:    explicit_loopback = host == "localhost" or host.endswith(".localhost")
+app/services/upstream_mcp.py:365:        explicit_loopback = literal.is_loopback
+app/services/upstream_mcp.py:367:    elif explicit_loopback:
+app/services/upstream_mcp.py:397:    loopback_exception = (
+app/services/upstream_mcp.py:399:        and explicit_loopback
+app/services/upstream_mcp.py:400:        and all(address.is_loopback for address in parsed_addresses)
+app/services/upstream_mcp.py:402:    if parts.scheme.lower() == "http" and not loopback_exception:
+app/services/upstream_mcp.py:404:            "MCP_UPSTREAM_URL must use https except for loopback local/test servers"
+app/services/upstream_mcp.py:406:    if not loopback_exception and any(
+app/services/upstream_mcp.py:410:            "MCP_UPSTREAM_URL must not resolve to private, loopback, link-local, metadata, or reserved addresses"
+app/services/upstream_mcp.py:481:            follow_redirects=False,
+app/services/upstream_mcp.py:701:            if self._injected_http_client.follow_redirects:
+app/services/upstream_mcp.py:703:                    "injected upstream MCP HTTP client must disable redirects"
+app/services/upstream_mcp.py:736:            follow_redirects=False,
+app/routers/billing.py:242:    auth: AuthContext = Depends(get_auth_context),
+app/routers/billing.py:251:    auth.require_bootstrap_admin()
+app/routers/billing.py:282:    auth: AuthContext = Depends(get_auth_context),
+app/routers/billing.py:380:    auth: AuthContext = Depends(get_auth_context),
+app/routers/billing.py:449:    auth: AuthContext = Depends(get_auth_context),
+app/routers/billing.py:479:    auth: AuthContext = Depends(get_auth_context),
+app/routers/billing.py:506:    auth: AuthContext = Depends(get_auth_context),
+app/routers/billing.py:523:    auth: AuthContext = Depends(get_auth_context),
+app/routers/billing.py:547:    auth: AuthContext = Depends(get_auth_context),
+app/routers/billing.py:601:    auth: AuthContext = Depends(get_auth_context),
+app/routers/billing.py:850:    auth: AuthContext = Depends(get_auth_context),
+app/routers/billing.py:902:    auth: AuthContext = Depends(get_auth_context),
+app/routers/billing.py:993:    auth: AuthContext = Depends(get_auth_context),
+app/routers/billing.py:1173:    auth: AuthContext = Depends(get_auth_context),
+app/routers/billing.py:1311:    auth: AuthContext = Depends(get_auth_context),
+app/routers/billing.py:1341:    auth: AuthContext = Depends(get_auth_context),
+app/routers/billing.py:1360:            owner_wallet_id=auth.wallet_id,
+app/routers/billing.py:1399:    auth: AuthContext = Depends(get_auth_context),
+app/routers/billing.py:1504:    auth: AuthContext = Depends(get_auth_context),
+app/routers/billing.py:1542:    auth: AuthContext = Depends(get_auth_context),
+app/routers/billing.py:1578:    auth: AuthContext = Depends(get_auth_context),
+app/routers/billing.py:1619:    auth: AuthContext = Depends(get_auth_context),
+app/routers/billing.py:1670:    auth: AuthContext = Depends(get_auth_context),
+app/routers/billing.py:1710:    auth: AuthContext = Depends(get_auth_context),
+app/routers/receipts.py:48:            auth.require_bootstrap_admin()
+app/routers/receipts.py:57:    auth.require_bootstrap_admin()
+app/routers/receipts.py:68:    auth: AuthContext = Depends(get_auth_context),
+app/routers/receipts.py:98:    auth: AuthContext = Depends(get_auth_context),
+app/routers/receipts.py:128:    auth: AuthContext = Depends(get_auth_context),
+app/routers/receipts.py:137:            auth.require_bootstrap_admin()
+app/routers/receipts.py:165:    auth: AuthContext = Depends(get_auth_context),
+app/routers/receipts.py:167:    auth.require_bootstrap_admin()
+app/routers/receipts.py:247:    auth: AuthContext = Depends(get_auth_context),
+app/routers/receipts.py:259:    auth: AuthContext = Depends(get_auth_context),
+app/routers/receipts.py:271:    auth: AuthContext = Depends(get_auth_context),
+app/routers/receipts.py:306:    auth: AuthContext = Depends(get_auth_context),
+app/routers/receipts.py:314:        auth.require_bootstrap_admin()
+app/routers/permits.py:44:    auth.require_bootstrap_admin()
+app/routers/permits.py:58:    auth: AuthContext = Depends(get_auth_context),
+app/routers/permits.py:70:        auth.require_bootstrap_admin()
+app/routers/permits.py:98:    auth: AuthContext = Depends(get_auth_context),
+app/routers/permits.py:168:    auth: AuthContext = Depends(get_auth_context),
+app/routers/permits.py:188:    auth: AuthContext = Depends(get_auth_context),
+app/routers/permits.py:219:    auth: AuthContext = Depends(get_auth_context),
+app/routers/permits.py:236:    auth: AuthContext = Depends(get_auth_context),
+app/core/config.py:164:    MAX_REQUEST_BODY_BYTES: int = 1_048_576
+app/core/config.py:356:    # reach loopback/RFC1918/link-local addresses (e.g. a mock server on
+app/core/config.py:357:    # localhost). Never enable in production — it re-opens SSRF against
+app/core/auth.py:36:class AuthContext:
+app/core/auth.py:57:    def require_wallet_access(self, wallet_id: str | None) -> None:
+app/core/auth.py:78:    def require_bootstrap_admin(self) -> None:
+app/core/auth.py:460:def require_enterprise_tool_access(tool_name: str):
+app/main.py:563:    RequestBodyLimitMiddleware, max_body_size=settings.MAX_REQUEST_BODY_BYTES
+app/main.py:571:    ``allow_origins=["*"]`` and ``allow_credentials=True``, Starlette echoes the
+app/main.py:580:        allow_origins=origins,
+app/main.py:582:        allow_methods=["*"],
+app/main.py:583:        allow_headers=["*"],
+app/main.py:1252:    auth: AuthContext = Depends(get_auth_context),
+app/main.py:1254:    auth.require_bootstrap_admin()
+app/middleware/security_headers.py:84:_DOCS_HTML_PATHS = frozenset({"/docs", "/redoc", "/docs/oauth2-redirect"})
+app/middleware/security_headers.py:95:        "/docs/oauth2-redirect",

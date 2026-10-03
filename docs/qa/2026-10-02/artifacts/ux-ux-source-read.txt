@@ -1,0 +1,495 @@
+FILE site/a11y.js
+1: /* Accessibility preferences panel.
+2:    Injects a floating toggle + panel, persists choices, and applies them as
+3:    data attributes on <html> so styles.css can respond. No network calls. */
+4: (function () {
+5:   "use strict";
+6: 
+7:   var STORAGE_KEY = "amw-a11y";
+8:   var MIN_SCALE = 0.9;
+9:   var MAX_SCALE = 1.4;
+10:   var STEP = 0.1;
+11:   var root = document.documentElement;
+12: 
+13:   var defaults = {
+14:     scale: 1,
+15:     contrast: false,
+16:     motion: false,
+17:     spacing: false,
+18:     underline: false,
+19:   };
+20: 
+21:   function loadState() {
+22:     try {
+23:       var raw = window.localStorage.getItem(STORAGE_KEY);
+24:       if (!raw) return Object.assign({}, defaults);
+25:       var parsed = JSON.parse(raw);
+26:       var state = Object.assign({}, defaults, parsed);
+27:       state.scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, Number(state.scale) || 1));
+28:       return state;
+29:     } catch (error) {
+30:       return Object.assign({}, defaults);
+31:     }
+32:   }
+33: 
+34:   function saveState(state) {
+35:     try {
+36:       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+37:     } catch (error) {
+38:       /* private mode: preferences simply do not persist */
+39:     }
+40:   }
+41: 
+42:   function applyState(state) {
+43:     root.style.setProperty("--a11y-scale", String(state.scale));
+44:     if (state.contrast) {
+45:       root.setAttribute("data-a11y-contrast", "high");
+46:     } else {
+47:       root.removeAttribute("data-a11y-contrast");
+48:     }
+49:     if (state.motion) {
+50:       root.setAttribute("data-a11y-motion", "reduce");
+51:     } else {
+52:       root.removeAttribute("data-a11y-motion");
+53:     }
+54:     if (state.spacing) {
+55:       root.setAttribute("data-a11y-spacing", "wide");
+56:     } else {
+57:       root.removeAttribute("data-a11y-spacing");
+58:     }
+59:     if (state.underline) {
+60:       root.setAttribute("data-a11y-underline", "on");
+61:     } else {
+62:       root.removeAttribute("data-a11y-underline");
+63:     }
+64:   }
+65: 
+66:   var state = loadState();
+67:   applyState(state);
+68: 
+69:   function build() {
+70:     if (document.getElementById("amw-a11y-panel")) return;
+71:     var toggle = document.createElement("button");
+72:     toggle.type = "button";
+73:     toggle.className = "amw-a11y-toggle";
+74:     toggle.setAttribute("aria-expanded", "false");
+75:     toggle.setAttribute("aria-controls", "amw-a11y-panel");
+76:     toggle.setAttribute("aria-label", "Accessibility options");
+77:     toggle.textContent = "Aa";
+78: 
+79:     var panel = document.createElement("div");
+80:     panel.className = "amw-a11y-panel";
+81:     panel.id = "amw-a11y-panel";
+82:     panel.setAttribute("role", "dialog");
+83:     panel.setAttribute("aria-label", "Accessibility options");
+84:     panel.setAttribute("tabindex", "-1");
+85:     panel.hidden = true;
+86: 
+87:     var heading = document.createElement("h2");
+88:     heading.textContent = "Accessibility";
+89:     panel.appendChild(heading);
+90: 
+91:     /* Text size row */
+92:     var sizeRow = document.createElement("div");
+93:     sizeRow.className = "amw-a11y-row";
+94:     var sizeLabel = document.createElement("span");
+95:     sizeLabel.textContent = "Text size";
+96:     sizeLabel.id = "amw-a11y-size-label";
+97:     var sizeControls = document.createElement("span");
+98:     sizeControls.className = "amw-a11y-size";
+99:     sizeControls.setAttribute("role", "group");
+100:     sizeControls.setAttribute("aria-labelledby", "amw-a11y-size-label");
+101: 
+102:     var smaller = document.createElement("button");
+103:     smaller.type = "button";
+104:     smaller.textContent = "−";
+105:     smaller.setAttribute("aria-label", "Decrease text size");
+106: 
+107:     var readout = document.createElement("output");
+108:     readout.setAttribute("aria-live", "polite");
+109: 
+110:     var larger = document.createElement("button");
+111:     larger.type = "button";
+112:     larger.textContent = "+";
+113:     larger.setAttribute("aria-label", "Increase text size");
+114: 
+115:     sizeControls.appendChild(smaller);
+116:     sizeControls.appendChild(readout);
+117:     sizeControls.appendChild(larger);
+118:     sizeRow.appendChild(sizeLabel);
+119:     sizeRow.appendChild(sizeControls);
+120:     panel.appendChild(sizeRow);
+121: 
+122:     function renderScale() {
+123:       readout.value = Math.round(state.scale * 100) + "%";
+124:     }
+125:     renderScale();
+126: 
+127:     smaller.addEventListener("click", function () {
+128:       state.scale = Math.max(MIN_SCALE, Math.round((state.scale - STEP) * 10) / 10);
+129:       applyState(state);
+130:       saveState(state);
+131:       renderScale();
+132:     });
+133:     larger.addEventListener("click", function () {
+134:       state.scale = Math.min(MAX_SCALE, Math.round((state.scale + STEP) * 10) / 10);
+135:       applyState(state);
+136:       saveState(state);
+137:       renderScale();
+138:     });
+139: 
+140:     /* Switch rows */
+141:     var switches = [
+142:       { key: "contrast", label: "High contrast" },
+143:       { key: "motion", label: "Reduce motion" },
+144:       { key: "spacing", label: "Comfortable spacing" },
+145:       { key: "underline", label: "Underline links" },
+146:     ];
+147: 
+148:     var switchButtons = {};
+149: 
+150:     switches.forEach(function (item) {
+151:       var row = document.createElement("div");
+152:       row.className = "amw-a11y-row";
+153:       var label = document.createElement("span");
+154:       label.textContent = item.label;
+155:       label.id = "amw-a11y-lbl-" + item.key;
+156: 
+157:       var control = document.createElement("button");
+158:       control.type = "button";
+159:       control.className = "amw-a11y-switch";
+160:       control.id = "amw-a11y-sw-" + item.key;
+161:       control.setAttribute("aria-pressed", state[item.key] ? "true" : "false");
+162:       control.setAttribute("aria-labelledby", label.id + " " + control.id);
+163:       control.textContent = state[item.key] ? "On" : "Off";
+164: 
+165:       control.addEventListener("click", function () {
+166:         state[item.key] = !state[item.key];
+167:         control.setAttribute("aria-pressed", state[item.key] ? "true" : "false");
+168:         control.textContent = state[item.key] ? "On" : "Off";
+169:         applyState(state);
+170:         saveState(state);
+171:       });
+172: 
+173:       switchButtons[item.key] = control;
+174:       row.appendChild(label);
+175:       row.appendChild(control);
+176:       panel.appendChild(row);
+177:     });
+178: 
+179:     /* Reset */
+180:     var reset = document.createElement("button");
+181:     reset.type = "button";
+182:     reset.className = "amw-a11y-reset";
+183:     reset.textContent = "Reset to defaults";
+184:     reset.addEventListener("click", function () {
+185:       state = Object.assign({}, defaults);
+186:       applyState(state);
+187:       saveState(state);
+188:       renderScale();
+189:       Object.keys(switchButtons).forEach(function (key) {
+190:         switchButtons[key].setAttribute("aria-pressed", "false");
+191:         switchButtons[key].textContent = "Off";
+192:       });
+193:     });
+194:     panel.appendChild(reset);
+195: 
+196:     function openPanel() {
+197:       panel.hidden = false;
+198:       toggle.setAttribute("aria-expanded", "true");
+199:       panel.focus();
+200:     }
+201: 
+202:     function closePanel(refocus) {
+203:       panel.hidden = true;
+204:       toggle.setAttribute("aria-expanded", "false");
+205:       if (refocus) toggle.focus();
+206:     }
+207: 
+208:     toggle.addEventListener("click", function () {
+209:       if (panel.hidden) {
+210:         openPanel();
+211:       } else {
+212:         closePanel(false);
+213:       }
+214:     });
+215: 
+216:     document.addEventListener("keydown", function (event) {
+217:       if (event.key === "Escape" && !panel.hidden) {
+218:         closePanel(true);
+219:       }
+220:     });
+221: 
+222:     document.addEventListener("click", function (event) {
+223:       if (panel.hidden) return;
+224:       if (panel.contains(event.target) || toggle.contains(event.target)) return;
+225:       closePanel(false);
+226:     });
+227: 
+228:     document.body.appendChild(toggle);
+229:     document.body.appendChild(panel);
+230:   }
+231: 
+232:   if (document.readyState === "loading") {
+233:     document.addEventListener("DOMContentLoaded", build);
+234:   } else {
+235:     build();
+236:   }
+237: })();
+FILE site/index.html
+590:             <span class="booking-context">@@BOOKING_CONTEXT@@</span>
+591:             <!-- booking:end -->
+592:           </div>
+593:         </div>
+594: 
+595:         <div class="pilot-fit" id="economic-fit" aria-labelledby="economic-fit-title">
+596:           <h3 id="economic-fit-title">Does avoiding duplicates justify the cost?</h3>
+597:           <p>
+598:             Take the refund example: each duplicate is one refund paid twice
+599:             plus the hours spent clawing it back.
+600:             Monthly actions × baseline duplicate rate × loss per duplicate ×
+601:             expected reduction = estimated monthly avoided loss.
+602:             Use the loss you actually bear, including recovery labor, rather
+603:             than the full transaction value. Count each cost once.
+604:           </p>
+605:           <p id="fit-assumptions">
+606:             Expected reduction is an assumption about your whole adopted
+607:             workflow, including the upstream tool, to validate in a pilot.
+608:             It is not a gateway guarantee. These numbers stay in your browser
+609:             and are not saved or sent to us.
+610:           </p>
+611:           <fieldset class="fit-fields" aria-describedby="fit-assumptions" data-fit-inputs hidden>
+612:             <legend>Your workflow assumptions</legend>
+613:             <label for="fit-actions">Consequential actions / month
+614:               <input id="fit-actions" type="number" min="0" step="1" required inputmode="numeric" />
+615:             </label>
+616:             <label for="fit-rate">Baseline duplicate rate (%)
+617:               <input id="fit-rate" type="number" min="0" max="100" step="any" required inputmode="decimal" aria-describedby="fit-rate-help" />
+618:               <span id="fit-rate-help">Enter 0.1 for 0.1%, or one duplicate in 1,000 actions.</span>
+619:             </label>
+620:             <label for="fit-loss">Loss per duplicate (USD)
+621:               <input id="fit-loss" type="number" min="0" step="any" required inputmode="decimal" />
+622:             </label>
+623:             <label for="fit-reduction">Expected reduction (%)
+624:               <input id="fit-reduction" type="number" min="0" max="100" step="any" required inputmode="decimal" />
+625:             </label>
+626:             <label for="fit-cost">Total monthly cost (USD, optional)
+627:               <input id="fit-cost" type="number" min="0" step="any" inputmode="decimal" aria-describedby="fit-cost-help" />
+628:               <span id="fit-cost-help">Include the service quote, your operations, and setup plus integration costs spread over your evaluation period. Leave blank if unknown.</span>
+629:             </label>
+630:           </fieldset>
+631:           <div class="fit-result" role="status" aria-live="polite" aria-atomic="true" data-fit-result hidden>
+632:             <p data-fit-summary>Enter the four workflow assumptions to estimate avoided loss.</p>
+633:             <p data-fit-guidance></p>
+634:           </div>
+635:           <p data-fit-next hidden><a href="#pilot">Include these assumptions in your pilot email</a></p>
+636:           <p data-fit-alternative hidden><a href="/compare/">Compare simpler reliability options</a></p>
+637:           <details class="fit-example">
+638:             <summary>Illustrative example: how a $35 threshold is calculated</summary>
+639:             <p>
+640:               100,000 actions/month × 0.1% duplicates × $50 actual loss × 80%
+641:               reduction = $4,000/month in estimated avoided loss. With $2,800
+642:               in total monthly cost, the break-even loss is $35 per duplicate:
+643:               $2,800 ÷ (100,000 × 0.001 × 0.8). At 0.01% duplication, the
+644:               threshold rises to $350. These are illustrative assumptions,
+645:               not our pricing or measured results.
+646:             </p>
+FILE static/dashboard.html
+275:     }
+276: 
+277:     @media (max-width: 560px) {
+278:       html { scroll-padding-top: 8.5rem; }
+279:       header { flex-wrap: wrap; row-gap: 0.25rem; }
+280:       .brand { font-size: 0.85rem; letter-spacing: 0; }
+281:     }
+282:   </style>
+283: </head>
+284: <body>
+285:   <a class="skip-link" href="#main-content">Skip to content</a>
+286:   <header>
+287:     <a class="brand" href="https://www.thisisatest.tech/">Agent Middleware API</a>
+288:     <span class="label">Private experiment</span>
+289:   </header>
+290: 
+291:   <main id="main-content" tabindex="-1">
+292:     <div class="label">Operator index</div>
+293:     <h1>Inspect the trust plane without invented telemetry.</h1>
+294:     <p class="lede">
+295:       This origin is a private experiment, not a public product. Tool catalogs
+296:       and invoke require an operator-issued key. This page only points at
+297:       runtime posture and portable verification keys.
+298:     </p>
+299:     <p class="notice">
+300:       No tenant records or aggregate customer counts are rendered here. This page
+301:       does not request API keys, make authenticated calls, or store credentials in
+302:       the browser.
+303:     </p>
+304: 
+305:     <section aria-labelledby="posture-heading">
+306:       <h2 id="posture-heading">Core contract</h2>
+307:       <p class="section-copy">The governed path is intentionally narrow.</p>
+308:       <div class="grid">
+309:         <article class="card">
+310:           <h3>Scoped authorization</h3>
+311:           <p>Signed permits bind a subject, tool scope, budget, expiry, and nonce.</p>
+312:           <div class="scope">discover → authenticate → authorize</div>
+313:         </article>
+314:         <article class="card">
+315:           <h3>Idempotent metering</h3>
+316:           <p>Retries reuse the same operation boundary so one accepted action is charged once.</p>
+317:           <div class="scope">invoke → meter</div>
+318:         </article>
+319:         <article class="card">
+320:           <h3>Portable receipts</h3>
+321:           <p>Governed outcomes can be exported with the issuer key material required for offline verification.</p>
+322:           <div class="scope">receipt → verify</div>
+323:         </article>
+324:         <article class="card">
+325:           <h3>Durable evidence</h3>
+326:           <p>Dispatch state and account audit events are persisted for authenticated operator inspection.</p>
+327:           <div class="scope">audit → govern</div>
+328:         </article>
+329:       </div>
+330:     </section>
+331: 
+332:     <section aria-labelledby="evidence-heading">
+333:       <h2 id="evidence-heading">Status and evidence</h2>
+334:       <p class="section-copy">
+335:         The proof is self-issued live gateway proof, not customer traction.
+336:       </p>
+337:       <div class="links">
+338:         <a href="https://www.thisisatest.tech/proof/">
+339:           <strong>Portable receipt proof</strong>
+340:           <span>Artifact, matching key snapshot, and offline verification command.</span>
+341:         </a>
+342:         <a href="https://api.thisisatest.tech/health/dependencies">
+343:           <strong>Runtime truth</strong>
+344:           <span>Dependency posture, feature flags, build SHA, and metric scope metadata.</span>
+345:         </a>
+346:         <a href="https://api.thisisatest.tech/.well-known/trust-keys.json">
+347:           <strong>Current trust keys</strong>
+348:           <span>Public issuer keys exposed by the live API.</span>
+349:         </a>
+350:       </div>
+351:     </section>
+352: 
+353:     <section aria-labelledby="discovery-heading">
+354:       <h2 id="discovery-heading">Machine discovery</h2>
+355:       <div class="links">
+356:         <a href="https://api.thisisatest.tech/.well-known/agent.json">
+357:           <strong>Agent manifest</strong>
+358:           <span>Bootstrap metadata. Tool lists on this origin require a key.</span>
+359:         </a>
+360:         <a href="https://api.thisisatest.tech/llms.txt">
+361:           <strong>llms.txt</strong>
+362:           <span>Machine-readable integration guidance.</span>
+363:         </a>
+364:       </div>
+365:     </section>
+366: 
+367:     <section aria-labelledby="inspection-heading">
+368:       <h2 id="inspection-heading">Authenticated inspection</h2>
+369:       <p class="section-copy">
+370:         Inspect your own permits, receipts, and audit events from a trusted terminal.
+371:         Keep the key in your environment; do not paste it into a public web page.
+372:       </p>
+373:       <pre><code>export AGENT_MIDDLEWARE_API_KEY=[REDACTED]
+374: 
+375: curl --fail-with-body \
+376:   -H "X-API-Key: [REDACTED] \
+377:   "https://api.thisisatest.tech/v1/me/permits"
+378: 
+379: curl --fail-with-body \
+380:   -H "X-API-Key: [REDACTED] \
+381:   "https://api.thisisatest.tech/v1/me/receipts"
+382: 
+383: curl --fail-with-body \
+384:   -H "X-API-Key: [REDACTED] \
+385:   "https://api.thisisatest.tech/v1/me/audit/events"</code></pre>
+386:     </section>
+387: 
+388:     <section aria-labelledby="limits-heading">
+389:       <h2 id="limits-heading">How to read the runtime data</h2>
+390:       <ul>
+391:         <li><code>upstream_mcp.call_metrics</code> are process-local and reset on restart.</li>
+392:         <li><code>upstream_mcp.dispatch_metrics</code> summarize durable dispatch records.</li>
+393:         <li>A healthy dependency report is operational posture, not evidence of customer usage.</li>
+394:         <li>The public proof demonstrates one gateway-controlled action, not end-to-end exactly-once behavior for arbitrary upstream side effects.</li>
+395:       </ul>
+396:     </section>
+397:   </main>
+398: 
+399:   <footer>
+400:     <a href="https://www.thisisatest.tech/">Agent Middleware API</a>
+401:     <a href="https://www.thisisatest.tech/proof/">Proof</a>
+402:     <a href="https://api.thisisatest.tech/health/dependencies">Runtime truth</a>
+403:   </footer>
+404: </body>
+405: </html>
+FILE site/partials/nav.html
+1:     <nav class="site-nav" aria-label="Primary">
+2:       <a class="nav-brand" href="/" aria-label="Agent Middleware API home">
+3:         <span>Agent Middleware API</span>
+4:       </a>
+5:       <div class="nav-links">
+6:         <a href="/#pilot">Pilot</a>
+7:         <a href="/proof/"@@NAV_PROOF_CURRENT@@>Proof</a>
+8:         <a href="/compare/"@@NAV_COMPARE_CURRENT@@>Compare</a>
+9:         <a href="/#machine-discovery">Machine discovery</a>
+10:         <a
+11:           class="nav-agent"
+12:           href="@@PILOT_EMAIL_HREF@@"
+13:           data-analytics-event="email_click"
+14:           aria-label="Start a pilot by email (opens your mail app)"
+15:           >Start a pilot by email</a
+16:         >
+17:       </div>
+18:     </nav>
+FILE site/404.html
+1: <!DOCTYPE html>
+2: <html lang="en">
+3:   <head>
+4:     <meta charset="utf-8" />
+5:     <meta name="viewport" content="width=device-width, initial-scale=1" />
+6:     <title>Page not found | Agent Middleware API</title>
+7:     <meta name="description" content="That page does not exist on this site." />
+8:     <meta name="robots" content="noindex, follow" />
+9:     <meta name="theme-color" content="#0b1020" />
+10:     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+11:     <link rel="stylesheet" href="/fonts.css?v=@@FONTS_CSS_VERSION@@" />
+12:     <link rel="stylesheet" href="/styles.css?v=@@STYLES_CSS_VERSION@@" />
+13:     <script src="/a11y-preload.js?v=gateway-18"></script>
+14:     @@VERCEL_ANALYTICS_SCRIPTS@@
+15:     <script defer src="/analytics.js?v=gateway-18"></script>
+16:     <script defer src="/a11y.js?v=gateway-18"></script>
+17:   </head>
+18:   <body>
+19:     <a class="skip-link" href="#main">Skip to content</a>
+20:     @@SITE_NAV@@
+21: 
+22:     <main id="main">
+23:       <section class="section" aria-labelledby="notfound-title">
+24:         <p class="section-kicker">404 / Not found</p>
+25:         <h1 id="notfound-title">That page is not here.</h1>
+26:         <p>
+27:           The URL you asked for does not exist on this site. Nothing was
+28:           denied and nothing failed — there is simply no page at that path.
+29:         </p>
+30:         <div class="machine-links">
+31:           <a href="/"><span>Overview</span><code>/</code></a>
+32:           <a href="/proof/"
+33:             ><span>Receipt proof and offline verifier</span><code>/proof/</code></a
+34:           >
+35:           <a href="/#machine-discovery"
+36:             ><span>Machine discovery</span><code>/#machine-discovery</code></a
+37:           >
+38:           <a href="/llms.txt"
+39:             ><span>Agent instructions</span><code>/llms.txt</code></a
+40:           >
+41:         </div>
+42:       </section>
+43:     </main>
+44: 
+45:     @@SITE_FOOTER@@
+46:   </body>
+47: </html>

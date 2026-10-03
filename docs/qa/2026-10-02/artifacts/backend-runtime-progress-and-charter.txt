@@ -1,0 +1,4 @@
+UTC now 2026-10-03T00:42:26.816340+00:00
+SQLite exists True last write 2026-10-03T00:42:26.775013+00:00
+Baseline coverage file exists False
+Recent session starts ['### 2026-10-03T00:35:44Z — install-runtime-test-deps', 'Outcome: exit 0; 2.0s; ended 2026-10-03T00:35:46Z. [Output](artifacts/backend-install-runtime-test-deps.txt).', 'Command (argv): `[\'python3\', \'-c\', \'from pathlib import Path; import subprocess; print(Path("app/core/config.py").read_text()[-16000:]); subprocess.run(["rg","-n","load_dotenv|read_env_file|env_file|POSTGRES.*URL|TEST_DATABASE|LIVE_|RUN_.*INTEGRATION|subprocess\\\\\\\\.","app","tests","scripts/quickstart.py"]); print("DEPS LOG",Path("docs/qa/2026-10-02/artifacts/backend-install-runtime-test-deps.txt").read_text()[-2000:])\']`', '### 2026-10-03T00:36:34Z — baseline-suite']
