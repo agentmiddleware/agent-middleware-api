@@ -54,3 +54,16 @@ for (const contrast of ['default', 'high']) {
     } finally {dom.window.close();}
   });
 }
+
+test('UX-002: operator commands expose a named keyboard focus target', () => {
+  const dom = page('static/dashboard.html');
+  try {
+    const {document} = dom.window;
+    const code = document.querySelector('pre');
+    assert.equal(code.tabIndex, 0, 'Scrollable commands must join sequential keyboard navigation');
+    assert.equal(code.getAttribute('role'), 'region');
+    assert.equal(code.getAttribute('aria-label'), 'Authenticated inspection commands');
+    code.focus();
+    assert.equal(document.activeElement, code);
+  } finally {dom.window.close();}
+});
