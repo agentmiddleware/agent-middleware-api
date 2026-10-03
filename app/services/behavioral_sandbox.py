@@ -351,17 +351,21 @@ class BehavioralSandboxEngine:
     def _build_python_wrapper(code: str, context: dict[str, Any], dry_run: bool) -> str:
         """Build the small runner passed to the selected execution backend."""
         return f"""
+import contextlib
+import io
 import json
 
-context = {json.dumps(context)}
-dry_run = {str(dry_run).lower()}
+context = json.loads({json.dumps(context)!r})
+dry_run = {dry_run!r}
 
 def sandboxed_execute(context, dry_run):
+    output = io.StringIO()
     try:
-        exec({json.dumps(code)})
-        return {{"success": True, "output": "executed"}}
+        with contextlib.redirect_stdout(output):
+            exec({code!r})
+        return {{"success": True, "output": output.getvalue() or "executed"}}
     except Exception as e:
-        return {{"success": False, "error": str(e)}}
+        return {{"success": False, "error": str(e), "output": output.getvalue()}}
 
 result = sandboxed_execute(context, dry_run)
 print(json.dumps(result))
@@ -437,6 +441,7 @@ print(json.dumps(result))
             stdout=stdout,
             stderr=stderr,
             backend="docker",
+            returncode=proc.returncode,
         )
 
     async def _execute_python_host(
@@ -498,6 +503,7 @@ print(json.dumps(result))
                 stdout=stdout,
                 stderr=stderr,
                 backend="unsafe_host",
+                returncode=proc.returncode,
             )
 
         except Exception as e:
@@ -508,28 +514,30 @@ print(json.dumps(result))
         stdout: bytes,
         stderr: bytes,
         backend: str,
+        returncode: int | None = 0,
     ) -> dict[str, Any]:
-        output = stdout.decode().strip()
-        error = stderr.decode().strip()
+        output = stdout.decode(errors="replace").strip()
+        error = stderr.decode(errors="replace").strip()
 
-        if error and not output:
+        if returncode != 0:
             return {
                 "success": False,
-                "error": error,
+                "error": error or f"Python runner exited with status {returncode}",
+                "output": output,
                 "resources": {"backend": backend},
             }
 
         try:
             result = json.loads(output)
-            if isinstance(result, dict):
-                result.setdefault("resources", {})
-                result["resources"].setdefault("backend", backend)
+            if isinstance(result, dict) and isinstance(result.get("success"), bool):
+                result["resources"] = {"backend": backend}
                 return result
         except json.JSONDecodeError:
             pass
 
         return {
-            "success": True,
+            "success": False,
+            "error": error or "Python runner returned no valid structured result",
             "output": output,
             "resources": {"backend": backend},
         }

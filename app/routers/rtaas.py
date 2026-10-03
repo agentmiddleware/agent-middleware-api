@@ -13,6 +13,7 @@ from datetime import datetime
 
 from ..core.auth import AuthContext, get_auth_context
 from ..core.dependencies import get_rtaas_engine
+from ..schemas.red_team import AttackCategory
 from ..services.rtaas import RTaaSEngine, RTaaSJob
 
 router = APIRouter(
@@ -48,7 +49,7 @@ async def _load_owned_job(
 
 
 class RTaaSTargetSchema(BaseModel):
-    """An external endpoint to attack."""
+    """An endpoint description used to generate simulated findings."""
 
     url: str = Field(..., description="Full URL of the target endpoint.")
     method: str = Field(default="GET", description="HTTP method.")
@@ -63,7 +64,7 @@ class RTaaSTargetSchema(BaseModel):
 
 
 class CreateJobRequest(BaseModel):
-    """Submit external targets for Red Team scanning."""
+    """Describe targets for a simulated Red Team job."""
 
     tenant_id: str = Field(
         ...,
@@ -75,9 +76,9 @@ class CreateJobRequest(BaseModel):
     targets: list[RTaaSTargetSchema] = Field(
         ...,
         min_length=1,
-        description="List of external endpoints to attack.",
+        description="Endpoint descriptions for simulation; no targets are contacted.",
     )
-    attack_categories: list[str] | None = Field(
+    attack_categories: list[AttackCategory] | None = Field(
         None,
         description="Attack categories to run. None = all categories.",
     )
@@ -127,12 +128,12 @@ class JobListResponse(BaseModel):
     "/jobs",
     response_model=JobResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Create a Red Team scanning job",
+    summary="Create a simulated Red Team job",
     description=(
-        "Submit external endpoint URLs for penetration testing. "
-        "Our Red Team swarm will attack the specified targets and return "
-        "a structured vulnerability report with CWE mappings and remediation steps. "
-        "Use this before deploying any agent-built tool to production."
+        "Model a scan job using endpoint descriptions and return deterministic "
+        "simulated findings with CWE mappings and remediation examples. "
+        "No target is contacted or attacked. These findings provide no evidence "
+        "of security or release readiness."
     ),
 )
 async def create_job(
@@ -146,7 +147,11 @@ async def create_job(
     job = await engine.create_job(
         tenant_id=request.tenant_id,
         targets=[t.model_dump() for t in request.targets],
-        attack_categories=request.attack_categories,
+        attack_categories=(
+            [category.value for category in request.attack_categories]
+            if request.attack_categories is not None
+            else None
+        ),
         intensity=request.intensity,
     )
     return _job_to_response(job)
@@ -155,7 +160,7 @@ async def create_job(
 @router.get(
     "/jobs",
     response_model=JobListResponse,
-    summary="List scanning jobs",
+    summary="List simulated scanning jobs",
     description=(
         "View your wallet's RTaaS jobs. Bootstrap admins may filter by any "
         "tenant, or omit the filter to list all."
@@ -197,7 +202,7 @@ async def list_jobs(
     "/jobs/{job_id}",
     response_model=JobResponse,
     summary="Get job details",
-    description="Retrieve the full vulnerability report for an RTaaS job.",
+    description="Retrieve the simulated findings report for an RTaaS job.",
 )
 async def get_job(
     job_id: str,
@@ -210,8 +215,8 @@ async def get_job(
 
 @router.get(
     "/jobs/{job_id}/vulnerabilities",
-    summary="Get vulnerabilities for a job",
-    description="Retrieve just the vulnerability list with remediation steps.",
+    summary="Get simulated findings for a job",
+    description="Retrieve modeled findings with remediation examples; no live scan was run.",
 )
 async def get_vulnerabilities(
     job_id: str,
