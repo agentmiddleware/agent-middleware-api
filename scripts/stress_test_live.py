@@ -63,6 +63,32 @@ def is_zero_credits(value: object) -> bool:
         return False
 
 
+def successful_receipt_id(response: httpx.Response) -> str:
+    """Require evidence of a successful governed invocation or replay."""
+    require(response.status_code == 200, f"invoke returned HTTP {response.status_code}")
+    try:
+        body = response.json()
+    except ValueError as exc:
+        raise AssertionError("invoke returned invalid JSON") from exc
+    require(
+        isinstance(body, dict)
+        and body.get("jsonrpc") == "2.0"
+        and "id" in body
+        and "error" not in body,
+        "invoke did not return a successful JSON-RPC response",
+    )
+    result = body.get("result")
+    require(isinstance(result, dict), "invoke result is missing or malformed")
+    receipt = result.get("receipt")
+    require(isinstance(receipt, dict), "invoke receipt is missing or malformed")
+    receipt_id = receipt.get("receipt_id")
+    require(
+        isinstance(receipt_id, str) and receipt_id.strip(),
+        "invoke receipt ID is missing or malformed",
+    )
+    return receipt_id
+
+
 async def req(method, path, **kwargs):
     async with SEM:
         async with httpx.AsyncClient(base_url=API_URL, timeout=30) as c:
@@ -253,11 +279,11 @@ async def test_concurrent_governed_invokes(spn, agt):
     results = await asyncio.gather(*[invoke(i) for i in range(20)])
     elapsed = time.monotonic() - start
     codes = [r.status_code for r in results]
-    success = sum(1 for r in results if "error" not in r.json())
+    success = len([successful_receipt_id(r) for r in results])
     print(
         f"  20 parallel invokes in {elapsed:.2f}s: {success}/20 success, codes={set(codes)}"
     )
-    assert success == 20, "expected all success, got failures"
+    require(success == 20, "expected all success, got failures")
 
 
 async def test_unicode_payload(spn, agt):
@@ -491,7 +517,7 @@ async def test_rapid_fire_idempotency(spn, agt):
 
     start = time.monotonic()
     tasks = []
-    for i in range(50):
+    for _ in range(50):
         tasks.append(
             req(
                 "POST",
@@ -499,11 +525,11 @@ async def test_rapid_fire_idempotency(spn, agt):
                 headers={"Idempotency-Key": ikey("rapid-same-key")},
                 json={
                     "jsonrpc": "2.0",
-                    "id": i,
+                    "id": 0,
                     "method": "tools/call",
                     "params": {
                         "name": "partner.notes.write",
-                        "arguments": {"text": f"rapid {i}"},
+                        "arguments": {"text": "rapid replay"},
                         "mcpContext": {"wallet_id": agt, "permit_id": pid},
                     },
                 },
@@ -512,14 +538,11 @@ async def test_rapid_fire_idempotency(spn, agt):
     results = await asyncio.gather(*tasks)
     elapsed = time.monotonic() - start
 
-    successes = sum(1 for r in results if "error" not in r.json())
-    # First should succeed, rest should be idempotent replays
+    # Every identical request must return a successful replay with a receipt.
+    # An in-progress conflict is a failed check, not a successful replay.
+    receipt_ids = [successful_receipt_id(r) for r in results]
+    successes = len(receipt_ids)
     print(f"  50 calls in {elapsed:.2f}s: {successes}/50 success")
-    receipt_ids = [
-        r.json().get("result", {}).get("receipt", {}).get("receipt_id", "")
-        for r in results
-        if "result" in r.json()
-    ]
     if len(set(receipt_ids)) == 1 and receipt_ids:
         print(f"  All returned same receipt: ✅ {receipt_ids[0]}")
     else:
