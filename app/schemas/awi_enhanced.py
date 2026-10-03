@@ -323,7 +323,9 @@ class RAGQueryRequest(BaseModel):
 
     query: str = Field(
         ...,
-        description="Natural language query",
+        min_length=1,
+        pattern=r"\S",
+        description="Natural language query containing at least one non-whitespace character",
         examples=[
             "shopping for laptops last week",
             "form submissions involving addresses",
