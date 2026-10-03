@@ -159,11 +159,17 @@ signed and chained, so tampering is *evident*. (Evident, not impossible — a
 database administrator who can alter both the data and its chain metadata is
 inside the trust boundary, and we say so.)
 
-**"Does exactly-once really hold across the network?"** For one accepted
-idempotency key at our boundary: one gateway dispatch, one debit, one receipt.
-A *remote* tool's own side effect is exactly once only if that tool also honors
-the forwarded key. Anything broader would overstate the distributed-systems
-guarantee.
+**"What happens when the call is retried?"** For the configured upstream MCP
+tool, identical retries under the same accepted idempotency key allow at most
+one gateway dispatch and at most one debit. This does not guarantee delivery or
+a downstream effect; downstream replay safety also requires the upstream to
+honor the forwarded key. Local governed tools have no dispatch state machine
+and interrupted calls fail closed into manual review.
+
+A call can commit effects or a debit but return `manual_review_required` with
+no receipt if an audit or receipt write fails. Do not retry with a new idempotency key:
+that can execute and charge the call again. Reconcile from the ledger and audit
+chain as described in [failure semantics](docs/failure-semantics.md).
 
 **"Why not just use an open-source library?"** If your problem is reliability,
 do. A decorator library gives you idempotency, timeouts, and budget caps for
@@ -177,8 +183,9 @@ Otherwise the library is the correct answer and we will say so.
 least one verifies offline without calling its issuer. We do not claim to be
 alone here. What no project we surveyed *documents* is binding the debit to the
 idempotency record:
-one accepted key, one dispatch, one ledger debit, one receipt, in a single
-persisted chain. (One *debit* — a refunded failure correctly writes a second,
+one accepted key, at most one dispatch and ledger debit, and a receipt when
+finalization succeeds, in a single persisted chain for the configured upstream
+tool. (At most one *debit* — a refunded failure correctly writes a second,
 compensating ledger entry against that debit.) Several of them enforce budgets
 and several dedupe replays; whether any binds the two is unresolved, and we say
 so rather than claiming the cell outright. The signature proves what happened;
