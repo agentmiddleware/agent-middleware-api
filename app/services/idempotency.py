@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, cast
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
@@ -1046,20 +1046,22 @@ class IdempotencyService:
                 # debit is recoverable by that key: link it here and the stuck
                 # pass below resolves it exactly like any other crashed
                 # finalization. Engine-independent -- no row-lock behaviour
-                # involved.
+                # involved. AWI HTTP uses the same operation-key ownership:
+                # interrupted admission must preserve and recover its debit too.
                 orphaned_local = (
                     (
                         await session.execute(
                             select(IdempotencyRecordModel)
                             .where(
-                                cast(
-                                    ColumnElement[bool],
-                                    IdempotencyRecordModel.endpoint
-                                    == GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
-                                ),
-                                cast(
-                                    ColumnElement[bool],
-                                    IdempotencyRecordModel.operation_kind == "local",
+                                or_(
+                                    and_(
+                                        col(IdempotencyRecordModel.endpoint)
+                                        == GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+                                        col(IdempotencyRecordModel.operation_kind)
+                                        == "local",
+                                    ),
+                                    col(IdempotencyRecordModel.operation_kind)
+                                    == "awi_http",
                                 ),
                                 cast(
                                     ColumnElement[bool],
@@ -1141,9 +1143,13 @@ class IdempotencyService:
                                 ),
                                 cast(
                                     ColumnElement[bool],
-                                    cast(
-                                        Any, IdempotencyRecordModel.ledger_entry_id
-                                    ).is_not(None),
+                                    or_(
+                                        cast(
+                                            Any, IdempotencyRecordModel.ledger_entry_id
+                                        ).is_not(None),
+                                        col(IdempotencyRecordModel.operation_kind)
+                                        == "awi_http",
+                                    ),
                                 ),
                                 cast(
                                     ColumnElement[bool],
@@ -1183,7 +1189,7 @@ class IdempotencyService:
                             )
                         )
                     ).scalar_one_or_none()
-                    if receipt is None:
+                    if receipt is None and record.ledger_entry_id is not None:
                         # Legacy receipts predate the explicit idempotency FK.
                         receipt = (
                             await session.execute(

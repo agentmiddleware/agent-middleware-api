@@ -92,12 +92,12 @@ async def test_awi_request_authority_is_bound(constraint, clean_database):
                         LedgerEntryModel.amount < 0,
                     )
                 )
-            assert debits == 0
+            assert debits == (1 if constraint == "dry_run_rejected" else 0)
         if constraint == "dry_run_rejected":
             assert first.status_code == 200
             assert first.json()["error"] == "dry_run_unsupported"
             assert first.json()["effect_status"] == "not_dispatched"
-            assert first.json()["receipt"]["outcome"] == "failed"
+            assert first.json()["receipt"]["outcome"] == "failed_refunded"
             return
         if constraint == "max_calls_per_tool":
             assert first.status_code == 403
