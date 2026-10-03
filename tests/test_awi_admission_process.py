@@ -1,4 +1,4 @@
-"""SQLite process death preserves AWI debit ownership without redispatch."""
+"""Process death preserves AWI debit ownership without redispatch."""
 
 from __future__ import annotations
 
@@ -16,10 +16,15 @@ import pytest
 @pytest.mark.parametrize(
     "crash", ["before_callback", "after_callback", "after_receipt"]
 )
-async def test_awi_process_crash_holds_or_recovers_owner(tmp_path, crash):
+async def test_awi_process_crash_holds_or_recovers_owner(
+    tmp_path, crash, clean_database
+):
+    database_url = os.environ.get("DATABASE_URL", "")
+    if not database_url.startswith("postgresql+"):
+        database_url = f"sqlite+aiosqlite:///{tmp_path / 'awi.db'}"
     env = {
         **os.environ,
-        "DATABASE_URL": f"sqlite+aiosqlite:///{tmp_path / 'awi.db'}",
+        "DATABASE_URL": database_url,
         "STATE_BACKEND": "memory",
         "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
     }
