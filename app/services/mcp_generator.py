@@ -2,12 +2,10 @@
 MCP Server Generator
 ====================
 
-Generates MCP-shaped tool metadata and standalone Python servers from
-registered services. The HTTP tools.json envelope is project-specific.
+Generates MCP-shaped tool metadata from registered services.
+Standalone ungoverned code generation is retired. The HTTP tools.json envelope is project-specific.
 
-Supports two modes:
-1. Dynamic MCP Proxy: Live server mounted on FastAPI (zero infra for users)
-2. Standalone Script: Generated Python file using the official MCP SDK
+The supported governed MCP server is mounted on FastAPI.
 
 MCP Protocol Reference: https://modelcontextprotocol.io/
 """
@@ -52,7 +50,7 @@ def _finite_price(value: Any) -> float | None:
 
 class McpGenerator:
     """
-    Generates project tool manifests and standalone MCP servers.
+    Generates project tool manifests for the governed MCP server.
 
     MCP Manifest Structure (tools.json):
     {
@@ -270,165 +268,15 @@ class McpGenerator:
         description: str = "Custom MCP server generated from B2A marketplace",
         transport: str = "stdio",
     ) -> str:
+        """Refuse the retired ungoverned standalone generator before any effects.
+
+        Keep the callable signature for an explicit error on existing callers.
+        The active gateway and tool-manifest generation remain supported.
         """
-        Generate a standalone MCP server Python script.
-
-        This script uses the official MCP Python SDK and can be run
-        locally or embedded in other applications.
-
-        Args:
-            output_path: Where to write the generated script
-            title: Server title
-            description: Server description
-            transport: "stdio" (default) or "sse"
-
-        Returns:
-            Path to the generated script
-        """
-        services = list(self.registry._local_registry.values())
-
-        tools_code = []
-        for service in services:
-            name = service["service_id"]
-            input_schema = service.get("input_schema", {})
-            input_props = input_schema.get("properties", {})
-            required = input_schema.get("required", [])
-
-            params_code = []
-            for prop_name, prop_def in input_props.items():
-                prop_type = prop_def.get("type", "string")
-                is_required = prop_name in required
-                default = "" if is_required else " = None"
-                params_code.append(f"    {prop_name}: {prop_type}{default}")
-
-            if not params_code:
-                params_code = ["    input_data: dict = {}"]
-
-            tools_code.append(f'''
-@mcp.tool()
-async def {name.replace("-", "_")}({",".join([""] + params_code)}) -> dict:
-    """
-    {service.get("description", "B2A service: " + name)}
-    
-    Cost: {service.get("credits_per_unit", 1.0)} credits per
-    {service.get("unit_name", "call")}
-    Category: {service.get("category", "unknown")}
-    """
-    return await call_b2a_service(
-        service_id="{name}",
-        input_data={{"input_data": input_data}},
-        wallet_id=os.getenv("B2A_WALLET_ID"),
-        api_key=os.getenv("B2A_API_KEY"),
-        api_url=os.getenv("B2A_API_URL", "http://localhost:8000"),
-    )
-''')
-
-        script = f'''#!/usr/bin/env python3
-"""
-{title}
-=============
-
-Generated MCP Server using B2A SDK
-Generated at: {datetime.now(timezone.utc).isoformat()}
-
-Usage:
-    # Set environment variables
-    export B2A_API_KEY=your-api-key
-    export B2A_WALLET_ID=your-wallet-id
-    export B2A_API_URL=https://api.thisisatest.tech  # optional
-
-    # Run the server
-    python {output_path.split("/")[-1]}
-    
-    # Or with SSE transport (requires uvicorn)
-    python {output_path.split("/")[-1]} --transport sse --port 8001
-"""
-
-import os
-import json
-import asyncio
-from typing import Any
-
-try:
-    from mcp.server.fastmcp import FastMCP
-except ImportError:
-    print("Error: mcp package not installed. Run: pip install 'mcp>=1.29.0,<2'")
-    raise
-
-try:
-    import httpx
-except ImportError:
-    print("Error: httpx not installed. Run: pip install httpx")
-    raise
-
-
-mcp = FastMCP("{title}")
-
-
-async def call_b2a_service(
-    service_id: str,
-    input_data: dict,
-    wallet_id: str | None,
-    api_key: str | None,
-    api_url: str = "http://localhost:8000",
-) -> dict:
-    """
-    Call a B2A service through the billing gateway.
-    
-    This function handles:
-    - Authentication (X-API-Key header)
-    - Wallet context (mcp_context field)
-    - Credit deduction
-    - Velocity monitoring
-    """
-    if not wallet_id:
-        raise ValueError("B2A_WALLET_ID environment variable not set")
-    if not api_key:
-        raise ValueError("B2A_API_KEY environment variable not set")
-
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            f"{{api_url}}/v1/billing/services/{{service_id}}/invoke",
-            headers={{
-                "X-API-Key": api_key,
-                "Content-Type": "application/json",
-            }},
-            json={{
-                "caller_wallet_id": wallet_id,
-                "input_data": input_data,
-            }},
-            timeout=30.0,
+        raise RuntimeError(
+            "Standalone MCP generation is retired; use the governed "
+            "POST /mcp/messages flow in docs/quickstart.md instead."
         )
-        response.raise_for_status()
-        return response.json()
-
-
-{"".join(tools_code)}
-
-
-if __name__ == "__main__":
-    import sys
-
-    transport = "stdio"
-    port = 8001
-
-    if len(sys.argv) > 1:
-        if sys.argv[1] == "--transport" and len(sys.argv) > 2:
-            transport = sys.argv[2]
-        if sys.argv[1] == "--port" and len(sys.argv) > 2:
-            port = int(sys.argv[3])
-
-    if transport == "sse":
-        mcp.run(transport="sse", port=port)
-    else:
-        mcp.run()
-'''
-
-        with open(output_path, "w") as f:
-            f.write(script)
-
-        logger.info(f"Generated standalone MCP server: {output_path}")
-        return output_path
 
     def generate_tools_list_response(
         self,
