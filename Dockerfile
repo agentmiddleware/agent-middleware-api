@@ -17,10 +17,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN test "$(grep -c -x '# --- Development ---' requirements.txt)" -eq 1 \
     && sed '/^# --- Development ---$/,$d' requirements.txt > requirements-runtime.txt \
-    && python -m venv /opt/venv \
-    && /opt/venv/bin/pip install --no-cache-dir -r requirements-runtime.txt
+    && python -m venv --without-pip /opt/venv \
+    && python -m pip --python /opt/venv install --no-cache-dir -r requirements-runtime.txt \
+    && python -m pip --python /opt/venv check
 
 FROM base AS runtime
+
+# DSA-6530-1 fixes CVE-2026-103111; keep the required shared library patched.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends --only-upgrade libpcre2-8-0 \
+    && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libpcre2-8-0)" ge '10.46-1~deb13u3' \
+    && rm -rf /var/lib/apt/lists/* \
+    && python -m pip uninstall --yes pip
 
 WORKDIR /app
 
