@@ -404,7 +404,7 @@ async def validate_upstream_url(
             "MCP_UPSTREAM_URL must use https except for loopback local/test servers"
         )
     if not loopback_exception and any(
-        not address.is_global for address in parsed_addresses
+        address.is_multicast or not address.is_global for address in parsed_addresses
     ):
         raise UpstreamMcpConfigurationError(
             "MCP_UPSTREAM_URL must not resolve to private, loopback, link-local, metadata, or reserved addresses"
