@@ -2,7 +2,8 @@
 Legacy B2A MCP CLI & Helpers
 =====================
 
-Command-line tools for MCP server generation and management.
+Legacy discovery and serving helpers. Standalone generation is retired.
+Use the governed POST /mcp/messages flow documented in docs/quickstart.md.
 
 Usage:
     python -m b2a_sdk.mcp generate --output tools.json
@@ -14,7 +15,6 @@ import argparse
 import asyncio
 import json
 import os
-from datetime import datetime, timezone
 from typing import Any
 
 try:
@@ -66,134 +66,18 @@ def generate_standalone_server(
     title: str = "B2A MCP Server",
     description: str = "Custom MCP server from B2A marketplace",
     services: list[dict] | None = None,
+    api_url: str = DEFAULT_API_URL,
 ) -> None:
+    """Refuse retired ungoverned code generation without discovery or file writes.
+
+    The callable and CLI arguments remain accepted so existing callers receive
+    an explicit support-boundary error. This helper never implemented the
+    permit/receipt authorization loop.
     """
-    Generate a standalone MCP server script.
-
-    Args:
-        output_path: Where to write the script
-        title: Server title
-        description: Server description
-        services: List of service definitions (fetched from API if not provided)
-    """
-    if services is None:
-        manifest = generate_manifest()
-        services = manifest.get("tools", [])
-
-    tools_code = []
-    for service in services:
-        name = service.get("name", "unknown")
-        safe_name = name.replace("-", "_")
-        input_schema = service.get("inputSchema", {})
-        props = input_schema.get("properties", {})
-        required = input_schema.get("required", [])
-        credits = service.get("annotations", {}).get("creditsPerCall", 1.0)
-        unit = service.get("annotations", {}).get("unitName", "call")
-        category = service.get("annotations", {}).get("category", "custom")
-
-        params = []
-        for prop_name, prop_def in props.items():
-            prop_type = prop_def.get("type", "string")
-            is_required = prop_name in required
-            default = "" if is_required else " = None"
-            params.append(f"{prop_name}: {prop_type}{default}")
-
-        if not params:
-            params = ["input_data: dict = {}"]
-
-        tools_code.append(f'''
-@mcp.tool()
-async def {safe_name}({", ".join(params)}) -> dict:
-    """
-    {service.get("description", "B2A service: " + name)}
-
-    Cost: {credits} credits per {unit}
-    Category: {category}
-    """
-    return await call_b2a_service(
-        service_id="{name}",
-        input_data={{"input_data": input_data}},
-        wallet_id=os.getenv("B2A_WALLET_ID"),
-        api_key=os.getenv("B2A_API_KEY"),
-        api_url=os.getenv("B2A_API_URL", "{DEFAULT_API_URL}"),
+    raise RuntimeError(
+        "Standalone MCP generation is retired; use the governed "
+        "POST /mcp/messages flow in docs/quickstart.md instead."
     )
-''')
-
-    script = f'''#!/usr/bin/env python3
-"""
-{title}
-=============
-Generated MCP Server using B2A SDK
-Generated at: {datetime.now(timezone.utc).isoformat()}
-
-Usage:
-    export B2A_API_KEY=your-api-key
-    export B2A_WALLET_ID=your-wallet-id
-    export B2A_API_URL=https://api.thisisatest.tech  # optional
-    python {output_path.split("/")[-1]}
-"""
-
-import os
-import json
-from typing import Any
-
-try:
-    from mcp.server.fastmcp import FastMCP
-except ImportError:
-    print("Error: mcp package required. Install: pip install 'mcp>=1.29.0,<2'")
-    raise
-
-try:
-    import httpx
-except ImportError:
-    print("Error: httpx required. Install: pip install httpx")
-    raise
-
-
-mcp = FastMCP("{title}")
-
-
-async def call_b2a_service(
-    service_id: str,
-    input_data: dict,
-    wallet_id: str | None,
-    api_key: str | None,
-    api_url: str = "{DEFAULT_API_URL}",
-) -> dict:
-    if not wallet_id:
-        raise ValueError("B2A_WALLET_ID not set")
-    if not api_key:
-        raise ValueError("B2A_API_KEY not set")
-
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            f"{{api_url}}/v1/billing/services/{{service_id}}/invoke",
-            headers={{
-                "X-API-Key": api_key,
-                "Content-Type": "application/json",
-            }},
-            json={{
-                "caller_wallet_id": wallet_id,
-                "input_data": input_data,
-            }},
-            timeout=30.0,
-        )
-        response.raise_for_status()
-        return response.json()
-
-
-{chr(10).join(tools_code)}
-
-
-if __name__ == "__main__":
-    mcp.run()
-'''
-
-    with open(output_path, "w") as f:
-        f.write(script)
-
-    os.chmod(output_path, 0o755)
-    print(f"Standalone server generated: {output_path}")
 
 
 def list_tools(
@@ -306,7 +190,9 @@ def main() -> None:
     generate_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="B2A API URL")
     generate_parser.add_argument("--category", help="Category filter")
 
-    standalone_parser = subparsers.add_parser("standalone", help="Generate standalone MCP server")
+    standalone_parser = subparsers.add_parser(
+        "standalone", help="Retired: use the governed MCP gateway"
+    )
     standalone_parser.add_argument("--output", "-o", required=True, help="Output script path")
     standalone_parser.add_argument("--title", default="B2A MCP Server", help="Server title")
     standalone_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="B2A API URL")
@@ -333,11 +219,14 @@ def main() -> None:
         print(f"Generated manifest with {len(manifest.get('tools', []))} tools")
 
     elif args.command == "standalone":
-        generate_standalone_server(
-            output_path=args.output,
-            title=args.title,
-            api_url=args.api_url,
-        )
+        try:
+            generate_standalone_server(
+                output_path=args.output,
+                title=args.title,
+                api_url=args.api_url,
+            )
+        except RuntimeError as exc:
+            parser.error(str(exc))
 
     elif args.command == "list":
         list_tools(api_url=args.api_url, category=args.category)

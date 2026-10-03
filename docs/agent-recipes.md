@@ -352,18 +352,14 @@ result = await client.call_mcp_tool(
 )
 ```
 
-### Generate Standalone MCP Server
+### Retired standalone MCP generator
 
-```bash
-# Generate MCP server from registered tools
-cd b2a_sdk && pip install -e ".[mcp]"
-python -m b2a_sdk.mcp standalone --output my_server.py
-
-# Run server
-export B2A_API_KEY=your-key
-export B2A_WALLET_ID=your-wallet
-python my_server.py
-```
+`python -m b2a_sdk.mcp standalone` and
+`McpGenerator.generate_standalone_server` now refuse without fetching tools or
+writing files. Their generated billing proxies never implemented governed
+permit authorization or signed receipts. Use the supported
+[governed quickstart](quickstart.md) and `POST /mcp/messages` with a wallet,
+permit, and caller-owned idempotency key.
 
 ---
 

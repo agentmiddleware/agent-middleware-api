@@ -350,7 +350,7 @@ in committed defaults.
 | `MCP_UPSTREAM_URL` | one public HTTPS MCP origin | The pilot supports exactly one real upstream tool server |
 | `MCP_UPSTREAM_BEARER_TOKEN` | customer-specific secret | Never put it in the manifest or committed files |
 | `SENTINEL_API_URL` / `SENTINEL_API_KEY` | Omit unless enabling Sentinel-backed human approval | Optional product integration, not an Agent Middleware release dependency. Approval-required operations fail closed unless both are configured. Send synthetic or redacted arguments only. |
-| `RUN_MIGRATIONS_ON_START` | `true` for routine forward-compatible migrations; **not a substitute for migration 037's first-activation maintenance gate** | Entrypoint runs `alembic upgrade head` before uvicorn. App boot then **verifies** trust tables exist and **never** calls `create_all` in production-like envs. Flag + empty `DATABASE_URL` fails closed (container exits). If the DB was previously bootstrapped with `create_all` and has no `alembic_version` row, run `alembic stamp head` once before enabling this flag. Migration 037 must be applied through the paused-ingress, drained-worker sequence above before any new reconciler can receive traffic. |
+| `RUN_MIGRATIONS_ON_START` | `true` for routine forward-compatible migrations; **not a substitute for migration 037's first-activation maintenance gate** | Entrypoint runs `alembic upgrade head` before uvicorn. App boot then **verifies** trust tables exist and **never** calls `create_all` in production-like envs. Flag + empty `DATABASE_URL` fails closed (container exits). If existing tables have no `alembic_version` row, stop for manual review: compare physical schema and data-migration history, stamp only a proven matching historical revision, then apply required migrations using [the current controlled rollout](schema-042-rollout.md). Table presence does not establish parity with head. Migration 037 must be applied through the paused-ingress, drained-worker sequence above before any new reconciler can receive traffic. |
 
 `REDIS_URL` is required for the managed pilot's isolated Redis service. Outside
 that pilot it remains optional when Redis rate limiting is unused; a
@@ -388,11 +388,11 @@ After this commit:
    `ENABLE_DEV_KEY_SELF_PROVISION`, `ENABLE_STANDARD_MCP_ENDPOINT`,
    `DEBUG`, `STATIC_DEV_API_KEYS`. Keep `ENVIRONMENT=production`. Do **not**
    rotate or remove `VALID_API_KEYS` — those are C.Lee's operator keys.
-3. **Deploy the merged commit** the same way this service is usually shipped
-   (`railway up` from that SHA, or the GitHub → Railway integration if it is
-   what currently ships). Do **not** click **Redeploy from GitHub source**
-   if that would roll back to an older image. This agent must not run that
-   deploy.
+3. **Deploy the merged commit** using the operator-run
+   [canonical deploy path](#canonical-deploy-path): a clean exact-SHA checkout,
+   completed release gates, and the stamped release-context upload. Confirm
+   [current schema compatibility](schema-042-rollout.md) before selecting the
+   release or recovery image. This agent must not run that deploy.
 4. **Check, from a terminal, with no API key:**
    - `curl -sS -o /dev/null -w '%{http_code}\n' https://api.thisisatest.tech/mcp/tools.json` → `401`
    - `curl -sS -o /dev/null -w '%{http_code}\n' https://api.thisisatest.tech/v1/discover` → `401`
@@ -415,8 +415,10 @@ any check it ran fails, so it works as a gate in a shell or in CI:
   this tree against the `alembic_version` row in the target database. A tree
   ahead of the deployed schema is the failure that produces a 500 on the first
   request touching a new table. It also detects a `create_all`-bootstrapped DB
-  with no `alembic_version` row and tells you to `alembic stamp head` once
-  before enabling `RUN_MIGRATIONS_ON_START`.
+  with no `alembic_version` row and blocks for manual review. Compare physical
+  schema and data-migration history; stamp only a proven matching historical
+  revision, then apply the missing migrations under
+  [the current controlled rollout](schema-042-rollout.md).
 - **Off-platform migration parity** (`--public-db`, needs
   `DATABASE_PUBLIC_URL`) — uses only the explicit public PostgreSQL URL. It
   never falls back to the private `DATABASE_URL`; missing, local, or

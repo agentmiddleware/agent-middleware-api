@@ -85,8 +85,8 @@ def test_fails_when_database_behind_tree(migrated_db):
     assert preflight.check_db(async_url) is False
 
 
-def test_fails_on_unstamped_create_all_bootstrap(migrated_db):
-    """Tables present, no alembic_version row — needs `alembic stamp head`."""
+def test_fails_on_unstamped_create_all_bootstrap(migrated_db, capsys):
+    """Table presence cannot establish schema or data-migration equivalence."""
     async_url, sync_url = migrated_db
     engine = create_engine(sync_url)
     with engine.begin() as conn:
@@ -94,6 +94,11 @@ def test_fails_on_unstamped_create_all_bootstrap(migrated_db):
     engine.dispose()
 
     assert preflight.check_db(async_url) is False
+    output = capsys.readouterr().out
+    assert "manual review" in output
+    assert "schema and data-migration history" in output
+    assert "proven matching historical revision" in output
+    assert "Run `alembic stamp head`" not in output
 
 
 def test_public_db_mode_fails_closed_without_public_url(

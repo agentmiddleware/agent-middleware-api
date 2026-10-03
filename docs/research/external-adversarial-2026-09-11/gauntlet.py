@@ -1,44 +1,23 @@
 #!/usr/bin/env python3
-"""Gauntlet — public adversarial test kit for the Agent Middleware trust plane.
-Four batteries in one file. Usage:
-  python3 gauntlet.py 1    # baseline adversarial (26 probes)
-  python3 gauntlet.py 2    # surface & transport (24 experiments)
-  python3 gauntlet.py 3    # creative red team (25 experiments)
-  python3 gauntlet.py 4    # 50-agent concurrent swarm (200 experiments)
-  python3 gauntlet.py all
-Stdlib only. No credentials required — that's the point.
+"""Retired, non-gating historical diagnostic harness.
+
+The archived counters do not assert per-route expected statuses. Zero flags
+are not evidence that authentication held. Execution and its transport are
+refused: the original fixed target is production, not an authorized test target.
+Use the supported local security-review-kit.md and PROOF_MATRIX.md procedures.
 """
 
-import json, sys, time, base64, random, statistics, urllib.request, urllib.error
+import sys, time, base64, random, statistics
 from concurrent.futures import ThreadPoolExecutor
 
 BASE = "https://api.thisisatest.tech"
 
 
 def raw(method, path, body=None, headers=None, timeout=15):
-    h = {}
-    if headers:
-        h.update(headers)
-    data = body if isinstance(body, (bytes, type(None))) else json.dumps(body).encode()
-    req = urllib.request.Request(BASE + path, data=data, headers=h, method=method)
-    t0 = time.time()
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return (
-                r.status,
-                dict(r.headers),
-                r.read(1200).decode("utf-8", "replace"),
-                time.time() - t0,
-            )
-    except urllib.error.HTTPError as e:
-        return (
-            e.code,
-            dict(e.headers),
-            e.read(1200).decode("utf-8", "replace"),
-            time.time() - t0,
-        )
-    except Exception as e:
-        return "ERR", {}, str(e)[:150], time.time() - t0
+    raise RuntimeError(
+        "Historical gauntlet is retired and non-gating; use the authorized "
+        "local procedures in docs/security-review-kit.md."
+    )
 
 
 def leak_check(text):
@@ -283,6 +262,7 @@ def battery4():
 
 
 def _report(title, rows):
+    print("Historical non-gating diagnostics; not an auth-boundary verdict.")
     print("\n" + "=" * 96 + f"\n{title}\n" + "=" * 96)
     bad = 0
     for name, code, detail in rows:
@@ -293,14 +273,14 @@ def _report(title, rows):
             or "LEAK" in str(detail)
             or "OPEN" in str(code)
         ):
-            flag = "  <<< FINDING"
+            flag = "  <<< DIAGNOSTIC FLAG"
             bad += 1
         print(f"{str(name):44s} {str(code):>12s}  {str(detail)[:60]}{flag}")
-    print("-" * 96 + f"\n{len(rows)} experiments · {bad} findings\n")
+    print("-" * 96 + f"\n{len(rows)} experiments · {bad} diagnostic flags\n")
 
 
 if __name__ == "__main__":
-    which = sys.argv[1] if len(sys.argv) > 1 else "all"
-    m = {"1": battery1, "2": battery2, "3": battery3, "4": battery4}
-    for k in ["1", "2", "3", "4"] if which == "all" else [which]:
-        m[k]()
+    sys.exit(
+        "Historical gauntlet is retired and non-gating; use the authorized "
+        "local procedures in docs/security-review-kit.md."
+    )
