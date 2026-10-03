@@ -216,7 +216,7 @@ async def test_every_callback_requires_admission(
         )
     if fault != "empty_wallet":
         original = getattr(owner, name)
-        monkeypatch.setattr(owner, name, AsyncMock(side_effect=error))
+        monkeypatch.setattr(type(owner), name, AsyncMock(side_effect=error))
     first = await client.post(case.path, json=case.body, headers=case.headers)
     assert first.status_code == (402 if fault == "empty_wallet" else 503), first.text
     case.effect.assert_not_awaited()
@@ -224,7 +224,7 @@ async def test_every_callback_requires_admission(
     assert not ledger
     assert permit.spent_credits == 0
     if fault != "empty_wallet":
-        monkeypatch.setattr(owner, name, original)
+        monkeypatch.setattr(type(owner), name, staticmethod(original))
         for _ in range(2):
             retry = await client.post(case.path, json=case.body, headers=case.headers)
             assert retry.status_code == (201 if tool == "awi_memory_index" else 200), (
@@ -281,14 +281,14 @@ async def test_interrupted_admission_never_dispatches_or_reopens(
             raise asyncio.CancelledError()
         raise RuntimeError("synthetic commit/checkpoint failure")
 
-    monkeypatch.setattr(owner, name, interrupt)
+    monkeypatch.setattr(type(owner), name, staticmethod(interrupt))
     if fault == "cancel":
         with pytest.raises(asyncio.CancelledError):
             await client.post(case.path, json=case.body, headers=case.headers)
     else:
         response = await client.post(case.path, json=case.body, headers=case.headers)
         assert response.status_code == 503
-    monkeypatch.setattr(owner, name, original)
+    monkeypatch.setattr(type(owner), name, staticmethod(original))
     case.effect.assert_not_awaited()
     ledger, permit, idem = await records(case)
     assert len(ledger) == 1
@@ -323,13 +323,13 @@ async def test_post_dispatch_crash_never_reexecutes(
         name = "create_receipt" if boundary == "receipt" else "complete"
         original = getattr(owner, name)
         monkeypatch.setattr(
-            owner,
+            type(owner),
             name,
             AsyncMock(side_effect=RuntimeError("synthetic storage failure")),
         )
         response = await client.post(case.path, json=case.body, headers=case.headers)
         assert response.status_code == 503
-        monkeypatch.setattr(owner, name, original)
+        monkeypatch.setattr(type(owner), name, staticmethod(original))
     repaired, needs_review = await get_idempotency_service().reconcile_stuck_records(
         idle_seconds=0
     )
@@ -360,7 +360,7 @@ async def test_receipt_commit_ack_loss_reuses_one_receipt(
             raise RuntimeError("synthetic receipt ack loss")
         return receipt
 
-    monkeypatch.setattr(receipts, "create_receipt", lose_ack)
+    monkeypatch.setattr(type(receipts), "create_receipt", staticmethod(lose_ack))
     response = await client.post(case.path, json=case.body, headers=case.headers)
     assert response.status_code == 200, response.text
     assert len(ids) == 2 and len(set(ids)) == 1
