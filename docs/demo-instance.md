@@ -61,38 +61,25 @@ boot refuses them. The full variable reference is
    written by that script, so a plain build of the fork's GitHub source
    fails.
 
-## Option 2: Docker Compose (Local Demo)
+## Option 2: Supported Local Demo
 
-This repository does not ship a `docker-compose.demo.yml`; save the following as
-that filename first. `TRUST_SIGNING_PRIVATE_KEY_B64` is required — the container
-exits at startup without it.
+Use [the local quickstart](quickstart.md) for the wallet → permit → invoke →
+receipt workflow:
 
-```yaml
-services:
-  api:
-    image: ghcr.io/petrefiedthunder/agent-middleware-api:latest
-    ports:
-      - "8000:8000"
-    environment:
-      - STATE_BACKEND=memory
-      - VALID_API_KEYS=${BOOTSTRAP_KEY:?generate with python3 -c 'import secrets; print(secrets.token_urlsafe(32))'}
-      - DEBUG=false
-      - RATE_LIMIT_PER_MINUTE=60
-      - TRUST_SIGNING_KEY_ID=demo-ed25519
-      - TRUST_SIGNING_PRIVATE_KEY_B64=${TRUST_SIGNING_PRIVATE_KEY_B64:?generate with python3 -c 'import base64, secrets; print(base64.b64encode(secrets.token_bytes(32)).decode())'}
-    volumes:
-      - ./demo.db:/app/demo.db
-```
-
-Run with:
 ```bash
-export TRUST_SIGNING_PRIVATE_KEY_B64=$(python3 -c 'import base64, secrets; print(base64.b64encode(secrets.token_bytes(32)).decode())')
-export BOOTSTRAP_KEY=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
-docker-compose -f docker-compose.demo.yml up
+make quickstart
 ```
 
-`STATE_BACKEND=memory` keeps no durable state, so a fresh seed per run is fine
-here. Anything with a persistent database must reuse one saved seed.
+The quickstart binds loopback only, configures its SQLite database and durable
+state, and persists the database and signing seed together under
+`data/quickstart/`. Reuse that saved signing seed on every restart; do not
+regenerate it while keeping signed data. Follow the quickstart's self-provision
+step to obtain a wallet-scoped key and its governed invocation examples.
+
+The former ad hoc Compose recipe is retired: its memory-state setting and
+unused database mount did not configure the trust database. Hosted demo setup
+and operator bootstrap below apply to Option 1; local callers should use the
+complete quickstart flow above.
 
 ## Demo API Keys
 

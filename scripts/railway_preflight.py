@@ -425,8 +425,10 @@ def check_db(url: str) -> bool:
         if has_tables:
             print(
                 f"{BAD} database has tables but no alembic_version row "
-                f"(create_all bootstrap). Run `alembic stamp head` once, then "
-                f"enable RUN_MIGRATIONS_ON_START=true."
+                f"(possible create_all bootstrap): manual review required. Compare "
+                f"physical schema and data-migration history; stamp only a proven "
+                f"matching historical revision, then apply required migrations "
+                f"under docs/schema-042-rollout.md. Table presence is not parity."
             )
         else:
             print(
