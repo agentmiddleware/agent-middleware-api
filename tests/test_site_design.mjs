@@ -1,7 +1,8 @@
 // Usage: node tests/test_site_design.mjs <local URL> [Playwright module path] [screenshot directory]
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdir, readFile } from "node:fs/promises";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const base = new URL(process.argv[2] || "http://127.0.0.1:8765");
 assert(["127.0.0.1", "localhost", "[::1]"].includes(base.hostname), "Use a loopback preview");
@@ -80,12 +81,31 @@ try {
     }
   }
   // The operator index stays self-contained on its separate API origin.
-  await page.context().clearCookies();
-  await page.setContent(await readFile(new URL("../static/dashboard.html", import.meta.url), "utf8"));
-  assert.equal(await page.locator("script").count(), 0);
+  // A fresh response must use the API policy: setContent on the marketing
+  // document inherits its style-src 'self' and incorrectly blocks this CSS.
+  const apiPolicy = JSON.parse(execFileSync("python3", ["-c", `
+import ast, json, pathlib, sys
+tree = ast.parse(pathlib.Path(sys.argv[1]).read_text())
+policy = next(ast.literal_eval(node.value) for node in tree.body
+    if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name)
+    and target.id == "FIRST_PARTY_HTML_CSP" for target in node.targets))
+print(json.dumps(policy))
+`, fileURLToPath(new URL("../app/middleware/security_headers.py", import.meta.url))], { encoding: "utf8" }));
+  const operator = await browser.newPage({ viewport: { width: 320, height: 1000 } });
+  operator.on("pageerror", (error) => errors.push(error.message));
+  operator.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+  const operatorURL = new URL("/operator-preview", base).href;
+  const operatorHTML = await readFile(new URL("../static/dashboard.html", import.meta.url), "utf8");
+  await operator.route(operatorURL, (route) => route.fulfill({
+    status: 200, contentType: "text/html", body: operatorHTML,
+    headers: { "Content-Security-Policy": apiPolicy },
+  }));
+  await operator.goto(operatorURL);
+  assert.equal(await operator.locator("script").count(), 0);
+  assert.equal(await operator.evaluate(() => getComputedStyle(document.body).backgroundColor), "rgb(11, 16, 32)");
   for (const width of [320, 390, 1440]) {
-    await page.setViewportSize({ width, height: 1000 });
-    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `dashboard overflows at ${width}`);
+    await operator.setViewportSize({ width, height: 1000 });
+    assert(await operator.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `dashboard overflows at ${width}`);
     scenarios++;
   }
   assert.deepEqual(errors, [], "Browser errors or failed assets");
