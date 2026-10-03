@@ -1,0 +1,321 @@
+FILE frontend-components.test.cjs
+// DOM/component fallback. No browser rendering claims; all fetches are stubbed.
+const {test} = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const modules = process.env.QA_NODE_MODULES || '/private/tmp/amw-qa-browser/node_modules';
+const {JSDOM} = require(`${modules}/jsdom`);
+const ts = require(`${modules}/typescript`);
+const root = path.resolve(__dirname, '../../..');
+function page(file) {
+  // Deliberately omit resources: no subresource loading is enabled.
+  return new JSDOM(fs.readFileSync(path.join(root, file), 'utf8'), {
+    url: 'http://127.0.0.1:8765/', runScripts: 'outside-only',
+  });
+}
+function script(dom, file) {
+  vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), dom.getInternalVMContext(), {filename: path.join(root, file)});
+}
+
+test('calculator covers empty, valid, equal, zero, invalid and overflow classes', () => {
+  const dom = page('site/index.html');
+  try {
+    dom.window.fetch = () => {throw new Error('Unexpected network attempt');};
+    script(dom, 'site/pilot-fit.js');
+    const d = dom.window.document;
+    const inputs = [...d.querySelectorAll('.pilot-fit input')];
+    const summary = () => d.querySelector('[data-fit-summary]').textContent;
+    const guidance = () => d.querySelector('[data-fit-guidance]').textContent;
+    const fill = values => {values.forEach((v, i) => {inputs[i].value = String(v);}); inputs[0].dispatchEvent(new dom.window.Event('input', {bubbles: true}));};
+    assert.match(summary(), /Enter the four/);
+    fill([100000, .1, 50, 80, 2800]);
+    assert.match(summary(), /\$4,000.00/);
+    assert.match(guidance(), /exceeds.*\$1,200.00/);
+    assert.equal(d.querySelector('[data-fit-next]').hidden, false);
+    fill([1, 100, 1, 100, 1]);
+    assert.match(guidance(), /does not exceed/);
+    fill([1, 100, 1.005, 100, 1]);
+    assert.match(guidance(), /exceeds.*\$0.01/);
+    fill([0, 100, 50, 100, 0]);
+    assert.match(guidance(), /no avoided duplicates/);
+    fill([1, 100, 50, 100, '']);
+    assert.match(guidance(), /fit is still unknown/);
+    for (const [index, value] of [[0,-1],[0,.5],[1,-1],[1,101],[2,-1],[3,101],[4,-1]]) {
+      const values = [100000,.1,50,80,2800]; values[index] = value; fill(values);
+      assert.match(summary(), /Check your inputs/);
+      assert.equal(inputs[index].getAttribute('aria-invalid'), 'true');
+      assert.equal(d.querySelector('[data-fit-next]').hidden, true);
+    }
+    fill([100000, .1, 1e308, 80, 2800]);
+    assert.match(summary(), /too large/);
+    fill([1,100,'',100,0]);
+    assert.match(summary(), /Enter the four/);
+  } finally {dom.window.close();}
+});
+
+for (const failure of ['http', 'json', 'key-mismatch', 'missing-payload', null]) {
+  test(`receipt component handles ${failure || 'valid artifacts'} without network`, async () => {
+    const dom = page('site/proof/index.html');
+    try {
+      const receipt = JSON.parse(fs.readFileSync(path.join(root, 'site/proof/receipt.json'), 'utf8'));
+      const keys = JSON.parse(fs.readFileSync(path.join(root, 'site/proof/trust-keys.json'), 'utf8'));
+      const requests = [];
+      dom.window.fetch = async (url, options) => {
+        assert(['\/proof/receipt.json','\/proof/trust-keys.json'].includes(url));
+        assert.equal(options.credentials, 'omit');
+        requests.push(url);
+        const body = url.includes('receipt') ? receipt : keys;
+        if (failure === 'missing-payload') delete receipt.signing_input;
+        if (failure === 'key-mismatch') keys.keys = [];
+        return {ok: failure !== 'http', json: async () => {
+          if (failure === 'json') throw new SyntaxError('Synthetic malformed JSON');
+          return body;
+        }};
+      };
+      script(dom, 'site/proof/proof.js');
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(requests.length, 2);
+      assert.equal(dom.window.document.querySelector('[data-proof-status]').textContent,
+        failure ? 'not published' : 'artifacts loaded');
+      assert.match(dom.window.document.querySelector('[data-proof-message]').textContent,
+        failure ? /No verification claim/ : /offline verifier/);
+    } finally {dom.window.close();}
+  });
+}
+
+function client() {
+  const requests = [];
+  let config;
+  const transport = {};
+  for (const method of ['get', 'post', 'delete']) transport[method] = async (...args) => {
+    requests.push({method, args}); return {data: {status: 'synthetic'}};
+  };
+  const fakeAxios = {create(options) {config = options; return transport;}};
+  const module = {exports: {}};
+  const source = fs.readFileSync(path.join(root, 'awi_sdk/typescript/index.ts'), 'utf8');
+  const compiled = ts.transpileModule(source, {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true}}).outputText;
+  vm.runInNewContext(compiled, {exports: module.exports, module, require(name) {
+    assert.equal(name, 'axios'); return fakeAxios;
+  }}, {filename: 'qa-transpiled-awi-sdk.js'});
+  const sdk = new module.exports.AWIClient({baseUrl: 'http://127.0.0.1:8769', apiKey: [REDACTED];
+  return {sdk, requests, config};
+}
+
+test('SDK fails before transport for missing permit and invalid idempotency keys', async () => {
+  const {sdk, requests, config} = client();
+  assert.equal(config.maxRedirects, 0);
+  for (const options of [undefined, {}, {permitId: ' '}, {permitId: 'permit', idempotencyKey: ' '}, {permitId: 'permit', idempotencyKey: 'a'.repeat(129)}]) {
+    await assert.rejects(sdk.execute('session', 'get_representation', {}, options));
+  }
+  assert.equal(requests.length, 0);
+});
+
+test('SDK preserves retry identity, astral boundary and governed headers', async () => {
+  const {sdk, requests} = client();
+  const options = {permitId: ' permit ', idempotencyKey: 'a'.repeat(128)};
+  await sdk.execute('session', 'get_representation', {}, options);
+  await sdk.execute('session', 'get_representation', {}, options);
+  assert.equal(requests.length, 2);
+  assert.deepEqual(requests[0].args[2], requests[1].args[2]);
+  assert.equal(requests[0].args[2].headers['X-Permit-Id'], 'permit');
+  await sdk.execute('session', 'get_representation', {}, {...options, idempotencyKey: '😀'.repeat(128)});
+  assert.equal(requests.length, 3);
+  await assert.rejects(sdk.execute('session', 'get_representation', {}, {...options, idempotencyKey: '😀'.repeat(129)}));
+  assert.equal(requests.length, 3);
+});
+
+test('FE-001: declared SDK build has a project configuration', {todo: 'FE-001: npm run build exits 1 because tsconfig.json is absent'}, () => {
+  assert.equal(fs.existsSync(path.join(root, 'awi_sdk/typescript/tsconfig.json')), true);
+});
+
+test('FE-002: maxSteps=0 is not silently promoted to 100 actions', {todo: 'FE-002: preserve invalid zero for API rejection or reject locally'}, async () => {
+  const {sdk, requests} = client();
+  try {await sdk.createSession('http://127.0.0.1:8769/synthetic', {maxSteps: 0});}
+  catch {assert.equal(requests.length, 0); return;}
+  assert.equal(requests[0].args[1].max_steps, 0);
+});
+
+FILE ux_browser_qa.cjs
+/* Local-only exploratory UX evidence. No product code is modified. */
+process.env.PLAYWRIGHT_BROWSERS_PATH = '/private/tmp/amw-qa-playwright-browsers';
+const { chromium } = require('/private/tmp/amw-qa-browser/node_modules/playwright');
+const axe = require('/private/tmp/amw-qa-browser/node_modules/axe-core');
+const fs = require('node:fs');
+const path = require('node:path');
+const out = path.join(__dirname, 'artifacts');
+const report = { started: new Date().toISOString(), axeVersion: axe.version, pages: [], interactions: {}, outboundBlocked: [] };
+
+async function layout(page) {
+  return page.evaluate(() => ({
+    viewport: window.innerWidth,
+    documentWidth: document.documentElement.scrollWidth,
+    headings: Array.from(document.querySelectorAll('h1,h2,h3')).map(e => ({tag: e.tagName, text: e.textContent.trim()})),
+    landmarks: Array.from(document.querySelectorAll('main,nav,header,footer')).map(e => ({tag: e.tagName, name: e.getAttribute('aria-label')})),
+    overflow: Array.from(document.querySelectorAll('main,nav,button,input,a,h1,h2,h3,pre,table')).filter(e => {
+      const r = e.getBoundingClientRect();
+      return r.width > 0 && (r.right > window.innerWidth + 1 || r.left < -1);
+    }).map(e => ({tag: e.tagName, id: e.id, cls: e.className, text: e.textContent.trim().slice(0,80), width: e.getBoundingClientRect().width})),
+  }));
+}
+
+async function scan(page, label) {
+  await page.addScriptTag({content: axe.source});
+  const result = await page.evaluate(async () => window.axe.run(document, {
+    runOnly: {type: 'tag', values: ['wcag2a','wcag2aa','wcag21a','wcag21aa','wcag22aa']},
+  }));
+  fs.writeFileSync(path.join(out, `ux-axe-${label}.json`), JSON.stringify(result, null, 2));
+  return {violations: result.violations.map(v => ({id:v.id,impact:v.impact,help:v.help,nodes:v.nodes.map(n=>({target:n.target,summary:n.failureSummary}))})), passes:result.passes.length, incomplete:result.incomplete.length};
+}
+
+async function main() {
+  const browser = await chromium.launch({headless:true});
+  const context = await browser.newContext({viewport:{width:1440,height:1000},reducedMotion:'reduce',serviceWorkers:'block'});
+  await context.route('**/*', route => {
+    const url = new URL(route.request().url());
+    if (['127.0.0.1','localhost','[::1]'].includes(url.hostname)) return route.continue();
+    report.outboundBlocked.push({host:url.hostname,type:route.request().resourceType()});
+    return route.abort('blockedbyclient');
+  });
+  const page = await context.newPage();
+  const pages = [
+    ['home','http://127.0.0.1:8765/'],
+    ['proof','http://127.0.0.1:8765/proof/'],
+    ['compare','http://127.0.0.1:8765/compare/'],
+    ['concept','http://127.0.0.1:8765/concept/'],
+    ['404','http://127.0.0.1:8765/404.html'],
+    ['dashboard','http://127.0.0.1:8766/dashboard.html'],
+  ];
+  for (const [label,url] of pages) {
+    await page.setViewportSize({width:1440,height:1000});
+    await page.goto(url,{waitUntil:'networkidle'});
+    const item = {label,url,title:await page.title(),desktop:await layout(page),axe:await scan(page,label)};
+    fs.writeFileSync(path.join(out, `ux-semantics-${label}.yml`), await page.locator('body').ariaSnapshot());
+    await page.screenshot({path:path.join(out,`ux-${label}-desktop.png`),fullPage:false});
+    await page.keyboard.press('Tab');
+    item.firstTab = await page.evaluate(()=>({tag:document.activeElement.tagName,text:document.activeElement.textContent.trim(),href:document.activeElement.getAttribute('href')}));
+    await page.keyboard.press('Enter');
+    item.skipTarget = await page.evaluate(()=>({hash:location.hash,active:document.activeElement.tagName,id:document.activeElement.id,scrollY:window.scrollY}));
+    await page.setViewportSize({width:390,height:844});
+    await page.goto(url,{waitUntil:'networkidle'});
+    item.mobile = await layout(page);
+    await page.screenshot({path:path.join(out,`ux-${label}-mobile.png`),fullPage:label !== 'home' && label !== 'compare'});
+    await page.setViewportSize({width:320,height:900});
+    item.reflow320 = await layout(page);
+    report.pages.push(item);
+  }
+  await page.setViewportSize({width:390,height:844});
+  await page.goto(pages[0][1],{waitUntil:'networkidle'});
+  const calculator = page.locator('.pilot-fit');
+  await calculator.scrollIntoViewIfNeeded();
+  report.interactions.calculatorEmpty = await calculator.innerText();
+  await calculator.screenshot({path:path.join(out,'ux-calculator-empty.png')});
+  await page.locator('#fit-actions').fill('-1');
+  report.interactions.calculatorInvalid = {text:await calculator.innerText(),fields:await calculator.locator('input').evaluateAll(es=>es.map(e=>({id:e.id,invalid:e.getAttribute('aria-invalid'),description:e.getAttribute('aria-describedby')})))};
+  await calculator.screenshot({path:path.join(out,'ux-calculator-invalid.png')});
+  for (const [id,value] of [['fit-actions','100000'],['fit-rate','0.1'],['fit-loss','50'],['fit-reduction','80'],['fit-cost','2800']]) await page.locator(`#${id}`).fill(value);
+  report.interactions.calculatorValid = await calculator.innerText();
+  await calculator.screenshot({path:path.join(out,'ux-calculator-valid.png')});
+  report.interactions.calculatorAxe = await scan(page,'calculator-valid');
+  const toggle = page.getByRole('button',{name:'Accessibility options',exact:true});
+  await toggle.focus();
+  await page.keyboard.press('Enter');
+  report.interactions.accessibilityOpen = {focus:await page.evaluate(()=>document.activeElement.outerHTML.slice(0,300)),snapshot:await page.getByRole('dialog').ariaSnapshot()};
+  report.interactions.accessibilityAxe = await scan(page,'accessibility-dialog');
+  await page.getByRole('dialog').screenshot({path:path.join(out,'ux-accessibility-panel-mobile.png')});
+  await page.keyboard.press('Escape');
+  report.interactions.accessibilityEscape = {focus:await page.evaluate(()=>document.activeElement.getAttribute('aria-label')),hidden:await page.getByRole('dialog').count() === 0};
+  await toggle.click();
+  for (let i=0;i<10;i++) await page.getByRole('button',{name:'Increase text size',exact:true}).click();
+  await page.keyboard.press('Escape');
+  await page.setViewportSize({width:320,height:900});
+  await page.evaluate(()=>scrollTo(0,0));
+  report.interactions.enlargedText320 = await layout(page);
+  report.interactions.enlargedText320.scale = await page.evaluate(()=>getComputedStyle(document.documentElement).fontSize);
+  await page.screenshot({path:path.join(out,'ux-enlarged-text-320.png'),fullPage:false});
+  report.finished = new Date().toISOString();
+  fs.writeFileSync(path.join(out,'ux-browser-report.json'),JSON.stringify(report,null,2));
+  await browser.close();
+  console.log(JSON.stringify({pages:report.pages.map(p=>({label:p.label,violations:p.axe.violations,desktopWidth:p.desktop.documentWidth,mobileWidth:p.mobile.documentWidth,reflowWidth:p.reflow320.documentWidth,firstTab:p.firstTab,skipTarget:p.skipTarget})),calculatorAxe:report.interactions.calculatorAxe,accessibilityAxe:report.interactions.accessibilityAxe,enlargedText320:report.interactions.enlargedText320,outboundBlocked:report.outboundBlocked},null,2));
+}
+main().catch(error=>{console.error(error.stack);process.exitCode=1;});
+
+FILE CLAIMS-REPORT.md
+# Backend QA: claim and security review
+
+PR: opened by orchestrator
+
+CI status: pending at time of writing
+
+This is the read-only claims/security lane of Backend QA, resumed on 2026-10-03 UTC after the interrupted run. The branch is `qa/2026-10-02-sweep`, HEAD `d45754e`, origin `PetrefiedThunder/agent-middleware-api`. No product files, migrations, environment files, deployment configuration, or credentials were changed. No remote service was contacted. Commands and unsuccessful filename searches are retained in [CLAIMS-SESSION.md](CLAIMS-SESSION.md).
+
+## Charter and method
+
+Timebox: approximately 30 minutes. Trace exactly-once and new-idempotency-key assertions from tracked documentation, code comments, schemas and UI copy into the actual replay and dispatch implementation. Review the highest-impact authorization, tenant isolation, resource-consumption and upstream-consumption controls against the OWASP API Top 10 categories. Distinguish a supported claim, a known limitation, a stale claim, and an unexecuted proof.
+
+The local `code-review` and `security-review` skill checklists informed the review. CodeRabbit was not invoked: its skill says that it sends code diffs to an external API, which the orchestrator's package-only network restriction excludes. There was no attempt to authenticate or install that service. Pytest execution belongs to the separate Backend QA lane; this report's test references identify existing proofs, not a claim that this lane ran them.
+
+## Defect finding for the consolidated findings table
+
+| ID | Severity | Group | Title | Exact reproduction | Expected | Actual | Evidence | Suggested fix |
+|---|---|---|---|---|---|---|---|---|
+| BE-100 | Medium | Backend | Integration guidance overstates receipt completion and local/upstream equivalence | Read `docs/agent-self-credentialing.md:101-108` and `docs/tool-interface-authority.md:35-37`; compare with `app/routers/mcp.py:235-241,259-271,2185-2223` and `README.md:144-162`. The error path is exercised by the existing terminal-record-contention tests listed below. | Guidance says at most one debit/dispatch for an accepted same-key identity, distinguishes the configured upstream dispatch state machine from local calls, and discloses charged calls whose receipt cannot be written and require manual review. | The self-credentialing page promises “one authorization, one debit, one finalized receipt” and says the governance path is identical. The tool-interface page promises the full “exactly-once dispatch” pipeline for every allowed call. The implementation branches for upstream/local execution and explicitly provides a manual-review outcome with committed effects and no receipt. `ELEVATOR_PITCH.md:162-165` repeats an unconditional one-dispatch/one-debit/one-receipt formulation. | [marketing claims](artifacts/claims-marketing-claims.txt), [claim context](artifacts/claims-claim-context-tests.txt), [dispatch branches](artifacts/claims-dispatch-and-autopermit-details.txt); `app/routers/mcp.py:_terminal_record_contended_data`, `_execute_registered_tool_inner`; `tests/test_receipt_write_contention_surface.py` and `tests/test_audit_chain_contention_surface.py`. | Align these integration pages and the pitch with README/WEDGE: use “at most one,” name the upstream-only durable dispatch boundary, and link manual-review/no-receipt outcomes. Preserve the safe fail-closed code. |
+
+Severity is Medium because this guidance changes integration retry/reconciliation assumptions about money and irreversible actions; this is a documentation correctness finding, not proof of duplicate billing. No product fix was applied.
+
+## Mandatory claim findings: verification inventory
+
+Every lexical occurrence is retained with file and line in [CLAIMS-INVENTORY.md](CLAIMS-INVENTORY.md) and [claims-inventory.json](artifacts/claims-inventory.json). The following finding IDs classify the substantive families; verified or documented-limitation rows are explicitly **not defects** and do not inflate severity counts. References in tests, historical reports, games, MQTT QoS definitions and one-time registration helpers are identified separately from an end-to-end processing guarantee. Enumeration does not claim that every historical proof was rerun.
+
+| ID | Status / severity | Claim and source | Implementation verification and gap | Suggested treatment |
+|---|---|---|---|---|
+| BE-101 | Source-verified; no defect | Exactly-once is a deduplication term meaning at most one gateway dispatch/debit for the same accepted identity: `WEDGE.md:16-23`, `README.md:144-146`, `AGENTS.md:62-67`. | `IdempotencyRecordModel` has wallet/endpoint/key uniqueness and a cross-transport governed identity index (`app/db/models.py:1032-1057`); `idempotency.py:199-228` requires the same payload and returns stored response; each upstream attempt has a unique idempotency-record FK (`models.py:1082-1093`); dispatch claim uses a guarded state transition (`mcp_dispatch_attempts.py:1477-1549`). This proves structure, not a rerun of PostgreSQL crash/concurrency tests. | Retain this scoped terminology; never expand it to eventual delivery or an arbitrary remote effect. |
+| BE-102 | Source-verified limitation; no defect | Remote effect-once needs upstream support: `README.md:157-162`, `app/main.py:500-506`, `docs/openapi.json:5`, `site/compare/index.html:429-438`, `SECURITY_LIMITATIONS.md:83`, related partner/failure docs. | Adapter forwards invocation and idempotency metadata in `app/services/upstream_mcp.py:950-963`; it cannot force a remote tool to honor it. The claim is committed before network send. No third-party behavior was tested. | Keep the limitation adjacent to every delivery claim. |
+| BE-103 | Source-verified; no defect | New-key duplicates are allowed under default `log`, not deduplicated: `docs/POLICY_ENFORCEMENT.md:224-232`, `docs/denial-details.md:159-165`, `docs/articles/intent-is-not-authority.md:45`. | Default is `DuplicateGuardMode.LOG` (`app/core/config.py:144-151`); detected repeats increment a counter and continue (`mcp_dispatch_attempts.py:827-829`); existing `test_duplicate_detection_log_mode_allows` asserts two dispatches (`tests/test_upstream_retry_cap_enforcement.py:539-540`). | Explicitly choose enforcement where the pilot requires it; a test proving default duplicate dispatch is not a product regression. |
+| BE-104 | Source-verified with bounded scope; no defect | New-key repeats are refused in `enforce` for the same permit/tool/arguments within the configured window, absent permit opt-out: `docs/denial-details.md:71`, `docs/POLICY_ENFORCEMENT.md:213-232`, `docs/articles/intent-is-not-authority.md:47`. | `mcp_dispatch_attempts.py:735-845` checks mode, opt-out, permit ID, public tool ID, request hash and cutoff, returning `duplicate_request_new_key` only in enforce mode. Existing test asserts one dispatch at `tests/test_upstream_retry_cap_enforcement.py:460-461`. PostgreSQL concurrency proof is separate and was not run by this lane. | Keep all scope qualifiers. Changed arguments, changed permit, expired window and intentional-repeat opt-out are not covered. |
+| BE-105 | Source-verified limitation; no defect | Standard `POST /mcp` does not gain cross-key deduplication merely by enabling the guard: `docs/articles/intent-is-not-authority.md:66,94`. | `_mint_auto_permit` derives mint identity from the client key (`app/routers/mcp_standard.py:302-320`); another key creates another permit (`:329-348`). The guard matches the original permit ID (`mcp_dispatch_attempts.py:763-764`). Thus a fresh-key retry does not match the prior attempt. This was code-traced, not reproduced against a running server. | Do not advertise guard protection for fresh-key standard-MCP calls. Preserve a stable business/key identity at the caller, or document a deliberate separate design change with tests. |
+| BE-106 | Source-verified bounded meaning; no defect | Local dogfood proof says exactly-once against a durable file: `docs/PROOF_MATRIX.md:22`, local demo/test comments. | The statement describes the controlled local proof scenario, not universal crash recovery. Local execution calls the function at `app/routers/mcp.py:2218-2223`; it has no upstream dispatch state machine. The matrix itself limits downstream claims at `:238-251`. | Prefer “same-key replay produces one file append in this proof”; retain local-crash limitations. BE-100 covers pages that claim path equivalence. |
+| BE-107 | Partially verified; no defect demonstrated | Reservation release and refunds happen once: `app/services/permits.py:1312-1318`, `docs/failure-semantics.md:179,289-300`, trust/refund test comments. | Release performs the permit mutation and attempt checkpoint transactionally, using a guarded null-to-timestamp update (`permits.py:1323-1357`). Refund proofs are named in the docs and concurrency tests; the full refund implementation and live PostgreSQL proof were not independently re-executed here. | Preserve existing concurrency/crash tests; do not count this source review as live proof. |
+| BE-108 | Partially verified; no defect demonstrated | Human approval/permit issuance mints once: `app/services/permit_requests.py:23-27`, `docs/permit-requests.md:67`, `app/services/human_approval.py:145`. | Issuance documents a conditional transition and reserved primary key; `tests/test_permit_request_flow.py` contains the corresponding concurrent poller cases. External approval delivery itself was not tested. | Scope “once” to durable permit issuance/approval identity, not guaranteed external notification delivery. |
+| BE-109 | Recorded, no product-delivery claim | Historical changelog/proof reports; test assertions; migration descriptions; billing counters; one-time tool registration; IoT QoS value 2; arcade text. | These are searchable in the occurrence inventory. They are not independent promises of arbitrary downstream exactly-once behavior. Historical pass counts and external-source claims were not refreshed. | Keep historical results dated; do not reuse them as current CI or customer proof. |
+
+The most consequential known gap is BE-105: the standard tool surface creates a new auto-permit for a new client key. This is already disclosed in the repository, so it is reported as a verified limitation rather than mislabeled as a new defect.
+
+## OWASP API Top 10 source review
+
+This is an application source review using the 2023 API category names, not a certification, a production penetration test, or a dependency-advisory refresh. No live external reference was fetched under the network restriction.
+
+| Category | Reviewed control / source evidence | Existing verification anchor | Result and limit |
+|---|---|---|---|
+| API1 Broken Object Level Authorization | Exact wallet match/admin in `app/core/auth.py:57-87`; permit listing scope in `app/routers/permits.py:60-70`; receipt ownership in `app/routers/receipts.py:34-57`. | `tests/test_permits.py:test_verify_does_not_leak_permit_to_unauthorized_caller`; `tests/test_receipts.py:test_receipt_evidence_denies_cross_wallet_access`. | Source controls present; no bypass demonstrated. Application scoping is not database RLS. |
+| API2 Broken Authentication | Active issuing-key check for JWTs in `app/core/auth.py:381-403`; production/local bootstrap posture tested separately. | `tests/test_api_keys.py:test_revoked_db_key_cannot_authenticate`; `tests/test_production_trust_posture.py:test_anonymous_cannot_invoke_or_mint_in_production`. | Source and negative tests found; no real credentials or production endpoint tested. |
+| API3 Broken Object Property Level Authorization | Permit inspection permits only issuer, subject or admin (`app/routers/permits.py:34-44`); receipt lists reject mismatched ownership (`receipts.py:40-57`). | `tests/test_receipts.py:test_receipt_evidence_does_not_expose_cross_wallet_artifacts`; `tests/test_permits.py:test_permit_cannot_name_foreign_subject_wallet`. | Focused trust-resource review; no exhaustive property-by-property mass-assignment analysis. |
+| API4 Unrestricted Resource Consumption | Global 1 MiB request body cap (`app/core/config.py:156-164`, `app/main.py:558-564`); rate limiter mounted at `main.py:555-556`; upstream response cap is configured. | `tests/test_request_body_limit.py`; `tests/test_rate_limit_threshold.py:test_rotating_invalid_keys_share_one_bounded_budget`; upstream oversized-response tests. | Controls present; no load/soak test or distributed limiter proof in this lane. |
+| API5 Broken Function Level Authorization | Bootstrap-only duplicate-guard metrics (`app/main.py:1251-1255`); refund retry remains operator-only (`app/routers/receipts.py:165-167`). | `tests/test_duplicate_guard_config.py:test_duplicate_guard_health_endpoint_rejects_non_admin_keys`; `tests/test_route_auth_inventory.py`. | Core admin boundaries source-checked; complete route test execution belongs to backend log. |
+| API6 Unrestricted Access to Sensitive Business Flows | Same-key identity, permit budget reservation, one-shot dispatch, scoped cross-key guard and approval checks; see BE-101/103/104/105. | `tests/test_upstream_retry_cap_enforcement.py`, `tests/test_trust_negative_security.py`, concurrency suites. | Default/new-permit limits are explicit. No stronger business-operation deduplication inferred. |
+| API7 Server Side Request Forgery | Configured upstream URL rejects non-public addresses except explicit local/test loopback (`app/services/upstream_mcp.py:362-410`); redirects disabled (`:481,701-736`). | `tests/test_upstream_mcp.py:test_url_guard_rejects_dns_to_private_link_local_and_reserved`, `test_default_http_client_disables_redirects_and_redacts_auth`. | Code controls present; no internet or metadata endpoints contacted. |
+| API8 Security Misconfiguration | Wildcard CORS disables credentials (`app/main.py:567-583`); proof surfaces and unsafe local flags have production posture tests. | `tests/test_cors_security.py`; `tests/test_trust_mode_guardrails.py`; `tests/test_production_trust_posture.py`. | Source/test inventory only; deployed flags deliberately not inspected. |
+| API9 Improper Inventory Management | OpenAPI committed at `docs/openapi.json`; route-auth inventory and gated proof-surface tests exist; main loop separates supported tools from demos. | `tests/test_route_auth_inventory.py`, `tests/test_proof_surface_gate.py`. | Contract test execution and schema drift checks belong to backend pass. BE-100 documents misleading integration guidance. |
+| API10 Unsafe Consumption of APIs | Upstream response size checks, canonicalization and explicit ambiguous outcome handling (`app/services/upstream_mcp.py:950-983`); no automatic redispatch after durable claim. | `tests/test_upstream_mcp.py:test_oversized_or_invalid_response_is_rejected_after_dispatch`; dispatch reconciliation suites. | No external service behavior trusted as tested; contract only covers configured upstream adapter. |
+
+## Auth and permission matrix
+
+Entries state expected code behavior, not a new execution result. Tests named above and the separate Backend QA results establish runtime coverage.
+
+| Surface | Anonymous | Own wallet key | Foreign wallet key | Bootstrap admin | Source |
+|---|---|---|---|---|---|
+| Protected trust routes | Authentication required | Continue subject to scopes/permit | Authentication alone grants no other-wallet access | Operator access where allowed | `app/core/auth.py`; `tests/test_route_auth_inventory.py` |
+| `GET /v1/permits` without wallet filter | Refused | Scoped to own wallet | Scoped to that caller, not another wallet | Can use operator view | `app/routers/permits.py:47-82` |
+| Permit inspection | Refused | Issuer/subject can inspect | Refused | Allowed | `app/routers/permits.py:34-44` |
+| Receipt listing | Refused | Own wallet or issuer/subject permit | Refused | Allowed | `app/routers/receipts.py:34-57` |
+| Refund reconciliation list | Refused | Own wallet records | No other-wallet records | Cross-wallet queue | `app/routers/receipts.py:124-144` |
+| Refund reconciliation retry | Refused | Refused | Refused | Allowed | `app/routers/receipts.py:165-167` |
+| `/health/duplicate-guard` | Refused | Refused | Refused | Allowed | `app/main.py:1251-1255` |
+| Standard `POST /mcp` tool call | Refused | Auto-permit bounded by wallet/policy | No arbitrary wallet selection | Wallet-scoped key required for this surface | `tests/test_standard_mcp_endpoint.py:test_tools_call_requires_wallet_scoped_key`; `app/routers/mcp_standard.py:257-320` |
+| Public receipt verification keys | Public in production posture | Public | Public | Public | `tests/test_production_trust_posture.py:test_receipt_keys_remain_public_in_production` |
+
+## Limits and next work
+
+No new production vulnerability is claimed from this lane. No secrets were intentionally read or recorded. The lexical search omitted credential/environment filenames. No live PostgreSQL, upstream MCP, external approval, distributed execution, or billing system was contacted; no dependency-advisory service was queried. Same-key races, refund recovery and auth tests must be read with the separate Backend QA outcomes. Correct BE-100 documentation first, then explicitly test the standard-MCP fresh-key boundary if that surface is part of an active pilot.
+

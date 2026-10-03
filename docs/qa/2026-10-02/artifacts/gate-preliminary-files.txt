@@ -1,0 +1,434 @@
+tests/test_qa_20261002_backend.py
+docs/qa/2026-10-02/SESSION-LOG.md
+docs/qa/2026-10-02/BACKEND-SESSION.md
+docs/qa/2026-10-02/run_logged.py
+docs/qa/2026-10-02/playwright.config.cjs
+docs/qa/2026-10-02/ux_csp_server.py
+docs/qa/2026-10-02/PLAN.md
+docs/qa/2026-10-02/browser-loopback.mjs
+docs/qa/2026-10-02/CLAIMS-SESSION.md
+docs/qa/2026-10-02/backend_safety/sitecustomize.py
+docs/qa/2026-10-02/COORDINATION-SESSION.md
+docs/qa/2026-10-02/requirements-qa.txt
+docs/qa/2026-10-02/UX-SESSION.md
+docs/qa/2026-10-02/ux_browser_qa.cjs
+docs/qa/2026-10-02/frontend.spec.cjs
+docs/qa/2026-10-02/secret_scan.py
+docs/qa/2026-10-02/GATE-SESSION.md
+docs/qa/2026-10-02/UX-REPORT.md
+docs/qa/2026-10-02/FRONTEND-SESSION.md
+docs/qa/2026-10-02/artifacts/frontend-contact-validation-source.txt
+docs/qa/2026-10-02/artifacts/claims-dispatch-and-autopermit-details.txt
+docs/qa/2026-10-02/artifacts/frontend-sdk-build-with-compiler.txt
+docs/qa/2026-10-02/artifacts/frontend-dashboard-map.txt
+docs/qa/2026-10-02/artifacts/frontend-site-build-local-tmpdir.txt
+docs/qa/2026-10-02/artifacts/coordination-progress-inventory.txt
+docs/qa/2026-10-02/artifacts/frontend-build-settings.txt
+docs/qa/2026-10-02/artifacts/ux-page-semantics-source.txt
+docs/qa/2026-10-02/artifacts/frontend-install-browsers.txt
+docs/qa/2026-10-02/artifacts/frontend-surface-targets.txt
+docs/qa/2026-10-02/artifacts/frontend-inventory.txt
+docs/qa/2026-10-02/artifacts/coordination-plan-written.txt
+docs/qa/2026-10-02/artifacts/claims-claims-primary.txt
+docs/qa/2026-10-02/artifacts/ux-ui-source-map.txt
+docs/qa/2026-10-02/artifacts/claims-marketing-claims.txt
+docs/qa/2026-10-02/artifacts/coordination-python-dependency-audit.txt
+docs/qa/2026-10-02/artifacts/backend-safety-bootstrap-create.txt
+docs/qa/2026-10-02/artifacts/tracked-secret-scan.json
+docs/qa/2026-10-02/artifacts/backend-request-boundary-source.txt
+docs/qa/2026-10-02/artifacts/coordination-secret-scan-help.txt
+docs/qa/2026-10-02/artifacts/claims-security-inventory-corrected.txt
+docs/qa/2026-10-02/artifacts/coordination-tracked-secret-scan.txt
+docs/qa/2026-10-02/artifacts/ux-charters.txt
+docs/qa/2026-10-02/artifacts/backend-trust-test-inventory.txt
+docs/qa/2026-10-02/artifacts/claims-new-key-claim-search.txt
+docs/qa/2026-10-02/artifacts/claims-claim-context-tests.txt
+docs/qa/2026-10-02/artifacts/frontend-site-dependency-audit.txt
+docs/qa/2026-10-02/artifacts/coordination-config-read.txt
+docs/qa/2026-10-02/artifacts/ux-browser-accessibility.txt
+docs/qa/2026-10-02/artifacts/backend-unicode-contract-tests-map.txt
+docs/qa/2026-10-02/artifacts/ux-skill-and-pages.txt
+docs/qa/2026-10-02/artifacts/claims-core-claims.txt
+docs/qa/2026-10-02/artifacts/backend-install-runtime-test-deps.txt
+docs/qa/2026-10-02/artifacts/backend-subprocess-network-inventory.txt
+docs/qa/2026-10-02/artifacts/ux-accessibility-source.txt
+docs/qa/2026-10-02/artifacts/backend-ruff-baseline.txt
+docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-main-public-pages-92902--browser-or-resource-errors-webkit/error-context.md
+docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-operator-index-is-00d11-oes-not-ask-for-credentials-webkit/error-context.md
+docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-receipt-evidence--4ee34--cryptographic-verification-firefox/error-context.md
+docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-main-public-pages-92902--browser-or-resource-errors-chromium/error-context.md
+docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-main-public-pages-92902--browser-or-resource-errors-firefox/error-context.md
+docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-malformed-receipt-payload-fails-closed-chromium/error-context.md
+docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-mobile-pages-do-not-overflow-firefox/error-context.md
+docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-operator-index-is-00d11-oes-not-ask-for-credentials-firefox/error-context.md
+docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-receipt-load-fail-c9de9-ata-and-verification-claims-webkit/error-context.md
+docs/qa/2026-10-02/artifacts/frontend-browser-attempt-progress.txt
+docs/qa/2026-10-02/artifacts/backend-safety-focused.txt
+docs/qa/2026-10-02/artifacts/backend-suite-safety-map.txt
+docs/qa/2026-10-02/artifacts/claims-inventory.json
+docs/qa/2026-10-02/artifacts/claims-identity-memory-skills.txt
+docs/qa/2026-10-02/artifacts/claims-all-doc-claims.txt
+docs/qa/2026-10-02/artifacts/backend-key-validation-locate.txt
+docs/qa/2026-10-02/artifacts/coordination-resume-map.txt
+docs/qa/2026-10-02/artifacts/gate-identity-and-instructions.txt
+docs/qa/2026-10-02/artifacts/frontend-frontend-static-checks.txt
+docs/qa/2026-10-02/artifacts/frontend-sdk-install-declared.txt
+docs/qa/2026-10-02/artifacts/frontend-existing-design-browser-tests.txt
+docs/qa/2026-10-02/artifacts/backend-idempotency-openapi-review.txt
+docs/qa/2026-10-02/artifacts/frontend-existing-js-tests.txt
+docs/qa/2026-10-02/artifacts/ux-docs-and-build-links.txt
+docs/qa/2026-10-02/artifacts/claims-security-auth-controls.txt
+docs/qa/2026-10-02/artifacts/backend-openapi-summary.json
+docs/qa/2026-10-02/artifacts/frontend-sdk-explicit-typecheck.txt
+docs/qa/2026-10-02/artifacts/backend-test-safety-annotations.txt
+docs/qa/2026-10-02/artifacts/frontend-sdk-dependency-audit.txt
+docs/qa/2026-10-02/artifacts/ux-inventory.txt
+docs/qa/2026-10-02/artifacts/backend-new-test-fixtures.txt
+docs/qa/2026-10-02/artifacts/frontend-sdk-isolate.txt
+docs/qa/2026-10-02/artifacts/frontend-cross-browser-regressions.txt
+docs/qa/2026-10-02/artifacts/claims-claim-inventory.txt
+docs/qa/2026-10-02/artifacts/frontend-site-build-local.txt
+docs/qa/2026-10-02/artifacts/frontend-browser-engine-outcomes.txt
+docs/qa/2026-10-02/artifacts/ux-targeted-map.txt
+docs/qa/2026-10-02/artifacts/backend-ruff-after-qa.txt
+docs/qa/2026-10-02/artifacts/frontend-playwright.json
+docs/qa/2026-10-02/artifacts/backend-concise-config.txt
+docs/qa/2026-10-02/artifacts/frontend-js-test-source.txt
+docs/qa/2026-10-02/artifacts/backend-openapi-contract-probe.txt
+docs/qa/2026-10-02/artifacts/backend-focused-key-validation-source.txt
+docs/qa/2026-10-02/artifacts/coordination-inventory.txt
+docs/qa/2026-10-02/artifacts/claims-implementation-doc-evidence.txt
+docs/qa/2026-10-02/artifacts/claims-standard-mcp-code.txt
+docs/qa/2026-10-02/artifacts/backend-mypy-baseline.txt
+docs/qa/2026-10-02/artifacts/coordination-secret-scan-triage.txt
+docs/qa/2026-10-02/artifacts/backend-install-python-qa.txt
+docs/qa/2026-10-02/artifacts/tracked-secret-triage.json
+docs/qa/2026-10-02/artifacts/frontend-sdk-build-declared.txt
+docs/qa/2026-10-02/artifacts/frontend-sdk-isolated-build.txt
+docs/qa/2026-10-02/artifacts/claims-standard-mcp-key-scope.txt
+docs/qa/2026-10-02/artifacts/ux-verify-csp.txt
+docs/qa/2026-10-02/artifacts/claims-security-map.txt
+docs/qa/2026-10-02/package_audit.py
+docs/qa/2026-10-02/artifacts/frontend-existing-pilot-browser-tests.txt
+docs/qa/2026-10-02/artifacts/backend-resume-identity.txt
+docs/qa/2026-10-02/artifacts/claims-security-test-inventory.txt
+docs/qa/2026-10-02/artifacts/frontend-surface-map.txt
+docs/qa/2026-10-02/artifacts/ux-ux-source-read.txt
+docs/qa/2026-10-02/artifacts/backend-suite-progress.txt
+docs/qa/2026-10-02/artifacts/frontend-install-browser-tooling-tmp-cache.txt
+docs/qa/2026-10-02/artifacts/claims-cross-key-guard.txt
+docs/qa/2026-10-02/artifacts/frontend-site-build-default.txt
+docs/qa/2026-10-02/artifacts/backend-fix-qa-guard-lint.txt
+docs/qa/2026-10-02/artifacts/backend-add-risk-tests.txt
+docs/qa/2026-10-02/artifacts/frontend-install-browser-tooling.txt
+docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-calculator-valid--07074-d-cleared-states-stay-local-webkit/error-context.md
+docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-mobile-pages-do-not-overflow-webkit/error-context.md
+docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-calculator-valid--07074-d-cleared-states-stay-local-firefox/error-context.md
+docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-receipt-evidence--4ee34--cryptographic-verification-webkit/error-context.md
+docs/qa/2026-10-02/artifacts/coordination-logger-redaction-check.txt
+docs/qa/2026-10-02/artifacts/python-package-audit.json
+docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-receipt-load-fail-c9de9-ata-and-verification-claims-chromium/error-context.md
+docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-malformed-receipt-payload-fails-closed-firefox/error-context.md
+docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-receipt-load-fail-c9de9-ata-and-verification-claims-firefox/error-context.md
+docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-mobile-pages-do-not-overflow-chromium/error-context.md
+docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-receipt-evidence--4ee34--cryptographic-verification-chromium/error-context.md
+docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-operator-index-is-00d11-oes-not-ask-for-credentials-chromium/error-context.md
+docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-malformed-receipt-payload-fails-closed-webkit/error-context.md
+docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-no-JavaScript-ret-1671c--pilot-and-proof-entry-path-webkit/error-context.md
+docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-calculator-valid--07074-d-cleared-states-stay-local-chromium/error-context.md
+docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-no-JavaScript-ret-1671c--pilot-and-proof-entry-path-chromium/error-context.md
+docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-no-JavaScript-ret-1671c--pilot-and-proof-entry-path-firefox/error-context.md
+# AGENTS.md — Tests
+
+Tests should verify business-critical behavior, not just happy paths.
+
+Prefer:
+
+- negative-path tests
+- authorization failure tests
+- tenant isolation tests
+- billing/idempotency tests
+- receipt verification tests
+- replay prevention tests
+- malformed input tests
+
+Do not remove tests unless replacing them with equal or better coverage.
+
+
+FILE docs/qa/2026-10-02/backend_safety/sitecustomize.py 
+ """QA-only guard inherited by Python child processes; never used by product."""
+import ipaddress
+import os
+import sys
+
+# Suppress all dotenv I/O before importing app settings.
+from pydantic_settings.sources import DotEnvSettingsSource
+DotEnvSettingsSource._read_env_files = lambda self: {}
+import dotenv
+dotenv.load_dotenv = lambda *args, **kwargs: False
+dotenv.dotenv_values = lambda *args, **kwargs: {}
+
+def local(host):
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+def guard(event, args):
+    if event in ("socket.connect", "socket.sendto"):
+        address = args[1]
+        if isinstance(address, tuple) and not local(address[0]):
+            raise PermissionError("QA guard: non-loopback network denied")
+    if event == "socket.getaddrinfo" and args[0] is not None and not local(args[0]):
+        raise PermissionError("QA guard: external DNS denied")
+    if event == "subprocess.Popen":
+        executable = os.path.basename(str(args[0]))
+        if executable in {"railway", "vercel", "fly", "supabase", "firebase", "curl", "wget"}:
+            raise PermissionError("QA guard: external command denied")
+    if event == "open" and isinstance(args[0], (str, bytes)):
+        name = os.path.basename(os.fsdecode(args[0]))
+        if name == ".env" or name.startswith(".env."):
+            raise PermissionError("QA guard: environment file access denied")
+
+sys.addaudithook(guard)
+
+
+FILE tests/test_qa_20261002_backend.py 
+ """QA sweep: public auth contract and replay-key encoding boundaries.
+
+Optional generative/schema tooling is installed by docs/qa/2026-10-02/
+requirements-qa.txt. Product behavior is deliberately unchanged.
+"""
+from __future__ import annotations
+
+import json
+from collections import Counter
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from app.main import app
+from app.services.idempotency import (
+    InvalidIdempotencyKeyError,
+    decode_idempotency_key_header,
+    resolve_client_idempotency_key,
+    validate_client_idempotency_key,
+)
+from tests.test_mcp_idempotency_key_validation import CountedTool, _snapshot
+from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
+
+
+@pytest.fixture
+async def qa_client():
+    async with AsyncClient(
+        transport=ASGITransport(app=app, raise_app_exceptions=False),
+        base_url="http://test",
+    ) as client:
+        yield client
+
+
+@pytest.mark.parametrize("method,path", [
+    ("GET", "/v1/permits"),
+    ("POST", "/v1/permits"),
+    ("GET", "/v1/receipts"),
+    ("GET", "/v1/receipts/missing"),
+    ("GET", "/v1/billing/wallets"),
+    ("POST", "/v1/billing/charge"),
+    ("GET", "/v1/audit/events"),
+    ("POST", "/v1/audit/verify-chain"),
+    ("GET", "/v1/me/authority"),
+    ("GET", "/v1/api-keys/missing"),
+    ("POST", "/mcp/messages"),
+    ("POST", "/mcp/tools/missing/invoke"),
+])
+@pytest.mark.parametrize("credential", ["absent", "invalid-bearer"])
+async def test_sensitive_route_rejects_unauthenticated_caller(
+    qa_client, method, path, credential
+):
+    # A malformed Authorization header must not fall back to a valid bootstrap key.
+    headers = {} if credential == "absent" else {
+        "Authorization": "Bearer [REDACTED]",
+        "X-API-Key": "test-key",
+    }
+    response = await qa_client.request(method, path, headers=headers, json={})
+    assert response.status_code == 401
+    assert response.headers["content-type"].startswith("application/json")
+    assert "traceback" not in response.text.lower()
+    assert "X-Credential-Rejected" not in response.headers
+
+
+def test_openapi_schema_is_valid_with_unique_operation_ids():
+    validator = pytest.importorskip("openapi_spec_validator")
+    # Force a fresh schema: other tests mount dormant routers dynamically.
+    old_schema = app.openapi_schema
+    try:
+        app.openapi_schema = None
+        schema = app.openapi()
+        validator.validate(schema)
+        operations = [
+            operation
+            for path in schema["paths"].values()
+            for method, operation in path.items()
+            if method in {"get", "post", "put", "patch", "delete"}
+        ]
+        counts = Counter(operation["operationId"] for operation in operations)
+        assert all(count == 1 for count in counts.values())
+    finally:
+        app.openapi_schema = old_schema
+
+
+@pytest.mark.xfail(strict=True, reason="BE-002: Bearer [REDACTED] is absent from OpenAPI security schemes")
+def test_openapi_declares_supported_bearer_authentication():
+    schemes = app.openapi()["components"]["securitySchemes"].values()
+    assert any(s.get("type") == "http" and s.get("scheme") == "bearer" for s in schemes)
+
+
+def test_scalar_unicode_replay_keys_roundtrip_without_normalization():
+    hypothesis = pytest.importorskip("hypothesis")
+    from hypothesis import strategies as st
+
+    alphabet = st.characters(
+        exclude_categories=("Cs",),
+        exclude_characters="".join(chr(i) for i in [*range(32), 127]),
+    )
+
+    @hypothesis.settings(max_examples=200, derandomize=True, deadline=None)
+    @hypothesis.given(st.text(alphabet=alphabet, min_size=1, max_size=128).filter(str.strip))
+    def check(key):
+        decoded = decode_idempotency_key_header(key.encode("utf-8").decode("latin-1"))
+        assert decoded == key
+        assert resolve_client_idempotency_key([("header", decoded), ("body", key)]) == key
+        with pytest.raises(InvalidIdempotencyKeyError):
+            resolve_client_idempotency_key([("header", key), ("body", key + " ")])
+
+    check()
+
+
+@pytest.mark.parametrize("key", ["\ud800", "prefix\udfff", "\ud800\udfff"])
+@pytest.mark.xfail(strict=True, reason="BE-001: lone surrogate replay keys pass validation and cannot be persisted as UTF-8")
+def test_replay_key_validator_rejects_non_scalar_unicode(key):
+    with pytest.raises(InvalidIdempotencyKeyError):
+        validate_client_idempotency_key(key, source="JSON body")
+
+
+@pytest.mark.xfail(strict=True, reason="BE-001: escaped lone surrogate replay key returns HTTP 500 instead of a client error")
+async def test_lone_surrogate_replay_key_is_rejected_before_effect_or_debit(
+    qa_client, clean_database
+):
+    tool = CountedTool("qa.encoding.effect")
+    try:
+        caller = await provision_agent_wallet(qa_client)
+        permit = await create_tool_permit(
+            qa_client,
+            wallet_id=caller["agent_wallet_id"],
+            key_id=caller["key_id"],
+            tool_name=tool.name,
+        )
+        before = await _snapshot(qa_client, caller, tool)
+        body = {
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {
+                "name": tool.name, "arguments": {"text": "one"},
+                "mcpContext": {
+                    "wallet_id": caller["agent_wallet_id"],
+                    "permit_id": permit["permit_id"],
+                    "idempotency_key": "\ud800",
+                },
+            },
+        }
+        response = await qa_client.post(
+            "/mcp/messages",
+            content=json.dumps(body).encode("ascii"),
+            headers={**caller["agent_headers"], "Content-Type": "application/json"},
+        )
+        assert await _snapshot(qa_client, caller, tool) == before
+        assert response.status_code == 200
+        assert response.json()["error"]["code"] == -32602
+    finally:
+        tool.close()
+
+
+FILE docs/qa/2026-10-02/COORDINATION-SESSION.md 
+ 
+### 2026-10-02T23:46:05Z — inventory
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', '-c', 'from pathlib import Path; import shutil; print("tools", {x:shutil.which(x) for x in ["uv","node","npm","ruff","mypy","gitleaks","coderabbit"]}); print("venv",Path(".venv/bin/python").exists()); print("roots", [x.name for x in Path(".").iterdir() if not x.name.startswith(".")]); print(Path("tests/AGENTS.md").read_text()); print("manifests", [str(x) for x in Path(".").rglob("package.json") if "node_modules" not in str(x) and ".venv" not in str(x)])']`
+
+Outcome: exit 0; 0.0s; ended 2026-10-02T23:46:05Z. [Output](artifacts/coordination-inventory.txt).
+
+### 2026-10-03T00:35:13Z — resume-map
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', '-c', 'from pathlib import Path; import datetime; print("RESUME",datetime.datetime.now(datetime.timezone.utc).isoformat()); paths=["AGENTS.md","tests/AGENTS.md","pyproject.toml","requirements.txt","site/package.json","awi_sdk/typescript/package.json","tests/conftest.py"]; print("instruction paths",[str(p) for p in Path(".").rglob("AGENTS.md") if not any(x in p.parts for x in ("node_modules",".git",".venv"))]); [(print("FILE",p),print(Path(p).read_text())) for p in paths]; print("TEST FILES",[str(p) for p in Path("tests").glob("test_*.py")]); print("SITE FILES",[str(p) for p in Path("site").iterdir()])']`
+
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:35:13Z. [Output](artifacts/coordination-resume-map.txt).
+
+### 2026-10-03T00:35:55Z — config-read
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', '-c', 'from pathlib import Path; paths=["pyproject.toml","requirements.txt","site/package.json","awi_sdk/typescript/package.json","ruff.toml","mypy.ini"]; [(print("FILE",p),print(Path(p).read_text())) for p in paths]; print("AGENTS",[str(p) for p in Path(".").rglob("AGENTS.md") if not any(x in p.parts for x in (".git","node_modules",".venv"))]); print("ENV FILE EXISTS ONLY",[p for p in [".env","site/.env",".env.local"] if Path(p).exists()]); print("WORKFLOWS",[str(p) for p in Path(".github/workflows").glob("*.yml")])']`
+
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:35:55Z. [Output](artifacts/coordination-config-read.txt).
+
+### 2026-10-03T00:36:51Z — plan-written
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', '-c', 'from pathlib import Path; print("Created PLAN.md and SESSION-LOG.md using apply_patch; planning and reconstructed bootstrap commands recorded."); print("BEFORE",len(list(Path("tests").glob("test_*.py"))),"root pytest modules"); print("QA",[p.name for p in Path("docs/qa/2026-10-02").glob("*.md")])']`
+
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:36:51Z. [Output](artifacts/coordination-plan-written.txt).
+
+### 2026-10-03T00:37:18Z — logger-redaction-check
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', '-c', 'import importlib.util; p="docs/qa/2026-10-02/run_logged.py"; spec=importlib.util.spec_from_file_location("qa_logger",p); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); fixtures=["Bearer [REDACTED]", "a"*43+"=", "b"*64, "https://[REDACTED]@example.invalid", "[REDACTED]"]; assert all("[REDACTED]" in m.scrub(s) for s in fixtures); print("Redaction classes passed; synthetic values not printed"); from pathlib import Path; count=0; files=list(Path("docs/qa/2026-10-02/artifacts").glob("*.txt")); [(p.write_text(m.scrub(p.read_text()))) for p in files]; print("Existing text artifacts re-scrubbed",len(files))']`
+
+Outcome: exit 0; 0.1s; ended 2026-10-03T00:37:18Z. [Output](artifacts/coordination-logger-redaction-check.txt).
+
+### 2026-10-03T00:37:47Z — python-dependency-audit
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['/private/tmp/amw-qa-python/bin/python', 'docs/qa/2026-10-02/package_audit.py']`
+
+Outcome: exit 0; 2.0s; ended 2026-10-03T00:37:49Z. [Output](artifacts/coordination-python-dependency-audit.txt).
+
+### 2026-10-03T00:38:05Z — secret-scan-help
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['gitleaks', 'dir', '--help']`
+
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:38:05Z. [Output](artifacts/coordination-secret-scan-help.txt).
+
+### 2026-10-03T00:38:23Z — tracked-secret-scan
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', 'docs/qa/2026-10-02/secret_scan.py']`
+
+Outcome: exit 0; 1.6s; ended 2026-10-03T00:38:24Z. [Output](artifacts/coordination-tracked-secret-scan.txt).
+
+### 2026-10-03T00:38:36Z — progress-inventory
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', '-c', 'from pathlib import Path; import datetime,json; print("UTC",datetime.datetime.now(datetime.timezone.utc).isoformat()); print("FILES",[str(p) for p in Path("docs/qa/2026-10-02").iterdir()]); paths=["docs/qa/2026-10-02/BACKEND-SESSION.md","docs/qa/2026-10-02/FRONTEND-SESSION.md","docs/qa/2026-10-02/UX-SESSION.md"]; [(print(p),print(Path(p).read_text()[-2500:])) for p in paths if Path(p).exists()]']`
+
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:38:36Z. [Output](artifacts/coordination-progress-inventory.txt).
+
+### 2026-10-03T00:38:53Z — secret-scan-triage
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', '-c', 'import ast,json; from pathlib import Path; p=Path("docs/qa/2026-10-02/artifacts/tracked-secret-scan.json"); data=json.loads(p.read_text()); summary=[]; markers=("test","fake","dummy","demo","invalid","example","spoof","wrong","revoked","missing","unverified","secret","insecure","not-","stranger","api_key");\nfor item in data["findings"]:\n tree=ast.parse(Path(item["file"]).read_text()); containers=[n for n in ast.walk(tree) if isinstance(n,(ast.FunctionDef,ast.AsyncFunctionDef)) and n.lineno<=item["line"]<=n.end_lineno]; literals=[n.value for n in ast.walk(tree) if isinstance(n,ast.Constant) and isinstance(n.value,str) and n.lineno<=item["line"]<=n.end_lineno]; record={**item,"test_context":[n.name for n in containers],"synthetic_marker_present":any(any(m in s.lower() for m in markers) for s in literals)}; summary.append(record)\nPath("docs/qa/2026-10-02/artifacts/tracked-secret-triage.json").write_text(json.dumps(summary,indent=2)+"\\n"); print("All findings are in test-only paths:",all("test" in x["file"] for x in summary)); print("Total detections:",len(summary)); print("Context review (values omitted):",json.dumps(summary,indent=2))']`
+
+Outcome: exit 0; 0.4s; ended 2026-10-03T00:38:53Z. [Output](artifacts/coordination-secret-scan-triage.txt).
+

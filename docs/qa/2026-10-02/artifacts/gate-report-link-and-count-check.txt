@@ -1,0 +1,13 @@
+{
+  "finding_rows": 8,
+  "counts": {
+    "Critical": 0,
+    "High": 0,
+    "Medium": 5,
+    "Low": 3
+  },
+  "summary_count_lines": [
+    "Counts: Critical=0 High=0 Medium=5 Low=3"
+  ],
+  "missing_links": []
+}

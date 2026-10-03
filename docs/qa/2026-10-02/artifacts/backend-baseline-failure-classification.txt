@@ -1,0 +1,15 @@
+TOTAL                                         24266   3018    88%
+FAILED tests/test_agent_url_and_input_hardening.py::TestOutboundUrlGuard::test_ip_encoding_tricks_are_blocked[http://2130706433/] - AssertionError: assert 'dns_resolution_failed' == 'private_address_blocked'
+FAILED tests/test_agent_url_and_input_hardening.py::TestOutboundUrlGuard::test_ip_encoding_tricks_are_blocked[http://0x7f000001/] - AssertionError: assert 'dns_resolution_failed' == 'private_address_blocked'
+FAILED tests/test_agent_url_and_input_hardening.py::TestOutboundUrlGuard::test_ip_encoding_tricks_are_blocked[http://017700000001/] - AssertionError: assert 'dns_resolution_failed' == 'private_address_blocked'
+FAILED tests/test_agent_url_and_input_hardening.py::TestOutboundUrlGuard::test_ip_encoding_tricks_are_blocked[http://0/] - AssertionError: assert 'dns_resolution_failed' == 'private_address_blocked'
+FAILED tests/test_onboarding_contract.py::test_signing_seed_is_a_visible_required_key - PermissionError: QA guard: environment file access denied
+FAILED tests/test_onboarding_contract.py::test_signing_seed_ships_empty_rather_than_with_a_real_value - PermissionError: QA guard: environment file access denied
+FAILED tests/test_onboarding_contract.py::test_env_example_documents_how_to_generate_the_seed - PermissionError: QA guard: environment file access denied
+FAILED tests/test_onboarding_contract.py::test_default_state_backend_boots_locally - PermissionError: QA guard: environment file access denied
+8 failed, 3624 passed, 60 skipped, 71 warnings in 360.54s (0:06:00)
+Attempt coverage totals {'covered_lines': 21248, 'num_statements': 24266, 'percent_covered': 87.56284513310806, 'percent_covered_display': '88', 'missing_lines': 3018, 'excluded_lines': 45, 'percent_statements_covered': 87.56284513310806, 'percent_statements_covered_display': '88'}
+app/services/idempotency.py {'covered_lines': 264, 'num_statements': 295, 'percent_covered': 89.49152542372882, 'percent_covered_display': '89', 'missing_lines': 31, 'excluded_lines': 0, 'percent_statements_covered': 89.49152542372882, 'percent_statements_covered_display': '89'}
+app/services/permits.py {'covered_lines': 515, 'num_statements': 537, 'percent_covered': 95.90316573556797, 'percent_covered_display': '96', 'missing_lines': 22, 'excluded_lines': 0, 'percent_statements_covered': 95.90316573556797, 'percent_statements_covered_display': '96'}
+app/services/signing_keys.py {'covered_lines': 205, 'num_statements': 210, 'percent_covered': 97.61904761904762, 'percent_covered_display': '98', 'missing_lines': 5, 'excluded_lines': 0, 'percent_statements_covered': 97.61904761904762, 'percent_statements_covered_display': '98'}
+app/core/auth.py {'covered_lines': 138, 'num_statements': 142, 'percent_covered': 97.1830985915493, 'percent_covered_display': '97', 'missing_lines': 4, 'excluded_lines': 0, 'percent_statements_covered': 97.1830985915493, 'percent_statements_covered_display': '97'}

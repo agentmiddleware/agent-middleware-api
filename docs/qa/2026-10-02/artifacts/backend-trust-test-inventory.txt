@@ -1,0 +1,68 @@
+rg: tests/test_idempotency_key_contract.py: No such file or directory (os error 2)
+rg: app/core/idempotency.py: No such file or directory (os error 2)
+tests/test_tenant_isolation_hardening.py:61:async def test_telemetry_pipeline_not_readable_across_tenants(client, clean_database):
+tests/test_tenant_isolation_hardening.py:108:async def test_telemetry_list_pipelines_scoped_to_caller(client, clean_database):
+tests/test_tenant_isolation_hardening.py:128:async def test_telemetry_create_pipeline_for_other_wallet_denied(
+tests/test_tenant_isolation_hardening.py:147:async def test_planner_optimize_requires_auth(client, clean_database):
+tests/test_tenant_isolation_hardening.py:153:async def test_planner_optimize_rejects_cross_wallet(client, clean_database):
+tests/test_tenant_isolation_hardening.py:180:async def test_sandbox_env_not_accessible_across_tenants(client, clean_database):
+tests/test_tenant_isolation_hardening.py:250:async def test_iot_device_not_accessible_across_tenants(client, clean_database):
+tests/test_tenant_isolation_hardening.py:314:async def test_iot_list_devices_scoped_to_caller(client, clean_database):
+tests/test_tenant_isolation_hardening.py:355:async def test_iot_registration_metadata_cannot_assign_ownership(
+tests/test_tenant_isolation_hardening.py:390:async def test_bootstrap_admin_key_matches_via_constant_time_compare(clean_database):
+tests/test_trust_negative_security.py:83:async def test_expired_permit_is_denied_without_charge(client, clean_database):
+tests/test_trust_negative_security.py:126:async def test_revoked_permit_is_denied_without_charge(client, clean_database):
+tests/test_trust_negative_security.py:172:async def test_terminal_permit_between_precheck_and_reservation_is_denied(
+tests/test_trust_negative_security.py:235:async def test_budget_exceeded_permit_is_denied_without_charge(client, clean_database):
+tests/test_trust_negative_security.py:269:async def test_replay_not_served_to_unauthorized_caller(client, clean_database):
+tests/test_trust_negative_security.py:314:async def test_denied_call_does_not_poison_idempotency_key(client, clean_database):
+tests/test_trust_negative_security.py:356:async def test_unsigned_receipt_fails_verification(client, clean_database):
+CRITICAL TESTS ['test_demo_trust_plane.py', 'test_trust_helpers.py', 'test_idempotency.py', 'test_red_team_trust_plane.py', 'test_edge_client_trust_gap.py', 'test_delivery_uncertain_replay.py', 'test_mcp_dispatch_router_claim.py', 'test_wallet_concurrency.py', 'test_me_trust_ledger.py', 'test_mcp_internal_error_disclosure.py', 'test_mcp_dispatch_reconciliation.py', 'test_trust_boundary.py', 'test_openai_wrapper_trust_loop.py', 'test_tenant_isolation_hardening.py', 'test_mcp_dispatch_claim.py', 'test_mcp_dispatch_evidence.py', 'test_trust_negative_security.py', 'test_trust_operator_inspection.py', 'test_upstream_mcp.py', 'test_mcp_idempotency_key_validation.py', 'test_permit_postgres_concurrency.py', 'test_mcp_trust.py', 'test_python_sdk_trust_loop.py', 'test_duplicate_guard_postgres_concurrency.py', 'test_dogfood_trust_plane.py', 'test_trust_coverage_gate_scope.py', 'test_production_trust_posture.py', 'test_mcp_trust_mode.py', 'test_governed_debit_dispatch_fence.py', 'test_upstream_retry_cap_enforcement.py', 'test_quickstart_invalid_idempotency_key.py', 'test_trust_package.py', 'test_trust_mode_guardrails.py', 'test_dispatch_claim_migration.py', 'test_idempotency_completion_contention.py', 'test_mcp_upstream_governed.py']
+APP INSTRUCTIONS # AGENTS.md — Services (trust-critical core)
+
+This directory holds the trust-critical service code: billing/metering, permits, receipts, signing keys, idempotency, audit, governance, auth, and KYC. Treat everything here as both integrity-critical and security-critical.
+
+## Billing / Metering Integrity
+
+Never change billing, metering, budget, usage, or charge logic without checking:
+
+- idempotency
+- retry behavior
+- double-charge risk
+- tenant isolation
+- budget limits
+- over-budget behavior
+- audit trail
+- receipt linkage
+
+Required tests for billing changes:
+
+- retry does not double-charge
+- over-budget invocation fails
+- invalid tenant cannot access billing records
+- idempotency key prevents duplicate charge
+- usage event links to correct permit/tool/action
+
+## Security
+
+Check:
+
+- authentication
+- authorization
+- tenant isolation
+- delegation scope
+- permit lifecycle
+- revocation
+- replay prevention
+- key handling
+- secret exposure
+- logging of sensitive data
+
+Required tests for security changes:
+
+- unauthorized request fails
+- expired/revoked credential fails
+- permit cannot exceed delegation scope
+- Tenant A cannot access Tenant B data
+- malicious input is rejected
+

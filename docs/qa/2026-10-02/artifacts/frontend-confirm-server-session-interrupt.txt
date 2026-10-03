@@ -1,0 +1,7 @@
+port 8765 lsof exit 1
+
+
+port 8766 lsof exit 1
+
+
+Session cancellation outcome recorded

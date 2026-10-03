@@ -1,0 +1,85 @@
+MATCHES 314 FILES 129
+AGENTS.md:62:1. **exactly-once economic authorization at the gateway boundary** — one
+AGENTS.md:66:reconciles. (Local governed tools have no dispatch state machine.) This is the wedge. ("Exactly-once" is the
+CHANGELOG.md:14:### Changed — duplicate guard observability and release gates
+CHANGELOG.md:16:- **Durable duplicate-denial count**: `/health/duplicate-guard` now also
+CHANGELOG.md:32:- **Railway IaC preserves `MCP_UPSTREAM_DUPLICATE_GUARD`**: production now sets
+CHANGELOG.md:174:defaults to empty; new tests pin the `permit_required` idempotency
+CHANGELOG.md:205:- **Duplicate guard hardening**: The cross-key duplicate guard (`MCP_UPSTREAM_DUPLICATE_GUARD`) now validates its mode at startup using a strict enum (`off`, `log`, `enforce`). Typos such as "enforced" are rejected at boot rather than silently falling back to permissive behavior. Invalid modes raise `ValidationError` during config construction.
+CHANGELOG.md:206:- **Duplicate guard observability**: Added `/health/duplicate-guard` endpoint (admin-only) exposing the current mode, configured window, and counters tracking how often log mode would have blocked a request (`log_mode_blocks`) and how often enforce mode actually blocked one (`enforce_mode_blocks`). Does not expose request contents or secrets. Requires bootstrap admin authentication.
+CHANGELOG.md:208:- **PostgreSQL concurrency proof**: Parallel identical new-key calls under `enforce` mode now produce exactly one dispatch and one charge, verified by a new concurrency test (`test_duplicate_guard_postgres_concurrency.py`) running in the `postgres_permit_concurrency` CI job. The test proves N racing calls yield 1 success receipt, N-1 `duplicate_request_new_key` denials, 1 ledger debit, and 1 upstream dispatch.
+CHANGELOG.md:213:- **Default duplicate guard mode unchanged**: The default remains `log` (observe-only). Operators wishing to enforce duplicate blocking must explicitly set `MCP_UPSTREAM_DUPLICATE_GUARD=enforce`.
+CHANGELOG.md:219:- **Migration required**: Alembic revision `040_permit_repeat_window` adds the nullable integer column `permits.repeat_window_seconds`. Upgrade the database with `alembic upgrade head` before starting the API. For an unstamped legacy database, first verify and stamp its exact existing revision; do not stamp `head` to bypass migration. The duplicate guard reads the persisted column, and permit signing includes its value only when set; existing permits with `NULL` retain their previous signed payload. Startup rejects existing schemas missing this column, including unstamped legacy databases.
+CHANGELOG.md:347:- **A contended remote charge releases its reservation exactly once.** The
+CHANGELOG.md:848:the same governed permit → meter → exactly-once dispatch → signed receipt
+CHANGELOG.md:858:server-minted permit, charged exactly once for an idempotency key, replay
+CHANGELOG.md:1026:an `Idempotency-Key` with different terms is a `409`, not a second page.
+CHANGELOG.md:1027:- **Minting happens exactly once.** The `pending → minting` transition is a
+CHANGELOG.md:1071:replay contract, exactly-once refunds, and — deliberately — the list of
+CHANGELOG.md:1125:by the attempt's null pointer, refund it exactly once, release the
+CONTEXT.md:19:effect occurred nor that it occurred exactly once; remote effect-once behavior
+DEMO_SCRIPT.md:148:- "Watch the wallet. This call charges it exactly once, and the ledger entry is
+DESIGN_PARTNER_GUIDE.md:142:and that a final valid call still charges exactly once.
+DESIGN_PARTNER_GUIDE.md:204:- "Exactly-once gateway authorization, debit, and receipt finalization for
+DESIGN_PARTNER_GUIDE.md:218:- Claiming an arbitrary remote tool's side effect is exactly once when that
+ELEVATOR_PITCH.md:65:differentiating primitive is **exactly-once economic authorization at the
+ELEVATOR_PITCH.md:115:| Enterprise authz for MCP | Who may call | Meter, receipt, and charge exactly once |
+ELEVATOR_PITCH.md:162:**"Does exactly-once really hold across the network?"** For one accepted
+ELEVATOR_PITCH.md:164:A *remote* tool's own side effect is exactly once only if that tool also honors
+ELEVATOR_PITCH.md:221:- Distributed exactly-once side effects in arbitrary upstream MCP servers.
+README.md:157:- **Not universal exactly-once.** Gateway replay safety makes the *remote* side
+README.md:158:effect exactly once only if the upstream tool also honors the forwarded
+SECURITY_LIMITATIONS.md:83:- Gateway exactly-once behavior does not make a remote side effect exactly
+TROUBLESHOOTING.md:91:You reused an `Idempotency-Key` with different payload. Use a fresh UUID for each distinct request, or replay the exact same payload.
+TROUBLESHOOTING.md:95:- `idempotency_key_reused` (`-32603`; REST `400`): the `idempotency_key` in `mcpContext` was already used for a different payload. Use a fresh key per distinct invocation (not the same as the permit's idempotency key).
+TRUST_MODEL.md:34:## Exactly-Once Debit, Bound To The Idempotency Record
+WEDGE.md:1:# Wedge: Replay-safe MCP permits and exactly-once debits
+WEDGE.md:6:> Exactly-once gateway authorization, debit, and receipt finalization for
+WEDGE.md:16:**What "exactly-once" means here, precisely.** It is the distributed-systems
+WEDGE.md:47:differentiating primitive is exactly-once economic authorization at the
+WEDGE.md:283:- Distributed exactly-once side effects in arbitrary upstream MCP servers.
+app/core/config.py:148:MCP_UPSTREAM_DUPLICATE_GUARD: DuplicateGuardMode = DuplicateGuardMode.LOG
+app/core/resilience.py:183:# waits and the helpers below run their operation exactly once. SQLite in WAL
+app/db/models.py:812:# under different idempotency keys are allowed.
+app/main.py:55:from .services.mcp_dispatch_attempts import get_duplicate_guard_metrics
+app/main.py:505:"the downstream effect. A remote side effect is exactly once only when "
+app/main.py:1237:"/health/duplicate-guard",
+app/main.py:1239:summary="Duplicate guard observability (admin-only)",
+app/main.py:1241:"Returns the current duplicate guard mode and observability metrics. "
+app/main.py:1251:async def health_duplicate_guard(
+app/main.py:1255:return await get_duplicate_guard_metrics()
+app/routers/mcp.py:232:"internal error" as "try again", which with a *fresh* idempotency key runs
+app/routers/mcp.py:266:"Do not retry with a new idempotency key: that would run and "
+app/schemas/iot.py:159:"2=exactly once)."
+app/schemas/trust.py:49:# under different idempotency keys are allowed (for tools that legitimately
+app/schemas/trust.py:54:# after an effectful prior attempt. Only enforced when duplicate guard is
+app/services/acp_bridge.py:125:idempotency_error (different parameters). The order id itself stays the
+app/services/billing_engine.py:1164:# daily_spent is incremented exactly once per charge (by the
+app/services/human_approval.py:118:invoke that reuses the same idempotency key with different arguments or a
+app/services/human_approval.py:145:single approval and page the human exactly once.
+app/services/human_approval.py:148:of the key so a retry with the same idempotency key but different reviewed
+app/services/idempotency.py:35:"""Raised when an idempotency key is reused for a different request."""
+app/services/mcp_dispatch_attempts.py:48:# In-memory duplicate guard metrics for observability. Both counters are
+app/services/mcp_dispatch_attempts.py:52:_duplicate_guard_metrics = {
+app/services/mcp_dispatch_attempts.py:59:DUPLICATE_GUARD_METRIC_SCOPES: dict[str, dict[str, Any]] = {
+app/services/mcp_dispatch_attempts.py:95:"""Count denied receipts whose reason is the duplicate guard.
+app/services/mcp_dispatch_attempts.py:142:async def get_duplicate_guard_metrics() -> dict[str, Any]:
+app/services/mcp_dispatch_attempts.py:143:"""Return the effective duplicate guard mode and its metrics.
+app/services/mcp_dispatch_attempts.py:151:mode = settings.MCP_UPSTREAM_DUPLICATE_GUARD
+app/services/mcp_dispatch_attempts.py:156:"log_mode_blocks": _duplicate_guard_metrics["log_mode_blocks"],
+app/services/mcp_dispatch_attempts.py:157:"enforce_mode_blocks": _duplicate_guard_metrics["enforce_mode_blocks"],
+app/services/mcp_dispatch_attempts.py:160:"metric_scopes": DUPLICATE_GUARD_METRIC_SCOPES,
+app/services/mcp_dispatch_attempts.py:735:duplicate_mode = settings.MCP_UPSTREAM_DUPLICATE_GUARD
+app/services/mcp_dispatch_attempts.py:821:f"Duplicate request detected: new idempotency key with "
+app/services/mcp_dispatch_attempts.py:829:_duplicate_guard_metrics["log_mode_blocks"] += 1
+app/services/mcp_dispatch_attempts.py:832:_duplicate_guard_metrics["enforce_mode_blocks"] += 1
+app/services/mcp_dispatch_attempts.py:1478:"""Acquire the durable, non-reacquirable right to send exactly once.
+app/services/mcp_phase9_tools.py:340:"""Ensure Phase 9 tools are registered exactly once when proof surfaces are on."""
+app/services/permit_requests.py:23:**Minting happens exactly once.** The ``pending -> minting`` transition is a
+app/services/permit_requests.py:118:"""The idempotency key was reused with different requested terms."""
+app/services/permits.py:1313:"""Release one remote attempt's reservation exactly once.
+app/services/pods.py:21:commits exactly once. ``WalletEngine.create_sponsor_wallet``,
+app/services/receipts.py:200:"""Reject reuse of one idempotency record for different evidence."""
+app/services/upstream_mcp.py:846:"configured upstream tool must appear exactly once in tools/list"
+DOC_COUNTS
+Counter({'tests': 96, 'docs': 73, 'app': 43, 'failure_lab': 19, 'scripts': 17, 'CHANGELOG.md': 16, 'site': 9, 'wrappers': 8, 'ELEVATOR_PITCH.md': 5, 'WEDGE.md': 5, 'DESIGN_PARTNER_GUIDE.md': 3, 'migrations': 3, '.github': 2, 'AGENTS.md': 2, 'README.md': 2, 'TROUBLESHOOTING.md': 2, 'static': 2, '.railway': 1, 'CONTEXT.md': 1, 'DEMO_SCRIPT.md': 1, 'SECURITY_LIMITATIONS.md': 1, 'TRUST_MODEL.md': 1, 'awi_sdk': 1, 'b2a_sdk': 1})

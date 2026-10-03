@@ -1,0 +1,35 @@
+Listing tests:
+  [chromium] › frontend.spec.cjs:9:1 › main public pages load without browser or resource errors
+  [chromium] › frontend.spec.cjs:21:1 › calculator valid, boundary, invalid and cleared states stay local
+  [chromium] › frontend.spec.cjs:48:1 › receipt evidence loads without claiming cryptographic verification
+  [chromium] › frontend.spec.cjs:54:1 › receipt load failure removes published data and verification claims
+  [chromium] › frontend.spec.cjs:62:1 › malformed receipt payload fails closed
+  [chromium] › frontend.spec.cjs:68:1 › mobile pages do not overflow
+  [chromium] › frontend.spec.cjs:77:1 › operator index is static and does not ask for credentials
+  [chromium] › frontend.spec.cjs:84:1 › no JavaScript retains the pilot and proof entry path
+  [chromium] › ux-regressions.spec.cjs:15:1 › UX-001: comparison fit text meets minimum contrast
+  [chromium] › ux-regressions.spec.cjs:28:1 › UX-002: dashboard scrollable commands have explicit keyboard access
+  [chromium] › ux-regressions.spec.cjs:42:1 › UX-003: operator runtime links remain on the served origin
+  [firefox] › frontend.spec.cjs:9:1 › main public pages load without browser or resource errors
+  [firefox] › frontend.spec.cjs:21:1 › calculator valid, boundary, invalid and cleared states stay local
+  [firefox] › frontend.spec.cjs:48:1 › receipt evidence loads without claiming cryptographic verification
+  [firefox] › frontend.spec.cjs:54:1 › receipt load failure removes published data and verification claims
+  [firefox] › frontend.spec.cjs:62:1 › malformed receipt payload fails closed
+  [firefox] › frontend.spec.cjs:68:1 › mobile pages do not overflow
+  [firefox] › frontend.spec.cjs:77:1 › operator index is static and does not ask for credentials
+  [firefox] › frontend.spec.cjs:84:1 › no JavaScript retains the pilot and proof entry path
+  [firefox] › ux-regressions.spec.cjs:15:1 › UX-001: comparison fit text meets minimum contrast
+  [firefox] › ux-regressions.spec.cjs:28:1 › UX-002: dashboard scrollable commands have explicit keyboard access
+  [firefox] › ux-regressions.spec.cjs:42:1 › UX-003: operator runtime links remain on the served origin
+  [webkit] › frontend.spec.cjs:9:1 › main public pages load without browser or resource errors
+  [webkit] › frontend.spec.cjs:21:1 › calculator valid, boundary, invalid and cleared states stay local
+  [webkit] › frontend.spec.cjs:48:1 › receipt evidence loads without claiming cryptographic verification
+  [webkit] › frontend.spec.cjs:54:1 › receipt load failure removes published data and verification claims
+  [webkit] › frontend.spec.cjs:62:1 › malformed receipt payload fails closed
+  [webkit] › frontend.spec.cjs:68:1 › mobile pages do not overflow
+  [webkit] › frontend.spec.cjs:77:1 › operator index is static and does not ask for credentials
+  [webkit] › frontend.spec.cjs:84:1 › no JavaScript retains the pilot and proof entry path
+  [webkit] › ux-regressions.spec.cjs:15:1 › UX-001: comparison fit text meets minimum contrast
+  [webkit] › ux-regressions.spec.cjs:28:1 › UX-002: dashboard scrollable commands have explicit keyboard access
+  [webkit] › ux-regressions.spec.cjs:42:1 › UX-003: operator runtime links remain on the served origin
+Total: 33 tests in 2 files

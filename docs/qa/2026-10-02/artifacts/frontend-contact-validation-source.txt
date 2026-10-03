@@ -1,0 +1,178 @@
+172:     """Raised when a build would publish an unusable human funnel."""
+173: 
+174: 
+175: def _reject_provisional(field: str, value: str) -> None:
+176:     lowered = value.casefold()
+177:     if any(term in lowered for term in PROVISIONAL_TERMS):
+178:         raise LaunchConfigurationError(f"{field} contains a provisional value")
+179:     if "@@" in value:
+180:         raise LaunchConfigurationError(f"{field} contains an unresolved token")
+181: 
+182: 
+183: def _is_reserved_hostname(hostname: str) -> bool:
+184:     normalized = hostname.casefold().rstrip(".")
+185:     return normalized in RESERVED_HOSTS or normalized.endswith(RESERVED_HOST_SUFFIXES)
+186: 
+187: 
+188: def validated_contacts(
+189:     environment: dict[str, str], *, escape_markup: bool = True
+190: ) -> dict[str, str]:
+191:     """Return contact values or refuse to build the public site.
+192: 
+193:     ``escape_markup`` is on for HTML and XML targets. Plain-text targets such as
+194:     ``.well-known/security.txt`` take the raw value, because an entity-escaped
+195:     address there would be served verbatim to whoever reads the file.
+196:     """
+197: 
+198:     missing = [
+199:         name
+200:         for name in CONTACT_FIELDS.values()
+201:         if not environment.get(name, "").strip()
+202:     ]
+203:     if missing:
+204:         raise LaunchConfigurationError(
+205:             "missing required launch contact values: " + ", ".join(sorted(missing))
+206:         )
+207: 
+208:     display_name = environment["PUBLIC_DISPLAY_NAME"].strip()
+209:     email = environment["PUBLIC_CONTACT_EMAIL"].strip()
+210:     booking_url = environment.get(BOOKING_FIELD, "").strip()
+211: 
+212:     for field, value in (
+213:         ("PUBLIC_DISPLAY_NAME", display_name),
+214:         ("PUBLIC_CONTACT_EMAIL", email),
+215:         (BOOKING_FIELD, booking_url),
+216:     ):
+217:         if value:
+218:             _reject_provisional(field, value)
+219: 
+220:     if (
+221:         display_name.casefold() == "agent middleware api"
+222:         or len(display_name) < 3
+223:         or re.search(
+224:             r"\b(?:example|fake|placeholder|provisional|test)\b",
+225:             display_name,
+226:             flags=re.IGNORECASE,
+227:         )
+228:     ):
+229:         raise LaunchConfigurationError(
+230:             "PUBLIC_DISPLAY_NAME must identify an accountable person or entity"
+231:         )
+232:     if re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email) is None:
+233:         raise LaunchConfigurationError(
+234:             "PUBLIC_CONTACT_EMAIL is not a valid email address"
+235:         )
+236:     if _is_reserved_hostname(email.rsplit("@", 1)[1]):
+237:         raise LaunchConfigurationError(
+238:             "PUBLIC_CONTACT_EMAIL must use a routable public domain"
+239:         )
+240: 
+241:     # Optional: a configured booking link is validated as strictly as before,
+242:     # and an absent one simply leaves the booking blocks out of the build.
+243:     if booking_url:
+244:         booking = urlparse(booking_url)
+245:         if booking.scheme != "https" or not booking.hostname:
+246:             raise LaunchConfigurationError(
+247:                 "PUBLIC_BOOKING_URL must be an absolute HTTPS URL"
+248:             )
+249:         if booking.username or booking.password:
+[REDACTED]             raise LaunchConfigurationError(
+251:                 "PUBLIC_BOOKING_URL must not contain credentials"
+252:             )
+253:         if _is_reserved_hostname(booking.hostname):
+254:             raise LaunchConfigurationError(
+255:                 "PUBLIC_BOOKING_URL must use a routable public domain"
+256:             )
+257:         blocked_booking_hosts = {
+258:             "api.thisisatest.tech",
+259:             "thisisatest.tech",
+260:             "www.thisisatest.tech",
+261:         }
+262:         if booking.hostname.casefold() in blocked_booking_hosts:
+263:             raise LaunchConfigurationError(
+264:                 "PUBLIC_BOOKING_URL must point to a booking service"
+265:             )
+266: 
+267:     if not escape_markup:
+268:         values = {
+269:             "@@PUBLIC_DISPLAY_NAME@@": display_name,
+270:             "@@PUBLIC_CONTACT_EMAIL@@": email,
+271:         }
+272:         if booking_url:
+273:             values[BOOKING_TOKEN] = booking_url
+274:         return values
+275:     escaped = {
+276:         "@@PUBLIC_DISPLAY_NAME@@": html.escape(display_name),
+277:         "@@PUBLIC_CONTACT_EMAIL@@": html.escape(email, quote=True),
+278:     }
+279:     if booking_url:
+280:         escaped[BOOKING_TOKEN] = html.escape(booking_url, quote=True)
+281:     return escaped
+282: 
+283: 
+284: def booking_configured(environment: dict[str, str]) -> bool:
+285:     """Whether the build carries the optional booking link."""
+286: 
+287:     return bool(environment.get(BOOKING_FIELD, "").strip())
+288: 
+289: 
+290: def render_booking_blocks(markup: str, *, configured: bool) -> str:
+291:     """Resolve the optional booking blocks in one page.
+292: 
+293:     With a booking link configured only the marker comments go; without one
+294:     the whole block goes, so no page ever ships an empty ``href`` or a
+295:     ``@@PUBLIC_BOOKING_URL@@`` token. Unbalanced markers are a launch error.
+296:     """
+297: 
+298:     if markup.count(BOOKING_BLOCK_START) != markup.count(BOOKING_BLOCK_END):
+299:         raise LaunchConfigurationError("booking block markers are unbalanced")
+300:     if configured:
+301:         return _BOOKING_MARKER_LINE.sub("", markup)
+302:     rendered = _BOOKING_BLOCK.sub("", markup)
+303:     if BOOKING_BLOCK_START in rendered or BOOKING_BLOCK_END in rendered:
+304:         raise LaunchConfigurationError(
+305:             "booking block markers must each sit on their own line"
+306:         )
+307:     return rendered
+308: 
+309: 
+310: def vercel_analytics_enabled(environment: dict[str, str]) -> bool:
+311:     """Return whether the build should emit the Vercel Web Analytics loader.
+312: 
+313:     A misspelled value fails the build instead of silently disabling analytics
+314:     the operator meant to turn on.
+315:     """
+316: 
+317:     raw = environment.get(ANALYTICS_FLAG, "").strip().casefold()
+318:     if raw in ANALYTICS_FLAG_ENABLED:
+319:         return True
+320:     if raw in ANALYTICS_FLAG_DISABLED:
+321:         return False
+322:     raise LaunchConfigurationError(
+323:         f'{ANALYTICS_FLAG} must be "true", "false", or unset'
+324:     )
+325: 
+326: 
+327: def _copy_asset(relative_path: str, output: Path) -> None:
+328:     source = SITE_ROOT / relative_path
+329:     destination = output / relative_path
+330:     if source.is_dir():
+331:         # Withhold the operator note only. A blanket "*.md" would also silently
+332:         # drop Markdown from .well-known or proof if either ever gained one, and
+333:         # it would strip fonts/OFL.txt's neighbours; the license itself is
+334:         # plain text precisely so it stays published.
+335:         shutil.copytree(
+test-scripts ['tests/test_site_pilot_fit.mjs', 'tests/test_site_design.mjs', 'tests/test_site_agent_interface.py']
+lock {
+  "name": "agent-middleware-marketing-site",
+  "version": "1.0.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "agent-middleware-marketing-site",
+      "version": "1.0.0"
+    }
+  }
+}
+
