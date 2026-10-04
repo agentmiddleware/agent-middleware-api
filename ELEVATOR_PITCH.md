@@ -34,7 +34,7 @@ superlative.
 Your agent invokes a costly tool and the request times out. Agent Middleware
 puts one scoped, budgeted boundary in front of the call: replaying the same
 request and accepted idempotency key cannot create another gateway dispatch or
-debit, and the terminal gateway outcome gets a signed receipt.
+debit; finalized gateway outcomes carry signed receipts.
 
 ## Thirty seconds
 
@@ -45,8 +45,9 @@ show the economic consequence afterward?
 Agent Middleware API is a transaction boundary for metered MCP calls. An agent
 uses a wallet-scoped key and an Ed25519-signed permit bound to tool, scope,
 budget, and expiry. The gateway records one accepted request key, returns the
-original result and signed receipt on an identical replay, and rejects changed
-input under that key. Out-of-scope and over-budget calls fail before a debit.
+original result and signed receipt on an identical replay after finalization,
+and rejects changed input under that key. Out-of-scope and over-budget calls
+fail before a debit.
 
 Run the [executable proof](README.md#see-it-in-sixty-seconds) locally,
 then evaluate the supported vendor-managed, single-tenant pilot with one real
@@ -75,12 +76,14 @@ scoped signed permit -> governed MCP invoke -> wallet charge -> signed receipt
 - **Budgets that bind.** Decimal wallet balances with row-locked debits. Final
   permit checks and budget reservation happen while the permit row is locked,
   so competing invokes and revoke-versus-invoke races resolve correctly.
-- **Charge-once under failure.** A repeated idempotency key returns the original
-  result and receipt with no second gateway dispatch and no second debit. One
-  persisted chain links the idempotency record, permit reservation, ledger
-  debit, dispatch attempt, receipt, and audit event.
-- **Honest failure accounting.** Confirmed pre-dispatch failures and
-  upstream-returned errors are refunded and receipted. Genuinely ambiguous
+- **Same-key replay after finalization.** An identical replay returns the
+  original result and receipt with no second gateway dispatch or debit. For the
+  configured upstream MCP tool, one persisted chain links the idempotency
+  record, permit reservation, ledger debit, dispatch attempt, receipt, and
+  audit event.
+- **Honest failure accounting.** For the configured upstream MCP tool,
+  confirmed pre-dispatch failures and upstream-returned errors are refunded
+  and receipted when finalization succeeds. Genuinely ambiguous
   post-dispatch outcomes are marked `delivery_uncertain` and routed to
   fail-closed manual review — never silently redispatched.
 - **Portable gateway evidence.** Signed receipts for success, denial, failure,
@@ -112,7 +115,7 @@ restore an unacceptable risk. If it does not earn a commercial next step, stop.
 |---|---|---|
 | MCP trust gateways | Policy and evidence | Wallet debit plus economic idempotency |
 | MCP monetization / pay-per-tool | Payment rails | Internal budgets, no settlement claim |
-| Enterprise authz for MCP | Who may call | Meter, receipt, and charge exactly once |
+| Enterprise authz for MCP | Who may call | Same-key debit deduplication and receipts for finalized outcomes |
 | Agent reliability libraries | Retry safety inside the caller | A boundary the agent cannot route around, and evidence a third party can check |
 | Agent audit / compliance layers | Regulatory mapping and exports | The economic consequence, not just the record of the call |
 
@@ -159,15 +162,17 @@ signed and chained, so tampering is *evident*. (Evident, not impossible — a
 database administrator who can alter both the data and its chain metadata is
 inside the trust boundary, and we say so.)
 
-**"Does exactly-once really hold across the network?"** For one accepted
-idempotency key at our boundary: at most one gateway dispatch to the configured
-upstream tool and at most one debit, with a receipt on every path that
-finalizes or reconciles. "Exactly-once" is the deduplication term: never a
-duplicate charge, not always a charge. A *remote* tool's own side effect is
-exactly once only if that tool also honors the forwarded key, and a receipt
-lost to write contention after effects are committed is held for manual review
-rather than invented. Anything broader would overstate the distributed-systems
-guarantee.
+**"What happens when the call is retried?"** For the configured upstream MCP
+tool, identical retries under the same accepted idempotency key allow at most
+one gateway dispatch and at most one debit. This does not guarantee delivery or
+a downstream effect; downstream replay safety also requires the upstream to
+honor the forwarded key. Local governed tools have no dispatch state machine
+and interrupted calls fail closed into manual review.
+
+A call can commit effects or a debit but return `manual_review_required` with
+no receipt if an audit or receipt write fails. Do not retry with a new idempotency key:
+that can execute and charge the call again. Reconcile from the ledger and audit
+chain as described in [failure semantics](docs/failure-semantics.md).
 
 **"Why not just use an open-source library?"** If your problem is reliability,
 do. A decorator library gives you idempotency, timeouts, and budget caps for
@@ -181,8 +186,9 @@ Otherwise the library is the correct answer and we will say so.
 least one verifies offline without calling its issuer. We do not claim to be
 alone here. What no project we surveyed *documents* is binding the debit to the
 idempotency record:
-one accepted key, one dispatch, one ledger debit, one receipt, in a single
-persisted chain. (One *debit* — a refunded failure correctly writes a second,
+one accepted key, at most one dispatch and ledger debit, and a receipt when
+finalization succeeds, in a single persisted chain for the configured upstream
+tool. (At most one *debit* — a refunded failure correctly writes a second,
 compensating ledger entry against that debit.) Several of them enforce budgets
 and several dedupe replays; whether any binds the two is unresolved, and we say
 so rather than claiming the cell outright. The signature proves what happened;

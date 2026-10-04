@@ -50,6 +50,12 @@ bearer_scheme = HTTPBearer(
 )
 
 
+bearer_header = HTTPBearer(
+    auto_error=False,
+    description="Bearer authentication via Authorization; this header takes precedence over X-API-Key.",
+)
+
+
 @dataclass(frozen=True)
 class AuthContext:
     """Authenticated caller details used for tenant-scoped authorization."""
@@ -142,8 +148,7 @@ CREDENTIAL_ACCEPTANCE: ContextVar[CredentialAcceptance | None] = ContextVar(
 async def get_auth_context(
     api_key: str | None = Security(api_key_header),
     authorization: Annotated[str | None, Header()] = None,
-    # OpenAPI declaration only; the raw header above is what is parsed.
-    bearer_declared: HTTPAuthorizationCredentials | None = Security(bearer_scheme),
+    _bearer: HTTPAuthorizationCredentials | None = Security(bearer_header),
 ) -> AuthContext:
     """
     Validate credentials and return caller context.
@@ -157,6 +162,8 @@ async def get_auth_context(
     this module is already imported, and a captured `settings` would keep
     serving the stale key list.
     """
+    # HTTPBearer declares the OpenAPI alternative; raw Authorization stays
+    # authoritative so malformed headers cannot fall back to an API key.
     context = await _resolve_auth_context(api_key, authorization)
     acceptance = CREDENTIAL_ACCEPTANCE.get()
     if acceptance is not None:

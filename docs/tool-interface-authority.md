@@ -32,18 +32,19 @@ DENY              constraint violated -> machine-actionable denial
 
 ### ALLOW
 
-Unchanged: the server mints a bounded, signed, single-tool, short-lived
-permit from the caller's wallet and runs the governed
-permit → meter → execute → signed receipt pipeline. The economic guarantee
-is the gateway's: for one accepted idempotency key, at most one dispatch and
-at most one debit. Only the configured upstream MCP tool has the durable
-dispatch state machine that receipts an ambiguous post-send outcome as
-`delivery_uncertain`; a local governed tool has no dispatch record and fails
-closed into manual review. A receipt is written on every path that
-finalizes or is denied, but a receipt or audit write lost to contention
-*after* effects are committed answers `manual_review_required` with no
-receipt, and must not be retried under a new key. See
-[failure-semantics.md](failure-semantics.md).
+The server mints a bounded, signed, single-tool, short-lived permit from the
+caller's wallet, meters the call, and writes a signed receipt when the outcome
+finalizes. For the configured upstream MCP tool, identical retries under the
+same accepted idempotency key allow at most one gateway dispatch and at most
+one debit. This does not guarantee delivery or a downstream effect.
+Local governed tools have no dispatch state machine and interrupted calls fail
+closed into manual review.
+
+The receipt arrows above describe completed paths. Effects or a debit may
+commit before an audit or receipt write fails, returning
+`manual_review_required` with no receipt. Do not retry with a new idempotency key:
+that can execute and charge the call again. Reconcile from the ledger and audit
+chain; see [failure semantics](failure-semantics.md).
 
 ### REQUIRE_APPROVAL
 

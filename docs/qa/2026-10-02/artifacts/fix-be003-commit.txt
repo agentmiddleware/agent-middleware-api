@@ -1,0 +1,2 @@
+[qa/2026-10-02-fixes 30ff418] fix(BE-003): reject multicast outbound destinations
+ 3 files changed, 22 insertions(+), 10 deletions(-)

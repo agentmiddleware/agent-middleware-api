@@ -1,0 +1,425 @@
+FILE app/core/auth.py
+1: """
+2: API Key + JWT Bearer [REDACTED] for agent consumers.
+3:
+4: Agents pass credentials via:
+5: - X-API-Key header (legacy, long-lived keys)
+6: - Authorization: Bearer <jwt> header (modern, short-lived tokens)
+7: """
+8:
+9: import hmac
+10: from contextvars import ContextVar
+11: from dataclasses import dataclass, replace
+12: from typing import Annotated
+13:
+14: from fastapi import Depends, Header, HTTPException, Request, Security, status
+15: from fastapi.security import APIKeyHeader
+16: from .config import get_settings
+17: from .oidc_iga import EnterprisePrincipal, IGADecision, IGAError, is_iga_issuer_token
+18: from .trust_mode import is_production_like_environment
+19:
+20: settings = get_settings()
+21:
+22: # Static development/training keys (STATIC_DEV_API_KEYS) must carry this
+23: # prefix. It keeps dev keys greppable/scannable and means a rotated
+24: # amw_live_ bootstrap key pasted into the wrong variable never
+25: # authenticates through the static-dev path.
+26: STATIC_DEV_KEY_PREFIX = "amw_dev_"
+27:
+28: api_key_header = APIKeyHeader(
+29:     name=settings.API_KEY_HEADER,
+30:     auto_error=False,
+31:     description="API key for agent authentication. Pass in the X-API-Key header.",
+32: )
+33:
+34:
+35: @dataclass(frozen=True)
+36: class AuthContext:
+110: # The converse signal, for RateLimitMiddleware's shared pre-auth bucket. A
+111: # request that never authenticates — a public route, a 404 — is never refused
+112: # either, so the rejected marker alone let a caller pick a fresh per-key
+113: # bucket by inventing an X-API-Key value per request; the limiter therefore
+114: # keeps the reservation unless this comes back accepted. A ContextVar rather
+115: # than request state because get_auth_context is also called without a
+116: # Request; a mutable holder rather than a flag because call_next runs the app
+117: # in a child task whose context is a copy, so only a shared object carries the
+118: # answer back out.
+119: CREDENTIAL_ACCEPTANCE: ContextVar[CredentialAcceptance | None] = ContextVar(
+120:     "credential_acceptance", default=None
+121: )
+122:
+123:
+124: async def get_auth_context(
+125:     api_key: [REDACTED] | None = Security(api_key_header),
+126:     authorization: Annotated[str | None, Header()] = None,
+127: ) -> AuthContext:
+128:     """
+129:     Validate credentials and return caller context.
+130:
+131:     Checks in order:
+132:     1. Authorization: Bearer <jwt> (modern, short-lived)
+133:     2. X-API-Key header (legacy, long-lived keys)
+134:
+135:     Settings are read per call, not from the module-level singleton: tests and
+136:     the Postgres CI job rebind VALID_API_KEYS and clear the settings cache after
+137:     this module is already imported, and a captured `settings` would keep
+138:     serving the stale key list.
+139:     """
+140:     context = await _resolve_auth_context(api_key, authorization)
+141:     acceptance = CREDENTIAL_ACCEPTANCE.get()
+142:     if acceptance is not None:
+143:         acceptance.accepted = True
+144:     return context
+145:
+146:
+147: async def _resolve_auth_context(
+148:     api_key: [REDACTED] | None,
+149:     authorization: str | None,
+150: ) -> AuthContext:
+151:     """Authenticate the caller; ``get_auth_context`` records the acceptance."""
+152:     settings = get_settings()
+153:
+154:     # A presented Authorization header is authoritative. Never fall back to a
+155:     # concurrently supplied API key when its scheme, shape, or token is invalid:
+156:     # doing so would let an invalid bearer [REDACTED] authenticate as a different
+157:     # principal than the caller intended.
+158:     if authorization is not None:
+159:         token = [REDACTED]
+160:         # Enterprise IGA reroute — deliberately narrow. is_iga_issuer_token
+161:         # peeks ONLY at the token's unverified `iss` claim and is True solely
+162:         # when it names an issuer pinned in IGA_TRUSTED_ISSUERS; with IGA
+163:         # disabled (the default) it is always False, so every bearer [REDACTED]
+164:         # today's internal-JWT handling byte for byte. When an enterprise
+165:         # bearer [REDACTED] alongside an X-API-Key, the API key is the
+166:         # authenticating credential (the recursive call below runs the
+167:         # standard API-key path unchanged) and the bearer [REDACTED] carried as
+168:         # human-identity attribution that the IGA enforcement points fully
+169:         # VERIFY (pinned key, algorithm allowlist, audience, issuer, expiry)
+170:         # before any trust decision — the unverified peek here only routes,
+171:         # it never authenticates. An enterprise bearer [REDACTED] NO accompanying
+172:         # API key is not an API credential: it falls through to
+173:         # _auth_from_jwt and fails with 401 exactly as before.
+174:         if api_key and is_iga_issuer_token(token):
+175:             context = await _resolve_auth_context(api_key, None)
+176:             return replace(context, enterprise_bearer_token=[REDACTED]
+177:         return await _auth_from_jwt(token)
+178:
+179:     # Preserve the pre-header direct-call/X-API-Key compatibility path.
+180:     if api_key and api_key.startswith("Bearer "):
+181:         token = [REDACTED]
+182:         return await _auth_from_jwt(token)
+183:
+184:     if api_key is None:
+185:         detail = {
+186:             "error": "missing_credentials",
+187:             "message": "X-API-Key or Authorization: Bearer [REDACTED] is required.",
+188:             "docs": "/docs",
+189:         }
+190:         # On a local instance that opted into self-serve dev keys, point a
+191:         # bootstrapping agent at the credential it can actually mint here.
+192:         # Gated so no production surface ever advertises it (production-like
+193:         # environments refuse to boot with the flag set anyway).
+194:         if settings.ENABLE_DEV_KEY_SELF_PROVISION and not (
+195:             is_production_like_environment(settings.ENVIRONMENT)
+196:         ):
+197:             detail["self_provision"] = (
+198:                 "This local instance allows self-serve dev keys: POST "
+199:                 "/v1/dev-keys/self-provision (empty body) to mint a "
+200:                 "wallet-scoped key, then send it as X-API-Key."
+201:             )
+202:         raise HTTPException(
+203:             status_code=status.HTTP_401_UNAUTHORIZED,
+204:             detail=detail,
+205:         )
+206:
+207:     # RED TEAM FIX: Reject empty or whitespace-only keys.
+208:     stripped = api_key.strip()
+209:     if not stripped or len(stripped) < 8:
+210:         raise HTTPException(
+211:             status_code=status.HTTP_401_UNAUTHORIZED,
+212:             detail={
+213:                 "error": "invalid_api_key",
+214:                 "message": "API key must be at least 8 characters.",
+215:             },
+216:         )
+217:
+218:     # A JWT-shaped value (a raw token without "Bearer ") is verified exactly as
+219:     # the Authorization header would verify it, and never falls through to
+220:     # API-key lookup: a token that fails to parse is already a 401, and an
+221:     # unexpected failure (a liveness check that could not run) must surface
+222:     # here as it does there, not be retried as a key — or, in DEBUG open
+223:     # mode, as a bootstrap admin.
+224:     if stripped.count(".") == 2 and len(stripped) > 50:
+225:         return await _auth_from_jwt(stripped)
+226:
+227:     valid_keys = [k.strip() for k in settings.VALID_API_KEYS.split(",") if k.strip()]
+228:
+229:     if any(hmac.compare_digest(stripped, key) for key in valid_keys):
+230:         return AuthContext(
+231:             source="env",
+232:             raw_key=stripped,
+233:             is_bootstrap_admin=True,
+234:         )
+235:
+236:     # Static development/training keys: bootstrap-admin power in
+237:     # local-compatible environments only. The environment gate is
+238:     # defense-in-depth — validate_trust_mode_guardrails already refuses to
+239:     # boot a production-like deployment with STATIC_DEV_API_KEYS set — so a
+240:     # leaked dev key is worthless against production even if the guardrail
+241:     # were bypassed. Exempt from rotation by design: see
+242:     # docs/static-dev-api-keys.md.
+243:     static_dev_keys = (
+244:         []
+245:         if is_production_like_environment(settings.ENVIRONMENT)
+335:     """Accept exactly ``Bearer <nonempty-token>`` with no extra whitespace."""
+336:     prefix = "Bearer "
+337:     if not authorization.startswith(prefix):
+338:         token = [REDACTED]
+339:     else:
+340:         token = [REDACTED] :]
+341:
+342:     if not token or token != token.strip() or any(char.isspace() for char in token):
+343:         raise HTTPException(
+344:             status_code=status.HTTP_401_UNAUTHORIZED,
+345:             detail={
+346:                 "error": "invalid_token",
+347:                 "message": "Authorization header must be exactly 'Bearer <token>'.",
+348:             },
+349:         )
+350:     return token
+351:
+352:
+353: async def _auth_from_jwt(token: [REDACTED] -> AuthContext:
+354:     """Verify JWT and return AuthContext."""
+355:     from .jwt import get_jwt_service, JWTError
+356:
+357:     jwt_svc = get_jwt_service()
+358:     try:
+359:         payload = jwt_svc.verify_access_token(token)
+360:     except JWTError as e:
+361:         raise HTTPException(
+362:             status_code=status.HTTP_401_UNAUTHORIZED,
+363:             detail={
+364:                 "error": "invalid_token",
+365:                 "message": str(e),
+366:             },
+367:         ) from e
+368:
+369:     if payload.key_id is None:
+370:         raise HTTPException(
+371:             status_code=status.HTTP_401_UNAUTHORIZED,
+372:             detail={
+373:                 "error": "unbound_access_token",
+374:                 "message": (
+375:                     "This access token is not bound to an API key; authenticate "
+376:                     "with an active API key."
+377:                 ),
+378:             },
+379:         )
+380:
+381:     from ..services.api_key_service import get_api_key_service
+382:
+383:     if not await get_api_key_service().is_key_live(payload.key_id):
+384:         raise HTTPException(
+385:             status_code=status.HTTP_401_UNAUTHORIZED,
+386:             detail={
+387:                 "error": "no_active_api_key",
+388:                 "message": (
+389:                     "The API key that issued this access token is no longer active."
+390:                 ),
+391:             },
+392:         )
+393:
+394:     return AuthContext(
+395:         source="jwt",
+396:         # Not a credential: a stable, non-secret handle for the API key that
+397:         # minted this token. A truncated token cannot serve: every EdDSA JWT
+398:         # opens with the same encoded header, so all JWT callers shared it.
+399:         raw_key=f"jwt:{payload.key_id}",
+400:         wallet_id=payload.sub,
+401:         key_id=payload.key_id,
+402:         is_bootstrap_admin=False,
+403:         scopes=payload.scopes,
+404:     )
+405:
+406:
+407: async def verify_api_key(
+408:     api_key: [REDACTED] | None = Security(api_key_header),
+409: ) -> str:
+410:     """
+411:     Validate the provided API key.
+412:     Returns the raw key on success for backwards-compatible dependencies.
+413:     """
+414:     context = await get_auth_context(api_key)
+415:     return context.raw_key
+416:
+417:
+418: async def get_enterprise_principal(
+419:     authorization: Annotated[str | None, Header()] = None,
+420: ) -> EnterprisePrincipal | None:
+421:     """Optional enterprise IGA identity layer (app.core.oidc_iga).
+422:
+423:     Returns None — leaving every existing auth path untouched — when the
+424:     Authorization header is absent or not Bearer-shaped, when IGA is disabled
+425:     (IGA_TRUSTED_ISSUERS empty), or when the bearer [REDACTED]'s issuer is not an
+426:     IGA-trusted issuer (internal EdDSA JWTs land here and continue through
+427:     get_auth_context unchanged). A token FROM a trusted enterprise issuer
+428:     that fails verification raises 401 with the IGAError reason: a bad
+429:     enterprise token must never fall through to another auth path.
+430:     """
+431:     from .oidc_iga import parse_enterprise_token, token_issuer_is_trusted
+432:
+433:     # Settings are re-read per call for the same reason get_auth_context
+434:     # documents: tests rebind IGA_* env vars after this module is imported.
+435:     settings = get_settings()
+436:     if not settings.IGA_TRUSTED_ISSUERS.strip():
+437:         return None
+438:     if authorization is None or not authorization.startswith("Bearer "):
+439:         return None
+440:     token = [REDACTED] ") :].strip()
+FILE tests/test_qa_20261002_backend.py
+1: """QA sweep: public auth contract and replay-key encoding boundaries.
+2:
+3: Optional generative/schema tooling is installed by docs/qa/2026-10-02/
+4: requirements-qa.txt. Product behavior is deliberately unchanged.
+5: """
+6: from __future__ import annotations
+7:
+8: import json
+9: from collections import Counter
+10:
+11: import pytest
+12: from httpx import ASGITransport, AsyncClient
+13:
+14: from app.main import app
+15: from app.services.idempotency import (
+16:     InvalidIdempotencyKeyError,
+17:     decode_idempotency_key_header,
+18:     resolve_client_idempotency_key,
+19: )
+20: from tests.test_mcp_idempotency_key_validation import CountedTool, _snapshot
+21: from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
+22:
+23:
+24: @pytest.fixture
+25: async def qa_client():
+26:     async with AsyncClient(
+27:         transport=ASGITransport(app=app, raise_app_exceptions=False),
+28:         base_url="http://test",
+29:     ) as client:
+30:         yield client
+31:
+32:
+33: @pytest.mark.parametrize("method,path", [
+34:     ("GET", "/v1/permits"),
+35:     ("POST", "/v1/permits"),
+36:     ("GET", "/v1/receipts"),
+37:     ("GET", "/v1/receipts/missing"),
+38:     ("GET", "/v1/billing/wallets"),
+39:     ("POST", "/v1/billing/charge"),
+40:     ("GET", "/v1/audit/events"),
+41:     ("POST", "/v1/audit/verify-chain"),
+42:     ("GET", "/v1/me/authority"),
+43:     ("GET", "/v1/api-keys/missing"),
+44:     ("POST", "/mcp/messages"),
+45:     ("POST", "/mcp/tools/missing/invoke"),
+46: ])
+47: @pytest.mark.parametrize("credential", ["absent", "invalid-bearer"])
+48: async def test_sensitive_route_rejects_unauthenticated_caller(
+49:     qa_client, method, path, credential
+50: ):
+51:     # A malformed Authorization header must not fall back to a valid bootstrap key.
+52:     headers = {} if credential == "absent" else {
+53:         "Authorization": "Bearer [REDACTED]",
+54:         "X-API-Key": "test-key",
+55:     }
+56:     response = await qa_client.request(method, path, headers=headers, json={})
+57:     assert response.status_code == 401
+58:     assert response.headers["content-type"].startswith("application/json")
+59:     assert "traceback" not in response.text.lower()
+60:     assert "X-Credential-Rejected" not in response.headers
+61:
+62:
+63: def test_openapi_schema_is_valid_with_unique_operation_ids():
+64:     validator = pytest.importorskip("openapi_spec_validator")
+65:     # Force a fresh schema: other tests mount dormant routers dynamically.
+66:     old_schema = app.openapi_schema
+67:     try:
+68:         app.openapi_schema = None
+69:         schema = app.openapi()
+70:         validator.validate(schema)
+71:         operations = [
+72:             operation
+73:             for path in schema["paths"].values()
+74:             for method, operation in path.items()
+75:             if method in {"get", "post", "put", "patch", "delete"}
+76:         ]
+77:         counts = Counter(operation["operationId"] for operation in operations)
+78:         assert all(count == 1 for count in counts.values())
+79:     finally:
+80:         app.openapi_schema = old_schema
+81:
+82:
+83: @pytest.mark.xfail(strict=True, reason="BE-002: Bearer [REDACTED] is absent from OpenAPI security schemes")
+84: def test_openapi_declares_supported_bearer_authentication():
+85:     schemes = app.openapi()["components"]["securitySchemes"].values()
+86:     assert any(s.get("type") == "http" and s.get("scheme") == "bearer" for s in schemes)
+87:
+88:
+89: def test_scalar_unicode_replay_keys_roundtrip_without_normalization():
+90:     hypothesis = pytest.importorskip("hypothesis")
+91:     from hypothesis import strategies as st
+92:
+93:     alphabet = st.characters(
+94:         exclude_categories=("Cs",),
+95:         exclude_characters="".join(chr(i) for i in [*range(32), 127]),
+96:     )
+97:
+98:     @hypothesis.settings(max_examples=200, derandomize=True, deadline=None)
+99:     @hypothesis.given(st.text(alphabet=alphabet, min_size=1, max_size=128).filter(str.strip))
+100:     def check(key):
+101:         decoded = decode_idempotency_key_header(key.encode("utf-8").decode("latin-1"))
+102:         assert decoded == key
+103:         assert resolve_client_idempotency_key([("header", decoded), ("body", key)]) == key
+104:         with pytest.raises(InvalidIdempotencyKeyError):
+105:             resolve_client_idempotency_key([("header", key), ("body", key + " ")])
+106:
+107:     check()
+108:
+109:
+110: async def test_lone_surrogate_replay_key_is_rejected_before_effect_or_debit(
+111:     qa_client, clean_database
+112: ):
+113:     tool = CountedTool("qa.encoding.effect")
+114:     try:
+115:         caller = await provision_agent_wallet(qa_client)
+116:         permit = await create_tool_permit(
+117:             qa_client,
+118:             wallet_id=caller["agent_wallet_id"],
+119:             key_id=caller["key_id"],
+120:             tool_name=tool.name,
+121:         )
+122:         before = await _snapshot(qa_client, caller, tool)
+123:         body = {
+124:             "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+125:             "params": {
+126:                 "name": tool.name, "arguments": {"text": "one"},
+127:                 "mcpContext": {
+128:                     "wallet_id": caller["agent_wallet_id"],
+129:                     "permit_id": permit["permit_id"],
+130:                     "idempotency_key": "\ud800",
+131:                 },
+132:             },
+133:         }
+134:         response = await qa_client.post(
+135:             "/mcp/messages",
+136:             content=json.dumps(body).encode("ascii"),
+137:             headers={**caller["agent_headers"], "Content-Type": "application/json"},
+138:         )
+139:         assert await _snapshot(qa_client, caller, tool) == before
+140:         assert response.status_code == 400
+141:         assert response.json()["detail"] == "Invalid JSON"
+142:     finally:
+143:         tool.close()
+144:
+145:

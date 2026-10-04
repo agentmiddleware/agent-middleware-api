@@ -9874,7 +9874,7 @@
       },
       "HTTPBearer": {
         "type": "http",
-        "description": "Short-lived JWT for agent authentication. Pass as 'Authorization: Bearer <token>'. A presented Authorization header is authoritative: an invalid bearer is refused even when an X-API-Key accompanies it.",
+        "description": "Bearer authentication via Authorization; this header takes precedence over X-API-Key.",
         "scheme": "bearer"
       }
     }

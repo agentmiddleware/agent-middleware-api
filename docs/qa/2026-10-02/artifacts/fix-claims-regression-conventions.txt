@@ -1,0 +1,160 @@
+rg: tests/test_docs_contracts.py: No such file or directory (os error 2)
+rg: tests/test_marketing_claims.py: No such file or directory (os error 2)
+rg: tests/test_failure_semantics_docs.py: No such file or directory (os error 2)
+tests/test_receipt_write_contention_surface.py:254:async def test_a_contended_receipt_insert_is_restarted_until_it_lands(
+tests/test_receipt_write_contention_surface.py:308:async def test_a_denial_reports_its_real_reason_through_receipt_contention(
+tests/test_receipt_write_contention_surface.py:353:async def test_an_exhausted_denial_receipt_is_named_retryable_not_internal(
+tests/test_receipt_write_contention_surface.py:426:async def test_a_charged_call_is_never_told_to_retry_its_receipt(
+tests/test_receipt_write_contention_surface.py:474:async def test_a_refunded_call_that_already_ran_is_never_told_to_retry(
+tests/test_receipt_write_contention_surface.py:550:async def test_the_standard_surface_answers_the_same_named_outcome(
+tests/test_receipt_write_contention_surface.py:600:async def test_the_legacy_rest_surface_names_an_exhausted_denial_retryable(
+tests/test_receipt_write_contention_surface.py:678:async def test_the_legacy_rest_surface_never_tells_a_charged_call_to_retry(
+tests/test_receipt_write_contention_surface.py:741:async def test_a_terminal_dispatch_chain_is_not_advertised_as_a_plain_retry(
+tests/test_receipt_write_contention_surface.py:827:async def test_a_consumed_approval_is_not_advertised_as_a_plain_retry(
+tests/test_receipt_write_contention_surface.py:917:async def test_a_rejected_approval_denial_is_still_a_plain_retry(
+tests/test_audit_chain_contention_surface.py:162:async def test_a_refusal_that_ran_nothing_answers_audit_contention_as_retryable(
+tests/test_audit_chain_contention_surface.py:226:async def test_finalization_never_tells_a_charged_caller_to_retry(
+tests/test_audit_chain_contention_surface.py:303:async def test_a_local_call_that_ran_and_refunded_is_never_told_to_retry(
+tests/test_audit_chain_contention_surface.py:376:async def test_a_charged_upstream_call_is_never_told_to_retry(
+tests/test_audit_chain_contention_surface.py:475:async def test_a_contended_refusal_does_not_free_another_calls_live_key(
+tests/test_audit_chain_contention_surface.py:553:async def test_a_genuine_bug_in_the_same_window_stays_unclassified(
+tests/test_audit_chain_contention_surface.py:632:async def test_the_standard_surface_answers_the_same_named_outcome(
+tests/test_audit_chain_contention_surface.py:749:async def test_a_terminal_dispatch_chain_is_not_advertised_as_a_plain_retry(
+tests/test_audit_chain_contention_surface.py:837:async def test_a_consumed_approval_still_reaches_a_terminal_answer(
+"""Run a QA command with UTC timestamps and scrubbed output; no shell expansion."""
+
+import argparse
+import datetime as dt
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+import time
+
+ROOT = Path(__file__).resolve().parents[3]
+HERE = Path(__file__).resolve().parent
+
+
+def scrub(text):
+    text = re.sub(r"-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----.*?-----END (?:[A-Z]+ )?PRIVATE KEY-----", "[REDACTED]", text, flags=re.DOTALL)
+    text = re.sub(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b", "[REDACTED]", text)
+    text = re.sub(r"(?<=://)[^/@\s]+:[^/@\s]+@", "[REDACTED]@", text)
+    text = re.sub(r"(?i)(bearer\s+)[\w.\-]+", r"\1[REDACTED]", text)
+    text = re.sub(r"\b(?:amw_(?:dev_|live_)?|sk-(?:proj-)?)[A-Za-z0-9_-]{12,}\b", "[REDACTED]", text)
+    text = re.sub(r"(?i)((?:api[_-]?key|token|secret|password|private_key)\s*[=:]\s*)[^\s,;]+", r"\1[REDACTED]", text)
+    # Generated local fixture signing seeds must not enter shared QA logs.
+    text = re.sub(r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{43}=(?![A-Za-z0-9+/=])", "[REDACTED]", text)
+    text = re.sub(r"(?<![A-Fa-f0-9])[A-Fa-f0-9]{64,}(?![A-Fa-f0-9])", "[REDACTED]", text)
+    return text
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--group", required=True)
+    parser.add_argument("--label", required=True)
+    parser.add_argument("--cwd", default=str(ROOT))
+    parser.add_argument("--timeout", type=int, default=1800)
+    parser.add_argument("--aggregate-session", action="store_true", help="Refresh SESSION-LOG.md after this command outcome is written")
+    parser.add_argument("command", nargs=argparse.REMAINDER)
+    args = parser.parse_args()
+    command = args.command[1:] if args.command[:1] == ["--"] else args.command
+    now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    log = HERE / f"{args.group.upper()}-SESSION.md"
+    artifacts = HERE / "artifacts"
+    artifacts.mkdir(exist_ok=True)
+    output_path = artifacts / f"{args.group.lower()}-{args.label}.txt"
+    env = {k: v for k, v in os.environ.items() if k in {"PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "SYSTEMROOT"}}
+    env.update({"UV_CACHE_DIR": "/private/tmp/amw-qa-uv-cache", "PIP_CACHE_DIR": "/private/tmp/amw-qa-pip-cache", "PYTHONDONTWRITEBYTECODE": "1", "NO_COLOR": "1", "CI": "true"})
+    with log.open("a") as handle:
+        handle.write(f"\n### {now} — {args.label}\n\nCWD: `{args.cwd}`\n\nCommand (argv): `{scrub(repr(command))}`\n\n")
+    started = time.monotonic()
+    try:
+        result = subprocess.run(command, cwd=args.cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=args.timeout)
+        output, code = result.stdout, result.returncode
+    except subprocess.TimeoutExpired as exc:
+        output = exc.stdout or b""
+        output = output.decode(errors="replace") if isinstance(output, bytes) else output
+        output += "\nQA timeout reached.\n"
+        code = 124
+    except OSError as exc:
+        output, code = str(exc), 127
+    output = scrub(output)
+    output_path.write_text(output)
+    end = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    with log.open("a") as handle:
+        handle.write(f"Outcome for `{args.group.lower()}-{args.label}`: exit {code}; {time.monotonic() - started:.1f}s; ended {end}. [Output](artifacts/{output_path.name}).\n")
+    if args.aggregate_session:
+        from assemble_session_log import assemble
+
+        assemble()
+    print(output[-16000:])
+    print(f"\nQA exit={code}; artifact={output_path.relative_to(ROOT)}")
+    return code
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+
+
+### 2026-10-03T03:45:49Z — initial-context
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', '-c', 'import os,subprocess; print("cwd",os.getcwd()); [subprocess.run(c,check=False) for c in [["git","worktree","list"],["git","remote","get-url","origin"],["git","branch","--show-current"],["git","status","--short"]]]']`
+
+Outcome for `fix-claims-initial-context`: exit 0; 0.1s; ended 2026-10-03T03:45:49Z. [Output](artifacts/fix-claims-initial-context.txt).
+
+### 2026-10-03T03:45:56Z — instructions-findings
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', '-c', 'from pathlib import Path; import subprocess; subprocess.run(["rg","--files","-g","AGENTS.md","-g","!node_modules","-g","!.venv"]); paths=["AGENTS.md","docs/qa/2026-10-02/FINDINGS.md","docs/qa/2026-10-02/SUMMARY.md","/Users/sellers/.codex/skills/debug-bug/SKILL.md"]; [(print("FILE",p),print(Path(p).read_text())) for p in paths if Path(p).exists()]']`
+
+Outcome for `fix-claims-instructions-findings`: exit 0; 0.1s; ended 2026-10-03T03:45:56Z. [Output](artifacts/fix-claims-instructions-findings.txt).
+
+### 2026-10-03T03:46:10Z — targeted-docs
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', '-c', 'from pathlib import Path; import subprocess; subprocess.run(["rg","--files","-g","AGENTS.md","docs","tests"]); subprocess.run(["rg","-n","BE-100|retry|guarantee|receipt|exactly.once|same|local","docs/qa/2026-10-02/CLAIMS-REPORT.md","docs/qa/2026-10-02/FINDINGS.md"]); [(print("FILE",p),print(Path(p).read_text())) for p in ["docs/agent-self-credentialing.md","docs/tool-interface-authority.md","ELEVATOR_PITCH.md"]]']`
+
+Outcome for `fix-claims-targeted-docs`: exit 0; 0.1s; ended 2026-10-03T03:46:10Z. [Output](artifacts/fix-claims-targeted-docs.txt).
+
+### 2026-10-03T03:46:16Z — claims-evidence
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', '-c', 'from pathlib import Path; import subprocess; subprocess.run(["rg","--files","-g","AGENTS.md","docs","tests"]); subprocess.run(["rg","-n","BE-100","docs/qa/2026-10-02/FINDINGS.md","docs/qa/2026-10-02/CLAIMS-REPORT.md"]); p=Path("docs/qa/2026-10-02/CLAIMS-REPORT.md"); s=p.read_text(); start=s.index("BE-100"); print(s[max(0,start-150):start+5500]); subprocess.run(["rg","-n","AMW|pytest process|test.db","/Users/sellers/.codex/memories/MEMORY.md"])]']`
+
+Outcome for `fix-claims-claims-evidence`: exit 1; 0.0s; ended 2026-10-03T03:46:16Z. [Output](artifacts/fix-claims-claims-evidence.txt).
+
+### 2026-10-03T03:46:21Z — claims-evidence-retry
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', '-c', 'from pathlib import Path; import subprocess; subprocess.run(["rg","--files","-g","AGENTS.md","docs","tests"]); subprocess.run(["rg","-n","BE-100","docs/qa/2026-10-02/FINDINGS.md","docs/qa/2026-10-02/CLAIMS-REPORT.md"]); s=Path("docs/qa/2026-10-02/CLAIMS-REPORT.md").read_text(); start=s.index("BE-100"); print(s[max(0,start-150):start+5500]); subprocess.run(["rg","-n","AMW|pytest process|test.db","/Users/sellers/.codex/memories/MEMORY.md"])']`
+
+Outcome for `fix-claims-claims-evidence-retry`: exit 0; 0.0s; ended 2026-10-03T03:46:21Z. [Output](artifacts/fix-claims-claims-evidence-retry.txt).
+
+### 2026-10-03T03:46:26Z — docs-context
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', '-c', 'from pathlib import Path; files=[("AGENTS.md",1,175),("tests/AGENTS.md",1,150),("docs/agent-self-credentialing.md",70,160),("docs/tool-interface-authority.md",1,85)]; [(print("FILE",name),*[print(f"{n}: {line}") for n,line in enumerate(Path(name).read_text().splitlines(),1) if start<=n<=end]) for name,start,end in files]']`
+
+Outcome for `fix-claims-docs-context`: exit 0; 0.0s; ended 2026-10-03T03:46:26Z. [Output](artifacts/fix-claims-docs-context.txt).
+
+### 2026-10-03T03:46:31Z — implementation-context
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', '-c', 'from pathlib import Path; files=[("README.md",135,170),("app/routers/mcp.py",215,275),("app/routers/mcp.py",2180,2228),("tests/test_receipt_write_contention_surface.py",1,100),("tests/test_audit_chain_contention_surface.py",1,65)]; [(print("FILE",name),*[print(f"{n}: {line}") for n,line in enumerate(Path(name).read_text().splitlines(),1) if start<=n<=end]) for name,start,end in files]']`
+
+Outcome for `fix-claims-implementation-context`: exit 0; 0.0s; ended 2026-10-03T03:46:31Z. [Output](artifacts/fix-claims-implementation-context.txt).
+
+### 2026-10-03T03:46:36Z — regression-conventions
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', '-c', 'import subprocess; from pathlib import Path; subprocess.run(["rg","-n","Path.*parents|read_text|exactly.once|manual.review","tests/test_docs_contracts.py","tests/test_marketing_claims.py","tests/test_failure_semantics_docs.py"]); subprocess.run(["rg","-n","^async def test_|^def test_","tests/test_receipt_write_contention_surface.py","tests/test_audit_chain_contention_surface.py"]); print(Path("docs/qa/2026-10-02/run_logged.py").read_text()); print(Path("docs/qa/2026-10-02/FIX-CLAIMS-SESSION.md").read_text())']`

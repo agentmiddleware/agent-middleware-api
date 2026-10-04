@@ -1,0 +1,58 @@
+---
+name: debug-bug
+description: Use when diagnosing and fixing a bug in any repository. Prioritize reproduction, root cause, minimal fix, regression tests, negative-path coverage, and verification.
+---
+
+# Debug Bug
+
+## Process
+
+1. Reproduce the failure or locate the failing path from tests, logs, reports,
+   routes, services, or docs.
+2. Inspect related code before changing anything.
+3. Identify the smallest likely root cause.
+4. Make the minimal fix.
+5. Add a regression test when practical.
+6. Add negative-path tests if the bug touches auth, authorization, tenant
+   isolation, billing, secrets, deployment, tool execution, or data integrity.
+7. Run targeted tests first, then broader checks if the changed surface is
+   shared.
+8. Explain root cause, fix, verification, untested areas, remaining risk, and
+   next step.
+
+## Rules
+
+- Do not rewrite surrounding systems just to fix one bug.
+- Do not mask errors without understanding them.
+- Do not delete or weaken tests to make the suite pass.
+- If the issue cannot be reproduced, state that clearly and provide the closest
+  evidence found.
+rg: awi_sdk/README.md: No such file or directory (os error 2)
+AGENTS.md:3:## Project Mission
+AGENTS.md:16:## Core Loop
+AGENTS.md:22:Every major feature should support this loop. If a feature does not support this loop, question whether it should be frozen, deleted, or moved out of the main wedge.
+AGENTS.md:24:## Current Company Phase: Customer Validation
+AGENTS.md:31:> No new core capability without documented evidence from a named prospective
+AGENTS.md:51:## Product Wedge Candidates
+AGENTS.md:83:## Engineering Priorities
+AGENTS.md:103:## Security-Critical Areas
+AGENTS.md:123:## Agent-Specific Risks
+AGENTS.md:140:## Analysis Rules
+AGENTS.md:161:## Implementation Rules
+AGENTS.md:175:## Local Credentials for Agents
+AGENTS.md:194:## Final Summary Format
+AGENTS.md:206:## Cursor Cloud specific instructions
+docs/30-day-customer-validation.md:5:> stays frozen. The live origin is a private experiment, not a public product.
+docs/30-day-customer-validation.md:7:## Decision To Make
+docs/30-day-customer-validation.md:19:## Business Invariant
+docs/30-day-customer-validation.md:21:No new core capability without documented evidence from a named prospective
+docs/30-day-customer-validation.md:42:## Target Customer
+docs/30-day-customer-validation.md:48:## Discovery Question
+docs/30-day-customer-validation.md:68:## 30-Day Funnel
+docs/30-day-customer-validation.md:77:## Pilot Acceptance Test
+docs/30-day-customer-validation.md:104:## Buying And Disconfirming Signals
+docs/30-day-customer-validation.md:128:## Evidence Log
+docs/30-day-customer-validation.md:146:## Day-30 Decision
+docs/30-day-customer-validation.md:158:### Recorded decision: Narrow (2026-09-16)
+docs/30-day-customer-validation.md:186:- No new core capability, including pods, extra MCP tools, standard `/mcp`
+docs/30-day-customer-validation.md:212:## Existing Implementation Documents

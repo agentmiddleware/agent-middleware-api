@@ -336,8 +336,8 @@
       </p>
       <div class="links">
         <a href="https://www.thisisatest.tech/proof/">
-          <strong>Portable receipt proof (hosted sample)</strong>
-          <span>Separately hosted public artifact, matching key snapshot, and offline verification command. Not this runtime.</span>
+          <strong>Hosted portable receipt proof</strong>
+          <span>Artifact, matching key snapshot, and offline verification command.</span>
         </a>
         <a href="/health/dependencies">
           <strong>Runtime truth</strong>
@@ -345,7 +345,7 @@
         </a>
         <a href="/.well-known/trust-keys.json">
           <strong>Current trust keys</strong>
-          <span>Public issuer keys exposed by this API origin.</span>
+          <span>Public issuer keys exposed by this API.</span>
         </a>
       </div>
     </section>
@@ -369,10 +369,9 @@
       <p class="section-copy">
         Inspect your own permits, receipts, and audit events from a trusted terminal.
         Keep the key in your environment; do not paste it into a public web page.
-        Set <code>API_URL</code> to the origin you are inspecting; the hosted
-        experiment is shown as the example, a local or staging runtime uses its own.
+        Set <code>API_URL</code> to this server's origin; the example below uses a local server.
       </p>
-      <pre tabindex="0" role="region" aria-label="Authenticated inspection commands"><code>export API_URL='https://api.thisisatest.tech'   # or http://127.0.0.1:8000
+      <pre tabindex="0" role="region" aria-label="Authenticated inspection commands"><code>export API_URL="http://127.0.0.1:8000"
 export AGENT_MIDDLEWARE_API_KEY='replace-in-your-terminal'
 
 curl --fail-with-body \

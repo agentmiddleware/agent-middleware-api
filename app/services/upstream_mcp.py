@@ -406,7 +406,7 @@ async def validate_upstream_url(
     # is_global alone admits multicast: the stdlib classifies 224.0.0.0/4 and
     # ff00::/8 as global, so a multicast destination is refused by name.
     if not loopback_exception and any(
-        not address.is_global or address.is_multicast for address in parsed_addresses
+        address.is_multicast or not address.is_global for address in parsed_addresses
     ):
         raise UpstreamMcpConfigurationError(
             "MCP_UPSTREAM_URL must not resolve to private, loopback, link-local, "

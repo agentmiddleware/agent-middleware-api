@@ -1,0 +1,198 @@
+ M ELEVATOR_PITCH.md
+ M tests/test_qa_be100_documentation.py
+?? docs/qa/2026-10-02/FIX-CLAIMS-SESSION.md
+?? docs/qa/2026-10-02/FIX-GATE-SESSION.md
+?? docs/qa/2026-10-02/FIX-SDK-SESSION.md
+?? docs/qa/2026-10-02/FIX-SESSION.md
+?? docs/qa/2026-10-02/FIX-UX-SESSION.md
+?? docs/qa/2026-10-02/artifacts/fix-add-multicast-regressions.txt
+?? docs/qa/2026-10-02/artifacts/fix-auth-and-related-tests.txt
+?? docs/qa/2026-10-02/artifacts/fix-auth-regression-read.txt
+?? docs/qa/2026-10-02/artifacts/fix-backend-sources.txt
+?? docs/qa/2026-10-02/artifacts/fix-backend-test-selection.txt
+?? docs/qa/2026-10-02/artifacts/fix-be002-before.txt
+?? docs/qa/2026-10-02/artifacts/fix-be002-commit.txt
+?? docs/qa/2026-10-02/artifacts/fix-be002-export-schema.txt
+?? docs/qa/2026-10-02/artifacts/fix-be002-implementation.txt
+?? docs/qa/2026-10-02/artifacts/fix-be002-regression.txt
+?? docs/qa/2026-10-02/artifacts/fix-be002-schema-diff.txt
+?? docs/qa/2026-10-02/artifacts/fix-be002-secrets.txt
+?? docs/qa/2026-10-02/artifacts/fix-be002-stage.txt
+?? docs/qa/2026-10-02/artifacts/fix-be002-staged-check.txt
+?? docs/qa/2026-10-02/artifacts/fix-be002-targeted.txt
+?? docs/qa/2026-10-02/artifacts/fix-be003-before.txt
+?? docs/qa/2026-10-02/artifacts/fix-be003-commit.txt
+?? docs/qa/2026-10-02/artifacts/fix-be003-secrets.txt
+?? docs/qa/2026-10-02/artifacts/fix-be003-stage.txt
+?? docs/qa/2026-10-02/artifacts/fix-be003-staged-check.txt
+?? docs/qa/2026-10-02/artifacts/fix-be003-targeted-corrected.txt
+?? docs/qa/2026-10-02/artifacts/fix-be003-targeted.txt
+?? docs/qa/2026-10-02/artifacts/fix-be100-commit.txt
+?? docs/qa/2026-10-02/artifacts/fix-be100-stage.txt
+?? docs/qa/2026-10-02/artifacts/fix-be100-staged-check.txt
+?? docs/qa/2026-10-02/artifacts/fix-be100-targeted.txt
+?? docs/qa/2026-10-02/artifacts/fix-bearer-test-map.txt
+?? docs/qa/2026-10-02/artifacts/fix-browser-install.txt
+?? docs/qa/2026-10-02/artifacts/fix-build-validation-map.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-add-regression.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-apply-doc-correction.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-claims-evidence-retry.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-claims-evidence.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-docs-context.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-final-regression-evidence.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-final-review.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-followup-context.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-followup-doc-edit.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-followup-regression-before.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-implementation-context.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-initial-context.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-instructions-findings.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-negative-control.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-regression-conventions.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-targeted-docs.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-verify-doc-correction.txt
+?? docs/qa/2026-10-02/artifacts/fix-exception-and-auth-tests.txt
+?? docs/qa/2026-10-02/artifacts/fix-fe002-commit.txt
+?? docs/qa/2026-10-02/artifacts/fix-fe002-stage.txt
+?? docs/qa/2026-10-02/artifacts/fix-fe002-staged-check.txt
+?? docs/qa/2026-10-02/artifacts/fix-final-two-diffs.txt
+?? docs/qa/2026-10-02/artifacts/fix-first-diffs.txt
+?? docs/qa/2026-10-02/artifacts/fix-fix-be003-test-contract.txt
+?? docs/qa/2026-10-02/artifacts/fix-fix-multicast.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-be002-context.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-be002-current-diff.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-be002-decision.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-be002-dependencies.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-be002-search.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-be003-diff-review.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-be003-review-decision.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-be100-diff.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-be100-final-review-finding.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-be100-tests-source.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-candidate-diff-stat.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-candidate-tests.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-changed-claims-audit.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-claim-context-final.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-committed-range-check.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-current-fix-status.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-final-product-diff.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-final-range-inventory.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-findings-full.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-first-three-review-decision.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-focus-rules.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-guard-source-context.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-identity.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-initial-diff.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-instructions-findings.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-last-two-review-decision.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-nested-agents-memory.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-openapi-context-retry.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-openapi-json-diff.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-review-skill.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-ux-pending-diff.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-ux-sdk-diff.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-ux001-context.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-ux002-focus-context.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-ux002-review-decision.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-ux003-current-diff.txt
+?? docs/qa/2026-10-02/artifacts/fix-install-guard-hook.txt
+?? docs/qa/2026-10-02/artifacts/fix-install-python.txt
+?? docs/qa/2026-10-02/artifacts/fix-lint-after.txt
+?? docs/qa/2026-10-02/artifacts/fix-mypy-after.txt
+?? docs/qa/2026-10-02/artifacts/fix-new-tests-review.txt
+?? docs/qa/2026-10-02/artifacts/fix-openapi-before-check.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-after-fe002.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-before-fe002.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-bounds-freeze.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-context.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-explicit-typecheck.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-final-diff.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-fix-fe002.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-focused-read.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-identity.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-python-build.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-regression-tests.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-related-components.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-skill-findings.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-source-bounds-memory.txt
+?? docs/qa/2026-10-02/artifacts/fix-setup-node.txt
+?? docs/qa/2026-10-02/artifacts/fix-setup-package-build-tools.txt
+?? docs/qa/2026-10-02/artifacts/fix-setup-python.txt
+?? docs/qa/2026-10-02/artifacts/fix-test-guard-hook.txt
+?? docs/qa/2026-10-02/artifacts/fix-tooling-and-safety.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-final-js-inventory.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-final-node-suite.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-browser-config-source.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-browser-runtime-probe.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-build-fixtures.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-context.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-create-contrast-test.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-dashboard-related-tests.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-dom-color-probe.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-focused-context.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-initial-inspect.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-palette-and-focus.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-related-source.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-site-build-context.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-site-build.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-source-read.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-testing-tools.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux001-after.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux001-before.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux001-edit.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux001-result-decision.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux001-review.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux002-after.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux002-before.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux002-diff.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux002-edit.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux002-result-decision.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux002-syntax.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux002-test.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux003-after.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux003-before.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux003-diff.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux003-edit.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux003-link-inventory.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux003-result-decision.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux003-syntax.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux003-test-completeness.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux003-test.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux003-whitespace.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux001-commit.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux001-stage.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux001-staged-check.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux002-commit.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux002-diff.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux002-stage.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux002-staged-check.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux002-targeted.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux003-commit.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux003-stage.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux003-staged-check.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux003-targeted.txt
+?? docs/qa/2026-10-02/artifacts/fix-wrapper-python-build.txt
+eb02ac1 fix(BE-002): declare supported Bearer [REDACTED] in OpenAPI
+ef29d58 fix(UX-003): keep operator inspection on the served origin
+30ff418 fix(BE-003): reject multicast outbound destinations
+0440fdb fix(FE-002): preserve explicit SDK session step limits
+8238663 fix(UX-002): make operator commands keyboard focusable
+1a98a30 fix(UX-001): use readable fit text on paper comparison cards
+cfc1291 fix(BE-100): scope retry and receipt completion guidance
+ ELEVATOR_PITCH.md                               |  21 ++--
+ app/core/auth.py                                |  11 +-
+ app/core/url_guard.py                           |   6 +-
+ app/services/upstream_mcp.py                    |   2 +-
+ awi_sdk/typescript/index.ts                     |   2 +-
+ docs/agent-self-credentialing.md                |  31 +++--
+ docs/openapi.json                               | 161 ++++++++++++++++++++++++
+ docs/qa/2026-10-02/frontend-components.test.cjs |  25 +++-
+ docs/qa/2026-10-02/ux-contracts.test.cjs        | 104 +++++++++++++++
+ docs/qa/2026-10-02/ux-regressions.spec.cjs      |  25 +++-
+ docs/tool-interface-authority.md                |  16 ++-
+ site/styles.css                                 |   4 +
+ static/dashboard.html                           |  26 ++--
+ tests/test_human_accessibility.py               |   2 +-
+ tests/test_qa_20261002_backend.py               |  43 +++++--
+ tests/test_qa_be100_documentation.py            |  34 +++++
+ 16 files changed, 455 insertions(+), 58 deletions(-)

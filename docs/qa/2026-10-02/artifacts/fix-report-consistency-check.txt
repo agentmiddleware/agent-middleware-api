@@ -1,0 +1,1 @@
+{'findings': 8, 'documented': 8, 'fixed': 7, 'partial': 0, 'deferred': 1, 'Critical/High': 0, 'committed_product_paths': 16, 'evidence_links_resolve': True, 'forbidden_surface_change': False}
