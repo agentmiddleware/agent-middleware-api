@@ -1,0 +1,151 @@
+FILE tests/test_qa_be100_documentation.py
+ """BE-100: integration guidance must disclose incomplete terminal evidence."""
+
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _assert_scoped_retry_guidance(relative_path: str) -> None:
+    text = " ".join((ROOT / relative_path).read_text().split())
+    assert "at most one debit" in text
+    assert "same accepted idempotency key" in text
+    assert "configured upstream MCP" in text
+    assert "manual_review_required" in text
+    assert "no receipt" in text
+    assert "Do not retry with a new idempotency key" in text
+    assert "Local governed tools have no dispatch state machine" in text
+    assert "failure-semantics.md" in text
+    assert "one authorization, one debit, one finalized receipt" not in text
+    assert "The governance path is identical" not in text
+    assert "exactly-once dispatch" not in text
+    assert "one gateway dispatch, one debit, one receipt" not in text
+
+
+def test_be100_self_credentialing_scopes_retry_guarantees() -> None:
+    _assert_scoped_retry_guidance("docs/agent-self-credentialing.md")
+
+
+def test_be100_tool_interface_scopes_retry_guarantees() -> None:
+    _assert_scoped_retry_guidance("docs/tool-interface-authority.md")
+
+
+def test_be100_pitch_scopes_retry_guarantees() -> None:
+    _assert_scoped_retry_guidance("ELEVATOR_PITCH.md")
+
+FILE docs/qa/2026-10-02/ux-contracts.test.cjs
+ // Offline DOM/CSS checks; rendering, keyboard scrolling and axe remain browser tests.
+const {test} = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const modules = process.env.QA_NODE_MODULES || '/private/tmp/amw-qa-browser/node_modules';
+const {JSDOM} = require(`${modules}/jsdom`);
+const root = path.resolve(__dirname, '../../..');
+
+function page(file) {
+  // No script execution or subresource loading: the checks cannot contact a host.
+  return new JSDOM(fs.readFileSync(path.join(root, file), 'utf8'), {
+    url: 'http://127.0.0.1:8765/',
+  });
+}
+
+function luminance(color) {
+  const rgb = color.match(/^rgb\((\d+), (\d+), (\d+)\)$/);
+  assert(rgb, `Expected an opaque resolved RGB color, got ${color}`);
+  const [r, g, b] = rgb.slice(1).map(value => {
+    const channel = Number(value) / 255;
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+for (const contrast of ['default', 'high']) {
+  test(`UX-001: paper and dark fit lists meet 4.5:1 contrast (${contrast})`, () => {
+    const dom = page('site/compare/index.html');
+    try {
+      const {document} = dom.window;
+      if (contrast === 'high') document.documentElement.dataset.a11yContrast = 'high';
+      const style = document.createElement('style');
+      const css = fs.readFileSync(path.join(root, 'site/styles.css'), 'utf8');
+      style.textContent = css;
+      document.head.append(style);
+      const tokens = dom.window.getComputedStyle(document.documentElement);
+      // JSDOM preserves var() in computed colors. Resolve the page's root palette
+      // before computing the real selectors and cascade; do not substitute colors.
+      style.textContent = css.replace(/var\((--[\w-]+)\)/g, (value, token) =>
+        tokens.getPropertyValue(token).trim() || value);
+      for (const selector of ['.proof-col:not(.replay)', '.proof-col.replay']) {
+        const card = document.querySelector(selector);
+        const background = luminance(dom.window.getComputedStyle(card).backgroundColor);
+        const items = card.querySelectorAll('.fit-list li');
+        assert.equal(items.length, 4);
+        for (const item of items) {
+          const foreground = luminance(dom.window.getComputedStyle(item).color);
+          const ratio = (Math.max(background, foreground) + 0.05) /
+            (Math.min(background, foreground) + 0.05);
+          assert(ratio >= 4.5, `${selector}: contrast ${ratio.toFixed(2)}:1 is below 4.5:1`);
+        }
+      }
+    } finally {dom.window.close();}
+  });
+}
+
+FILE docs/qa/2026-10-02/artifacts/fix-sdk-after-fe002.txt
+ ✔ FE-002: maxSteps=0 is not silently promoted to 100 actions (31.503958ms)
+✔ FE-002: session limits default only when absent and preserve API validation boundaries (5.276125ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 347.604792
+
+FILE docs/qa/2026-10-02/artifacts/fix-ux-ux001-after.txt
+ ✔ calculator covers empty, valid, equal, zero, invalid and overflow classes (86.347667ms)
+✔ receipt component handles http without network (15.396667ms)
+✔ receipt component handles json without network (8.171292ms)
+✔ receipt component handles key-mismatch without network (7.67725ms)
+✔ receipt component handles missing-payload without network (7.226958ms)
+✔ receipt component handles valid artifacts without network (7.733667ms)
+✔ SDK fails before transport for missing permit and invalid idempotency keys (32.896625ms)
+✔ SDK preserves retry identity, astral boundary and governed headers (5.821375ms)
+⚠ FE-001: declared SDK build produces its advertised entrypoints (545.400958ms) # FE-001: npm run build exits 1 because tsconfig.json is absent
+✔ FE-002: maxSteps=0 is not silently promoted to 100 actions (4.99575ms)
+✔ FE-002: session limits default only when absent and preserve API validation boundaries (3.964625ms)
+✔ UX-001: paper and dark fit lists meet 4.5:1 contrast (default) (209.053667ms)
+✔ UX-001: paper and dark fit lists meet 4.5:1 contrast (high) (40.499292ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 1
+ℹ duration_ms 1056.394875
+
+✖ failing tests:
+
+test at docs/qa/2026-10-02/frontend-components.test.cjs:130:1
+⚠ FE-001: declared SDK build produces its advertised entrypoints (545.400958ms) # FE-001: npm run build exits 1 because tsconfig.json is absent
+  AssertionError [ERR_ASSERTION]: Declared npm run build must succeed
+
+  1 !== 0
+
+      at TestContext.<anonymous> (/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api/docs/qa/2026-10-02/frontend-components.test.cjs:140:10)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

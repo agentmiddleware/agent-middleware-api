@@ -1,0 +1,44 @@
+✔ calculator covers empty, valid, equal, zero, invalid and overflow classes (86.347667ms)
+✔ receipt component handles http without network (15.396667ms)
+✔ receipt component handles json without network (8.171292ms)
+✔ receipt component handles key-mismatch without network (7.67725ms)
+✔ receipt component handles missing-payload without network (7.226958ms)
+✔ receipt component handles valid artifacts without network (7.733667ms)
+✔ SDK fails before transport for missing permit and invalid idempotency keys (32.896625ms)
+✔ SDK preserves retry identity, astral boundary and governed headers (5.821375ms)
+⚠ FE-001: declared SDK build produces its advertised entrypoints (545.400958ms) # FE-001: npm run build exits 1 because tsconfig.json is absent
+✔ FE-002: maxSteps=0 is not silently promoted to 100 actions (4.99575ms)
+✔ FE-002: session limits default only when absent and preserve API validation boundaries (3.964625ms)
+✔ UX-001: paper and dark fit lists meet 4.5:1 contrast (default) (209.053667ms)
+✔ UX-001: paper and dark fit lists meet 4.5:1 contrast (high) (40.499292ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 1
+ℹ duration_ms 1056.394875
+
+✖ failing tests:
+
+test at docs/qa/2026-10-02/frontend-components.test.cjs:130:1
+⚠ FE-001: declared SDK build produces its advertised entrypoints (545.400958ms) # FE-001: npm run build exits 1 because tsconfig.json is absent
+  AssertionError [ERR_ASSERTION]: Declared npm run build must succeed
+
+  1 !== 0
+
+      at TestContext.<anonymous> (/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api/docs/qa/2026-10-02/frontend-components.test.cjs:140:10)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

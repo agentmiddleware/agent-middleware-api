@@ -172,6 +172,13 @@ A good change usually includes:
 
 Do not introduce new dependencies unless necessary and justified.
 
+Where a feature would call a model for a bounded decision (route, classify,
+rank, verify) rather than to generate text, read
+[`docs/research/typesafe-system-one-2026-10-03.md`](docs/research/typesafe-system-one-2026-10-03.md)
+before writing a prompt-and-parse step. It records the TypeSafe System One
+contract and where such judgments do and do not fit this repository; the
+customer-validation invariant above still decides whether to build.
+
 ## Local Credentials for Agents
 
 When you need an API key against a local instance, provision your own —

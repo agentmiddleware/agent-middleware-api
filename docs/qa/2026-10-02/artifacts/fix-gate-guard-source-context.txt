@@ -1,0 +1,235 @@
+FILE app/core/url_guard.py
+1: """Outbound-URL guard for agent-driven navigation and proxied requests.
+2:
+3: Agent-supplied URLs reach two genuinely dangerous sinks: the AWI Playwright
+4: bridge (a real headless browser that will happily open ``file://`` and
+5: intranet URLs) and the behavioral sandbox's HTTP proxy mode (a raw
+6: ``aiohttp`` request). Both run inside our infrastructure, so an unchecked
+7: URL is an SSRF primitive against link-local metadata services, RFC1918
+8: networks, and the host filesystem.
+9:
+10: ``check_outbound_url`` returns ``None`` when the URL is safe to fetch and a
+11: short machine-readable reason string when it must be blocked. Scheme and
+12: literal-address checks are unconditional; hostname checks resolve DNS and
+13: block names that resolve to non-global addresses. Resolution failure fails
+14: closed (``dns_resolution_failed``): the guard cannot vouch for a name it
+15: could not resolve, and the fetching client (a headless browser with its own
+16: resolver, or a later retry) may well resolve it — possibly to an intranet
+17: address. This matches the upstream MCP URL guard. Tests that exercise
+18: public hostnames pin ``_resolve_host`` instead of relying on live DNS. This
+19: is a pre-flight guard, not a substitute for network-level egress policy,
+20: and it intentionally does not try to defeat DNS rebinding.
+21:
+22: Setting ``ALLOW_PRIVATE_NETWORK_TARGETS=true`` (local development against
+23: mock servers) skips only the private-address checks; non-http(s) schemes
+24: such as ``file://`` and ``javascript:`` are never allowed.
+25: """
+26:
+27: from __future__ import annotations
+28:
+29: import asyncio
+30: import ipaddress
+31: import socket
+32: from urllib.parse import urlsplit
+33:
+34: from app.core.config import get_settings
+35:
+36: _ALLOWED_SCHEMES = {"http", "https"}
+37: _BLOCKED_HOSTNAMES = {"localhost", "metadata.google.internal"}
+38: _BLOCKED_SUFFIXES = (".localhost", ".local", ".internal")
+39:
+40:
+41: def _address_blocked(address: str) -> bool:
+42:     try:
+43:         ip = ipaddress.ip_address(address)
+44:     except ValueError:
+45:         return False
+46:     # is_global is False for loopback, RFC1918/ULA, link-local (including
+47:     # 169.254.169.254 metadata), CGNAT shared space, multicast, reserved,
+48:     # and unspecified addresses.
+49:     return not ip.is_global
+50:
+51:
+52: async def _resolve_host(host: str):
+53:     """Resolve a hostname through the event loop; split out for deterministic tests."""
+54:
+55:     return await asyncio.get_running_loop().getaddrinfo(
+56:         host, None, type=socket.SOCK_STREAM
+57:     )
+58:
+59:
+60: async def check_outbound_url(url: str) -> str | None:
+61:     """Return a block reason for an agent-supplied outbound URL, or None."""
+62:     try:
+63:         parts = urlsplit(url)
+64:     except ValueError:
+65:         return "unparseable_url"
+66:
+67:     if parts.scheme.lower() not in _ALLOWED_SCHEMES:
+68:         return "scheme_not_allowed"
+69:
+70:     host = parts.hostname
+71:     if not host:
+72:         return "missing_host"
+73:
+74:     if get_settings().ALLOW_PRIVATE_NETWORK_TARGETS:
+75:         return None
+76:
+77:     host = host.strip("[]").rstrip(".").lower()
+78:     if host in _BLOCKED_HOSTNAMES or host.endswith(_BLOCKED_SUFFIXES):
+79:         return "private_host_blocked"
+80:
+81:     if _address_blocked(host):
+82:         return "private_address_blocked"
+83:
+84:     try:
+85:         ipaddress.ip_address(host)
+86:     except ValueError:
+87:         # A hostname, not a literal address: resolve it and require every
+88:         # resolved address to be globally routable.
+89:         try:
+90:             infos = await _resolve_host(host)
+91:         except (OSError, UnicodeError):
+92:             # socket.gaierror is an OSError; UnicodeError covers names the
+93:             # IDNA codec rejects (e.g. an over-long label). Fail closed.
+94:             return "dns_resolution_failed"
+95:         for info in infos:
+96:             if _address_blocked(str(info[4][0])):
+97:                 return "private_address_blocked"
+98:
+99:     return None
+FILE app/services/upstream_mcp.py
+360:         literal = None
+361:
+362:     explicit_loopback = host == "localhost" or host.endswith(".localhost")
+363:     addresses: Sequence[str]
+364:     if literal is not None:
+365:         explicit_loopback = literal.is_loopback
+366:         addresses = (str(literal),)
+367:     elif explicit_loopback:
+368:         addresses = ("127.0.0.1", "::1")
+369:     else:
+370:         try:
+371:             async with asyncio.timeout(configuration.connect_timeout_seconds):
+372:                 addresses = tuple(
+373:                     await (resolver or _default_resolver)(host, parts.port)
+374:                 )
+375:         except UpstreamMcpConfigurationError:
+376:             raise
+377:         except Exception:
+378:             raise UpstreamMcpConfigurationError(
+379:                 "MCP_UPSTREAM_URL host could not be resolved"
+380:             ) from None
+381:
+382:     if not addresses:
+383:         raise UpstreamMcpConfigurationError(
+384:             "MCP_UPSTREAM_URL host resolved to no addresses"
+385:         )
+386:
+387:     parsed_addresses: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
+388:     for address in addresses:
+389:         try:
+390:             parsed_addresses.append(ipaddress.ip_address(address))
+391:         except ValueError as exc:
+392:             raise UpstreamMcpConfigurationError(
+393:                 "MCP_UPSTREAM_URL resolution returned an invalid address"
+394:             ) from exc
+395:
+396:     local_environment = not is_production_like_environment(configuration.environment)
+397:     loopback_exception = (
+398:         local_environment
+399:         and explicit_loopback
+400:         and all(address.is_loopback for address in parsed_addresses)
+401:     )
+402:     if parts.scheme.lower() == "http" and not loopback_exception:
+403:         raise UpstreamMcpConfigurationError(
+404:             "MCP_UPSTREAM_URL must use https except for loopback local/test servers"
+405:         )
+406:     if not loopback_exception and any(
+407:         not address.is_global for address in parsed_addresses
+408:     ):
+409:         raise UpstreamMcpConfigurationError(
+410:             "MCP_UPSTREAM_URL must not resolve to private, loopback, link-local, metadata, or reserved addresses"
+411:         )
+412:     return str(parsed_addresses[0])
+413:
+414:
+415: @dataclass
+416: class _ResponseGuardState:
+417:     rejection_code: str | None = None
+418:     rejected: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
+419:
+420:     def reject(self, code: str) -> None:
+421:         if self.rejection_code is None:
+422:             self.rejection_code = code
+423:             self.rejected.set()
+424:
+425:
+426: class _GuardedResponseRejected(RuntimeError):
+427:     """Internal marker for a response rejected before buffering or parsing."""
+428:
+429:
+430: class _BoundedResponseStream(httpx.AsyncByteStream):
+431:     def __init__(
+432:         self,
+433:         stream: httpx.AsyncByteStream,
+434:         *,
+435:         limit: int,
+436:         state: _ResponseGuardState,
+437:     ) -> None:
+438:         self._stream = stream
+439:         self._limit = limit
+440:         self._state = state
+441:
+442:     async def __aiter__(self) -> AsyncIterator[bytes]:
+443:         received = 0
+444:         async for chunk in self._stream:
+445:             received += len(chunk)
+446:             if received > self._limit:
+447:                 self._state.reject("upstream_response_too_large")
+448:                 await self._stream.aclose()
+449:                 raise _GuardedResponseRejected("upstream_response_too_large")
+450:             yield chunk
+451:
+452:     async def aclose(self) -> None:
+453:         await self._stream.aclose()
+454:
+455:
+FILE tests/test_qa_20261002_backend.py
+145:
+146: @pytest.mark.parametrize("address", ["224.0.0.1", "239.255.255.250", "ff02::1", "ff05::1"])
+147: @pytest.mark.xfail(strict=True, reason="BE-003: is_global alone permits multicast addresses through outbound guards")
+148: async def test_outbound_url_guard_rejects_multicast(address, monkeypatch):
+149:     from app.core.config import get_settings
+150:     from app.core.url_guard import check_outbound_url
+151:
+152:     monkeypatch.setattr(get_settings(), "ALLOW_PRIVATE_NETWORK_TARGETS", False)
+153:     host = f"[{address}]" if ":" in address else address
+154:     assert await check_outbound_url(f"http://{host}/") == "private_address_blocked"
+155:
+156:
+157: @pytest.mark.parametrize("address", ["224.0.0.1", "ff02::1"])
+158: @pytest.mark.xfail(strict=True, reason="BE-003: is_global alone permits multicast addresses through upstream guard")
+159: async def test_upstream_url_guard_rejects_multicast(address):
+160:     from decimal import Decimal
+161:     from app.services.upstream_mcp import (
+162:         UpstreamMcpConfiguration,
+163:         UpstreamMcpConfigurationError,
+164:         validate_upstream_url,
+165:     )
+166:
+167:     host = f"[{address}]" if ":" in address else address
+168:     configuration = UpstreamMcpConfiguration(
+169:         url=f"https://{host}/mcp",
+170:         origin=f"https://{host}",
+171:         tool_name="notes.write",
+172:         public_tool_id="partner.notes.write",
+173:         bearer_token=[REDACTED],
+174:         credits_per_call=Decimal("1"),
+175:         connect_timeout_seconds=1.0,
+176:         call_timeout_seconds=1.0,
+177:         max_response_bytes=1024,
+178:         environment="production",
+179:     )
+180:     with pytest.raises(UpstreamMcpConfigurationError):
+181:         await validate_upstream_url(configuration)

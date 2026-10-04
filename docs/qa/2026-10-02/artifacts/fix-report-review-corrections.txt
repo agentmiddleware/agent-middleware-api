@@ -1,0 +1,1 @@
+Applied independent report review: exact coverage rounding, honest browser assertion wording, exact UX contrast test names.

@@ -1,0 +1,44 @@
+app/services/red_team.py:580:                notes="PATCHED: verify_api_key() rejects empty/short keys.",
+tests/test_wallet_status_enforcement.py:598:def test_charge_openapi_documents_wallet_expired_denial():
+tests/test_wallet_status_enforcement.py:604:def test_child_wallet_openapi_documents_wallet_expired_denial():
+tests/test_wallet_status_enforcement.py:612:def test_transfer_openapi_documents_wallet_expired_denial():
+tests/test_protocol.py:75:async def test_openapi_spec_structure(client):
+tests/conftest.py:143:# Configure auth so tests don't hit the fail-safe 503 in verify_api_key.
+tests/test_discovery.py:52:async def test_openapi_json_accessible(client):
+tests/test_security_headers.py:229:def test_full_app_openapi_has_csp_without_no_store() -> None:
+tests/test_awi_adoption.py:37:    def test_generate_from_openapi(self):
+tests/test_awi_adoption.py:56:    def test_openapi_endpoint_extraction(self):
+tests/test_awi_adoption.py:71:    def test_openapi_servers_extraction(self):
+tests/test_wedge_honesty.py:188:async def test_openapi_description_is_transaction_integrity_not_full_platform(client):
+tests/test_qa_20261002_backend.py:63:def test_openapi_schema_is_valid_with_unique_operation_ids():
+tests/test_qa_20261002_backend.py:66:    old_schema = app.openapi_schema
+tests/test_qa_20261002_backend.py:68:        app.openapi_schema = None
+tests/test_qa_20261002_backend.py:80:        app.openapi_schema = old_schema
+tests/test_qa_20261002_backend.py:84:def test_openapi_declares_supported_bearer_authentication():
+tests/test_public_metadata.py:21:def test_openapi_omits_contact_until_real_identity_is_configured() -> None:
+tests/test_public_metadata.py:26:def test_openapi_contact_accepts_complete_non_placeholder_identity() -> None:
+tests/test_public_metadata.py:115:def test_openapi_contact_rejects_partial_or_placeholder_identity(overrides) -> None:
+tests/test_discovery_drift.py:170:async def test_openapi_contains_core_control_plane_routes(client):
+tests/test_billing.py:106:def test_sponsor_creation_openapi_declares_bootstrap_admin_boundary():
+tests/test_billing.py:584:def test_direct_top_up_openapi_contract_is_deprecated_and_410_only():
+tests/test_human_accessibility.py:132:def test_openapi_documents_human_html_and_dashboard_not_found():
+app/core/auth.py:407:async def verify_api_key(
+app/core/rate_limiter.py:561:        # a header the caller controls, before verify_api_key has had a chance
+app/tools/awi_manifest_generator.py:131:    def generate_from_openapi(self, openapi_spec: dict) -> dict[str, Any]:
+app/routers/billing.py:17:from ..core.auth import AuthContext, get_auth_context, verify_api_key
+app/routers/billing.py:1268:    api_key: [REDACTED] = Depends(verify_api_key),
+app/routers/billing.py:1295:    api_key: [REDACTED] = Depends(verify_api_key),
+app/routers/billing.py:1384:    api_key: [REDACTED] = Depends(verify_api_key),
+app/routers/oracle.py:17:from ..core.auth import AuthContext, get_auth_context, verify_api_key
+app/routers/oracle.py:240:    api_key: [REDACTED] = Depends(verify_api_key),
+app/routers/oracle.py:269:    api_key: [REDACTED] = Depends(verify_api_key),
+app/routers/oracle.py:302:    api_key: [REDACTED] = Depends(verify_api_key),
+app/routers/oracle.py:334:    api_key: [REDACTED] = Depends(verify_api_key),
+app/routers/oracle.py:352:    api_key: [REDACTED] = Depends(verify_api_key),
+app/routers/factory.py:15:from ..core.auth import AuthContext, get_auth_context, verify_api_key
+app/routers/factory.py:320:    api_key: [REDACTED] = Depends(verify_api_key),
+app/routers/factory.py:336:    api_key: [REDACTED] = Depends(verify_api_key),
+app/routers/factory.py:355:    api_key: [REDACTED] = Depends(verify_api_key),
+app/routers/discover.py:11:from ..core.auth import reject_anonymous_production_catalog, verify_api_key
+app/routers/discover.py:563:async def list_mcp_tools(api_key: [REDACTED] = Depends(verify_api_key)):
+app/routers/discover.py:596:async def list_awi_endpoints(api_key: [REDACTED] = Depends(verify_api_key)):

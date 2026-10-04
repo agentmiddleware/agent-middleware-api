@@ -1,0 +1,36 @@
+---
+name: review-pr
+description: Use when reviewing a pull request or local diff in any repository. Prioritize behavioral regressions, security flaws, data-integrity risks, missing tests, deployment risk, and product-scope creep.
+---
+
+# Review PR
+
+## Review Stance
+
+Findings come first. Prioritize concrete bugs, regressions, missing tests, and
+security or data-integrity risks over style commentary.
+
+## Process
+
+1. Read applicable `AGENTS.md` files.
+2. Inspect the diff and surrounding files it depends on.
+3. Separate docs claims from executable code and tests.
+4. Check auth, authorization, tenant isolation, billing, secrets, deployment,
+   migrations, tool execution, and data-integrity paths carefully.
+5. Verify changed behavior against tests.
+6. Call out missing tests when they create meaningful risk.
+7. Flag product-scope creep and unnecessary abstractions.
+
+## Findings Format
+
+Lead with findings ordered by severity:
+
+- `P0` exploitable data loss, fund loss, secret exposure, or production outage.
+- `P1` auth bypass, cross-tenant access, billing/data corruption, migration
+  breakage, or serious regression.
+- `P2` meaningful correctness, reliability, or missing-test risk.
+- `P3` maintainability issues worth fixing but not release-blocking.
+
+For each finding, cite exact files and line numbers when possible, explain the
+impact, and describe the smallest likely fix. If no issues are found, say so
+and state residual risk.

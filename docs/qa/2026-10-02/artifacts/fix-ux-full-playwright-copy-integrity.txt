@@ -1,0 +1,40 @@
+frontend.spec.cjs
+Original SHA-1: d2524d36c54a3104a2c5a7af5f51b3a97cf7055e
+Temporary SHA-1: d4a9be6b85edb5f6cd50b46ea60c8770e62188a0
+Only intended loopback port substitutions: 1
+--- frontend.spec.cjs
++++ temporary/frontend.spec.cjs
+@@ -75,7 +75,7 @@
+ });
+
+ test('operator index is static and does not ask for credentials', async ({page}) => {
+-  await page.goto('http://127.0.0.1:8766/dashboard.html');
++  await page.goto('http://127.0.0.1:18766/dashboard.html');
+   await expect(page.locator('h1')).toContainText('Inspect the trust plane');
+   expect(await page.locator('script, input, form').count()).toBe(0);
+   await expect(page.locator('.notice')).toContainText('does not request API keys');
+
+ux-regressions.spec.cjs
+Original SHA-1: 99aca0f87fa00eee3c02da05a4bf1a59847dcaba
+Temporary SHA-1: 806faf0c46eef12389abb9487cd6943c571a5494
+Only intended loopback port substitutions: 2
+--- ux-regressions.spec.cjs
++++ temporary/ux-regressions.spec.cjs
+@@ -25,7 +25,7 @@
+ });
+
+ test('UX-002: dashboard scrollable commands have explicit keyboard access', async ({page}) => {
+-  await page.goto('http://127.0.0.1:8766/dashboard.html');
++  await page.goto('http://127.0.0.1:18766/dashboard.html');
+   const code = page.locator('pre');
+   const state = await code.evaluate(element => ({
+     scrolls: element.scrollWidth > element.clientWidth,
+@@ -47,7 +47,7 @@
+ });
+
+ test('UX-003: operator runtime links remain on the served origin', async ({page}) => {
+-  await page.goto('http://127.0.0.1:8766/dashboard.html');
++  await page.goto('http://127.0.0.1:18766/dashboard.html');
+   for (const name of [/Runtime truth/, /Current trust keys/, /Agent manifest/, /llms.txt/]) {
+     const links = page.getByRole('link', {name});
+     await expect(links.first()).toBeVisible();
