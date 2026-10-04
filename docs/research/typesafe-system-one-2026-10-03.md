@@ -246,3 +246,7 @@ repository does not use.
   [independently reviewed synthetic QA checkpoint](jev-advisory-checkpoint-2026-10-03.md)
   records observed results and limitations; it does not validate AMW behavior
   or authorize a product integration.
+
+## 2026-10-04 real prospecting follow-up
+
+The [real public-company prospecting and email review](jev-public-prospecting-2026-10-04.md) records five pinned-model calls, three grounded unsent discovery drafts and an actual bounded sequential/parallel comparison. Current need and execution-path ownership remain unverified. This adds research evidence and changes no runtime gate or deployed configuration.
