@@ -1,0 +1,47 @@
+✔ calculator covers empty, valid, equal, zero, invalid and overflow classes (93.180542ms)
+✔ receipt component handles http without network (16.343666ms)
+✔ receipt component handles json without network (8.965792ms)
+✔ receipt component handles key-mismatch without network (8.22425ms)
+✔ receipt component handles missing-payload without network (7.710208ms)
+✔ receipt component handles valid artifacts without network (8.085542ms)
+✔ SDK fails before transport for missing permit and invalid idempotency keys (34.59125ms)
+✔ SDK preserves retry identity, astral boundary and governed headers (6.358458ms)
+⚠ FE-001: declared SDK build produces its advertised entrypoints (283.26025ms) # FE-001: npm run build exits 1 because tsconfig.json is absent
+✔ FE-002: maxSteps=0 is not silently promoted to 100 actions (7.266042ms)
+✔ FE-002: session limits default only when absent and preserve API validation boundaries (5.660292ms)
+✔ UX-001: paper and dark fit lists meet 4.5:1 contrast (default) (224.592667ms)
+✔ UX-001: paper and dark fit lists meet 4.5:1 contrast (high) (41.412459ms)
+✔ UX-002: operator commands expose a named keyboard focus target (12.30725ms)
+✔ UX-003: operator runtime links resolve on the served origin (9.960875ms)
+✔ UX-003: inspection commands require an explicit API origin (8.997333ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 1
+ℹ duration_ms 1001.6925
+
+✖ failing tests:
+
+test at docs/qa/2026-10-02/frontend-components.test.cjs:130:1
+⚠ FE-001: declared SDK build produces its advertised entrypoints (283.26025ms) # FE-001: npm run build exits 1 because tsconfig.json is absent
+  AssertionError [ERR_ASSERTION]: Declared npm run build must succeed
+
+  1 !== 0
+
+      at TestContext.<anonymous> (/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api/docs/qa/2026-10-02/frontend-components.test.cjs:140:10)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

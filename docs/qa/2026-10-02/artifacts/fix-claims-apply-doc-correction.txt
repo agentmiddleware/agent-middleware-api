@@ -1,0 +1,1 @@
+Corrected BE-100 guidance in the three assigned pages; runtime behavior unchanged.

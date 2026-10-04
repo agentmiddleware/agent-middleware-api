@@ -1,0 +1,98 @@
+tests/test_route_auth_inventory.py:19:def test_state_changing_core_trust_routes_have_auth_dependencies():
+tests/test_jwt_auth.py:67:async def test_bearer_access_token_authenticates(jwt_service, live_key):
+tests/test_jwt_auth.py:81:async def test_raw_access_token_authenticates(jwt_service, live_key):
+tests/test_jwt_auth.py:94:async def test_jwt_contexts_do_not_share_raw_key(jwt_service, live_key):
+tests/test_jwt_auth.py:106:    one = await get_auth_context(api_key=[REDACTED], authorization=f"Bearer {first}")
+tests/test_jwt_auth.py:111:    again = await get_auth_context(api_key=[REDACTED], authorization=f"Bearer {first}")
+tests/test_jwt_auth.py:118:async def test_raw_unbound_access_token_fails_closed(jwt_service, auth_client):
+tests/test_jwt_auth.py:133:async def test_raw_revoked_access_token_fails_closed(
+tests/test_jwt_auth.py:156:async def test_raw_rejected_token_cannot_fall_through_to_configured_env_key(
+tests/test_jwt_auth.py:175:async def test_raw_rejected_token_cannot_fall_through_to_debug_bootstrap(
+tests/test_jwt_auth.py:196:async def test_unbound_access_token_fails_closed(jwt_service, auth_client):
+tests/test_jwt_auth.py:203:        headers={"Authorization": f"Bearer {token}"},
+tests/test_jwt_auth.py:211:async def test_http_bearer_access_token_takes_priority_over_api_key(
+tests/test_jwt_auth.py:221:            "Authorization": f"Bearer {token}",
+tests/test_jwt_auth.py:237:    "authorization",
+tests/test_jwt_auth.py:247:async def test_malformed_authorization_does_not_fall_back_to_api_key(
+tests/test_jwt_auth.py:248:    authorization, auth_client
+tests/test_jwt_auth.py:252:        headers={"Authorization": authorization, "X-API-Key": "test-key"},
+tests/test_jwt_auth.py:260:async def test_invalid_bearer_does_not_fall_back_to_api_key(auth_client):
+tests/test_jwt_auth.py:264:            "Authorization": "Bearer [REDACTED]",
+tests/test_jwt_auth.py:274:async def test_refresh_bearer_does_not_fall_back_to_api_key(jwt_service, auth_client):
+tests/test_jwt_auth.py:280:            "Authorization": f"Bearer {refresh_token}",
+tests/test_jwt_auth.py:292:async def test_http_x_api_key_remains_supported(auth_client):
+tests/test_jwt_auth.py:303:def test_payload_exp_is_epoch_seconds(jwt_service):
+tests/test_jwt_auth.py:338:def test_signed_token_missing_a_required_claim_is_refused(jwt_service, claim):
+tests/test_jwt_auth.py:351:@pytest.mark.parametrize("header", ["Authorization", "X-API-Key"])
+tests/test_jwt_auth.py:352:async def test_token_without_exp_is_401_on_both_header_paths(
+tests/test_jwt_auth.py:356:    value = f"Bearer {token}" if header == "Authorization" else token
+tests/test_jwt_auth.py:381:async def test_raw_token_failure_is_not_masked_as_an_api_key_lookup(
+tests/test_jwt_auth.py:395:        await get_auth_context(api_key=[REDACTED], authorization=f"Bearer {token}")
+tests/test_jwt_auth.py:401:async def test_raw_token_failure_cannot_fall_through_to_debug_bootstrap(
+tests/test_iga_policy.py:227:async def test_okta_principal_with_mapped_active_bundle_allows(
+tests/test_iga_policy.py:248:async def test_tool_outside_bundle_allowlist_is_blocked(
+tests/test_iga_policy.py:265:async def test_corrupt_bundle_allowlist_blocks_instead_of_allowing_everything(
+tests/test_iga_policy.py:292:async def test_unauthorized_principal_without_required_role_is_blocked(
+tests/test_iga_policy.py:310:async def test_entra_roles_claim_allows(iga_config, clean_database, rsa_key):
+tests/test_iga_policy.py:327:async def test_entra_groups_claim_fallback(iga_config, rsa_key):
+tests/test_iga_policy.py:338:async def test_missing_group_claim_is_empty_not_error(iga_config, rsa_key):
+tests/test_iga_policy.py:347:async def test_expired_token_rejected(iga_config, rsa_key):
+tests/test_iga_policy.py:354:async def test_wrong_audience_rejected(iga_config, rsa_key):
+tests/test_iga_policy.py:361:async def test_unknown_issuer_rejected(iga_config, rsa_key):
+tests/test_iga_policy.py:368:async def test_token_signed_with_wrong_key_rejected(iga_config, rsa_key, wrong_rsa_key):
+tests/test_iga_policy.py:376:async def test_unknown_kid_rejected(iga_config, rsa_key):
+tests/test_iga_policy.py:383:async def test_hs256_token_rejected_when_only_rs256_allowed(iga_config, rsa_key):
+tests/test_iga_policy.py:404:async def test_malformed_token_rejected(iga_config, rsa_key):
+tests/test_iga_policy.py:411:async def test_malformed_issuer_config_fails_closed_at_use_time(iga_config, rsa_key):
+tests/test_iga_policy.py:418:async def test_malformed_issuer_config_disables_routing_loudly(
+tests/test_iga_policy.py:434:async def test_malformed_group_map_fails_closed_at_use_time(iga_config, rsa_key):
+tests/test_iga_policy.py:476:async def test_structurally_invalid_issuer_config_fails_closed(
+tests/test_iga_policy.py:486:async def test_unknown_issuer_host_without_explicit_provider_fails_closed(
+tests/test_iga_policy.py:521:async def test_structurally_invalid_group_map_fails_closed(
+tests/test_iga_policy.py:538:async def test_max_uses_exhausted_blocks_third_call(
+tests/test_iga_policy.py:561:async def test_velocity_window_blocks_burst_then_recovers(
+tests/test_iga_policy.py:597:async def test_velocity_windows_are_tracked_per_grant(
+tests/test_iga_policy.py:670:async def test_max_uses_are_tracked_per_grant(iga_config, clean_database, rsa_key):
+tests/test_iga_policy.py:701:async def test_release_tool_use_compensates_exactly_and_clamps_at_zero(
+tests/test_iga_policy.py:736:async def test_inactive_policy_bundle_blocks(iga_config, clean_database, rsa_key):
+tests/test_iga_policy.py:748:async def test_denial_prefers_tool_not_allowed_over_inactive(
+tests/test_iga_policy.py:774:async def test_get_enterprise_principal_none_when_disabled_or_headerless(rsa_key):
+tests/test_iga_policy.py:777:    assert await get_enterprise_principal(authorization=None) is None
+tests/test_iga_policy.py:779:        await get_enterprise_principal(authorization=f"Bearer {_mint(rsa_key)}") is None
+tests/test_iga_policy.py:783:async def test_get_enterprise_principal_ignores_internal_issuer_tokens(
+tests/test_iga_policy.py:787:    assert await get_enterprise_principal(authorization=None) is None
+tests/test_iga_policy.py:788:    assert await get_enterprise_principal(authorization="Basic abc123") is None
+tests/test_iga_policy.py:793:        await get_enterprise_principal(authorization=f"Bearer {internal_token}") is None
+tests/test_iga_policy.py:797:async def test_get_enterprise_principal_401_on_bad_enterprise_token(
+tests/test_iga_policy.py:803:            authorization=f"Bearer {_mint(rsa_key, exp_delta=-60)}"
+tests/test_iga_policy.py:809:async def test_get_enterprise_principal_returns_verified_principal(iga_config, rsa_key):
+tests/test_iga_policy.py:812:    principal = await get_enterprise_principal(authorization=f"Bearer {token}")
+tests/test_iga_policy.py:818:async def test_require_enterprise_tool_access_403_with_decision_reason(
+tests/test_iga_policy.py:852:# tool is registered, and the enterprise bearer [REDACTED] the Authorization
+tests/test_iga_policy.py:969:async def test_enterprise_bearer_with_required_group_allows_governed_call(
+tests/test_iga_policy.py:991:                "Authorization": f"Bearer {token}",
+tests/test_iga_policy.py:1004:async def test_enterprise_bearer_without_required_group_is_blocked_on_wire(
+tests/test_iga_policy.py:1026:                "Authorization": f"Bearer {token}",
+tests/test_iga_policy.py:1042:async def test_enterprise_bearer_with_invalid_signature_is_denied_not_dispatched(
+tests/test_iga_policy.py:1064:                "Authorization": f"Bearer {token}",
+tests/test_iga_policy.py:1074:async def test_api_key_only_governed_call_unaffected_by_iga_config(
+tests/test_iga_policy.py:1101:async def test_insufficient_funds_denial_releases_iga_use(
+tests/test_iga_policy.py:1137:        headers = {**agent_headers, "Authorization": f"Bearer {token}"}
+tests/test_iga_policy.py:1172:async def test_ledger_contention_releases_iga_use(
+tests/test_iga_policy.py:1201:        headers = {**agent_headers, "Authorization": f"Bearer {token}"}
+tests/test_iga_policy.py:1246:async def test_a_contended_remote_charge_keeps_the_use_it_cannot_prove_unspent(
+tests/test_iga_policy.py:1282:        headers = {**setup["agent_headers"], "Authorization": f"Bearer {token}"}
+tests/test_iga_policy.py:1318:async def test_remote_insufficient_funds_releases_the_use_before_the_fallible_budget_cleanup(
+tests/test_iga_policy.py:1363:        headers = {**setup["agent_headers"], "Authorization": f"Bearer {token}"}
+tests/test_iga_policy.py:1413:async def test_enterprise_shaped_bearer_still_401s_when_iga_disabled(
+tests/test_iga_policy.py:1444:                "Authorization": f"Bearer {token}",
+app/main.py:505:        "the downstream effect. A remote side effect is exactly once only when "
+app/main.py:1246:        "duplicate_request_new_key across the service lifetime) and the scope "
+docs/openapi.json:5:    "description": "## Agent Transaction Integrity\n\n**Make consequential agent actions transactional.**\n\nTransaction-integrity boundary for consequential autonomous actions on the configured upstream-MCP path: one logical action binds scoped authority and configured consumption to at most one gateway dispatch and debit, records delivery_uncertain instead of automatically redispatching, and links gateway evidence for required external reconciliation.\n\nIt is not a full agent middleware platform. This is a durable gateway state machine, not one distributed ACID transaction and not proof of the downstream effect. A remote side effect is exactly once only when the upstream honors the forwarded idempotency key. See `/WEDGE.md` and `/SECURITY_LIMITATIONS.md`.\n\n### Canonical Loop\n\n`logical action -> authorize -> reserve allowance -> debit -> claim dispatch -> confirmed outcome | delivery_uncertain -> receipt/audit -> authoritative external reconciliation required`\n\n### Product Surface\n\n- **Logical action identity** — accepted key bound to one payload\n- **Bounded authority consumption** — scoped permit and configured allowance\n- **One-shot gateway dispatch/debit** — at most once per accepted action\n- **Explicit uncertainty** — `delivery_uncertain` is not auto-redispatched\n- **Linked gateway evidence** — receipt and audit data for reconciliation\n- **Discovery** — `.well-known/agent.json`, `/mcp/tools.json`, `/llms.txt`, `/v1/discover`\n\n### Proof Surfaces\n\nAgentic-web, browser, content, oracle, sandbox, media, IoT, red-team, and telemetry demos are labeled scaffolding. They mount only when `ENABLE_PROOF_SURFACES=true` and do not define the product.\n\n### Authentication\n\nProtected endpoints require an API key via the `X-API-Key` header.\n\n### For Agents\n\nStart at `/.well-known/agent.json`, then `/llms.txt` and `/mcp/tools.json`. Prefer `PUBLIC_URL` over any localhost server entry.",
+docs/openapi.json:3538:        "description": "Rotate an API key by creating a new one and optionally revoking the old one. Returns the new key which is only shown once.",
+docs/openapi.json:5228:        "description": "Returns the current duplicate guard mode and observability metrics. Exposes log_mode_blocks (how many times log mode detected but allowed a duplicate) and enforce_mode_blocks (how many times enforce mode blocked a duplicate) for this process, plus enforce_mode_denials_durable (denial receipts with reason_code duplicate_request_new_key across the service lifetime) and the scope of each metric. Does not expose request contents or secrets. Requires bootstrap admin authentication.",
+docs/openapi.json:6466:          "create_new_key": {
+docs/openapi.json:6683:          "new_key_id": {
+docs/openapi.json:9034:            "description": "Specific key ID to rotate. None = create new key only."
+docs/openapi.json:9078:          "new_key": {
+OPENAPI CLAIM MATCHES

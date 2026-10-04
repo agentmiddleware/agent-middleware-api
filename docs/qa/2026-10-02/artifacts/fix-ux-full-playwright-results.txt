@@ -1,0 +1,11 @@
+Playwright stats: {"duration": 9841.148, "expected": 0, "flaky": 0, "skipped": 0, "startTime": "2026-10-03T03:55:57.797Z", "unexpected": 33}
+Attempted results: 33
+Counts by engine: {'chromium': 11, 'firefox': 11, 'webkit': 11}
+Result statuses: {'failed': 33}
+Failure causes: {'Error: browserType.launch: Target page, context or browser has been closed': 11, "Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox": 11, "Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/webkit-2359/pw_run.sh": 11}
+All errors precede navigation in browserType.launch: True
+Formerly expected-failure UX results: 9
+Current path exists: /private/tmp/amw-fix-browsers True
+Current path exists: /private/tmp/amw-fix-browsers/webkit-2359/pw_run.sh False
+Owned temporary server port 18765: no listener
+Owned temporary server port 18766: no listener

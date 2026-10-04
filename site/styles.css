@@ -1803,9 +1803,6 @@ html[data-a11y-motion="reduce"].arcade-open .site-footer {
   line-height: 1.65;
 }
 
-/* The good-fit list sits on a paper card. --text-dim is the dark-surface
-   muted color and measures 2.13:1 on --paper, so it takes the paper-surface
-   muted ink instead; the dark replay card keeps the inherited color. */
 .proof-col:not(.replay) .fit-list li {
   color: var(--paper-dim);
 }

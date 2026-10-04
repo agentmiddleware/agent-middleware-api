@@ -1,0 +1,435 @@
+docs/qa/2026-10-02/backend_safety/sitecustomize.py
+"""QA-only guard inherited by Python child processes; never used by product."""
+import ipaddress
+import os
+import socket
+import sys
+
+# Suppress all dotenv I/O before importing app settings.
+from pydantic_settings.sources import DotEnvSettingsSource
+DotEnvSettingsSource._read_env_files = lambda self: {}
+import dotenv
+dotenv.load_dotenv = lambda *args, **kwargs: False
+dotenv.dotenv_values = lambda *args, **kwargs: {}
+
+def local(host):
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+def numeric_address(host):
+    # inet_aton parses legacy numeric IPv4 spellings without DNS or I/O.
+    # Existing SSRF tests deliberately ask getaddrinfo to classify these.
+    try:
+        socket.inet_aton(host)
+        return True
+    except (OSError, TypeError):
+        return False
+
+
+def guard(event, args):
+    if event in ("socket.connect", "socket.sendto"):
+        address = args[1]
+        if isinstance(address, tuple) and not local(address[0]):
+            raise PermissionError("QA guard: non-loopback network denied")
+    if event == "socket.getaddrinfo" and args[0] is not None and not local(args[0]) and not numeric_address(args[0]):
+        raise PermissionError("QA guard: external DNS denied")
+    if event == "subprocess.Popen":
+        executable = os.path.basename(str(args[0]))
+        if executable in {"railway", "vercel", "fly", "supabase", "firebase", "curl", "wget"}:
+            raise PermissionError("QA guard: external command denied")
+    if event == "open" and isinstance(args[0], (str, bytes)):
+        name = os.path.basename(os.fsdecode(args[0]))
+        if name == ".env" or name.startswith(".env."):
+            raise PermissionError("QA guard: environment file access denied")
+
+sys.addaudithook(guard)
+
+app/core/url_guard.py
+"""Outbound-URL guard for agent-driven navigation and proxied requests.
+
+Agent-supplied URLs reach two genuinely dangerous sinks: the AWI Playwright
+bridge (a real headless browser that will happily open ``file://`` and
+intranet URLs) and the behavioral sandbox's HTTP proxy mode (a raw
+``aiohttp`` request). Both run inside our infrastructure, so an unchecked
+URL is an SSRF primitive against link-local metadata services, RFC1918
+networks, and the host filesystem.
+
+``check_outbound_url`` returns ``None`` when the URL is safe to fetch and a
+short machine-readable reason string when it must be blocked. Scheme and
+literal-address checks are unconditional; hostname checks resolve DNS and
+block names that resolve to non-global addresses. Resolution failure fails
+closed (``dns_resolution_failed``): the guard cannot vouch for a name it
+could not resolve, and the fetching client (a headless browser with its own
+resolver, or a later retry) may well resolve it — possibly to an intranet
+address. This matches the upstream MCP URL guard. Tests that exercise
+public hostnames pin ``_resolve_host`` instead of relying on live DNS. This
+is a pre-flight guard, not a substitute for network-level egress policy,
+and it intentionally does not try to defeat DNS rebinding.
+
+Setting ``ALLOW_PRIVATE_NETWORK_TARGETS=true`` (local development against
+mock servers) skips only the private-address checks; non-http(s) schemes
+such as ``file://`` and ``javascript:`` are never allowed.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import ipaddress
+import socket
+from urllib.parse import urlsplit
+
+from app.core.config import get_settings
+
+_ALLOWED_SCHEMES = {"http", "https"}
+_BLOCKED_HOSTNAMES = {"localhost", "metadata.google.internal"}
+_BLOCKED_SUFFIXES = (".localhost", ".local", ".internal")
+
+
+def _address_blocked(address: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:
+        return False
+    # is_global is False for loopback, RFC1918/ULA, link-local (including
+    # 169.254.169.254 metadata), CGNAT shared space, multicast, reserved,
+    # and unspecified addresses.
+    return not ip.is_global
+
+
+async def _resolve_host(host: str):
+    """Resolve a hostname through the event loop; split out for deterministic tests."""
+
+    return await asyncio.get_running_loop().getaddrinfo(
+        host, None, type=socket.SOCK_STREAM
+    )
+
+
+async def check_outbound_url(url: str) -> str | None:
+    """Return a block reason for an agent-supplied outbound URL, or None."""
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return "unparseable_url"
+
+    if parts.scheme.lower() not in _ALLOWED_SCHEMES:
+        return "scheme_not_allowed"
+
+    host = parts.hostname
+    if not host:
+        return "missing_host"
+
+    if get_settings().ALLOW_PRIVATE_NETWORK_TARGETS:
+        return None
+
+    host = host.strip("[]").rstrip(".").lower()
+    if host in _BLOCKED_HOSTNAMES or host.endswith(_BLOCKED_SUFFIXES):
+        return "private_host_blocked"
+
+    if _address_blocked(host):
+        return "private_address_blocked"
+
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        # A hostname, not a literal address: resolve it and require every
+        # resolved address to be globally routable.
+        try:
+            infos = await _resolve_host(host)
+        except (OSError, UnicodeError):
+            # socket.gaierror is an OSError; UnicodeError covers names the
+            # IDNA codec rejects (e.g. an over-long label). Fail closed.
+            return "dns_resolution_failed"
+        for info in infos:
+            if _address_blocked(str(info[4][0])):
+                return "private_address_blocked"
+
+    return None
+
+tests/test_qa_20261002_backend.py
+"""QA sweep: public auth contract and replay-key encoding boundaries.
+
+Optional generative/schema tooling is installed by docs/qa/2026-10-02/
+requirements-qa.txt. Product behavior is deliberately unchanged.
+"""
+from __future__ import annotations
+
+import json
+from collections import Counter
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from app.main import app
+from app.services.idempotency import (
+    InvalidIdempotencyKeyError,
+    decode_idempotency_key_header,
+    resolve_client_idempotency_key,
+)
+from tests.test_mcp_idempotency_key_validation import CountedTool, _snapshot
+from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
+
+
+@pytest.fixture
+async def qa_client():
+    async with AsyncClient(
+        transport=ASGITransport(app=app, raise_app_exceptions=False),
+        base_url="http://test",
+    ) as client:
+        yield client
+
+
+@pytest.mark.parametrize("method,path", [
+    ("GET", "/v1/permits"),
+    ("POST", "/v1/permits"),
+    ("GET", "/v1/receipts"),
+    ("GET", "/v1/receipts/missing"),
+    ("GET", "/v1/billing/wallets"),
+    ("POST", "/v1/billing/charge"),
+    ("GET", "/v1/audit/events"),
+    ("POST", "/v1/audit/verify-chain"),
+    ("GET", "/v1/me/authority"),
+    ("GET", "/v1/api-keys/missing"),
+    ("POST", "/mcp/messages"),
+    ("POST", "/mcp/tools/missing/invoke"),
+])
+@pytest.mark.parametrize("credential", ["absent", "invalid-bearer"])
+async def test_sensitive_route_rejects_unauthenticated_caller(
+    qa_client, method, path, credential
+):
+    # A malformed Authorization header must not fall back to a valid bootstrap key.
+    headers = {} if credential == "absent" else {
+        "Authorization": "Bearer [REDACTED]",
+        "X-API-Key": "test-key",
+    }
+    response = await qa_client.request(method, path, headers=headers, json={})
+    assert response.status_code == 401
+    assert response.headers["content-type"].startswith("application/json")
+    assert "traceback" not in response.text.lower()
+    assert "X-Credential-Rejected" not in response.headers
+
+
+def test_openapi_schema_is_valid_with_unique_operation_ids():
+    validator = pytest.importorskip("openapi_spec_validator")
+    # Force a fresh schema: other tests mount dormant routers dynamically.
+    old_schema = app.openapi_schema
+    try:
+        app.openapi_schema = None
+        schema = app.openapi()
+        validator.validate(schema)
+        operations = [
+            operation
+            for path in schema["paths"].values()
+            for method, operation in path.items()
+            if method in {"get", "post", "put", "patch", "delete"}
+        ]
+        counts = Counter(operation["operationId"] for operation in operations)
+        assert all(count == 1 for count in counts.values())
+    finally:
+        app.openapi_schema = old_schema
+
+
+@pytest.mark.xfail(strict=True, reason="BE-002: Bearer [REDACTED] is absent from OpenAPI security schemes")
+def test_openapi_declares_supported_bearer_authentication():
+    schemes = app.openapi()["components"]["securitySchemes"].values()
+    assert any(s.get("type") == "http" and s.get("scheme") == "bearer" for s in schemes)
+
+
+def test_scalar_unicode_replay_keys_roundtrip_without_normalization():
+    hypothesis = pytest.importorskip("hypothesis")
+    from hypothesis import strategies as st
+
+    alphabet = st.characters(
+        exclude_categories=("Cs",),
+        exclude_characters="".join(chr(i) for i in [*range(32), 127]),
+    )
+
+    @hypothesis.settings(max_examples=200, derandomize=True, deadline=None)
+    @hypothesis.given(st.text(alphabet=alphabet, min_size=1, max_size=128).filter(str.strip))
+    def check(key):
+        decoded = decode_idempotency_key_header(key.encode("utf-8").decode("latin-1"))
+        assert decoded == key
+        assert resolve_client_idempotency_key([("header", decoded), ("body", key)]) == key
+        with pytest.raises(InvalidIdempotencyKeyError):
+            resolve_client_idempotency_key([("header", key), ("body", key + " ")])
+
+    check()
+
+
+async def test_lone_surrogate_replay_key_is_rejected_before_effect_or_debit(
+    qa_client, clean_database
+):
+    tool = CountedTool("qa.encoding.effect")
+    try:
+        caller = await provision_agent_wallet(qa_client)
+        permit = await create_tool_permit(
+            qa_client,
+            wallet_id=caller["agent_wallet_id"],
+            key_id=caller["key_id"],
+            tool_name=tool.name,
+        )
+        before = await _snapshot(qa_client, caller, tool)
+        body = {
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {
+                "name": tool.name, "arguments": {"text": "one"},
+                "mcpContext": {
+                    "wallet_id": caller["agent_wallet_id"],
+                    "permit_id": permit["permit_id"],
+                    "idempotency_key": "\ud800",
+                },
+            },
+        }
+        response = await qa_client.post(
+            "/mcp/messages",
+            content=json.dumps(body).encode("ascii"),
+            headers={**caller["agent_headers"], "Content-Type": "application/json"},
+        )
+        assert await _snapshot(qa_client, caller, tool) == before
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Invalid JSON"
+    finally:
+        tool.close()
+
+
+@pytest.mark.parametrize("address", ["224.0.0.1", "239.255.255.250", "ff02::1", "ff05::1"])
+@pytest.mark.xfail(strict=True, reason="BE-003: is_global alone permits multicast addresses through outbound guards")
+async def test_outbound_url_guard_rejects_multicast(address, monkeypatch):
+    from app.core.config import get_settings
+    from app.core.url_guard import check_outbound_url
+
+    monkeypatch.setattr(get_settings(), "ALLOW_PRIVATE_NETWORK_TARGETS", False)
+    host = f"[{address}]" if ":" in address else address
+    assert await check_outbound_url(f"http://{host}/") == "private_address_blocked"
+
+
+@pytest.mark.parametrize("address", ["224.0.0.1", "ff02::1"])
+@pytest.mark.xfail(strict=True, reason="BE-003: is_global alone permits multicast addresses through upstream guard")
+async def test_upstream_url_guard_rejects_multicast(address):
+    from decimal import Decimal
+    from app.services.upstream_mcp import (
+        UpstreamMcpConfiguration,
+        UpstreamMcpConfigurationError,
+        validate_upstream_url,
+    )
+
+    host = f"[{address}]" if ":" in address else address
+    configuration = UpstreamMcpConfiguration(
+        url=f"https://{host}/mcp",
+        origin=f"https://{host}",
+        tool_name="notes.write",
+        public_tool_id="partner.notes.write",
+        bearer_token=[REDACTED],
+        credits_per_call=Decimal("1"),
+        connect_timeout_seconds=1.0,
+        call_timeout_seconds=1.0,
+        max_response_bytes=1024,
+        environment="production",
+    )
+    with pytest.raises(UpstreamMcpConfigurationError):
+        await validate_upstream_url(configuration)
+
+UPSTREAM GUARD
+
+
+async def validate_upstream_url(
+    configuration: UpstreamMcpConfiguration,
+    *,
+    resolver: Resolver | None = None,
+) -> str:
+    """Validate the destination and return the address to pin for connection."""
+    parts = _parse_url_shape(configuration.url)
+    host = (parts.hostname or "").strip("[]").rstrip(".").lower()
+    if host in _BLOCKED_HOSTNAMES or host.endswith(_BLOCKED_HOST_SUFFIXES):
+        raise UpstreamMcpConfigurationError(
+            "MCP_UPSTREAM_URL host is reserved for internal infrastructure"
+        )
+
+    literal: ipaddress.IPv4Address | ipaddress.IPv6Address | None
+    try:
+        literal = ipaddress.ip_address(host)
+    except ValueError:
+        literal = None
+
+    explicit_loopback = host == "localhost" or host.endswith(".localhost")
+    addresses: Sequence[str]
+    if literal is not None:
+        explicit_loopback = literal.is_loopback
+        addresses = (str(literal),)
+    elif explicit_loopback:
+        addresses = ("127.0.0.1", "::1")
+    else:
+        try:
+            async with asyncio.timeout(configuration.connect_timeout_seconds):
+                addresses = tuple(
+                    await (resolver or _default_resolver)(host, parts.port)
+                )
+        except UpstreamMcpConfigurationError:
+            raise
+        except Exception:
+            raise UpstreamMcpConfigurationError(
+                "MCP_UPSTREAM_URL host could not be resolved"
+            ) from None
+
+    if not addresses:
+        raise UpstreamMcpConfigurationError(
+            "MCP_UPSTREAM_URL host resolved to no addresses"
+        )
+
+    parsed_addresses: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
+    for address in addresses:
+        try:
+            parsed_addresses.append(ipaddress.ip_address(address))
+        except ValueError as exc:
+            raise UpstreamMcpConfigurationError(
+                "MCP_UPSTREAM_URL resolution returned an invalid address"
+            ) from exc
+
+    local_environment = not is_production_like_environment(configuration.environment)
+    loopback_exception = (
+        local_environment
+        and explicit_loopback
+        and all(address.is_loopback for address in parsed_addresses)
+    )
+    if parts.scheme.lower() == "http" and not loopback_exception:
+        raise UpstreamMcpConfigurationError(
+            "MCP_UPSTREAM_URL must use https except for loopback local/test servers"
+        )
+    if not loopback_exception and any(
+        not address.is_global for address in parsed_addresses
+    ):
+        raise UpstreamMcpConfigurationError(
+            "MCP_UPSTREAM_URL must not resolve to private, loopback, link-local, metadata, or reserved addresses"
+        )
+    return str(parsed_addresses[0])
+
+
+@dataclass
+class _ResponseGuardState:
+    rejection_code: str | None = None
+    rejected: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
+
+    def reject(self, code: str) -> None:
+        if self.rejection_code is None:
+            self.rejection_code = code
+            self.rejected.set()
+
+
+class _GuardedResponseRejected(RuntimeError):
+    """Internal marker for a response rejected before buffering or parsing."""
+
+
+class _BoundedResponseStream(httpx.AsyncByteStream):
+    def __init__(
+        self,
+        stream: httpx.AsyncByteStream,
+        *,
+        limit: int,
+        state: _ResponseGuardState,
+    ) -> None:
+        self._stream = stream
+        self._limit = limit
+        self._state = state
