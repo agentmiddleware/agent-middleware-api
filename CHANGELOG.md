@@ -11,42 +11,23 @@ The next release consolidates the accumulated trust-plane and public-product
 work as `v1.3.0`. Create that tag only from the exact commit that passes the
 full release gate; do not backfill a final `v1.2.0` tag.
 
-### Fixed — 2026-10-02 QA sweep follow-up
+### Added — SDK build config and TypeSafe research record
 
-The eight findings the 2026-10-02 QA sweep (`docs/qa/2026-10-02/FINDINGS.md`)
-left unfixed in product code, each re-verified before the change. The strict
-expected-failure tests that pinned them now run as ordinary regressions.
+Follow-up to the 2026-10-02 QA fixes merged in #587, which deferred FE-001.
 
-- **BE-003 — outbound guards refuse multicast.** `check_outbound_url` and
-  `validate_upstream_url` relied on `is_global`, which the stdlib leaves True
-  for 224.0.0.0/4 and ff00::/8. Both now also reject `is_multicast`, before any
-  connection, for literal and resolved addresses.
-- **BE-002 — OpenAPI declares Bearer authentication.** `get_auth_context`
-  carries an `HTTPBearer` scheme next to `APIKeyHeader`, so generated clients
-  see the two credentials as alternatives. Documentation only: the raw
-  `Authorization` header is still parsed by the same code, and a malformed
-  bearer is still refused rather than falling back to an accompanying API
-  key. `docs/openapi.json` regenerated.
-- **BE-100 — integration pages no longer overclaim.** `docs/agent-self-credentialing.md`,
-  `docs/tool-interface-authority.md`, and `ELEVATOR_PITCH.md` now say "at most
-  one" dispatch and debit, name the upstream-only durable dispatch state
-  machine, and link the `manual_review_required` outcome in which effects are
-  committed and no receipt exists.
 - **FE-001 — the unshipped TypeScript SDK builds as declared.**
   `awi_sdk/typescript/tsconfig.json` emits `dist/index.js` and
-  `dist/index.d.ts`, the entrypoints `package.json` already advertised.
-- **FE-002 — an explicit `maxSteps: 0` reaches the API.** `createSession`
-  used a truthy default, turning zero into 100 actions; it is nullish now, so
-  zero is sent and rejected by the API's minimum-one validation.
-- **UX-001 — comparison good-fit text meets AA contrast.** The list on the
-  paper card uses `--paper-dim` instead of the dark-surface `--text-dim`
-  (2.13:1 on `--paper`); the dark replay card is unchanged.
-- **UX-002 — operator command block is keyboard reachable.** The scrolling
-  `<pre>` on `/dashboard` is a focusable, named region.
-- **UX-003 — operator dashboard inspects the origin that serves it.** Runtime
-  truth, trust keys, agent manifest, and `llms.txt` links are same-origin; the
-  curl examples take `API_URL`; the hosted proof link is labeled as a
-  separately hosted sample.
+  `dist/index.d.ts`, the entrypoints `package.json` already advertised. The QA
+  contract test for it now runs as an ordinary regression.
+- **Upstream URL guard message names multicast.** The refusal text of
+  `validate_upstream_url` now lists multicast addresses, matching the check that
+  rejects them.
+- **TypeSafe System One research record.**
+  `docs/research/typesafe-system-one-2026-10-03.md` records the TypeSafe
+  contract and where bounded model judgments do and do not fit this repository.
+  `AGENTS.md` points implementers at it. Research only: no product code or
+  dependency changes, and no new capability without the evidence `AGENTS.md`
+  requires.
 
 ### Changed — duplicate guard observability and release gates
 
