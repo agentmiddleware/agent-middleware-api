@@ -41,8 +41,9 @@ logger = logging.getLogger(__name__)
 # Trust-plane tables that must exist after Alembic (or a stamped legacy DB).
 # alembic_version is intentionally omitted: a DB previously bootstrapped via
 # create_all may have trust tables without a stamp; requiring the stamp would
-# refuse a healthy service. Operators enabling RUN_MIGRATIONS_ON_START on such
-# a DB should `alembic stamp head` first.
+# refuse a healthy service. Before enabling RUN_MIGRATIONS_ON_START, operators
+# must compare physical schema and data-migration history and review recovery
+# under docs/schema-042-rollout.md; table presence does not prove parity.
 REQUIRED_TRUST_TABLES = frozenset(
     {
         "permits",
@@ -295,7 +296,8 @@ def _missing_required_columns(sync_conn) -> set[str]:  # noqa: ANN001
 def _stale_alembic_message(sync_conn) -> str | None:  # noqa: ANN001
     """If alembic_version is stamped but behind packaged head, return an error.
 
-    Legacy create_all DBs without a stamp are skipped (table check is enough).
+    Legacy create_all DBs without a stamp use the separate table/column checks.
+    Those boot checks do not establish historical data-migration equivalence.
     """
     inspector = sa_inspect(sync_conn)
     if "alembic_version" not in inspector.get_table_names():
@@ -312,7 +314,9 @@ def _stale_alembic_message(sync_conn) -> str | None:  # noqa: ANN001
     if not current:
         return (
             "alembic_version exists but has no revision. "
-            "Run `alembic stamp head` or `alembic upgrade head`."
+            "Stop for manual review of physical schema and data-migration history; "
+            "stamp only a proven matching historical revision, then apply required "
+            "migrations under docs/schema-042-rollout.md. Table presence is not parity."
         )
     if current != heads:
         return (
