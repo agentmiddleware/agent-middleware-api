@@ -234,6 +234,14 @@ async def ask(
     }
 
 
+def choice_confidence(answer: dict[str, Any]) -> float:
+    """Jev's `confidence` key is optional on the wire; fall back to the top probability."""
+    if "confidence" in answer:
+        return float(answer["confidence"])
+    probabilities = answer.get("probabilities") or {}
+    return max(map(float, probabilities.values()), default=0.0)
+
+
 def rank(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     out: dict[str, list[dict[str, Any]]] = {
         "defects": [],
@@ -257,7 +265,7 @@ def rank(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
             out["outside_wedge"].append(r)
         if (
             reality["choice"] in {"stubbed", "misleading", "demo_only"}
-            and reality["confidence"] >= RANKING["low_confidence"]
+            and choice_confidence(reality) >= RANKING["low_confidence"]
         ):
             out["not_real"].append(r)
     out["defects"].sort(key=lambda r: -r["answers"]["security_defect"]["noul"])
@@ -318,7 +326,7 @@ def report(
         "## Stubbed, demo-only, or misleading",
         "",
         *[
-            f"- {loc(r)} — {r['answers']['reality_level']['choice']} (conf {r['answers']['reality_level']['confidence']:.2f})"
+            f"- {loc(r)} — {r['answers']['reality_level']['choice']} (conf {choice_confidence(r['answers']['reality_level']):.2f})"
             for r in buckets["not_real"]
         ],
         "",
