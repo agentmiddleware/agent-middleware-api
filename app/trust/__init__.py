@@ -46,6 +46,7 @@ from .approvals import (
 from .audit_chain import (
     AuditChainContendedError,
     AuditChainVerification,
+    AuditEventConflictError,
     audit_payload,
     count_audit_events,
     count_audit_events_grouped,
@@ -166,6 +167,7 @@ from .signing import (
 
 __all__ = [
     "AuditChainContendedError",
+    "AuditEventConflictError",
     # adapters
     "GovernedInvocationAdapter",
     "GovernedRequest",
