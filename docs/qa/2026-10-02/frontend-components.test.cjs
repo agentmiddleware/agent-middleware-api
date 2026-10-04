@@ -127,7 +127,7 @@ test('SDK preserves retry identity, astral boundary and governed headers', async
   assert.equal(requests.length, 3);
 });
 
-test('FE-001: declared SDK build produces its advertised entrypoints', {todo: 'FE-001: npm run build exits 1 because tsconfig.json is absent'}, () => {
+test('FE-001: declared SDK build produces its advertised entrypoints', () => {
   const target = fs.mkdtempSync(path.join(os.tmpdir(), 'amw-qa-sdk-build-'));
   // Copy tracked package source only; no credential or environment files.
   for (const name of ['index.ts', 'package.json', 'LICENSE', 'tsconfig.json']) {
@@ -142,9 +142,28 @@ test('FE-001: declared SDK build produces its advertised entrypoints', {todo: 'F
   for (const entrypoint of [pkg.main, pkg.types]) assert.equal(fs.existsSync(path.join(target, entrypoint)), true);
 });
 
-test('FE-002: maxSteps=0 is not silently promoted to 100 actions', {todo: 'FE-002: preserve invalid zero for API rejection or reject locally'}, async () => {
+test('FE-002: maxSteps=0 is not silently promoted to 100 actions', async () => {
   const {sdk, requests} = client();
-  try {await sdk.createSession('http://127.0.0.1:8769/synthetic', {maxSteps: 0});}
-  catch {assert.equal(requests.length, 0); return;}
+  await sdk.createSession('http://127.0.0.1:8769/synthetic', {maxSteps: 0});
+  assert.equal(requests.length, 1);
   assert.equal(requests[0].args[1].max_steps, 0);
+});
+
+test('FE-002: session limits default only when absent and preserve API validation boundaries', async () => {
+  const {sdk, requests} = client();
+  const target = 'http://127.0.0.1:8769/synthetic';
+  for (const options of [undefined, {}, {maxSteps: undefined}, {maxSteps: null}]) {
+    await sdk.createSession(target, options);
+    assert.equal(requests.at(-1).args[1].max_steps, 100);
+  }
+  // Invalid values must reach the API unchanged, so its 1..1000 bounds apply.
+  for (const maxSteps of [-1, 0, 0.5, 1, 1000, 1001]) {
+    await sdk.createSession(target, {maxSteps, allowHumanPause: false});
+    const request = requests.at(-1);
+    assert.equal(request.method, 'post');
+    assert.equal(request.args[0], '/v1/awi/sessions');
+    assert.equal(request.args[1].max_steps, maxSteps);
+    assert.equal(request.args[1].allow_human_pause, false);
+  }
+  assert.equal(requests.length, 10);
 });

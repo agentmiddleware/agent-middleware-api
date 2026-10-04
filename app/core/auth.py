@@ -12,7 +12,7 @@ from dataclasses import dataclass, replace
 from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, Request, Security, status
-from fastapi.security import APIKeyHeader
+from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 from .config import get_settings
 from .oidc_iga import EnterprisePrincipal, IGADecision, IGAError, is_iga_issuer_token
 from .trust_mode import is_production_like_environment
@@ -29,6 +29,12 @@ api_key_header = APIKeyHeader(
     name=settings.API_KEY_HEADER,
     auto_error=False,
     description="API key for agent authentication. Pass in the X-API-Key header.",
+)
+
+
+bearer_header = HTTPBearer(
+    auto_error=False,
+    description="Bearer authentication via Authorization; this header takes precedence over X-API-Key.",
 )
 
 
@@ -124,6 +130,7 @@ CREDENTIAL_ACCEPTANCE: ContextVar[CredentialAcceptance | None] = ContextVar(
 async def get_auth_context(
     api_key: str | None = Security(api_key_header),
     authorization: Annotated[str | None, Header()] = None,
+    _bearer: HTTPAuthorizationCredentials | None = Security(bearer_header),
 ) -> AuthContext:
     """
     Validate credentials and return caller context.
@@ -137,6 +144,8 @@ async def get_auth_context(
     this module is already imported, and a captured `settings` would keep
     serving the stale key list.
     """
+    # HTTPBearer declares the OpenAPI alternative; raw Authorization stays
+    # authoritative so malformed headers cannot fall back to an API key.
     context = await _resolve_auth_context(api_key, authorization)
     acceptance = CREDENTIAL_ACCEPTANCE.get()
     if acceptance is not None:

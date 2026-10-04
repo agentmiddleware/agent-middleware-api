@@ -1,0 +1,10 @@
+✔ FE-002: maxSteps=0 is not silently promoted to 100 actions (31.503958ms)
+✔ FE-002: session limits default only when absent and preserve API validation boundaries (5.276125ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 347.604792

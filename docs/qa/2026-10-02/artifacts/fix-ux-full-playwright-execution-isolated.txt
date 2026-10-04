@@ -1,0 +1,756 @@
+[WebServer] 127.0.0.1 - - [02/Oct/2026 20:55:57] "GET / HTTP/1.1" 200 -
+[WebServer] 127.0.0.1 - - [02/Oct/2026 20:55:58] "GET /dashboard.html HTTP/1.1" 200 -
+
+Running 33 tests using 1 worker
+
+(node:41056) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘   1 [chromium] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:9:1 › main public pages load without browser or resource errors (0ms)
+(node:41062) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘   2 [chromium] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:21:1 › calculator valid, boundary, invalid and cleared states stay local (0ms)
+(node:41064) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘   3 [chromium] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:48:1 › receipt evidence loads without claiming cryptographic verification (0ms)
+(node:41066) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘   4 [chromium] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:54:1 › receipt load failure removes published data and verification claims (0ms)
+(node:41071) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘   5 [chromium] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:62:1 › malformed receipt payload fails closed (0ms)
+(node:41190) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘   6 [chromium] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:68:1 › mobile pages do not overflow (0ms)
+(node:41217) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘   7 [chromium] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:77:1 › operator index is static and does not ask for credentials (0ms)
+(node:41227) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘   8 [chromium] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:84:1 › no JavaScript retains the pilot and proof entry path (0ms)
+(node:41229) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘   9 [chromium] › ../../../../../private/tmp/amw-fix-playwright-specs/ux-regressions.spec.cjs:15:1 › UX-001: comparison fit text meets minimum contrast (0ms)
+(node:41232) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  10 [chromium] › ../../../../../private/tmp/amw-fix-playwright-specs/ux-regressions.spec.cjs:27:1 › UX-002: dashboard scrollable commands have explicit keyboard access (0ms)
+(node:41238) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  11 [chromium] › ../../../../../private/tmp/amw-fix-playwright-specs/ux-regressions.spec.cjs:49:1 › UX-003: operator runtime links remain on the served origin (0ms)
+(node:41240) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  12 [firefox] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:9:1 › main public pages load without browser or resource errors (0ms)
+(node:41241) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  13 [firefox] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:21:1 › calculator valid, boundary, invalid and cleared states stay local (0ms)
+(node:41242) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  14 [firefox] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:48:1 › receipt evidence loads without claiming cryptographic verification (0ms)
+(node:41243) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  15 [firefox] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:54:1 › receipt load failure removes published data and verification claims (0ms)
+(node:41250) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  16 [firefox] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:62:1 › malformed receipt payload fails closed (0ms)
+(node:41255) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  17 [firefox] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:68:1 › mobile pages do not overflow (1ms)
+(node:41256) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  18 [firefox] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:77:1 › operator index is static and does not ask for credentials (0ms)
+(node:41265) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  19 [firefox] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:84:1 › no JavaScript retains the pilot and proof entry path (0ms)
+(node:41295) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  20 [firefox] › ../../../../../private/tmp/amw-fix-playwright-specs/ux-regressions.spec.cjs:15:1 › UX-001: comparison fit text meets minimum contrast (0ms)
+(node:41299) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  21 [firefox] › ../../../../../private/tmp/amw-fix-playwright-specs/ux-regressions.spec.cjs:27:1 › UX-002: dashboard scrollable commands have explicit keyboard access (0ms)
+(node:41301) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  22 [firefox] › ../../../../../private/tmp/amw-fix-playwright-specs/ux-regressions.spec.cjs:49:1 › UX-003: operator runtime links remain on the served origin (0ms)
+(node:41305) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  23 [webkit] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:9:1 › main public pages load without browser or resource errors (0ms)
+(node:41311) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  24 [webkit] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:21:1 › calculator valid, boundary, invalid and cleared states stay local (0ms)
+(node:41316) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  25 [webkit] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:48:1 › receipt evidence loads without claiming cryptographic verification (0ms)
+(node:41321) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  26 [webkit] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:54:1 › receipt load failure removes published data and verification claims (0ms)
+(node:41322) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  27 [webkit] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:62:1 › malformed receipt payload fails closed (0ms)
+(node:41323) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  28 [webkit] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:68:1 › mobile pages do not overflow (0ms)
+(node:41334) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  29 [webkit] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:77:1 › operator index is static and does not ask for credentials (0ms)
+(node:41339) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  30 [webkit] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:84:1 › no JavaScript retains the pilot and proof entry path (0ms)
+(node:41346) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  31 [webkit] › ../../../../../private/tmp/amw-fix-playwright-specs/ux-regressions.spec.cjs:15:1 › UX-001: comparison fit text meets minimum contrast (0ms)
+(node:41347) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  32 [webkit] › ../../../../../private/tmp/amw-fix-playwright-specs/ux-regressions.spec.cjs:27:1 › UX-002: dashboard scrollable commands have explicit keyboard access (0ms)
+(node:41348) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  33 [webkit] › ../../../../../private/tmp/amw-fix-playwright-specs/ux-regressions.spec.cjs:49:1 › UX-003: operator runtime links remain on the served origin (0ms)
+
+
+  1) [chromium] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:9:1 › main public pages load without browser or resource errors
+
+    Error: browserType.launch: Target page, context or browser has been closed
+    Browser logs:
+
+    <launching> /private/tmp/amw-fix-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-2FjHV8 --remote-debugging-pipe --no-startup-window
+    <launched> pid=41057
+    [pid=41057][err] [1002/205558.347367:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+    [pid=41057][err] [1002/205558.372331:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+    [pid=41057][err] [1002/205558.382275:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.41057: Permission denied (1100)
+    Call log:
+      - <launching> /private/tmp/amw-fix-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-2FjHV8 --remote-debugging-pipe --no-startup-window
+      - <launched> pid=41057
+      - [pid=41057][err] [1002/205558.347367:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+      - [pid=41057][err] [1002/205558.372331:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+      - [pid=41057][err] [1002/205558.382275:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.41057: Permission denied (1100)
+      - [pid=41057] <gracefully close start>
+      - [pid=41057] <kill>
+      - [pid=41057] <will force kill>
+      - [pid=41057] exception while trying to kill process: Error: kill EPERM
+      - [pid=41057] <process did exit: exitCode=null, signal=SIGTRAP>
+      - [pid=41057] starting temporary directories cleanup
+      - [pid=41057] finished temporary directories cleanup
+      - [pid=41057] <gracefully close end>
+
+
+    Error Context: ../../../../../private/tmp/amw-fix-playwright-results/frontend-main-public-pages-92902--browser-or-resource-errors-chromium/error-context.md
+
+  2) [chromium] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:21:1 › calculator valid, boundary, invalid and cleared states stay local
+
+    Error: browserType.launch: Target page, context or browser has been closed
+    Browser logs:
+
+    <launching> /private/tmp/amw-fix-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-DESOQR --remote-debugging-pipe --no-startup-window
+    <launched> pid=41063
+    [pid=41063][err] [1002/205558.820031:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+    [pid=41063][err] [1002/205558.821395:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+    [pid=41063][err] [1002/205558.821828:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.41063: Permission denied (1100)
+    Call log:
+      - <launching> /private/tmp/amw-fix-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-DESOQR --remote-debugging-pipe --no-startup-window
+      - <launched> pid=41063
+      - [pid=41063][err] [1002/205558.820031:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+      - [pid=41063][err] [1002/205558.821395:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+      - [pid=41063][err] [1002/205558.821828:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.41063: Permission denied (1100)
+      - [pid=41063] <gracefully close start>
+      - [pid=41063] <kill>
+      - [pid=41063] <will force kill>
+      - [pid=41063] exception while trying to kill process: Error: kill EPERM
+      - [pid=41063] <process did exit: exitCode=null, signal=SIGTRAP>
+      - [pid=41063] starting temporary directories cleanup
+      - [pid=41063] finished temporary directories cleanup
+      - [pid=41063] <gracefully close end>
+
+
+    Error Context: ../../../../../private/tmp/amw-fix-playwright-results/frontend-calculator-valid--07074-d-cleared-states-stay-local-chromium/error-context.md
+
+  3) [chromium] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:48:1 › receipt evidence loads without claiming cryptographic verification
+
+    Error: browserType.launch: Target page, context or browser has been closed
+    Browser logs:
+
+    <launching> /private/tmp/amw-fix-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-GcSrOE --remote-debugging-pipe --no-startup-window
+    <launched> pid=41065
+    [pid=41065][err] [1002/205559.272161:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+    [pid=41065][err] [1002/205559.273404:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+    [pid=41065][err] [1002/205559.273832:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.41065: Permission denied (1100)
+    Call log:
+      - <launching> /private/tmp/amw-fix-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-GcSrOE --remote-debugging-pipe --no-startup-window
+      - <launched> pid=41065
+      - [pid=41065][err] [1002/205559.272161:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+      - [pid=41065][err] [1002/205559.273404:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+      - [pid=41065][err] [1002/205559.273832:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.41065: Permission denied (1100)
+      - [pid=41065] <gracefully close start>
+      - [pid=41065] <kill>
+      - [pid=41065] <will force kill>
+      - [pid=41065] exception while trying to kill process: Error: kill EPERM
+      - [pid=41065] <process did exit: exitCode=null, signal=SIGTRAP>
+      - [pid=41065] starting temporary directories cleanup
+      - [pid=41065] finished temporary directories cleanup
+      - [pid=41065] <gracefully close end>
+
+
+    Error Context: ../../../../../private/tmp/amw-fix-playwright-results/frontend-receipt-evidence--4ee34--cryptographic-verification-chromium/error-context.md
+
+  4) [chromium] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:54:1 › receipt load failure removes published data and verification claims
+
+    Error: browserType.launch: Target page, context or browser has been closed
+    Browser logs:
+
+    <launching> /private/tmp/amw-fix-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-DrNS4D --remote-debugging-pipe --no-startup-window
+    <launched> pid=41070
+    [pid=41070][err] [1002/205559.722347:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+    [pid=41070][err] [1002/205559.723716:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+    [pid=41070][err] [1002/205559.724126:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.41070: Permission denied (1100)
+    Call log:
+      - <launching> /private/tmp/amw-fix-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-DrNS4D --remote-debugging-pipe --no-startup-window
+      - <launched> pid=41070
+      - [pid=41070][err] [1002/205559.722347:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+      - [pid=41070][err] [1002/205559.723716:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+      - [pid=41070][err] [1002/205559.724126:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.41070: Permission denied (1100)
+      - [pid=41070] <gracefully close start>
+      - [pid=41070] <kill>
+      - [pid=41070] <will force kill>
+      - [pid=41070] exception while trying to kill process: Error: kill EPERM
+      - [pid=41070] <process did exit: exitCode=null, signal=SIGTRAP>
+      - [pid=41070] starting temporary directories cleanup
+      - [pid=41070] finished temporary directories cleanup
+      - [pid=41070] <gracefully close end>
+
+
+    Error Context: ../../../../../private/tmp/amw-fix-playwright-results/frontend-receipt-load-fail-c9de9-ata-and-verification-claims-chromium/error-context.md
+
+  5) [chromium] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:62:1 › malformed receipt payload fails closed
+
+    Error: browserType.launch: Target page, context or browser has been closed
+    Browser logs:
+
+    <launching> /private/tmp/amw-fix-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-kkes2u --remote-debugging-pipe --no-startup-window
+    <launched> pid=41076
+    [pid=41076][err] [1002/205600.151448:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+    [pid=41076][err] [1002/205600.152562:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+    [pid=41076][err] [1002/205600.153003:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.41076: Permission denied (1100)
+    Call log:
+      - <launching> /private/tmp/amw-fix-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-kkes2u --remote-debugging-pipe --no-startup-window
+      - <launched> pid=41076
+      - [pid=41076][err] [1002/205600.151448:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+      - [pid=41076][err] [1002/205600.152562:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+      - [pid=41076][err] [1002/205600.153003:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.41076: Permission denied (1100)
+      - [pid=41076] <gracefully close start>
+      - [pid=41076] <kill>
+      - [pid=41076] <will force kill>
+      - [pid=41076] exception while trying to kill process: Error: kill EPERM
+      - [pid=41076] <process did exit: exitCode=null, signal=SIGTRAP>
+      - [pid=41076] starting temporary directories cleanup
+      - [pid=41076] finished temporary directories cleanup
+      - [pid=41076] <gracefully close end>
+
+
+    Error Context: ../../../../../private/tmp/amw-fix-playwright-results/frontend-malformed-receipt-payload-fails-closed-chromium/error-context.md
+
+  6) [chromium] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:68:1 › mobile pages do not overflow
+
+    Error: browserType.launch: Target page, context or browser has been closed
+    Browser logs:
+
+    <launching> /private/tmp/amw-fix-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-GETMFe --remote-debugging-pipe --no-startup-window
+    <launched> pid=41202
+    [pid=41202][err] [1002/205600.591299:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+    [pid=41202][err] [1002/205600.592548:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+    [pid=41202][err] [1002/205600.593014:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.41202: Permission denied (1100)
+    Call log:
+      - <launching> /private/tmp/amw-fix-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-GETMFe --remote-debugging-pipe --no-startup-window
+      - <launched> pid=41202
+      - [pid=41202][err] [1002/205600.591299:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+      - [pid=41202][err] [1002/205600.592548:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+      - [pid=41202][err] [1002/205600.593014:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.41202: Permission denied (1100)
+      - [pid=41202] <gracefully close start>
+      - [pid=41202] <kill>
+      - [pid=41202] <will force kill>
+      - [pid=41202] exception while trying to kill process: Error: kill EPERM
+      - [pid=41202] <process did exit: exitCode=null, signal=SIGTRAP>
+      - [pid=41202] starting temporary directories cleanup
+      - [pid=41202] finished temporary directories cleanup
+      - [pid=41202] <gracefully close end>
+
+
+    Error Context: ../../../../../private/tmp/amw-fix-playwright-results/frontend-mobile-pages-do-not-overflow-chromium/error-context.md
+
+  7) [chromium] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:77:1 › operator index is static and does not ask for credentials
+
+    Error: browserType.launch: Target page, context or browser has been closed
+    Browser logs:
+
+    <launching> /private/tmp/amw-fix-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-7J4hAF --remote-debugging-pipe --no-startup-window
+    <launched> pid=41226
+    [pid=41226][err] [1002/205601.025526:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+    [pid=41226][err] [1002/205601.026992:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+    [pid=41226][err] [1002/205601.027498:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.41226: Permission denied (1100)
+    Call log:
+      - <launching> /private/tmp/amw-fix-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-7J4hAF --remote-debugging-pipe --no-startup-window
+      - <launched> pid=41226
+      - [pid=41226][err] [1002/205601.025526:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+      - [pid=41226][err] [1002/205601.026992:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+      - [pid=41226][err] [1002/205601.027498:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.41226: Permission denied (1100)
+      - [pid=41226] <gracefully close start>
+      - [pid=41226] <kill>
+      - [pid=41226] <will force kill>
+      - [pid=41226] exception while trying to kill process: Error: kill EPERM
+      - [pid=41226] <process did exit: exitCode=null, signal=SIGTRAP>
+      - [pid=41226] starting temporary directories cleanup
+      - [pid=41226] finished temporary directories cleanup
+      - [pid=41226] <gracefully close end>
+
+
+    Error Context: ../../../../../private/tmp/amw-fix-playwright-results/frontend-operator-index-is-00d11-oes-not-ask-for-credentials-chromium/error-context.md
+
+  8) [chromium] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:84:1 › no JavaScript retains the pilot and proof entry path
+
+    Error: browserType.launch: Target page, context or browser has been closed
+    Browser logs:
+
+    <launching> /private/tmp/amw-fix-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-fj2AXA --remote-debugging-pipe --no-startup-window
+    <launched> pid=41228
+    [pid=41228][err] [1002/205601.464207:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+    [pid=41228][err] [1002/205601.465703:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+    [pid=41228][err] [1002/205601.466085:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.41228: Permission denied (1100)
+    Call log:
+      - <launching> /private/tmp/amw-fix-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-fj2AXA --remote-debugging-pipe --no-startup-window
+      - <launched> pid=41228
+      - [pid=41228][err] [1002/205601.464207:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+      - [pid=41228][err] [1002/205601.465703:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+      - [pid=41228][err] [1002/205601.466085:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.41228: Permission denied (1100)
+      - [pid=41228] <gracefully close start>
+      - [pid=41228] <kill>
+      - [pid=41228] <will force kill>
+      - [pid=41228] exception while trying to kill process: Error: kill EPERM
+      - [pid=41228] <process did exit: exitCode=null, signal=SIGTRAP>
+      - [pid=41228] starting temporary directories cleanup
+      - [pid=41228] finished temporary directories cleanup
+      - [pid=41228] <gracefully close end>
+
+
+    Error Context: ../../../../../private/tmp/amw-fix-playwright-results/frontend-no-JavaScript-ret-1671c--pilot-and-proof-entry-path-chromium/error-context.md
+
+  9) [chromium] › ../../../../../private/tmp/amw-fix-playwright-specs/ux-regressions.spec.cjs:15:1 › UX-001: comparison fit text meets minimum contrast
+
+    Error: browserType.launch: Target page, context or browser has been closed
+    Browser logs:
+
+    <launching> /private/tmp/amw-fix-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-QW1Bwr --remote-debugging-pipe --no-startup-window
+    <launched> pid=41231
+    [pid=41231][err] [1002/205601.902211:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+    [pid=41231][err] [1002/205601.903460:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+    [pid=41231][err] [1002/205601.903915:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.41231: Permission denied (1100)
+    Call log:
+      - <launching> /private/tmp/amw-fix-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-QW1Bwr --remote-debugging-pipe --no-startup-window
+      - <launched> pid=41231
+      - [pid=41231][err] [1002/205601.902211:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+      - [pid=41231][err] [1002/205601.903460:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+      - [pid=41231][err] [1002/205601.903915:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.41231: Permission denied (1100)
+      - [pid=41231] <gracefully close start>
+      - [pid=41231] <kill>
+      - [pid=41231] <will force kill>
+      - [pid=41231] exception while trying to kill process: Error: kill EPERM
+      - [pid=41231] <process did exit: exitCode=null, signal=SIGTRAP>
+      - [pid=41231] starting temporary directories cleanup
+      - [pid=41231] finished temporary directories cleanup
+      - [pid=41231] <gracefully close end>
+
+
+    Error Context: ../../../../../private/tmp/amw-fix-playwright-results/ux-regressions-UX-001-comp-1825d-text-meets-minimum-contrast-chromium/error-context.md
+
+  10) [chromium] › ../../../../../private/tmp/amw-fix-playwright-specs/ux-regressions.spec.cjs:27:1 › UX-002: dashboard scrollable commands have explicit keyboard access
+
+    Error: browserType.launch: Target page, context or browser has been closed
+    Browser logs:
+
+    <launching> /private/tmp/amw-fix-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-E4C9xP --remote-debugging-pipe --no-startup-window
+    <launched> pid=41237
+    [pid=41237][err] [1002/205602.360083:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+    [pid=41237][err] [1002/205602.361424:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+    [pid=41237][err] [1002/205602.361830:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.41237: Permission denied (1100)
+    Call log:
+      - <launching> /private/tmp/amw-fix-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-E4C9xP --remote-debugging-pipe --no-startup-window
+      - <launched> pid=41237
+      - [pid=41237][err] [1002/205602.360083:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+      - [pid=41237][err] [1002/205602.361424:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+      - [pid=41237][err] [1002/205602.361830:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.41237: Permission denied (1100)
+      - [pid=41237] <gracefully close start>
+      - [pid=41237] <kill>
+      - [pid=41237] <will force kill>
+      - [pid=41237] exception while trying to kill process: Error: kill EPERM
+      - [pid=41237] <process did exit: exitCode=null, signal=SIGTRAP>
+      - [pid=41237] starting temporary directories cleanup
+      - [pid=41237] finished temporary directories cleanup
+      - [pid=41237] <gracefully close end>
+
+
+    Error Context: ../../../../../private/tmp/amw-fix-playwright-results/ux-regressions-UX-002-dash-e96e4-ve-explicit-keyboard-access-chromium/error-context.md
+
+  11) [chromium] › ../../../../../private/tmp/amw-fix-playwright-specs/ux-regressions.spec.cjs:49:1 › UX-003: operator runtime links remain on the served origin
+
+    Error: browserType.launch: Target page, context or browser has been closed
+    Browser logs:
+
+    <launching> /private/tmp/amw-fix-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-OM1WAn --remote-debugging-pipe --no-startup-window
+    <launched> pid=41239
+    [pid=41239][err] [1002/205602.807703:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+    [pid=41239][err] [1002/205602.808772:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+    [pid=41239][err] [1002/205602.809242:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.41239: Permission denied (1100)
+    Call log:
+      - <launching> /private/tmp/amw-fix-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-OM1WAn --remote-debugging-pipe --no-startup-window
+      - <launched> pid=41239
+      - [pid=41239][err] [1002/205602.807703:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+      - [pid=41239][err] [1002/205602.808772:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+      - [pid=41239][err] [1002/205602.809242:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.41239: Permission denied (1100)
+      - [pid=41239] <gracefully close start>
+      - [pid=41239] <kill>
+      - [pid=41239] <will force kill>
+      - [pid=41239] exception while trying to kill process: Error: kill EPERM
+      - [pid=41239] <process did exit: exitCode=null, signal=SIGTRAP>
+      - [pid=41239] starting temporary directories cleanup
+      - [pid=41239] finished temporary directories cleanup
+      - [pid=41239] <gracefully close end>
+
+
+    Error Context: ../../../../../private/tmp/amw-fix-playwright-results/ux-regressions-UX-003-oper-68ef3-remain-on-the-served-origin-chromium/error-context.md
+
+  12) [firefox] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:9:1 › main public pages load without browser or resource errors
+
+    Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox
+    ╔════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright was just installed or updated.       ║
+    ║ Please run the following command to download new browsers: ║
+    ║                                                            ║
+    ║     npx playwright install                                 ║
+    ║                                                            ║
+    ║ <3 Playwright Team                                         ║
+    ╚════════════════════════════════════════════════════════════╝
+
+    Error Context: ../../../../../private/tmp/amw-fix-playwright-results/frontend-main-public-pages-92902--browser-or-resource-errors-firefox/error-context.md
+
+  13) [firefox] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:21:1 › calculator valid, boundary, invalid and cleared states stay local
+
+    Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox
+    ╔════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright was just installed or updated.       ║
+    ║ Please run the following command to download new browsers: ║
+    ║                                                            ║
+    ║     npx playwright install                                 ║
+    ║                                                            ║
+    ║ <3 Playwright Team                                         ║
+    ╚════════════════════════════════════════════════════════════╝
+
+    Error Context: ../../../../../private/tmp/amw-fix-playwright-results/frontend-calculator-valid--07074-d-cleared-states-stay-local-firefox/error-context.md
+
+  14) [firefox] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:48:1 › receipt evidence loads without claiming cryptographic verification
+
+    Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox
+    ╔════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright was just installed or updated.       ║
+    ║ Please run the following command to download new browsers: ║
+    ║                                                            ║
+    ║     npx playwright install                                 ║
+    ║                                                            ║
+    ║ <3 Playwright Team                                         ║
+    ╚════════════════════════════════════════════════════════════╝
+
+    Error Context: ../../../../../private/tmp/amw-fix-playwright-results/frontend-receipt-evidence--4ee34--cryptographic-verification-firefox/error-context.md
+
+  15) [firefox] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:54:1 › receipt load failure removes published data and verification claims
+
+    Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox
+    ╔════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright was just installed or updated.       ║
+    ║ Please run the following command to download new browsers: ║
+    ║                                                            ║
+    ║     npx playwright install                                 ║
+    ║                                                            ║
+    ║ <3 Playwright Team                                         ║
+    ╚════════════════════════════════════════════════════════════╝
+
+    Error Context: ../../../../../private/tmp/amw-fix-playwright-results/frontend-receipt-load-fail-c9de9-ata-and-verification-claims-firefox/error-context.md
+
+  16) [firefox] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:62:1 › malformed receipt payload fails closed
+
+    Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox
+    ╔════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright was just installed or updated.       ║
+    ║ Please run the following command to download new browsers: ║
+    ║                                                            ║
+    ║     npx playwright install                                 ║
+    ║                                                            ║
+    ║ <3 Playwright Team                                         ║
+    ╚════════════════════════════════════════════════════════════╝
+
+    Error Context: ../../../../../private/tmp/amw-fix-playwright-results/frontend-malformed-receipt-payload-fails-closed-firefox/error-context.md
+
+  17) [firefox] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:68:1 › mobile pages do not overflow
+
+    Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox
+    ╔════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright was just installed or updated.       ║
+    ║ Please run the following command to download new browsers: ║
+    ║                                                            ║
+    ║     npx playwright install                                 ║
+    ║                                                            ║
+    ║ <3 Playwright Team                                         ║
+    ╚════════════════════════════════════════════════════════════╝
+
+    Error Context: ../../../../../private/tmp/amw-fix-playwright-results/frontend-mobile-pages-do-not-overflow-firefox/error-context.md
+
+  18) [firefox] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:77:1 › operator index is static and does not ask for credentials
+
+    Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox
+    ╔════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright was just installed or updated.       ║
+    ║ Please run the following command to download new browsers: ║
+    ║                                                            ║
+    ║     npx playwright install                                 ║
+    ║                                                            ║
+    ║ <3 Playwright Team                                         ║
+    ╚════════════════════════════════════════════════════════════╝
+
+    Error Context: ../../../../../private/tmp/amw-fix-playwright-results/frontend-operator-index-is-00d11-oes-not-ask-for-credentials-firefox/error-context.md
+
+  19) [firefox] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:84:1 › no JavaScript retains the pilot and proof entry path
+
+    Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox
+    ╔════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright was just installed or updated.       ║
+    ║ Please run the following command to download new browsers: ║
+    ║                                                            ║
+    ║     npx playwright install                                 ║
+    ║                                                            ║
+    ║ <3 Playwright Team                                         ║
+    ╚════════════════════════════════════════════════════════════╝
+
+    Error Context: ../../../../../private/tmp/amw-fix-playwright-results/frontend-no-JavaScript-ret-1671c--pilot-and-proof-entry-path-firefox/error-context.md
+
+  20) [firefox] › ../../../../../private/tmp/amw-fix-playwright-specs/ux-regressions.spec.cjs:15:1 › UX-001: comparison fit text meets minimum contrast
+
+    Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox
+    ╔════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright was just installed or updated.       ║
+    ║ Please run the following command to download new browsers: ║
+    ║                                                            ║
+    ║     npx playwright install                                 ║
+    ║                                                            ║
+    ║ <3 Playwright Team                                         ║
+    ╚════════════════════════════════════════════════════════════╝
+
+    Error Context: ../../../../../private/tmp/amw-fix-playwright-results/ux-regressions-UX-001-comp-1825d-text-meets-minimum-contrast-firefox/error-context.md
+
+  21) [firefox] › ../../../../../private/tmp/amw-fix-playwright-specs/ux-regressions.spec.cjs:27:1 › UX-002: dashboard scrollable commands have explicit keyboard access
+
+    Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox
+    ╔════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright was just installed or updated.       ║
+    ║ Please run the following command to download new browsers: ║
+    ║                                                            ║
+    ║     npx playwright install                                 ║
+    ║                                                            ║
+    ║ <3 Playwright Team                                         ║
+    ╚════════════════════════════════════════════════════════════╝
+
+    Error Context: ../../../../../private/tmp/amw-fix-playwright-results/ux-regressions-UX-002-dash-e96e4-ve-explicit-keyboard-access-firefox/error-context.md
+
+  22) [firefox] › ../../../../../private/tmp/amw-fix-playwright-specs/ux-regressions.spec.cjs:49:1 › UX-003: operator runtime links remain on the served origin
+
+    Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox
+    ╔════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright was just installed or updated.       ║
+    ║ Please run the following command to download new browsers: ║
+    ║                                                            ║
+    ║     npx playwright install                                 ║
+    ║                                                            ║
+    ║ <3 Playwright Team                                         ║
+    ╚════════════════════════════════════════════════════════════╝
+
+    Error Context: ../../../../../private/tmp/amw-fix-playwright-results/ux-regressions-UX-003-oper-68ef3-remain-on-the-served-origin-firefox/error-context.md
+
+  23) [webkit] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:9:1 › main public pages load without browser or resource errors
+
+    Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/webkit-2359/pw_run.sh
+    ╔════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright was just installed or updated.       ║
+    ║ Please run the following command to download new browsers: ║
+    ║                                                            ║
+    ║     npx playwright install                                 ║
+    ║                                                            ║
+    ║ <3 Playwright Team                                         ║
+    ╚════════════════════════════════════════════════════════════╝
+
+    Error Context: ../../../../../private/tmp/amw-fix-playwright-results/frontend-main-public-pages-92902--browser-or-resource-errors-webkit/error-context.md
+
+  24) [webkit] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:21:1 › calculator valid, boundary, invalid and cleared states stay local
+
+    Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/webkit-2359/pw_run.sh
+    ╔════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright was just installed or updated.       ║
+    ║ Please run the following command to download new browsers: ║
+    ║                                                            ║
+    ║     npx playwright install                                 ║
+    ║                                                            ║
+    ║ <3 Playwright Team                                         ║
+    ╚════════════════════════════════════════════════════════════╝
+
+    Error Context: ../../../../../private/tmp/amw-fix-playwright-results/frontend-calculator-valid--07074-d-cleared-states-stay-local-webkit/error-context.md
+
+  25) [webkit] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:48:1 › receipt evidence loads without claiming cryptographic verification
+
+    Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/webkit-2359/pw_run.sh
+    ╔════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright was just installed or updated.       ║
+    ║ Please run the following command to download new browsers: ║
+    ║                                                            ║
+    ║     npx playwright install                                 ║
+    ║                                                            ║
+    ║ <3 Playwright Team                                         ║
+    ╚════════════════════════════════════════════════════════════╝
+
+    Error Context: ../../../../../private/tmp/amw-fix-playwright-results/frontend-receipt-evidence--4ee34--cryptographic-verification-webkit/error-context.md
+
+  26) [webkit] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:54:1 › receipt load failure removes published data and verification claims
+
+    Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/webkit-2359/pw_run.sh
+    ╔════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright was just installed or updated.       ║
+    ║ Please run the following command to download new browsers: ║
+    ║                                                            ║
+    ║     npx playwright install                                 ║
+    ║                                                            ║
+    ║ <3 Playwright Team                                         ║
+    ╚════════════════════════════════════════════════════════════╝
+
+    Error Context: ../../../../../private/tmp/amw-fix-playwright-results/frontend-receipt-load-fail-c9de9-ata-and-verification-claims-webkit/error-context.md
+
+  27) [webkit] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:62:1 › malformed receipt payload fails closed
+
+    Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/webkit-2359/pw_run.sh
+    ╔════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright was just installed or updated.       ║
+    ║ Please run the following command to download new browsers: ║
+    ║                                                            ║
+    ║     npx playwright install                                 ║
+    ║                                                            ║
+    ║ <3 Playwright Team                                         ║
+    ╚════════════════════════════════════════════════════════════╝
+
+    Error Context: ../../../../../private/tmp/amw-fix-playwright-results/frontend-malformed-receipt-payload-fails-closed-webkit/error-context.md
+
+  28) [webkit] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:68:1 › mobile pages do not overflow
+
+    Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/webkit-2359/pw_run.sh
+    ╔════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright was just installed or updated.       ║
+    ║ Please run the following command to download new browsers: ║
+    ║                                                            ║
+    ║     npx playwright install                                 ║
+    ║                                                            ║
+    ║ <3 Playwright Team                                         ║
+    ╚════════════════════════════════════════════════════════════╝
+
+    Error Context: ../../../../../private/tmp/amw-fix-playwright-results/frontend-mobile-pages-do-not-overflow-webkit/error-context.md
+
+  29) [webkit] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:77:1 › operator index is static and does not ask for credentials
+
+    Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/webkit-2359/pw_run.sh
+    ╔════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright was just installed or updated.       ║
+    ║ Please run the following command to download new browsers: ║
+    ║                                                            ║
+    ║     npx playwright install                                 ║
+    ║                                                            ║
+    ║ <3 Playwright Team                                         ║
+    ╚════════════════════════════════════════════════════════════╝
+
+    Error Context: ../../../../../private/tmp/amw-fix-playwright-results/frontend-operator-index-is-00d11-oes-not-ask-for-credentials-webkit/error-context.md
+
+  30) [webkit] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:84:1 › no JavaScript retains the pilot and proof entry path
+
+    Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/webkit-2359/pw_run.sh
+    ╔════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright was just installed or updated.       ║
+    ║ Please run the following command to download new browsers: ║
+    ║                                                            ║
+    ║     npx playwright install                                 ║
+    ║                                                            ║
+    ║ <3 Playwright Team                                         ║
+    ╚════════════════════════════════════════════════════════════╝
+
+    Error Context: ../../../../../private/tmp/amw-fix-playwright-results/frontend-no-JavaScript-ret-1671c--pilot-and-proof-entry-path-webkit/error-context.md
+
+  31) [webkit] › ../../../../../private/tmp/amw-fix-playwright-specs/ux-regressions.spec.cjs:15:1 › UX-001: comparison fit text meets minimum contrast
+
+    Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/webkit-2359/pw_run.sh
+    ╔════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright was just installed or updated.       ║
+    ║ Please run the following command to download new browsers: ║
+    ║                                                            ║
+    ║     npx playwright install                                 ║
+    ║                                                            ║
+    ║ <3 Playwright Team                                         ║
+    ╚════════════════════════════════════════════════════════════╝
+
+    Error Context: ../../../../../private/tmp/amw-fix-playwright-results/ux-regressions-UX-001-comp-1825d-text-meets-minimum-contrast-webkit/error-context.md
+
+  32) [webkit] › ../../../../../private/tmp/amw-fix-playwright-specs/ux-regressions.spec.cjs:27:1 › UX-002: dashboard scrollable commands have explicit keyboard access
+
+    Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/webkit-2359/pw_run.sh
+    ╔════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright was just installed or updated.       ║
+    ║ Please run the following command to download new browsers: ║
+    ║                                                            ║
+    ║     npx playwright install                                 ║
+    ║                                                            ║
+    ║ <3 Playwright Team                                         ║
+    ╚════════════════════════════════════════════════════════════╝
+
+    Error Context: ../../../../../private/tmp/amw-fix-playwright-results/ux-regressions-UX-002-dash-e96e4-ve-explicit-keyboard-access-webkit/error-context.md
+
+  33) [webkit] › ../../../../../private/tmp/amw-fix-playwright-specs/ux-regressions.spec.cjs:49:1 › UX-003: operator runtime links remain on the served origin
+
+    Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/webkit-2359/pw_run.sh
+    ╔════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright was just installed or updated.       ║
+    ║ Please run the following command to download new browsers: ║
+    ║                                                            ║
+    ║     npx playwright install                                 ║
+    ║                                                            ║
+    ║ <3 Playwright Team                                         ║
+    ╚════════════════════════════════════════════════════════════╝
+
+    Error Context: ../../../../../private/tmp/amw-fix-playwright-results/ux-regressions-UX-003-oper-68ef3-remain-on-the-served-origin-webkit/error-context.md
+
+  33 failed
+    [chromium] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:9:1 › main public pages load without browser or resource errors
+    [chromium] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:21:1 › calculator valid, boundary, invalid and cleared states stay local
+    [chromium] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:48:1 › receipt evidence loads without claiming cryptographic verification
+    [chromium] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:54:1 › receipt load failure removes published data and verification claims
+    [chromium] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:62:1 › malformed receipt payload fails closed
+    [chromium] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:68:1 › mobile pages do not overflow
+    [chromium] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:77:1 › operator index is static and does not ask for credentials
+    [chromium] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:84:1 › no JavaScript retains the pilot and proof entry path
+    [chromium] › ../../../../../private/tmp/amw-fix-playwright-specs/ux-regressions.spec.cjs:15:1 › UX-001: comparison fit text meets minimum contrast
+    [chromium] › ../../../../../private/tmp/amw-fix-playwright-specs/ux-regressions.spec.cjs:27:1 › UX-002: dashboard scrollable commands have explicit keyboard access
+    [chromium] › ../../../../../private/tmp/amw-fix-playwright-specs/ux-regressions.spec.cjs:49:1 › UX-003: operator runtime links remain on the served origin
+    [firefox] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:9:1 › main public pages load without browser or resource errors
+    [firefox] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:21:1 › calculator valid, boundary, invalid and cleared states stay local
+    [firefox] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:48:1 › receipt evidence loads without claiming cryptographic verification
+    [firefox] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:54:1 › receipt load failure removes published data and verification claims
+    [firefox] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:62:1 › malformed receipt payload fails closed
+    [firefox] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:68:1 › mobile pages do not overflow
+    [firefox] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:77:1 › operator index is static and does not ask for credentials
+    [firefox] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:84:1 › no JavaScript retains the pilot and proof entry path
+    [firefox] › ../../../../../private/tmp/amw-fix-playwright-specs/ux-regressions.spec.cjs:15:1 › UX-001: comparison fit text meets minimum contrast
+    [firefox] › ../../../../../private/tmp/amw-fix-playwright-specs/ux-regressions.spec.cjs:27:1 › UX-002: dashboard scrollable commands have explicit keyboard access
+    [firefox] › ../../../../../private/tmp/amw-fix-playwright-specs/ux-regressions.spec.cjs:49:1 › UX-003: operator runtime links remain on the served origin
+    [webkit] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:9:1 › main public pages load without browser or resource errors
+    [webkit] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:21:1 › calculator valid, boundary, invalid and cleared states stay local
+    [webkit] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:48:1 › receipt evidence loads without claiming cryptographic verification
+    [webkit] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:54:1 › receipt load failure removes published data and verification claims
+    [webkit] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:62:1 › malformed receipt payload fails closed
+    [webkit] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:68:1 › mobile pages do not overflow
+    [webkit] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:77:1 › operator index is static and does not ask for credentials
+    [webkit] › ../../../../../private/tmp/amw-fix-playwright-specs/frontend.spec.cjs:84:1 › no JavaScript retains the pilot and proof entry path
+    [webkit] › ../../../../../private/tmp/amw-fix-playwright-specs/ux-regressions.spec.cjs:15:1 › UX-001: comparison fit text meets minimum contrast
+    [webkit] › ../../../../../private/tmp/amw-fix-playwright-specs/ux-regressions.spec.cjs:27:1 › UX-002: dashboard scrollable commands have explicit keyboard access
+    [webkit] › ../../../../../private/tmp/amw-fix-playwright-specs/ux-regressions.spec.cjs:49:1 › UX-003: operator runtime links remain on the served origin

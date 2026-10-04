@@ -1,0 +1,3 @@
+Using Python 3.13.14 environment at: /private/tmp/amw-fix-python
+Checked 84 packages in 6ms
+All installed packages are compatible

@@ -1,0 +1,25 @@
+html {
+  color: 'rgb(0, 0, 0)',
+  background: 'rgba(0, 0, 0, 0)',
+  paper: '#f6f3e9'
+}
+.proof-col:not(.replay) {
+  color: 'var(--paper-ink)',
+  background: 'rgba(0, 0, 0, 0)',
+  paper: '#f6f3e9'
+}
+.proof-col:not(.replay) li {
+  color: 'var(--text-dim)',
+  background: 'rgba(0, 0, 0, 0)',
+  paper: '#f6f3e9'
+}
+.proof-col.replay {
+  color: 'var(--text)',
+  background: 'rgba(0, 0, 0, 0)',
+  paper: '#f6f3e9'
+}
+.proof-col.replay li {
+  color: 'var(--text-dim)',
+  background: 'rgba(0, 0, 0, 0)',
+  paper: '#f6f3e9'
+}
