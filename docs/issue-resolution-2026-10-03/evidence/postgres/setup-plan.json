@@ -1,0 +1,17 @@
+{
+  "head": "079bb7290f6ed86c6762baec02827305b5cb9da7",
+  "cwd": "/Users/sellers/.openclaw/worktrees/amw-issues-20261003-postgres",
+  "started": "2026-10-04T02:02:23.102629+00:00",
+  "port_bind_check": "free",
+  "environment": "test",
+  "pg_bin": "/opt/homebrew/opt/postgresql@17/bin",
+  "cluster": "/tmp/amw-release-postgres-final-20261003/cluster",
+  "fresh_databases": [
+    "postgresql+asyncpg://sellers@127.0.0.1:55439/amw_action_final_accounting",
+    "postgresql+asyncpg://sellers@127.0.0.1:55439/amw_action_final_process",
+    "postgresql+asyncpg://sellers@127.0.0.1:55439/amw_action_final_migration",
+    "postgresql+asyncpg://sellers@127.0.0.1:55439/amw_action_final_dispatch",
+    "postgresql+asyncpg://sellers@127.0.0.1:55439/amw_action_final_permit"
+  ],
+  "credentials": "synthetic test-only; no user credential/environment files read"
+}

@@ -1,0 +1,351 @@
+{
+  "head": "079bb7290f6ed86c6762baec02827305b5cb9da7",
+  "head_after": "079bb7290f6ed86c6762baec02827305b5cb9da7",
+  "results": [
+    {
+      "name": "initdb",
+      "head": "079bb7290f6ed86c6762baec02827305b5cb9da7",
+      "cwd": "/Users/sellers/.openclaw/worktrees/amw-issues-20261003-postgres",
+      "command": [
+        "/opt/homebrew/opt/postgresql@17/bin/initdb",
+        "-D",
+        "/tmp/amw-release-postgres-final-20261003/cluster",
+        "-U",
+        "sellers",
+        "--auth-local=trust",
+        "--auth-host=trust",
+        "--no-locale",
+        "-E",
+        "UTF8"
+      ],
+      "started": "2026-10-04T02:02:23.115899+00:00",
+      "explicit_test_settings": {},
+      "exit_code": 0,
+      "finished": "2026-10-04T02:02:23.514674+00:00",
+      "head_after": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "name": "postgres-start",
+      "head": "079bb7290f6ed86c6762baec02827305b5cb9da7",
+      "cwd": "/Users/sellers/.openclaw/worktrees/amw-issues-20261003-postgres",
+      "command": [
+        "/opt/homebrew/opt/postgresql@17/bin/pg_ctl",
+        "-D",
+        "/tmp/amw-release-postgres-final-20261003/cluster",
+        "-l",
+        "/tmp/amw-release-postgres-final-20261003/postgres.log",
+        "-o",
+        "-h 127.0.0.1 -p 55439 -k /tmp/amw-release-postgres-final-20261003/socket",
+        "-w",
+        "start"
+      ],
+      "started": "2026-10-04T02:02:23.541998+00:00",
+      "explicit_test_settings": {},
+      "exit_code": 0,
+      "finished": "2026-10-04T02:02:23.671395+00:00",
+      "head_after": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "name": "create-accounting",
+      "head": "079bb7290f6ed86c6762baec02827305b5cb9da7",
+      "cwd": "/Users/sellers/.openclaw/worktrees/amw-issues-20261003-postgres",
+      "command": [
+        "/opt/homebrew/opt/postgresql@17/bin/createdb",
+        "-h",
+        "127.0.0.1",
+        "-p",
+        "55439",
+        "-U",
+        "sellers",
+        "amw_action_final_accounting"
+      ],
+      "started": "2026-10-04T02:02:23.698361+00:00",
+      "explicit_test_settings": {},
+      "exit_code": 0,
+      "finished": "2026-10-04T02:02:23.773596+00:00",
+      "head_after": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "name": "create-process",
+      "head": "079bb7290f6ed86c6762baec02827305b5cb9da7",
+      "cwd": "/Users/sellers/.openclaw/worktrees/amw-issues-20261003-postgres",
+      "command": [
+        "/opt/homebrew/opt/postgresql@17/bin/createdb",
+        "-h",
+        "127.0.0.1",
+        "-p",
+        "55439",
+        "-U",
+        "sellers",
+        "amw_action_final_process"
+      ],
+      "started": "2026-10-04T02:02:23.797824+00:00",
+      "explicit_test_settings": {},
+      "exit_code": 0,
+      "finished": "2026-10-04T02:02:23.871775+00:00",
+      "head_after": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "name": "create-migration",
+      "head": "079bb7290f6ed86c6762baec02827305b5cb9da7",
+      "cwd": "/Users/sellers/.openclaw/worktrees/amw-issues-20261003-postgres",
+      "command": [
+        "/opt/homebrew/opt/postgresql@17/bin/createdb",
+        "-h",
+        "127.0.0.1",
+        "-p",
+        "55439",
+        "-U",
+        "sellers",
+        "amw_action_final_migration"
+      ],
+      "started": "2026-10-04T02:02:23.896838+00:00",
+      "explicit_test_settings": {},
+      "exit_code": 0,
+      "finished": "2026-10-04T02:02:23.968377+00:00",
+      "head_after": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "name": "create-dispatch",
+      "head": "079bb7290f6ed86c6762baec02827305b5cb9da7",
+      "cwd": "/Users/sellers/.openclaw/worktrees/amw-issues-20261003-postgres",
+      "command": [
+        "/opt/homebrew/opt/postgresql@17/bin/createdb",
+        "-h",
+        "127.0.0.1",
+        "-p",
+        "55439",
+        "-U",
+        "sellers",
+        "amw_action_final_dispatch"
+      ],
+      "started": "2026-10-04T02:02:23.990985+00:00",
+      "explicit_test_settings": {},
+      "exit_code": 0,
+      "finished": "2026-10-04T02:02:24.068019+00:00",
+      "head_after": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "name": "create-permit",
+      "head": "079bb7290f6ed86c6762baec02827305b5cb9da7",
+      "cwd": "/Users/sellers/.openclaw/worktrees/amw-issues-20261003-postgres",
+      "command": [
+        "/opt/homebrew/opt/postgresql@17/bin/createdb",
+        "-h",
+        "127.0.0.1",
+        "-p",
+        "55439",
+        "-U",
+        "sellers",
+        "amw_action_final_permit"
+      ],
+      "started": "2026-10-04T02:02:24.092646+00:00",
+      "explicit_test_settings": {},
+      "exit_code": 0,
+      "finished": "2026-10-04T02:02:24.167627+00:00",
+      "head_after": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "name": "migrate-accounting",
+      "head": "079bb7290f6ed86c6762baec02827305b5cb9da7",
+      "cwd": "/Users/sellers/.openclaw/worktrees/amw-issues-20261003-postgres",
+      "command": [
+        "/Users/sellers/Projects/agent-middleware-api/.venv/bin/python3",
+        "-m",
+        "alembic",
+        "upgrade",
+        "head"
+      ],
+      "started": "2026-10-04T02:02:24.193773+00:00",
+      "explicit_test_settings": {
+        "DATABASE_URL": "postgresql+asyncpg://sellers@127.0.0.1:55439/amw_action_final_accounting"
+      },
+      "exit_code": 0,
+      "finished": "2026-10-04T02:02:24.741312+00:00",
+      "head_after": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "name": "migrate-process",
+      "head": "079bb7290f6ed86c6762baec02827305b5cb9da7",
+      "cwd": "/Users/sellers/.openclaw/worktrees/amw-issues-20261003-postgres",
+      "command": [
+        "/Users/sellers/Projects/agent-middleware-api/.venv/bin/python3",
+        "-m",
+        "alembic",
+        "upgrade",
+        "head"
+      ],
+      "started": "2026-10-04T02:02:24.769871+00:00",
+      "explicit_test_settings": {
+        "DATABASE_URL": "postgresql+asyncpg://sellers@127.0.0.1:55439/amw_action_final_process"
+      },
+      "exit_code": 0,
+      "finished": "2026-10-04T02:02:25.329643+00:00",
+      "head_after": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "name": "migrate-permit",
+      "head": "079bb7290f6ed86c6762baec02827305b5cb9da7",
+      "cwd": "/Users/sellers/.openclaw/worktrees/amw-issues-20261003-postgres",
+      "command": [
+        "/Users/sellers/Projects/agent-middleware-api/.venv/bin/python3",
+        "-m",
+        "alembic",
+        "upgrade",
+        "head"
+      ],
+      "started": "2026-10-04T02:02:25.356476+00:00",
+      "explicit_test_settings": {
+        "DATABASE_URL": "postgresql+asyncpg://sellers@127.0.0.1:55439/amw_action_final_permit"
+      },
+      "exit_code": 0,
+      "finished": "2026-10-04T02:02:25.921030+00:00",
+      "head_after": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "name": "action-accounting",
+      "head": "079bb7290f6ed86c6762baec02827305b5cb9da7",
+      "cwd": "/Users/sellers/.openclaw/worktrees/amw-issues-20261003-postgres",
+      "command": [
+        "/Users/sellers/Projects/agent-middleware-api/.venv/bin/python3",
+        "-m",
+        "pytest",
+        "tests/test_action_postgres.py",
+        "-x",
+        "-ra",
+        "--tb=short",
+        "--junitxml=/tmp/amw-release-postgres-final-20261003/action-accounting.xml",
+        "--basetemp=/tmp/amw-release-postgres-final-20261003/action-accounting-artifacts"
+      ],
+      "started": "2026-10-04T02:02:25.944836+00:00",
+      "explicit_test_settings": {
+        "DATABASE_URL": "postgresql+asyncpg://sellers@127.0.0.1:55439/amw_action_final_accounting",
+        "RUN_POSTGRES_CONCURRENCY_TESTS": "1"
+      },
+      "exit_code": 0,
+      "finished": "2026-10-04T02:02:28.356592+00:00",
+      "head_after": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "name": "action-multiprocess",
+      "head": "079bb7290f6ed86c6762baec02827305b5cb9da7",
+      "cwd": "/Users/sellers/.openclaw/worktrees/amw-issues-20261003-postgres",
+      "command": [
+        "/Users/sellers/Projects/agent-middleware-api/.venv/bin/python3",
+        "-m",
+        "pytest",
+        "tests/test_action_multiprocess.py",
+        "-x",
+        "-ra",
+        "--tb=short",
+        "--junitxml=/tmp/amw-release-postgres-final-20261003/action-multiprocess.xml",
+        "--basetemp=/tmp/amw-release-postgres-final-20261003/action-multiprocess-artifacts"
+      ],
+      "started": "2026-10-04T02:02:28.385778+00:00",
+      "explicit_test_settings": {
+        "DATABASE_URL": "postgresql+asyncpg://sellers@127.0.0.1:55439/amw_action_final_process",
+        "RUN_MCP_MULTIPROCESS_TESTS": "1",
+        "MCP_STRESS_DB_ISOLATED": "1",
+        "STATE_BACKEND": "postgres"
+      },
+      "exit_code": 0,
+      "finished": "2026-10-04T02:02:50.220927+00:00",
+      "head_after": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "name": "action-migration",
+      "head": "079bb7290f6ed86c6762baec02827305b5cb9da7",
+      "cwd": "/Users/sellers/.openclaw/worktrees/amw-issues-20261003-postgres",
+      "command": [
+        "/Users/sellers/Projects/agent-middleware-api/.venv/bin/python3",
+        "-m",
+        "pytest",
+        "tests/test_action_migrations.py::test_postgres_legacy_roundtrip_and_fail_closed_downgrade",
+        "-x",
+        "-ra",
+        "--tb=short",
+        "--junitxml=/tmp/amw-release-postgres-final-20261003/action-migration.xml",
+        "--basetemp=/tmp/amw-release-postgres-final-20261003/action-migration-artifacts"
+      ],
+      "started": "2026-10-04T02:02:50.248261+00:00",
+      "explicit_test_settings": {
+        "DATABASE_URL": "sqlite+aiosqlite:////tmp/amw-release-postgres-final-20261003/migration-fixture.sqlite",
+        "ACTION_MIGRATION_DATABASE_URL": "postgresql+asyncpg://sellers@127.0.0.1:55439/amw_action_final_migration",
+        "ALLOW_METADATA_CREATE_ALL": "true"
+      },
+      "exit_code": 0,
+      "finished": "2026-10-04T02:02:57.459088+00:00",
+      "head_after": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "name": "dispatch-migration",
+      "head": "079bb7290f6ed86c6762baec02827305b5cb9da7",
+      "cwd": "/Users/sellers/.openclaw/worktrees/amw-issues-20261003-postgres",
+      "command": [
+        "/Users/sellers/Projects/agent-middleware-api/.venv/bin/python3",
+        "-m",
+        "pytest",
+        "tests/test_dispatch_call_slot_migration.py",
+        "-x",
+        "-ra",
+        "--tb=short",
+        "--junitxml=/tmp/amw-release-postgres-final-20261003/dispatch-migration.xml",
+        "--basetemp=/tmp/amw-release-postgres-final-20261003/dispatch-migration-artifacts"
+      ],
+      "started": "2026-10-04T02:02:57.484958+00:00",
+      "explicit_test_settings": {
+        "DATABASE_URL": "sqlite+aiosqlite:////tmp/amw-release-postgres-final-20261003/migration-fixture.sqlite",
+        "DISPATCH_MIGRATION_DATABASE_URL": "postgresql+asyncpg://sellers@127.0.0.1:55439/amw_action_final_dispatch",
+        "ALLOW_METADATA_CREATE_ALL": "true"
+      },
+      "exit_code": 0,
+      "finished": "2026-10-04T02:02:58.514128+00:00",
+      "head_after": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "name": "permit-concurrency",
+      "head": "079bb7290f6ed86c6762baec02827305b5cb9da7",
+      "cwd": "/Users/sellers/.openclaw/worktrees/amw-issues-20261003-postgres",
+      "command": [
+        "/Users/sellers/Projects/agent-middleware-api/.venv/bin/python3",
+        "-m",
+        "pytest",
+        "tests/test_permit_postgres_concurrency.py",
+        "-x",
+        "-ra",
+        "--tb=short",
+        "--junitxml=/tmp/amw-release-postgres-final-20261003/permit-concurrency.xml",
+        "--basetemp=/tmp/amw-release-postgres-final-20261003/permit-concurrency-artifacts"
+      ],
+      "started": "2026-10-04T02:02:58.537714+00:00",
+      "explicit_test_settings": {
+        "DATABASE_URL": "postgresql+asyncpg://sellers@127.0.0.1:55439/amw_action_final_permit",
+        "RUN_POSTGRES_CONCURRENCY_TESTS": "1"
+      },
+      "exit_code": 0,
+      "finished": "2026-10-04T02:03:01.345765+00:00",
+      "head_after": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "name": "postgres-stop",
+      "head": "079bb7290f6ed86c6762baec02827305b5cb9da7",
+      "cwd": "/Users/sellers/.openclaw/worktrees/amw-issues-20261003-postgres",
+      "command": [
+        "/opt/homebrew/opt/postgresql@17/bin/pg_ctl",
+        "-D",
+        "/tmp/amw-release-postgres-final-20261003/cluster",
+        "-m",
+        "fast",
+        "-w",
+        "stop"
+      ],
+      "started": "2026-10-04T02:03:01.375714+00:00",
+      "explicit_test_settings": {},
+      "exit_code": 0,
+      "finished": "2026-10-04T02:03:01.712057+00:00",
+      "head_after": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    }
+  ],
+  "finished": "2026-10-04T02:03:01.812866+00:00",
+  "git_status": ""
+}

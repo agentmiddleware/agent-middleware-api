@@ -1,0 +1,30 @@
+✔ calculator covers empty, valid, equal, zero, invalid and overflow classes (91.651917ms)
+✔ receipt component handles http without network (14.566875ms)
+✔ receipt component handles json without network (8.889458ms)
+✔ receipt component handles key-mismatch without network (8.032459ms)
+✔ receipt component handles missing-payload without network (7.780417ms)
+✔ receipt component handles valid artifacts without network (8.148708ms)
+✔ SDK fails before transport for missing permit and invalid idempotency keys (35.312375ms)
+✔ SDK preserves retry identity, astral boundary and governed headers (6.328125ms)
+✔ FE-001: declared SDK build produces its advertised entrypoints (409.77975ms)
+✔ FE-002: maxSteps=0 is not silently promoted to 100 actions (6.846958ms)
+✔ FE-002: session limits default only when absent and preserve API validation boundaries (4.811458ms)
+✔ UX-001: paper and dark fit lists meet 4.5:1 contrast (default) (221.324417ms)
+✔ UX-001: paper and dark fit lists meet 4.5:1 contrast (high) (44.744875ms)
+✔ UX-002: operator commands expose a named keyboard focus target (11.913667ms)
+✔ UX-003: operator runtime links resolve on the served origin (9.413584ms)
+✔ UX-003: inspection commands require an explicit API origin (7.652291ms)
+✔ Key Rotation seed 2 grants invulnerability after one hit (1.957583ms)
+✔ Key Rotation seed 3 grants invulnerability after one hit (1.297167ms)
+✔ Key Rotation seed 5 grants invulnerability after one hit (1.137666ms)
+✔ Happy Path visible feet meet the ground before and after a jump (1.43925ms)
+✔ Happy Path uses the same visible origin on a platform landing (0.827542ms)
+✔ Tap Forge carries passive quota fractions across frame rates (0.519375ms)
+ℹ tests 22
+ℹ suites 0
+ℹ pass 22
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 945.055583
