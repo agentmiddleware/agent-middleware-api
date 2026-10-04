@@ -103,22 +103,23 @@ Not proven by this harness, and not claimed:
 - **Production behavior.** Same code, different infrastructure (Postgres,
   Redis, a real upstream MCP server). A local pass is strong evidence about
   the logic, not a measurement of the production deployment.
-- **Remote exactly-once.** For the configured upstream MCP tool, an accepted
-  idempotency identity permits at most one gateway dispatch and at most one
-  debit. This is not a guarantee that a network send or downstream effect
-  occurred. Downstream deduplication depends on the upstream honoring the
+- **Remote effects.** For the configured upstream MCP tool, identical retries
+  under the same accepted idempotency key allow at most one gateway dispatch
+  and at most one debit. This does not guarantee delivery or a downstream
+  effect; downstream replay safety also requires the upstream to honor the
   forwarded key. This local harness does not exercise upstream crash recovery.
-- **A receipt after every effect.** A local crash or exhausted receipt/audit
-  write after committed effects can leave no receipt and require manual
-  review. An ambiguous upstream outcome is receipted as `delivery_uncertain`
-  only when finalization or reconciliation succeeds. Do not retry an unresolved
-  action with a new key; that can execute and charge again. See
-  [failure-semantics.md](failure-semantics.md).
-- **The local tool is simulated.** `partner.notes.write` appends to a local
-  JSONL file and is labeled `simulation: true` in discovery. The configured
-  upstream MCP tool uses a durable dispatch state machine; local governed
-  tools do not. Both enforce permits and accounting, but the local replay
-  proof does not establish the upstream recovery guarantees.
+- **Local and upstream execution differ.** `partner.notes.write` appends to a
+  local JSONL file and is labeled `simulation: true` in discovery.
+  `partner.echo` uses the configured upstream MCP adapter and durable dispatch
+  state machine. Local governed tools have no dispatch state machine and
+  interrupted calls fail closed into manual review.
+- **Receipt completion.** A call can commit effects or a debit but fail to
+  write its audit event or receipt, returning `manual_review_required` with
+  no receipt. Do not retry with a new idempotency key: that can execute and
+  charge the call again. Reconcile from the ledger and audit chain as described
+  in [failure semantics](failure-semantics.md). An ambiguous upstream outcome
+  is receipted as `delivery_uncertain` only when finalization or reconciliation
+  succeeds.
 
 To reproduce the invariants against production, an operator must issue a
 wallet-scoped key and funded permit out of band. No agent should manufacture

@@ -1,0 +1,20 @@
+SUMMARY es a PostgreSQL DATABASE_URL for real row-lock semantics
+SKIPPED [1] tests/test_permit_postgres_concurrency.py:578: requires a PostgreSQL DATABASE_URL for real row-lock semantics
+SKIPPED [1] tests/test_permit_postgres_concurrency.py:637: requires a PostgreSQL DATABASE_URL for real row-lock semantics
+SKIPPED [1] tests/test_permit_postgres_concurrency.py:689: requires a PostgreSQL DATABASE_URL for real row-lock semantics
+SKIPPED [1] tests/test_permit_postgres_concurrency.py:746: requires a PostgreSQL DATABASE_URL for real row-lock semantics
+SKIPPED [1] tests/test_permit_postgres_concurrency.py:902: requires a PostgreSQL DATABASE_URL for real row-lock semantics
+SKIPPED [1] tests/test_permit_postgres_concurrency.py:955: requires a PostgreSQL DATABASE_URL for real row-lock semantics
+SKIPPED [11] tests/test_permit_postgres_concurrency.py:147: requires a PostgreSQL DATABASE_URL for real row-lock semantics
+SKIPPED [1] tests/test_postgres_datetime_binding.py:203: TEST_POSTGRES_URL not set; Postgres-dialect coverage skipped
+SKIPPED [1] tests/test_postgres_datetime_binding.py:225: TEST_POSTGRES_URL not set; Postgres-dialect coverage skipped
+SKIPPED [1] tests/test_postgres_datetime_binding.py:263: TEST_POSTGRES_URL not set; Postgres-dialect coverage skipped
+SKIPPED [1] tests/test_postgres_datetime_binding.py:323: TEST_POSTGRES_URL not set; Postgres-dialect coverage skipped
+SKIPPED [1] tests/test_postgres_datetime_binding.py:346: TEST_POSTGRES_URL not set; Postgres-dialect coverage skipped
+SKIPPED [1] tests/test_security_fuzz_battery.py:705: requires PostgreSQL for accurate concurrent budget accounting
+3655 passed, 60 skipped, 4 deselected, 7 xfailed, 66 warnings in 307.72s (0:05:07)
+
+backend-baseline-coverage.json {"covered_lines": 21248, "excluded_lines": 45, "missing_lines": 3018, "num_statements": 24266, "percent_covered": 87.56284513310806, "percent_covered_display": "88", "percent_statements_covered": 87.56284513310806, "percent_statements_covered_display": "88"}
+META {"branch_coverage": false, "format": 3, "show_contexts": false, "timestamp": "2026-10-02T17:42:35.983442", "version": "7.16.2"}
+backend-after-coverage.json {"covered_lines": 21249, "excluded_lines": 45, "missing_lines": 3017, "num_statements": 24266, "percent_covered": 87.566966125443, "percent_covered_display": "88", "percent_statements_covered": 87.566966125443, "percent_statements_covered_display": "88"}
+META {"branch_coverage": false, "format": 3, "show_contexts": false, "timestamp": "2026-10-02T17:54:34.359886", "version": "7.16.2"}

@@ -1,0 +1,17 @@
+node --check docs/qa/2026-10-02/ux-contracts.test.cjs: exit 0
+node --check docs/qa/2026-10-02/ux-regressions.spec.cjs: exit 0
+node --check docs/qa/2026-10-02/playwright.config.cjs: exit 0
+node --check docs/qa/2026-10-02/browser-loopback.mjs: exit 0
+node --check docs/qa/2026-10-02/ux_browser_qa.cjs: exit 0
+node --check docs/qa/2026-10-02/frontend.spec.cjs: exit 0
+node --check docs/qa/2026-10-02/frontend-components.test.cjs: exit 0
+node --check site/pilot-fit.js: exit 0
+node --check site/va-init.js: exit 0
+node --check site/a11y-preload.js: exit 0
+node --check site/arcade-boot.js: exit 0
+node --check site/analytics.js: exit 0
+node --check site/a11y.js: exit 0
+node --check site/wave.js: exit 0
+node --check site/proof/proof.js: exit 0
+node --check site/arcade.js: exit 0
+Syntax summary: 16 passed, 0 failed; site=9, QA=7

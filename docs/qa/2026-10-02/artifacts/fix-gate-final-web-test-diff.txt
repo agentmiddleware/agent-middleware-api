@@ -1,0 +1,202 @@
+diff --git a/docs/qa/2026-10-02/frontend-components.test.cjs b/docs/qa/2026-10-02/frontend-components.test.cjs
+index d8302db..850b8a6 100644
+--- a/docs/qa/2026-10-02/frontend-components.test.cjs
++++ b/docs/qa/2026-10-02/frontend-components.test.cjs
+@@ -142,9 +142,28 @@ test('FE-001: declared SDK build produces its advertised entrypoints', {todo: 'F
+   for (const entrypoint of [pkg.main, pkg.types]) assert.equal(fs.existsSync(path.join(target, entrypoint)), true);
+ });
+
+-test('FE-002: maxSteps=0 is not silently promoted to 100 actions', {todo: 'FE-002: preserve invalid zero for API rejection or reject locally'}, async () => {
++test('FE-002: maxSteps=0 is not silently promoted to 100 actions', async () => {
+   const {sdk, requests} = client();
+-  try {await sdk.createSession('http://127.0.0.1:8769/synthetic', {maxSteps: 0});}
+-  catch {assert.equal(requests.length, 0); return;}
++  await sdk.createSession('http://127.0.0.1:8769/synthetic', {maxSteps: 0});
++  assert.equal(requests.length, 1);
+   assert.equal(requests[0].args[1].max_steps, 0);
+ });
++
++test('FE-002: session limits default only when absent and preserve API validation boundaries', async () => {
++  const {sdk, requests} = client();
++  const target = 'http://127.0.0.1:8769/synthetic';
++  for (const options of [undefined, {}, {maxSteps: undefined}, {maxSteps: null}]) {
++    await sdk.createSession(target, options);
++    assert.equal(requests.at(-1).args[1].max_steps, 100);
++  }
++  // Invalid values must reach the API unchanged, so its 1..1000 bounds apply.
++  for (const maxSteps of [-1, 0, 0.5, 1, 1000, 1001]) {
++    await sdk.createSession(target, {maxSteps, allowHumanPause: false});
++    const request = requests.at(-1);
++    assert.equal(request.method, 'post');
++    assert.equal(request.args[0], '/v1/awi/sessions');
++    assert.equal(request.args[1].max_steps, maxSteps);
++    assert.equal(request.args[1].allow_human_pause, false);
++  }
++  assert.equal(requests.length, 10);
++});
+diff --git a/docs/qa/2026-10-02/ux-contracts.test.cjs b/docs/qa/2026-10-02/ux-contracts.test.cjs
+new file mode 100644
+index 0000000..c76c653
+--- /dev/null
++++ b/docs/qa/2026-10-02/ux-contracts.test.cjs
+@@ -0,0 +1,104 @@
++// Offline DOM/CSS checks; rendering, keyboard scrolling and axe remain browser tests.
++const {test} = require('node:test');
++const assert = require('node:assert/strict');
++const fs = require('node:fs');
++const path = require('node:path');
++const modules = process.env.QA_NODE_MODULES || '/private/tmp/amw-qa-browser/node_modules';
++const {JSDOM} = require(`${modules}/jsdom`);
++const root = path.resolve(__dirname, '../../..');
++
++function page(file) {
++  // No script execution or subresource loading: the checks cannot contact a host.
++  return new JSDOM(fs.readFileSync(path.join(root, file), 'utf8'), {
++    url: 'http://127.0.0.1:8765/',
++  });
++}
++
++function luminance(color) {
++  const rgb = color.match(/^rgb\((\d+), (\d+), (\d+)\)$/);
++  assert(rgb, `Expected an opaque resolved RGB color, got ${color}`);
++  const [r, g, b] = rgb.slice(1).map(value => {
++    const channel = Number(value) / 255;
++    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
++  });
++  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
++}
++
++for (const contrast of ['default', 'high']) {
++  test(`UX-001: paper and dark fit lists meet 4.5:1 contrast (${contrast})`, () => {
++    const dom = page('site/compare/index.html');
++    try {
++      const {document} = dom.window;
++      if (contrast === 'high') document.documentElement.dataset.a11yContrast = 'high';
++      const style = document.createElement('style');
++      const css = fs.readFileSync(path.join(root, 'site/styles.css'), 'utf8');
++      style.textContent = css;
++      document.head.append(style);
++      const tokens = dom.window.getComputedStyle(document.documentElement);
++      // JSDOM preserves var() in computed colors. Resolve the page's root palette
++      // before computing the real selectors and cascade; do not substitute colors.
++      style.textContent = css.replace(/var\((--[\w-]+)\)/g, (value, token) =>
++        tokens.getPropertyValue(token).trim() || value);
++      for (const selector of ['.proof-col:not(.replay)', '.proof-col.replay']) {
++        const card = document.querySelector(selector);
++        const background = luminance(dom.window.getComputedStyle(card).backgroundColor);
++        const items = card.querySelectorAll('.fit-list li');
++        assert.equal(items.length, 4);
++        for (const item of items) {
++          const foreground = luminance(dom.window.getComputedStyle(item).color);
++          const ratio = (Math.max(background, foreground) + 0.05) /
++            (Math.min(background, foreground) + 0.05);
++          assert(ratio >= 4.5, `${selector}: contrast ${ratio.toFixed(2)}:1 is below 4.5:1`);
++        }
++      }
++    } finally {dom.window.close();}
++  });
++}
++
++test('UX-002: operator commands expose a named keyboard focus target', () => {
++  const dom = page('static/dashboard.html');
++  try {
++    const {document} = dom.window;
++    const code = document.querySelector('pre');
++    assert.equal(code.tabIndex, 0, 'Scrollable commands must join sequential keyboard navigation');
++    assert.equal(code.getAttribute('role'), 'region');
++    assert.equal(code.getAttribute('aria-label'), 'Authenticated inspection commands');
++    code.focus();
++    assert.equal(document.activeElement, code);
++  } finally {dom.window.close();}
++});
++
++test('UX-003: operator runtime links resolve on the served origin', () => {
++  const dom = page('static/dashboard.html');
++  try {
++    const {document} = dom.window;
++    const runtimePaths = ['/health/dependencies', '/.well-known/trust-keys.json',
++      '/.well-known/agent.json', '/llms.txt'];
++    const links = [...document.querySelectorAll('a[href]')];
++    for (const pathname of runtimePaths) {
++      const matches = links.filter(link => new URL(link.href).pathname === pathname);
++      assert(matches.length > 0, `Missing runtime link: ${pathname}`);
++      for (const link of matches) {
++        for (const origin of ['http://127.0.0.1:8765', 'https://operator.example']) {
++          assert.equal(new URL(link.getAttribute('href'), origin).origin, origin,
++            `${pathname} must inspect the served runtime`);
++        }
++      }
++    }
++    for (const link of links.filter(link => new URL(link.href).pathname === '/proof/')) {
++      assert.match(link.textContent, /hosted/i, 'External proof must be labeled as hosted');
++    }
++  } finally {dom.window.close();}
++});
++
++test('UX-003: inspection commands require an explicit API origin', () => {
++  const dom = page('static/dashboard.html');
++  try {
++    const code = dom.window.document.querySelector('pre').textContent;
++    assert.match(code, /export API_URL="http:\/\/127\.0\.0\.1:8000"/);
++    for (const endpoint of ['permits', 'receipts', 'audit/events']) {
++      assert(code.includes('"${API_URL}/v1/me/' + endpoint + '"'));
++    }
++    assert(!code.includes('https://api.thisisatest.tech'));
++  } finally {dom.window.close();}
++});
+diff --git a/docs/qa/2026-10-02/ux-regressions.spec.cjs b/docs/qa/2026-10-02/ux-regressions.spec.cjs
+index 8e2436f..b9eab5a 100644
+--- a/docs/qa/2026-10-02/ux-regressions.spec.cjs
++++ b/docs/qa/2026-10-02/ux-regressions.spec.cjs
+@@ -1,4 +1,4 @@
+-// Known issues are expected failures until the corresponding product fix lands.
++// Regression coverage for the 2026-10-02 UX findings.
+ const modules = process.env.QA_NODE_MODULES || '/private/tmp/amw-qa-browser/node_modules';
+ const {test, expect} = require(`${modules}/@playwright/test`);
+ const axe = require(`${modules}/axe-core`);
+@@ -13,7 +13,6 @@ test.beforeEach(async ({context, page}) => {
+ });
+
+ test('UX-001: comparison fit text meets minimum contrast', async ({page}) => {
+-  test.fail(true, 'UX-001: paper card inherits dark-surface text color (2.13:1).');
+   await page.goto('/compare/');
+   await page.addScriptTag({content: axe.source});
+   const violations = await page.evaluate(async () => {
+@@ -26,7 +25,6 @@ test('UX-001: comparison fit text meets minimum contrast', async ({page}) => {
+ });
+
+ test('UX-002: dashboard scrollable commands have explicit keyboard access', async ({page}) => {
+-  test.fail(true, 'UX-002: scrollable pre has neither tabindex nor focusable content.');
+   await page.goto('http://127.0.0.1:8766/dashboard.html');
+   const code = page.locator('pre');
+   const state = await code.evaluate(element => ({
+@@ -36,11 +34,26 @@ test('UX-002: dashboard scrollable commands have explicit keyboard access', asyn
+     ) !== null,
+   }));
+   expect(!state.scrolls || state.keyboardAccessible).toBe(true);
++  await expect(code).toHaveAccessibleName('Authenticated inspection commands');
++  await page.locator('a[href$="/llms.txt"]').focus();
++  await page.keyboard.press('Tab');
++  await expect(code).toBeFocused();
++  expect(await code.evaluate(element => parseFloat(getComputedStyle(element).outlineWidth)))
++    .toBeGreaterThan(0);
++  if (state.scrolls) {
++    await page.keyboard.press('ArrowRight');
++    await expect.poll(() => code.evaluate(element => element.scrollLeft)).toBeGreaterThan(0);
++  }
+ });
+
+ test('UX-003: operator runtime links remain on the served origin', async ({page}) => {
+-  test.fail(true, 'UX-003: runtime links target a fixed production origin from local dashboard.');
+   await page.goto('http://127.0.0.1:8766/dashboard.html');
+-  const href = await page.getByRole('link', {name: /Runtime truth/}).first().getAttribute('href');
+-  expect(new URL(href, page.url()).origin).toBe(new URL(page.url()).origin);
++  for (const name of [/Runtime truth/, /Current trust keys/, /Agent manifest/, /llms.txt/]) {
++    const links = page.getByRole('link', {name});
++    await expect(links.first()).toBeVisible();
++    for (const link of await links.all()) {
++      const href = await link.getAttribute('href');
++      expect(new URL(href, page.url()).origin).toBe(new URL(page.url()).origin);
++    }
++  }
+ });

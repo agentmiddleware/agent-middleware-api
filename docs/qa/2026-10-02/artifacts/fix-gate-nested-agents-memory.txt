@@ -1,0 +1,15 @@
+AGENTS.md
+app/services/AGENTS.md
+tests/AGENTS.md
+1:# Task Group: agent-middleware-api dead rate-limiter removal and PR closeout
+10:- rollout_summaries/2026-10-01T15-39-09-kDFR-remove_unused_token_bucket_rate_limiter_pr_494.md (cwd=/Users/sellers/Projects/agent-middleware-api/.claude/worktrees/clever-euler-104499, rollout_path=/Users/sellers/.codex/sessions/2026/10/01/rollout-2026-10-01T08-39-09-01a0f81e-9673-7d91-9f9d-8265af8f638f.jsonl, updated_at=2026-10-01T07:54:25+00:00, thread_id=01a0f81e-9673-7d91-9f9d-8265af8f638f, partial; local cleanup validated, PR merge pending)
+14:- rate_limit.py, rate_limiter.py, RateLimitMiddleware, get_rate_limiter, app/main.py, check_doc_references.py, uv run --with-requirements, PR #494, auto-merge
+22:- The live limiter is `app/core/rate_limiter.py`, a per-API-key fixed-window Redis counter with in-memory fallback, mounted from `app/main.py`; `app/core/rate_limit.py` and `app/middleware/rate_limit.py` were unimported dead modules. [Task 1]
+24:- Verified cleanup evidence: the required `git grep` returned no matches, `python3 scripts/check_doc_references.py` resolved 680 references across 271 files, `ruff check .` passed, targeted tests passed 35, and importing `app.main` showed only `app.core.rate_limiter.RateLimitMiddleware`. [Task 1]
+132:- 700743, codex-backlog-2026-09-27.md, team-worktree, git remote get-url origin, agent-middleware-api, RegEngine, Dollarloop, test.db, SQLite, one pytest per worktree
+152:- DEMO-LOT-0412, b754a503, 401, Notion, 367 PR rows, 312 missing CI, 13 Railway rows, No automatic routines right now, LinkedIn-only, no resends, backlog-execution-status
+163:- Parallel pytest processes in one AMW checkout corrupt shared relative `./test.db`; run one pytest process per worktree/CWD or give concurrent tests separate worktrees. [Task 1]
+166:- RegEngine honesty rewrites from PRs #3052/#3055/#3061/#3063 were verified live, and merged PR #3088's `DEMO-LOT-0412` was present in source/deployment identity; authenticated scenario execution remained unverified because endpoints returned 401 without credentials. [Task 3]
+1139:- rollout_summaries/2026-09-05T11-23-50-FlKw-awi_idempotency_contract_merged_pr_401.md (cwd=/Users/sellers/Documents/GitHub/agent-middleware-api/.claude/worktrees/jovial-mirzakhani-bea1d3, rollout_path=/Users/sellers/.codex/sessions/2026/09/05/rollout-2026-09-05T04-23-50-01a0714f-7dea-7d61-b24d-9f5ad5b9df70.jsonl, updated_at=2026-09-05T06:44:57+00:00, thread_id=01a0714f-7dea-7d61-b24d-9f5ad5b9df70, merged PR #401)
+1140:- rollout_summaries/2026-09-05T11-23-50-0WLO-awi_idempotency_header_parity_merged.md (cwd=/Users/sellers/Documents/GitHub/agent-middleware-api/.claude/worktrees/relaxed-greider-89aae0, rollout_path=/Users/sellers/.codex/sessions/2026/09/05/rollout-2026-09-05T04-23-50-01a0714f-7dac-7901-9db7-d2c6ddf5a23c.jsonl, updated_at=2026-09-05T06:46:13+00:00, thread_id=01a0714f-7dac-7901-9db7-d2c6ddf5a23c, merged PR #401)
+1145:- AWI, Idempotency-Key, resolve_client_idempotency_key, repeated headers, idempotency_key_conflict, permit_required, operation_key, LedgerEntryModel.amount < 0, PR #401, PR #399

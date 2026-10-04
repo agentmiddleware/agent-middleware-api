@@ -1,0 +1,229 @@
+/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api eb02ac1 [qa/2026-10-02-fixes]
+qa/2026-10-02-fixes
+?? docs/qa/2026-10-02/FIX-CLAIMS-SESSION.md
+?? docs/qa/2026-10-02/FIX-GATE-SESSION.md
+?? docs/qa/2026-10-02/FIX-SDK-SESSION.md
+?? docs/qa/2026-10-02/FIX-SESSION.md
+?? docs/qa/2026-10-02/FIX-UX-SESSION.md
+?? docs/qa/2026-10-02/artifacts/fix-add-multicast-regressions.txt
+?? docs/qa/2026-10-02/artifacts/fix-auth-and-related-tests.txt
+?? docs/qa/2026-10-02/artifacts/fix-auth-regression-read.txt
+?? docs/qa/2026-10-02/artifacts/fix-backend-sources.txt
+?? docs/qa/2026-10-02/artifacts/fix-backend-test-selection.txt
+?? docs/qa/2026-10-02/artifacts/fix-be002-before.txt
+?? docs/qa/2026-10-02/artifacts/fix-be002-commit.txt
+?? docs/qa/2026-10-02/artifacts/fix-be002-export-schema.txt
+?? docs/qa/2026-10-02/artifacts/fix-be002-implementation.txt
+?? docs/qa/2026-10-02/artifacts/fix-be002-regression.txt
+?? docs/qa/2026-10-02/artifacts/fix-be002-schema-diff.txt
+?? docs/qa/2026-10-02/artifacts/fix-be002-secrets.txt
+?? docs/qa/2026-10-02/artifacts/fix-be002-stage.txt
+?? docs/qa/2026-10-02/artifacts/fix-be002-staged-check.txt
+?? docs/qa/2026-10-02/artifacts/fix-be002-targeted.txt
+?? docs/qa/2026-10-02/artifacts/fix-be003-before.txt
+?? docs/qa/2026-10-02/artifacts/fix-be003-commit.txt
+?? docs/qa/2026-10-02/artifacts/fix-be003-secrets.txt
+?? docs/qa/2026-10-02/artifacts/fix-be003-stage.txt
+?? docs/qa/2026-10-02/artifacts/fix-be003-staged-check.txt
+?? docs/qa/2026-10-02/artifacts/fix-be003-targeted-corrected.txt
+?? docs/qa/2026-10-02/artifacts/fix-be003-targeted.txt
+?? docs/qa/2026-10-02/artifacts/fix-be100-commit.txt
+?? docs/qa/2026-10-02/artifacts/fix-be100-stage.txt
+?? docs/qa/2026-10-02/artifacts/fix-be100-staged-check.txt
+?? docs/qa/2026-10-02/artifacts/fix-be100-targeted.txt
+?? docs/qa/2026-10-02/artifacts/fix-bearer-test-map.txt
+?? docs/qa/2026-10-02/artifacts/fix-browser-install.txt
+?? docs/qa/2026-10-02/artifacts/fix-build-validation-map.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-add-regression.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-apply-doc-correction.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-claims-evidence-retry.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-claims-evidence.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-docs-context.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-final-regression-evidence.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-final-review.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-implementation-context.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-initial-context.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-instructions-findings.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-negative-control.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-regression-conventions.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-targeted-docs.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-verify-doc-correction.txt
+?? docs/qa/2026-10-02/artifacts/fix-exception-and-auth-tests.txt
+?? docs/qa/2026-10-02/artifacts/fix-fe002-commit.txt
+?? docs/qa/2026-10-02/artifacts/fix-fe002-stage.txt
+?? docs/qa/2026-10-02/artifacts/fix-fe002-staged-check.txt
+?? docs/qa/2026-10-02/artifacts/fix-final-two-diffs.txt
+?? docs/qa/2026-10-02/artifacts/fix-first-diffs.txt
+?? docs/qa/2026-10-02/artifacts/fix-fix-be003-test-contract.txt
+?? docs/qa/2026-10-02/artifacts/fix-fix-multicast.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-be002-context.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-be002-current-diff.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-be002-decision.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-be002-dependencies.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-be002-search.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-be003-diff-review.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-be003-review-decision.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-be100-diff.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-be100-final-review-finding.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-be100-tests-source.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-candidate-diff-stat.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-candidate-tests.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-changed-claims-audit.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-claim-context-final.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-committed-range-check.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-current-fix-status.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-findings-full.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-first-three-review-decision.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-focus-rules.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-guard-source-context.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-identity.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-initial-diff.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-instructions-findings.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-last-two-review-decision.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-nested-agents-memory.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-openapi-context-retry.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-openapi-json-diff.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-review-skill.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-ux-pending-diff.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-ux-sdk-diff.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-ux001-context.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-ux002-focus-context.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-ux002-review-decision.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-ux003-current-diff.txt
+?? docs/qa/2026-10-02/artifacts/fix-install-guard-hook.txt
+?? docs/qa/2026-10-02/artifacts/fix-install-python.txt
+?? docs/qa/2026-10-02/artifacts/fix-lint-after.txt
+?? docs/qa/2026-10-02/artifacts/fix-mypy-after.txt
+?? docs/qa/2026-10-02/artifacts/fix-new-tests-review.txt
+?? docs/qa/2026-10-02/artifacts/fix-openapi-before-check.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-after-fe002.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-before-fe002.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-bounds-freeze.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-context.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-explicit-typecheck.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-final-diff.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-fix-fe002.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-focused-read.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-identity.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-python-build.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-regression-tests.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-related-components.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-skill-findings.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-source-bounds-memory.txt
+?? docs/qa/2026-10-02/artifacts/fix-setup-node.txt
+?? docs/qa/2026-10-02/artifacts/fix-setup-package-build-tools.txt
+?? docs/qa/2026-10-02/artifacts/fix-setup-python.txt
+?? docs/qa/2026-10-02/artifacts/fix-test-guard-hook.txt
+?? docs/qa/2026-10-02/artifacts/fix-tooling-and-safety.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-browser-config-source.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-browser-runtime-probe.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-build-fixtures.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-context.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-create-contrast-test.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-dashboard-related-tests.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-dom-color-probe.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-focused-context.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-initial-inspect.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-palette-and-focus.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-related-source.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-site-build-context.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-site-build.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-source-read.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-testing-tools.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux001-after.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux001-before.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux001-edit.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux001-result-decision.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux001-review.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux002-after.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux002-before.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux002-diff.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux002-edit.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux002-result-decision.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux002-syntax.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux002-test.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux003-after.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux003-before.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux003-diff.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux003-edit.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux003-link-inventory.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux003-result-decision.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux003-syntax.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux003-test-completeness.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux003-test.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux003-whitespace.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux001-commit.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux001-stage.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux001-staged-check.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux002-commit.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux002-diff.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux002-stage.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux002-staged-check.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux002-targeted.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux003-commit.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux003-stage.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux003-staged-check.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux003-targeted.txt
+?? docs/qa/2026-10-02/artifacts/fix-wrapper-python-build.txt
+ELEVATOR_PITCH.md:19:> One agent action, at most one debit — no matter how many times the agent
+ELEVATOR_PITCH.md:20:> retries under the same accepted key. Verify the receipt without us.
+ELEVATOR_PITCH.md:26:The debit leads. Offline-verifiable signed receipts are real here and worth
+ELEVATOR_PITCH.md:37:debit, and the terminal gateway outcome gets a signed receipt.
+ELEVATOR_PITCH.md:48:original result and signed receipt on an identical replay, and rejects changed
+ELEVATOR_PITCH.md:65:differentiating primitive is **exactly-once economic authorization at the
+ELEVATOR_PITCH.md:69:scoped signed permit -> governed MCP invoke -> wallet charge -> signed receipt
+ELEVATOR_PITCH.md:78:- **Charge-once under failure.** A repeated idempotency key returns the original
+ELEVATOR_PITCH.md:79:  result and receipt with no second gateway dispatch and no second debit. One
+ELEVATOR_PITCH.md:81:  debit, dispatch attempt, receipt, and audit event.
+ELEVATOR_PITCH.md:83:  upstream-returned errors are refunded and receipted. Genuinely ambiguous
+ELEVATOR_PITCH.md:86:- **Portable gateway evidence.** Signed receipts for success, denial, failure,
+ELEVATOR_PITCH.md:97:| `make prove-trust-plane` | The full permit → invoke → charge → receipt → replay → deny loop |
+ELEVATOR_PITCH.md:103:engineer behind the proxy. Intentionally retry the action, verify the receipt
+ELEVATOR_PITCH.md:115:| Enterprise authz for MCP | Who may call | Meter, receipt, and charge exactly once |
+ELEVATOR_PITCH.md:148:receipt, and prevents an identical replay under the same accepted key from
+ELEVATOR_PITCH.md:149:creating another gateway dispatch or debit. The debit and receipt are the
+ELEVATOR_PITCH.md:163:tool, identical retries under the same accepted idempotency key allow at most
+ELEVATOR_PITCH.md:164:one gateway dispatch and at most one debit. This does not guarantee delivery or
+ELEVATOR_PITCH.md:170:no receipt if an audit or receipt write fails. Do not retry with a new idempotency key:
+ELEVATOR_PITCH.md:182:**"Don't other MCP gateways already sign receipts?"** Yes — several, and at
+ELEVATOR_PITCH.md:186:one accepted key, at most one dispatch and ledger debit, and a receipt when
+ELEVATOR_PITCH.md:195:**"Can these receipts satisfy SOC 2 or the EU AI Act?"** Not on their own, and
+ELEVATOR_PITCH.md:196:we will not say otherwise. A receipt evidences the signed *authorization
+ELEVATOR_PITCH.md:198:chain — and shows the record has not been altered since. Only a success receipt
+ELEVATOR_PITCH.md:200:`delivery_uncertain` receipts evidence exactly those outcomes instead, which is
+ELEVATOR_PITCH.md:228:- Distributed exactly-once side effects in arbitrary upstream MCP servers.
+ELEVATOR_PITCH.md:232:- That we are the only product doing any of this. Signed receipts, offline
+docs/tool-interface-authority.md:24:ALLOW             policy satisfied -> auto-permit -> execute -> signed receipt
+docs/tool-interface-authority.md:27:                  same Idempotency-Key -> execute -> signed receipt
+docs/tool-interface-authority.md:29:                  (reason code + details + remediation), receipted where a
+docs/tool-interface-authority.md:36:caller's wallet, meters the call, and writes a signed receipt when the outcome
+docs/tool-interface-authority.md:37:finalizes. For the configured upstream MCP tool, identical retries under the
+docs/tool-interface-authority.md:39:one debit. This does not guarantee delivery or a downstream effect.
+docs/tool-interface-authority.md:43:The receipt arrows above describe completed paths. Effects or a debit may
+docs/tool-interface-authority.md:44:commit before an audit or receipt write fails, returning
+docs/tool-interface-authority.md:45:`manual_review_required` with no receipt. Do not retry with a new idempotency key:
+docs/tool-interface-authority.md:67:      "detail": "Nothing was charged. Retry the identical tools/call with the same Idempotency-Key once the approval is decided; the same permit and approval are reused."
+docs/tool-interface-authority.md:73:Nothing is charged, no receipt exists, and the idempotency key is released —
+docs/tool-interface-authority.md:104:  receipt where one exists. See `docs/denial-details.md` for the reason-code
+docs/tool-interface-authority.md:129:  "receiptProvided": true,
+docs/tool-interface-authority.md:144:permit-less calls, so it advertises `governed`, `receiptProvided`,
+docs/tool-interface-authority.md:178:`/v1/permits`, `/v1/permit-requests`, signed receipts, the ledger, and the
+docs/agent-self-credentialing.md:5:meter → receipt` all require a wallet-scoped API key, and production
+docs/agent-self-credentialing.md:50:agent exercises the real permit/metering/receipt path rather than a special
+docs/agent-self-credentialing.md:67:| 1 | charge-once | one governed invoke → exactly one debit |
+docs/agent-self-credentialing.md:68:| 2 | replay | same idempotency key → cached receipt, no new debit, no second side effect |
+docs/agent-self-credentialing.md:69:| 3 | concurrency | 5 identical in-flight calls → one success, one debit, one side effect |
+docs/agent-self-credentialing.md:71:| 5 | scope-denial | tool outside the permit → 403 `permit_tool_not_allowed`, signed denial receipt, zero charged |
+docs/agent-self-credentialing.md:73:| 7 | signature | every receipt verifies under the published Ed25519 key; tampered copies do not |
+docs/agent-self-credentialing.md:76:from `/.well-known/trust-keys.json`, verifies the portable receipt's
+docs/agent-self-credentialing.md:86:  receipt is served on retry once the winner settles.
+docs/agent-self-credentialing.md:87:- A denial still mints a **signed receipt** with `credits_charged` 0. Denials
+docs/agent-self-credentialing.md:92:Proven by this local harness: identical same-key replay creates no second
+docs/agent-self-credentialing.md:93:debit or file append, the tested calls finalize receipts under replay,
+docs/agent-self-credentialing.md:94:concurrency, conflict, and denial, and those receipts are tamper-evident
+docs/agent-self-credentialing.md:95:under the published key. This does not prove receipt completion under every
+docs/agent-self-credentialing.md:103:- **Remote effects.** For the configured upstream MCP tool, identical retries
+docs/agent-self-credentialing.md:105:  and at most one debit. This does not guarantee delivery or a downstream
+docs/agent-self-credentialing.md:114:  write its audit event or receipt, returning `manual_review_required` with
+docs/agent-self-credentialing.md:115:  no receipt. Do not retry with a new idempotency key: that can execute and
+/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api

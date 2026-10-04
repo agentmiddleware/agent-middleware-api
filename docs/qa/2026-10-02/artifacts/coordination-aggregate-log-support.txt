@@ -1,0 +1,1 @@
+Added optional post-outcome aggregate-session refresh. SESSION-LOG.md now embeds every group command record in addition to separate logs; rerun only at final closeout after all groups stop writing.

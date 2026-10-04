@@ -1,0 +1,18 @@
+30ff418 fix(BE-003): reject multicast outbound destinations
+0440fdb fix(FE-002): preserve explicit SDK session step limits
+8238663 fix(UX-002): make operator commands keyboard focusable
+1a98a30 fix(UX-001): use readable fit text on paper comparison cards
+cfc1291 fix(BE-100): scope retry and receipt completion guidance
+ELEVATOR_PITCH.md
+app/core/url_guard.py
+app/services/upstream_mcp.py
+awi_sdk/typescript/index.ts
+docs/agent-self-credentialing.md
+docs/qa/2026-10-02/frontend-components.test.cjs
+docs/qa/2026-10-02/ux-contracts.test.cjs
+docs/qa/2026-10-02/ux-regressions.spec.cjs
+docs/tool-interface-authority.md
+site/styles.css
+static/dashboard.html
+tests/test_qa_20261002_backend.py
+tests/test_qa_be100_documentation.py

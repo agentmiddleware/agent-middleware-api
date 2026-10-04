@@ -1,0 +1,46 @@
+.........................x..........FFFF................................ [ 42%]
+........................................................................ [ 85%]
+........................                                                 [100%]
+=================================== FAILURES ===================================
+_________ test_upstream_url_guard_rejects_multicast[literal-224.0.0.1] _________
+tests/test_qa_20261002_backend.py:192: in test_upstream_url_guard_rejects_multicast
+    with pytest.raises(UpstreamMcpConfigurationError, match="must not resolve"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AssertionError: Regex pattern did not match.
+E     Expected regex: 'must not resolve'
+E     Actual message: 'upstream_mcp_configuration_invalid'
+__________ test_upstream_url_guard_rejects_multicast[literal-ff02::1] __________
+tests/test_qa_20261002_backend.py:192: in test_upstream_url_guard_rejects_multicast
+    with pytest.raises(UpstreamMcpConfigurationError, match="must not resolve"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AssertionError: Regex pattern did not match.
+E     Expected regex: 'must not resolve'
+E     Actual message: 'upstream_mcp_configuration_invalid'
+________ test_upstream_url_guard_rejects_multicast[mixed-dns-224.0.0.1] ________
+tests/test_qa_20261002_backend.py:192: in test_upstream_url_guard_rejects_multicast
+    with pytest.raises(UpstreamMcpConfigurationError, match="must not resolve"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AssertionError: Regex pattern did not match.
+E     Expected regex: 'must not resolve'
+E     Actual message: 'upstream_mcp_configuration_invalid'
+_________ test_upstream_url_guard_rejects_multicast[mixed-dns-ff02::1] _________
+tests/test_qa_20261002_backend.py:192: in test_upstream_url_guard_rejects_multicast
+    with pytest.raises(UpstreamMcpConfigurationError, match="must not resolve"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AssertionError: Regex pattern did not match.
+E     Expected regex: 'must not resolve'
+E     Actual message: 'upstream_mcp_configuration_invalid'
+=========================== short test summary info ============================
+FAILED tests/test_qa_20261002_backend.py::test_upstream_url_guard_rejects_multicast[literal-224.0.0.1] - AssertionError: Regex pattern did not match.
+  Expected regex: 'must not resolve'
+  Actual message: 'upstream_mcp_configuration_invalid'
+FAILED tests/test_qa_20261002_backend.py::test_upstream_url_guard_rejects_multicast[literal-ff02::1] - AssertionError: Regex pattern did not match.
+  Expected regex: 'must not resolve'
+  Actual message: 'upstream_mcp_configuration_invalid'
+FAILED tests/test_qa_20261002_backend.py::test_upstream_url_guard_rejects_multicast[mixed-dns-224.0.0.1] - AssertionError: Regex pattern did not match.
+  Expected regex: 'must not resolve'
+  Actual message: 'upstream_mcp_configuration_invalid'
+FAILED tests/test_qa_20261002_backend.py::test_upstream_url_guard_rejects_multicast[mixed-dns-ff02::1] - AssertionError: Regex pattern did not match.
+  Expected regex: 'must not resolve'
+  Actual message: 'upstream_mcp_configuration_invalid'
+4 failed, 163 passed, 1 xfailed in 4.00s

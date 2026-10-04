@@ -1,0 +1,25 @@
+docs/qa/2026-10-02/ux_browser_qa.cjs:48:    ['dashboard','http://127.0.0.1:8766/dashboard.html'],
+tests/test_site_agent_interface.py:1835:        "static/dashboard.html": ROOT / "static" / "dashboard.html",
+tests/test_site_agent_interface.py:1839:        # unquote so the dashboard's %23-encoded data: URI favicon is scanned
+tests/test_site_agent_interface.py:1859:    the graphics' old charcoal-and-ember, the dashboard's old blues — must
+tests/test_site_agent_interface.py:1886:    # The dashboard's old blue header glow, as an rgba triplet.
+tests/test_site_design.mjs:84:  await page.setContent(await readFile(new URL("../static/dashboard.html", import.meta.url), "utf8"));
+tests/test_site_design.mjs:88:    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `dashboard overflows at ${width}`);
+tests/test_security_headers.py:44:        routes=[Route("/dashboard", lambda request: HTMLResponse("<html></html>"))]
+tests/test_security_headers.py:48:    csp = TestClient(app).get("/dashboard").headers["content-security-policy"]
+tests/test_dashboard_design.py:9:DASHBOARD = ROOT / "static" / "dashboard.html"
+tests/test_dashboard_design.py:21:def test_dashboard_tokens_match_the_shared_site_design() -> None:
+tests/test_dashboard_design.py:23:    dashboard = DASHBOARD.read_text(encoding="utf-8")
+tests/test_dashboard_design.py:24:    tokens = _root_tokens(dashboard)
+tests/test_dashboard_design.py:38:    assert set(re.findall(r"var\((--[\w-]+)\)", dashboard)) <= tokens.keys()
+tests/test_dashboard_design.py:53:def test_dashboard_skip_link_reaches_a_focusable_main_without_external_assets() -> None:
+tests/test_human_accessibility.py:46:async def test_dashboard_endpoint_returns_html(client):
+tests/test_human_accessibility.py:47:    """Direct /dashboard is a public evidence index, not fake telemetry."""
+tests/test_human_accessibility.py:48:    resp = await client.get("/dashboard")
+tests/test_human_accessibility.py:58:    "path,headers", [("/dashboard", {}), ("/", {"Accept": "text/html"})]
+tests/test_human_accessibility.py:108:    assert meta["human_observability"]["human_dashboard_url"] == "/dashboard"
+tests/test_human_accessibility.py:117:    assert manifest["documentation"]["human_dashboard"] == "/dashboard"
+tests/test_human_accessibility.py:132:def test_openapi_documents_human_html_and_dashboard_not_found():
+tests/test_human_accessibility.py:134:    dashboard file-missing response."""
+tests/test_human_accessibility.py:141:    dashboard_responses = spec["paths"]["/dashboard"]["get"]["responses"]
+tests/test_human_accessibility.py:142:    assert dashboard_responses["404"]["description"] == "Dashboard not found"

@@ -1,0 +1,196 @@
+FILE browser-loopback.mjs
+// QA-only adapter: existing browser scripts receive a loopback-only browser.
+// Install playwright in QA_NODE_MODULES (defaults to the sweep's temporary tools).
+import { pathToFileURL } from 'node:url';
+const modules = process.env.QA_NODE_MODULES || '/private/tmp/amw-qa-browser/node_modules';
+const pw = await import(pathToFileURL(`${modules}/playwright/index.mjs`).href);
+async function protect(context) {
+  await context.route('**/*', route => {
+    const url = new URL(route.request().url());
+    return ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)
+      ? route.continue() : route.abort('blockedbyclient');
+  });
+  return context;
+}
+function guarded(type) {
+  return { async launch(options) {
+    const browser = await type.launch(options);
+    const newContext = browser.newContext.bind(browser);
+    const newPage = browser.newPage.bind(browser);
+    browser.newContext = async options => protect(await newContext({...options, serviceWorkers: 'block'}));
+    browser.newPage = async options => {
+      const page = await newPage({...options, serviceWorkers: 'block'});
+      await protect(page.context());
+      return page;
+    };
+    return browser;
+  }};
+}
+export const chromium = guarded(pw.chromium);
+export const firefox = guarded(pw.firefox);
+export const webkit = guarded(pw.webkit);
+
+FILE ux_csp_server.py
+"""Serve existing QA site artifacts with loopback-only resource restrictions."""
+
+from functools import partial
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from threading import Thread
+
+
+class LocalOnlyHandler(SimpleHTTPRequestHandler):
+    def end_headers(self):
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self' data: blob:; connect-src 'self'; "
+            "script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+            "object-src 'none'; frame-src 'none'; form-action 'self'; base-uri 'self'",
+        )
+        self.send_header("Cache-Control", "no-store")
+        super().end_headers()
+
+    def log_message(self, format, *args):
+        pass
+
+
+def main():
+    root = Path(__file__).resolve().parents[3]
+    site = ThreadingHTTPServer(
+        ("127.0.0.1", 8767),
+        partial(LocalOnlyHandler, directory="/private/tmp/amw-qa-site-dist"),
+    )
+    dashboard = ThreadingHTTPServer(
+        ("127.0.0.1", 8768),
+        partial(LocalOnlyHandler, directory=str(root / "static")),
+    )
+    Thread(target=dashboard.serve_forever, daemon=True).start()
+    print("Local CSP servers: 127.0.0.1:8767 and 127.0.0.1:8768", flush=True)
+    site.serve_forever()
+
+
+if __name__ == "__main__":
+    main()
+
+FILE package_audit.py
+"""Audit installed Python versions using public PyPI package metadata only."""
+
+from concurrent.futures import ThreadPoolExecutor
+import importlib.metadata
+import json
+from pathlib import Path
+import urllib.error
+import urllib.parse
+import urllib.request
+
+
+def inspect_package(package):
+    name, version = package
+    url = "https://pypi.org/pypi/{}/{}/json".format(
+        urllib.parse.quote(name, safe=""), urllib.parse.quote(version, safe="")
+    )
+    try:
+        with urllib.request.urlopen(url, timeout=30) as response:
+            data = json.load(response)
+        return {
+            "name": name,
+            "version": version,
+            "vulnerabilities": [
+                {
+                    "id": item.get("id"),
+                    "aliases": item.get("aliases", []),
+                    "fixed_in": item.get("fixed_in", []),
+                    "withdrawn": item.get("withdrawn"),
+                }
+                for item in data.get("vulnerabilities", [])
+                if not item.get("withdrawn")
+            ],
+        }
+    except (urllib.error.URLError, TimeoutError, ValueError) as error:
+        return {"name": name, "version": version, "error": type(error).__name__}
+
+
+if __name__ == "__main__":
+    packages = sorted(
+        {(item.metadata["Name"], item.version) for item in importlib.metadata.distributions()}
+    )
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(inspect_package, packages))
+    report = {
+        "source": "Public PyPI per-version JSON package metadata; no private registry or advisory API",
+        "scope": "Resolved isolated Python QA environment, including development tools",
+        "packages": results,
+        "package_count": len(results),
+        "vulnerable_package_count": sum(bool(item.get("vulnerabilities")) for item in results),
+        "unverified_package_count": sum("error" in item for item in results),
+    }
+    path = Path(__file__).parent / "artifacts" / "python-package-audit.json"
+    path.write_text(json.dumps(report, indent=2) + "\n")
+    print(json.dumps({key: value for key, value in report.items() if key != "packages"}, indent=2))
+    for item in results:
+        if item.get("vulnerabilities") or item.get("error"):
+            print(json.dumps(item))
+
+FILE secret_scan.py
+"""Run redacted Gitleaks over tracked source, excluding credential/env files."""
+
+import json
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+
+
+if __name__ == "__main__":
+    root = Path(__file__).resolve().parents[3]
+    files = subprocess.check_output(["git", "ls-files", "-z"], cwd=root).decode().split("\0")
+    excluded = []
+    count = 0
+    # Preserve this private temporary snapshot for reproducibility; no repository files removed.
+    snapshot = Path(tempfile.mkdtemp(prefix="amw-qa-source-scan-", dir="/private/tmp"))
+    for name in files:
+        if not name:
+            continue
+        path = Path(name)
+        if (
+            any(part.startswith(".env") for part in path.parts)
+            or path.suffix.lower() in {".pem", ".key", ".p12", ".pfx", ".db", ".sqlite"}
+            or path.name.lower() in {"credentials", "credentials.json", ".npmrc", ".pypirc", "id_rsa", "id_ed25519"}
+            or ".aws" in path.parts
+        ):
+            excluded.append(name)
+            continue
+        source = root / path
+        if not source.is_file() or source.is_symlink():
+            continue
+        target = snapshot / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+        count += 1
+    report = root / "docs/qa/2026-10-02/artifacts/tracked-secret-scan.json"
+    result = subprocess.run(
+        ["gitleaks", "dir", "--redact=100", "--no-banner", "--no-color", "--report-format", "json", "--report-path", str(report), str(snapshot)],
+        cwd=snapshot,
+        check=False,
+    )
+    entries = json.loads(report.read_text()) if report.exists() else []
+    # The raw redacted scanner report is narrowed to location/rule only as defense in depth.
+    findings = [
+        {
+            "file": item.get("File", "").removeprefix(str(snapshot) + "/"),
+            "line": item.get("StartLine"),
+            "rule": item.get("RuleID"),
+            "value": "[REDACTED]",
+        }
+        for item in entries
+    ]
+    output = {
+        "scope": "Tracked working-tree files, current content, no history or environment/credential files",
+        "files_scanned": count,
+        "excluded_files": excluded,
+        "exit_code": result.returncode,
+        "findings": findings,
+    }
+    report.write_text(json.dumps(output, indent=2) + "\n")
+    print(json.dumps(output, indent=2))
+

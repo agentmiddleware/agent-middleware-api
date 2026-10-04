@@ -45,7 +45,7 @@ def _address_blocked(address: str) -> bool:
         return False
     # is_global is False for loopback, RFC1918/ULA, link-local (including
     # 169.254.169.254 metadata), CGNAT shared space, reserved, and unspecified
-    # addresses. Multicast requires an explicit check despite being "global".
+    # addresses. Multicast needs an explicit check: it can be classified global.
     return ip.is_multicast or not ip.is_global
 
 

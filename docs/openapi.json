@@ -10238,7 +10238,7 @@
       },
       "HTTPBearer": {
         "type": "http",
-        "description": "JWT authentication. Authorization takes precedence over X-API-Key.",
+        "description": "Bearer authentication via Authorization; this header takes precedence over X-API-Key.",
         "scheme": "bearer"
       }
     }

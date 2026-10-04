@@ -1,0 +1,260 @@
+tools {'node': '/opt/homebrew/bin/node', 'npm': '/opt/homebrew/bin/npm', 'npx': '/opt/homebrew/bin/npx'}
+tmp False
+dashboard True
+1: #!/usr/bin/env python3
+2: """Render the static marketing site only when launch contacts are real.
+3: 
+4: The source HTML deliberately contains non-deployable tokens. Vercel runs this
+5: script and serves only ``dist/``; a missing or obviously provisional contact
+6: therefore fails the build instead of leaking a fake funnel into production.
+7: 
+8: The Vercel Web Analytics loader is emitted only when
+9: ``PUBLIC_ENABLE_VERCEL_ANALYTICS=true``. Deploying the ``/_vercel/insights``
+10: script tag against a project whose Web Analytics is not enabled makes every
+11: page load log a 404 plus a MIME-type refusal in the browser console, so the
+12: default build omits the tag entirely.
+13: """
+14: 
+15: from __future__ import annotations
+16: 
+17: import argparse
+18: import hashlib
+19: import html
+20: import json
+21: import os
+22: import re
+23: import shutil
+24: import sys
+25: import tempfile
+26: from datetime import datetime, timedelta, timezone
+27: from html.parser import HTMLParser
+28: from pathlib import Path
+29: from urllib.parse import quote, urlparse
+30: 
+31: 
+32: SITE_ROOT = Path(__file__).resolve().parent
+33: REPO_ROOT = SITE_ROOT.parent
+34: DEFAULT_OUTPUT = SITE_ROOT / "dist"
+35: # Required launch contacts. Pilot intake is email-first by design: a prospect
+36: # sends the tool scenario and gets a written reply, and a call happens only when
+37: # a scenario needs one. So the accountable name and the monitored address gate
+38: # the build; a booking link is optional and never a prerequisite.
+39: CONTACT_FIELDS = {
+40:     "@@PUBLIC_DISPLAY_NAME@@": "PUBLIC_DISPLAY_NAME",
+41:     "@@PUBLIC_CONTACT_EMAIL@@": "PUBLIC_CONTACT_EMAIL",
+42: }
+43: BOOKING_TOKEN = [REDACTED]
+44: BOOKING_CONTEXT_TOKEN = [REDACTED]
+45: PILOT_EMAIL_TOKEN = [REDACTED]
+46: PILOT_EMAIL_BODY = """One-tool paid pilot enquiry
+47: 
+48: 1. Tool or action (synthetic or redacted only):
+49: 2. What goes wrong on retry:
+50: 3. How we check whether the action ran:
+51: 4. Cost of one duplicate or unproven call (money, recovery hours, or customer consequence; measured or estimated):
+52: 5. Budget owner and target decision date:
+53: 
+54: Optional workflow assumptions: monthly actions, baseline duplicate rate, expected reduction, and total monthly cost.
+55: 
+56: Do not include production secrets, credentials, or customer data.
+57: """
+58: BOOKING_FIELD = "PUBLIC_BOOKING_URL"
+59: # Markup that only makes sense with a booking link sits between these two
+60: # comments. When no link is configured the whole block is removed, so the
+61: # emitted page never carries an empty href or an unresolved token; when one is
+62: # configured only the marker comments are removed.
+63: BOOKING_BLOCK_START = "<!-- booking:start -->"
+64: BOOKING_BLOCK_END = "<!-- booking:end -->"
+65: # Marker lines may end in LF or CRLF, and the closing marker may end the
+66: # file; the block is dropped or unwrapped identically either way.
+67: _BOOKING_BLOCK = re.compile(
+68:     rf"^[ \t]*{re.escape(BOOKING_BLOCK_START)}[ \t]*\r?\n.*?"
+69:     rf"^[ \t]*{re.escape(BOOKING_BLOCK_END)}[ \t]*(?:\r?\n|\Z)",
+70:     flags=re.DOTALL | re.MULTILINE,
+71: )
+72: _BOOKING_MARKER_LINE = re.compile(
+73:     rf"^[ \t]*(?:{re.escape(BOOKING_BLOCK_START)}|{re.escape(BOOKING_BLOCK_END)})[ \t]*(?:\r?\n|\Z)",
+74:     flags=re.MULTILINE,
+75: )
+76: ANALYTICS_FLAG = "PUBLIC_ENABLE_VERCEL_ANALYTICS"
+77: ANALYTICS_TOKEN = [REDACTED]
+78: ANALYTICS_FLAG_ENABLED = frozenset({"true"})
+79: ANALYTICS_FLAG_DISABLED = frozenset({"", "false"})
+80: # The queue shim lives in /va-init.js rather than an inline <script> so the
+81: # deployed Content-Security-Policy can stay script-src 'self' with no
+82: # 'unsafe-inline'. It must load before the insights script reads window.vaq.
+83: ANALYTICS_SCRIPTS = """<script src="/va-init.js?v=gateway-18"></script>
+84:     <script defer src="/_vercel/insights/script.js"></script>"""
+85: # Shared chrome is rendered at build time so it also works without JavaScript.
+86: SITE_PARTIALS = {
+87:     "@@SITE_NAV@@": "partials/nav.html",
+88:     "@@SITE_FOOTER@@": "partials/footer.html",
+89: }
+90: STYLES_CSS_VERSION_TOKEN = [REDACTED]
+91: CONCEPT_CSS_VERSION_TOKEN = [REDACTED]
+92: BUILD_DATE_TOKEN = [REDACTED]
+93: FAQ_JSONLD_TOKEN = [REDACTED]
+94: HERO_CONSOLE_TOKEN = [REDACTED]
+95: LOOP_TRANSCRIPT_TOKEN = [REDACTED]
+96: LIVE_VERIFICATION_TOKEN = [REDACTED]
+97: # The day the published sample receipt was issued, read from the receipt's own
+98: # signed claims so the page can never drift from the artifact it describes.
+99: PROOF_RECEIPT_ISSUED_TOKEN = [REDACTED]
+100: TRANSCRIPT = SITE_ROOT / "proof" / "transcript.json"
+101: LIVE_RECEIPT = SITE_ROOT / "proof" / "receipt.json"
+102: LIVE_KEYS = SITE_ROOT / "proof" / "trust-keys.json"
+103: #: The hero shows the loop's spine; the governed-path section shows all of it.
+104: HERO_CONSOLE_STEPS = ("authorize", "invoke", "replay", "verify")
+105: SECURITY_TXT_EXPIRES_TOKEN = [REDACTED]
+106: # security.txt must carry a future Expires (RFC 9116 §2.5.5). Regenerating it
+107: # one year out on every build means a deployed site never serves a lapsed file.
+108: SECURITY_TXT_LIFETIME_DAYS = 365
+109: TEXT_ASSETS = (
+110:     "index.html",
+111:     "proof/index.html",
+112:     "compare/index.html",
+113:     "concept/index.html",
+114:     "404.html",
+115:     "sitemap.xml",
+116:     ".well-known/security.txt",
+117:     # The machine-pointer files cite the published receipt's issue date, read
+118:     # from the bundle at build time like the HTML pages, so the two can never
+119:     # disagree.
+120:     "llm.txt",
+121:     "llms.txt",
+122:     "llms-full.txt",
+123: )
+124: COPY_ASSETS = (
+125:     ".well-known",
+126:     "a11y.js",
+127:     "a11y-preload.js",
+128:     "arcade-boot.js",
+129:     "arcade.css",
+130:     "arcade.js",
+930:         if analytics_enabled:
+931:             rendered = rendered.replace(ANALYTICS_TOKEN, ANALYTICS_SCRIPTS)
+932:         else:
+933:             # Drop the token's whole line regardless of indentation so no
+934:             # blank line or stray whitespace is left behind; the
+935:             # unresolved-token check below still fails loudly if the token
+936:             # ever stops sitting on its own line.
+937:             rendered = re.sub(
+938:                 rf"^[ \t]*{re.escape(ANALYTICS_TOKEN)}[ \t]*\n",
+939:                 "",
+940:                 rendered,
+941:                 flags=re.MULTILINE,
+942:             )
+943:         if PROOF_RECEIPT_ISSUED_TOKEN in rendered:
+944:             rendered = rendered.replace(
+945:                 PROOF_RECEIPT_ISSUED_TOKEN, published_receipt_issued_date()
+946:             )
+947:         if relative_path.endswith(".html"):
+948:             rendered = render_booking_blocks(rendered, configured=with_booking)
+949:             rendered = rendered.replace(FONT_PRELOAD_TOKEN, font_preload_tags())
+950:             rendered = rendered.replace(FONTS_CSS_VERSION_TOKEN, fonts_css_version())
+951:             if FAQ_JSONLD_TOKEN in rendered:
+952:                 rendered = rendered.replace(FAQ_JSONLD_TOKEN, faq_jsonld(rendered))
+953:             if any(
+954:                 token in rendered
+955:                 for token in (
+956:                     HERO_CONSOLE_TOKEN,
+957:                     LOOP_TRANSCRIPT_TOKEN,
+958:                     LIVE_VERIFICATION_TOKEN,
+959:                 )
+960:             ):
+961:                 transcript = load_transcript()
+962:                 rendered = rendered.replace(
+963:                     HERO_CONSOLE_TOKEN,
+964:                     render_console(
+965:                         transcript,
+966:                         steps=HERO_CONSOLE_STEPS,
+967:                         full=False,
+968:                         labelled_by="hero-console-title",
+969:                     ),
+970:                 )
+971:                 rendered = rendered.replace(
+972:                     LOOP_TRANSCRIPT_TOKEN,
+973:                     render_console(
+974:                         transcript,
+975:                         steps=None,
+976:                         full=True,
+977:                         labelled_by="loop-console-title",
+978:                     ),
+979:                 )
+980:                 rendered = rendered.replace(
+981:                     LIVE_VERIFICATION_TOKEN, render_live_verification(transcript)
+982:                 )
+983:         replacements = (
+984:             markup_replacements
+985:             if relative_path.endswith((".html", ".xml"))
+986:             else text_replacements
+987:         )
+988:         for token, replacement in replacements.items():
+989:             rendered = rendered.replace(token, replacement)
+990:         unresolved = sorted(set(re.findall(r"@@[A-Z0-9_]+@@", rendered)))
+991:         if unresolved:
+992:             raise LaunchConfigurationError(
+993:                 f"{relative_path} contains unresolved tokens: {', '.join(unresolved)}"
+994:             )
+995:         destination = output / relative_path
+996:         destination.parent.mkdir(parents=True, exist_ok=True)
+997:         destination.write_text(rendered, encoding="utf-8")
+998: 
+999: 
+1000: def main(argv: list[str] | None = None) -> int:
+1001:     parser = argparse.ArgumentParser(description=__doc__)
+1002:     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+1003:     args = parser.parse_args(argv)
+1004:     try:
+1005:         render_site(args.output, dict(os.environ))
+1006:     except LaunchConfigurationError as exc:
+1007:         print(f"site build blocked: {exc}", file=sys.stderr)
+1008:         return 2
+1009:     return 0
+1010: 
+1011: 
+1012: if __name__ == "__main__":
+1013:     raise SystemExit(main())
+html controls
+165:     <script src="/a11y-preload.js?v=gateway-18"></script>
+219:               aria-label="Start a pilot by email (opens your mail app)"
+226:               aria-label="Run the local proof — opens the verification page"
+256:       <section class="section offer-band" aria-label="How the gateway works and the pilot offer" data-wave="condense">
+287:         <aside class="agent-entry pilot-card" aria-labelledby="pilot-card-title">
+330:             aria-label="Diagram: the governed boundary is the only path from the agent to the tool"
+335:               aria-labelledby="bf-title bf-desc"
+388:       <section class="section thesis-section" aria-labelledby="thesis-title" data-wave="order">
+429:       <section class="protocol-section" aria-labelledby="protocol-title" data-wave="stream">
+449:       <section class="section proof-section" id="proof" aria-labelledby="proof-title" data-wave="crystal">
+470:             <div class="proof-label">
+503:       <section class="section pilot-section" id="pilot" aria-labelledby="pilot-title" data-wave="quiet">
+573:               aria-label="Start a pilot by email (opens your mail app)"
+587:               aria-label="Book a call if your scenario needs one (opens in a new tab)"
+595:         <div class="pilot-fit" id="economic-fit" aria-labelledby="economic-fit-title">
+611:           <fieldset class="fit-fields" aria-describedby="fit-assumptions" data-fit-inputs hidden>
+613:             <label for="fit-actions">Consequential actions / month
+614:               <input id="fit-actions" type="number" min="0" step="1" required inputmode="numeric" />
+615:             </label>
+616:             <label for="fit-rate">Baseline duplicate rate (%)
+617:               <input id="fit-rate" type="number" min="0" max="100" step="any" required inputmode="decimal" aria-describedby="fit-rate-help" />
+619:             </label>
+620:             <label for="fit-loss">Loss per duplicate (USD)
+621:               <input id="fit-loss" type="number" min="0" step="any" required inputmode="decimal" />
+622:             </label>
+623:             <label for="fit-reduction">Expected reduction (%)
+624:               <input id="fit-reduction" type="number" min="0" max="100" step="any" required inputmode="decimal" />
+625:             </label>
+626:             <label for="fit-cost">Total monthly cost (USD, optional)
+627:               <input id="fit-cost" type="number" min="0" step="any" inputmode="decimal" aria-describedby="fit-cost-help" />
+629:             </label>
+631:           <div class="fit-result" role="status" aria-live="polite" aria-atomic="true" data-fit-result hidden>
+632:             <p data-fit-summary>Enter the four workflow assumptions to estimate avoided loss.</p>
+633:             <p data-fit-guidance></p>
+635:           <p data-fit-next hidden><a href="#pilot">Include these assumptions in your pilot email</a></p>
+636:           <p data-fit-alternative hidden><a href="/compare/">Compare simpler reliability options</a></p>
+655:         aria-labelledby="machine-title"
+714:       <section class="boundary-section" aria-labelledby="boundary-title" data-wave="dark">
+733:         aria-labelledby="provenance-title"
+781:                 aria-label="Start a pilot by email (opens your mail app)"
+796:                 aria-label="Book a call if your scenario needs one (opens in a new tab)"
+SDK config [PosixPath('awi_sdk/typescript/LICENSE'), PosixPath('awi_sdk/typescript/package.json'), PosixPath('awi_sdk/typescript/index.ts')]

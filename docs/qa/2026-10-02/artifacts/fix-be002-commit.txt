@@ -1,0 +1,2 @@
+[qa/2026-10-02-fixes eb02ac1] fix(BE-002): declare supported Bearer [REDACTED] in OpenAPI
+ 3 files changed, 187 insertions(+), 4 deletions(-)

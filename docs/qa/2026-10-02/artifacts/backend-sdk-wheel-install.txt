@@ -1,0 +1,10 @@
+Using Python 3.13.14 environment at: /private/tmp/amw-qa-python
+Resolved 2 packages in 4ms
+   Building b2a-sdk @ file:///Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api/b2a_sdk
+   Building openai-agent-middleware @ file:///Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api/wrappers/openai-agent-middleware
+      Built openai-agent-middleware @ file:///Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api/wrappers/openai-agent-middleware
+      Built b2a-sdk @ file:///Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api/b2a_sdk
+Prepared 2 packages in 549ms
+Installed 2 packages in 1ms
+ + b2a-sdk==0.5.0 (from file:///Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api/b2a_sdk)
+ + openai-agent-middleware==0.1.0 (from file:///Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api/wrappers/openai-agent-middleware)

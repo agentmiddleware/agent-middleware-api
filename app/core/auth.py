@@ -30,9 +30,11 @@ api_key_header = APIKeyHeader(
     auto_error=False,
     description="API key for agent authentication. Pass in the X-API-Key header.",
 )
+
+
 bearer_header = HTTPBearer(
     auto_error=False,
-    description="JWT authentication. Authorization takes precedence over X-API-Key.",
+    description="Bearer authentication via Authorization; this header takes precedence over X-API-Key.",
 )
 
 
@@ -142,8 +144,8 @@ async def get_auth_context(
     this module is already imported, and a captured `settings` would keep
     serving the stale key list.
     """
-    # Declare Bearer for OpenAPI while keeping the raw header authoritative:
-    # HTTPBearer accepts casing/spacing that our credential parser rejects.
+    # HTTPBearer declares the OpenAPI alternative; raw Authorization stays
+    # authoritative so malformed headers cannot fall back to an API key.
     context = await _resolve_auth_context(api_key, authorization)
     acceptance = CREDENTIAL_ACCEPTANCE.get()
     if acceptance is not None:

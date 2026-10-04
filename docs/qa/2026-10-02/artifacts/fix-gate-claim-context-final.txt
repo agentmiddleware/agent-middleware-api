@@ -1,0 +1,87 @@
+14:
+15: > **Authorize one agent action. Charge it once. Prove what happened.**
+16:
+17: ## Subhead
+18:
+19: > One agent action, at most one debit — no matter how many times the agent
+20: > retries under the same accepted key. Verify the receipt without us.
+21:
+22: ("At most one" is deliberate and matches `CONTEXT.md`:
+23: a crash before dispatch refunds, and a denied call never charges. The guarantee is
+24: never a duplicate charge, not always a charge.)
+25:
+26: The debit leads. Offline-verifiable signed receipts are real here and worth
+27: saying, but as of the 2026-08 sweep
+28: ([`docs/market-research-2026-08.md`](docs/market-research-2026-08.md)) they are
+29: no longer rare, so they cannot carry the pitch and must never carry a
+30: superlative.
+31:
+32: ## Ten seconds
+57: **The problem to test.** Give me one tool you are afraid to let an autonomous
+58: agent invoke. If the call times out, can you tell whether the gateway dispatched
+59: it, whether a retry creates another debit, who authorized the economic exposure,
+60: and what evidence survives afterward? Existing IAM, gateway, or logging controls
+61: may already be sufficient; the first conversation must establish that they are
+62: not before this product is proposed.
+63:
+64: **The wedge.** Not a general MCP gateway, and not payments. The narrow,
+65: differentiating primitive is **exactly-once economic authorization at the
+66: gateway boundary**:
+67:
+68: ```text
+69: scoped signed permit -> governed MCP invoke -> wallet charge -> signed receipt
+70: -> ledger -> audit chain -> replay no double charge -> out-of-scope denial
+71: ```
+72:
+73: **What that buys you.**
+74:
+75: - **Budgets that bind.** Decimal wallet balances with row-locked debits. Final
+76:   permit checks and budget reservation happen while the permit row is locked,
+77:   so competing invokes and revoke-versus-invoke races resolve correctly.
+102: **The ask.** One partner-owned agent, one real staging tool, and one partner
+103: engineer behind the proxy. Intentionally retry the action, verify the receipt
+104: in the partner's environment, and ask whether removing the boundary would
+105: restore an unacceptable risk. If it does not earn a commercial next step, stop.
+106:
+107: ---
+108:
+109: ## Positioning in one table
+110:
+111: | Nearby category | Their center of gravity | Our difference |
+112: |---|---|---|
+113: | MCP trust gateways | Policy and evidence | Wallet debit plus economic idempotency |
+114: | MCP monetization / pay-per-tool | Payment rails | Internal budgets, no settlement claim |
+115: | Enterprise authz for MCP | Who may call | Meter, receipt, and charge exactly once |
+116: | Agent reliability libraries | Retry safety inside the caller | A boundary the agent cannot route around, and evidence a third party can check |
+117: | Agent audit / compliance layers | Regulatory mapping and exports | The economic consequence, not just the record of the call |
+118:
+119: Named projects, verification levels, and the rows we lose:
+120: [`docs/market-research-2026-08.md`](docs/market-research-2026-08.md).
+121:
+122: ## Who it's for
+123:
+124: Platform engineering, AI infrastructure, or security teams that already run
+125: internal agents against MCP-style tools and need a control point *before* the
+126: tool is invoked — and who can bring one real tool to the first conversation.
+127:
+213: supported or learned from. The whole loop is runnable locally with no
+214: credentials and no contact with us.
+215:
+216: **"What's the maturity?"** Production beta, not production complete. Run the
+217: proofs locally; the supported design-partner posture is vendor-managed and
+218: single-tenant. Read `SECURITY_LIMITATIONS.md` before deciding.
+219:
+220: ## What this pitch must never claim
+221:
+222: Do not say, imply, or let a slide suggest:
+223:
+224: - Production-ready payments or settlement.
+225: - Compliance-grade ledger storage.
+226: - Full autonomous-economic-actor infrastructure.
+227: - Universal policy enforcement across every agent framework.
+228: - Distributed exactly-once side effects in arbitrary upstream MCP servers.
+229: - A replacement for enterprise IAM, secrets management, or sandbox isolation.
+230: - Byzantine fault tolerance. There is one server, one database, and one
+231:   operator-held signing key — there are no replicas and no consensus.
+232: - That we are the only product doing any of this. Signed receipts, offline
+233:   verification, per-tool policy, and budget caps all exist elsewhere. A

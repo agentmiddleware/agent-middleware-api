@@ -1,0 +1,4 @@
+Final metrics and scanner correction written to ['SUMMARY.md', 'COVERAGE.md', 'FINDINGS.md']
+Counts: Critical=0 High=0 Medium=5 Low=3
+App after3655passed60skipped4deselected7xfail; SDK129; OpenAI65; local strict posture12. Statement coverage unchanged87.566966%.
+Required docs present True

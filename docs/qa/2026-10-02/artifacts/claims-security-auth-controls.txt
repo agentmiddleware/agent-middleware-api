@@ -1,0 +1,324 @@
+FILE app/core/auth.py
+30:    auto_error=False,
+31:    description="API key for agent authentication. Pass in the X-API-Key header.",
+32:)
+33:
+34:
+35:@dataclass(frozen=True)
+36:class AuthContext:
+37:    """Authenticated caller details used for tenant-scoped authorization."""
+38:
+39:    source: str
+40:    raw_key: str
+41:    key_id: str | None = None
+42:    wallet_id: str | None = None
+43:    is_bootstrap_admin: bool = False
+44:    scopes: list[str] = None  # type: ignore[assignment]
+45:    # Enterprise (Okta/Entra) bearer [REDACTED] accompanied an X-API-Key call. Set
+46:    # ONLY when the Authorization header carried a token whose UNVERIFIED
+47:    # issuer names a pinned IGA issuer (see get_auth_context). It is identity
+48:    # attribution for the human behind the agent, NEVER an API credential:
+49:    # enforcement points (app/core/oidc_iga.parse_enterprise_token +
+50:    # enforce_tool_call) fully verify it before any trust decision.
+51:    enterprise_bearer_token: [REDACTED] | None = None
+52:
+53:    def __post_init__(self):
+54:        if self.scopes is None:
+55:            object.__setattr__(self, "scopes", [])
+56:
+57:    def require_wallet_access(self, wallet_id: str | None) -> None:
+58:        """Allow bootstrap admins or the exact wallet owning a DB-backed key.
+59:
+60:        ``wallet_id`` may be ``None`` for a resource with no owning wallet (e.g.
+61:        a sandbox environment created by a bootstrap admin). A non-admin caller
+62:        always has a concrete ``self.wallet_id``, so an ownerless resource is
+63:        correctly denied to everyone but bootstrap admins.
+64:        """
+65:        if self.is_bootstrap_admin:
+66:            return
+67:        if self.wallet_id is not None and self.wallet_id == wallet_id:
+68:            return
+69:        raise HTTPException(
+70:            status_code=status.HTTP_403_FORBIDDEN,
+71:            detail={
+72:                "error": "wallet_access_denied",
+73:                "message": "API key is not authorized for this wallet.",
+74:                "wallet_id": wallet_id,
+75:            },
+76:        )
+77:
+78:    def require_bootstrap_admin(self) -> None:
+79:        """Allow only trusted bootstrap/admin environment keys."""
+80:        if self.is_bootstrap_admin:
+81:            return
+82:        raise HTTPException(
+83:            status_code=status.HTTP_403_FORBIDDEN,
+84:            detail={
+85:                "error": "admin_access_denied",
+86:                "message": "This operation requires a bootstrap admin API key.",
+87:            },
+88:        )
+89:
+90:
+91:# Internal marker on a response that failed *authentication* rather than
+92:# authorization. RateLimitMiddleware charges those to its shared
+93:# rejected-credential bucket and strips the header before the response leaves
+94:# the innermost middleware, so it is never a public surface. It exists because
+95:# an unknown-but-well-formed key is refused with 403, not 401, and the limiter
+96:# must not confuse that with an authenticated caller denied on scope
+97:# (wallet_access_denied, insufficient_scope), whose denials are ordinary
+375:                    "This access token is not bound to an API key; authenticate "
+376:                    "with an active API key."
+377:                ),
+378:            },
+379:        )
+380:
+381:    from ..services.api_key_service import get_api_key_service
+382:
+383:    if not await get_api_key_service().is_key_live(payload.key_id):
+384:        raise HTTPException(
+385:            status_code=status.HTTP_401_UNAUTHORIZED,
+386:            detail={
+387:                "error": "no_active_api_key",
+388:                "message": (
+389:                    "The API key that issued this access token is no longer active."
+390:                ),
+391:            },
+392:        )
+393:
+394:    return AuthContext(
+395:        source="jwt",
+396:        # Not a credential: a stable, non-secret handle for the API key that
+397:        # minted this token. A truncated token cannot serve: every EdDSA JWT
+398:        # opens with the same encoded header, so all JWT callers shared it.
+399:        raw_key=f"jwt:{payload.key_id}",
+400:        wallet_id=payload.sub,
+401:        key_id=payload.key_id,
+402:        is_bootstrap_admin=False,
+403:        scopes=payload.scopes,
+404:    )
+405:
+406:
+407:async def verify_api_key(
+408:    api_key: [REDACTED] | None = Security(api_key_header),
+409:) -> str:
+410:    """
+411:    Validate the provided API key.
+412:    Returns the raw key on success for backwards-compatible dependencies.
+413:    """
+414:    context = await get_auth_context(api_key)
+415:    return context.raw_key
+416:
+417:
+418:async def get_enterprise_principal(
+419:    authorization: Annotated[str | None, Header()] = None,
+420:) -> EnterprisePrincipal | None:
+421:    """Optional enterprise IGA identity layer (app.core.oidc_iga).
+422:
+423:    Returns None — leaving every existing auth path untouched — when the
+424:    Authorization header is absent or not Bearer-shaped, when IGA is disabled
+425:    (IGA_TRUSTED_ISSUERS empty), or when the bearer [REDACTED]'s issuer is not an
+426:    IGA-trusted issuer (internal EdDSA JWTs land here and continue through
+427:    get_auth_context unchanged). A token FROM a trusted enterprise issuer
+428:    that fails verification raises 401 with the IGAError reason: a bad
+429:    enterprise token must never fall through to another auth path.
+430:    """
+431:    from .oidc_iga import parse_enterprise_token, token_issuer_is_trusted
+432:
+433:    # Settings are re-read per call for the same reason get_auth_context
+434:    # documents: tests rebind IGA_* env vars after this module is imported.
+435:    settings = get_settings()
+436:    if not settings.IGA_TRUSTED_ISSUERS.strip():
+437:        return None
+438:    if authorization is None or not authorization.startswith("Bearer "):
+439:        return None
+440:    token = [REDACTED] ") :].strip()
+441:    if not token:
+[REDACTED]        return None
+443:
+444:    try:
+445:        if not token_issuer_is_trusted(token):
+446:            return None
+447:        return parse_enterprise_token(token)
+448:    except IGAError as exc:
+449:        # Covers both a failed verification of an IGA-issuer token and a
+450:        # malformed IGA configuration while the layer is enabled: fail closed.
+451:        raise HTTPException(
+452:            status_code=status.HTTP_401_UNAUTHORIZED,
+453:            detail={
+454:                "error": exc.reason,
+455:                "message": str(exc),
+456:            },
+457:        ) from exc
+458:
+FILE app/routers/receipts.py
+28:from app.trust.evidence import authorize_receipt_access, build_receipt_evidence
+29:
+30:router = APIRouter(prefix="/v1/receipts", tags=["Trust Receipts"])
+31:logger = logging.getLogger(__name__)
+32:
+33:
+34:async def _authorize_receipt_list(
+35:    *,
+36:    auth: AuthContext,
+37:    wallet_id: str | None,
+38:    permit_id: str | None,
+39:) -> None:
+40:    if permit_id:
+41:        permit = await get_permit_service().get_permit(permit_id)
+42:        if not permit:
+43:            raise HTTPException(status_code=404, detail="permit_not_found")
+44:        if wallet_id and wallet_id not in {
+45:            permit.issuer_wallet_id,
+46:            permit.subject_wallet_id,
+47:        }:
+48:            auth.require_bootstrap_admin()
+49:            return
+50:        if auth.is_bootstrap_admin:
+51:            return
+52:        if auth.wallet_id in {permit.issuer_wallet_id, permit.subject_wallet_id}:
+53:            return
+54:    if wallet_id:
+55:        auth.require_wallet_access(wallet_id)
+56:        return
+57:    auth.require_bootstrap_admin()
+58:
+59:
+60:@router.get("", response_model=ReceiptListResponse)
+61:async def list_receipts(
+118:
+119:
+120:@router.get(
+121:    "/reconciliation/refunds",
+122:    response_model=RefundReconciliationListResponse,
+123:)
+124:async def list_refund_reconciliations(
+125:    status: Literal["pending", "resolved"] | None = Query("pending"),
+126:    limit: int = Query(50, ge=1, le=200),
+127:    offset: int = Query(0, ge=0),
+128:    auth: AuthContext = Depends(get_auth_context),
+129:) -> RefundReconciliationListResponse:
+130:    # Money owed back to a wallet is that wallet's business. Operators still
+131:    # get the cross-tenant queue; a wallet key sees only its own items. The
+132:    # retry below stays operator-only — it moves money, and this move is about
+133:    # reads.
+134:    wallet_id = None
+135:    if not auth.is_bootstrap_admin:
+136:        if not auth.wallet_id:
+137:            auth.require_bootstrap_admin()
+138:        wallet_id = auth.wallet_id
+139:    try:
+140:        items, total = await get_refund_reconciliation_service().list_items(
+141:            status=status,
+142:            wallet_id=wallet_id,
+143:            limit=limit,
+144:            offset=offset,
+145:        )
+146:    except RefundReconciliationError as exc:
+147:        raise HTTPException(status_code=exc.status_code, detail=exc.reason) from exc
+148:    next_offset = offset + len(items) if offset + len(items) < total else None
+149:    return RefundReconciliationListResponse(
+150:        items=items,
+FILE app/routers/permits.py
+21:    IdempotencyCreationDisabledError,
+22:    IdempotencyInProgressError,
+23:    PermitError,
+24:    get_agent_money,
+25:    get_idempotency_service,
+26:    get_permit_service,
+27:    get_receipt_service,
+28:    permit_model_to_response,
+29:)
+30:
+31:router = APIRouter(prefix="/v1/permits", tags=["Trust Permits"])
+32:
+33:
+34:def _authorize_permit_inspection(
+35:    *,
+36:    auth: AuthContext,
+37:    issuer_wallet_id: str,
+38:    subject_wallet_id: str,
+39:) -> None:
+40:    if auth.is_bootstrap_admin:
+41:        return
+42:    if auth.wallet_id in {issuer_wallet_id, subject_wallet_id}:
+43:        return
+44:    auth.require_bootstrap_admin()
+45:
+46:
+47:@router.get("", response_model=PermitListResponse)
+48:async def list_permits(
+49:    wallet_id: str | None = Query(None),
+50:    status: str | None = Query(None),
+51:    subject_key_id: str | None = Query(None),
+52:    created_after: datetime | None = Query(None),
+53:    created_before: datetime | None = Query(None),
+54:    expires_after: datetime | None = Query(None),
+55:    expires_before: datetime | None = Query(None),
+56:    limit: int = Query(50, ge=1, le=200),
+57:    offset: int = Query(0, ge=0),
+58:    auth: AuthContext = Depends(get_auth_context),
+59:) -> PermitListResponse:
+60:    if wallet_id:
+61:        auth.require_wallet_access(wallet_id)
+62:    elif auth.wallet_id:
+63:        # An unscoped list is an operator view. A wallet key asking for it means
+64:        # "my permits", so scope it to the caller rather than refusing: the
+65:        # data was already readable at /v1/me/permits, and needing an admin key
+66:        # to see your own permits by issuer/expiry filters was the gate in the
+67:        # wrong place.
+68:        wallet_id = auth.wallet_id
+69:    else:
+70:        auth.require_bootstrap_admin()
+71:
+72:    permits, total = await get_permit_service().list_permits(
+73:        wallet_id=wallet_id,
+74:        status=status,
+75:        subject_key_id=subject_key_id,
+76:        created_after=created_after,
+77:        created_before=created_before,
+78:        expires_after=expires_after,
+79:        expires_before=expires_before,
+80:        limit=limit,
+81:        offset=offset,
+82:    )
+83:    next_offset = offset + len(permits) if offset + len(permits) < total else None
+84:    return PermitListResponse(
+FILE app/main.py
+550:    ],
+551:)
+552:
+553:# --- Middleware Stack ---
+554:
+555:# Rate limiting (enforces documented 120 req/min per API key)
+556:app.add_middleware(RateLimitMiddleware)
+557:
+558:# Inbound body ceiling. Registered between the rate limiter and CORS so the
+559:# stack puts it outside RateLimitMiddleware — an oversized body is refused
+560:# before any per-key bookkeeping or handler buffers it — and inside
+561:# CORSMiddleware, so the 413 carries the same headers as every other response.
+562:app.add_middleware(
+563:    RequestBodyLimitMiddleware, max_body_size=settings.MAX_REQUEST_BODY_BYTES
+564:)
+565:
+566:
+567:def add_cors_middleware(application: FastAPI, origins: list[str]) -> None:
+568:    """Attach CORS, enabling credentials only for an explicit allowlist.
+569:
+570:    Never pair credentialed CORS with a wildcard origin: with
+571:    ``allow_origins=["*"]`` and ``allow_credentials=True``, Starlette echoes the
+572:    caller's ``Origin`` back and still returns
+573:    ``Access-Control-Allow-Credentials: true``, letting any website make
+574:    credentialed cross-origin reads against the trust plane. A wildcard therefore
+575:    serves ``Access-Control-Allow-Origin: *`` with credentials disabled.
+576:    """
+577:    allow_all_origins = "*" in origins
+578:    application.add_middleware(
+579:        CORSMiddleware,
+580:        allow_origins=origins,
+581:        allow_credentials=not allow_all_origins,
+582:        allow_methods=["*"],
+583:        allow_headers=["*"],
+584:    )
+585:
+586:

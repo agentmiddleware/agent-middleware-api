@@ -1,0 +1,211 @@
+{
+  "stats": {
+    "startTime": "2026-10-03T03:55:57.797Z",
+    "duration": 9841.148,
+    "expected": 0,
+    "skipped": 0,
+    "unexpected": 33,
+    "flaky": 0
+  },
+  "results": [
+    {
+      "project": "chromium",
+      "title": "main public pages load without browser or resource errors",
+      "status": "failed",
+      "error": "Error: browserType.launch: Target page, context or browser has been closed"
+    },
+    {
+      "project": "chromium",
+      "title": "calculator valid, boundary, invalid and cleared states stay local",
+      "status": "failed",
+      "error": "Error: browserType.launch: Target page, context or browser has been closed"
+    },
+    {
+      "project": "chromium",
+      "title": "receipt evidence loads without claiming cryptographic verification",
+      "status": "failed",
+      "error": "Error: browserType.launch: Target page, context or browser has been closed"
+    },
+    {
+      "project": "chromium",
+      "title": "receipt load failure removes published data and verification claims",
+      "status": "failed",
+      "error": "Error: browserType.launch: Target page, context or browser has been closed"
+    },
+    {
+      "project": "chromium",
+      "title": "malformed receipt payload fails closed",
+      "status": "failed",
+      "error": "Error: browserType.launch: Target page, context or browser has been closed"
+    },
+    {
+      "project": "chromium",
+      "title": "mobile pages do not overflow",
+      "status": "failed",
+      "error": "Error: browserType.launch: Target page, context or browser has been closed"
+    },
+    {
+      "project": "chromium",
+      "title": "operator index is static and does not ask for credentials",
+      "status": "failed",
+      "error": "Error: browserType.launch: Target page, context or browser has been closed"
+    },
+    {
+      "project": "chromium",
+      "title": "no JavaScript retains the pilot and proof entry path",
+      "status": "failed",
+      "error": "Error: browserType.launch: Target page, context or browser has been closed"
+    },
+    {
+      "project": "firefox",
+      "title": "main public pages load without browser or resource errors",
+      "status": "failed",
+      "error": "Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox"
+    },
+    {
+      "project": "firefox",
+      "title": "calculator valid, boundary, invalid and cleared states stay local",
+      "status": "failed",
+      "error": "Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox"
+    },
+    {
+      "project": "firefox",
+      "title": "receipt evidence loads without claiming cryptographic verification",
+      "status": "failed",
+      "error": "Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox"
+    },
+    {
+      "project": "firefox",
+      "title": "receipt load failure removes published data and verification claims",
+      "status": "failed",
+      "error": "Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox"
+    },
+    {
+      "project": "firefox",
+      "title": "malformed receipt payload fails closed",
+      "status": "failed",
+      "error": "Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox"
+    },
+    {
+      "project": "firefox",
+      "title": "mobile pages do not overflow",
+      "status": "failed",
+      "error": "Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox"
+    },
+    {
+      "project": "firefox",
+      "title": "operator index is static and does not ask for credentials",
+      "status": "failed",
+      "error": "Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox"
+    },
+    {
+      "project": "firefox",
+      "title": "no JavaScript retains the pilot and proof entry path",
+      "status": "failed",
+      "error": "Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox"
+    },
+    {
+      "project": "webkit",
+      "title": "main public pages load without browser or resource errors",
+      "status": "failed",
+      "error": "Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/webkit-2359/pw_run.sh"
+    },
+    {
+      "project": "webkit",
+      "title": "calculator valid, boundary, invalid and cleared states stay local",
+      "status": "failed",
+      "error": "Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/webkit-2359/pw_run.sh"
+    },
+    {
+      "project": "webkit",
+      "title": "receipt evidence loads without claiming cryptographic verification",
+      "status": "failed",
+      "error": "Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/webkit-2359/pw_run.sh"
+    },
+    {
+      "project": "webkit",
+      "title": "receipt load failure removes published data and verification claims",
+      "status": "failed",
+      "error": "Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/webkit-2359/pw_run.sh"
+    },
+    {
+      "project": "webkit",
+      "title": "malformed receipt payload fails closed",
+      "status": "failed",
+      "error": "Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/webkit-2359/pw_run.sh"
+    },
+    {
+      "project": "webkit",
+      "title": "mobile pages do not overflow",
+      "status": "failed",
+      "error": "Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/webkit-2359/pw_run.sh"
+    },
+    {
+      "project": "webkit",
+      "title": "operator index is static and does not ask for credentials",
+      "status": "failed",
+      "error": "Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/webkit-2359/pw_run.sh"
+    },
+    {
+      "project": "webkit",
+      "title": "no JavaScript retains the pilot and proof entry path",
+      "status": "failed",
+      "error": "Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/webkit-2359/pw_run.sh"
+    },
+    {
+      "project": "chromium",
+      "title": "UX-001: comparison fit text meets minimum contrast",
+      "status": "failed",
+      "error": "Error: browserType.launch: Target page, context or browser has been closed"
+    },
+    {
+      "project": "chromium",
+      "title": "UX-002: dashboard scrollable commands have explicit keyboard access",
+      "status": "failed",
+      "error": "Error: browserType.launch: Target page, context or browser has been closed"
+    },
+    {
+      "project": "chromium",
+      "title": "UX-003: operator runtime links remain on the served origin",
+      "status": "failed",
+      "error": "Error: browserType.launch: Target page, context or browser has been closed"
+    },
+    {
+      "project": "firefox",
+      "title": "UX-001: comparison fit text meets minimum contrast",
+      "status": "failed",
+      "error": "Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox"
+    },
+    {
+      "project": "firefox",
+      "title": "UX-002: dashboard scrollable commands have explicit keyboard access",
+      "status": "failed",
+      "error": "Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox"
+    },
+    {
+      "project": "firefox",
+      "title": "UX-003: operator runtime links remain on the served origin",
+      "status": "failed",
+      "error": "Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox"
+    },
+    {
+      "project": "webkit",
+      "title": "UX-001: comparison fit text meets minimum contrast",
+      "status": "failed",
+      "error": "Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/webkit-2359/pw_run.sh"
+    },
+    {
+      "project": "webkit",
+      "title": "UX-002: dashboard scrollable commands have explicit keyboard access",
+      "status": "failed",
+      "error": "Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/webkit-2359/pw_run.sh"
+    },
+    {
+      "project": "webkit",
+      "title": "UX-003: operator runtime links remain on the served origin",
+      "status": "failed",
+      "error": "Error: browserType.launch: Executable doesn't exist at /private/tmp/amw-fix-browsers/webkit-2359/pw_run.sh"
+    }
+  ],
+  "classification": "Infrastructure errors in browserType.launch, before navigation/product assertions."
+}

@@ -1,0 +1,88 @@
+100:class UpstreamMcpError(RuntimeError):
+101-    """Base error with a stable code and dispatch-boundary signal."""
+102-
+103-    def __init__(self, code: str, *, dispatch_started: bool) -> None:
+104-        super().__init__(code)
+105-        self.code = code
+106-        self.dispatch_started = dispatch_started
+107-
+108-
+109-class UpstreamMcpPreDispatchError(UpstreamMcpError):
+110-    """Connection, initialization, or dispatch-checkpoint failure."""
+111-
+112-    def __init__(self, code: str = "upstream_pre_dispatch_failed") -> None:
+113-        super().__init__(code, dispatch_started=False)
+114-
+115-
+116-class UpstreamMcpDispatchClaimUnavailableError(UpstreamMcpError):
+117-    """Another activation already owns the durable right to send."""
+118-
+119-    def __init__(self) -> None:
+120-        super().__init__("idempotency_in_progress", dispatch_started=False)
+121-
+122-
+123:class UpstreamMcpConfigurationError(UpstreamMcpPreDispatchError):
+124-    """Unsafe or incomplete operator configuration."""
+125-
+126-    def __init__(self, detail: str) -> None:
+127-        super().__init__("upstream_mcp_configuration_invalid")
+128-        self.detail = detail
+129-
+130-
+131-class UpstreamMcpDeliveryUncertainError(UpstreamMcpError):
+132-    """The call began but no trustworthy terminal response was obtained."""
+133-
+134-    def __init__(self) -> None:
+135-        super().__init__("upstream_delivery_uncertain", dispatch_started=True)
+136-
+137-
+138-class UpstreamMcpResponseRejectedError(UpstreamMcpError):
+139-    """A confirmed response could not be safely retained."""
+140-
+141-    def __init__(self, code: str = "upstream_response_rejected") -> None:
+142-        super().__init__(code, dispatch_started=True)
+143-
+144-
+145-@dataclass(frozen=True)
+146-class UpstreamMcpResult:
+147-    """Canonical, bounded representation of one upstream MCP result."""
+148-
+149-    payload: dict[str, Any]
+150-    canonical_json: str
+151-    response_hash: str
+152-    size_bytes: int
+153-    is_error: bool
+154-
+155-
+156-class UpstreamMcpReturnedError(UpstreamMcpError):
+157-    """The upstream returned a valid MCP tool-level error result."""
+158-
+159-    def __init__(self, result: UpstreamMcpResult) -> None:
+160-        super().__init__("upstream_returned_error", dispatch_started=True)
+161-        self.result = result
+162-
+163-
+tests/test_static_dev_api_keys.py
+tests/test_rate_limit_threshold.py
+tests/test_iga_policy.py
+tests/test_qa_20261002_backend.py
+tests/test_discovery_tools_consistency.py
+tests/test_wallet_status_enforcement.py
+tests/test_signing_key_lifecycle.py
+tests/test_tenant_isolation_hardening.py
+tests/test_railway_preflight.py
+tests/test_receipts.py
+tests/test_onboarding_contract.py
+tests/test_governed_adapter.py
+tests/test_dogfood_tool_flag.py
+tests/test_evidence_bundle.py
+tests/test_scaffolding_harden.py
+tests/test_dev_key_self_provision.py
+tests/test_route_auth_inventory.py
+tests/test_jwt_auth.py
+tests/test_db_urls_durable_state.py
+tests/test_agent_first_contract.py
+tests/test_billing.py
+tests/test_discovery_drift.py
+TEST FILES
+['tests/test_tool_interface_authority.py', 'tests/test_jwt_auth.py', 'tests/test_route_auth_inventory.py', 'tests/test_kyc_status_authority.py', 'tests/test_iga_policy.py']

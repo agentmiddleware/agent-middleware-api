@@ -1,0 +1,64 @@
+// QA-only adapter: existing browser scripts receive a loopback-only browser.
+// Install playwright in QA_NODE_MODULES (defaults to the sweep's temporary tools).
+import { pathToFileURL } from 'node:url';
+const modules = process.env.QA_NODE_MODULES || '/private/tmp/amw-qa-browser/node_modules';
+const pw = await import(pathToFileURL(`${modules}/playwright/index.mjs`).href);
+async function protect(context) {
+  await context.route('**/*', route => {
+    const url = new URL(route.request().url());
+    return ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)
+      ? route.continue() : route.abort('blockedbyclient');
+  });
+  return context;
+}
+function guarded(type) {
+  return { async launch(options) {
+    const browser = await type.launch(options);
+    const newContext = browser.newContext.bind(browser);
+    const newPage = browser.newPage.bind(browser);
+    browser.newContext = async options => protect(await newContext({...options, serviceWorkers: 'block'}));
+    browser.newPage = async options => {
+      const page = await newPage({...options, serviceWorkers: 'block'});
+      await protect(page.context());
+      return page;
+    };
+    return browser;
+  }};
+}
+export const chromium = guarded(pw.chromium);
+export const firefox = guarded(pw.firefox);
+export const webkit = guarded(pw.webkit);
+
+// QA regression coverage. This suite cannot contact non-loopback hosts.
+const {test, expect} = require(process.env.QA_NODE_MODULES
+  ? `${process.env.QA_NODE_MODULES}/@playwright/test` : '/private/tmp/amw-qa-browser/node_modules/@playwright/test');
+test.beforeEach(async ({context}) => {
+  await context.route('**/*', route => ['127.0.0.1', 'localhost', '[::1]'].includes(new URL(route.request().url()).hostname)
+    ? route.continue() : route.abort('blockedbyclient'));
+});
+
+test('main public pages load without browser or resource errors', async ({page}) => {
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('response', response => {if (response.status() >= 400) errors.push(`${response.status()} ${response.url()}`);});
+  for (const route of ['/', '/proof/', '/compare/', '/concept/', '/404.html']) {
+    expect((await page.goto(route, {waitUntil: 'networkidle'})).status()).toBe(200);
+    await expect(page.locator('h1')).toBeVisible();
+    expect(await page.locator('body').innerText()).not.toContain('@@PUBLIC_');
+  }
+  expect(errors).toEqual([]);
+}
+const path = require('node:path');
+const {defineConfig} = require(process.env.QA_NODE_MODULES
+  ? `${process.env.QA_NODE_MODULES}/@playwright/test` : '/private/tmp/amw-qa-browser/node_modules/@playwright/test');
+module.exports = defineConfig({
+  testDir: __dirname,
+  testMatch: ['frontend.spec.cjs', 'ux-regressions.spec.cjs'],
+  outputDir: path.join(__dirname, 'artifacts/frontend-playwright'),
+  reporter: [['list'], ['json', {outputFile: path.join(__dirname, 'artifacts/frontend-playwright.json')}]],
+  workers: 1,
+  timeout: 30000,
+  use: {baseURL: 'http://127.0.0.1:8765', viewport: {width: 1440, height: 1000},
+    reducedMotion: 'reduce', serviceWorkers: 'block', screenshot: 'only-on-failure'},
+  projects: ['chromium', 'firefox', 'webkit'].map(browserName => ({name: browserName, use: {browserName}})),
+});

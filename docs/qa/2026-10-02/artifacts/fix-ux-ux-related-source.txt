@@ -1,0 +1,306 @@
+"""Shared visual contract for the API origin's self-contained operator index."""
+
+from html.parser import HTMLParser
+from pathlib import Path
+import re
+
+
+ROOT = Path(__file__).resolve().parents[1]
+DASHBOARD = ROOT / "static" / "dashboard.html"
+
+
+def _root_tokens(source: str) -> dict[str, str]:
+    root = re.search(r":root\s*\{([^}]+)\}", source)
+    assert root, "The design tokens must have a :root declaration."
+    return {
+        name: value.strip()
+        for name, value in re.findall(r"(--[\w-]+)\s*:\s*([^;]+);", root.group(1))
+    }
+
+
+def test_dashboard_tokens_match_the_shared_site_design() -> None:
+    """Catch drift beyond color: typography, page width, radii, and focus."""
+    dashboard = DASHBOARD.read_text(encoding="utf-8")
+    tokens = _root_tokens(dashboard)
+    site_tokens = _root_tokens((ROOT / "site" / "styles.css").read_text())
+    required = {
+        "--font-display",
+        "--font-title",
+        "--font-body",
+        "--font-mono",
+        "--radius",
+        "--radius-sm",
+        "--page-max",
+        "--pad-x",
+        "--focus-ring",
+    }
+    assert required <= tokens.keys()
+    assert set(re.findall(r"var\((--[\w-]+)\)", dashboard)) <= tokens.keys()
+    for name, value in tokens.items():
+        assert name in site_tokens, f"Dashboard-only design token: [REDACTED]
+        assert value == site_tokens[name], f"Dashboard token has drifted: {name}"
+
+
+class _Elements(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.elements: list[tuple[str, dict[str, str | None]]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.elements.append((tag, dict(attrs)))
+
+
+def test_dashboard_skip_link_reaches_a_focusable_main_without_external_assets() -> None:
+    document = _Elements()
+    document.feed(DASHBOARD.read_text(encoding="utf-8"))
+    links = [attrs for tag, attrs in document.elements if tag == "a"]
+    mains = [attrs for tag, attrs in document.elements if tag == "main"]
+    assert len(mains) == 1
+    assert mains[0].get("tabindex") == "-1"
+    assert links[0].get("href") == f"#{mains[0]['id']}"
+    assert "skip-link" in (links[0].get("class") or "").split()
+    for tag, attrs in document.elements:
+        assert tag not in {"script", "iframe", "img", "audio", "video", "source"}
+        if tag == "link":
+            assert attrs.get("rel") != "stylesheet"
+            if attrs.get("rel") == "icon":
+                assert (attrs.get("href") or "").startswith("data:")
+
+"""
+Tests for Human Accessibility & Content Negotiation Layer.
+Verifies that human operators can access the control deck and documentation
+via browser HTML requests while agent-native machine calls receive pure JSON.
+"""
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from app.main import app
+from app.routers.well_known import get_agent_first_metadata
+
+
+@pytest.fixture
+async def client():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+
+
+@pytest.mark.anyio
+async def test_root_content_negotiation_browser_html(client):
+    """Browser request with Accept: text/html returns the public operator index."""
+    headers = {"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9"}
+    resp = await client.get("/", headers=headers)
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers["content-type"]
+    assert "Agent Middleware API" in resp.text
+    assert "Private experiment" in resp.text
+    assert "No tenant records or aggregate customer counts" in resp.text
+
+
+@pytest.mark.anyio
+async def test_root_content_negotiation_agent_json(client):
+    """Machine/Agent request with Accept: application/json returns API root JSON."""
+    headers = {"Accept": "application/json"}
+    resp = await client.get("/", headers=headers)
+    assert resp.status_code == 200
+    assert "application/json" in resp.headers["content-type"]
+    data = resp.json()
+    assert "agent_first" in data
+    assert data["agent_first"]["design_principle"] == "agent_first"
+
+
+@pytest.mark.anyio
+async def test_dashboard_endpoint_returns_html(client):
+    """Direct /dashboard is a public evidence index, not fake telemetry."""
+    resp = await client.get("/dashboard")
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers["content-type"]
+    assert "Agent Middleware API" in resp.text
+    assert "Private experiment" in resp.text
+    assert "self-issued live gateway proof, not customer traction" in resp.text
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "path,headers", [("/dashboard", {}), ("/", {"Accept": "text/html"})]
+)
+async def test_public_operator_index_has_no_fake_data_or_browser_key_handling(
+    client, path, headers
+):
+    resp = await client.get(path, headers=headers)
+    assert resp.status_code == 200
+    page = resp.text
+
+    fabricated_markers = (
+        "agent_synth_01",
+        "agent_finance_bot",
+        "rcpt_99a8b7",
+        "pmt_8f9a2c",
+        "1,428",
+        "metric-permits",
+        'verification_status: "VALID"',
+        "Verify Ed25519 Signature",
+        "Load Sample",
+        "Control Plane Active",
+        "INTACT",
+    )
+    for marker in fabricated_markers:
+        assert marker not in page
+
+    browser_secret_markers = (
+        "localStorage",
+        "sessionStorage",
+        'type="password"',
+        "fetch('/v1/permits",
+        'fetch("/v1/permits',
+    )
+    for marker in browser_secret_markers:
+        assert marker not in page
+
+    assert "<script" not in page
+    assert "railway.app" not in page
+    assert "vercel.app" not in page
+    assert "https://www.thisisatest.tech/proof/" in page
+    assert "https://api.thisisatest.tech/health/dependencies" in page
+    assert "Keep the key in your environment" in page
+    assert "Public governed-tool catalog" not in page
+    assert 'href="https://api.thisisatest.tech/mcp/tools.json"' not in page
+
+
+@pytest.mark.anyio
+async def test_agent_first_metadata_declares_human_observability(client):
+    """get_agent_first_metadata includes human_observability URLs."""
+    meta = get_agent_first_metadata()
+    assert "human_observability" in meta
+    assert meta["human_observability"]["human_dashboard_url"] == "/dashboard"
+    assert meta["human_observability"]["interactive_docs_url"] == "/docs"
+    note = meta["human_observability"]["note"]
+    assert "status and evidence index" in note
+    assert "active permits" not in note
+
+    manifest_resp = await client.get("/.well-known/agent.json")
+    assert manifest_resp.status_code == 200
+    manifest = manifest_resp.json()
+    assert manifest["documentation"]["human_dashboard"] == "/dashboard"
+
+
+@pytest.mark.anyio
+async def test_docs_and_llm_txt_remain_accessible(client):
+    """OpenAPI and LLM documentation endpoints remain accessible."""
+    resp_llm = await client.get("/llm.txt")
+    assert resp_llm.status_code == 200
+    assert "Agent Middleware API" in resp_llm.text
+
+    resp_openapi = await client.get("/openapi.json")
+    assert resp_openapi.status_code == 200
+    assert "openapi" in resp_openapi.json()
+
+
+def test_openapi_documents_human_html_and_dashboard_not_found():
+    """Generated clients see both negotiated root media types and the
+    dashboard file-missing response."""
+    spec = app.openapi()
+
+    root_content = spec["paths"]["/"]["get"]["responses"]["200"]["content"]
+    assert "application/json" in root_content
+    assert root_content["text/html"]["schema"] == {"type": "string"}
+
+    dashboard_responses = spec["paths"]["/dashboard"]["get"]["responses"]
+    assert dashboard_responses["404"]["description"] == "Dashboard not found"
+
+// Usage: node tests/test_site_design.mjs <local URL> [Playwright module path] [screenshot directory]
+import assert from "node:assert/strict";
+import { mkdir, readFile } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
+
+const base = new URL(process.argv[2] || "http://127.0.0.1:8765");
+assert(["127.0.0.1", "localhost", "[::1]"].includes(base.hostname), "Use a loopback preview");
+const { chromium } = await import(process.argv[3] ? pathToFileURL(process.argv[3]).href : "playwright");
+const browser = await chromium.launch({ headless: true });
+const routes = ["/", "/proof/", "/compare/", "/concept/", "/404.html"];
+const errors = [];
+let scenarios = 0;
+try {
+  for (const javaScriptEnabled of [true, false]) {
+    for (const width of [320, 390, 768, 1024, 1440]) {
+      const context = await browser.newContext({ javaScriptEnabled, viewport: { width, height: 1000 }, reducedMotion: "reduce" });
+      const page = await context.newPage();
+      page.on("pageerror", (error) => errors.push(error.message));
+      page.on("response", (response) => { if (response.status() >= 400) errors.push(`${response.status()} ${response.url()}`); });
+      let commonNav;
+      let commonFooter;
+      let commonStyle;
+      for (const route of routes) {
+        const response = await page.goto(new URL(route, base).href, { waitUntil: "networkidle" });
+        assert.equal(response.status(), 200, route);
+        await page.evaluate(() => document.fonts.ready);
+        const layout = await page.evaluate(() => {
+          const nav = document.querySelector(".site-nav");
+          const styles = getComputedStyle(document.body);
+          return {
+            overflow: document.documentElement.scrollWidth > innerWidth,
+            nav: [...nav.querySelectorAll("a")].map((a) => [a.textContent.trim(), a.getAttribute("href")]),
+            footer: [...document.querySelectorAll(".site-footer a")].map((a) => [a.textContent.trim(), a.getAttribute("href")]),
+            theme: [styles.fontFamily, styles.fontSize, styles.color, styles.backgroundColor, getComputedStyle(document.querySelector("h1")).fontFamily],
+            navHeight: getComputedStyle(nav).position === "sticky" ? nav.getBoundingClientRect().height : 0,
+            scrollPadding: parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop),
+          };
+        });
+        assert(!layout.overflow, `${route} overflows at ${width}px JS=${javaScriptEnabled}`);
+        assert(layout.scrollPadding >= layout.navHeight, `${route} sticky nav obscures anchors: ${layout.navHeight} > ${layout.scrollPadding} at ${width}px`);
+        commonNav ??= layout.nav;
+        commonFooter ??= layout.footer;
+        commonStyle ??= layout.theme;
+        assert.deepEqual(layout.nav, commonNav, `${route} navigation differs`);
+        assert.deepEqual(layout.footer, commonFooter, `${route} footer differs`);
+        assert.deepEqual(layout.theme, commonStyle, `${route} design tokens differ`);
+        await page.keyboard.press("Tab");
+        assert.equal(await page.locator(":focus").getAttribute("class"), "skip-link");
+        await page.keyboard.press("Enter");
+        assert.equal(new URL(page.url()).hash, "#main");
+        if (process.argv[4] && javaScriptEnabled && [390, 1440].includes(width)) {
+          await mkdir(process.argv[4], { recursive: true });
+          await page.goto(new URL(route, base).href, { waitUntil: "networkidle" });
+          await page.screenshot({ path: `${process.argv[4]}/${route.replaceAll("/", "") || "home"}-${width}.png` });
+        }
+        scenarios++;
+      }
+      await context.close();
+    }
+  }
+  const page = await browser.newPage({ viewport: { width: 320, height: 1000 }, reducedMotion: "reduce" });
+  await page.goto(base.href);
+  await page.evaluate(() => localStorage.setItem("amw-a11y", JSON.stringify({ scale: 1.4, contrast: true, spacing: true, motion: true })));
+  for (const width of [320, 390, 768, 1024, 1440]) {
+    await page.setViewportSize({ width, height: 1000 });
+    for (const route of routes) {
+      const response = await page.goto(new URL(route, base).href, { waitUntil: "networkidle" });
+      assert.equal(response.status(), 200, `${route} preview missing during accessibility checks`);
+      await page.evaluate(() => document.fonts.ready);
+      const result = await page.evaluate(() => ({
+        overflow: document.documentElement.scrollWidth > innerWidth,
+        nav: getComputedStyle(document.querySelector(".site-nav")).position === "sticky" ? document.querySelector(".site-nav").getBoundingClientRect().height : 0,
+        padding: parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop),
+        color: getComputedStyle(document.body).color,
+      }));
+      assert(!result.overflow, `${route} enlarged high-contrast text overflows`);
+      assert(result.padding >= result.nav, `${route} enlarged nav obscures targets: ${result.nav} > ${result.padding}`);
+      assert.equal(result.color, "rgb(255, 255, 255)");
+      scenarios++;
+    }
+  }
+  // The operator index stays self-contained on its separate API origin.
+  await page.context().clearCookies();
+  await page.setContent(await readFile(new URL("../static/dashboard.html", import.meta.url), "utf8"));
+  assert.equal(await page.locator("script").count(), 0);
+  for (const width of [320, 390, 1440]) {
+    await page.setViewportSize({ width, height: 1000 });
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `dashboard overflows at ${width}`);
+    scenarios++;
+  }
+  assert.deepEqual(errors, [], "Browser errors or failed assets");
+  console.log(`${scenarios} design scenarios passed: shared shell, theme, responsive layout, keyboard, accessibility preferences, and no-JavaScript rendering.`);
+} finally {
+  await browser.close();
+}

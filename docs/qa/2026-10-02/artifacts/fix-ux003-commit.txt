@@ -1,0 +1,2 @@
+[qa/2026-10-02-fixes ef29d58] fix(UX-003): keep operator inspection on the served origin
+ 4 files changed, 59 insertions(+), 17 deletions(-)

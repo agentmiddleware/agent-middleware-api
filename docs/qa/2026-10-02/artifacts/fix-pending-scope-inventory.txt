@@ -1,0 +1,5 @@
+Untracked by suffix: {'.md': 6, '.txt': 225, '.json': 1}
+Tracked modified: ['docs/qa/2026-10-02/SUMMARY.md']
+Unexpected new paths: []
+Current branch: qa/2026-10-02-fixes
+Current HEAD: 3297eb3

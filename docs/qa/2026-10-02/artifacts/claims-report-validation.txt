@@ -1,0 +1,17 @@
+Inventory syntax and IDs: PASS
+Report 76 lines
+Named contention tests:
+tests/test_receipt_write_contention_surface.py:254:async def test_a_contended_receipt_insert_is_restarted_until_it_lands(
+tests/test_receipt_write_contention_surface.py:308:async def test_a_denial_reports_its_real_reason_through_receipt_contention(
+tests/test_receipt_write_contention_surface.py:353:async def test_an_exhausted_denial_receipt_is_named_retryable_not_internal(
+tests/test_receipt_write_contention_surface.py:426:async def test_a_charged_call_is_never_told_to_retry_its_receipt(
+tests/test_receipt_write_contention_surface.py:741:async def test_a_terminal_dispatch_chain_is_not_advertised_as_a_plain_retry(
+tests/test_audit_chain_contention_surface.py:162:async def test_a_refusal_that_ran_nothing_answers_audit_contention_as_retryable(
+tests/test_audit_chain_contention_surface.py:749:async def test_a_terminal_dispatch_chain_is_not_advertised_as_a_plain_retry(
+tests/test_audit_chain_contention_surface.py:837:async def test_a_consumed_approval_still_reaches_a_terminal_answer(
+tests/test_upstream_retry_cap_enforcement.py:479:async def test_duplicate_detection_log_mode_allows(client, clean_database, monkeypatch):
+Owned files
+docs/qa/2026-10-02/CLAIMS-INVENTORY.md
+docs/qa/2026-10-02/CLAIMS-SESSION.md
+docs/qa/2026-10-02/CLAIMS-REPORT.md
+Diff check:
