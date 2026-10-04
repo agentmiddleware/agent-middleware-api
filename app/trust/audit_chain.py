@@ -10,6 +10,7 @@ from __future__ import annotations
 from app.services.audit_chain import (
     AuditChainContendedError,
     AuditChainVerification,
+    AuditEventConflictError,
     audit_payload,
     sign_audit_model,
     verify_audit_chain,
@@ -25,6 +26,7 @@ from app.services.audit_log import (
 __all__ = [
     "AuditChainContendedError",
     "AuditChainVerification",
+    "AuditEventConflictError",
     "audit_payload",
     "sign_audit_model",
     "verify_audit_chain",

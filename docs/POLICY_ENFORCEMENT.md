@@ -241,6 +241,17 @@ database is configured or the count fails or times out, with
 counters are still served. `metric_scopes` labels each metric's durability so a
 monitor never infers it from the values.
 
+### Optional probabilistic risk advice
+
+[`JEV_RISK_GUARD`](jev-risk-guard.md) is **off by default**. Operators may opt
+in to send redacted, truncated arguments and tool/permit descriptions to
+TypeSafe for probabilistic advice. It runs only after deterministic policy
+allows the call, never loosens authorization, and fails open on vendor errors.
+`log` records advice; `enforce` routes escalations through the existing human
+approval gate or denies calls without a governed permit. Advice is labelled
+advisory in the signed audit and receipt. It is outside the deterministic
+authorization guarantee.
+
 ---
 
 ## 10. Consolidated reason-code reference
