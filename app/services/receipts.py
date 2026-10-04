@@ -14,9 +14,10 @@ from app.core.config import DuplicateGuardMode, get_settings
 from app.core.resilience import run_with_write_conflict_retry
 from app.core.time import utc_now
 from app.db.database import get_session_factory
-from app.db.models import IdempotencyRecordModel, ReceiptModel
-from app.schemas.trust import ReceiptResponse
+from app.db.models import IdempotencyRecordModel, ReceiptModel, PermitModel
+from app.schemas.trust import ActionPermitFields, ReceiptResponse
 from app.services.jev_guard_metadata import load_jev_guard_metadata
+from app.services.pricing import credit_amount_fits_storage
 from app.services.signing_keys import (
     canonical_json,
     get_signing_key_service,
@@ -291,12 +292,22 @@ class ReceiptService:
         constraints_evaluated: dict[str, Any] | None = None,
         prepared_signing_key_id: str | None = None,
     ) -> ReceiptResponse:
+        if not all(
+            credit_amount_fits_storage(amount)
+            for amount in (credits_authorized, credits_charged)
+        ):
+            raise ReceiptError("receipt_credits_invalid")
         # Reuse the existing signed JSON field; no receipt schema/migration.
         # The audit link also covers denial/refund/reconciliation helpers.
         if get_settings().JEV_RISK_GUARD != DuplicateGuardMode.OFF:
-            jev = await load_jev_guard_metadata(audit_event_id, wallet_id, session=session)
+            jev = await load_jev_guard_metadata(
+                audit_event_id, wallet_id, session=session
+            )
             if jev is not None:
-                constraints_evaluated = {**(constraints_evaluated or {}), "jev_risk_guard": jev}
+                constraints_evaluated = {
+                    **(constraints_evaluated or {}),
+                    "jev_risk_guard": jev,
+                }
         if reason_code is not None:
             if outcome == "success" or not _REASON_CODE_PATTERN.fullmatch(reason_code):
                 raise ReceiptError("receipt_reason_code_invalid")
