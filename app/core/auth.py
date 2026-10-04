@@ -31,24 +31,6 @@ api_key_header = APIKeyHeader(
     description="API key for agent authentication. Pass in the X-API-Key header.",
 )
 
-# Declares the `Authorization: Bearer <jwt>` alternative in OpenAPI so a
-# generated client discovers both supported credentials (BE-002). It is a
-# documentation-only dependency: ``auto_error=False`` means it never raises,
-# and ``_resolve_auth_context`` keeps reading the raw ``Authorization`` header
-# itself, so a malformed bearer is still refused instead of falling back to a
-# concurrently supplied API key. Listed alongside ``api_key_header`` on the
-# same dependency, FastAPI emits the two schemes as alternatives (OR), which
-# matches the runtime: either credential authenticates on its own.
-bearer_scheme = HTTPBearer(
-    auto_error=False,
-    description=(
-        "Short-lived JWT for agent authentication. Pass as "
-        "'Authorization: Bearer <token>'. A presented Authorization header is "
-        "authoritative: an invalid bearer is refused even when an X-API-Key "
-        "accompanies it."
-    ),
-)
-
 
 bearer_header = HTTPBearer(
     auto_error=False,
