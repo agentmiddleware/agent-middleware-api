@@ -62,6 +62,31 @@ occurred. When a send is claimed and no trustworthy result comes back, the call
 is receipted `delivery_uncertain` and never silently redispatched. See
 [docs/failure-semantics.md](docs/failure-semantics.md).
 
+## Current status
+
+`main` is the `v1.3.0` release candidate. The version is unreleased: the tag is
+created only from a commit that passes the full release gate.
+
+- **Merged:** the 2026-10-02 and 2026-10-03 QA remediation — 82 findings
+  (79 fixes, 3 explicit retirements: #511, #529, #570) — plus single-action
+  authority and schema 042 (`042_permit_action_binding`).
+- **Locally validated, at an earlier commit:** full Python suite, fresh
+  PostgreSQL, browser, and SDK checks, recorded at `079bb72`. Later merged
+  commits (including the Jev runtime integration and receipt fixes) were not
+  re-run as one local gate on the merged tree. Evidence:
+  [docs/issue-resolution-2026-10-03/](docs/issue-resolution-2026-10-03/README.md).
+- **Not verified:** hosted CI on the merged head, any staging or production
+  deployment, live provider and payment behavior, and customer acceptance.
+- **Single-action issuance is frozen.** `POST /v1/action-permits` is not mounted
+  or advertised by the normal application, and the configured upstream has no
+  qualified action binding. Permits remain reusable budget envelopes.
+- **Schema 042 is a one-way boundary.** Boot refuses a database whose revision
+  differs from the packaged head. Read
+  [docs/schema-042-rollout.md](docs/schema-042-rollout.md) before any deploy;
+  it records prerequisites, not permission to deploy.
+
+Per-release detail: [CHANGELOG.md](CHANGELOG.md).
+
 ## See it in sixty seconds
 
 Prerequisites: Python 3.11+, [`uv`](https://docs.astral.sh/uv/), and `make`.
@@ -147,6 +172,22 @@ this server.
 | **Offline-verifiable receipts** | Ed25519-signed; verifiable with no credentials and no network access to the issuer, using the SDK verifier or any JOSE tooling. | `GET /v1/receipts/{id}/portable`, `/.well-known/jwks.json` |
 | **Authority before money** | Out-of-scope, expired, revoked, or tampered permits are denied with a reason code *before* any charge. When a valid permit was present, that refusal is itself a signed receipt. Unpermitted and unknown-tool calls fail closed without one. | `tests/test_adversarial_five_claims.py` |
 
+Two optional controls sit beside these guarantees and are **not** part of them:
+
+- **Duplicate guard** (`MCP_UPSTREAM_DUPLICATE_GUARD=off|log|enforce`, default
+  `log`). `enforce` denies the same arguments under a *new* idempotency key on
+  the same permit and tool within the window, with `duplicate_request_new_key`.
+  Detection is scoped to one `permit_id`, so it only helps flows that keep the
+  original permit. On `POST /mcp`, a new key without a `permit_id` mints a fresh
+  permit, so an identical retry still dispatches and debits again. It does not
+  close the restart-with-a-new-key hole. See
+  [docs/POLICY_ENFORCEMENT.md](docs/POLICY_ENFORCEMENT.md).
+- **Jev risk advisory** (`JEV_RISK_GUARD=off|log|enforce`, default `off`). A
+  probabilistic check run only after deterministic policy has allowed the call.
+  It never turns a denial into an allow, can be wrong, and fails open on vendor
+  errors. Redacted state leaves the gateway only after operator opt-in. See
+  [docs/jev-risk-guard.md](docs/jev-risk-guard.md).
+
 CI runs the full release gate as one required check (`trust_release_gate`), so
 these claims cannot regress into `main` unproven.
 [docs/PROOF_MATRIX.md](docs/PROOF_MATRIX.md) maps every proof command to the
@@ -173,6 +214,8 @@ invariant it asserts — and to what it does not prove.
   server and one exact tool.
 - **No delegation chains.** Permits are reusable budget envelopes; parent
   delegation containment is not implemented.
+- **No live single-action issuance.** The code and schema 042 are merged, but
+  issuance stays frozen until a binding and rollout are separately reviewed.
 - **No public SLA**, no KMS integration, and no approval for PHI, PCI, or
   regulated production records.
 
