@@ -425,7 +425,9 @@ def test_registry_binding_is_trusted_snapshot():
 
 
 @pytest.mark.anyio
-async def test_action_route_persists_and_replays(clean_database, monkeypatch):
+async def test_action_route_persists_and_replays(
+    clean_database, monkeypatch, action_permit_route
+):
     from httpx import ASGITransport, AsyncClient
     from app.main import app
     from app.services.service_registry import get_service_registry

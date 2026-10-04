@@ -129,7 +129,7 @@ async def test_http_transport_cannot_select_action_namespace(monkeypatch):
 
 
 @pytest.fixture
-async def action_runtime(monkeypatch, clean_database):
+async def action_runtime(monkeypatch, clean_database, action_permit_route):
     from httpx import ASGITransport, AsyncClient
     from app.main import app
     from app.core.config import get_settings

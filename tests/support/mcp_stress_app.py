@@ -497,10 +497,13 @@ async def stress_reconcile(
 
 
 if os.environ.get("MCP_STRESS_ACTION_MODE") == "1":
+    from app.routers.permits import action_router
     from app.services.action_permits import (
         ActionToolBinding,
         upstream_action_binding_hash,
     )
+
+    app.include_router(action_router)
 
     @app.middleware("http")
     async def bind_action_fixture(request, call_next):

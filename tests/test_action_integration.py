@@ -22,7 +22,7 @@ async def client():
 
 
 @pytest.fixture
-def action_registry(monkeypatch):
+def action_registry(monkeypatch, action_permit_route):
     registry = get_service_registry()
     monkeypatch.setattr(registry, "get", AsyncMock(return_value={"fixture": True}))
     monkeypatch.setattr(registry, "get_action_binding", lambda record: BINDING)

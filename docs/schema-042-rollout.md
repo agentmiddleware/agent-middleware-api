@@ -6,6 +6,13 @@ each of `permits` and `receipts`. Existing values and signatures remain
 unchanged. Upstream 041 still scrubs non-wallet content owner keys; 042 neither
 replaces that migration nor restores scrubbed values.
 
+Action issuance remains frozen. The normal application does not mount or
+advertise `/v1/action-permits`, including when proof surfaces or the configured
+upstream are enabled. Only explicit test fixtures mount that router and provide
+an `ActionToolBinding`; the configured upstream has no qualified binding.
+Unfreezing issuance requires a separately reviewed binding and rollout. Existing
+action verification, receipt reads and recovery remain available internally.
+
 The feature's original local `041_permit_action_binding` was applied only to
 disposable tests and was never an operational schema. Its unpublished revision
 was renumbered for this integration. A retained database stamped with that old

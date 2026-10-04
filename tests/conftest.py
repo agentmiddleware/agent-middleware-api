@@ -249,6 +249,25 @@ def anyio_backend():
     return "asyncio"
 
 
+@pytest.fixture
+def action_permit_route():
+    """Opt action fixtures into frozen issuance without changing app startup."""
+    from app.main import app
+    from app.routers.permits import action_router
+
+    original_routes = list(app.router.routes)
+    app.include_router(action_router)
+    mounted_routes = app.router.routes[len(original_routes) :]
+    app.openapi_schema = None
+    try:
+        yield
+    finally:
+        app.router.routes[:] = [
+            route for route in app.router.routes if route not in mounted_routes
+        ]
+        app.openapi_schema = None
+
+
 def _mount_dormant_test_routes() -> None:
     """Mount dormant trust surfaces (+ Stripe webhooks) on the shared app once.
 

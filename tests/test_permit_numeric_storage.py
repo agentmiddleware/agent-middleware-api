@@ -131,7 +131,7 @@ def test_permit_schemas_reject_credit_terms_that_change_in_storage(
     ],
 )
 async def test_lossy_permit_terms_are_rejected_before_acceptance(
-    client, clean_database, endpoint, field, extra
+    client, clean_database, endpoint, field, extra, action_permit_route
 ):
     owner = await provision_agent_wallet(client)
     response = await client.post(
