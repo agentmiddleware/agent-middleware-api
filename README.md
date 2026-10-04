@@ -70,8 +70,11 @@ created only from a commit that passes the full release gate.
 - **Merged:** the 2026-10-02 and 2026-10-03 QA remediation — 82 findings
   (79 fixes, 3 explicit retirements: #511, #529, #570) — plus single-action
   authority and schema 042 (`042_permit_action_binding`).
-- **Locally validated:** full Python suite, fresh PostgreSQL, browser, and SDK
-  checks. Evidence: [docs/issue-resolution-2026-10-03/](docs/issue-resolution-2026-10-03/README.md).
+- **Locally validated, at an earlier commit:** full Python suite, fresh
+  PostgreSQL, browser, and SDK checks, recorded at `079bb72`. Later merged
+  commits (including the Jev runtime integration and receipt fixes) were not
+  re-run as one local gate on the merged tree. Evidence:
+  [docs/issue-resolution-2026-10-03/](docs/issue-resolution-2026-10-03/README.md).
 - **Not verified:** hosted CI on the merged head, any staging or production
   deployment, live provider and payment behavior, and customer acceptance.
 - **Single-action issuance is frozen.** `POST /v1/action-permits` is not mounted
@@ -174,7 +177,10 @@ Two optional controls sit beside these guarantees and are **not** part of them:
 - **Duplicate guard** (`MCP_UPSTREAM_DUPLICATE_GUARD=off|log|enforce`, default
   `log`). `enforce` denies the same arguments under a *new* idempotency key on
   the same permit and tool within the window, with `duplicate_request_new_key`.
-  It narrows the restart-with-a-new-key hole; it does not close it. See
+  Detection is scoped to one `permit_id`, so it only helps flows that keep the
+  original permit. On `POST /mcp`, a new key without a `permit_id` mints a fresh
+  permit, so an identical retry still dispatches and debits again. It does not
+  close the restart-with-a-new-key hole. See
   [docs/POLICY_ENFORCEMENT.md](docs/POLICY_ENFORCEMENT.md).
 - **Jev risk advisory** (`JEV_RISK_GUARD=off|log|enforce`, default `off`). A
   probabilistic check run only after deterministic policy has allowed the call.
