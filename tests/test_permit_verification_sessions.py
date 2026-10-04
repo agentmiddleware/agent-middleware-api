@@ -175,7 +175,9 @@ async def test_prepared_signing_key_is_revalidated_in_caller_transaction(
     async with factory() as session:
         async with session.begin():
             with monkeypatch.context() as patch:
-                patch.setattr(signing_keys, "get_session_factory", _reject_nested_session)
+                patch.setattr(
+                    signing_keys, "get_session_factory", _reject_nested_session
+                )
                 with pytest.raises(SigningKeyError, match="signing_key_disabled"):
                     await get_receipt_service().create_receipt(
                         permit_id=permit["permit_id"],

@@ -245,9 +245,7 @@ def verify(
                 "not evaluated: the signature did not verify",
             ),
             key_id=key_id,
-            envelope_key_id=(
-                bundle.get("kid") if isinstance(bundle, dict) else None
-            ),
+            envelope_key_id=(bundle.get("kid") if isinstance(bundle, dict) else None),
             notes=notes,
         )
 

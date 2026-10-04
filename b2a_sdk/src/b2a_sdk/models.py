@@ -252,13 +252,10 @@ class ACPLineItem:
         request that could only 422.
         """
         if not 0 < self.quantity <= 10_000:
-            raise ValueError(
-                f"quantity must be in 1..10000, got {self.quantity!r}"
-            )
+            raise ValueError(f"quantity must be in 1..10000, got {self.quantity!r}")
         if not 0 <= self.unit_amount <= 10_000_000:
             raise ValueError(
-                "unit_amount must be in 0..10000000 minor units, got "
-                f"{self.unit_amount!r}"
+                f"unit_amount must be in 0..10000000 minor units, got {self.unit_amount!r}"
             )
 
     def to_payload(self) -> JsonObject:

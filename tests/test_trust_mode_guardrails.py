@@ -190,7 +190,6 @@ def test_production_accepts_public_mcp_disabled():
     )
 
 
-
 @pytest.mark.parametrize(
     "database_url",
     [

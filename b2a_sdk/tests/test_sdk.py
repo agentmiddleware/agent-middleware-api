@@ -118,9 +118,7 @@ class TestB2AClient:
             ("k" * 129, "at most 128 characters"),
         ],
     )
-    async def test_charge_rejects_invalid_idempotency_key_before_sending(
-        self, bad_key, message
-    ):
+    async def test_charge_rejects_invalid_idempotency_key_before_sending(self, bad_key, message):
         """An invalid key fails closed locally: no request, so no charge."""
         client, seen = _recording_client(_CHARGE_OK)
         async with client:
@@ -328,6 +326,7 @@ class TestDecorators:
     @pytest.mark.asyncio
     async def test_monitored_decorator_success(self, mock_client):
         """Test @monitored fires telemetry on success."""
+
         @monitored(mock_client, service_name="test_service")
         async def my_function():
             return "success"
@@ -343,6 +342,7 @@ class TestDecorators:
     @pytest.mark.asyncio
     async def test_monitored_decorator_error(self, mock_client):
         """Test @monitored fires error telemetry on exception."""
+
         @monitored(mock_client, service_name="test_service")
         async def my_function():
             raise ValueError("Test error")
@@ -359,6 +359,7 @@ class TestDecorators:
     @pytest.mark.asyncio
     async def test_monitored_error_omits_exception_text_by_default(self, mock_client):
         """Exception messages and tracebacks can carry secrets; off by default."""
+
         @monitored(mock_client, service_name="test_service")
         async def my_function():
             raise ValueError("token=sk-live-secret")
@@ -386,15 +387,14 @@ class TestDecorators:
 
     def test_monitored_sync_function_outside_event_loop_returns_value(self, mock_client):
         """A sync function must not fail after it ran just because no loop exists."""
+
         @monitored(mock_client, service_name="test_service")
         def add(a, b):
             return a + b
 
         assert add(2, 3) == 5
 
-    def test_monitored_sync_function_outside_event_loop_reraises_original(
-        self, mock_client
-    ):
+    def test_monitored_sync_function_outside_event_loop_reraises_original(self, mock_client):
         @monitored(mock_client, service_name="test_service")
         def explode():
             raise ValueError("original failure")
@@ -403,9 +403,7 @@ class TestDecorators:
             explode()
 
     @pytest.mark.asyncio
-    async def test_monitored_sync_function_inside_event_loop_emits_telemetry(
-        self, mock_client
-    ):
+    async def test_monitored_sync_function_inside_event_loop_emits_telemetry(self, mock_client):
         @monitored(mock_client, service_name="test_service")
         def add(a, b):
             return a + b
@@ -417,6 +415,7 @@ class TestDecorators:
     @pytest.mark.asyncio
     async def test_billable_decorator_success(self, mock_client):
         """Test @billable charges before execution."""
+
         @billable(mock_client, wallet_id="wallet-123", service_category="iot_bridge", units=5.0)
         async def my_function():
             return "success"

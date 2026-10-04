@@ -332,7 +332,7 @@
     <section aria-labelledby="evidence-heading">
       <h2 id="evidence-heading">Status and evidence</h2>
       <p class="section-copy">
-        The proof is self-issued live gateway proof, not customer traction.
+        The hosted proof is separately served, self-issued live gateway proof, not customer traction.
       </p>
       <div class="links">
         <a href="https://www.thisisatest.tech/proof/">
@@ -369,7 +369,8 @@
       <p class="section-copy">
         Inspect your own permits, receipts, and audit events from a trusted terminal.
         Keep the key in your environment; do not paste it into a public web page.
-        Set <code>API_URL</code> to this server's origin; the example below uses a local server.
+        Set <code>API_URL</code> to the origin serving this page, without a trailing slash;
+        the example below uses the local server default.
       </p>
       <pre tabindex="0" role="region" aria-label="Authenticated inspection commands"><code>export API_URL="http://127.0.0.1:8000"
 export AGENT_MIDDLEWARE_API_KEY='replace-in-your-terminal'

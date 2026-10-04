@@ -94,8 +94,11 @@ def test_openapi_declares_supported_bearer_authentication():
         app.openapi_schema = None
         schema = app.openapi()
         schemes = schema["components"]["securitySchemes"]
-        bearer = [name for name, definition in schemes.items()
-                  if definition.get("type") == "http" and definition.get("scheme") == "bearer"]
+        bearer = [
+            name
+            for name, definition in schemes.items()
+            if definition.get("type") == "http" and definition.get("scheme") == "bearer"
+        ]
         assert len(bearer) == 1
         security = schema["paths"]["/v1/permits"]["get"]["security"]
         assert {bearer[0]: []} in security
@@ -171,7 +174,9 @@ async def test_lone_surrogate_replay_key_is_rejected_before_effect_or_debit(
         tool.close()
 
 
-@pytest.mark.parametrize("address", ["224.0.0.1", "239.255.255.250", "ff02::1", "ff05::1"])
+@pytest.mark.parametrize(
+    "address", ["224.0.0.1", "239.255.255.250", "ff02::1", "ff05::1"]
+)
 @pytest.mark.parametrize("resolved", [False, True], ids=["literal", "mixed-dns"])
 async def test_outbound_url_guard_rejects_multicast(address, resolved, monkeypatch):
     from app.core.config import get_settings
@@ -180,8 +185,11 @@ async def test_outbound_url_guard_rejects_multicast(address, resolved, monkeypat
     monkeypatch.setattr(get_settings(), "ALLOW_PRIVATE_NETWORK_TARGETS", False)
     host = f"[{address}]" if ":" in address else address
     if resolved:
+
         async def resolve(_host):
-            return [(None, None, None, None, (value, 0)) for value in ("8.8.8.8", address)]
+            return [
+                (None, None, None, None, (value, 0)) for value in ("8.8.8.8", address)
+            ]
 
         monkeypatch.setattr("app.core.url_guard._resolve_host", resolve)
         host = "multicast.example"
@@ -217,5 +225,7 @@ async def test_upstream_url_guard_rejects_multicast(address, resolved):
         max_response_bytes=1024,
         environment="production",
     )
-    with pytest.raises(UpstreamMcpConfigurationError, match="upstream_mcp_configuration_invalid"):
+    with pytest.raises(
+        UpstreamMcpConfigurationError, match="upstream_mcp_configuration_invalid"
+    ):
         await validate_upstream_url(configuration, resolver=resolve)

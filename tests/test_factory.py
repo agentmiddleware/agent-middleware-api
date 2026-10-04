@@ -30,6 +30,7 @@ def api_headers():
 
 # --- Pipeline Creation ---
 
+
 @pytest.mark.anyio
 async def test_create_pipeline(client, api_headers):
     resp = await client.post(
@@ -101,6 +102,7 @@ async def test_get_pipeline_not_found(client, api_headers):
 
 # --- Content Retrieval ---
 
+
 @pytest.mark.anyio
 async def test_list_pipeline_content(client, api_headers):
     # Create pipeline and wait for async rendering
@@ -141,6 +143,7 @@ async def test_get_content_not_found(client, api_headers):
 
 
 # --- Analytics Ingestion ---
+
 
 @pytest.mark.anyio
 async def test_ingest_analytics(client, api_headers):
@@ -186,6 +189,7 @@ async def test_analytics_summary(client, api_headers):
 
 # --- Scheduling ---
 
+
 @pytest.mark.anyio
 async def test_get_schedule(client, api_headers):
     resp = await client.post(
@@ -226,6 +230,7 @@ async def test_schedule_empty_content(client, api_headers):
 
 # --- Live Campaign Mode ---
 
+
 @pytest.mark.anyio
 async def test_launch_b2a_campaign(client, api_headers):
     """Full integration: source video -> 3 hooks -> 1-to-N multiplication -> scheduling."""
@@ -246,7 +251,12 @@ async def test_launch_b2a_campaign(client, api_headers):
                         "Agent-native APIs eliminate the UI bottleneck",
                         "B2A replaces B2B for programmatic buyers",
                     ],
-                    "target_formats": ["short_video", "static_image", "text_post", "quote_card"],
+                    "target_formats": [
+                        "short_video",
+                        "static_image",
+                        "text_post",
+                        "quote_card",
+                    ],
                 },
                 {
                     "title": "The Liability Sink",
@@ -260,7 +270,13 @@ async def test_launch_b2a_campaign(client, api_headers):
                         "402 responses teach agents to self-fund",
                         "Zero-GUI product design",
                     ],
-                    "target_formats": ["short_video", "static_image", "text_post", "carousel", "blog_excerpt"],
+                    "target_formats": [
+                        "short_video",
+                        "static_image",
+                        "text_post",
+                        "carousel",
+                        "blog_excerpt",
+                    ],
                 },
                 {
                     "title": "Swarm Beats Monolith",
@@ -273,7 +289,12 @@ async def test_launch_b2a_campaign(client, api_headers):
                         "Middleware is the connective tissue of swarms",
                         "Redundancy beats single points of failure",
                     ],
-                    "target_formats": ["short_video", "quote_card", "debate_clip", "text_post"],
+                    "target_formats": [
+                        "short_video",
+                        "quote_card",
+                        "debate_clip",
+                        "text_post",
+                    ],
                 },
             ],
             "brand_config": {
@@ -528,6 +549,7 @@ async def test_campaign_content_has_hook_metadata(client, api_headers):
 
 # --- Auth ---
 
+
 @pytest.mark.anyio
 async def test_factory_requires_api_key(client):
     resp = await client.post(
@@ -586,9 +608,7 @@ async def _wait_for_pipeline(client, pipeline_id, headers, *, attempts=100):
     """Poll the pipeline until it reaches a terminal status (or give up)."""
     data = {}
     for _ in range(attempts):
-        resp = await client.get(
-            f"/v1/factory/pipelines/{pipeline_id}", headers=headers
-        )
+        resp = await client.get(f"/v1/factory/pipelines/{pipeline_id}", headers=headers)
         assert resp.status_code == 200
         data = resp.json()
         if data["status"] in {"ready", "failed"}:
@@ -697,9 +717,7 @@ async def test_content_piece_not_readable_across_tenants(
     )
     assert foreign.status_code == 404
     assert foreign.json() == missing.json()
-    _assert_no_leak(
-        foreign, a["agent_wallet_id"], pipeline_id, "Tenant A pipeline"
-    )
+    _assert_no_leak(foreign, a["agent_wallet_id"], pipeline_id, "Tenant A pipeline")
 
     own = await client.get(
         f"/v1/factory/content/{content_id}", headers=a["agent_headers"]

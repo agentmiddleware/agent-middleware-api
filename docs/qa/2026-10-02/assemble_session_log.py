@@ -21,7 +21,9 @@ def assemble():
                 lambda match: f"Outcome for `{match.group(2)}`: {match.group(1)}",
                 content,
             )
-            sections.append(f"\n## Consolidated {name.lower()} record\n\n" + content + "\n")
+            sections.append(
+                f"\n## Consolidated {name.lower()} record\n\n" + content + "\n"
+            )
     target.write_text(preamble + "\n" + marker + "".join(sections))
 
 

@@ -40,9 +40,7 @@ def _run(code: str, *, block_httpx: bool) -> subprocess.CompletedProcess:
     # while ensuring the SDK source wins on import.
     env = dict(os.environ)
     existing = env.get("PYTHONPATH")
-    env["PYTHONPATH"] = (
-        f"{SDK_SRC}{os.pathsep}{existing}" if existing else str(SDK_SRC)
-    )
+    env["PYTHONPATH"] = f"{SDK_SRC}{os.pathsep}{existing}" if existing else str(SDK_SRC)
     return subprocess.run(
         [sys.executable, "-c", (_BLOCK_HTTPX if block_httpx else "") + code],
         env=env,

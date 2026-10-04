@@ -59,7 +59,9 @@ def _git_archive(commit_sha: str, *, repo_root: Path) -> bytes:
         raise ReleaseContextError(f"could not run git archive: {error}") from error
     if result.returncode:
         detail = result.stderr.decode("utf-8", errors="replace").strip()
-        raise ReleaseContextError(f"git archive failed: {detail or 'unknown git error'}")
+        raise ReleaseContextError(
+            f"git archive failed: {detail or 'unknown git error'}"
+        )
     return result.stdout
 
 
@@ -126,7 +128,9 @@ def _extract_archive(archive: bytes, destination: Path) -> None:
                     shutil.copyfileobj(source, target)
                 resolved_path.chmod(member.mode & 0o777)
     except (OSError, tarfile.TarError) as error:
-        raise ReleaseContextError(f"could not extract release archive: {error}") from error
+        raise ReleaseContextError(
+            f"could not extract release archive: {error}"
+        ) from error
 
 
 def prepare_release_context(
@@ -140,10 +144,14 @@ def prepare_release_context(
     _require_clean_checkout(repo_root=repo_root)
     _require_detached_checkout(repo_root=repo_root)
 
-    commit_sha = _git_text(["rev-parse", "--verify", f"{ref}^{{commit}}"], repo_root=repo_root)
+    commit_sha = _git_text(
+        ["rev-parse", "--verify", f"{ref}^{{commit}}"], repo_root=repo_root
+    )
     commit_sha = commit_sha.strip().lower()
     if _SHA_RE.fullmatch(commit_sha) is None:
-        raise ReleaseContextError("release ref did not resolve to a full 40-character SHA")
+        raise ReleaseContextError(
+            "release ref did not resolve to a full 40-character SHA"
+        )
     head_sha = _git_text(["rev-parse", "HEAD"], repo_root=repo_root).strip().lower()
     if head_sha != commit_sha:
         raise ReleaseContextError("release ref must match the detached checkout HEAD")
@@ -158,7 +166,9 @@ def prepare_release_context(
             tempfile.mkdtemp(prefix=f"railway-release-{commit_sha[:12]}-", dir=parent)
         )
     except OSError as error:
-        raise ReleaseContextError(f"could not create release context: {error}") from error
+        raise ReleaseContextError(
+            f"could not create release context: {error}"
+        ) from error
 
     try:
         _extract_archive(_git_archive(commit_sha, repo_root=repo_root), context)
@@ -172,7 +182,9 @@ def prepare_release_context(
 
         stamp = context / _STAMP_NAME
         if stamp.exists() or stamp.is_symlink():
-            raise ReleaseContextError(f"release archive must not already contain {_STAMP_NAME}")
+            raise ReleaseContextError(
+                f"release archive must not already contain {_STAMP_NAME}"
+            )
         stamp.write_text(f"{commit_sha}\n", encoding="utf-8")
         stamp.chmod(0o444)
         if stamp.read_text(encoding="utf-8") != f"{commit_sha}\n":

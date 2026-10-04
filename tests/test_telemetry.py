@@ -58,9 +58,12 @@ def sample_batch():
 
 # --- Event Ingestion ---
 
+
 @pytest.mark.anyio
 async def test_batch_ingest(client, api_headers, sample_batch):
-    resp = await client.post("/v1/telemetry/events", json=sample_batch, headers=api_headers)
+    resp = await client.post(
+        "/v1/telemetry/events", json=sample_batch, headers=api_headers
+    )
     assert resp.status_code == 202
     data = resp.json()
     assert data["ingested"] == 3
@@ -76,7 +79,9 @@ async def test_single_event_ingest(client, api_headers):
         "message": "Rate limit approaching threshold",
         "severity": "medium",
     }
-    resp = await client.post("/v1/telemetry/events/single", json=event, headers=api_headers)
+    resp = await client.post(
+        "/v1/telemetry/events/single", json=event, headers=api_headers
+    )
     assert resp.status_code == 202
     assert resp.json()["ingested"] == 1
 
@@ -88,11 +93,14 @@ async def test_invalid_event_type(client, api_headers):
         "source": "test",
         "message": "test",
     }
-    resp = await client.post("/v1/telemetry/events/single", json=event, headers=api_headers)
+    resp = await client.post(
+        "/v1/telemetry/events/single", json=event, headers=api_headers
+    )
     assert resp.status_code == 422  # Validation error
 
 
 # --- Stats ---
+
 
 @pytest.mark.anyio
 async def test_stats_endpoint(client, api_headers, sample_batch):
@@ -105,6 +113,7 @@ async def test_stats_endpoint(client, api_headers, sample_batch):
 
 
 # --- Anomalies ---
+
 
 @pytest.mark.anyio
 async def test_list_anomalies_empty(client, api_headers):

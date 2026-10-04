@@ -77,13 +77,21 @@ class RefundRequest:
                 raise RefundValidationError(f"{name} must be a non-empty string")
         amount = data.get("amount")
         if isinstance(amount, bool) or not isinstance(amount, int):
-            raise RefundValidationError("amount must be an integer number of minor units")
+            raise RefundValidationError(
+                "amount must be an integer number of minor units"
+            )
         if amount <= 0 or amount > _MAX_AMOUNT_MINOR_UNITS:
             raise RefundValidationError("amount is out of range")
         currency = data.get("currency", "USD")
         if not isinstance(currency, str) or currency not in _SUPPORTED_CURRENCIES:
             raise RefundValidationError("currency is not supported")
-        unknown = set(data) - {"operation_id", "customer_id", "payment_id", "amount", "currency"}
+        unknown = set(data) - {
+            "operation_id",
+            "customer_id",
+            "payment_id",
+            "amount",
+            "currency",
+        }
         if unknown:
             raise RefundValidationError(
                 "unknown fields: " + ", ".join(sorted(str(name) for name in unknown))
@@ -162,7 +170,9 @@ class SimulatedRefundService:
             customer_id=request.customer_id,
             payment_id=request.payment_id,
             configuration=self.configuration,
-            native_fingerprint=request.fingerprint() if self.native_idempotency else None,
+            native_fingerprint=request.fingerprint()
+            if self.native_idempotency
+            else None,
             make_result=_result_from_record,
         )
         result = dict(outcome.result)
@@ -191,7 +201,9 @@ class _BearerAuth:
                     for key, value in scope.get("headers", [])
                     if key.lower() == b"authorization"
                 ]
-                if len(values) != 1 or not hmac.compare_digest(values[0], self._expected):
+                if len(values) != 1 or not hmac.compare_digest(
+                    values[0], self._expected
+                ):
                     response = JSONResponse(
                         {"detail": "refund_tool_unauthorized"},
                         status_code=401,
@@ -226,7 +238,12 @@ def build_downstream_app(
     *,
     bearer_token: str,
     control_token: str,
-    allowed_hosts: tuple[str, ...] = ("localhost", "localhost:*", "127.0.0.1", "127.0.0.1:*"),
+    allowed_hosts: tuple[str, ...] = (
+        "localhost",
+        "localhost:*",
+        "127.0.0.1",
+        "127.0.0.1:*",
+    ),
     crash_hook: Callable[[], None] | None = None,
 ) -> DownstreamApp:
     server = FastMCP(
@@ -305,7 +322,9 @@ def build_downstream_app(
         try:
             refund_request = RefundRequest.from_mapping(data)
         except RefundValidationError as exc:
-            return JSONResponse({"error": "validation_failed", "detail": str(exc)}, status_code=400)
+            return JSONResponse(
+                {"error": "validation_failed", "detail": str(exc)}, status_code=400
+            )
         try:
             result = await asyncio.to_thread(
                 service.execute,
@@ -326,7 +345,9 @@ def build_downstream_app(
                 "status": "ok",
                 "tool": REFUND_TOOL_NAME,
                 "native_idempotency": service.native_idempotency,
-                "execution_count": await asyncio.to_thread(service.ledger.execution_count),
+                "execution_count": await asyncio.to_thread(
+                    service.ledger.execution_count
+                ),
                 "crashed": injector.crashed,
             }
         )
@@ -337,7 +358,9 @@ def build_downstream_app(
             return _denied()
         operation_id = request.query_params.get("operation_id")
         effects = await asyncio.to_thread(service.ledger.effects, operation_id)
-        return JSONResponse({"count": len(effects), "effects": [e.as_dict() for e in effects]})
+        return JSONResponse(
+            {"count": len(effects), "effects": [e.as_dict() for e in effects]}
+        )
 
     @server.custom_route("/__lab/crossings", methods=["GET"], include_in_schema=False)
     async def lab_crossings(request: Request) -> JSONResponse:
@@ -345,7 +368,9 @@ def build_downstream_app(
             return _denied()
         return JSONResponse(injector.snapshot())
 
-    @server.custom_route("/__lab/faults", methods=["POST", "DELETE"], include_in_schema=False)
+    @server.custom_route(
+        "/__lab/faults", methods=["POST", "DELETE"], include_in_schema=False
+    )
     async def lab_faults(request: Request) -> JSONResponse:
         if not _control_ok(request):
             return _denied()
@@ -356,7 +381,9 @@ def build_downstream_app(
             data = await request.json()
             plan = FaultPlan.from_dict(data)
         except (ValueError, KeyError, TypeError) as exc:
-            return JSONResponse({"error": "invalid_plan", "detail": str(exc)}, status_code=400)
+            return JSONResponse(
+                {"error": "invalid_plan", "detail": str(exc)}, status_code=400
+            )
         injector.arm(plan)
         return JSONResponse({"armed": [p.as_dict() for p in injector.armed()]})
 

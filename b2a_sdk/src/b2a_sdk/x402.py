@@ -149,9 +149,7 @@ class X402Client:
         if response.is_error:
             detail = _error_detail(payload, f"HTTP {response.status_code}")
             if response.status_code == 401:
-                raise AuthenticationError(
-                    detail, status_code=401, payload=payload
-                )
+                raise AuthenticationError(detail, status_code=401, payload=payload)
             if response.status_code == 403:
                 raise AuthorizationError(detail, status_code=403, payload=payload)
             raise APIError(detail, status_code=response.status_code, payload=payload)
@@ -165,16 +163,14 @@ class X402Client:
             value = payload.get(required)
             if not isinstance(value, str) or not value:
                 raise APIError(
-                    f"invalid_x402_parse_response: {required!r} must be a "
-                    "non-empty string",
+                    f"invalid_x402_parse_response: {required!r} must be a non-empty string",
                     status_code=response.status_code,
                     payload=payload,
                 )
         asset = payload.get("asset")
         if asset is not None and (not isinstance(asset, str) or not asset):
             raise APIError(
-                "invalid_x402_parse_response: 'asset' must be a non-empty "
-                "string when present",
+                "invalid_x402_parse_response: 'asset' must be a non-empty string when present",
                 status_code=response.status_code,
                 payload=payload,
             )
@@ -243,9 +239,7 @@ class X402Client:
         if response.is_error:
             detail = _error_detail(payload, f"HTTP {response.status_code}")
             if response.status_code == 401:
-                raise AuthenticationError(
-                    detail, status_code=401, payload=payload
-                )
+                raise AuthenticationError(detail, status_code=401, payload=payload)
             # Deliberate divergence from client.py's _raise_http_error, which
             # maps permit_* details to PermitDeniedError only on 403: the x402
             # settle endpoint returns permit denials as 400 (denied reason) or
@@ -256,9 +250,7 @@ class X402Client:
             if response.status_code == 403:
                 raise AuthorizationError(detail, status_code=403, payload=payload)
             if response.status_code == 409:
-                raise IdempotencyConflictError(
-                    detail, status_code=409, payload=payload
-                )
+                raise IdempotencyConflictError(detail, status_code=409, payload=payload)
             raise APIError(detail, status_code=response.status_code, payload=payload)
         return payload
 

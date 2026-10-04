@@ -121,7 +121,11 @@ def phase_for(configuration: str) -> str:
     if not configuration:
         return PHASE_SETUP
     try:
-        return PHASE_PROTECTED if Configuration(configuration).uses_gateway else PHASE_BASELINE
+        return (
+            PHASE_PROTECTED
+            if Configuration(configuration).uses_gateway
+            else PHASE_BASELINE
+        )
     except ValueError:
         return PHASE_SETUP
 
@@ -246,7 +250,10 @@ class StepStream:
                 "Arming the injected failure: the tool will execute and commit, "
                 "and its answer will be discarded on the way back."
             ]
-        if step_name.startswith("attempt.first") or step_name in ("t09.submit", "t12.call"):
+        if step_name.startswith("attempt.first") or step_name in (
+            "t09.submit",
+            "t12.call",
+        ):
             return [SENDING, *self._observed(data, state)]
         if step_name.startswith("attempt.retry") or step_name.endswith(".retry"):
             return [RETRYING, *self._observed(data, state)]
@@ -256,9 +263,7 @@ class StepStream:
             return [message or "Verdict recorded."]
         return [message] if message else []
 
-    def _observed(
-        self, data: dict[str, Any], state: _ConfigurationState
-    ) -> list[str]:
+    def _observed(self, data: dict[str, Any], state: _ConfigurationState) -> list[str]:
         """What the instruments recorded for one attempt, in the PRD's order.
 
         The caller supplies the verb -- "Sending..." or "Retrying..." -- and

@@ -41,6 +41,7 @@ def sample_device():
 
 # --- Device Registration ---
 
+
 @pytest.mark.anyio
 async def test_register_device(client, api_headers, sample_device):
     resp = await client.post("/v1/iot/devices", json=sample_device, headers=api_headers)
@@ -75,7 +76,9 @@ async def test_list_devices(client, api_headers, sample_device):
 @pytest.mark.anyio
 async def test_get_device(client, api_headers, sample_device):
     await client.post("/v1/iot/devices", json=sample_device, headers=api_headers)
-    resp = await client.get(f"/v1/iot/devices/{sample_device['device_id']}", headers=api_headers)
+    resp = await client.get(
+        f"/v1/iot/devices/{sample_device['device_id']}", headers=api_headers
+    )
     assert resp.status_code == 200
     assert resp.json()["device_id"] == sample_device["device_id"]
 
@@ -87,6 +90,7 @@ async def test_get_nonexistent_device(client, api_headers):
 
 
 # --- Message Sending with ACL ---
+
 
 @pytest.mark.anyio
 async def test_send_message_allowed_topic(client, api_headers, sample_device):
@@ -140,6 +144,7 @@ async def test_send_message_empty_acl_denies_all(client, api_headers):
 
 
 # --- Auth ---
+
 
 @pytest.mark.anyio
 async def test_missing_api_key(client):

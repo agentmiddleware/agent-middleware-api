@@ -25,6 +25,7 @@ def api_headers():
 
 # --- Video Upload ---
 
+
 @pytest.mark.anyio
 async def test_upload_video_with_url(client, api_headers):
     resp = await client.post(
@@ -77,6 +78,7 @@ async def test_video_not_found(client, api_headers):
 
 # --- Hooks ---
 
+
 @pytest.mark.anyio
 async def test_hooks_empty_for_new_video(client, api_headers):
     upload = await client.post(
@@ -91,6 +93,7 @@ async def test_hooks_empty_for_new_video(client, api_headers):
 
 
 # --- Distribution ---
+
 
 @pytest.mark.anyio
 async def test_distribute_nonexistent_clips(client, api_headers):
@@ -109,6 +112,7 @@ async def test_distribute_nonexistent_clips(client, api_headers):
 
 
 # --- Clip Not Found ---
+
 
 @pytest.mark.anyio
 async def test_clip_not_found(client, api_headers):
@@ -163,9 +167,7 @@ def _assert_no_leak(body: str, *secrets: str) -> None:
 
 @pytest.mark.proof
 @pytest.mark.anyio
-async def test_media_video_and_clip_not_readable_across_tenants(
-    client, clean_database
-):
+async def test_media_video_and_clip_not_readable_across_tenants(client, clean_database):
     a = await provision_agent_wallet(client)
     b = await provision_agent_wallet(client)
     video_id = await _create_ready_video(client, a["agent_headers"])
@@ -182,9 +184,7 @@ async def test_media_video_and_clip_not_readable_across_tenants(
 
     # Wallet B gets the same 404 it would for an unknown id, with none of A's
     # data (title, source, owner wallet, hooks, clip lineage) in the body.
-    video = await client.get(
-        f"/v1/media/videos/{video_id}", headers=b["agent_headers"]
-    )
+    video = await client.get(f"/v1/media/videos/{video_id}", headers=b["agent_headers"])
     hooks = await client.get(
         f"/v1/media/videos/{video_id}/hooks", headers=b["agent_headers"]
     )
@@ -310,9 +310,7 @@ async def test_media_bootstrap_admin_access_and_ownerless_resources(
     admin_video = await _create_ready_video(client, BOOTSTRAP_HEADERS)
     admin_clip = await _create_clip(client, BOOTSTRAP_HEADERS, admin_video)
     assert (
-        await client.get(
-            f"/v1/media/videos/{admin_video}", headers=a["agent_headers"]
-        )
+        await client.get(f"/v1/media/videos/{admin_video}", headers=a["agent_headers"])
     ).status_code == 404
     assert (
         await client.get(f"/v1/media/clips/{admin_clip}", headers=a["agent_headers"])

@@ -191,12 +191,12 @@ def sync_dogfood_tool_registration() -> None:
     from ..core.config import get_settings
 
     settings = get_settings()
-    
+
     if settings.ENABLE_DOGFOOD_TOOL:
         register_dogfood_tool()
     elif _registered:
         unregister_dogfood_tool()
-    
+
     if settings.ENABLE_DOGFOOD_SECOND_TOOL:
         register_dogfood_second_tool()
     elif _second_registered:

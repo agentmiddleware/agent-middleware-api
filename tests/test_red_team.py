@@ -24,6 +24,7 @@ def api_headers():
 
 # --- Scan Initiation ---
 
+
 @pytest.mark.anyio
 async def test_launch_full_scan(client, api_headers):
     resp = await client.post(
@@ -74,6 +75,7 @@ async def test_quick_scan(client, api_headers):
 
 # --- Report Retrieval ---
 
+
 @pytest.mark.anyio
 async def test_get_scan_report(client, api_headers):
     # Launch scan first
@@ -123,6 +125,7 @@ async def test_list_scans(client, api_headers):
 
 
 # --- Vulnerabilities ---
+
 
 @pytest.mark.anyio
 async def test_get_vulnerabilities(client, api_headers):
@@ -188,6 +191,7 @@ async def test_vulnerability_has_remediation(client, api_headers):
 
 # --- Security Score ---
 
+
 @pytest.mark.anyio
 async def test_security_score_within_range(client, api_headers):
     create_resp = await client.post(
@@ -208,6 +212,7 @@ async def test_security_score_within_range(client, api_headers):
 
 
 # --- Auth ---
+
 
 @pytest.mark.anyio
 async def test_security_requires_api_key(client):

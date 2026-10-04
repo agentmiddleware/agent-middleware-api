@@ -9,7 +9,11 @@ import tempfile
 
 if __name__ == "__main__":
     root = Path(__file__).resolve().parents[3]
-    files = subprocess.check_output(["git", "ls-files", "-z"], cwd=root).decode().split("\0")
+    files = (
+        subprocess.check_output(["git", "ls-files", "-z"], cwd=root)
+        .decode()
+        .split("\0")
+    )
     excluded = []
     count = 0
     # Preserve this private temporary snapshot for reproducibility; no repository files removed.
@@ -21,7 +25,15 @@ if __name__ == "__main__":
         if (
             any(part.startswith(".env") for part in path.parts)
             or path.suffix.lower() in {".pem", ".key", ".p12", ".pfx", ".db", ".sqlite"}
-            or path.name.lower() in {"credentials", "credentials.json", ".npmrc", ".pypirc", "id_rsa", "id_ed25519"}
+            or path.name.lower()
+            in {
+                "credentials",
+                "credentials.json",
+                ".npmrc",
+                ".pypirc",
+                "id_rsa",
+                "id_ed25519",
+            }
             or ".aws" in path.parts
         ):
             excluded.append(name)
@@ -36,7 +48,20 @@ if __name__ == "__main__":
     report = root / "docs/qa/2026-10-02/artifacts/tracked-secret-scan-relative.json"
     result = subprocess.run(
         # Relative paths preserve the repository's existing anchored allowances.
-        ["gitleaks", "dir", ".", "--config", ".gitleaks.toml", "--redact=100", "--no-banner", "--no-color", "--report-format", "json", "--report-path", str(report)],
+        [
+            "gitleaks",
+            "dir",
+            ".",
+            "--config",
+            ".gitleaks.toml",
+            "--redact=100",
+            "--no-banner",
+            "--no-color",
+            "--report-format",
+            "json",
+            "--report-path",
+            str(report),
+        ],
         cwd=snapshot,
         check=False,
     )

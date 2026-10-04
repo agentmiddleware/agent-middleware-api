@@ -133,7 +133,9 @@ def test_every_scenario_is_actually_implemented(test_id):
     scenario = get_scenario(test_id)
     method = type(scenario).run_configuration
 
-    assert method is not Scenario.run_configuration, f"{test_id} inherits the abstract body"
+    assert method is not Scenario.run_configuration, (
+        f"{test_id} inherits the abstract body"
+    )
 
     source = textwrap.dedent(inspect.getsource(method))
     tree = ast.parse(source)

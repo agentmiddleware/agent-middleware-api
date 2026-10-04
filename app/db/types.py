@@ -29,11 +29,15 @@ class NaiveUTCDateTime(TypeDecorator[datetime]):
     impl = DateTime
     cache_ok = True
 
-    def process_bind_param(self, value: datetime | None, dialect: Any) -> datetime | None:
+    def process_bind_param(
+        self, value: datetime | None, dialect: Any
+    ) -> datetime | None:
         if value is None:
             return None
         return to_naive_utc(value)
 
-    def process_result_value(self, value: datetime | None, dialect: Any) -> datetime | None:
+    def process_result_value(
+        self, value: datetime | None, dialect: Any
+    ) -> datetime | None:
         # DB returns naive UTC; keep it naive for consistency
         return value

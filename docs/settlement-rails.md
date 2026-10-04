@@ -196,6 +196,19 @@ charge), and the settlement record is a signed receipt whose
 `ledger_entry_id` is `None` — asserted under test. No on-chain execution, no
 custody, no minting.
 
+An incomplete x402 request retains its idempotency owner. After five minutes,
+a retry without a persisted receipt returns `409 x402_settlement_needs_review`:
+the first attempt may have committed its permit reservation or may still be
+running. Inspect the original request and permit before any operator repair;
+changing the key is a new settlement, not recovery. A receipt without a saved
+response returns `409 x402_settled_unrecoverable_replay`, since the exact
+authorization response cannot be reconstructed from the receipt's hashes.
+An original worker that finishes can still persist its response for replay.
+Receipt write errors without confirmed rollback also retain the reservation
+and owner, even if a subsequent lookup finds no receipt. Failed budget or
+call-slot compensation returns the same review conflict; only confirmed
+pre-reservation refusals or fully compensated failures release the key.
+
 **ACP** (`app/services/acp_bridge.py`). Translates an Agentic Commerce
 Protocol checkout into PermitV2 bounds (a purpose-minted single-use permit
 with a merchant-domain recipient constraint and a budget equal to the derived
@@ -220,8 +233,8 @@ Against the checklist above, read the two surfaces this way:
   idempotency record (the intent id for ACP, the `Idempotency-Key` header
   for x402); a replay returns the original result, and duplicate or crashed
   redelivery is provably non-minting and non-double-charging under test.
-  Both also recover stale crashed records, so a wedged key cannot become a
-  permanent denial.
+  ACP has stale-record recovery. x402 preserves incomplete owners for review
+  rather than repeating a reservation whose prior outcome is unknown.
 - **Items 9–15:** **deliberately unanswered.** Those are the rail questions
   — finality, reversal, denomination, reconciliation — and neither surface
   is a rail: neither touches the ledger, so the checklist's gate ("before it

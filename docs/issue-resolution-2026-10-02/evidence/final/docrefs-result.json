@@ -1,0 +1,11 @@
+{
+  "command": [
+    "/Users/sellers/Projects/agent-middleware-api/.venv/bin/python",
+    "scripts/check_doc_references.py"
+  ],
+  "head": "0db19631f8a2de879e77d9b57246c41fb261c243",
+  "mode": "docrefs",
+  "exit_code": 0,
+  "started": "2026-10-03T03:43:43.116234+00:00",
+  "finished": "2026-10-03T03:43:44.337947+00:00"
+}

@@ -1,0 +1,17 @@
+{
+  "command": [
+    "/Users/sellers/Projects/agent-middleware-api/.venv/bin/python",
+    "-m",
+    "pytest",
+    "tests/test_site_agent_interface.py::test_site_build_blocks_missing_and_provisional_contacts",
+    "-x",
+    "-ra",
+    "--basetemp=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/amw-release-validation-5dl7l3ea/site-env"
+  ],
+  "workdir": "/Users/sellers/.openclaw/worktrees/amw-issues-20261003-release",
+  "head_before": "58ccc4edcef301806b4d44ee6790131a325798e2",
+  "started_at": "2026-10-04T02:01:06.253137+00:00",
+  "exit_code": 0,
+  "finished_at": "2026-10-04T02:01:06.998398+00:00",
+  "head_after": "58ccc4edcef301806b4d44ee6790131a325798e2"
+}

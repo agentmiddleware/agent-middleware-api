@@ -61,9 +61,11 @@ logger = logging.getLogger(__name__)
 # Content Store
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ContentPipeline:
     """A content generation pipeline instance."""
+
     pipeline_id: str
     title: str
     source_clip_id: str | None
@@ -87,6 +89,7 @@ class ContentPipeline:
 @dataclass
 class LiveCampaign:
     """A live content campaign spanning multiple hooks and pipelines."""
+
     campaign_id: str
     campaign_title: str
     source_url: str
@@ -239,9 +242,7 @@ class ContentStore:
         self._require_db()
         factory = get_session_factory()
         async with factory() as session:
-            existing = await session.get(
-                ContentPipelineModel, pipeline.pipeline_id
-            )
+            existing = await session.get(ContentPipelineModel, pipeline.pipeline_id)
             if existing is None:
                 session.add(_pipeline_to_row(pipeline))
             else:
@@ -273,8 +274,15 @@ class ContentStore:
                 return None
             pieces_result = await session.execute(
                 select(ContentPieceModel)
-                .where(cast(ColumnElement[bool], ContentPieceModel.pipeline_id == pipeline_id))
-                .order_by(cast(ColumnElement[Any], ContentPieceModel.generated_at).asc())
+                .where(
+                    cast(
+                        ColumnElement[bool],
+                        ContentPieceModel.pipeline_id == pipeline_id,
+                    )
+                )
+                .order_by(
+                    cast(ColumnElement[Any], ContentPieceModel.generated_at).asc()
+                )
             )
             pieces = list(pieces_result.scalars().all())
         return _row_to_pipeline(row, pieces)
@@ -325,8 +333,15 @@ class ContentStore:
         async with factory() as session:
             result = await session.execute(
                 select(ContentPieceModel)
-                .where(cast(ColumnElement[bool], ContentPieceModel.pipeline_id == pipeline_id))
-                .order_by(cast(ColumnElement[Any], ContentPieceModel.generated_at).asc())
+                .where(
+                    cast(
+                        ColumnElement[bool],
+                        ContentPieceModel.pipeline_id == pipeline_id,
+                    )
+                )
+                .order_by(
+                    cast(ColumnElement[Any], ContentPieceModel.generated_at).asc()
+                )
             )
             rows = list(result.scalars().all())
         return [content_piece_model_to_schema(r) for r in rows]
@@ -359,9 +374,7 @@ class ContentStore:
             row = await session.get(ContentCampaignModel, campaign_id)
         return _row_to_campaign(row) if row else None
 
-    async def list_campaigns(
-        self, owner_key: str | None = None
-    ) -> list[LiveCampaign]:
+    async def list_campaigns(self, owner_key: str | None = None) -> list[LiveCampaign]:
         """List campaigns, newest first; ``owner_key`` restricts to one owner."""
         self._require_db()
         factory = get_session_factory()
@@ -386,16 +399,16 @@ class ContentStore:
 
 # 1-to-20 multiplication rule: pieces per format per hook
 HOOK_FORMAT_MULTIPLIERS = {
-    ContentFormat.SHORT_VIDEO: 3,      # 3 clip variants per hook
-    ContentFormat.STATIC_IMAGE: 3,     # 3 thumbnail variants
-    ContentFormat.TEXT_POST: 3,         # 3 platform-adapted text posts
-    ContentFormat.CAROUSEL: 1,         # 1 deep-dive carousel
-    ContentFormat.AUDIOGRAM: 1,        # 1 audio waveform
-    ContentFormat.BLOG_EXCERPT: 1,     # 1 SEO excerpt
-    ContentFormat.EMAIL_SNIPPET: 1,    # 1 newsletter block
-    ContentFormat.QUOTE_CARD: 2,       # 2 pull-quote images
-    ContentFormat.DEBATE_CLIP: 1,      # 1 side-by-side debate
-    ContentFormat.LONG_VIDEO: 1,       # 1 long-form version
+    ContentFormat.SHORT_VIDEO: 3,  # 3 clip variants per hook
+    ContentFormat.STATIC_IMAGE: 3,  # 3 thumbnail variants
+    ContentFormat.TEXT_POST: 3,  # 3 platform-adapted text posts
+    ContentFormat.CAROUSEL: 1,  # 1 deep-dive carousel
+    ContentFormat.AUDIOGRAM: 1,  # 1 audio waveform
+    ContentFormat.BLOG_EXCERPT: 1,  # 1 SEO excerpt
+    ContentFormat.EMAIL_SNIPPET: 1,  # 1 newsletter block
+    ContentFormat.QUOTE_CARD: 2,  # 2 pull-quote images
+    ContentFormat.DEBATE_CLIP: 1,  # 1 side-by-side debate
+    ContentFormat.LONG_VIDEO: 1,  # 1 long-form version
 }
 
 # Standard pipeline multipliers (non-hook mode)
@@ -478,12 +491,14 @@ class FormatAdapter:
             "variant": index + 1,
         }
         if hook:
-            metadata.update({
-                "hook_id": hook.hook_id or "",
-                "hook_type": hook.hook_type.value,
-                "source_segment": f"{hook.start_seconds}s-{hook.end_seconds}s",
-                "transcript_snippet": hook.transcript_snippet[:200],
-            })
+            metadata.update(
+                {
+                    "hook_id": hook.hook_id or "",
+                    "hook_type": hook.hook_type.value,
+                    "source_segment": f"{hook.start_seconds}s-{hook.end_seconds}s",
+                    "transcript_snippet": hook.transcript_snippet[:200],
+                }
+            )
 
         return GeneratedContent(
             content_id=content_id,
@@ -555,7 +570,8 @@ class FormatAdapter:
 
         talking_points = hook.talking_points if hook else ["Agent economy insight"]
         text = (
-            hook.transcript_snippet[:200] if hook and hook.transcript_snippet
+            hook.transcript_snippet[:200]
+            if hook and hook.transcript_snippet
             else f"Key insight from {pipeline.title}: [auto-generated pull quote]"
         )
 
@@ -680,7 +696,8 @@ class FormatAdapter:
         content_id = str(uuid.uuid4())
         hook = pipeline.hook
         quote = (
-            hook.transcript_snippet[:140] if hook and hook.transcript_snippet
+            hook.transcript_snippet[:140]
+            if hook and hook.transcript_snippet
             else f"Key quote from {pipeline.title}"
         )
 
@@ -689,7 +706,7 @@ class FormatAdapter:
             pipeline_id=pipeline.pipeline_id,
             format=ContentFormat.QUOTE_CARD,
             title=f"{pipeline.title} — Quote Card {index + 1}",
-            description=f"Pull-quote card: \"{quote[:60]}...\"",
+            description=f'Pull-quote card: "{quote[:60]}..."',
             download_url=f"/v1/factory/content/{content_id}/download",
             thumbnail_url=f"/v1/factory/content/{content_id}/download",
             dimensions="1080x1080",
@@ -752,6 +769,7 @@ FORMAT_ADAPTERS = {
 # ---------------------------------------------------------------------------
 # Algorithmic Scheduler
 # ---------------------------------------------------------------------------
+
 
 class AlgorithmicScheduler:
     """
@@ -824,16 +842,18 @@ class AlgorithmicScheduler:
                     day_key = slot_time.strftime("%Y-%m-%d")
                     slots_used[platform][day_key] += 1
 
-                    recommendations.append(ScheduleRecommendation(
-                        content_id=content_id,
-                        platform=platform,
-                        recommended_time=slot_time,
-                        confidence=round(confidence, 2),
-                        reasoning=self._explain_recommendation(
-                            platform, slot_time, confidence
-                        ),
-                        estimated_views=self._estimate_views(platform, confidence),
-                    ))
+                    recommendations.append(
+                        ScheduleRecommendation(
+                            content_id=content_id,
+                            platform=platform,
+                            recommended_time=slot_time,
+                            confidence=round(confidence, 2),
+                            reasoning=self._explain_recommendation(
+                                platform, slot_time, confidence
+                            ),
+                            estimated_views=self._estimate_views(platform, confidence),
+                        )
+                    )
 
         # Sort by time
         recommendations.sort(key=lambda r: r.recommended_time)
@@ -910,6 +930,7 @@ class AlgorithmicScheduler:
 # Content Factory Orchestrator
 # ---------------------------------------------------------------------------
 
+
 class ContentFactory:
     """
     Top-level orchestrator for the Programmatic Content Factory.
@@ -978,7 +999,11 @@ class ContentFactory:
 
         if run_inline:
             await self._run_pipeline(pipeline.pipeline_id)
-            return pipeline
+            # The durable store returns copies; _run_pipeline updates its own
+            # copy, so return the saved terminal status rather than "queued".
+            finished = await self.store.get_pipeline(pipeline.pipeline_id)
+            assert finished is not None
+            return finished
 
         # Kick off async generation
         task = asyncio.create_task(self._run_pipeline(pipeline.pipeline_id))
@@ -1090,6 +1115,7 @@ class ContentFactory:
         # Create a pipeline per hook
         hook_results: list[CampaignHookResult] = []
         all_content_ids: list[str] = []
+        all_pipelines_ready = True
 
         for hook in hooks:
             pipeline = await self.create_pipeline(
@@ -1108,6 +1134,11 @@ class ContentFactory:
                 run_inline=True,
             )
             campaign.pipeline_ids.append(pipeline.pipeline_id)
+            all_pipelines_ready = all_pipelines_ready and pipeline.status == "ready"
+            if not all_pipelines_ready:
+                campaign.status = "failed"
+            # Preserve completed work if a later hook or scheduling step fails.
+            await self.store.create_campaign(campaign)
 
             # Gather results
             content = await self.store.list_by_pipeline(pipeline.pipeline_id)
@@ -1118,18 +1149,20 @@ class ContentFactory:
             for c in content:
                 pieces_by_format[c.format.value] += 1
 
-            hook_results.append(CampaignHookResult(
-                hook_id=hook.hook_id or "",
-                hook_title=hook.title,
-                hook_type=hook.hook_type,
-                content_pieces=content_ids,
-                pieces_by_format=dict(pieces_by_format),
-                total_pieces=len(content_ids),
-            ))
+            hook_results.append(
+                CampaignHookResult(
+                    hook_id=hook.hook_id or "",
+                    hook_title=hook.title,
+                    hook_type=hook.hook_type,
+                    content_pieces=content_ids,
+                    pieces_by_format=dict(pieces_by_format),
+                    total_pieces=len(content_ids),
+                )
+            )
 
         # Auto-schedule across platforms
         schedule_summary: dict = {}
-        if auto_schedule and all_content_ids and platforms:
+        if auto_schedule and all_content_ids and platforms and all_pipelines_ready:
             recommendations = await self.scheduler.recommend(
                 content_ids=all_content_ids,
                 platforms=platforms,
@@ -1141,7 +1174,8 @@ class ContentFactory:
                 "date_range": (
                     f"{recommendations[0].recommended_time.strftime('%Y-%m-%d')} to "
                     f"{recommendations[-1].recommended_time.strftime('%Y-%m-%d')}"
-                    if recommendations else "none"
+                    if recommendations
+                    else "none"
                 ),
                 "estimated_total_views": sum(
                     r.estimated_views or 0 for r in recommendations
@@ -1158,14 +1192,15 @@ class ContentFactory:
                 ],
             }
 
-        campaign.status = "completed"
+        campaign.status = "completed" if all_pipelines_ready else "failed"
+        await self.store.create_campaign(campaign)
         total_pieces = sum(hr.total_pieces for hr in hook_results)
 
         return LiveCampaignResponse(
             campaign_id=campaign_id,
             campaign_title=campaign_title,
             source_url=source_url,
-            status="completed",
+            status=campaign.status,
             hooks_processed=len(hooks),
             total_content_pieces=total_pieces,
             hook_results=hook_results,

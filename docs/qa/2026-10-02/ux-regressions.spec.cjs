@@ -41,7 +41,8 @@ test('UX-002: dashboard scrollable commands have explicit keyboard access', asyn
   expect(await code.evaluate(element => parseFloat(getComputedStyle(element).outlineWidth)))
     .toBeGreaterThan(0);
   if (state.scrolls) {
-    await page.keyboard.press('ArrowRight');
+    // WebKit needs time between keydown and keyup to start native scrolling.
+    await page.keyboard.press('ArrowRight', {delay: 100});
     await expect.poll(() => code.evaluate(element => element.scrollLeft)).toBeGreaterThan(0);
   }
 });

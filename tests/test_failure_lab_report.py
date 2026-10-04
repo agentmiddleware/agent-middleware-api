@@ -24,7 +24,12 @@ from failure_lab.report import (
     render_run_html,
     render_run_json,
 )
-from failure_lab.scenarios.base import ConfigurationResult, Counters, ScenarioResult, Verdict
+from failure_lab.scenarios.base import (
+    ConfigurationResult,
+    Counters,
+    ScenarioResult,
+    Verdict,
+)
 
 ENVIRONMENT = {
     "run_id": "test-run",
@@ -78,7 +83,9 @@ def _entry(
     )
 
 
-def _result(entries: list[ConfigurationResult], *, verdict: Verdict = Verdict.PASS) -> ScenarioResult:
+def _result(
+    entries: list[ConfigurationResult], *, verdict: Verdict = Verdict.PASS
+) -> ScenarioResult:
     return ScenarioResult(
         test_id="TXX",
         title="Synthetic",
@@ -98,8 +105,20 @@ def test_the_gateway_adding_nothing_is_a_reachable_conclusion():
     """The result the PRD requires to be implementable, implemented."""
     result = _result(
         [
-            _entry(Configuration.DIRECT_NAIVE, verdict=Verdict.OBSERVED, executions=2, known=1, unresolved=1),
-            _entry(Configuration.DIRECT_NATIVE, verdict=Verdict.PASS, executions=1, known=1, unresolved=1),
+            _entry(
+                Configuration.DIRECT_NAIVE,
+                verdict=Verdict.OBSERVED,
+                executions=2,
+                known=1,
+                unresolved=1,
+            ),
+            _entry(
+                Configuration.DIRECT_NATIVE,
+                verdict=Verdict.PASS,
+                executions=1,
+                known=1,
+                unresolved=1,
+            ),
             _entry(
                 Configuration.GATEWAY_NATIVE,
                 verdict=Verdict.PASS,
@@ -116,15 +135,27 @@ def test_the_gateway_adding_nothing_is_a_reachable_conclusion():
 
     assert comparison.conclusion.kind is ConclusionKind.NATIVE_CONTROLS_SUFFICIENT
     assert comparison.conclusion.duplicates_prevented_vs_native == 0
-    assert "did not observe an additional duplicate effect" in comparison.conclusion.text
+    assert (
+        "did not observe an additional duplicate effect" in comparison.conclusion.text
+    )
 
 
 def test_an_already_correct_existing_integration_is_told_so():
     result = _result(
         [
-            _entry(Configuration.DIRECT_NAIVE, verdict=Verdict.PASS, executions=1, known=2),
-            _entry(Configuration.DIRECT_NATIVE, verdict=Verdict.PASS, executions=1, known=2),
-            _entry(Configuration.GATEWAY_NATIVE, verdict=Verdict.PASS, executions=1, dispatches=1, known=2),
+            _entry(
+                Configuration.DIRECT_NAIVE, verdict=Verdict.PASS, executions=1, known=2
+            ),
+            _entry(
+                Configuration.DIRECT_NATIVE, verdict=Verdict.PASS, executions=1, known=2
+            ),
+            _entry(
+                Configuration.GATEWAY_NATIVE,
+                verdict=Verdict.PASS,
+                executions=1,
+                dispatches=1,
+                known=2,
+            ),
         ]
     )
     conclusion = build_comparison(result).conclusion
@@ -157,7 +188,12 @@ def test_a_gateway_that_did_not_hold_is_not_dressed_up():
         [
             _entry(Configuration.DIRECT_NAIVE, verdict=Verdict.OBSERVED, executions=2),
             _entry(Configuration.DIRECT_NATIVE, verdict=Verdict.PASS, executions=1),
-            _entry(Configuration.GATEWAY_NATIVE, verdict=Verdict.FAIL, executions=2, dispatches=2),
+            _entry(
+                Configuration.GATEWAY_NATIVE,
+                verdict=Verdict.FAIL,
+                executions=2,
+                dispatches=2,
+            ),
         ],
         verdict=Verdict.FAIL,
     )
@@ -169,8 +205,20 @@ def test_the_cost_side_is_reported_not_only_the_benefit():
     """The baseline resolving an outcome the gateway could not is a cost."""
     result = _result(
         [
-            _entry(Configuration.DIRECT_NAIVE, verdict=Verdict.OBSERVED, executions=2, known=1, unresolved=1),
-            _entry(Configuration.DIRECT_NATIVE, verdict=Verdict.PASS, executions=1, known=2, p50=10.0),
+            _entry(
+                Configuration.DIRECT_NAIVE,
+                verdict=Verdict.OBSERVED,
+                executions=2,
+                known=1,
+                unresolved=1,
+            ),
+            _entry(
+                Configuration.DIRECT_NATIVE,
+                verdict=Verdict.PASS,
+                executions=1,
+                known=2,
+                p50=10.0,
+            ),
             _entry(
                 Configuration.GATEWAY_NATIVE,
                 verdict=Verdict.PASS,
@@ -197,8 +245,19 @@ def test_the_cost_side_is_reported_not_only_the_benefit():
 def test_load_shielding_is_credited_when_it_happens():
     result = _result(
         [
-            _entry(Configuration.DIRECT_NAIVE, verdict=Verdict.OBSERVED, executions=100, downstream_requests=100),
-            _entry(Configuration.DIRECT_NATIVE, verdict=Verdict.PASS, executions=1, downstream_requests=100, known=100),
+            _entry(
+                Configuration.DIRECT_NAIVE,
+                verdict=Verdict.OBSERVED,
+                executions=100,
+                downstream_requests=100,
+            ),
+            _entry(
+                Configuration.DIRECT_NATIVE,
+                verdict=Verdict.PASS,
+                executions=1,
+                downstream_requests=100,
+                known=100,
+            ),
             _entry(
                 Configuration.GATEWAY_NATIVE,
                 verdict=Verdict.PASS,
@@ -219,8 +278,16 @@ def test_load_shielding_is_credited_when_it_happens():
 def rendered() -> tuple[str, str]:
     result = _result(
         [
-            _entry(Configuration.DIRECT_NAIVE, verdict=Verdict.OBSERVED, executions=2, known=1, unresolved=1),
-            _entry(Configuration.DIRECT_NATIVE, verdict=Verdict.PASS, executions=1, known=2),
+            _entry(
+                Configuration.DIRECT_NAIVE,
+                verdict=Verdict.OBSERVED,
+                executions=2,
+                known=1,
+                unresolved=1,
+            ),
+            _entry(
+                Configuration.DIRECT_NATIVE, verdict=Verdict.PASS, executions=1, known=2
+            ),
             _entry(
                 Configuration.GATEWAY_NATIVE,
                 verdict=Verdict.PASS,
@@ -234,7 +301,9 @@ def rendered() -> tuple[str, str]:
         ]
     )
     comparison = build_comparison(result)
-    return render_comparison_text(comparison), render_run_html([comparison], environment=ENVIRONMENT)
+    return render_comparison_text(comparison), render_run_html(
+        [comparison], environment=ENVIRONMENT
+    )
 
 
 def test_no_python_leaks_into_the_rendered_artifacts(rendered):
@@ -279,8 +348,12 @@ def test_the_html_stands_alone_and_works_in_both_themes(rendered):
 def test_the_json_rendering_round_trips(rendered):
     import json
 
-    result = _result([_entry(Configuration.DIRECT_NAIVE, verdict=Verdict.OBSERVED, executions=2)])
-    document = json.loads(render_run_json([build_comparison(result)], environment=ENVIRONMENT))
+    result = _result(
+        [_entry(Configuration.DIRECT_NAIVE, verdict=Verdict.OBSERVED, executions=2)]
+    )
+    document = json.loads(
+        render_run_json([build_comparison(result)], environment=ENVIRONMENT)
+    )
     assert document["environment"]["run_id"] == "test-run"
     assert document["comparisons"][0]["conclusion"]["kind"]
     assert "gateway_disadvantages" in document["comparisons"][0]["conclusion"]
@@ -350,3 +423,93 @@ def test_every_conclusion_kind_has_a_plain_english_gloss():
         gloss = CONCLUSION_GLOSS.get(kind.value, "")
         assert gloss, f"{kind.value} has no gloss for the summary block"
         assert not gloss.endswith("."), f"{kind.value} gloss should be a fragment"
+
+
+@pytest.mark.parametrize("broken", ["baseline", "gateway", "both"])
+def test_configuration_errors_do_not_support_positive_comparisons(broken):
+    entries = [
+        _entry(
+            Configuration.DIRECT_NAIVE,
+            verdict=Verdict.ERROR
+            if broken in ("baseline", "both")
+            else Verdict.OBSERVED,
+            executions=0 if broken in ("baseline", "both") else 2,
+        ),
+        _entry(
+            Configuration.GATEWAY_NATIVE,
+            verdict=Verdict.ERROR if broken in ("gateway", "both") else Verdict.PASS,
+            executions=0 if broken in ("gateway", "both") else 1,
+        ),
+    ]
+    for entry in entries:
+        if entry.verdict == Verdict.ERROR:
+            entry.observation = "synthetic setup error"
+    comparison = build_comparison(_result(entries))
+    assert comparison.verdict == "ERROR"
+    assert comparison.conclusion.kind is ConclusionKind.INCONCLUSIVE
+    assert comparison.conclusion.duplicates_prevented_vs_existing == 0
+    assert comparison.conclusion.duplicates_prevented_vs_native == 0
+    assert comparison.conclusion.non_prevention_differences == []
+    assert "synthetic setup error" in render_comparison_text(comparison)
+    html = render_run_html([comparison], environment=ENVIRONMENT)
+    assert "synthetic setup error" in html
+    for column in comparison.columns:
+        if column.verdict == "ERROR":
+            assert not column.ran
+            assert column.label in html
+
+
+@pytest.mark.parametrize(
+    "broken", [Configuration.DIRECT_NAIVE, Configuration.DIRECT_NATIVE]
+)
+def test_only_measured_baselines_support_comparisons(broken):
+    entries = [
+        _entry(
+            configuration,
+            verdict=Verdict.ERROR if configuration is broken else Verdict.OBSERVED,
+            executions=0 if configuration is broken else 2,
+            p50=10.0,
+        )
+        for configuration in (Configuration.DIRECT_NAIVE, Configuration.DIRECT_NATIVE)
+    ]
+    entries.append(
+        _entry(
+            Configuration.GATEWAY_NATIVE, verdict=Verdict.PASS, executions=1, p50=20.0
+        )
+    )
+    comparison = build_comparison(_result(entries))
+    assert comparison.conclusion.kind is ConclusionKind.GATEWAY_PREVENTED_DUPLICATES
+    assert comparison.conclusion.duplicates_prevented_vs_existing == (
+        0 if broken is Configuration.DIRECT_NAIVE else 1
+    )
+    assert comparison.conclusion.duplicates_prevented_vs_native == (
+        0 if broken is Configuration.DIRECT_NATIVE else 1
+    )
+    assert comparison.additional_latency["p50_ms"] == (
+        None if broken is Configuration.DIRECT_NATIVE else 10.0
+    )
+
+
+def test_gateway_error_is_not_hidden_by_another_gateway_configuration():
+    comparison = build_comparison(
+        _result(
+            [
+                _entry(
+                    Configuration.DIRECT_NATIVE,
+                    verdict=Verdict.OBSERVED,
+                    executions=2,
+                    p50=10.0,
+                ),
+                _entry(
+                    Configuration.GATEWAY_NATIVE,
+                    verdict=Verdict.ERROR,
+                    executions=0,
+                    p50=20.0,
+                ),
+                _entry(Configuration.GATEWAY_NAIVE, verdict=Verdict.PASS, executions=1),
+            ]
+        )
+    )
+    assert comparison.conclusion.kind is ConclusionKind.INCONCLUSIVE
+    assert comparison.conclusion.duplicates_prevented_vs_native == 0
+    assert comparison.additional_latency["p50_ms"] is None

@@ -315,9 +315,7 @@ class AWIActionVocabulary:
         if action == AWIStandardAction.LOGIN:
             if params.get("credential_handle"):
                 return True, None
-            missing = [
-                name for name in ("username", "password") if name not in params
-            ]
+            missing = [name for name in ("username", "password") if name not in params]
             if missing:
                 return (
                     False,

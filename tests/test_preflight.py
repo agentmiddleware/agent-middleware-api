@@ -27,6 +27,7 @@ HEADERS = {"X-API-Key": "test-key"}
 # Basic Preflight
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.anyio
 async def test_preflight_returns_report(client):
     """Preflight should return a structured readiness report."""
@@ -147,7 +148,9 @@ async def test_preflight_checks_oracle_directories(client):
     assert resp.status_code == 200
     data = resp.json()
 
-    oracle_checks = [c for c in data["checks"] if c["name"].startswith("oracle_directory_")]
+    oracle_checks = [
+        c for c in data["checks"] if c["name"].startswith("oracle_directory_")
+    ]
     assert len(oracle_checks) == 4  # 4 default directories
 
 

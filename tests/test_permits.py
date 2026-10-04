@@ -12,7 +12,11 @@ from app.core.time import utc_now
 from app.db.database import get_session_factory
 from app.db.models import PermitModel
 from app.main import app
-from app.schemas.trust import PermitCreateRequest, PermitRequestCreate
+from app.schemas.trust import (
+    ActionPermitFields,
+    PermitCreateRequest,
+    PermitRequestCreate,
+)
 from app.services.idempotency import get_idempotency_service
 from app.services.permits import PermitError, get_permit_service
 from tests.test_trust_helpers import (
@@ -307,7 +311,8 @@ async def test_permit_create_rejects_in_progress_idempotency_key(
         endpoint="/v1/permits",
         idempotency_key="permit-in-progress-key",
         request_payload=PermitCreateRequest(**request_payload).model_dump(
-            mode="json", exclude={"repeat_window_seconds"}
+            mode="json",
+            exclude={"repeat_window_seconds", *ActionPermitFields.model_fields},
         ),
     )
 
@@ -798,9 +803,7 @@ async def test_permit_out_of_scale_body_from_unauthenticated_caller_is_401(
 
 
 @pytest.mark.anyio
-async def test_permit_at_full_storage_scale_mints_and_verifies(
-    client, clean_database
-):
+async def test_permit_at_full_storage_scale_mints_and_verifies(client, clean_database):
     """Eight decimals and a 64-character nonce are the column limits, and
     still accepted: the stored permit verifies against its own signature."""
     provisioned = await provision_agent_wallet(client)
@@ -833,9 +836,9 @@ async def test_permit_at_full_storage_scale_mints_and_verifies(
     assert verify_resp.json()["valid"] is True, verify_resp.json()
 
 
-@pytest.mark.parametrize("amount", ["0.00000001", "999999999999.99999999"])
-def test_permit_credit_fields_accept_the_full_column_range(amount):
-    """Smallest and largest values Numeric(20, 8) holds pass every bound."""
+@pytest.mark.parametrize("amount", ["0.00000001", "999999999999"])
+def test_permit_credit_fields_accept_lossless_small_and_large_values(amount):
+    """Boundary values must survive both Numeric(20, 8) and SQLite storage."""
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=30)
     permit = PermitCreateRequest(
         issuer_wallet_id="w",

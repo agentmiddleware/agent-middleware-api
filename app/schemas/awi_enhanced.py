@@ -214,6 +214,8 @@ class DOMSyncRequest(BaseModel):
 class DOMSyncResponse(BaseModel):
     """Response from DOM sync execution."""
 
+    status: str = "success"
+    effect_status: str | None = None
     session_id: str = Field(..., description="Browser session ID")
     execution_id: str = Field(..., description="Unique execution ID")
     action: str = Field(..., description="Action that was executed")
@@ -321,7 +323,9 @@ class RAGQueryRequest(BaseModel):
 
     query: str = Field(
         ...,
-        description="Natural language query",
+        min_length=1,
+        pattern=r"\S",
+        description="Natural language query containing at least one non-whitespace character",
         examples=[
             "shopping for laptops last week",
             "form submissions involving addresses",

@@ -133,7 +133,7 @@ settlement, or public arbitrary-code execution without strong isolation.
 - [ ] **Before or on first deploy**, bring the schema to head:
   - **One-off (any host):** `alembic upgrade head` with the same `DATABASE_URL` in the environment.
   - **Docker / Railway using this repo’s image:** set **`RUN_MIGRATIONS_ON_START=true`** (via Railway variables) so the container entrypoint runs migrations then starts uvicorn. If the flag is true and **`DATABASE_URL` is missing, the entrypoint exits non-zero** (fail closed — see `scripts/docker_entrypoint.sh`).
-  - **Legacy create_all DB:** if tables already exist but `alembic_version` is missing, run **`alembic stamp head`** once before enabling migrate-on-start (otherwise `upgrade` may fail on “already exists”).
+  - **Legacy create_all DB:** if tables already exist but `alembic_version` is missing, stop for manual review. Compare physical schema and data-migration history; stamp only a proven matching historical revision, then apply required migrations using [the current controlled rollout](schema-042-rollout.md). Table presence does not establish parity with head.
 - [ ] Do **not** rely on `SQLModel.metadata.create_all` in production-like environments — the API skips it and verifies required trust tables (`permits`, `receipts`, `idempotency_records`) at boot. Missing tables refuse startup.
 - [ ] Do **not** rely on multi-replica races: for many instances, run migrations once (release job or single boot) instead of flipping the flag on every replica simultaneously — Alembic is usually safe, but your platform may prefer a dedicated migrate step.
 

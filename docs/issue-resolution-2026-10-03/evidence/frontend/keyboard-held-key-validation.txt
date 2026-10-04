@@ -1,0 +1,32 @@
+
+Running 9 tests using 1 worker
+
+(node:27517) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  1 [chromium] › ../../../../../private/tmp/amw-release-frontend-20261003/qa-tests/ux-regressions.spec.cjs:27:1 › UX-002: dashboard scrollable commands have explicit keyboard access (224ms)
+(node:27557) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  2 [chromium] › ../../../../../private/tmp/amw-release-frontend-20261003/qa-tests/ux-regressions.spec.cjs:27:1 › UX-002: dashboard scrollable commands have explicit keyboard access (224ms)
+(node:27578) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  3 [chromium] › ../../../../../private/tmp/amw-release-frontend-20261003/qa-tests/ux-regressions.spec.cjs:27:1 › UX-002: dashboard scrollable commands have explicit keyboard access (226ms)
+(node:27604) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  4 [firefox] › ../../../../../private/tmp/amw-release-frontend-20261003/qa-tests/ux-regressions.spec.cjs:27:1 › UX-002: dashboard scrollable commands have explicit keyboard access (719ms)
+(node:27613) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  5 [firefox] › ../../../../../private/tmp/amw-release-frontend-20261003/qa-tests/ux-regressions.spec.cjs:27:1 › UX-002: dashboard scrollable commands have explicit keyboard access (727ms)
+(node:27630) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  6 [firefox] › ../../../../../private/tmp/amw-release-frontend-20261003/qa-tests/ux-regressions.spec.cjs:27:1 › UX-002: dashboard scrollable commands have explicit keyboard access (717ms)
+(node:27644) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  7 [webkit] › ../../../../../private/tmp/amw-release-frontend-20261003/qa-tests/ux-regressions.spec.cjs:27:1 › UX-002: dashboard scrollable commands have explicit keyboard access (363ms)
+(node:27655) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  8 [webkit] › ../../../../../private/tmp/amw-release-frontend-20261003/qa-tests/ux-regressions.spec.cjs:27:1 › UX-002: dashboard scrollable commands have explicit keyboard access (365ms)
+(node:27667) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  9 [webkit] › ../../../../../private/tmp/amw-release-frontend-20261003/qa-tests/ux-regressions.spec.cjs:27:1 › UX-002: dashboard scrollable commands have explicit keyboard access (371ms)
+
+  9 passed (8.0s)

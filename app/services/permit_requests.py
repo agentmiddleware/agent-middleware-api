@@ -51,6 +51,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.config import get_settings, public_api_origin
+from app.core.credits import credit_amount_fits_storage
 from app.core.runtime_mode import is_simulation
 from app.core.time import to_naive_utc, utc_now
 from app.core.trust_mode import is_production_like_environment
@@ -152,14 +153,23 @@ def permit_request_hash(
     )
 
 
-def sentinel_request_key(request_hash: str) -> str:
+def sentinel_request_key(
+    request_hash: str, *, subject_wallet_id: str, idempotency_key: str
+) -> str:
     """Deterministic Sentinel Idempotency-Key for one permit request.
 
-    Derived from the reviewed terms, not the row id, so a create whose
-    response was lost resolves to the same Sentinel approval instead of paging
-    the human twice.
+    Bind the caller's wallet-scoped request identity and reviewed terms. A new
+    client key needs a new approval, while retrying after a lost create response
+    must still resolve to the original approval even before a row was persisted.
     """
-    return f"mw-preq-{request_hash[:44]}"
+    identity = sha256_hex(
+        {
+            "subject_wallet_id": subject_wallet_id,
+            "idempotency_key": idempotency_key,
+            "request_hash": request_hash,
+        }
+    )
+    return f"mw-preq-{identity[:44]}"
 
 
 class PermitRequestService:
@@ -262,8 +272,10 @@ class PermitRequestService:
         now = utc_now()
         if expires_at <= now:
             raise PermitRequestError("permit_expired_at_request")
-        if max_credits <= Decimal("0"):
+        if max_credits.is_finite() and max_credits <= Decimal("0"):
             raise PermitRequestError("max_credits_must_be_positive")
+        if not credit_amount_fits_storage(max_credits):
+            raise PermitRequestError("max_credits_not_storable")
 
         effective_scopes = scopes or [f"tool:{tool}:invoke" for tool in allowed_tools]
         if "billing:charge" not in effective_scopes:
@@ -344,7 +356,11 @@ class PermitRequestService:
                 risk_level=settings.SENTINEL_RISK_LEVEL or "high",
                 approvers=self._approvers(),
                 timeout_seconds=self._timeout_seconds(),
-                idempotency_key=sentinel_request_key(model.request_hash),
+                idempotency_key=sentinel_request_key(
+                    model.request_hash,
+                    subject_wallet_id=model.subject_wallet_id,
+                    idempotency_key=model.idempotency_key,
+                ),
             )
         except httpx.HTTPStatusError as exc:
             status_code = exc.response.status_code
@@ -361,9 +377,7 @@ class PermitRequestService:
 
         action_id = payload.get("action_id") or payload.get("id")
         if not action_id:
-            logger.error(
-                "sentinel_permit_request_malformed: keys=%s", sorted(payload)
-            )
+            logger.error("sentinel_permit_request_malformed: keys=%s", sorted(payload))
             raise HumanApprovalUnavailableError()
         model.sentinel_action_id = str(action_id)
         url = payload.get("approval_url") or payload.get("url")
@@ -451,6 +465,11 @@ class PermitRequestService:
         except httpx.HTTPError as exc:
             raise HumanApprovalUnavailableError() from exc
 
+        if utc_now() >= model.expires_at:
+            return await self._decide(
+                model, REQUEST_STATUS_EXPIRED, reason="approval_window_elapsed"
+            )
+
         decision = payload.get("status") or payload.get("decision") or ""
         if decision not in {REQUEST_STATUS_APPROVED, REQUEST_STATUS_REJECTED}:
             return model
@@ -473,10 +492,16 @@ class PermitRequestService:
         UPDATE is the single serialization point, so concurrent pollers cannot
         both mint. A caller that loses the race reloads the winner's row.
         """
+        now = utc_now()
+        if decision == REQUEST_STATUS_APPROVED and now >= model.expires_at:
+            decision = REQUEST_STATUS_EXPIRED
+            reason = "approval_window_elapsed"
         target = (
             REQUEST_STATUS_MINTING if decision == REQUEST_STATUS_APPROVED else decision
         )
-        decided_at = model.decided_at or utc_now()
+        decided_at = (
+            now if target == REQUEST_STATUS_EXPIRED else model.decided_at or now
+        )
         values: dict[str, Any] = {
             "status": target,
             "decided_at": decided_at,
@@ -484,26 +509,49 @@ class PermitRequestService:
             "reason": reason if reason is not None else model.reason,
         }
         if target == REQUEST_STATUS_MINTING:
-            values["mint_started_at"] = utc_now()
+            values["mint_started_at"] = now
+
+        conditions = [
+            cast(
+                ColumnElement[bool], PermitRequestModel.request_id == model.request_id
+            ),
+            cast(
+                ColumnElement[bool], PermitRequestModel.status == REQUEST_STATUS_PENDING
+            ),
+        ]
+        if target == REQUEST_STATUS_MINTING:
+            conditions.append(
+                cast(ColumnElement[bool], PermitRequestModel.expires_at > now)
+            )
 
         factory = get_session_factory()
+        overdue_claim = False
         async with factory() as session:
             result = await session.execute(
                 update(PermitRequestModel)
-                .where(
-                    cast(
-                        ColumnElement[bool],
-                        PermitRequestModel.request_id == model.request_id,
-                    ),
-                    cast(
-                        ColumnElement[bool],
-                        PermitRequestModel.status == REQUEST_STATUS_PENDING,
-                    ),
-                )
+                .where(*conditions)
                 .values(**values)
+                .returning(cast(ColumnElement[Any], PermitRequestModel.expires_at))
             )
-            await session.commit()
-            won = cast(Any, result).rowcount == 1
+            claimed_deadline = result.scalar_one_or_none()
+            won = claimed_deadline is not None
+            # The UPDATE can wait behind another transaction after evaluating
+            # the pre-wait timestamp. Do not commit a provisional mint claim
+            # that completed after its persisted deadline.
+            overdue_claim = (
+                target == REQUEST_STATUS_MINTING
+                and claimed_deadline is not None
+                and utc_now() >= claimed_deadline
+            )
+            if overdue_claim:
+                await session.rollback()
+            else:
+                await session.commit()
+
+        if overdue_claim:
+            return await self._decide(
+                model, REQUEST_STATUS_EXPIRED, reason="approval_window_elapsed"
+            )
 
         reloaded = await self._load(model.request_id)
         if reloaded is None:  # pragma: no cover - row cannot vanish

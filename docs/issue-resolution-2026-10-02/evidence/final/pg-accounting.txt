@@ -1,0 +1,9 @@
+............                                                             [100%]
+=============================== warnings summary ===============================
+tests/test_action_postgres.py::test_atomic_action_prepare_rechecks_digest[False]
+tests/test_action_postgres.py::test_twenty_fresh_action_keys_share_accounting
+  /Users/sellers/Projects/agent-middleware-api/.venv/lib/python3.12/site-packages/asyncpg/connect_utils.py:104: UserWarning: password file PosixPath('/dev/null') is not a plain file
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+12 passed, 2 warnings in 2.25s

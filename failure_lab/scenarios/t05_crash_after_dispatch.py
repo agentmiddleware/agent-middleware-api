@@ -141,7 +141,9 @@ class CrashAfterDispatch(Scenario):
 
     # -- orchestration ----------------------------------------------------
 
-    async def run_configuration(self, target: Target, log: EventLog) -> ConfigurationResult:
+    async def run_configuration(
+        self, target: Target, log: EventLog
+    ) -> ConfigurationResult:
         target.require_gateway()
         backdate_seconds = int(
             self.options.get("backdate_seconds", DEFAULT_BACKDATE_SECONDS)
@@ -169,10 +171,14 @@ class CrashAfterDispatch(Scenario):
 
         measurements = await self.measure(target, attempts, operation_ids=operation_ids)
         for case in cases:
-            case.update(self._gateway_rows(measurements.snapshot, case["idempotency_key"]))
+            case.update(
+                self._gateway_rows(measurements.snapshot, case["idempotency_key"])
+            )
             case["failures"] = self._case_failures(case)
 
-        return self._verdict(target, log, cases, attempts, measurements, timeout_seconds)
+        return self._verdict(
+            target, log, cases, attempts, measurements, timeout_seconds
+        )
 
     # -- one sub-case -----------------------------------------------------
 
@@ -195,10 +201,7 @@ class CrashAfterDispatch(Scenario):
 
         log.emit(
             "case.start",
-            (
-                f"case {label} ({boundary}): "
-                f"{CRASH_BOUNDARY_DESCRIPTIONS[boundary]}"
-            ),
+            (f"case {label} ({boundary}): {CRASH_BOUNDARY_DESCRIPTIONS[boundary]}"),
             scenario=self.test_id,
             configuration=configuration,
             case=label,
@@ -324,9 +327,7 @@ class CrashAfterDispatch(Scenario):
             "backdate_seconds": backdate_seconds,
             "reconcile_idle_seconds": idle_seconds,
             "reconciliation": dict(reconciliation),
-            "reconciliation_marked_uncertain": reconciliation.get(
-                "dispatch_uncertain"
-            ),
+            "reconciliation_marked_uncertain": reconciliation.get("dispatch_uncertain"),
             "retry_used_same_key": (
                 retry_identity.idempotency_key == identity.idempotency_key
             ),

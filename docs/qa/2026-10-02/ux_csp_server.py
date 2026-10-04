@@ -34,7 +34,9 @@ class LocalOnlyHandler(SimpleHTTPRequestHandler):
         if self.path == "/__qa_axe.js":
             payload, kind = AXE.read_bytes(), "text/javascript"
         elif file_path.is_file() and file_path.suffix == ".html":
-            payload = file_path.read_bytes().replace(b"</head>", QA_SCRIPTS + b"</head>")
+            payload = file_path.read_bytes().replace(
+                b"</head>", QA_SCRIPTS + b"</head>"
+            )
             kind = "text/html"
         else:
             return super().send_head()

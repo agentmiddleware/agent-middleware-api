@@ -70,7 +70,9 @@ def validate_tools_call_params(raw: Any) -> dict[str, Any]:
     coerced into an empty default.
     """
     if not isinstance(raw, dict):
-        raise GovernedRequestInvalid("Invalid params: tools/call params must be an object")
+        raise GovernedRequestInvalid(
+            "Invalid params: tools/call params must be an object"
+        )
     # A JSON-RPC envelope is known by its protocol members. An object without
     # them is unwrapped only when it carries no top-level tool ``name``, so a
     # params object that happens to contain a key called "params" is not

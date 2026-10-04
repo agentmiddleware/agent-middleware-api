@@ -53,7 +53,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.check:
         if not out_path.is_file():
-            print(f"Missing {out_path}; run: python scripts/export_openapi.py", file=sys.stderr)
+            print(
+                f"Missing {out_path}; run: python scripts/export_openapi.py",
+                file=sys.stderr,
+            )
             return 1
         existing = _load_exported(out_path)
         if existing != spec:

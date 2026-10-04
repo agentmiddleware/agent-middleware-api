@@ -22,9 +22,11 @@ PATTERN = re.compile(
 
 
 def family(name, line, text):
-    if name == "docs/agent-self-credentialing.md" or (
-        name == "docs/tool-interface-authority.md" and line == 37
-    ) or (name == "ELEVATOR_PITCH.md" and line in (115, 162, 164)):
+    if (
+        name == "docs/agent-self-credentialing.md"
+        or (name == "docs/tool-interface-authority.md" and line == 37)
+        or (name == "ELEVATOR_PITCH.md" and line in (115, 162, 164))
+    ):
         return "BE-100", "Integration guidance: read BE-100 context and defect"
     if name.startswith(("tests/", "scripts/", "failure_lab/", "wrappers/")):
         return "BE-109", "Test, scenario or helper reference; not a universal guarantee"
@@ -33,22 +35,51 @@ def family(name, line, text):
     if name in ("app/schemas/iot.py", "app/services/mcp_phase9_tools.py"):
         return "BE-109", "QoS vocabulary or local registration; not gateway delivery"
     if "refund" in text.lower() or name == "app/services/permits.py":
-        return "BE-107", "Scoped refund/reservation property; runtime proof not rerun here"
-    if name in ("app/services/permit_requests.py", "docs/permit-requests.md", "app/services/human_approval.py"):
-        return "BE-108", "Permit/approval issuance identity; external notification not proved"
+        return (
+            "BE-107",
+            "Scoped refund/reservation property; runtime proof not rerun here",
+        )
+    if name in (
+        "app/services/permit_requests.py",
+        "docs/permit-requests.md",
+        "app/services/human_approval.py",
+    ):
+        return (
+            "BE-108",
+            "Permit/approval issuance identity; external notification not proved",
+        )
     if re.search(r"new|fresh|duplicate|repeat", text, re.I):
-        return "BE-103/104/105", "Cross-key/default/enforce scope; see report for exact boundaries"
+        return (
+            "BE-103/104/105",
+            "Cross-key/default/enforce scope; see report for exact boundaries",
+        )
     if name in ("docs/PROOF_MATRIX.md", "DEMO_SCRIPT.md", "DESIGN_PARTNER_GUIDE.md"):
-        return "BE-106/102", "Controlled proof or downstream limitation; not general delivery"
+        return (
+            "BE-106/102",
+            "Controlled proof or downstream limitation; not general delivery",
+        )
     if re.search(r"remote|downstream|upstream|side.effect", text, re.I):
-        return "BE-102", "Remote-effect qualifier or negation; upstream support remains required"
+        return (
+            "BE-102",
+            "Remote-effect qualifier or negation; upstream support remains required",
+        )
     if name.startswith("CHANGELOG") or "report" in name or "checkpoint" in name:
-        return "BE-109", "Historical/result reference; historical pass count not refreshed"
-    return "BE-101/109", "Same-key scoped claim or reference; inspect linked family evidence"
+        return (
+            "BE-109",
+            "Historical/result reference; historical pass count not refreshed",
+        )
+    return (
+        "BE-101/109",
+        "Same-key scoped claim or reference; inspect linked family evidence",
+    )
 
 
 def main():
-    tracked = subprocess.check_output(["git", "ls-files", "-z"], cwd=ROOT).decode().split("\0")
+    tracked = (
+        subprocess.check_output(["git", "ls-files", "-z"], cwd=ROOT)
+        .decode()
+        .split("\0")
+    )
     rows = []
     excluded = 0
     unreadable = 0
@@ -63,10 +94,19 @@ def main():
                 for part in path.parts
             )
             or path.suffix.lower() in {".pem", ".key", ".p12", ".pfx"}
-            or path.name.lower() in {
-                "credentials", "credentials.json", "credentials.toml",
-                "credential-store.json", "secret-store.json", "token-cache.json",
-                "private_key", "id_rsa", "id_ed25519", "id_dsa", "id_ecdsa",
+            or path.name.lower()
+            in {
+                "credentials",
+                "credentials.json",
+                "credentials.toml",
+                "credential-store.json",
+                "secret-store.json",
+                "token-cache.json",
+                "private_key",
+                "id_rsa",
+                "id_ed25519",
+                "id_dsa",
+                "id_ecdsa",
             }
         ):
             excluded += 1
@@ -84,15 +124,19 @@ def main():
         for number, text in enumerate(lines, 1):
             if PATTERN.search(text):
                 group, status = family(name, number, text)
-                rows.append({
-                    "id": f"BE-C{len(rows) + 1:03}",
-                    "file": name,
-                    "line": number,
-                    "text": scrub(text.strip()),
-                    "finding_family": group,
-                    "status": status,
-                })
-    (HERE / "artifacts" / "claims-inventory.json").write_text(json.dumps(rows, indent=2) + "\n")
+                rows.append(
+                    {
+                        "id": f"BE-C{len(rows) + 1:03}",
+                        "file": name,
+                        "line": number,
+                        "text": scrub(text.strip()),
+                        "finding_family": group,
+                        "status": status,
+                    }
+                )
+    (HERE / "artifacts" / "claims-inventory.json").write_text(
+        json.dumps(rows, indent=2) + "\n"
+    )
     heading = (
         "# Claim occurrence inventory\n\n"
         "PR: opened by orchestrator\n\nCI status: pending at time of writing\n\n"
@@ -109,6 +153,7 @@ def main():
         "| Occurrence | Source | Exact matched line | Family | Classification |\n"
         "|---|---|---|---|---|\n"
     )
+
     def escape(value):
         # Quoted source Markdown must not become links relative to this report.
         # Preserve the exact source in JSON; entities render literal brackets here.
@@ -121,16 +166,33 @@ def main():
             .replace("[", "&#91;")
             .replace("]", "&#93;")
         )
+
     lines = [heading]
     for row in rows:
         source = f"`{row['file']}:{row['line']}`"
-        lines.append("| " + " | ".join([
-            row["id"], source, escape(row["text"]), row["finding_family"], row["status"]
-        ]) + " |\n")
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    row["id"],
+                    source,
+                    escape(row["text"]),
+                    row["finding_family"],
+                    row["status"],
+                ]
+            )
+            + " |\n"
+        )
     (HERE / "CLAIMS-INVENTORY.md").write_text("".join(lines))
-    print(f"Enumerated {len(rows)} occurrences in {len({r['file'] for r in rows})} tracked files.")
-    print(f"Excluded environment/key/credential-store paths: {excluded}; absent tracked files: {unreadable}.")
-    print("Wrote CLAIMS-INVENTORY.md and artifacts/claims-inventory.json; content scrubbed.")
+    print(
+        f"Enumerated {len(rows)} occurrences in {len({r['file'] for r in rows})} tracked files."
+    )
+    print(
+        f"Excluded environment/key/credential-store paths: {excluded}; absent tracked files: {unreadable}."
+    )
+    print(
+        "Wrote CLAIMS-INVENTORY.md and artifacts/claims-inventory.json; content scrubbed."
+    )
 
 
 if __name__ == "__main__":

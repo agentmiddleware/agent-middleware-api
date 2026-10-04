@@ -67,14 +67,16 @@ prove-trust-plane-postgres: prove-crash-recovery
 # (never an automatic redispatch).
 #
 # Requires DATABASE_URL=postgresql+asyncpg://... pointing at a DEDICATED,
-# EMPTY database. The harness refuses to run otherwise: it fails closed on a
+# EMPTY database already migrated to head, STATE_BACKEND=postgres, a local/test
+# ENVIRONMENT, and explicit MCP_STRESS_DB_ISOLATED=1 acknowledgment. Provision
+# and migrate only the disposable database before invoking this target; this
+# target never migrates or overrides the caller's isolation settings.
+# The harness refuses to run otherwise: it fails closed on a
 # non-PostgreSQL URL, a production-like ENVIRONMENT, a stale Alembic revision,
 # or any application table that already holds rows, and it takes an advisory
 # lock so two runs cannot overlap. This is the same proof CI runs.
 prove-crash-recovery:
-	alembic upgrade head
-	RUN_MCP_MULTIPROCESS_TESTS=1 MCP_STRESS_DB_ISOLATED=1 \
-	STATE_BACKEND=postgres ENVIRONMENT=test \
+	RUN_MCP_MULTIPROCESS_TESTS=1 \
 	uv run --with-requirements requirements.txt \
 	  pytest tests/test_mcp_postgres_multiprocess.py -v --tb=short
 

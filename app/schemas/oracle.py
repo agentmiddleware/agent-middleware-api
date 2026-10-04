@@ -16,6 +16,7 @@ import re
 
 class OracleStatus(str, Enum):
     """Status of an oracle crawl/registration."""
+
     PENDING = "pending"
     CRAWLING = "crawling"
     INDEXED = "indexed"
@@ -26,17 +27,19 @@ class OracleStatus(str, Enum):
 
 class DirectoryType(str, Enum):
     """Types of agent directories the Oracle can infiltrate."""
-    WELL_KNOWN = "well_known"            # /.well-known/agent.json endpoints
-    LLM_TXT = "llm_txt"                  # /llm.txt documentation
-    OPENAPI = "openapi"                  # OpenAPI spec crawling
-    AGENT_REGISTRY = "agent_registry"    # Centralized agent registries
-    PLUGIN_STORE = "plugin_store"        # Plugin/tool marketplaces
-    MCP_SERVER = "mcp_server"            # Model Context Protocol servers
+
+    WELL_KNOWN = "well_known"  # /.well-known/agent.json endpoints
+    LLM_TXT = "llm_txt"  # /llm.txt documentation
+    OPENAPI = "openapi"  # OpenAPI spec crawling
+    AGENT_REGISTRY = "agent_registry"  # Centralized agent registries
+    PLUGIN_STORE = "plugin_store"  # Plugin/tool marketplaces
+    MCP_SERVER = "mcp_server"  # Model Context Protocol servers
 
 
 class CompatibilityTier(str, Enum):
     """How well an external API fits this control plane."""
-    NATIVE = "native"          # Direct API-to-API, zero adaptation needed
+
+    NATIVE = "native"  # Direct API-to-API, zero adaptation needed
     COMPATIBLE = "compatible"  # Minor translation layer required
     BRIDGEABLE = "bridgeable"  # Needs our IoT/Comms bridge
     INCOMPATIBLE = "incompatible"
@@ -49,6 +52,7 @@ SAFE_URL_PATTERN = re.compile(r"^https?://[a-zA-Z0-9]")
 
 class CrawlTargetRequest(BaseModel):
     """Submit a URL for the Oracle to crawl and index."""
+
     url: str = Field(
         ...,
         description="Base URL of the API or agent directory to crawl.",
@@ -82,6 +86,7 @@ class CrawlTargetRequest(BaseModel):
 
 class CrawlTargetResponse(BaseModel):
     """Result of submitting a crawl target."""
+
     target_id: str
     url: str
     directory_type: DirectoryType
@@ -91,8 +96,10 @@ class CrawlTargetResponse(BaseModel):
 
 # --- Indexed API Schemas ---
 
+
 class IndexedCapability(BaseModel):
     """A single capability discovered by the Oracle crawler."""
+
     name: str
     description: str
     endpoint: str | None = None
@@ -102,6 +109,7 @@ class IndexedCapability(BaseModel):
 
 class IndexedAPI(BaseModel):
     """An API that has been crawled and indexed by the Oracle."""
+
     api_id: str
     url: str
     name: str
@@ -162,8 +170,10 @@ class IndexedAPIListResponse(BaseModel):
 
 # --- Registration Schemas ---
 
+
 class RegistrationTarget(BaseModel):
     """An external directory where we want to register our API."""
+
     directory_url: str = Field(
         ...,
         description="URL of the agent directory/registry to register with.",
@@ -177,6 +187,7 @@ class RegistrationTarget(BaseModel):
 
 class RegistrationRequest(BaseModel):
     """Request to register our API in external agent networks."""
+
     targets: list[RegistrationTarget] = Field(
         ...,
         min_length=1,
@@ -191,6 +202,7 @@ class RegistrationRequest(BaseModel):
 
 class RegistrationResult(BaseModel):
     """Result of registering with a single directory."""
+
     directory_url: str
     directory_type: DirectoryType
     status: OracleStatus
@@ -200,6 +212,7 @@ class RegistrationResult(BaseModel):
 
 class RegistrationResponse(BaseModel):
     """Aggregated registration results."""
+
     results: list[RegistrationResult]
     total_attempted: int
     total_registered: int
@@ -208,8 +221,10 @@ class RegistrationResponse(BaseModel):
 
 # --- Ranking & Analytics Schemas ---
 
+
 class VisibilityScore(BaseModel):
     """Our API's visibility score across agent networks."""
+
     overall_score: float = Field(
         ...,
         ge=0.0,
@@ -238,6 +253,7 @@ class VisibilityScore(BaseModel):
 
 class NetworkGraphNode(BaseModel):
     """A node in the agent network graph."""
+
     node_id: str
     name: str
     url: str
@@ -254,6 +270,7 @@ class NetworkGraphNode(BaseModel):
 
 class NetworkGraphResponse(BaseModel):
     """The agent network graph centered on our API."""
+
     nodes: list[NetworkGraphNode]
     edges: list[dict]
     total_nodes: int

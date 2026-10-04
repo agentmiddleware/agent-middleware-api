@@ -44,7 +44,9 @@ The receipt arrows above describe completed paths. Effects or a debit may
 commit before an audit or receipt write fails, returning
 `manual_review_required` with no receipt. Do not retry with a new idempotency key:
 that can execute and charge the call again. Reconcile from the ledger and audit
-chain; see [failure semantics](failure-semantics.md).
+chain; see [failure semantics](failure-semantics.md). Upstream ambiguity is
+receipted as `delivery_uncertain` only when finalization or reconciliation
+succeeds.
 
 ### REQUIRE_APPROVAL
 

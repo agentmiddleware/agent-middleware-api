@@ -36,6 +36,7 @@ def _agent_key(agent_id: str, owner_wallet_id: str | None) -> str:
 @dataclass
 class AgentDecision:
     """A decision made by the AI agent."""
+
     decision_id: str
     agent_id: str
     context: dict[str, Any]
@@ -48,6 +49,7 @@ class AgentDecision:
 @dataclass
 class SelfHealResult:
     """Result of a self-healing operation."""
+
     heal_id: str
     issue: str
     diagnosis: str
@@ -86,12 +88,30 @@ class AgentIntelligence:
         # Load decisions
         decisions_data = await self._state.load_json("agent_intelligence.decisions")
         if decisions_data:
-            self._decisions = decisions_data
+            self._decisions = {
+                key: [
+                    item
+                    if isinstance(item, AgentDecision)
+                    else AgentDecision(
+                        **{
+                            **item,
+                            "timestamp": datetime.fromisoformat(item["timestamp"]),
+                        }
+                    )
+                    for item in items
+                ]
+                for key, items in decisions_data.items()
+            }
 
         # Load heals
         heals_data = await self._state.load_json("agent_intelligence.heals")
         if heals_data:
-            self._heals = heals_data
+            self._heals = {
+                key: item
+                if isinstance(item, SelfHealResult)
+                else SelfHealResult(**item)
+                for key, item in heals_data.items()
+            }
 
         # Load memory
         memory_data = await self._state.load_json("agent_intelligence.memory")
@@ -263,10 +283,12 @@ If you don't know something, say so."""
 
         if data_context:
             context_json = json.dumps(data_context, indent=2, default=str)
-            messages.append({
-                "role": "system",
-                "content": f"System data context:\n{context_json}",
-            })
+            messages.append(
+                {
+                    "role": "system",
+                    "content": f"System data context:\n{context_json}",
+                }
+            )
 
         messages.append({"role": "user", "content": question})
 
@@ -285,11 +307,13 @@ If you don't know something, say so."""
         if store_key not in self._memory:
             self._memory[store_key] = []
 
-        self._memory[store_key].append({
-            "key": key,
-            "value": value,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        })
+        self._memory[store_key].append(
+            {
+                "key": key,
+                "value": value,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        )
 
         # Keep only last 1000 memories
         if len(self._memory[store_key]) > 1000:

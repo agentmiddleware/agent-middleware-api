@@ -1,4 +1,4 @@
-"""A registered tool's price must be a finite, non-negative number.
+"""A registered tool's price must be a finite, positive number.
 
 ``tool_price`` is the one definition of what a governed invoke and a signed
 quote charge. It used to return whatever the registration held, so a
@@ -42,7 +42,16 @@ from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
 TOOL = "bad-price-echo"
 CATEGORY = ServiceCategory.AGENT_COMMS
 
-INVALID_FLOAT_PRICES = [float("nan"), float("inf"), float("-inf"), -1.0]
+INVALID_FLOAT_PRICES = [
+    float("nan"),
+    float("inf"),
+    float("-inf"),
+    -1.0,
+    0.0,
+    0.123456789,
+    0.000000001,
+    1000000000000.0,
+]
 
 
 @pytest.fixture
@@ -82,7 +91,23 @@ def priced_tool():
 
 @pytest.mark.parametrize(
     "exact",
-    ["NaN", "-NaN", "sNaN", "Infinity", "-Infinity", "-1", "-0.00000001", "abc", ""],
+    [
+        "NaN",
+        "-NaN",
+        "sNaN",
+        "Infinity",
+        "-Infinity",
+        "-1",
+        "0",
+        "-0",
+        "-0.00000001",
+        "abc",
+        "",
+        "0.123456789",
+        "0.000000001",
+        "1000000000000",
+        "100000000000.12345678",
+    ],
 )
 def test_tool_price_refuses_invalid_exact_override(exact):
     with pytest.raises(ValueError, match="tool_price_invalid"):
@@ -99,22 +124,20 @@ def test_tool_price_exact_override_is_checked_before_float_fallback():
     # A sound float does not rescue a broken exact override: the exact value
     # is the one the charge would use.
     with pytest.raises(ValueError, match="tool_price_invalid"):
-        tool_price(
-            {"credits_per_unit": 2.0, "credits_per_unit_exact": "NaN"}, CATEGORY
-        )
+        tool_price({"credits_per_unit": 2.0, "credits_per_unit_exact": "NaN"}, CATEGORY)
 
 
 @pytest.mark.parametrize(
     ("service", "expected"),
     [
         ({"credits_per_unit_exact": "2.50000000"}, Decimal("2.50000000")),
-        ({"credits_per_unit_exact": "0"}, Decimal("0")),
+        ({"credits_per_unit_exact": "0.123456780"}, Decimal("0.12345678")),
+        ({"credits_per_unit_exact": "0.00000001"}, Decimal("0.00000001")),
         ({"credits_per_unit": 3.0}, Decimal("3.0")),
-        ({"credits_per_unit": 0.0}, Decimal("0.0")),
         ({}, DEFAULT_PRICING[CATEGORY][1]),
     ],
 )
-def test_tool_price_accepts_finite_non_negative(service, expected):
+def test_tool_price_accepts_finite_positive(service, expected):
     assert tool_price(service, CATEGORY) == expected
 
 
@@ -281,3 +304,58 @@ async def test_quote_for_another_wallet_is_refused_before_pricing(
     )
     assert resp.status_code == 403
     assert await _quote_rows(owner["agent_wallet_id"]) == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "amount", ["0", "NaN", "Infinity", "0.123456789", "100000000000.12345678"]
+)
+async def test_direct_quote_service_rejects_invalid_amount_before_signing(
+    amount, monkeypatch
+):
+    from unittest.mock import AsyncMock
+    from app.services.quotes import QuoteError, QuoteService
+    from app.services.signing_keys import get_signing_key_service
+
+    signer = AsyncMock()
+    monkeypatch.setattr(get_signing_key_service(), "sign_payload", signer)
+    with pytest.raises(QuoteError, match="quoted_credits_invalid"):
+        await QuoteService().create_quote(
+            wallet_id="unused",
+            tool=TOOL,
+            quoted_credits=Decimal(amount),
+            category=CATEGORY.value,
+        )
+    signer.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "amount", ["NaN", "Infinity", "0.123456789", "100000000000.12345678"]
+)
+@pytest.mark.parametrize("field", ["credits_authorized", "credits_charged"])
+async def test_direct_receipt_service_rejects_non_storable_amount_before_signing(
+    amount, field, monkeypatch
+):
+    from unittest.mock import AsyncMock
+    from app.services.receipts import ReceiptError, ReceiptService
+    from app.services.signing_keys import get_signing_key_service
+
+    signer = AsyncMock()
+    monkeypatch.setattr(get_signing_key_service(), "sign_payload", signer)
+    credits = {"credits_authorized": Decimal("1"), "credits_charged": Decimal("0")}
+    credits[field] = Decimal(amount)
+    with pytest.raises(ReceiptError, match="receipt_credits_invalid"):
+        await ReceiptService().create_receipt(
+            permit_id="unused",
+            wallet_id="unused",
+            key_id=None,
+            tool=TOOL,
+            request_payload={},
+            response_payload={},
+            ledger_entry_id=None,
+            outcome="success",
+            audit_event_id=None,
+            **credits,
+        )
+    signer.assert_not_awaited()

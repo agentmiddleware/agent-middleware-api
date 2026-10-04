@@ -1,0 +1,402 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/sellers/.openclaw/worktrees/amw-issues-20261003-release
+configfile: pyproject.toml
+plugins: cov-7.1.0, asyncio-1.4.0, anyio-4.15.1
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 4995 items
+
+tests/test_acp_bridge.py ........................                        [  0%]
+tests/test_acta_receipt_interop.py ................                      [  0%]
+tests/test_action_database_guard.py .................................... [  1%]
+.                                                                        [  1%]
+tests/test_action_integration.py .......                                 [  1%]
+tests/test_action_invocation.py ........................................ [  2%]
+.................................................................        [  3%]
+tests/test_action_legacy_recovery.py .                                   [  3%]
+tests/test_action_migrations.py ............................s            [  4%]
+tests/test_action_multiprocess.py ssssssssss                             [  4%]
+tests/test_action_permits.py .....................                       [  5%]
+tests/test_action_postgres.py ssssssssssss                               [  5%]
+tests/test_action_preacceptance.py ..................................... [  5%]
+.....                                                                    [  6%]
+tests/test_action_recovery.py ..............................             [  6%]
+tests/test_action_verification_sessions.py ......                        [  6%]
+tests/test_adversarial_five_claims.py .................                  [  7%]
+tests/test_adversarial_transport.py .................................    [  7%]
+tests/test_agent_comms_durable.py ......                                 [  7%]
+tests/test_agent_first_contract.py ....                                  [  8%]
+tests/test_agent_ops_war_room_demo.py ..                                 [  8%]
+tests/test_agent_self_credential_proof.py ....                           [  8%]
+tests/test_agent_url_and_input_hardening.py ............................ [  8%]
+......................................                                   [  9%]
+tests/test_ai_durable_state.py ....                                      [  9%]
+tests/test_ai_router_isolation.py .........                              [  9%]
+tests/test_api_key_constant_time.py ...                                  [  9%]
+tests/test_api_keys.py ................................................. [ 10%]
+....                                                                     [ 10%]
+tests/test_approval_card_rendering.py .................................. [ 11%]
+................                                                         [ 11%]
+tests/test_arbitrage_regressions.py ..                                   [ 11%]
+tests/test_audit_chain.py .............                                  [ 12%]
+tests/test_audit_chain_contention_surface.py .........                   [ 12%]
+tests/test_audit_log.py .....                                            [ 12%]
+tests/test_audit_routes.py ...........                                   [ 12%]
+tests/test_audit_snapshot.py ..                                          [ 12%]
+tests/test_auto_pr_runner.py .................                           [ 13%]
+tests/test_awi.py ......................................                 [ 13%]
+tests/test_awi_adapter_sdk_hardening.py ................................ [ 14%]
+..........                                                               [ 14%]
+tests/test_awi_admission_ordering.py ................................... [ 15%]
+........                                                                 [ 15%]
+tests/test_awi_admission_process.py ...                                  [ 15%]
+tests/test_awi_adoption.py ...............                               [ 15%]
+tests/test_awi_dom_bridge_integration.py ...............                 [ 16%]
+tests/test_awi_execution_boundaries.py ....                              [ 16%]
+tests/test_awi_governed_mcp.py .....                                     [ 16%]
+tests/test_awi_http_governance.py .....................                  [ 16%]
+tests/test_awi_phase9.py ...................................s........... [ 17%]
+........................                                                 [ 18%]
+tests/test_awi_rag_lifecycle.py ....................                     [ 18%]
+tests/test_awi_request_authority.py .........                            [ 18%]
+tests/test_backend_contract_regressions.py ............................. [ 19%]
+...........                                                              [ 19%]
+tests/test_behavioral_runner_results.py ............                     [ 19%]
+tests/test_behavioral_sandbox.py ....................................... [ 20%]
+.......                                                                  [ 20%]
+tests/test_billing.py .................................................. [ 21%]
+..........................                                               [ 22%]
+tests/test_billing_boundary_regressions.py .......                       [ 22%]
+tests/test_blob.py .........                                             [ 22%]
+tests/test_broadcast.py .............                                    [ 22%]
+tests/test_build_provenance.py ......................                    [ 23%]
+tests/test_canonical_json_fixtures.py .....                              [ 23%]
+tests/test_check_doc_references.py ...............                       [ 23%]
+tests/test_ci_second_tool_denial.py .....s                               [ 23%]
+tests/test_clean_database_coverage.py ....                               [ 23%]
+tests/test_commit_sha_precedence.py ........                             [ 24%]
+tests/test_comms.py ................                                     [ 24%]
+tests/test_constant_loop_permit_budget.py ...                            [ 24%]
+tests/test_constant_loop_permit_linkage.py ...                           [ 24%]
+tests/test_constant_loop_receipt_signature.py ..                         [ 24%]
+tests/test_constant_test_loop.py .......s..............                  [ 24%]
+tests/test_content_factory_generation_durable.py ..........              [ 25%]
+tests/test_content_store.py .......                                      [ 25%]
+tests/test_cors_security.py ....                                         [ 25%]
+tests/test_crash_proof_make.py ..............                            [ 25%]
+tests/test_dashboard_design.py ..                                        [ 25%]
+tests/test_db_urls_durable_state.py ..........................           [ 26%]
+tests/test_delivery_uncertain_replay.py ..                               [ 26%]
+tests/test_demo_ambiguous_retry.py ....                                  [ 26%]
+tests/test_demo_trust_plane.py .                                         [ 26%]
+tests/test_denial_details_and_self_service.py .............              [ 26%]
+tests/test_dependency_security_policy.py ..                              [ 26%]
+tests/test_dev_key_self_provision.py ..............                      [ 26%]
+tests/test_discover_kyc_honesty.py ....                                  [ 26%]
+tests/test_discover_phase9.py ..............                             [ 27%]
+tests/test_discovery.py .......                                          [ 27%]
+tests/test_discovery_consistency.py ...                                  [ 27%]
+tests/test_discovery_drift.py ...........                                [ 27%]
+tests/test_discovery_honesty.py .....                                    [ 27%]
+tests/test_discovery_tools_consistency.py ....                           [ 27%]
+tests/test_dispatch_call_slot_migration.py s                             [ 27%]
+tests/test_dispatch_claim_migration.py ..                                [ 27%]
+tests/test_docker_commit_sha.py .......                                  [ 28%]
+tests/test_docker_entrypoint.py ....                                     [ 28%]
+tests/test_dogfood_tool_flag.py ......                                   [ 28%]
+tests/test_dogfood_trust_plane.py .                                      [ 28%]
+tests/test_duplicate_guard_config.py .......................             [ 28%]
+tests/test_duplicate_guard_postgres_concurrency.py sss                   [ 28%]
+tests/test_edge_client_trust_gap.py .                                    [ 28%]
+tests/test_evidence_bundle.py ........                                   [ 28%]
+tests/test_factory.py ............................                       [ 29%]
+tests/test_factory_campaign_persistence.py ..                            [ 29%]
+tests/test_failure_lab.py .............                                  [ 29%]
+tests/test_failure_lab_ci.py ..........                                  [ 30%]
+tests/test_failure_lab_claims.py ...........                             [ 30%]
+tests/test_failure_lab_diagnostic.py ................................... [ 30%]
+.................                                                        [ 31%]
+tests/test_failure_lab_evidence.py .........................             [ 31%]
+tests/test_failure_lab_harness.py .....                                  [ 31%]
+tests/test_failure_lab_portable_keys.py ....                             [ 31%]
+tests/test_failure_lab_report.py ..................                      [ 32%]
+tests/test_failure_lab_scenarios.py .................................... [ 33%]
+.......................                                                  [ 33%]
+tests/test_failure_lab_stateful.py .....                                 [ 33%]
+tests/test_failure_lab_verifier.py ..................                    [ 33%]
+tests/test_framework_inprocess_validator.py ..........                   [ 34%]
+tests/test_framework_legacy_client.py .................                  [ 34%]
+tests/test_framework_legacy_tools.py ..............sssssssssssss         [ 35%]
+tests/test_golden_path.py .                                              [ 35%]
+tests/test_governed_adapter.py .                                         [ 35%]
+tests/test_governed_debit_dispatch_fence.py .........                    [ 35%]
+tests/test_governed_metering.py ....                                     [ 35%]
+tests/test_governed_persistence.py ...............................       [ 35%]
+tests/test_head_method.py ..........                                     [ 36%]
+tests/test_health_dependencies.py ...................................    [ 36%]
+tests/test_health_public_projection.py .......                           [ 37%]
+tests/test_health_sim_parity.py ...                                      [ 37%]
+tests/test_historical_probe_retirement.py ...                            [ 37%]
+tests/test_human_accessibility.py ........                               [ 37%]
+tests/test_human_approval_gate.py ........................               [ 37%]
+tests/test_human_preflight.py .......                                    [ 37%]
+tests/test_idempotency.py .....                                          [ 38%]
+tests/test_idempotency_completion_contention.py ...........              [ 38%]
+tests/test_iga_compensation_identity.py ..                               [ 38%]
+tests/test_iga_policy.py ............................................... [ 39%]
+.....                                                                    [ 39%]
+tests/test_invariant_attack_harness.py ................................. [ 40%]
+...........                                                              [ 40%]
+tests/test_iot.py ...................                                    [ 40%]
+tests/test_iot_acl.py .............                                      [ 40%]
+tests/test_iot_registry.py ...............                               [ 41%]
+tests/test_jwt_auth.py ...........................                       [ 41%]
+tests/test_jwt_authority.py .................                            [ 42%]
+tests/test_key_distribution_references.py ......                         [ 42%]
+tests/test_key_management.py .                                           [ 42%]
+tests/test_kyc.py ...................................                    [ 42%]
+tests/test_kyc_status_authority.py ............                          [ 43%]
+tests/test_late_debit_reconciliation.py .........                        [ 43%]
+tests/test_ledger_write_contention.py .........                          [ 43%]
+tests/test_live_owner_waits.py ...                                       [ 43%]
+tests/test_live_script_target_safety.py ................................ [ 44%]
+.........................................                                [ 45%]
+tests/test_llm_endpoint.py ....                                          [ 45%]
+tests/test_load_battery.py .............                                 [ 45%]
+tests/test_local_permit_counter_contention.py .....                      [ 45%]
+tests/test_max_calls_debug.py .                                          [ 45%]
+tests/test_max_calls_race.py ..                                          [ 45%]
+tests/test_mcp_catalog_contract.py .                                     [ 45%]
+tests/test_mcp_discovery_wedge_gate.py .......                           [ 45%]
+tests/test_mcp_dispatch_claim.py ....................                    [ 46%]
+tests/test_mcp_dispatch_evidence.py .....................                [ 46%]
+tests/test_mcp_dispatch_reconciliation.py ...........................    [ 47%]
+tests/test_mcp_dispatch_router_claim.py ....                             [ 47%]
+tests/test_mcp_generator.py .......................................      [ 47%]
+tests/test_mcp_idempotency_key_validation.py ........................... [ 48%]
+........................                                                 [ 48%]
+tests/test_mcp_internal_error_disclosure.py .........                    [ 49%]
+tests/test_mcp_legacy_envelope_validation.py ..................          [ 49%]
+tests/test_mcp_malformed_input_review_probes.py ...........              [ 49%]
+tests/test_mcp_postgres_multiprocess.py sss.sssssssssssss                [ 50%]
+tests/test_mcp_transport_hardening.py ....................               [ 50%]
+tests/test_mcp_trust.py ..................                               [ 50%]
+tests/test_mcp_trust_mode.py ...........                                 [ 50%]
+tests/test_mcp_upstream_governed.py .................................... [ 51%]
+.......                                                                  [ 51%]
+tests/test_me_trust_ledger.py ...                                        [ 51%]
+tests/test_media.py ............                                         [ 52%]
+tests/test_migration_rollout_notes.py ...........                        [ 52%]
+tests/test_migrations.py .........                                       [ 52%]
+tests/test_minimal_path_e2e.py .                                         [ 52%]
+tests/test_naive_utc_datetime_columns.py ............................... [ 53%]
+.................................................                        [ 54%]
+tests/test_onboarding_contract.py .........................              [ 54%]
+tests/test_onboarding_doc_contracts.py ......                            [ 54%]
+tests/test_openai_wrapper_trust_loop.py .                                [ 54%]
+tests/test_operator_doc_contracts.py .....                               [ 54%]
+tests/test_oracle.py ...................                                 [ 55%]
+tests/test_oracle_durable_crawl.py ..                                    [ 55%]
+tests/test_oracle_store.py .........                                     [ 55%]
+tests/test_partner_bootstrap_flags.py .....                              [ 55%]
+tests/test_partner_mcp.py ...................                            [ 55%]
+tests/test_permit_budget_drift_visibility.py .....                       [ 56%]
+tests/test_permit_budget_integrity.py ....                               [ 56%]
+tests/test_permit_budget_threshold_alerts.py ..                          [ 56%]
+tests/test_permit_issuance_retry.py ..........................           [ 56%]
+tests/test_permit_numeric_storage.py ................................... [ 57%]
+...............................                                          [ 58%]
+tests/test_permit_postgres_concurrency.py ssssssssssssssssssss           [ 58%]
+tests/test_permit_repeat_window_rollout.py ....................          [ 58%]
+tests/test_permit_request_flow.py ...................................... [ 59%]
+.....                                                                    [ 59%]
+tests/test_permit_reservation_unwind.py ....                             [ 59%]
+tests/test_permit_signing_input_snapshot.py ......................       [ 60%]
+tests/test_permit_v2_constraints.py .........................            [ 60%]
+tests/test_permit_verification_sessions.py .....                         [ 60%]
+tests/test_permit_write_contention_surface.py ...........                [ 61%]
+tests/test_permits.py ............................                       [ 61%]
+tests/test_phase7_followups.py ....                                      [ 61%]
+tests/test_planner_constraints.py ...................................... [ 62%]
+..................                                                       [ 62%]
+tests/test_planner_optimize.py ..                                        [ 62%]
+tests/test_pods.py ................                                      [ 63%]
+tests/test_policy_bundles.py ........................................... [ 64%]
+.......                                                                  [ 64%]
+tests/test_policy_decisions.py ....                                      [ 64%]
+tests/test_postgres_datetime_binding.py .........sssss                   [ 64%]
+tests/test_preflight.py .................                                [ 64%]
+tests/test_prepare_railway_release.py .....                              [ 64%]
+tests/test_production_trust_posture.py ............                      [ 65%]
+tests/test_proof_surface_freeze.py .....                                 [ 65%]
+tests/test_proof_surface_gate.py .....                                   [ 65%]
+tests/test_protocol.py .............                                     [ 65%]
+tests/test_public_mcp_endpoint.py .....................................  [ 66%]
+tests/test_public_metadata.py ...............                            [ 66%]
+tests/test_publish_live_proof.py .........                               [ 66%]
+tests/test_published_proof.py .......                                    [ 67%]
+tests/test_python_sdk_trust_loop.py ..                                   [ 67%]
+tests/test_qa_20261002_backend.py ........................s.s........... [ 67%]
+..                                                                       [ 67%]
+tests/test_qa_be100_documentation.py ...                                 [ 67%]
+tests/test_quickstart_invalid_idempotency_key.py .                       [ 67%]
+tests/test_quickstart_path.py ......                                     [ 68%]
+tests/test_quote_vertical_slice.py ...                                   [ 68%]
+tests/test_railway_iac_config.py .....                                   [ 68%]
+tests/test_railway_preflight.py ........................................ [ 69%]
+........................................................................ [ 70%]
+........................................................................ [ 71%]
+........................................................................ [ 73%]
+........................................................................ [ 74%]
+.............................                                            [ 75%]
+tests/test_rate_limit_threshold.py ....................                  [ 75%]
+tests/test_readiness_fail_closed.py ......                               [ 75%]
+tests/test_receipt_portability.py ..............................         [ 76%]
+tests/test_receipt_signing_input_snapshot.py ..........                  [ 76%]
+tests/test_receipt_wallet_linkage.py ...                                 [ 76%]
+tests/test_receipt_write_contention_surface.py ...........               [ 76%]
+tests/test_receipts.py .................                                 [ 77%]
+tests/test_red_team.py .................                                 [ 77%]
+tests/test_red_team_trust_plane.py .                                     [ 77%]
+tests/test_refund_reconciliation.py ...........                          [ 77%]
+tests/test_refund_reconciliation_contention_surface.py ........          [ 78%]
+tests/test_repeat_window_compatibility.py ..                             [ 78%]
+tests/test_repo_guardian.py ......                                       [ 78%]
+tests/test_request_body_limit.py ............                            [ 78%]
+tests/test_retire_owner_keys.py ..............                           [ 78%]
+tests/test_revocation_containment.py ...........                         [ 78%]
+tests/test_rotate_api_keys.py ..................                         [ 79%]
+tests/test_route_auth_inventory.py .                                     [ 79%]
+tests/test_rtaas.py .............                                        [ 79%]
+tests/test_rtaas_input_validation.py ...........                         [ 79%]
+tests/test_runtime_degradation.py .........                              [ 80%]
+tests/test_runtime_mode.py ............                                  [ 80%]
+tests/test_sandbox.py .................                                  [ 80%]
+tests/test_sandbox_integration.py .....................                  [ 81%]
+tests/test_scaffolding_harden.py .....                                   [ 81%]
+tests/test_schema_boot.py .............................................. [ 82%]
+.                                                                        [ 82%]
+tests/test_sdk_action_permit_contract.py ...                             [ 82%]
+tests/test_secret_persistence.py .......                                 [ 82%]
+tests/test_security_fuzz_battery.py ...........s                         [ 82%]
+tests/test_security_headers.py .................                         [ 82%]
+tests/test_security_store.py ........                                    [ 83%]
+tests/test_sentinel_target_safety.py ................................... [ 83%]
+................................                                         [ 84%]
+tests/test_signed_quotes.py ................                             [ 84%]
+tests/test_signing_key_configuration.py ........                         [ 84%]
+tests/test_signing_key_lifecycle.py ...............                      [ 85%]
+tests/test_site_agent_interface.py ..................................... [ 85%]
+....................................                                     [ 86%]
+tests/test_sqlite_backend.py .......                                     [ 86%]
+tests/test_stale_commit_sha_prevention.py ..........                     [ 86%]
+tests/test_standard_mcp_endpoint.py ..........................           [ 87%]
+tests/test_static_dev_api_keys.py .........                              [ 87%]
+tests/test_stress_test_live_verdicts.py ................................ [ 88%]
+.....................                                                    [ 88%]
+tests/test_stripe_accounting_concurrency.py ....                         [ 88%]
+tests/test_stripe_integration.py ................................        [ 89%]
+tests/test_swarm_wallets.py .......                                      [ 89%]
+tests/test_telemetry.py ............                                     [ 89%]
+tests/test_telemetry_scope.py .........                                  [ 89%]
+tests/test_telemetry_store.py ........                                   [ 90%]
+tests/test_tenant_isolation_hardening.py ..........                      [ 90%]
+tests/test_time.py ..                                                    [ 90%]
+tests/test_tool_interface_authority.py ................................. [ 91%]
+                                                                         [ 91%]
+tests/test_tool_price_validation.py .................................... [ 91%]
+.........................                                                [ 92%]
+tests/test_transfers.py ......                                           [ 92%]
+tests/test_trust_boundary.py ....                                        [ 92%]
+tests/test_trust_coverage_gate_scope.py ......                           [ 92%]
+tests/test_trust_mode_guardrails.py .................................... [ 93%]
+............................................                             [ 94%]
+tests/test_trust_negative_security.py ........                           [ 94%]
+tests/test_trust_operator_inspection.py .....                            [ 94%]
+tests/test_trust_package.py ..........                                   [ 94%]
+tests/test_upstream_mcp.py ............................................. [ 95%]
+..................                                                       [ 95%]
+tests/test_upstream_retry_cap_enforcement.py .................           [ 96%]
+tests/test_v1_production.py ................                             [ 96%]
+tests/test_velocity_monitor.py .............                             [ 96%]
+tests/test_vendor_fonts.py ...............                               [ 97%]
+tests/test_wallet_concurrency.py .........                               [ 97%]
+tests/test_wallet_ledger_integrity.py ........                           [ 97%]
+tests/test_wallet_spendable_status.py ......................             [ 97%]
+tests/test_wallet_status_enforcement.py ..........................       [ 98%]
+tests/test_wedge_honesty.py ..........                                   [ 98%]
+tests/test_wrapper_permit_retry_contract.py .................            [ 98%]
+tests/test_x402.py ....................................................  [100%]
+
+=============================== warnings summary ===============================
+tests/test_failure_lab_diagnostic.py:32
+  /Users/sellers/.openclaw/worktrees/amw-issues-20261003-release/tests/test_failure_lab_diagnostic.py:32: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient
+
+../../../Projects/agent-middleware-api/.venv/lib/python3.12/site-packages/starlette/testclient.py:53
+  /Users/sellers/Projects/agent-middleware-api/.venv/lib/python3.12/site-packages/starlette/testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+tests/test_dispatch_claim_migration.py::test_dispatch_claim_migration_preserves_legacy_rows_and_downgrades
+tests/test_migrations.py::test_041_scrubs_legacy_plaintext_owner_keys_from_content_tables
+  /Users/sellers/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/contextlib.py:144: SAWarning: Skipped unsupported reflection of expression-based index uq_idempotency_governed_mcp_identity
+    next(self.gen)
+
+tests/test_human_approval_gate.py::test_locally_expired_approval_denies
+  /Users/sellers/Projects/agent-middleware-api/.venv/lib/python3.12/site-packages/aiosqlite/core.py:63: DeprecationWarning: The default datetime adapter is deprecated as of Python 3.12; see the sqlite3 documentation for suggested replacement recipes
+    result = function()
+
+tests/test_minimal_path_e2e.py::test_minimal_viable_path
+  /Users/sellers/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/contextlib.py:105: DeprecationWarning: Use `streamable_http_client` instead.
+    self.gen = func(*args, **kwds)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+SKIPPED [1] tests/test_action_migrations.py:167: requires fresh disposable local action migration DB
+SKIPPED [1] tests/test_action_multiprocess.py:213: set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness
+SKIPPED [6] tests/test_action_multiprocess.py:254: set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness
+SKIPPED [1] tests/test_action_multiprocess.py:362: set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness
+SKIPPED [1] tests/test_action_multiprocess.py:386: set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness
+SKIPPED [1] tests/test_action_multiprocess.py:406: set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness
+SKIPPED [2] tests/test_action_postgres.py:58: requires explicitly opted-in disposable local amw_action PostgreSQL database
+SKIPPED [1] tests/test_action_postgres.py:65: requires explicitly opted-in disposable local amw_action PostgreSQL database
+SKIPPED [1] tests/test_action_postgres.py:69: requires explicitly opted-in disposable local amw_action PostgreSQL database
+SKIPPED [2] tests/test_action_postgres.py:96: requires explicitly opted-in disposable local amw_action PostgreSQL database
+SKIPPED [1] tests/test_action_postgres.py:181: requires explicitly opted-in disposable local amw_action PostgreSQL database
+SKIPPED [5] tests/test_action_postgres.py:185: requires explicitly opted-in disposable local amw_action PostgreSQL database
+SKIPPED [1] tests/test_awi_phase9.py:708: Playwright not installed
+SKIPPED [1] tests/test_ci_second_tool_denial.py:165: CI workflow test only runs on Linux (GitHub Actions environment)
+SKIPPED [1] tests/test_constant_test_loop.py:345: Set RUN_CONSTANT_TEST_LOOP_INTEGRATION=1 to run full integration test
+SKIPPED [1] tests/test_dispatch_call_slot_migration.py:28: requires fresh disposable migration PostgreSQL
+SKIPPED [3] tests/test_duplicate_guard_postgres_concurrency.py:37: requires a PostgreSQL DATABASE_URL for real row-lock semantics
+SKIPPED [6] tests/test_framework_legacy_tools.py:260: could not import 'langchain_core.tools': No module named 'langchain_core'
+SKIPPED [1] tests/test_framework_legacy_tools.py:273: could not import 'langchain_core.tools': No module named 'langchain_core'
+SKIPPED [6] tests/test_framework_legacy_tools.py:285: could not import 'llama_index.core.tools': No module named 'llama_index'
+SKIPPED [1] tests/test_mcp_postgres_multiprocess.py:1065: set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness
+SKIPPED [1] tests/test_mcp_postgres_multiprocess.py:1124: set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness
+SKIPPED [1] tests/test_mcp_postgres_multiprocess.py:1174: set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness
+SKIPPED [1] tests/test_mcp_postgres_multiprocess.py:1261: set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness
+SKIPPED [1] tests/test_mcp_postgres_multiprocess.py:1350: set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness
+SKIPPED [1] tests/test_mcp_postgres_multiprocess.py:1419: set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness
+SKIPPED [1] tests/test_mcp_postgres_multiprocess.py:1534: set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness
+SKIPPED [1] tests/test_mcp_postgres_multiprocess.py:1601: set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness
+SKIPPED [1] tests/test_mcp_postgres_multiprocess.py:1662: set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness
+SKIPPED [7] tests/test_mcp_postgres_multiprocess.py:1933: set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness
+SKIPPED [1] tests/test_permit_postgres_concurrency.py:396: requires a PostgreSQL DATABASE_URL for real row-lock semantics
+SKIPPED [1] tests/test_permit_postgres_concurrency.py:474: requires a PostgreSQL DATABASE_URL for real row-lock semantics
+SKIPPED [1] tests/test_permit_postgres_concurrency.py:578: requires a PostgreSQL DATABASE_URL for real row-lock semantics
+SKIPPED [1] tests/test_permit_postgres_concurrency.py:637: requires a PostgreSQL DATABASE_URL for real row-lock semantics
+SKIPPED [1] tests/test_permit_postgres_concurrency.py:689: requires a PostgreSQL DATABASE_URL for real row-lock semantics
+SKIPPED [1] tests/test_permit_postgres_concurrency.py:746: requires a PostgreSQL DATABASE_URL for real row-lock semantics
+SKIPPED [1] tests/test_permit_postgres_concurrency.py:902: requires a PostgreSQL DATABASE_URL for real row-lock semantics
+SKIPPED [1] tests/test_permit_postgres_concurrency.py:955: requires a PostgreSQL DATABASE_URL for real row-lock semantics
+SKIPPED [12] tests/test_permit_postgres_concurrency.py:147: requires a PostgreSQL DATABASE_URL for real row-lock semantics
+SKIPPED [1] tests/test_postgres_datetime_binding.py:203: TEST_POSTGRES_URL not set; Postgres-dialect coverage skipped
+SKIPPED [1] tests/test_postgres_datetime_binding.py:225: TEST_POSTGRES_URL not set; Postgres-dialect coverage skipped
+SKIPPED [1] tests/test_postgres_datetime_binding.py:263: TEST_POSTGRES_URL not set; Postgres-dialect coverage skipped
+SKIPPED [1] tests/test_postgres_datetime_binding.py:323: TEST_POSTGRES_URL not set; Postgres-dialect coverage skipped
+SKIPPED [1] tests/test_postgres_datetime_binding.py:346: TEST_POSTGRES_URL not set; Postgres-dialect coverage skipped
+SKIPPED [1] tests/test_qa_20261002_backend.py:72: could not import 'openapi_spec_validator': No module named 'openapi_spec_validator'
+SKIPPED [1] tests/test_qa_20261002_backend.py:114: could not import 'hypothesis': No module named 'hypothesis'
+SKIPPED [1] tests/test_security_fuzz_battery.py:705: requires PostgreSQL for accurate concurrent budget accounting
+=========== 4908 passed, 87 skipped, 6 warnings in 302.81s (0:05:02) ===========

@@ -184,10 +184,14 @@ async def test_liveness_probe_publishes_build_provenance(baked, monkeypatch):
 
     monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", "")
     baked("a" * 40)
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
         liveness = await client.get("/health")
         dependencies = await client.get("/health/dependencies")
     assert liveness.status_code == 200
     assert liveness.json()["commit_sha"] == "a" * 40
     assert liveness.json()["build_provenance"] == "stamped"
-    assert liveness.json()["build_provenance"] == dependencies.json()["build_provenance"]
+    assert (
+        liveness.json()["build_provenance"] == dependencies.json()["build_provenance"]
+    )

@@ -34,7 +34,11 @@ from app.db.database import get_session_factory
 from app.db.models import IdempotencyRecordModel, ReceiptModel
 from app.main import app
 from app.services.receipts import ReceiptService, get_receipt_service
-from app.services.signing_keys import canonical_json, get_signing_key_service, sha256_hex
+from app.services.signing_keys import (
+    canonical_json,
+    get_signing_key_service,
+    sha256_hex,
+)
 from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
 
 GOLDEN_DIR = Path(__file__).parent / "fixtures" / "receipt_signing_golden"
@@ -72,6 +76,19 @@ def _base_model(**overrides) -> ReceiptModel:
 
 
 CASES = {
+    # Additive action v1 fields pin new receipt bytes without regenerating any
+    # historical fixture. The existing idempotency link signs the owner.
+    "success_action_v1": (
+        _base_model(
+            action_contract_version=1,
+            action_payload_hash="c" * 64,
+            action_schema_id="fixture-payment",
+            action_schema_version="1",
+            action_public_tool_id="golden-path-echo",
+            action_upstream_binding_hash="d" * 64,
+        ),
+        True,
+    ),
     # Current-format success receipt with full governed-dispatch linkage.
     "success_linked": (_base_model(), True),
     # Legacy-format signature: linkage fields excluded from signing input.

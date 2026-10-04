@@ -1,0 +1,67 @@
+{
+  "head": "079bb7290f6ed86c6762baec02827305b5cb9da7",
+  "head_after": "079bb7290f6ed86c6762baec02827305b5cb9da7",
+  "git_status": "",
+  "suites": [
+    {
+      "name": "action-accounting",
+      "tests": 12,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": "1.889"
+    },
+    {
+      "name": "action-multiprocess",
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": "21.331"
+    },
+    {
+      "name": "action-migration",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": "6.904"
+    },
+    {
+      "name": "dispatch-migration",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": "0.710"
+    },
+    {
+      "name": "permit-concurrency",
+      "tests": 20,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": "2.302"
+    }
+  ],
+  "total_tests": 44,
+  "total_failures": 0,
+  "total_errors": 0,
+  "total_skipped": 0,
+  "shutdown": {
+    "stopped": true,
+    "verified_owned_pid": 30259,
+    "port_listener_output": "",
+    "port_listener_exit": 1,
+    "data_retained": true,
+    "finished": "2026-10-04T02:03:01.800371+00:00"
+  },
+  "optional_qa_separate_environment": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "metadata": "optional-qa.json",
+    "note": "Python3.13 pre-existing environment; tests skipped by main environment are verified separately."
+  }
+}

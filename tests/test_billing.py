@@ -2516,7 +2516,11 @@ async def test_agent_wallet_provisioning_replays_on_idempotency_key(
     a second wallet or debit the sponsor twice."""
     sponsor_resp = await client.post(
         "/v1/billing/wallets/sponsor",
-        json={"sponsor_name": "Idem Sponsor", "email": "i@s.com", "initial_credits": 1000},
+        json={
+            "sponsor_name": "Idem Sponsor",
+            "email": "i@s.com",
+            "initial_credits": 1000,
+        },
         headers=api_headers,
     )
     assert sponsor_resp.status_code == 201
@@ -2528,9 +2532,13 @@ async def test_agent_wallet_provisioning_replays_on_idempotency_key(
         "budget_credits": 300,
     }
     headers = {**api_headers, "Idempotency-Key": "provision-idem-bot-1"}
-    first = await client.post("/v1/billing/wallets/agent", json=payload, headers=headers)
+    first = await client.post(
+        "/v1/billing/wallets/agent", json=payload, headers=headers
+    )
     assert first.status_code == 201, first.text
-    second = await client.post("/v1/billing/wallets/agent", json=payload, headers=headers)
+    second = await client.post(
+        "/v1/billing/wallets/agent", json=payload, headers=headers
+    )
     assert second.status_code == 201, second.text
     assert second.json()["wallet_id"] == first.json()["wallet_id"]
 
@@ -2564,8 +2572,12 @@ async def test_agent_wallet_provisioning_error_completes_idempotency_record(
         "budget_credits": 10,
     }
     headers = {**api_headers, "Idempotency-Key": "provision-orphan-1"}
-    first = await client.post("/v1/billing/wallets/agent", json=payload, headers=headers)
+    first = await client.post(
+        "/v1/billing/wallets/agent", json=payload, headers=headers
+    )
     assert first.status_code == 404, first.text
-    replay = await client.post("/v1/billing/wallets/agent", json=payload, headers=headers)
+    replay = await client.post(
+        "/v1/billing/wallets/agent", json=payload, headers=headers
+    )
     assert replay.status_code == 404, replay.text
     assert replay.json() == first.json()

@@ -179,7 +179,9 @@ async def test_create_kyc_session_wallet_not_found(client, api_headers):
 
 @pytest.mark.anyio
 @patch("app.services.kyc_service.stripe.identity.VerificationSession.create")
-async def test_create_kyc_session_success(mock_stripe_create, client, api_headers, sponsor_wallet):
+async def test_create_kyc_session_success(
+    mock_stripe_create, client, api_headers, sponsor_wallet
+):
     """Test successful KYC session creation."""
     mock_session = MagicMock()
     mock_session.id = "vs_test123"
@@ -239,12 +241,20 @@ async def test_db_key_cannot_read_other_wallet_kyc_status(client, api_headers):
     """A DB-backed key scoped to wallet A must not read wallet B's KYC status."""
     wallet_a_resp = await client.post(
         "/v1/billing/wallets/sponsor",
-        json={"sponsor_name": "KYC Tenant A", "email": "kyc-a@test.com", "initial_credits": 1000},
+        json={
+            "sponsor_name": "KYC Tenant A",
+            "email": "kyc-a@test.com",
+            "initial_credits": 1000,
+        },
         headers=api_headers,
     )
     wallet_b_resp = await client.post(
         "/v1/billing/wallets/sponsor",
-        json={"sponsor_name": "KYC Tenant B", "email": "kyc-b@test.com", "initial_credits": 1000},
+        json={
+            "sponsor_name": "KYC Tenant B",
+            "email": "kyc-b@test.com",
+            "initial_credits": 1000,
+        },
         headers=api_headers,
     )
     wallet_a = wallet_a_resp.json()["wallet_id"]
@@ -269,7 +279,11 @@ async def test_db_key_cannot_create_kyc_session_for_other_wallet(client, api_hea
     """A DB-backed key scoped to wallet A must not start a KYC session for wallet B."""
     wallet_a_resp = await client.post(
         "/v1/billing/wallets/sponsor",
-        json={"sponsor_name": "KYC Session A", "email": "kyc-session-a@test.com", "initial_credits": 1000},
+        json={
+            "sponsor_name": "KYC Session A",
+            "email": "kyc-session-a@test.com",
+            "initial_credits": 1000,
+        },
         headers=api_headers,
     )
     wallet_b_resp = await client.post(
@@ -308,7 +322,11 @@ async def test_db_key_cannot_read_other_wallet_verification_details(
     """A DB-backed key scoped to wallet A must not read wallet B's verification details."""
     wallet_a_resp = await client.post(
         "/v1/billing/wallets/sponsor",
-        json={"sponsor_name": "KYC Verify A", "email": "kyc-verify-a@test.com", "initial_credits": 1000},
+        json={
+            "sponsor_name": "KYC Verify A",
+            "email": "kyc-verify-a@test.com",
+            "initial_credits": 1000,
+        },
         headers=api_headers,
     )
     wallet_b_resp = await client.post(

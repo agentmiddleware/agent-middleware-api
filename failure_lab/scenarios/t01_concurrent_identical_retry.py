@@ -138,7 +138,9 @@ class ConcurrentIdenticalRetry(Scenario):
         "Concurrency is in-process asyncio against SQLite, not a multi-node load test.",
     )
 
-    async def run_configuration(self, target: Target, log: EventLog) -> ConfigurationResult:
+    async def run_configuration(
+        self, target: Target, log: EventLog
+    ) -> ConfigurationResult:
         requested = int(self.options.get("concurrency", 100))
         concurrency = max(MIN_CONCURRENCY, requested)
         timeout_seconds = float(
@@ -189,7 +191,9 @@ class ConcurrentIdenticalRetry(Scenario):
         )
 
         allowed = (
-            GATEWAY_EXPECTED_STATUSES if target.uses_gateway else DIRECT_EXPECTED_STATUSES
+            GATEWAY_EXPECTED_STATUSES
+            if target.uses_gateway
+            else DIRECT_EXPECTED_STATUSES
         )
         unexpected = _tally([a for a in attempts if a.status not in allowed])
         strain = {k: v for k, v in unexpected.items() if k in HARNESS_STRAIN_STATUSES}
@@ -205,7 +209,9 @@ class ConcurrentIdenticalRetry(Scenario):
                 product_anomalies=product_anomalies,
             )
 
-        measurements = await self.measure(target, attempts, operation_ids=[operation_id])
+        measurements = await self.measure(
+            target, attempts, operation_ids=[operation_id]
+        )
         settle_seconds = 0.0
         settled = True
         if strain:
@@ -310,17 +316,38 @@ class ConcurrentIdenticalRetry(Scenario):
 
         if target.uses_gateway:
             return self._gateway_result(
-                target, log, attempts, measurements, extra, risks, ledger_count,
-                layer_requests, preconditions,
+                target,
+                log,
+                attempts,
+                measurements,
+                extra,
+                risks,
+                ledger_count,
+                layer_requests,
+                preconditions,
             )
         if target.configuration is Configuration.DIRECT_NATIVE:
             return self._direct_native_result(
-                target, log, attempts, measurements, extra, risks, ledger_count,
-                layer_requests, preconditions,
+                target,
+                log,
+                attempts,
+                measurements,
+                extra,
+                risks,
+                ledger_count,
+                layer_requests,
+                preconditions,
             )
         return self._direct_naive_result(
-            target, log, attempts, measurements, extra, risks, ledger_count,
-            layer_requests, preconditions,
+            target,
+            log,
+            attempts,
+            measurements,
+            extra,
+            risks,
+            ledger_count,
+            layer_requests,
+            preconditions,
         )
 
     # -- measurement hygiene ---------------------------------------------
@@ -369,7 +396,9 @@ class ConcurrentIdenticalRetry(Scenario):
             await asyncio.sleep(STRAIN_SETTLE_INTERVAL_SECONDS)
             waited = round(waited + STRAIN_SETTLE_INTERVAL_SECONDS, 3)
             current = await self.measure(target, attempts, operation_ids=[operation_id])
-            stable = stable + 1 if _fingerprint(current) == _fingerprint(measurements) else 0
+            stable = (
+                stable + 1 if _fingerprint(current) == _fingerprint(measurements) else 0
+            )
             measurements = current
             busy = self._gateway_busy(current)
             if busy is False and stable >= 1:
@@ -634,7 +663,9 @@ class ConcurrentIdenticalRetry(Scenario):
 
         answered = [a for a in attempts if a.status == "success"]
         in_progress = [a for a in attempts if a.status == "in_progress"]
-        receipt_ids = sorted({a.receipt_id for a in answered if a.receipt_id is not None})
+        receipt_ids = sorted(
+            {a.receipt_id for a in answered if a.receipt_id is not None}
+        )
         without_receipt = sum(1 for a in answered if a.receipt_id is None)
         outcomes = measurements.receipt_outcomes()
 

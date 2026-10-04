@@ -99,7 +99,7 @@ You reused an `Idempotency-Key` with different payload. Use a fresh UUID for eac
 - REST `422 Unprocessable Entity`: the body failed schema validation (for example `name` is missing). The REST body spells the context `mcp_context`, not `mcpContext`.
 
 ### `delivery_uncertain` receipt
-The upstream MCP server accepted the request but the response was lost in transit. The charge stands. Do not retry automatically — inspect the upstream state manually. See [docs/partner-first-tool-runbook.md](docs/partner-first-tool-runbook.md).
+The gateway claimed a send but has no trustworthy terminal result. Delivery and the downstream effect may or may not have occurred; this receipt does not prove upstream acceptance or execution. Under the configured conservative policy, the charge stands and replaying the same key returns the uncertain outcome without redispatching. Do not retry automatically. Reconcile against authoritative downstream state before making a new attempt. See [docs/partner-first-tool-runbook.md](docs/partner-first-tool-runbook.md).
 
 ---
 

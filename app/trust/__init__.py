@@ -85,6 +85,7 @@ from .metering import (
     get_agent_money,
 )
 from .permits import (
+    PermitCreationRejectedError,
     PermitError,
     PermitService,
     PermitValidation,
@@ -188,6 +189,7 @@ __all__ = [
     "human_approval_configured",
     "approval_window_seconds",
     # permits
+    "PermitCreationRejectedError",
     "PermitService",
     "PermitValidation",
     "PermitError",
