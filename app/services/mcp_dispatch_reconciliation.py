@@ -13,7 +13,7 @@ from typing import Any, cast
 from sqlalchemy import select
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.core.config import get_settings
+from app.core.config import DuplicateGuardMode, get_settings
 from app.core.time import to_naive_utc, utc_now
 from app.db.database import get_session_factory
 from app.db.models import (
@@ -25,6 +25,7 @@ from app.db.models import (
 from app.schemas.trust import ReceiptResponse
 from app.services.agent_money import AgentMoney, get_agent_money
 from app.services.audit_log import AuditEvent, record_audit_event
+from app.services.jev_guard_metadata import jev_audit_id, load_jev_guard_metadata
 from app.services.idempotency import IdempotencyService, get_idempotency_service
 from app.services.mcp_dispatch_attempts import (
     DISPATCH_SENT_STATES,
@@ -577,6 +578,13 @@ class McpDispatchReconciliationService:
         }
         if attempt.approval_id is not None:
             metadata["approval_id"] = attempt.approval_id
+        if get_settings().JEV_RISK_GUARD != DuplicateGuardMode.OFF:
+            jev = await load_jev_guard_metadata(
+                jev_audit_id(attempt.wallet_id, context.endpoint, context.idempotency_key),
+                attempt.wallet_id,
+            )
+            if jev is not None:
+                metadata["jev_risk_guard"] = jev
         return await record_audit_event(
             event="mcp.invoke",
             # The event id is part of the signed audit payload and its primary
