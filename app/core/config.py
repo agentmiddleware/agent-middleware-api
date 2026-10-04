@@ -146,6 +146,13 @@ class Settings(BaseSettings):
     # - "log": detect and log duplicates but allow them (observe mode, default)
     # - "enforce": refuse duplicate requests with duplicate_request_new_key
     MCP_UPSTREAM_DUPLICATE_GUARD: DuplicateGuardMode = DuplicateGuardMode.LOG
+    # Probabilistic advisory check; enabling it sends redacted state to TypeSafe.
+    JEV_RISK_GUARD: DuplicateGuardMode = DuplicateGuardMode.OFF
+    JEV_RISK_GUARD_MODEL: str = "jev-1.13.0"
+    JEV_RISK_GUARD_TIMEOUT_SECONDS: float = 1.5
+    JEV_RISK_GUARD_TIERS: str = "medium,high"
+    TYPESAFE_API_KEY: SecretStr = SecretStr("")
+    TYPESAFE_BASE_URL: str = "https://api.typesafe.ai"
     # Default repeat detection window in seconds. Duplicates outside this window
     # are not detected.
     MCP_UPSTREAM_DUPLICATE_WINDOW_SECONDS: int = 86400  # 24 hours

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — planned v1.3.0
 
+### Added — optional Jev risk advice
+
+- `JEV_RISK_GUARD=off|log|enforce` (default `off`): pinned TypeSafe Jev
+  `jev-1.13.0` advice after deterministic policy allows an invoke. Log mode
+  never blocks; enforce mode reuses human approval for escalations and denies
+  ungoverned calls with `jev_risk_review_required`. Vendor failures fail open.
+  Redacted/truncated state leaves the gateway only after operator opt-in.
+  Model/version/status evidence is retained in signed audit and receipt
+  metadata, including upstream reconciliation. See
+  [`docs/jev-risk-guard.md`](docs/jev-risk-guard.md).
+
 The next release consolidates the accumulated trust-plane and public-product
 work as `v1.3.0`. Create that tag only from the exact commit that passes the
 full release gate; do not backfill a final `v1.2.0` tag.
