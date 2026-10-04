@@ -3,6 +3,7 @@
 Optional generative/schema tooling is installed by docs/qa/2026-10-02/
 requirements-qa.txt. Product behavior is deliberately unchanged.
 """
+
 from __future__ import annotations
 
 import json
@@ -30,29 +31,36 @@ async def qa_client():
         yield client
 
 
-@pytest.mark.parametrize("method,path", [
-    ("GET", "/v1/permits"),
-    ("POST", "/v1/permits"),
-    ("GET", "/v1/receipts"),
-    ("GET", "/v1/receipts/missing"),
-    ("GET", "/v1/billing/wallets"),
-    ("POST", "/v1/billing/charge"),
-    ("GET", "/v1/audit/events"),
-    ("POST", "/v1/audit/verify-chain"),
-    ("GET", "/v1/me/authority"),
-    ("GET", "/v1/api-keys/missing"),
-    ("POST", "/mcp/messages"),
-    ("POST", "/mcp/tools/missing/invoke"),
-])
+@pytest.mark.parametrize(
+    "method,path",
+    [
+        ("GET", "/v1/permits"),
+        ("POST", "/v1/permits"),
+        ("GET", "/v1/receipts"),
+        ("GET", "/v1/receipts/missing"),
+        ("GET", "/v1/billing/wallets"),
+        ("POST", "/v1/billing/charge"),
+        ("GET", "/v1/audit/events"),
+        ("POST", "/v1/audit/verify-chain"),
+        ("GET", "/v1/me/authority"),
+        ("GET", "/v1/api-keys/missing"),
+        ("POST", "/mcp/messages"),
+        ("POST", "/mcp/tools/missing/invoke"),
+    ],
+)
 @pytest.mark.parametrize("credential", ["absent", "invalid-bearer"])
 async def test_sensitive_route_rejects_unauthenticated_caller(
     qa_client, method, path, credential
 ):
     # A malformed Authorization header must not fall back to a valid bootstrap key.
-    headers = {} if credential == "absent" else {
-        "Authorization": "Bearer malformed",
-        "X-API-Key": "test-key",
-    }
+    headers = (
+        {}
+        if credential == "absent"
+        else {
+            "Authorization": "Bearer malformed",
+            "X-API-Key": "test-key",
+        }
+    )
     response = await qa_client.request(method, path, headers=headers, json={})
     assert response.status_code == 401
     assert response.headers["content-type"].startswith("application/json")
@@ -109,11 +117,15 @@ def test_scalar_unicode_replay_keys_roundtrip_without_normalization():
     )
 
     @hypothesis.settings(max_examples=200, derandomize=True, deadline=None)
-    @hypothesis.given(st.text(alphabet=alphabet, min_size=1, max_size=128).filter(str.strip))
+    @hypothesis.given(
+        st.text(alphabet=alphabet, min_size=1, max_size=128).filter(str.strip)
+    )
     def check(key):
         decoded = decode_idempotency_key_header(key.encode("utf-8").decode("latin-1"))
         assert decoded == key
-        assert resolve_client_idempotency_key([("header", decoded), ("body", key)]) == key
+        assert (
+            resolve_client_idempotency_key([("header", decoded), ("body", key)]) == key
+        )
         with pytest.raises(InvalidIdempotencyKeyError):
             resolve_client_idempotency_key([("header", key), ("body", key + " ")])
 
@@ -134,9 +146,12 @@ async def test_lone_surrogate_replay_key_is_rejected_before_effect_or_debit(
         )
         before = await _snapshot(qa_client, caller, tool)
         body = {
-            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
             "params": {
-                "name": tool.name, "arguments": {"text": "one"},
+                "name": tool.name,
+                "arguments": {"text": "one"},
                 "mcpContext": {
                     "wallet_id": caller["agent_wallet_id"],
                     "permit_id": permit["permit_id"],

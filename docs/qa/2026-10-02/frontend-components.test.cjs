@@ -127,7 +127,7 @@ test('SDK preserves retry identity, astral boundary and governed headers', async
   assert.equal(requests.length, 3);
 });
 
-test('FE-001: declared SDK build produces its advertised entrypoints', {todo: 'FE-001: npm run build exits 1 because tsconfig.json is absent'}, () => {
+test('FE-001: declared SDK build produces its advertised entrypoints', () => {
   const target = fs.mkdtempSync(path.join(os.tmpdir(), 'amw-qa-sdk-build-'));
   // Copy tracked package source only; no credential or environment files.
   for (const name of ['index.ts', 'package.json', 'LICENSE', 'tsconfig.json']) {

@@ -11,6 +11,24 @@ The next release consolidates the accumulated trust-plane and public-product
 work as `v1.3.0`. Create that tag only from the exact commit that passes the
 full release gate; do not backfill a final `v1.2.0` tag.
 
+### Added — SDK build config and TypeSafe research record
+
+Follow-up to the 2026-10-02 QA fixes merged in #587, which deferred FE-001.
+
+- **FE-001 — the unshipped TypeScript SDK builds as declared.**
+  `awi_sdk/typescript/tsconfig.json` emits `dist/index.js` and
+  `dist/index.d.ts`, the entrypoints `package.json` already advertised. The QA
+  contract test for it now runs as an ordinary regression.
+- **Upstream URL guard message names multicast.** The refusal text of
+  `validate_upstream_url` now lists multicast addresses, matching the check that
+  rejects them.
+- **TypeSafe System One research record.**
+  `docs/research/typesafe-system-one-2026-10-03.md` records the TypeSafe
+  contract and where bounded model judgments do and do not fit this repository.
+  `AGENTS.md` points implementers at it. Research only: no product code or
+  dependency changes, and no new capability without the evidence `AGENTS.md`
+  requires.
+
 ### Changed — duplicate guard observability and release gates
 
 - **Durable duplicate-denial count**: `/health/duplicate-guard` now also
