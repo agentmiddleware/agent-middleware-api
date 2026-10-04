@@ -242,4 +242,7 @@ repository does not use.
 - No cookbook, pricing, rate-limit, or model-card page was read.
 - No request was sent to `api.typesafe.ai`; the contract above is the
   SDK-encoded OpenAPI schema, not observed behavior.
-- No evaluation of Jev's accuracy on any task in this repository exists.
+- This reference-only session performed no accuracy evaluation. A later
+  [independently reviewed synthetic QA checkpoint](jev-advisory-checkpoint-2026-10-03.md)
+  records observed results and limitations; it does not validate AMW behavior
+  or authorize a product integration.
