@@ -12,6 +12,8 @@ from __future__ import annotations
 import asyncio
 import itertools
 import json
+import subprocess
+import sys
 from decimal import Decimal, InvalidOperation
 
 import httpx
@@ -71,9 +73,7 @@ class FakeTrustPlane:
         try:
             max_credits = Decimal(body["max_credits"])
         except (InvalidOperation, TypeError):
-            return httpx.Response(
-                422, json={"detail": [{"type": "decimal_parsing"}]}
-            )
+            return httpx.Response(422, json={"detail": [{"type": "decimal_parsing"}]})
         if max_credits <= 0 and self.fault != "nonpositive-permit-minted":
             return httpx.Response(400, json={"detail": "max_credits_must_be_positive"})
         if max_credits > AGENT_BALANCE:
@@ -183,6 +183,7 @@ def _run_stress(
 
 
 VERDICT_SUB_TESTS = (
+    "test_concurrent_governed_invokes",
     "test_unicode_payload",
     "test_timezone_extremes",
     "test_decimal_precision",
@@ -215,9 +216,7 @@ def test_healthy_server_passes_all_verdict_sub_tests_together(
     ("sub_test", "fault"),
     [
         pytest.param("test_unicode_payload", "emoji-rejected", id="unicode-error"),
-        pytest.param(
-            "test_unicode_payload", "oversized-charged", id="refusal-charged"
-        ),
+        pytest.param("test_unicode_payload", "oversized-charged", id="refusal-charged"),
         pytest.param(
             "test_timezone_extremes", "timezone-rejected", id="timezone-rejected"
         ),
@@ -248,3 +247,107 @@ def test_observed_failure_fails_the_run(
     out = capsys.readouterr().out
     assert "ALL STRESS TESTS PASSED" not in out
     assert "STRESS TEST FAILED" in out
+
+
+@pytest.mark.parametrize(
+    "sub_test", ["test_concurrent_governed_invokes", "test_rapid_fire_idempotency"]
+)
+@pytest.mark.parametrize(
+    "status,body",
+    [
+        (500, {"detail": "synthetic failure"}),
+        (409, {"detail": "in progress"}),
+        (200, []),
+        (200, {"result": {}}),
+        (200, {"jsonrpc": "2.0", "id": 0, "result": None}),
+        (200, {"jsonrpc": "2.0", "id": 0, "error": {"message": "denied"}}),
+        (200, {"jsonrpc": "2.0", "id": 0, "result": {"receipt": {"receipt_id": ""}}}),
+        (200, {"jsonrpc": "2.0", "id": 0, "result": {"receipt": {"receipt_id": 12}}}),
+        (200, {"jsonrpc": "2.0", "id": 0, "result": {"receipt": {"receipt_id": " "}}}),
+    ],
+)
+@pytest.mark.parametrize("partial", [False, True])
+def test_invokes_reject_missing_success_evidence(
+    monkeypatch, sub_test, status, body, partial
+):
+    calls = 0
+
+    async def request(method, path, **kwargs):
+        nonlocal calls
+        if path == "/v1/permits":
+            return httpx.Response(201, json={"permit_id": "synthetic-permit"})
+        calls += 1
+        if partial and calls > 1:
+            return httpx.Response(
+                200,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 0,
+                    "result": {"receipt": {"receipt_id": "synthetic-receipt"}},
+                },
+            )
+        return httpx.Response(status, json=body)
+
+    monkeypatch.setattr(stress, "req", request)
+    with pytest.raises(AssertionError):
+        asyncio.run(getattr(stress, sub_test)("sponsor", "agent"))
+
+
+def test_rapid_replays_send_identical_payloads(monkeypatch):
+    payloads = []
+
+    async def request(method, path, **kwargs):
+        if path == "/v1/permits":
+            return httpx.Response(201, json={"permit_id": "synthetic-permit"})
+        payloads.append(kwargs["json"])
+        return httpx.Response(
+            200,
+            json={
+                "jsonrpc": "2.0",
+                "id": 0,
+                "result": {"receipt": {"receipt_id": "synthetic-receipt"}},
+            },
+        )
+
+    monkeypatch.setattr(stress, "req", request)
+    asyncio.run(stress.test_rapid_fire_idempotency("sponsor", "agent"))
+    assert len(payloads) == 50
+    assert all(payload == payloads[0] for payload in payloads)
+
+
+@pytest.mark.parametrize(
+    "content", [b"invalid JSON", b'{"result":{"receipt":{"receipt_id":"x"}}}']
+)
+def test_success_evidence_rejects_invalid_rpc(content):
+    with pytest.raises(AssertionError):
+        stress.successful_receipt_id(httpx.Response(200, content=content))
+
+
+def test_invoke_checks_still_fail_under_optimized_python():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-O",
+            "-c",
+            """
+import asyncio
+import httpx
+from scripts import stress_test_live as stress
+async def request(method, path, **kwargs):
+    if path == '/v1/permits':
+        return httpx.Response(201, json={'permit_id': 'synthetic'})
+    return httpx.Response(500, json={'detail': 'failure'})
+stress.req = request
+for check in (stress.test_concurrent_governed_invokes, stress.test_rapid_fire_idempotency):
+    try:
+        asyncio.run(check('sponsor', 'agent'))
+    except AssertionError:
+        continue
+    raise SystemExit('check accepted HTTP failure under -O')
+""",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

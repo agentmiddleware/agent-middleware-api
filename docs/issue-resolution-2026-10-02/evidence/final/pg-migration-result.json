@@ -1,0 +1,17 @@
+{
+  "mode": "pg-migration",
+  "command": [
+    "/Users/sellers/Projects/agent-middleware-api/.venv/bin/python",
+    "-m",
+    "pytest",
+    "tests/test_action_migrations.py::test_postgres_legacy_roundtrip_and_fail_closed_downgrade",
+    "-s",
+    "-x",
+    "-q",
+    "-ra"
+  ],
+  "head": "0db19631f8a2de879e77d9b57246c41fb261c243",
+  "exit_code": 0,
+  "started": "2026-10-03T03:44:16.559837+00:00",
+  "finished": "2026-10-03T03:44:23.871619+00:00"
+}

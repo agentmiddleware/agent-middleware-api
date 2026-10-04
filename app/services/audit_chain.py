@@ -6,10 +6,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import asc, desc, select, update
+from sqlalchemy import asc, desc, literal, select, true, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.sql.elements import ColumnElement
+from sqlalchemy.orm import aliased
 
 from app.core.resilience import is_retryable_write_conflict
 from app.core.time import to_naive_utc, utc_now
@@ -467,25 +468,42 @@ async def _verify_single_chain(
 
     factory = get_session_factory()
     async with factory() as session:
-        result = await session.execute(stmt)
-        events = list(result.scalars().all())
-        # Anchor a full-chain verification against the head pointer so tail
-        # truncation (deleting the last K events) is detected -- otherwise a
-        # valid prefix verifies as valid. Only meaningful without a time window,
-        # where the last loaded event must equal the recorded head.
         head = None
         if created_after is None and created_before is None:
-            wallet_key = wallet_id or ""
-            head = (
-                await session.execute(
-                    select(AuditChainHeadModel).where(
-                        cast(
-                            ColumnElement[bool],
-                            AuditChainHeadModel.wallet_key == wallet_key,
-                        )
+            # One statement gives events and head the same database snapshot.
+            # A separate head SELECT could see a legitimate concurrent append
+            # and label the earlier event snapshot as a truncated chain.
+            # Anchor the outer joins to one row so an empty/deleted event set
+            # still loads its head and actual truncation remains detectable.
+            anchor = select(literal(1).label("anchor")).subquery()
+            event_rows = aliased(ControlPlaneAuditEventModel, stmt.subquery())
+            head_rows = aliased(
+                AuditChainHeadModel,
+                select(AuditChainHeadModel)
+                .where(
+                    cast(
+                        ColumnElement[bool],
+                        AuditChainHeadModel.wallet_key == (wallet_id or ""),
                     )
                 )
-            ).scalar_one_or_none()
+                .subquery(),
+            )
+            snapshot = await session.execute(
+                select(event_rows, head_rows)
+                .select_from(anchor)
+                .outerjoin(event_rows, true())
+                .outerjoin(head_rows, true())
+                .order_by(
+                    cast(ColumnElement[Any], event_rows.seq),
+                    cast(ColumnElement[Any], event_rows.created_at),
+                )
+            )
+            rows = snapshot.all()
+            events = [row[0] for row in rows if row[0] is not None]
+            head = rows[0][1] if rows else None
+        else:
+            result = await session.execute(stmt)
+            events = list(result.scalars().all())
 
     # A window that excludes the wallet's genesis event starts mid-chain: the
     # first in-window event legitimately links to an event *outside* the
@@ -497,7 +515,9 @@ async def _verify_single_chain(
         first_seq = events[0].seq
         pred_stmt = (
             select(cast(Any, ControlPlaneAuditEventModel.chain_hash))
-            .where(cast(ColumnElement[bool], ControlPlaneAuditEventModel.seq < first_seq))
+            .where(
+                cast(ColumnElement[bool], ControlPlaneAuditEventModel.seq < first_seq)
+            )
             .order_by(desc(cast(ColumnElement[Any], ControlPlaneAuditEventModel.seq)))
             .limit(1)
         )

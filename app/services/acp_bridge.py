@@ -248,10 +248,7 @@ class ACPCommerceAdapter:
             "stripe_payment_intent_id": payment_intent_id,
             "stripe_payment_status": payment_status,
         }
-        if (
-            not payment_intent_id
-            or payment_status not in _CANCELABLE_STRIPE_STATUSES
-        ):
+        if not payment_intent_id or payment_status not in _CANCELABLE_STRIPE_STATUSES:
             evidence["payment_intent_cancel"] = "not_cancelable"
             return evidence
         try:
@@ -406,8 +403,7 @@ class ACPCommerceAdapter:
                 )
             except Exception:
                 logger.exception(
-                    "Failed to record acp_intent_recovered evidence for "
-                    "order %s",
+                    "Failed to record acp_intent_recovered evidence for order %s",
                     order_id,
                 )
             await self._abandon_intent(
@@ -497,9 +493,7 @@ class ACPCommerceAdapter:
         # short-TTL permit; a wedged intent record has no such expiry).
         async def _rollback() -> None:
             try:
-                await get_permit_service().release_budget(
-                    permit.permit_id, credits
-                )
+                await get_permit_service().release_budget(permit.permit_id, credits)
             except Exception:
                 logger.exception(
                     "ACP rollback failed to release %s credits on permit %s "
@@ -514,8 +508,7 @@ class ACPCommerceAdapter:
                 )
             except Exception:
                 logger.exception(
-                    "ACP rollback failed to abandon the intent record for "
-                    "order %s",
+                    "ACP rollback failed to abandon the intent record for order %s",
                     order_id,
                 )
 

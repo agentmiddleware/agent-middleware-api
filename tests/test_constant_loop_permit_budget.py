@@ -82,7 +82,9 @@ async def test_constant_loop_verifies_permit_spent_credits_increase(
 
     # Step 1: Verify initial spent_credits is 0
     initial_spent = Decimal(str(permit["spent_credits"]))
-    assert initial_spent == Decimal("0"), f"New permit should have 0 spent_credits, got {initial_spent}"
+    assert initial_spent == Decimal("0"), (
+        f"New permit should have 0 spent_credits, got {initial_spent}"
+    )
 
     # Step 2: Invoke the governed tool (success path)
     invoke_resp = await client.post(
@@ -195,7 +197,9 @@ async def test_constant_loop_verifies_permit_spent_credits_replay_safe(
         f"Replay should not increase spent_credits: "
         f"{spent_after_replay} != {spent_after_first}"
     )
-    print(f"✓ Replay did not double-count: spent_credits stayed at {spent_after_replay}")
+    print(
+        f"✓ Replay did not double-count: spent_credits stayed at {spent_after_replay}"
+    )
 
 
 @pytest.mark.asyncio
@@ -252,7 +256,6 @@ async def test_permit_spent_credits_matches_receipt_charged(
     )
     spent_final = Decimal(str(permit_final.json()["spent_credits"]))
     assert spent_final == total_charged, (
-        f"permit spent_credits {spent_final} != "
-        f"sum of charges {total_charged}"
+        f"permit spent_credits {spent_final} != sum of charges {total_charged}"
     )
     print(f"✓ Permit spent_credits matches sum of charges: {spent_final}")

@@ -1622,9 +1622,7 @@ async def test_inflight_governed_debit_blocks_effect_free_abandon_in_postgres(
     assert ledger_rows[0].amount == -credits
     assert receipts == []
 
-    await McpDispatchReconciliationService(
-        dispatch_service=dispatch
-    ).reconcile_attempt(
+    await McpDispatchReconciliationService(dispatch_service=dispatch).reconcile_attempt(
         attempt.attempt_id,
         prepared_error_code="reconciled_stale_prepared",
     )
@@ -2541,3 +2539,90 @@ async def test_concurrent_remote_cap_1_with_delivery_uncertain_blocks_all() -> N
         assert attempts[0].state == "delivery_uncertain"
     finally:
         get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_permit_request_lock_wait_crossing_deadline_rolls_back_all_mint_claims(
+    monkeypatch,
+):
+    """A real row-lock wait must not admit an approval using pre-wait time."""
+    import app.services.permit_requests as requests_module
+    from app.db.models import PermitRequestModel
+    from tests.test_permit_request_flow import FakeSentinel, _request, _sentinel_env
+
+    _require_opted_in_postgres()
+    _sentinel_env(monkeypatch, simulated=False)
+    service = requests_module.PermitRequestService()
+    provider = FakeSentinel("approved")
+    monkeypatch.setattr(requests_module, "_service", service)
+    monkeypatch.setattr(service, "_sentinel", lambda: provider)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        agent = await provision_agent_wallet(client)
+        response = await _request(client, agent, idem="postgres-deadline-wait")
+        assert response.status_code == 202
+    model = await service._load(response.json()["request_id"])
+    assert model is not None
+    clock = [utc_now()]
+    monkeypatch.setattr(requests_module, "utc_now", lambda: clock[0])
+    factory = get_session_factory()
+    tasks = []
+    try:
+        async with factory() as blocker:
+            async with blocker.begin():
+                await blocker.execute(
+                    select(PermitRequestModel)
+                    .where(PermitRequestModel.request_id == model.request_id)
+                    .with_for_update()
+                )
+                tasks = [
+                    asyncio.create_task(service._decide(model, "approved"))
+                    for _ in range(2)
+                ]
+                # Verify both UPDATE statements really entered a database wait.
+                # Advance the application clock only after this deterministic seam.
+                for _ in range(200):
+                    async with factory() as observer:
+                        waiting = await observer.scalar(
+                            text(
+                                "SELECT count(*) FROM pg_stat_activity "
+                                "WHERE datname = current_database() AND wait_event_type = 'Lock' "
+                                "AND query LIKE 'UPDATE permit_requests SET%'"
+                            )
+                        )
+                    if waiting == 2:
+                        break
+                    await asyncio.sleep(0.01)
+                assert waiting == 2, (
+                    "both claimers must be blocked before time advances"
+                )
+                clock[0] = model.expires_at + timedelta(seconds=1)
+            # Releasing the unchanged row leaves the UPDATE's initial time stale.
+        outcomes = await asyncio.wait_for(asyncio.gather(*tasks), timeout=10)
+        assert [outcome.status for outcome in outcomes] == ["expired", "expired"]
+        async with factory() as session:
+            stored = await session.get(PermitRequestModel, model.request_id)
+            assert stored.status == "expired"
+            assert stored.reason == "approval_window_elapsed"
+            assert stored.permit_id is None
+            assert stored.mint_started_at is None
+            assert await session.get(PermitModel, model.reserved_permit_id) is None
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        async with factory() as session:
+            await session.execute(
+                delete(PermitModel).where(
+                    PermitModel.permit_id == model.reserved_permit_id
+                )
+            )
+            await session.execute(
+                delete(PermitRequestModel).where(
+                    PermitRequestModel.request_id == model.request_id
+                )
+            )
+            await session.commit()

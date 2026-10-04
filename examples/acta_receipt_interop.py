@@ -221,7 +221,10 @@ def sign_acta_receipt(
             f"got issuer_id={receipt.get('issuer_id')!r} kid={kid!r}"
         )
     signature = private_key.sign(jcs_canonicalize(receipt))
-    return {**receipt, "signature": {"alg": "Ed25519", "kid": kid, "sig": signature.hex()}}
+    return {
+        **receipt,
+        "signature": {"alg": "Ed25519", "kid": kid, "sig": signature.hex()},
+    }
 
 
 def verify_acta_receipt(
@@ -248,9 +251,7 @@ def verify_acta_receipt(
     if issuer_id != kid:
         raise TranscodeError("issuer_id does not match the signature kid")
     try:
-        public_key.verify(
-            bytes.fromhex(signature_block["sig"]), jcs_canonicalize(body)
-        )
+        public_key.verify(bytes.fromhex(signature_block["sig"]), jcs_canonicalize(body))
     except (InvalidSignature, ValueError) as exc:
         raise TranscodeError("ACTA envelope signature does not verify") from exc
     return body
@@ -270,9 +271,7 @@ def _demo(bundle_path: str) -> int:
         if entry["kid"] == bundle["kid"]
     )
 
-    verified = verify_portable_bundle(
-        bundle, key_b64, expected_issuer=keys["issuer"]
-    )
+    verified = verify_portable_bundle(bundle, key_b64, expected_issuer=keys["issuer"])
     print(f"inner signature: VERIFIED (kid={verified.kid})")
 
     transcoder_key = Ed25519PrivateKey.generate()
@@ -288,4 +287,6 @@ def _demo(bundle_path: str) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(_demo(sys.argv[1] if len(sys.argv) > 1 else "site/proof/receipt.json"))
+    raise SystemExit(
+        _demo(sys.argv[1] if len(sys.argv) > 1 else "site/proof/receipt.json")
+    )

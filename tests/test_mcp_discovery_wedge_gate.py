@@ -127,9 +127,7 @@ async def test_root_and_discover_hide_unmounted_proof_services(
     from tests.conftest import iter_routes
 
     billing_endpoints = root_data["services"]["agent_billing"]["endpoints"]
-    mounted_paths = {
-        getattr(route, "path", "") for route in iter_routes(app.routes)
-    }
+    mounted_paths = {getattr(route, "path", "") for route in iter_routes(app.routes)}
     for entry in billing_endpoints:
         _method, _, path = entry.partition(" ")
         assert path in mounted_paths, f"root advertises unmounted {entry}"
@@ -140,8 +138,10 @@ async def test_root_and_discover_hide_unmounted_proof_services(
         "/v1/billing/arbitrage",
         "/v1/billing/alerts",
     ):
-        assert not any(path == gated for _m, _, path in
-                       (e.partition(" ") for e in billing_endpoints))
+        assert not any(
+            path == gated
+            for _m, _, path in (e.partition(" ") for e in billing_endpoints)
+        )
 
     discover = await client.get("/v1/discover")
     assert discover.status_code == 200

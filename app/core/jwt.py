@@ -25,13 +25,13 @@ from app.services.signing_keys import _decode_private_key
 JWT_ALGORITHM = "EdDSA"
 JWT_ISSUER = "agent-middleware-api"
 JWT_AUDIENCE = "agent-middleware-api"
-JWT_ACCESS_EXPIRY = 900   # 15 minutes
+JWT_ACCESS_EXPIRY = 900  # 15 minutes
 JWT_REFRESH_EXPIRY = 604800  # 7 days
 
 
 @dataclass(frozen=True)
 class JWTPayload:
-    sub: str          # wallet_id
+    sub: str  # wallet_id
     key_id: str | None
     scopes: list[str]
     # Epoch seconds, as PyJWT decodes them. Callers that need a datetime
@@ -40,8 +40,8 @@ class JWTPayload:
     exp: int
     iss: str
     aud: str
-    jti: str          # unique token id
-    type: str         # access | refresh
+    jti: str  # unique token id
+    type: str  # access | refresh
 
 
 class JWTError(Exception):
@@ -96,7 +96,9 @@ class JWTService:
 
         return jwt.encode(payload, private_key, algorithm=JWT_ALGORITHM)
 
-    def create_refresh_token(self, wallet_id: str) -> str:
+    def create_refresh_token(
+        self, wallet_id: str, scopes: list[str] | None = None
+    ) -> str:
         """Create a long-lived refresh token."""
         private_key, signing_key_id = self._load_keys()
         now = datetime.now(timezone.utc)
@@ -110,6 +112,7 @@ class JWTService:
             "aud": JWT_AUDIENCE,
             "jti": jti,
             "type": "refresh",
+            "scopes": scopes if scopes is not None else [],
             "kid": signing_key_id,
         }
 
@@ -145,10 +148,16 @@ class JWTService:
         if payload.get("type") != token_type:
             raise JWTError(f"token_type_mismatch: expected {token_type}")
 
+        scopes = payload.get("scopes")
+        if not isinstance(scopes, list) or not all(
+            isinstance(scope, str) for scope in scopes
+        ):
+            raise JWTError("invalid_or_missing_scopes")
+
         return JWTPayload(
             sub=payload["sub"],
             key_id=payload.get("key_id"),
-            scopes=payload.get("scopes", []),
+            scopes=scopes,
             iat=payload["iat"],
             exp=payload["exp"],
             iss=payload["iss"],

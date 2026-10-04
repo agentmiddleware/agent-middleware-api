@@ -23,11 +23,15 @@ HEADERS = {"X-API-Key": "test-key"}
 @pytest.mark.anyio
 async def test_create_pattern_environment(client):
     """Create a pattern-discovery sandbox."""
-    resp = await client.post("/v1/sandbox/environments", json={
-        "env_type": "pattern",
-        "difficulty": "medium",
-        "seed": 42,
-    }, headers=HEADERS)
+    resp = await client.post(
+        "/v1/sandbox/environments",
+        json={
+            "env_type": "pattern",
+            "difficulty": "medium",
+            "seed": 42,
+        },
+        headers=HEADERS,
+    )
     assert resp.status_code == 201
     data = resp.json()
     assert data["env_type"] == "pattern"
@@ -38,10 +42,14 @@ async def test_create_pattern_environment(client):
 @pytest.mark.anyio
 async def test_create_navigation_environment(client):
     """Create a navigation sandbox."""
-    resp = await client.post("/v1/sandbox/environments", json={
-        "env_type": "navigation",
-        "difficulty": "hard",
-    }, headers=HEADERS)
+    resp = await client.post(
+        "/v1/sandbox/environments",
+        json={
+            "env_type": "navigation",
+            "difficulty": "hard",
+        },
+        headers=HEADERS,
+    )
     assert resp.status_code == 201
     assert resp.json()["env_type"] == "navigation"
 
@@ -49,10 +57,14 @@ async def test_create_navigation_environment(client):
 @pytest.mark.anyio
 async def test_create_api_mock_environment(client):
     """Create an API mock sandbox."""
-    resp = await client.post("/v1/sandbox/environments", json={
-        "env_type": "api_mock",
-        "difficulty": "easy",
-    }, headers=HEADERS)
+    resp = await client.post(
+        "/v1/sandbox/environments",
+        json={
+            "env_type": "api_mock",
+            "difficulty": "easy",
+        },
+        headers=HEADERS,
+    )
     assert resp.status_code == 201
     assert resp.json()["env_type"] == "api_mock"
 
@@ -60,10 +72,14 @@ async def test_create_api_mock_environment(client):
 @pytest.mark.anyio
 async def test_create_adversarial_environment(client):
     """Create an adversarial sandbox."""
-    resp = await client.post("/v1/sandbox/environments", json={
-        "env_type": "adversarial",
-        "difficulty": "extreme",
-    }, headers=HEADERS)
+    resp = await client.post(
+        "/v1/sandbox/environments",
+        json={
+            "env_type": "adversarial",
+            "difficulty": "extreme",
+        },
+        headers=HEADERS,
+    )
     assert resp.status_code == 201
     assert resp.json()["env_type"] == "adversarial"
 
@@ -71,15 +87,23 @@ async def test_create_adversarial_environment(client):
 @pytest.mark.anyio
 async def test_submit_action(client):
     """Agent can submit actions to the environment."""
-    create = await client.post("/v1/sandbox/environments", json={
-        "env_type": "pattern",
-        "difficulty": "easy",
-    }, headers=HEADERS)
+    create = await client.post(
+        "/v1/sandbox/environments",
+        json={
+            "env_type": "pattern",
+            "difficulty": "easy",
+        },
+        headers=HEADERS,
+    )
     env_id = create.json()["env_id"]
 
-    resp = await client.post(f"/v1/sandbox/environments/{env_id}/actions", json={
-        "action": {"type": "observe", "value": "grid"},
-    }, headers=HEADERS)
+    resp = await client.post(
+        f"/v1/sandbox/environments/{env_id}/actions",
+        json={
+            "action": {"type": "observe", "value": "grid"},
+        },
+        headers=HEADERS,
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert "step" in data
@@ -91,16 +115,24 @@ async def test_submit_action(client):
 @pytest.mark.anyio
 async def test_solve_pattern_environment(client):
     """Agent can solve a pattern puzzle by guessing the transform."""
-    create = await client.post("/v1/sandbox/environments", json={
-        "env_type": "pattern",
-        "difficulty": "easy",
-        "seed": 100,
-    }, headers=HEADERS)
+    create = await client.post(
+        "/v1/sandbox/environments",
+        json={
+            "env_type": "pattern",
+            "difficulty": "easy",
+            "seed": 100,
+        },
+        headers=HEADERS,
+    )
     env_id = create.json()["env_id"]
 
-    resp = await client.post(f"/v1/sandbox/environments/{env_id}/actions", json={
-        "action": {"type": "submit_transform", "value": "rotate"},
-    }, headers=HEADERS)
+    resp = await client.post(
+        f"/v1/sandbox/environments/{env_id}/actions",
+        json={
+            "action": {"type": "submit_transform", "value": "rotate"},
+        },
+        headers=HEADERS,
+    )
     data = resp.json()
     # Depending on seed, may or may not solve, but should accept action
     assert data["action_accepted"] is True
@@ -109,18 +141,28 @@ async def test_solve_pattern_environment(client):
 @pytest.mark.anyio
 async def test_evaluate_environment(client):
     """Evaluation returns generalization score."""
-    create = await client.post("/v1/sandbox/environments", json={
-        "env_type": "pattern",
-        "difficulty": "medium",
-    }, headers=HEADERS)
+    create = await client.post(
+        "/v1/sandbox/environments",
+        json={
+            "env_type": "pattern",
+            "difficulty": "medium",
+        },
+        headers=HEADERS,
+    )
     env_id = create.json()["env_id"]
 
     # Do a few actions first
-    await client.post(f"/v1/sandbox/environments/{env_id}/actions", json={
-        "action": {"type": "observe"},
-    }, headers=HEADERS)
+    await client.post(
+        f"/v1/sandbox/environments/{env_id}/actions",
+        json={
+            "action": {"type": "observe"},
+        },
+        headers=HEADERS,
+    )
 
-    resp = await client.post(f"/v1/sandbox/environments/{env_id}/evaluate", headers=HEADERS)
+    resp = await client.post(
+        f"/v1/sandbox/environments/{env_id}/evaluate", headers=HEADERS
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert "generalization_score" in data
@@ -132,9 +174,13 @@ async def test_evaluate_environment(client):
 @pytest.mark.anyio
 async def test_list_environments(client):
     """Can list all sandbox environments."""
-    await client.post("/v1/sandbox/environments", json={
-        "env_type": "pattern",
-    }, headers=HEADERS)
+    await client.post(
+        "/v1/sandbox/environments",
+        json={
+            "env_type": "pattern",
+        },
+        headers=HEADERS,
+    )
 
     resp = await client.get("/v1/sandbox/environments", headers=HEADERS)
     assert resp.status_code == 200
@@ -144,9 +190,13 @@ async def test_list_environments(client):
 @pytest.mark.anyio
 async def test_get_environment_by_id(client):
     """Can retrieve a specific environment."""
-    create = await client.post("/v1/sandbox/environments", json={
-        "env_type": "navigation",
-    }, headers=HEADERS)
+    create = await client.post(
+        "/v1/sandbox/environments",
+        json={
+            "env_type": "navigation",
+        },
+        headers=HEADERS,
+    )
     env_id = create.json()["env_id"]
 
     resp = await client.get(f"/v1/sandbox/environments/{env_id}", headers=HEADERS)
@@ -163,10 +213,14 @@ async def test_environment_not_found(client):
 @pytest.mark.anyio
 async def test_state_hides_rules(client):
     """Environment state should NOT expose hidden rules."""
-    create = await client.post("/v1/sandbox/environments", json={
-        "env_type": "pattern",
-        "difficulty": "hard",
-    }, headers=HEADERS)
+    create = await client.post(
+        "/v1/sandbox/environments",
+        json={
+            "env_type": "pattern",
+            "difficulty": "hard",
+        },
+        headers=HEADERS,
+    )
     data = create.json()
     state = data["state"]
     assert "hidden_rules" not in str(state).lower() or "hidden_rules" not in state
@@ -174,9 +228,12 @@ async def test_state_hides_rules(client):
 
 @pytest.mark.anyio
 async def test_sandbox_requires_api_key(client):
-    resp = await client.post("/v1/sandbox/environments", json={
-        "env_type": "pattern",
-    })
+    resp = await client.post(
+        "/v1/sandbox/environments",
+        json={
+            "env_type": "pattern",
+        },
+    )
     assert resp.status_code in (401, 403)
 
 
@@ -232,8 +289,9 @@ async def test_sandbox_lifecycle_records_governance_audit_events(
         by_request_id["req-sandbox-evaluate"].endpoint
         == f"/v1/sandbox/environments/{env_id}/evaluate"
     )
-    assert by_request_id["req-sandbox-evaluate"].metadata["generalization_score"] == (
-        evaluate.json()["generalization_score"]
+    assert (
+        by_request_id["req-sandbox-evaluate"].metadata["generalization_score"]
+        == (evaluate.json()["generalization_score"])
     )
 
 
@@ -345,9 +403,7 @@ async def test_sandbox_env_not_accessible_across_tenants(client, clean_database)
     assert owner_eval.json()["env_id"] == env_id
 
     # Bootstrap admins keep cross-tenant access.
-    admin_view = await client.get(
-        f"/v1/sandbox/environments/{env_id}", headers=HEADERS
-    )
+    admin_view = await client.get(f"/v1/sandbox/environments/{env_id}", headers=HEADERS)
     assert admin_view.status_code == 200
     assert admin_view.json()["action_count"] == 1
 

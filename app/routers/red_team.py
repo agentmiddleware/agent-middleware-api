@@ -63,11 +63,11 @@ def _scan_owner_scope(auth: AuthContext) -> str | None:
     "/scans",
     response_model=ScanResponse,
     status_code=202,
-    summary="Launch Red Team scan",
+    summary="Run a simulated Red Team scan",
     description=(
-        "Deploy the security swarm to attack specified services with selected "
-        "attack categories. Returns immediately with scan ID; the swarm runs "
-        "asynchronously. Default: full scan of all services with all vectors."
+        "Model the scan lifecycle for the selected services and attack categories. "
+        "Returns a simulated report synchronously. Sends no attack traffic and "
+        "provides no evidence of security or release readiness."
     ),
 )
 async def launch_scan(
@@ -96,9 +96,9 @@ async def launch_scan(
 @router.get(
     "/scans",
     response_model=ScanListResponse,
-    summary="List all security scans",
+    summary="List simulated security scans",
     description=(
-        "Returns the caller's historical scan reports, newest first "
+        "Returns the caller's historical simulated scan reports, newest first "
         "(every scan for a bootstrap admin)."
     ),
 )
@@ -114,9 +114,9 @@ async def list_scans(
 @router.get(
     "/scans/{scan_id}",
     response_model=ScanReport,
-    summary="Get scan report",
+    summary="Get simulated scan report",
     description=(
-        "Returns the full security scan report including all discovered "
+        "Returns the simulated security scan report including all modeled "
         "vulnerabilities, severity breakdown, security score, and "
         "prioritized remediation recommendations."
     ),
@@ -136,11 +136,10 @@ async def get_scan_report(
 @router.get(
     "/scans/{scan_id}/vulnerabilities",
     response_model=VulnerabilityListResponse,
-    summary="Get vulnerabilities from a scan",
+    summary="Get simulated findings from a scan",
     description=(
-        "Returns just the vulnerabilities from a scan, optionally filtered "
-        "by severity. Machine-readable format for the Autonomous PM "
-        "to auto-generate fix PRs."
+        "Returns modeled findings from a simulated scan, optionally filtered "
+        "by severity. These are not findings from live security testing."
     ),
 )
 async def get_vulnerabilities(
@@ -168,11 +167,12 @@ async def get_vulnerabilities(
 @router.post(
     "/scans/quick",
     response_model=ScanReport,
-    summary="Quick security check",
+    summary="Quick simulated security scan",
     description=(
-        "Runs a fast, surface-level scan focused on CRITICAL and HIGH severity "
-        "vectors only (ACL bypass, auth probes, privilege escalation). "
-        "Returns the full report synchronously — use for CI/CD gates."
+        "Models CRITICAL and HIGH severity vectors (ACL bypass, auth probes, "
+        "privilege escalation) and returns a simulated report synchronously. "
+        "Sends no attack traffic. This report cannot validate security or "
+        "serve as a release gate."
     ),
 )
 async def quick_scan(

@@ -192,7 +192,11 @@ def test_an_unknown_signed_kid_is_not_a_silent_pass(signed_bundle):
 def test_disabled_keys_are_dropped_from_the_key_set():
     document = {
         "keys": [
-            {"kid": "live", "alg": "Ed25519", "public_key_b64": base64.b64encode(bytes(32)).decode()},
+            {
+                "kid": "live",
+                "alg": "Ed25519",
+                "public_key_b64": base64.b64encode(bytes(32)).decode(),
+            },
             {
                 "kid": "revoked",
                 "alg": "Ed25519",

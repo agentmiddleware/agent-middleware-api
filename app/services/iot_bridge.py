@@ -89,6 +89,15 @@ class TopicACLEngine:
         if not acl:
             return False  # Deny-by-default
 
+        # Denials apply across all matching rules, even when an allow is more
+        # specific or appeared first in the supplied mapping.
+        for pattern, permission in acl.items():
+            if permission == ACLPermission.DENY and (
+                pattern == topic
+                or re.match(TopicACLEngine._topic_to_regex(pattern), topic)
+            ):
+                return False
+
         matched_permission: ACLPermission | None = None
 
         # Check exact match first
@@ -111,10 +120,7 @@ class TopicACLEngine:
         if matched_permission is None or matched_permission == ACLPermission.DENY:
             return False
 
-        if required == ACLPermission.WRITE and matched_permission == ACLPermission.READ:
-            return False
-
-        return True
+        return matched_permission in (required, ACLPermission.READ_WRITE)
 
 
 # ---------------------------------------------------------------------------

@@ -50,9 +50,7 @@ def _base_model(**overrides: object) -> PermitModel:
         issuer_wallet_id="agt-golden-issuer",
         subject_wallet_id="agt-golden-subject",
         subject_key_id="key_golden_0001",
-        scopes_json=json.dumps(
-            ["tool:golden-path-echo:invoke", "billing:charge"]
-        ),
+        scopes_json=json.dumps(["tool:golden-path-echo:invoke", "billing:charge"]),
         allowed_tools_json=json.dumps(["golden-path-echo"]),
         max_credits=Decimal("50.00000000"),
         spent_credits=Decimal("0"),
@@ -226,9 +224,7 @@ def test_unsigned_payload_is_verification_without_folded_fields(name: str) -> No
 @pytest.mark.parametrize("name", sorted(CASES))
 def test_sdk_local_validator_matches_server_bytes(name: str) -> None:
     """LocalPermitValidator must reconstruct the same canonical bytes."""
-    sdk_payload = LocalPermitValidator.permit_signing_payload(
-        _api_shaped(CASES[name])
-    )
+    sdk_payload = LocalPermitValidator.permit_signing_payload(_api_shaped(CASES[name]))
     assert sdk_canonical_json(sdk_payload) == _signing_input(name)
 
 

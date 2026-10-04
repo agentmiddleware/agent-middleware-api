@@ -10,7 +10,6 @@ Tests for:
 """
 
 import asyncio
-import tempfile
 import pytest
 from decimal import Decimal
 
@@ -26,6 +25,23 @@ from app.services.service_registry import (
 from app.services.mcp_generator import McpGenerator, get_mcp_generator
 from app.schemas.billing import ServiceCategory
 from pydantic import BaseModel
+
+
+@pytest.mark.parametrize(
+    "schema", [None, {}, {"type": "object", "properties": {"id": {"type": "integer"}}}]
+)
+def test_manifest_normalizes_only_missing_or_null_input_schema(schema):
+    generator = McpGenerator()
+    service = {"service_id": "schema-fixture", "input_schema": schema}
+    tool = generator._service_to_mcp_tool(service)
+    assert tool["inputSchema"] == (
+        {"type": "object", "properties": {}} if schema is None else schema
+    )
+    service.pop("input_schema")
+    assert generator._service_to_mcp_tool(service)["inputSchema"] == {
+        "type": "object",
+        "properties": {},
+    }
 
 
 class TestSchemaExtraction:
@@ -342,40 +358,34 @@ class TestMcpGenerator:
         assert tool["annotations"]["creditsPerCall"] == 25.0
         assert tool["annotations"]["providerWallet"] == "wallet-123"
 
-    def test_generate_standalone_server(self, generator):
+    @pytest.mark.parametrize("existing", [False, True])
+    def test_generate_standalone_server_refuses_without_effects(
+        self, generator, tmp_path, existing
+    ):
         gen, registry = generator
 
         async def service1(url: str):
             return {"url": url}
 
         registry.register_local(
-            service_id="my-service",
-            name="My Service",
-            description="My service description",
+            service_id="partner.search",
+            name="Partner Search",
+            description="Synthetic legacy service",
             category=ServiceCategory.CONTENT_FACTORY,
             func=service1,
         )
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
-            output_path = f.name
-
-        try:
+        output = tmp_path / "server.py"
+        if existing:
+            output.write_text("keep existing file")
+        with pytest.raises(RuntimeError, match="retired.*governed.*POST /mcp/messages"):
             gen.generate_standalone_server(
-                output_path=output_path,
-                title="Test MCP Server",
+                output_path=str(output), title="Test MCP Server", transport="sse"
             )
-
-            with open(output_path) as f:
-                content = f.read()
-
-            assert "Test MCP Server" in content
-            assert "@mcp.tool()" in content
-            assert "my_service" in content
-            assert "call_b2a_service" in content
-        finally:
-            import os
-
-            os.unlink(output_path)
+        assert (
+            output.read_text() == "keep existing file"
+            if existing
+            else not output.exists()
+        )
 
 
 class TestMcpGeneratorAsync:

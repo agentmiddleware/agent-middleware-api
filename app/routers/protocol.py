@@ -151,9 +151,7 @@ async def list_generations(
     auth: AuthContext = Depends(get_auth_context),
     engine: ProtocolEngine = Depends(get_protocol_engine),
 ):
-    gens = [
-        g for g in await engine.list_generations() if _can_read_generation(auth, g)
-    ]
+    gens = [g for g in await engine.list_generations() if _can_read_generation(auth, g)]
     return GenerationListResponse(
         generations=[
             {

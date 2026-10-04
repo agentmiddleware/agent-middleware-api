@@ -93,30 +93,37 @@ class FakeUpstreamExecutor:
         idempotency_key: str,
         before_dispatch: Callable[[], Awaitable[None]],
     ) -> UpstreamMcpResult:
-        self.calls.append({
-            "arguments": arguments,
-            "invocation_id": invocation_id,
-            "idempotency_key": idempotency_key,
-        })
-        
+        self.calls.append(
+            {
+                "arguments": arguments,
+                "invocation_id": invocation_id,
+                "idempotency_key": idempotency_key,
+            }
+        )
+
         if self.mode == "pre_dispatch_failure":
             raise UpstreamMcpPreDispatchError("upstream_connection_failed")
-        
+
         await before_dispatch()
         self.dispatch_count += 1
-        
+
         if self.mode == "returned_error":
             raise UpstreamMcpReturnedError(
                 _upstream_result(
-                    self.result_payload if self.result_payload is not None
-                    else {"content": [{"type": "text", "text": "error"}], "isError": True}
+                    self.result_payload
+                    if self.result_payload is not None
+                    else {
+                        "content": [{"type": "text", "text": "error"}],
+                        "isError": True,
+                    }
                 )
             )
         if self.mode == "delivery_uncertain":
             raise UpstreamMcpDeliveryUncertainError()
-        
+
         return _upstream_result(
-            self.result_payload if self.result_payload is not None
+            self.result_payload
+            if self.result_payload is not None
             else {"content": [{"type": "text", "text": "success"}], "isError": False}
         )
 
@@ -191,7 +198,10 @@ async def _create_permit_with_cap(
             "allow_identical_repeats": allow_repeats,
             "expires_at": (utc_now() + timedelta(hours=1)).isoformat(),
         },
-        headers={**BOOTSTRAP_HEADERS, "Idempotency-Key": f"permit-cap-{tool_name}-{max_calls}"},
+        headers={
+            **BOOTSTRAP_HEADERS,
+            "Idempotency-Key": f"permit-cap-{tool_name}-{max_calls}",
+        },
     )
     assert permit_resp.status_code == 201
     return permit_resp.json()["permit_id"]
@@ -200,7 +210,7 @@ async def _create_permit_with_cap(
 @pytest.mark.anyio
 async def test_remote_cap_1_success_then_new_key_refused(client, clean_database):
     """Remote tool with cap=1: success → new key → permit_max_calls_exceeded.
-    
+
     This is the primary fix: per-tool call caps now work on remote tools.
     """
     provisioned = await provision_agent_wallet(client)
@@ -208,15 +218,15 @@ async def test_remote_cap_1_success_then_new_key_refused(client, clean_database)
     key_id = provisioned["key_id"]
     agent_headers = provisioned["agent_headers"]
     tool_name = "test.cap.one"
-    
+
     executor = FakeUpstreamExecutor("success")
     _register_upstream(tool_name, executor)
-    
+
     try:
         permit_id = await _create_permit_with_cap(
             client, wallet_id, key_id, tool_name, max_calls=1
         )
-        
+
         # First call succeeds
         r1 = await client.post(
             "/mcp/messages",
@@ -234,7 +244,7 @@ async def test_remote_cap_1_success_then_new_key_refused(client, clean_database)
         assert "result" in body1
         assert body1["result"]["receipt"]["outcome"] == "success"
         assert executor.dispatch_count == 1
-        
+
         # Second call with different key is refused
         r2 = await client.post(
             "/mcp/messages",
@@ -260,7 +270,7 @@ async def test_remote_cap_1_success_then_new_key_refused(client, clean_database)
 @pytest.mark.anyio
 async def test_remote_cap_1_delivery_uncertain_then_refused(client, clean_database):
     """Remote tool with cap=1: delivery_uncertain → new key → refused.
-    
+
     Delivery uncertain calls hold their slot to prevent duplicate effects.
     """
     provisioned = await provision_agent_wallet(client)
@@ -268,15 +278,15 @@ async def test_remote_cap_1_delivery_uncertain_then_refused(client, clean_databa
     key_id = provisioned["key_id"]
     agent_headers = provisioned["agent_headers"]
     tool_name = "test.cap.uncertain"
-    
+
     executor = FakeUpstreamExecutor("delivery_uncertain")
     _register_upstream(tool_name, executor)
-    
+
     try:
         permit_id = await _create_permit_with_cap(
             client, wallet_id, key_id, tool_name, max_calls=1
         )
-        
+
         # First call ends delivery_uncertain
         r1 = await client.post(
             "/mcp/messages",
@@ -294,7 +304,7 @@ async def test_remote_cap_1_delivery_uncertain_then_refused(client, clean_databa
         assert body1["error"]["message"] == "delivery_uncertain"
         assert body1["error"]["data"]["receipt"]["outcome"] == "delivery_uncertain"
         assert executor.dispatch_count == 1
-        
+
         # Second call is refused (slot still held by uncertain call)
         r2 = await client.post(
             "/mcp/messages",
@@ -318,7 +328,7 @@ async def test_remote_cap_1_delivery_uncertain_then_refused(client, clean_databa
 @pytest.mark.anyio
 async def test_remote_different_tool_caps_independent(client, clean_database):
     """A cap on tool A doesn't block remote tool B.
-    
+
     Fixes the regression where max_calls_per_tool_json is not None blocked
     all remote tools, not just the capped ones.
     """
@@ -328,12 +338,12 @@ async def test_remote_different_tool_caps_independent(client, clean_database):
     agent_headers = provisioned["agent_headers"]
     tool_a = "test.cap.a"
     tool_b = "test.cap.b"
-    
+
     executor_a = FakeUpstreamExecutor("success")
     executor_b = FakeUpstreamExecutor("success")
     _register_upstream(tool_a, executor_a)
     _register_upstream(tool_b, executor_b)
-    
+
     try:
         # Permit with cap on tool A only
         permit_resp = await client.post(
@@ -356,7 +366,7 @@ async def test_remote_different_tool_caps_independent(client, clean_database):
         )
         assert permit_resp.status_code == 201
         permit_id = permit_resp.json()["permit_id"]
-        
+
         # Call tool A once (uses up its cap)
         r1 = await client.post(
             "/mcp/messages",
@@ -370,7 +380,7 @@ async def test_remote_different_tool_caps_independent(client, clean_database):
         )
         assert r1.status_code == 200
         assert executor_a.dispatch_count == 1
-        
+
         # Call tool B (should succeed, not blocked by tool A's cap)
         r2 = await client.post(
             "/mcp/messages",
@@ -394,21 +404,21 @@ async def test_remote_different_tool_caps_independent(client, clean_database):
 @pytest.mark.anyio
 async def test_duplicate_detection_enforce_mode(client, clean_database, monkeypatch):
     """Cross-key duplicate detection in enforce mode refuses duplicates.
-    
+
     Identical request hash under different key is detected and refused.
     """
     settings = get_settings()
     monkeypatch.setattr(settings, "MCP_UPSTREAM_DUPLICATE_GUARD", "enforce")
-    
+
     provisioned = await provision_agent_wallet(client)
     wallet_id = provisioned["agent_wallet_id"]
     key_id = provisioned["key_id"]
     agent_headers = provisioned["agent_headers"]
     tool_name = "test.dup.enforce"
-    
+
     executor = FakeUpstreamExecutor("success")
     _register_upstream(tool_name, executor)
-    
+
     try:
         # Permit WITHOUT cap (testing pure duplicate detection)
         permit_resp = await client.post(
@@ -426,7 +436,7 @@ async def test_duplicate_detection_enforce_mode(client, clean_database, monkeypa
         )
         assert permit_resp.status_code == 201
         permit_id = permit_resp.json()["permit_id"]
-        
+
         # First call with identical arguments
         r1 = await client.post(
             "/mcp/messages",
@@ -441,7 +451,7 @@ async def test_duplicate_detection_enforce_mode(client, clean_database, monkeypa
         )
         assert r1.status_code == 200
         assert executor.dispatch_count == 1
-        
+
         # Second call with SAME arguments but DIFFERENT key
         r2 = await client.post(
             "/mcp/messages",
@@ -463,9 +473,7 @@ async def test_duplicate_detection_enforce_mode(client, clean_database, monkeypa
         # The refusal is a denial receipt, so the durable count on the admin
         # observability endpoint reflects it without depending on this
         # process's in-memory counter.
-        metrics = await client.get(
-            "/health/duplicate-guard", headers=BOOTSTRAP_HEADERS
-        )
+        metrics = await client.get("/health/duplicate-guard", headers=BOOTSTRAP_HEADERS)
         assert metrics.status_code == 200
         metrics_body = metrics.json()
         assert metrics_body["mode"] == "enforce"
@@ -480,16 +488,16 @@ async def test_duplicate_detection_log_mode_allows(client, clean_database, monke
     """Cross-key duplicate detection in log mode allows duplicates (observe only)."""
     settings = get_settings()
     monkeypatch.setattr(settings, "MCP_UPSTREAM_DUPLICATE_GUARD", "log")
-    
+
     provisioned = await provision_agent_wallet(client)
     wallet_id = provisioned["agent_wallet_id"]
     key_id = provisioned["key_id"]
     agent_headers = provisioned["agent_headers"]
     tool_name = "test.dup.log"
-    
+
     executor = FakeUpstreamExecutor("success")
     _register_upstream(tool_name, executor)
-    
+
     try:
         permit_resp = await client.post(
             "/v1/permits",
@@ -506,7 +514,7 @@ async def test_duplicate_detection_log_mode_allows(client, clean_database, monke
         )
         assert permit_resp.status_code == 201
         permit_id = permit_resp.json()["permit_id"]
-        
+
         # First call
         r1 = await client.post(
             "/mcp/messages",
@@ -521,7 +529,7 @@ async def test_duplicate_detection_log_mode_allows(client, clean_database, monke
         )
         assert r1.status_code == 200
         assert executor.dispatch_count == 1
-        
+
         # Duplicate with different key should still succeed in log mode
         r2 = await client.post(
             "/mcp/messages",
@@ -547,16 +555,16 @@ async def test_duplicate_detection_opt_out(client, clean_database, monkeypatch):
     """Permit with allow_identical_repeats=true bypasses duplicate detection."""
     settings = get_settings()
     monkeypatch.setattr(settings, "MCP_UPSTREAM_DUPLICATE_GUARD", "enforce")
-    
+
     provisioned = await provision_agent_wallet(client)
     wallet_id = provisioned["agent_wallet_id"]
     key_id = provisioned["key_id"]
     agent_headers = provisioned["agent_headers"]
     tool_name = "test.dup.optout"
-    
+
     executor = FakeUpstreamExecutor("success")
     _register_upstream(tool_name, executor)
-    
+
     try:
         # Permit with opt-out enabled
         permit_resp = await client.post(
@@ -575,7 +583,7 @@ async def test_duplicate_detection_opt_out(client, clean_database, monkeypatch):
         )
         assert permit_resp.status_code == 201
         permit_id = permit_resp.json()["permit_id"]
-        
+
         # First call
         r1 = await client.post(
             "/mcp/messages",
@@ -590,7 +598,7 @@ async def test_duplicate_detection_opt_out(client, clean_database, monkeypatch):
         )
         assert r1.status_code == 200
         assert executor.dispatch_count == 1
-        
+
         # Duplicate should succeed because opt-out is enabled
         r2 = await client.post(
             "/mcp/messages",
@@ -614,7 +622,7 @@ async def test_duplicate_detection_opt_out(client, clean_database, monkeypatch):
 @pytest.mark.anyio
 async def test_same_key_replay_unchanged(client, clean_database):
     """Same-key replay returns original receipt with no second call or charge.
-    
+
     This behavior must not regress.
     """
     provisioned = await provision_agent_wallet(client)
@@ -622,15 +630,15 @@ async def test_same_key_replay_unchanged(client, clean_database):
     key_id = provisioned["key_id"]
     agent_headers = provisioned["agent_headers"]
     tool_name = "test.replay.same"
-    
+
     executor = FakeUpstreamExecutor("success")
     _register_upstream(tool_name, executor)
-    
+
     try:
         permit_id = await _create_permit_with_cap(
             client, wallet_id, key_id, tool_name, max_calls=1
         )
-        
+
         # First call
         r1 = await client.post(
             "/mcp/messages",
@@ -647,7 +655,7 @@ async def test_same_key_replay_unchanged(client, clean_database):
         body1 = r1.json()
         receipt_id_1 = body1["result"]["receipt"]["receipt_id"]
         assert executor.dispatch_count == 1
-        
+
         # Replay with same key
         r2 = await client.post(
             "/mcp/messages",
@@ -663,7 +671,7 @@ async def test_same_key_replay_unchanged(client, clean_database):
         assert r2.status_code == 200
         body2 = r2.json()
         receipt_id_2 = body2["result"]["receipt"]["receipt_id"]
-        
+
         # Same receipt, no second call
         assert receipt_id_2 == receipt_id_1
         assert executor.dispatch_count == 1  # Still 1, not 2
@@ -674,7 +682,7 @@ async def test_same_key_replay_unchanged(client, clean_database):
 @pytest.mark.anyio
 async def test_aggregate_value_cap_still_unsupported(client, clean_database):
     """Permit with aggregate_value_cap is still refused on upstream tools.
-    
+
     This constraint requires folding in-flight reservations and remains
     unsupported until that's implemented.
     """
@@ -683,10 +691,10 @@ async def test_aggregate_value_cap_still_unsupported(client, clean_database):
     key_id = provisioned["key_id"]
     agent_headers = provisioned["agent_headers"]
     tool_name = "test.agg.unsupported"
-    
+
     executor = FakeUpstreamExecutor("success")
     _register_upstream(tool_name, executor)
-    
+
     try:
         # Permit with aggregate_value_cap
         permit_resp = await client.post(
@@ -705,7 +713,7 @@ async def test_aggregate_value_cap_still_unsupported(client, clean_database):
         )
         assert permit_resp.status_code == 201
         permit_id = permit_resp.json()["permit_id"]
-        
+
         # Call is refused
         r = await client.post(
             "/mcp/messages",
@@ -937,16 +945,16 @@ async def test_remote_cap_1_pre_dispatch_failure_releases_slot(client, clean_dat
     key_id = provisioned["key_id"]
     agent_headers = provisioned["agent_headers"]
     tool_name = "test.cap.abandon"
-    
+
     # Use pre_dispatch_failure mode to trigger abandon path
     executor = FakeUpstreamExecutor("pre_dispatch_failure")
     _register_upstream(tool_name, executor)
-    
+
     try:
         permit_id = await _create_permit_with_cap(
             client, wallet_id, key_id, tool_name, max_calls=1
         )
-        
+
         # First call fails pre-dispatch (abandoned, slot released)
         r1 = await client.post(
             "/mcp/messages",
@@ -964,7 +972,7 @@ async def test_remote_cap_1_pre_dispatch_failure_releases_slot(client, clean_dat
         assert body1["error"]["message"] == "upstream_pre_dispatch_failed"
         assert body1["error"]["data"]["receipt"]["outcome"] == "failed_refunded"
         assert executor.dispatch_count == 0
-        
+
         # Second call with different key should succeed (slot was released)
         executor.mode = "success"
         r2 = await client.post(
@@ -1062,14 +1070,21 @@ def _inject_one_lost_counter_cas(
     original_execute = AsyncSession.execute
     original_refresh = AsyncSession.refresh
 
-    async def execute(self: AsyncSession, statement: Any, *args: Any, **kwargs: Any) -> Any:
+    async def execute(
+        self: AsyncSession, statement: Any, *args: Any, **kwargs: Any
+    ) -> Any:
         rendered = str(statement) if misses["count"] == 0 else ""
-        if rendered.startswith("UPDATE permits") and "tool_call_counts_json" in rendered:
+        if (
+            rendered.startswith("UPDATE permits")
+            and "tool_call_counts_json" in rendered
+        ):
             misses["count"] += 1
             return SimpleNamespace(rowcount=0)
         return await original_execute(self, statement, *args, **kwargs)
 
-    async def refresh(self: AsyncSession, instance: Any, *args: Any, **kwargs: Any) -> Any:
+    async def refresh(
+        self: AsyncSession, instance: Any, *args: Any, **kwargs: Any
+    ) -> Any:
         result = await original_refresh(self, instance, *args, **kwargs)
         if (
             budget_spent_on_refresh

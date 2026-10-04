@@ -223,6 +223,10 @@ class AWIExecutionResponse(BaseModel):
     status: str
     parameters: dict[str, Any]
     result: dict[str, Any] | None = None
+    effect_status: str | None = Field(
+        default=None,
+        description="not_dispatched for a rejected action; unknown when browser effects cannot be excluded",
+    )
     error: str | None = None
     new_state: dict[str, Any] | None = None
     representation: dict[str, Any] | None = None

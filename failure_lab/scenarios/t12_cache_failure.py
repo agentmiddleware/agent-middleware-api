@@ -189,7 +189,9 @@ class CacheFailure(Scenario):
         "configuration and is not driven here.",
     )
 
-    async def run_configuration(self, target: Target, log: EventLog) -> ConfigurationResult:
+    async def run_configuration(
+        self, target: Target, log: EventLog
+    ) -> ConfigurationResult:
         import app.core.rate_limiter as rate_limiter_module
         from app.core.config import get_settings
         from app.core.durable_state import get_durable_state
@@ -443,7 +445,9 @@ class CacheFailure(Scenario):
         unhealthy = _dig(health_after, "unhealthy") or []
         redis_probe_status = _dig(health_after, "dependencies", "redis", "status")
         degradation_surfaced = bool(
-            runtime_says_fallback and health_says_fallback and health_status == "degraded"
+            runtime_says_fallback
+            and health_says_fallback
+            and health_status == "degraded"
         )
 
         problems = [f"correctness invariant broken: {name}" for name in broken]
@@ -499,9 +503,7 @@ class CacheFailure(Scenario):
             settings_patch_reached_limiter=settings_patch_reached_limiter,
             redis_status_at_boot=redis_status_at_boot,
             redis_configured_at_boot=redis_configured_at_boot,
-            governed_loop_reached_the_dead_cache=(
-                governed_loop_reached_the_dead_cache
-            ),
+            governed_loop_reached_the_dead_cache=(governed_loop_reached_the_dead_cache),
             settings_only_redis_status=_dig(
                 health_settings_only, "dependencies", "redis", "status"
             ),

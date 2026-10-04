@@ -426,9 +426,7 @@ async def test_public_dependency_report_does_not_echo_exception_text(
 
 
 @pytest.mark.anyio
-async def test_full_dependency_report_does_not_echo_exception_text(
-    client, monkeypatch
-):
+async def test_full_dependency_report_does_not_echo_exception_text(client, monkeypatch):
     """With proof surfaces mounted the full report is served instead, and it is
     just as unauthenticated — it must not carry the driver text either."""
     monkeypatch.setattr(get_settings(), "ENABLE_PROOF_SURFACES", True)

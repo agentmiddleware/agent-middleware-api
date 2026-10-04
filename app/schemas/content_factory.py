@@ -16,16 +16,17 @@ from datetime import datetime
 
 class ContentFormat(str, Enum):
     """Output content formats."""
-    SHORT_VIDEO = "short_video"          # 15-60s vertical (Shorts/Reels/TikTok)
-    LONG_VIDEO = "long_video"            # 2-15min horizontal (YouTube)
-    AUDIOGRAM = "audiogram"              # Audio waveform video for podcasts
-    CAROUSEL = "carousel"                # Multi-image slideshow
-    STATIC_IMAGE = "static_image"        # Single thumbnail/poster
-    TEXT_POST = "text_post"              # Platform-native text (X/LinkedIn)
-    BLOG_EXCERPT = "blog_excerpt"        # SEO-optimized text snippet
-    EMAIL_SNIPPET = "email_snippet"      # Newsletter-ready HTML block
-    QUOTE_CARD = "quote_card"            # Pull-quote image for debate/reaction
-    DEBATE_CLIP = "debate_clip"          # Side-by-side argument clip
+
+    SHORT_VIDEO = "short_video"  # 15-60s vertical (Shorts/Reels/TikTok)
+    LONG_VIDEO = "long_video"  # 2-15min horizontal (YouTube)
+    AUDIOGRAM = "audiogram"  # Audio waveform video for podcasts
+    CAROUSEL = "carousel"  # Multi-image slideshow
+    STATIC_IMAGE = "static_image"  # Single thumbnail/poster
+    TEXT_POST = "text_post"  # Platform-native text (X/LinkedIn)
+    BLOG_EXCERPT = "blog_excerpt"  # SEO-optimized text snippet
+    EMAIL_SNIPPET = "email_snippet"  # Newsletter-ready HTML block
+    QUOTE_CARD = "quote_card"  # Pull-quote image for debate/reaction
+    DEBATE_CLIP = "debate_clip"  # Side-by-side argument clip
 
 
 class ContentStatus(str, Enum):
@@ -38,25 +39,28 @@ class ContentStatus(str, Enum):
 
 class HookType(str, Enum):
     """Types of content hooks extracted from source material."""
-    REACTION = "reaction"                # Hot-take / emotional reaction clip
-    EDUCATIONAL = "educational"          # Concept explainer segment
-    QUOTE_CARD = "quote_card"            # Pull-quote for static image
-    DEBATE = "debate"                    # Contrasting viewpoints
-    MONTAGE = "montage"                  # Rapid-fire highlights
-    COLD_OPEN = "cold_open"              # Pattern-interrupt opener
+
+    REACTION = "reaction"  # Hot-take / emotional reaction clip
+    EDUCATIONAL = "educational"  # Concept explainer segment
+    QUOTE_CARD = "quote_card"  # Pull-quote for static image
+    DEBATE = "debate"  # Contrasting viewpoints
+    MONTAGE = "montage"  # Rapid-fire highlights
+    COLD_OPEN = "cold_open"  # Pattern-interrupt opener
 
 
 class CaptionStyle(str, Enum):
     """Animated caption rendering styles for vertical video."""
-    WORD_BY_WORD = "word_by_word"        # Each word pops on screen
+
+    WORD_BY_WORD = "word_by_word"  # Each word pops on screen
     SENTENCE_HIGHLIGHT = "sentence_highlight"
-    KARAOKE = "karaoke"                  # Bouncing ball style
-    BOLD_IMPACT = "bold_impact"          # Large centered bold text
-    DUAL_COLOR = "dual_color"            # Key words in accent color
+    KARAOKE = "karaoke"  # Bouncing ball style
+    BOLD_IMPACT = "bold_impact"  # Large centered bold text
+    DUAL_COLOR = "dual_color"  # Key words in accent color
 
 
 class EngagementMetricType(str, Enum):
     """Metrics the scheduling engine tracks."""
+
     VIEWS = "views"
     WATCH_TIME = "watch_time"
     LIKES = "likes"
@@ -69,12 +73,14 @@ class EngagementMetricType(str, Enum):
 
 # --- Content Hook Schemas ---
 
+
 class ContentHook(BaseModel):
     """A targeted content hook extracted from source material.
 
     Hooks are the atomic units of the 1-to-20 multiplication rule:
     each hook produces multiple format-adapted content pieces.
     """
+
     hook_id: str | None = Field(
         default=None,
         description="Auto-assigned if omitted. Pass existing hook_id to reuse.",
@@ -114,8 +120,7 @@ class ContentHook(BaseModel):
             ContentFormat.CAROUSEL,
         ],
         description=(
-            "Formats to generate from this hook. Defaults to the "
-            "4-format spread."
+            "Formats to generate from this hook. Defaults to the 4-format spread."
         ),
     )
 
@@ -130,6 +135,7 @@ class ContentHook(BaseModel):
 
 # --- Live Campaign Schemas ---
 
+
 class LiveCampaignRequest(BaseModel):
     """Launch a full live content campaign from a single source.
 
@@ -140,6 +146,7 @@ class LiveCampaignRequest(BaseModel):
     3. Render all pieces in 9:16 vertical with animated captions
     4. Auto-schedule across platforms via the AlgorithmicScheduler
     """
+
     source_url: str = Field(
         ...,
         description="URL of the source video/audio asset.",
@@ -187,6 +194,7 @@ class LiveCampaignRequest(BaseModel):
 
 class CampaignHookResult(BaseModel):
     """Results for a single hook within a campaign."""
+
     hook_id: str
     hook_title: str
     hook_type: HookType
@@ -203,6 +211,7 @@ class CampaignHookResult(BaseModel):
 
 class LiveCampaignResponse(BaseModel):
     """Full results of a live content campaign."""
+
     campaign_id: str
     campaign_title: str
     source_url: str
@@ -223,8 +232,10 @@ class LiveCampaignResponse(BaseModel):
 
 # --- Content Factory Schemas ---
 
+
 class ContentPipelineRequest(BaseModel):
     """Submit a source asset for multi-format content generation."""
+
     source_clip_id: str | None = Field(
         None,
         description=(
@@ -255,19 +266,20 @@ class ContentPipelineRequest(BaseModel):
     brand_config: dict = Field(
         default_factory=dict,
         description="Brand customization: colors, fonts, logo_url, watermark settings.",
-        examples=[{
-            "primary_color": "#FF6B00",
-            "font_family": "Inter",
-            "logo_url": "https://cdn.example.com/logo.png",
-            "watermark_position": "bottom_right",
-        }],
+        examples=[
+            {
+                "primary_color": "#FF6B00",
+                "font_family": "Inter",
+                "logo_url": "https://cdn.example.com/logo.png",
+                "watermark_position": "bottom_right",
+            }
+        ],
     )
     language: str = Field(default="en")
     auto_schedule: bool = Field(
         default=True,
         description=(
-            "Automatically schedule distribution using the algorithmic "
-            "scheduler."
+            "Automatically schedule distribution using the algorithmic scheduler."
         ),
     )
 
@@ -282,6 +294,7 @@ class ContentPipelineRequest(BaseModel):
 
 class ContentPipelineResponse(BaseModel):
     """Response after initiating a content pipeline."""
+
     pipeline_id: str
     title: str
     source_type: str
@@ -295,6 +308,7 @@ class ContentPipelineResponse(BaseModel):
 
 class GeneratedContent(BaseModel):
     """A single generated content piece."""
+
     content_id: str
     pipeline_id: str
     format: ContentFormat
@@ -316,6 +330,7 @@ class GeneratedContent(BaseModel):
 
 class ContentListResponse(BaseModel):
     """Paginated content listing."""
+
     content: list[GeneratedContent]
     total: int
     pipeline_id: str
@@ -323,8 +338,10 @@ class ContentListResponse(BaseModel):
 
 # --- Scheduling Schemas ---
 
+
 class PlatformAnalytics(BaseModel):
     """Engagement analytics for a specific platform."""
+
     platform: str
     metric_type: EngagementMetricType
     value: float
@@ -334,6 +351,7 @@ class PlatformAnalytics(BaseModel):
 
 class AnalyticsIngestRequest(BaseModel):
     """Submit engagement data to improve scheduling."""
+
     metrics: list[PlatformAnalytics] = Field(
         ...,
         min_length=1,
@@ -355,6 +373,7 @@ class AnalyticsIngestResponse(BaseModel):
 
 class ScheduleRecommendation(BaseModel):
     """Algorithmic recommendation for when/where to post."""
+
     content_id: str
     platform: str
     recommended_time: datetime
@@ -368,8 +387,7 @@ class ScheduleRecommendation(BaseModel):
         ...,
         description="Explanation of why this slot was chosen.",
         examples=[
-            "Historical peak engagement for short_video on tiktok: "
-            "Tuesdays 7-9pm UTC"
+            "Historical peak engagement for short_video on tiktok: Tuesdays 7-9pm UTC"
         ],
     )
     estimated_views: int | None = None
@@ -377,6 +395,7 @@ class ScheduleRecommendation(BaseModel):
 
 class ScheduleRequest(BaseModel):
     """Request optimal scheduling for content pieces."""
+
     content_ids: list[str] = Field(
         ...,
         description="Content piece IDs to schedule.",
@@ -403,6 +422,7 @@ class ScheduleRequest(BaseModel):
 
 class ScheduleResponse(BaseModel):
     """Full schedule with per-content, per-platform recommendations."""
+
     recommendations: list[ScheduleRecommendation]
     total_scheduled: int
     date_range: str

@@ -233,7 +233,7 @@ it and `test_pages_carry_no_inline_scripts` will fail. Put the code in a
 same-origin file instead.
 
 The shared CSS and JS assets are served with `max-age=604800`, so cache busting is a **manual
-query token**: every reference looks like `/styles.css?v=gateway-18`. When you
+query token**: every reference looks like `/styles.css?v=gateway-19`. When you
 change any of those files (including `/wave.js`, `/arcade-boot.js`,
 `/arcade.js`, and `/arcade.css`), bump the token in
 `index.html`, `proof/index.html`, `compare/index.html`, `concept/index.html`,

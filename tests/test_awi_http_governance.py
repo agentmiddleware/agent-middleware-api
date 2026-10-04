@@ -591,26 +591,10 @@ async def test_valid_idempotency_key_at_store_width_replays_same_receipt(
 
 
 @pytest.mark.anyio
-async def test_awi_contended_charge_closes_the_key_it_cannot_safely_reopen(
+async def test_awi_contended_charge_releases_the_key_before_effects(
     client, clean_database, monkeypatch
 ):
-    """On AWI the action runs first, so a contended charge must not free the key.
-
-    The governed MCP path answers a lost write conflict by freeing the key and
-    telling the caller to retry, because there the charge precedes execution:
-    nothing ran, so a retry is free. Every governed AWI route is the other way
-    around -- ``app/routers/awi.py`` calls ``manager.execute_action`` (live
-    Playwright DOM commands when a bridge is attached) and the enhanced routes
-    execute browser commands, index RAG memories and consume WebAuthn
-    challenges before reaching this charge, none of them deduped on the key.
-    Freeing it there would invite the caller to repeat a side effect that had
-    already happened.
-
-    So the record is completed rather than abandoned, and the retry replays that
-    answer instead of running the action a second time. The reason survives into
-    the stored response so contention stays distinguishable from a substantive
-    charge failure.
-    """
+    """Definitive ledger contention precedes effects and permits a safe retry."""
     from sqlalchemy.exc import OperationalError
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -645,16 +629,14 @@ async def test_awi_contended_charge_closes_the_key_it_cannot_safely_reopen(
     )
     monkeypatch.setattr(AsyncSession, "flush", real_flush)
 
-    assert resp.status_code == 500, resp.text
+    assert resp.status_code == 503, resp.text
     # Not flattened into charge_failed: an operator can still see it was a lost
     # write conflict and not a substantive failure of the charge itself.
     assert resp.json()["detail"]["error"] == "ledger_write_contended"
 
     factory = get_session_factory()
     # The reservation is the other half of this branch. Nothing was charged, so
-    # nothing may stay reserved against the permit -- and because the retry
-    # replays the stored answer rather than reserving again, an unreleased
-    # reservation here would sit on the permit until it expired.
+    # nothing may stay reserved against the permit before a safe retry.
     async with factory() as session:
         reserved = (
             await session.execute(
@@ -665,8 +647,7 @@ async def test_awi_contended_charge_closes_the_key_it_cannot_safely_reopen(
         ).scalar_one()
     assert Decimal(str(reserved)) == Decimal("0")
 
-    # The key is closed, so the caller cannot be told to repeat an action that
-    # already ran.
+    # Nothing ran and compensation succeeded, so this key can retry.
     async with factory() as session:
         remaining = (
             await session.execute(
@@ -678,28 +659,27 @@ async def test_awi_contended_charge_closes_the_key_it_cannot_safely_reopen(
                 )
             )
         ).scalar_one()
-    assert remaining == 1
+    assert remaining == 0
 
-    # And the retry replays that stored answer rather than re-executing.
+    # The retry now executes once after its debit succeeds.
     retry = await client.post(
         "/v1/awi/rag/query",
         json={"query": "laptops", "top_k": 3},
         headers=headers,
     )
-    assert retry.status_code == 500, retry.text
-    assert retry.json()["detail"]["error"] == "ledger_write_contended"
+    assert retry.status_code == 200, retry.text
+    assert retry.json()["receipt"]["outcome"] == "success"
 
 
 @pytest.mark.anyio
-async def test_execute_dom_bridge_failure_takes_no_charge_and_replays(
-    client, clean_database, monkeypatch
+@pytest.mark.parametrize("failure", ["raised", "structured_zero", "structured_partial"])
+async def test_execute_dom_bridge_failure_retains_charge_and_replays(
+    client, clean_database, monkeypatch, failure
 ):
-    """A failed live DOM-bridge action must not be receipted as success.
+    """Browser failure is receipted as uncertain and cannot redispatch on replay.
 
-    The session manager used to fall back to the mock logic when the bridge
-    raised, so the route signed ``outcome="success"`` and debited the wallet
-    for an action that never executed. Now the manager returns a typed
-    ``status="error"`` and the governance layer takes the uncharged branch.
+    Even zero completed commands may mean the first command took effect before
+    raising. Admission is retained because refunding would assume no effect.
     """
     from app.services.awi_session import get_awi_session_manager
 
@@ -725,8 +705,18 @@ async def test_execute_dom_bridge_failure_takes_no_charge_and_replays(
     manager = get_awi_session_manager()
     manager._dom_sessions[session_id] = "dom-session-under-test"
 
+    calls = 0
+
     async def _bridge_raises(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
-        raise RuntimeError("playwright target closed")
+        nonlocal calls
+        calls += 1
+        if failure == "raised":
+            raise RuntimeError("playwright target closed")
+        return {
+            "success": False,
+            "commands_executed": 1 if failure == "structured_partial" else 0,
+            "error": "synthetic command failure",
+        }
 
     monkeypatch.setattr(manager, "_execute_via_dom_bridge", _bridge_raises)
     try:
@@ -745,16 +735,17 @@ async def test_execute_dom_bridge_failure_takes_no_charge_and_replays(
         data = resp.json()
         assert data["status"] == "error"
         assert data["error"].startswith("dom_bridge_failed")
-        assert data["receipt"]["outcome"] == "failed"
-        assert data["receipt"]["ledger_entry_id"] is None
+        assert data["effect_status"] == "unknown"
+        assert data["receipt"]["outcome"] == "delivery_uncertain"
+        assert data["receipt"]["ledger_entry_id"]
 
         receipt_resp = await client.get(
             f"/v1/receipts/{data['receipt']['receipt_id']}", headers=headers
         )
         assert receipt_resp.status_code == 200
         receipt = receipt_resp.json()
-        assert receipt["outcome"] == "failed"
-        assert Decimal(str(receipt["credits_charged"])) == Decimal("0")
+        assert receipt["outcome"] == "delivery_uncertain"
+        assert Decimal(str(receipt["credits_charged"])) == Decimal("3")
         assert receipt["reason_code"] == "dom_bridge_failed"
 
         factory = get_session_factory()
@@ -776,13 +767,14 @@ async def test_execute_dom_bridge_failure_takes_no_charge_and_replays(
                     )
                 )
             ).scalar_one()
-        assert debits == 0, "a failed DOM-bridge action was debited"
-        assert Decimal(str(spent or 0)) == Decimal("0")
+        assert debits == 1, "an uncertain DOM action must keep its debit"
+        assert Decimal(str(spent or 0)) == Decimal("3")
 
         # Same key replays the identical typed failure without re-running.
         replay = await client.post("/v1/awi/execute", json=body, headers=exec_headers)
         assert replay.status_code == 200, replay.text
         assert replay.json()["receipt"]["receipt_id"] == data["receipt"]["receipt_id"]
+        assert calls == 1
         async with factory() as session:
             debits_after = (
                 await session.execute(
@@ -794,6 +786,6 @@ async def test_execute_dom_bridge_failure_takes_no_charge_and_replays(
                     )
                 )
             ).scalar_one()
-        assert debits_after == 0
+        assert debits_after == 1
     finally:
         manager._dom_sessions.pop(session_id, None)

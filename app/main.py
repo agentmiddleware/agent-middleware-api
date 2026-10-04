@@ -32,7 +32,9 @@ from .core.durable_state import (
     get_durable_state,
 )
 from .core.health import (
+    CHECK_TIMEOUT_SECONDS,
     build_public_dependency_report,
+    check_database_readiness,
     check_mqtt_readiness,
     gather_dependency_report,
 )
@@ -618,7 +620,9 @@ app.add_middleware(HeadMethodMiddleware)
 def _json_safe_numbers(value: Any) -> Any:
     """Spell non-finite floats as strings; strict JSON has no such numbers."""
     if isinstance(value, float) and not math.isfinite(value):
-        return "NaN" if math.isnan(value) else ("Infinity" if value > 0 else "-Infinity")
+        return (
+            "NaN" if math.isnan(value) else ("Infinity" if value > 0 else "-Infinity")
+        )
     if isinstance(value, dict):
         return {key: _json_safe_numbers(item) for key, item in value.items()}
     if isinstance(value, list):
@@ -733,6 +737,9 @@ PROOF_SURFACE_ROUTERS = (
     awi_enhanced,
 )
 
+# Action issuance stays frozen: the configured upstream has no qualified
+# ActionToolBinding. Only explicit test fixtures mount permits.action_router;
+# production and proof-enabled apps retain recovery without advertising issuance.
 for router_module in CORE_TRUST_ROUTERS:
     app.include_router(
         router_module.router,
@@ -1175,7 +1182,12 @@ async def health_ready():
     checks: dict[str, dict[str, Any]] = {}
     all_healthy = True
 
-    state_report = await get_durable_state().health_report()
+    try:
+        state_report = await asyncio.wait_for(
+            get_durable_state().health_report(), timeout=CHECK_TIMEOUT_SECONDS
+        )
+    except Exception:
+        state_report = {"ok": False, "backend": "unknown"}
     checks["state_store"] = {
         "status": "up" if state_report.get("ok", False) else "down",
         "backend": state_report.get("backend", "unknown"),
@@ -1192,16 +1204,18 @@ async def health_ready():
     if checks["mqtt"]["status"] == "down":
         all_healthy = False
 
-    if settings.DATABASE_URL:
-        checks["database"] = {"status": "up", "configured": True}
-    else:
-        checks["database"] = {"status": "not_configured", "configured": False}
+    checks["database"] = await check_database_readiness()
+    if checks["database"]["status"] != "up":
+        all_healthy = False
 
-    return {
-        "status": "ready" if all_healthy else "not_ready",
-        "version": settings.APP_VERSION,
-        "checks": checks,
-    }
+    return JSONResponse(
+        status_code=200 if all_healthy else 503,
+        content={
+            "status": "ready" if all_healthy else "not_ready",
+            "version": settings.APP_VERSION,
+            "checks": checks,
+        },
+    )
 
 
 @app.get(

@@ -11,6 +11,7 @@ Sub-tests:
   1b. Reuse that idempotency key with a DIFFERENT payload. Expect: fail-closed
       `idempotency_key_reused`, no new charge, no new note.
 """
+
 import json
 import sys
 
@@ -19,11 +20,16 @@ import attacklib as A
 N = 10
 MARKER = "atk1-parallel"
 
+
 def main():
     cred = A.provision("atk1-double-charge")
-    permit = A.issue_permit(cred, allowed_tools=["partner.notes.write"],
-                            scopes=["tool:partner.notes.write:invoke", "billing:charge"],
-                            max_credits=1000, idem="atk1-permit")
+    permit = A.issue_permit(
+        cred,
+        allowed_tools=["partner.notes.write"],
+        scopes=["tool:partner.notes.write:invoke", "billing:charge"],
+        max_credits=1000,
+        idem="atk1-permit",
+    )
     permit_id = permit["json"]["permit_id"]
 
     notes0 = A.notes_count_for(MARKER)
@@ -31,8 +37,17 @@ def main():
     # 1a: N identical invocations, same idem key + same payload, fired simultaneously
     idem_key = "atk1-note-shared"
     text = f"{MARKER} identical-payload"
+
     def one(i):
-        return A.invoke(cred["api_key"], cred["wallet_id"], permit_id, idem_key, text, rpc_id=f"atk1-{i}")
+        return A.invoke(
+            cred["api_key"],
+            cred["wallet_id"],
+            permit_id,
+            idem_key,
+            text,
+            rpc_id=f"atk1-{i}",
+        )
+
     results = A.fire_parallel(N, one)
 
     receipt_ids = []
@@ -41,13 +56,15 @@ def main():
         rc = A.receipt_of(r)
         rid = rc.get("receipt_id") if rc else None
         receipt_ids.append(rid)
-        per_response.append({
-            "i": i,
-            "http_status": r.get("status"),
-            "carried_receipt": rid,
-            "outcome": A.outcome_of(r),
-            "error_or_reason": A.reason_of(r),
-        })
+        per_response.append(
+            {
+                "i": i,
+                "http_status": r.get("status"),
+                "carried_receipt": rid,
+                "outcome": A.outcome_of(r),
+                "error_or_reason": A.reason_of(r),
+            }
+        )
     distinct_receipts = sorted(set(x for x in receipt_ids if x))
     winners = sum(1 for p in per_response if p["carried_receipt"])
     collapsed = sum(1 for p in per_response if not p["carried_receipt"])
@@ -57,8 +74,14 @@ def main():
     debit_count = sum(1 for e in led1["entries"] if e["action"] == "debit")
 
     # 1b: same idem key, DIFFERENT payload
-    conflict = A.invoke(cred["api_key"], cred["wallet_id"], permit_id, idem_key,
-                        f"{MARKER} DIFFERENT-payload-same-key", rpc_id="atk1-conflict")
+    conflict = A.invoke(
+        cred["api_key"],
+        cred["wallet_id"],
+        permit_id,
+        idem_key,
+        f"{MARKER} DIFFERENT-payload-same-key",
+        rpc_id="atk1-conflict",
+    )
     led2 = A.ledger(cred)["json"]
     notes2 = A.notes_count_for(MARKER)
 
@@ -89,19 +112,28 @@ def main():
     }
 
     # Verdict logic
-    ok_1a = (len(distinct_receipts) == 1 and (notes1 - notes0) == 1
-             and float(led1["period_debits_exact"]) == 2.0)
-    ok_1b = (A.reason_of(conflict) == "idempotency_key_reused"
-             and (notes2 - notes1) == 0
-             and float(led2["period_debits_exact"]) == 2.0)
+    ok_1a = (
+        len(distinct_receipts) == 1
+        and (notes1 - notes0) == 1
+        and float(led1["period_debits_exact"]) == 2.0
+    )
+    ok_1b = (
+        A.reason_of(conflict) == "idempotency_key_reused"
+        and (notes2 - notes1) == 0
+        and float(led2["period_debits_exact"]) == 2.0
+    )
     verdict = "HELD" if (ok_1a and ok_1b) else "BROKE"
     evidence["verdict"] = verdict
-    evidence["checks"] = {"parallel_single_charge": ok_1a, "conflict_rejected_no_charge": ok_1b}
+    evidence["checks"] = {
+        "parallel_single_charge": ok_1a,
+        "conflict_rejected_no_charge": ok_1b,
+    }
 
     print(json.dumps(evidence, indent=2, default=str))
     with open("evidence_attack1.json", "w") as fh:
         json.dump(evidence, fh, indent=2, default=str)
     return A.verdict_exit_code(verdict)
+
 
 if __name__ == "__main__":
     sys.exit(main())

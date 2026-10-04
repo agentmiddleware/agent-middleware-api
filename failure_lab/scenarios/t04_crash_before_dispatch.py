@@ -185,7 +185,9 @@ class CrashBeforeDispatch(Scenario):
         "cannot fire is not a weaker assertion -- it is no assertion.",
     )
 
-    async def run_configuration(self, target: Target, log: EventLog) -> ConfigurationResult:
+    async def run_configuration(
+        self, target: Target, log: EventLog
+    ) -> ConfigurationResult:
         target.require_gateway()
         backdate_seconds = int(
             self.options.get("backdate_seconds", DEFAULT_BACKDATE_SECONDS)
@@ -315,7 +317,9 @@ class CrashBeforeDispatch(Scenario):
             for row in after_reconcile.attempts
             if row["attempt_id"] in crashed_attempt_ids
         ]
-        attempt_state = attempt_states_after[0] if attempt_states_after else "no_attempt_row"
+        attempt_state = (
+            attempt_states_after[0] if attempt_states_after else "no_attempt_row"
+        )
         attempt_sent_after = [
             row["sent"]
             for row in after_reconcile.attempts
@@ -328,9 +332,7 @@ class CrashBeforeDispatch(Scenario):
         recovery_receipts = _added(
             before.receipts, after_reconcile.receipts, "receipt_id"
         )
-        receipt_outcome = (
-            recovery_receipts[0]["outcome"] if recovery_receipts else None
-        )
+        receipt_outcome = recovery_receipts[0]["outcome"] if recovery_receipts else None
         records_after = [
             row
             for row in after_reconcile.idempotency_records
@@ -469,9 +471,7 @@ class CrashBeforeDispatch(Scenario):
             "credits_debited": [entry["amount"] for entry in crashed_debits],
             "credits_refunded": [entry["amount"] for entry in crash_refunds],
             "receipt_outcome": receipt_outcome,
-            "receipt_matches_documented_outcome": (
-                receipt_outcome == REFUNDED_OUTCOME
-            ),
+            "receipt_matches_documented_outcome": (receipt_outcome == REFUNDED_OUTCOME),
             "receipt_outcomes_from_recovery": [
                 entry["outcome"] for entry in recovery_receipts
             ],
@@ -639,9 +639,7 @@ class CrashBeforeDispatch(Scenario):
             "crashed_operations_net_debit_total": net_debit_total,
             "same_key_retry_dispatched_at": same_key_dispatched,
             "fresh_key_retry_dispatched_at": fresh_key_dispatched,
-            "receipt_outcomes_from_recovery": [
-                row["receipt_outcome"] for row in rows
-            ],
+            "receipt_outcomes_from_recovery": [row["receipt_outcome"] for row in rows],
             "attempt_states_after_reconcile": [
                 row["attempt_state_after_reconcile"] for row in rows
             ],

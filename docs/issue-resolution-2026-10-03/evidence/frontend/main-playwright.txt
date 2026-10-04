@@ -1,0 +1,35 @@
+
+Running 1 test using 1 worker
+
+(node:27187) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  1 [webkit] › ../../../../../private/tmp/amw-release-frontend-20261003/main-qa-tests/ux-regressions.spec.cjs:27:1 › UX-002: dashboard scrollable commands have explicit keyboard access (5.2s)
+
+
+  1) [webkit] › ../../../../../private/tmp/amw-release-frontend-20261003/main-qa-tests/ux-regressions.spec.cjs:27:1 › UX-002: dashboard scrollable commands have explicit keyboard access
+
+    Error: expect(received).toBeGreaterThan(expected)
+
+    Expected: > 0
+    Received:   0
+
+    Call Log:
+    - Timeout 5000ms exceeded while waiting on the predicate
+
+      43 |   if (state.scrolls) {
+      44 |     await page.keyboard.press('ArrowRight');
+    > 45 |     await expect.poll(() => code.evaluate(element => element.scrollLeft)).toBeGreaterThan(0);
+         |                                                                           ^
+      46 |   }
+      47 | });
+      48 |
+        at /private/tmp/amw-release-frontend-20261003/main-qa-tests/ux-regressions.spec.cjs:45:75
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../../../../tmp/amw-release-frontend-20261003/main-playwright-artifacts/ux-regressions-UX-002-dash-e96e4-ve-explicit-keyboard-access-webkit/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../../../../tmp/amw-release-frontend-20261003/main-playwright-artifacts/ux-regressions-UX-002-dash-e96e4-ve-explicit-keyboard-access-webkit/error-context.md
+
+  1 failed
+    [webkit] › ../../../../../private/tmp/amw-release-frontend-20261003/main-qa-tests/ux-regressions.spec.cjs:27:1 › UX-002: dashboard scrollable commands have explicit keyboard access

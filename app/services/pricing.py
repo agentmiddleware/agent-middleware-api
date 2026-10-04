@@ -20,6 +20,7 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from app.core.credits import credit_amount_fits_storage
 from app.schemas.billing import ServiceCategory
 
 
@@ -116,7 +117,7 @@ def tool_price(service: dict[str, Any], category: ServiceCategory) -> Decimal:
     """Current price in credits for one call of a registered tool.
 
     Raises ``ValueError("tool_price_invalid")`` unless the registered price is
-    a finite, non-negative number. Every caller reads the price before any
+    a finite, positive, losslessly storable number. Every caller reads the price before any
     policy, permit, quote or ledger step, so refusing here keeps a bad
     registration out of all of them: a negative price would otherwise be
     reserved against the permit as a *negative* amount (growing its budget),
@@ -133,7 +134,7 @@ def tool_price(service: dict[str, Any], category: ServiceCategory) -> Decimal:
         price = Decimal(str(raw_price))
     except InvalidOperation:
         raise ValueError("tool_price_invalid") from None
-    if not price.is_finite() or price < 0:
+    if not credit_amount_fits_storage(price) or price == 0:
         raise ValueError("tool_price_invalid")
     return price
 

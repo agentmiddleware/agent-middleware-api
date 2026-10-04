@@ -68,6 +68,13 @@ RUN_ID = uuid.uuid4().hex[:8]
 RESULTS: list[tuple[str, str, str]] = []  # (name, PASS/FAIL/SKIP, detail)
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        # The operator authorized only the selected target. Never forward a
+        # credential or a mutation to a redirect destination.
+        return None
+
+
 def req(
     method: str,
     path: str,
@@ -84,7 +91,7 @@ def req(
         headers.update(extra_headers)
     r = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
-        with urllib.request.urlopen(r, timeout=30) as resp:
+        with urllib.request.build_opener(_NoRedirect()).open(r, timeout=30) as resp:
             raw = resp.read().decode()
             status = resp.status
     except urllib.error.HTTPError as e:

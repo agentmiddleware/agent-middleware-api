@@ -69,6 +69,51 @@ def _initialize(protocol_version: str = "2025-06-18") -> dict:
 
 
 @pytest.mark.anyio
+async def test_discovery_preserves_typed_tools_alongside_no_argument_tool(
+    client, standard_mcp_enabled
+):
+    from mcp.types import Tool
+
+    registry = get_service_registry()
+
+    def ready() -> dict:
+        raise AssertionError("discovery must not invoke a tool")
+
+    def echo(message: str) -> dict:
+        raise AssertionError("discovery must not invoke a tool")
+
+    handlers = {"discovery.ready": ready, "discovery.echo": echo}
+    for name, handler in handlers.items():
+        registry.register_local(
+            service_id=name,
+            name=name,
+            description="Synthetic discovery fixture",
+            category=ServiceCategory.PLATFORM_FEE,
+            func=handler,
+        )
+    try:
+        typed_schema = registry.get_local("discovery.echo")["input_schema"]
+        assert registry.get_local("discovery.ready")["input_schema"] is None
+        standard = await client.post(
+            "/mcp", json=_rpc("tools/list"), headers=BOOTSTRAP_MCP_HEADERS
+        )
+        assert standard.status_code == 200
+        assert "result" in standard.json(), standard.text
+        manifest = await client.get("/mcp/tools.json")
+        assert manifest.status_code == 200
+        for tools in (standard.json()["result"]["tools"], manifest.json()["tools"]):
+            by_name = {tool["name"]: Tool.model_validate(tool) for tool in tools}
+            assert by_name["discovery.ready"].inputSchema == {
+                "type": "object",
+                "properties": {},
+            }
+            assert by_name["discovery.echo"].inputSchema == typed_schema
+    finally:
+        for name in handlers:
+            registry.unregister_local(name)
+
+
+@pytest.mark.anyio
 async def test_endpoint_disabled_by_default(client):
     resp = await client.post("/mcp", json=_initialize(), headers=BOOTSTRAP_MCP_HEADERS)
     assert resp.status_code == 404
@@ -465,9 +510,15 @@ async def test_unechoable_body_is_refused_before_any_charge(
     client, standard_mcp_enabled, clean_database, strict_counted_tool, raw
 ):
     provisioned = await provision_agent_wallet(client)
-    headers = {**provisioned["agent_headers"], **MCP_HEADERS, "Idempotency-Key": "strict-1"}
+    headers = {
+        **provisioned["agent_headers"],
+        **MCP_HEADERS,
+        "Idempotency-Key": "strict-1",
+    }
     wallet_url = f"/v1/billing/wallets/{provisioned['agent_wallet_id']}"
-    before = (await client.get(wallet_url, headers=provisioned["agent_headers"])).json()["balance"]
+    before = (
+        await client.get(wallet_url, headers=provisioned["agent_headers"])
+    ).json()["balance"]
 
     resp = await client.post("/mcp", content=raw.encode("ascii"), headers=headers)
 
@@ -475,8 +526,12 @@ async def test_unechoable_body_is_refused_before_any_charge(
     error = resp.json()["error"]
     assert error["code"] == -32600
     assert error["message"].startswith("Invalid Request")
-    assert strict_counted_tool == [], "nothing may execute for a body the reply cannot carry"
-    after = (await client.get(wallet_url, headers=provisioned["agent_headers"])).json()["balance"]
+    assert strict_counted_tool == [], (
+        "nothing may execute for a body the reply cannot carry"
+    )
+    after = (await client.get(wallet_url, headers=provisioned["agent_headers"])).json()[
+        "balance"
+    ]
     assert after == before
 
 
@@ -492,8 +547,12 @@ async def test_non_utf8_body_is_a_parse_error_not_500(client, standard_mcp_enabl
 
 
 @pytest.mark.anyio
-async def test_malformed_json_is_still_the_sdks_parse_error(client, standard_mcp_enabled):
+async def test_malformed_json_is_still_the_sdks_parse_error(
+    client, standard_mcp_enabled
+):
     """The strict pre-check leaves syntax errors to the SDK's own -32700 path."""
-    resp = await client.post("/mcp", content=b"{not json", headers=BOOTSTRAP_MCP_HEADERS)
+    resp = await client.post(
+        "/mcp", content=b"{not json", headers=BOOTSTRAP_MCP_HEADERS
+    )
     assert resp.status_code == 400, resp.text
     assert resp.json()["error"]["code"] == -32700

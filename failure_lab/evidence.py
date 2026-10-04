@@ -35,6 +35,7 @@ Layout (exactly these paths)::
     downstream-effects.json  the independent effect ledger's rows
     gateway-events.json      gateway-reported state, labelled as such
     receipts/<id>.json       each portable receipt bundle as exported
+    trust-keys.json          optional issuer public keys; not an issuer trust pin
     verification-results.json   the independent verifier's three claims
     summary.html             failure_lab.report.render_run_html(...)
     report.txt               failure_lab.report.render_run_text(...)
@@ -100,6 +101,10 @@ FILE_DESCRIPTIONS: dict[str, str] = {
     "summary.html": "failure_lab.report.render_run_html of this run.",
     "report.txt": "failure_lab.report.render_run_text of this run.",
     "results.json": "The raw ScenarioResult documents, redacted.",
+    "trust-keys.json": (
+        "Issuer public keys for offline signature checks. These keys travelled "
+        "with the receipts and do not establish issuer trust."
+    ),
 }
 
 # --------------------------------------------------------------------------- #
@@ -435,10 +440,18 @@ def _runtime_facts() -> dict[str, Any]:
     }
 
 
-_FAULT_KEYS_IN_EXTRA = ("fault_plan", "fault_plans", "crash_boundary", "boundary", "injected")
+_FAULT_KEYS_IN_EXTRA = (
+    "fault_plan",
+    "fault_plans",
+    "crash_boundary",
+    "boundary",
+    "injected",
+)
 
 
-def _fault_injection_points(documents: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+def _fault_injection_points(
+    documents: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
     """Every injected failure the instruments actually recorded.
 
     Derived from the fault layer's own crossings (``fault`` is the mode it
@@ -503,7 +516,9 @@ def _definition_entries(
                 "source": "scenario.definition()",
             }
         except Exception as exc:  # noqa: BLE001 - a broken definition is a finding
-            notes.append(f"could not read a scenario definition: {type(exc).__name__}: {exc}")
+            notes.append(
+                f"could not read a scenario definition: {type(exc).__name__}: {exc}"
+            )
     for definition in definitions:
         test_id = str(definition.get("test_id", ""))
         supplied.setdefault(
@@ -536,7 +551,11 @@ def _definition_entries(
             )
             continue
         recorded = str(document.get("definition_hash", ""))
-        if recorded and entry["definition_hash"] and recorded != entry["definition_hash"]:
+        if (
+            recorded
+            and entry["definition_hash"]
+            and recorded != entry["definition_hash"]
+        ):
             notes.append(
                 f"{test_id}: the definition hash recorded in the result "
                 f"({recorded[:12]}...) differs from the definition supplied to the "
@@ -591,7 +610,9 @@ def _downstream_rows(documents: Sequence[Mapping[str, Any]]) -> list[dict[str, A
         for entry in document.get("configurations") or []:
             configuration = str(entry.get("configuration", ""))
             for effect in entry.get("downstream_effects") or []:
-                rows.append({"test_id": test_id, "configuration": configuration, **effect})
+                rows.append(
+                    {"test_id": test_id, "configuration": configuration, **effect}
+                )
     return rows
 
 
@@ -677,7 +698,9 @@ def _scenario_manifest_entries(
             if observed.get(configuration) != verdict
         ]
         reported_match = document.get("matches_expectation")
-        matches = bool(reported_match if reported_match is not None else not divergences)
+        matches = bool(
+            reported_match if reported_match is not None else not divergences
+        )
         if divergences and matches:
             notes.append(
                 f"{document.get('test_id', '?')}: the result's matches_expectation flag "
@@ -703,13 +726,15 @@ def _scenario_manifest_entries(
                     "verdict": str(document.get("verdict", "")),
                     "per_configuration": observed,
                     "observation": {
-                        str(entry.get("configuration", "")): str(entry.get("observation", ""))
+                        str(entry.get("configuration", "")): str(
+                            entry.get("observation", "")
+                        )
                         for entry in document.get("configurations") or []
                     },
                     "downstream_executions": {
-                        str(entry.get("configuration", "")): (entry.get("counters") or {}).get(
-                            "downstream_executions"
-                        )
+                        str(entry.get("configuration", "")): (
+                            entry.get("counters") or {}
+                        ).get("downstream_executions")
                         for entry in document.get("configurations") or []
                     },
                     "source": (
@@ -760,7 +785,8 @@ class BundleResult:
 
 def _json_bytes(document: Any) -> bytes:
     return (
-        json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False, default=str) + "\n"
+        json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False, default=str)
+        + "\n"
     ).encode("utf-8")
 
 
@@ -787,6 +813,7 @@ def build_evidence_bundle(
     definitions: Sequence[Mapping[str, Any]] = (),
     event_log: Any = None,
     receipts: Any = None,
+    trust_keys: Mapping[str, Any] | None = None,
     verification_results: Sequence[Mapping[str, Any]] = (),
     fault_injection_points: Sequence[Mapping[str, Any]] = (),
     random_seed: int | None = None,
@@ -818,7 +845,9 @@ def build_evidence_bundle(
     bundle_id = uuid.uuid4().hex
     caller_environment = dict(environment or {})
     started = [str(d.get("started_at", "")) for d in documents if d.get("started_at")]
-    finished = [str(d.get("finished_at", "")) for d in documents if d.get("finished_at")]
+    finished = [
+        str(d.get("finished_at", "")) for d in documents if d.get("finished_at")
+    ]
 
     notes: list[str] = []
     definition_entries, definition_notes = _definition_entries(
@@ -843,7 +872,9 @@ def build_evidence_bundle(
 
     report_environment = {
         "run_id": caller_environment.get("run_id", bundle_id),
-        "started_at": caller_environment.get("started_at", min(started) if started else built_at),
+        "started_at": caller_environment.get(
+            "started_at", min(started) if started else built_at
+        ),
         "finished_at": caller_environment.get(
             "finished_at", max(finished) if finished else built_at
         ),
@@ -870,7 +901,9 @@ def build_evidence_bundle(
             "software": _software_versions(),
             "runtime": _runtime_facts(),
             "test_configuration": dict(test_configuration or {}),
-            "random_seed": random_seed if random_seed is not None else caller_environment.get("seed"),
+            "random_seed": random_seed
+            if random_seed is not None
+            else caller_environment.get("seed"),
         }
     )
 
@@ -917,6 +950,8 @@ def build_evidence_bundle(
 
     try:
         write_bytes("environment.json", _json_bytes(environment_document))
+        if trust_keys is not None:
+            write_bytes("trust-keys.json", _json_bytes(redact(dict(trust_keys))))
         write_bytes(
             "test-definition.json",
             _json_bytes(
@@ -1044,7 +1079,9 @@ def build_evidence_bundle(
         }
         for entry in file_entries:
             description = FILE_DESCRIPTIONS.get(entry["path"])
-            if description is None and entry["path"].startswith(f"{RECEIPTS_DIRECTORY}/"):
+            if description is None and entry["path"].startswith(
+                f"{RECEIPTS_DIRECTORY}/"
+            ):
                 description = (
                     "NOT A RECEIPT: what was supplied in this receipt's place, recorded "
                     "as such."
@@ -1056,7 +1093,9 @@ def build_evidence_bundle(
         all_secret_values = list(secret_values)
         if include_environment_secrets:
             all_secret_values.extend(environment_secret_values())
-        unique_secrets = [v for v in dict.fromkeys(str(v) for v in all_secret_values) if v]
+        unique_secrets = [
+            v for v in dict.fromkeys(str(v) for v in all_secret_values) if v
+        ]
         scannable = [v for v in unique_secrets if len(v) >= MIN_SCANNABLE_SECRET_LENGTH]
 
         manifest = {
@@ -1295,8 +1334,13 @@ def verify_bundle_integrity(directory: Path | str) -> IntegrityReport:
         if path.is_file()
     }
     unexpected = sorted(on_disk - listed - {MANIFEST_NAME})
-    problems.extend(f"{name}: present on disk but not listed in the manifest" for name in unexpected)
-    problems.extend(f"{name}: listed in the manifest but missing from the bundle" for name in missing)
+    problems.extend(
+        f"{name}: present on disk but not listed in the manifest" for name in unexpected
+    )
+    problems.extend(
+        f"{name}: listed in the manifest but missing from the bundle"
+        for name in missing
+    )
 
     return IntegrityReport(
         directory=root,

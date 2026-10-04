@@ -150,6 +150,18 @@ async def test_init_db_production_like_accepts_legacy_create_all_tables(
     [
         ("mcp_dispatch_attempts", "dispatch_claim_hash"),
         ("permits", "repeat_window_seconds"),
+        *[
+            (table, column)
+            for table in ("permits", "receipts")
+            for column in (
+                "action_contract_version",
+                "action_payload_hash",
+                "action_schema_id",
+                "action_schema_version",
+                "action_public_tool_id",
+                "action_upstream_binding_hash",
+            )
+        ],
     ],
 )
 async def test_init_db_rejects_unstamped_legacy_table_missing_required_column(
@@ -230,12 +242,17 @@ def test_init_db_production_like_ok_after_alembic(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize(
     "revision",
-    ["016_trust_primitives", "039_permit_allow_ident_repeats", "999_unknown_schema"],
+    [
+        None,
+        "016_trust_primitives",
+        "039_permit_allow_ident_repeats",
+        "999_unknown_schema",
+    ],
 )
 def test_init_db_production_like_rejects_stale_alembic_revision(
     tmp_path, monkeypatch, revision
 ):
-    """Old or unknown stamps must fail even when required columns exist."""
+    """Missing, old or unknown stamps fail even when required columns exist."""
     import asyncio
 
     db_path = tmp_path / "stale_prod.db"
@@ -251,18 +268,36 @@ def test_init_db_production_like_rejects_stale_alembic_revision(
     command.upgrade(config, "head")
     sync = create_engine(f"sqlite:///{db_path}")
     with sync.begin() as connection:
-        connection.exec_driver_sql(
-            "UPDATE alembic_version SET version_num = ?", (revision,)
-        )
+        if revision is None:
+            connection.exec_driver_sql("DELETE FROM alembic_version")
+        else:
+            connection.exec_driver_sql(
+                "UPDATE alembic_version SET version_num = ?", (revision,)
+            )
     sync.dispose()
 
     async def _boot() -> None:
         await close_db()
-        with pytest.raises(SchemaInitError, match="behind packaged head"):
+        expected = "has no revision" if revision is None else "behind packaged head"
+        with pytest.raises(SchemaInitError, match=expected) as exc_info:
             await init_db()
+        if revision is None:
+            message = str(exc_info.value)
+            assert "manual review" in message
+            assert "schema and data-migration history" in message
+            assert "proven matching historical revision" in message
+            assert "docs/schema-042-rollout.md" in message
+            assert "alembic stamp head" not in message
         await close_db()
 
     asyncio.run(_boot())
+    sync = create_engine(f"sqlite:///{db_path}")
+    with sync.connect() as connection:
+        revisions = connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).all()
+    assert revisions == ([] if revision is None else [(revision,)])
+    sync.dispose()
     get_settings.cache_clear()
 
 

@@ -29,8 +29,9 @@ def create_mcp_tool(
     # Cache permits by permit_idempotency_key to avoid 409 on replay
     # Server hashes the FULL permit request body including expires_at.
     # Sending different expires_at with same key → 409 IdempotencyConflictError.
-    # Solution: cache created permits and reuse permit_id on replay.
+    # Keep the original body before sending and the ID after acknowledgement.
     permit_cache: dict[str, str] = {}  # permit_idempotency_key → permit_id
+    permit_requests: dict[str, PermitRequest] = {}
 
     async def call_mcp(
         tool_name: str,
@@ -59,11 +60,10 @@ def create_mcp_tool(
         if not permit_idempotency_key or not permit_idempotency_key.strip():
             raise ValueError("permit_idempotency_key is required and must not be blank")
 
-        # Check cache first - if we've already created a permit with this key, reuse it
-        if permit_idempotency_key in permit_cache:
-            permit_id = permit_cache[permit_idempotency_key]
-        else:
-            # First time: create permit and cache the permit_id
+        # Snapshot before awaiting creation, including a response lost after
+        # acceptance. Concurrent coroutines also see this same request body.
+        request = permit_requests.get(permit_idempotency_key)
+        if request is None:
             request = PermitRequest(
                 issuer_wallet_id=wallet_id,
                 subject_wallet_id=wallet_id,
@@ -72,6 +72,13 @@ def create_mcp_tool(
                 allowed_tools=[tool_name],
                 scopes=[f"tool:{tool_name}:invoke", "billing:charge"],
             )
+            permit_requests[permit_idempotency_key] = request
+        elif request.allowed_tools != [tool_name]:
+            raise ValueError("permit_idempotency_key reused with different permit terms")
+
+        if permit_idempotency_key in permit_cache:
+            permit_id = permit_cache[permit_idempotency_key]
+        else:
             permit = await client.create_permit(request, idempotency_key=permit_idempotency_key)
             permit_id = permit.permit_id
             permit_cache[permit_idempotency_key] = permit_id

@@ -307,9 +307,9 @@ async def test_expired_quote_denies_rather_than_repricing(
     factory = get_session_factory()
     async with factory() as session:
         model = await session.get(QuoteModel, quote["quote_id"])
-        model.expires_at = datetime.now(timezone.utc).replace(
-            tzinfo=None
-        ) - timedelta(seconds=1)
+        model.expires_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+            seconds=1
+        )
         session.add(model)
         await session.commit()
 
@@ -345,9 +345,7 @@ async def test_quote_for_another_wallet_or_tool_is_refused(
         idem_key="permit-quote-mismatch",
     )
     stranger_quote = (
-        await _quote(
-            client, stranger["agent_headers"], stranger["agent_wallet_id"]
-        )
+        await _quote(client, stranger["agent_headers"], stranger["agent_wallet_id"])
     ).json()
 
     wrong_wallet = await _invoke(
@@ -511,9 +509,7 @@ async def test_quoting_someone_elses_wallet_or_an_unknown_tool_is_refused(
     agent = await provision_agent_wallet(client)
     stranger = await provision_agent_wallet(client)
 
-    foreign = await _quote(
-        client, agent["agent_headers"], stranger["agent_wallet_id"]
-    )
+    foreign = await _quote(client, agent["agent_headers"], stranger["agent_wallet_id"])
     assert foreign.status_code == 403
 
     unknown = await _quote(
@@ -551,9 +547,7 @@ async def test_concurrent_consume_spends_a_quote_once(
 
 
 @pytest.mark.asyncio
-async def test_wallet_can_list_its_own_quotes(
-    client, clean_database, registered_tool
-):
+async def test_wallet_can_list_its_own_quotes(client, clean_database, registered_tool):
     agent = await provision_agent_wallet(client)
     stranger = await provision_agent_wallet(client)
     spendable = (
@@ -584,9 +578,9 @@ async def test_wallet_can_list_its_own_quotes(
     factory = get_session_factory()
     async with factory() as session:
         model = await session.get(QuoteModel, spendable["quote_id"])
-        model.expires_at = datetime.now(timezone.utc).replace(
-            tzinfo=None
-        ) - timedelta(seconds=1)
+        model.expires_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+            seconds=1
+        )
         session.add(model)
         await session.commit()
 
@@ -604,3 +598,40 @@ async def test_wallet_can_list_its_own_quotes(
     assert (
         await client.get("/v1/me/quotes", headers=BOOTSTRAP_HEADERS)
     ).status_code == 403
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("price", [0.00000001, 0.12345678])
+async def test_eight_place_prices_keep_quote_and_receipt_signatures_after_reload(
+    client, clean_database, registered_tool, price
+):
+    from app.services.receipts import get_receipt_service
+
+    registered_tool(price)
+    agent = await provision_agent_wallet(client)
+    permit = await create_tool_permit(
+        client,
+        wallet_id=agent["agent_wallet_id"],
+        key_id=agent["key_id"],
+        tool_name=TOOL,
+    )
+    quote = await _quote(client, agent["agent_headers"], agent["agent_wallet_id"])
+    assert quote.status_code == 201
+    quote_id = quote.json()["quote_id"]
+    async with get_session_factory()() as session:
+        model = await session.get(QuoteModel, quote_id)
+        assert model is not None
+        assert await get_quote_service().verify_signature(model) is True
+    invoked = await _invoke(
+        client,
+        agent["agent_headers"],
+        wallet_id=agent["agent_wallet_id"],
+        permit_id=permit["permit_id"],
+        quote_id=quote_id,
+    )
+    assert invoked.status_code == 200
+    assert invoked.json().get("isError") is not True
+    receipt = invoked.json()["receipt"]
+    assert Decimal(str(receipt["credits_charged"])) == Decimal(str(price))
+    valid, reason, _ = await get_receipt_service().verify_receipt(receipt["receipt_id"])
+    assert valid, reason

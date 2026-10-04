@@ -1,0 +1,48 @@
+/Users/sellers/Projects/agent-middleware-api/.venv/lib/python3.12/site-packages/asyncpg/connect_utils.py:104: UserWarning: password file PosixPath('/dev/null') is not a plain file
+  warnings.warn(
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> 001_initial, Initial billing tables
+INFO  [alembic.runtime.migration] Running upgrade 001_initial -> 002_stripe_fields, Add Stripe payment fields to ledger entries
+INFO  [alembic.runtime.migration] Running upgrade 002_stripe_fields -> 003_velocity_monitoring, Add velocity monitoring fields to wallets
+INFO  [alembic.runtime.migration] Running upgrade 003_velocity_monitoring -> 004_telemetry_events, Add telemetry_events table
+INFO  [alembic.runtime.migration] Running upgrade 004_telemetry_events -> 005_oracle_tables, Add oracle_* tables
+INFO  [alembic.runtime.migration] Running upgrade 005_oracle_tables -> 006_security_scan, Add security_scans + security_vulnerabilities tables
+INFO  [alembic.runtime.migration] Running upgrade 006_security_scan -> 007_content_factory, Add content_factory tables
+INFO  [alembic.runtime.migration] Running upgrade 007_content_factory -> 008_iot_devices, Add iot_devices + iot_device_events tables
+INFO  [alembic.runtime.migration] Running upgrade 008_iot_devices -> 009_security_auth_schema, Add API key and wallet auth schema
+INFO  [alembic.runtime.migration] Running upgrade 009_security_auth_schema -> 010_oracle_crawl_payload_hash, Add raw_payload_hash to oracle crawl targets (Phase 1 durable crawl).
+INFO  [alembic.runtime.migration] Running upgrade 010_oracle_crawl_payload_hash -> 011_agent_comms_messages, Add agent_comms_messages for durable A2A store (Phase 1 comms).
+INFO  [alembic.runtime.migration] Running upgrade 011_agent_comms_messages -> 012_content_factory_generations, Durable text generations + provenance for Content Factory (Phase 1).
+INFO  [alembic.runtime.migration] Running upgrade 012_content_factory_generations -> 013_optimizer_telemetry, Planner telemetry table for constrained optimizer.
+INFO  [alembic.runtime.migration] Running upgrade 013_optimizer_telemetry -> 014_control_plane_audit, Durable control-plane audit events.
+INFO  [alembic.runtime.migration] Running upgrade 014_control_plane_audit -> 015_policy_bundles, Policy bundles.
+INFO  [alembic.runtime.migration] Running upgrade 015_policy_bundles -> 016_trust_primitives, Trust primitives for permits, receipts, idempotency, and audit chains.
+INFO  [alembic.runtime.migration] Running upgrade 016_trust_primitives -> 017_audit_event_seq, Per-wallet monotonic sequence for control-plane audit events.
+INFO  [alembic.runtime.migration] Running upgrade 017_audit_event_seq -> 018_permit_updated_at, Track last reservation activity on permits for budget reconciliation.
+INFO  [alembic.runtime.migration] Running upgrade 018_permit_updated_at -> 019_audit_chain_heads, Per-wallet audit chain head pointer.
+INFO  [alembic.runtime.migration] Running upgrade 019_audit_chain_heads -> 020_idempotency_ledger_entry, Track the ledger entry a governed invoke charged before finalizing.
+INFO  [alembic.runtime.migration] Running upgrade 020_idempotency_ledger_entry -> 021_ledger_stripe_event_id, Add ledger_entries.stripe_event_id for refund-webhook idempotency.
+INFO  [alembic.runtime.migration] Running upgrade 021_ledger_stripe_event_id -> 3988bd05deca, add refresh_tokens table
+INFO  [alembic.runtime.migration] Running upgrade 3988bd05deca -> 023_human_approval_gate, Human approval gate: Sentinel-backed pause before governed invokes.
+INFO  [alembic.runtime.migration] Running upgrade 023_human_approval_gate -> 024_human_approval_hardening, Harden the human-approval gate: bind approvals to the request, repair
+the SQLite boolean backfill from 023.
+INFO  [alembic.runtime.migration] Running upgrade 024_human_approval_hardening -> 025_refresh_token_key_binding, Bind refresh tokens to the API key that minted them.
+INFO  [alembic.runtime.migration] Running upgrade 025_refresh_token_key_binding -> 025_remove_plaintext_owner_keys, Retire plaintext API-key ownership values without breaking old workers.
+INFO  [alembic.runtime.migration] Running upgrade 025_remove_plaintext_owner_keys -> 026_governed_mcp_persistence, Add exactly-once ledger, receipt, and remote dispatch persistence.
+INFO  [alembic.runtime.migration] Running upgrade 026_governed_mcp_persistence -> 027_governed_mcp_identity, Serialize legacy and canonical governed MCP idempotency identities.
+INFO  [alembic.runtime.migration] Running upgrade 027_governed_mcp_identity -> 028_revoke_unbound_refresh, Revoke refresh tokens that cannot be bound to their minting API key.
+INFO  [alembic.runtime.migration] Running upgrade 028_revoke_unbound_refresh -> 029_add_permit_v2_constraints, Add permit schema v2 constraints and receipt constraints_evaluated.
+INFO  [alembic.runtime.migration] Running upgrade 029_add_permit_v2_constraints -> 030_permit_requests, Permit requests: agent asks, human approves, middleware mints.
+INFO  [alembic.runtime.migration] Running upgrade 030_permit_requests -> 031_quotes, Signed quotes: a price commitment an agent can rely on.
+INFO  [alembic.runtime.migration] Running upgrade 031_quotes -> 032_receipt_reason_code, Add a signed machine-readable reason to non-success receipts.
+INFO  [alembic.runtime.migration] Running upgrade 032_receipt_reason_code -> 033_drop_optimizer_telemetry, Drop the optimizer_telemetry table, which nothing ever wrote.
+INFO  [alembic.runtime.migration] Running upgrade 033_drop_optimizer_telemetry -> 034_add_permit_tool_call_counts, add permit tool_call_counts
+INFO  [alembic.runtime.migration] Running upgrade 034_add_permit_tool_call_counts -> 035_api_key_max_uses, Enforce CreateAPIKeyRequest.max_uses on api_keys.
+INFO  [alembic.runtime.migration] Running upgrade 035_api_key_max_uses -> 036_permit_request_hash_anchor, permit request hash anchor
+INFO  [alembic.runtime.migration] Running upgrade 036_permit_request_hash_anchor -> 037_mcp_dispatch_claim_hash, Add a nullable claim hash to governed MCP dispatch attempts.
+INFO  [alembic.runtime.migration] Running upgrade 037_mcp_dispatch_claim_hash -> 038_dispatch_call_slot_dup_idx, add dispatch call slot and duplicate detection index
+INFO  [alembic.runtime.migration] Running upgrade 038_dispatch_call_slot_dup_idx -> 039_permit_allow_ident_repeats, add permit allow_identical_repeats
+INFO  [alembic.runtime.migration] Running upgrade 039_permit_allow_ident_repeats -> 040_permit_repeat_window, add permit repeat_window_seconds
+INFO  [alembic.runtime.migration] Running upgrade 040_permit_repeat_window -> 041_scrub_content_owner_keys, Scrub plaintext API keys from content_pipelines / content_campaigns.
+INFO  [alembic.runtime.migration] Running upgrade 041_scrub_content_owner_keys -> 042_permit_action_binding, Add nullable signed single-action binding fields.

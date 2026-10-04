@@ -158,6 +158,16 @@ class AWISessionManager:
         response_parameters = self._vocabulary.redact_parameters(
             request.action, request.parameters
         )
+        if request.dry_run:
+            return AWIExecutionResponse(
+                execution_id=f"exec-{uuid.uuid4().hex[:12]}",
+                session_id=request.session_id,
+                action=request.action,
+                status="error",
+                parameters=response_parameters,
+                effect_status="not_dispatched",
+                error="dry_run_unsupported",
+            )
         session = await self._load_session(request.session_id)
         if not session:
             return AWIExecutionResponse(
@@ -166,6 +176,7 @@ class AWISessionManager:
                 action=request.action,
                 status="error",
                 parameters=response_parameters,
+                effect_status="not_dispatched",
                 error=f"Session not found: {request.session_id}",
             )
 
@@ -176,6 +187,7 @@ class AWISessionManager:
                 action=request.action,
                 status="paused",
                 parameters=response_parameters,
+                effect_status="not_dispatched",
                 error="Session is paused by human intervention",
             )
 
@@ -189,6 +201,7 @@ class AWISessionManager:
                 action=request.action,
                 status="max_steps_reached",
                 parameters=response_parameters,
+                effect_status="not_dispatched",
                 error="Maximum steps reached",
             )
 
@@ -205,6 +218,7 @@ class AWISessionManager:
                 action=request.action,
                 status="error",
                 parameters=response_parameters,
+                effect_status="not_dispatched",
                 error=error,
             )
 
@@ -213,13 +227,14 @@ class AWISessionManager:
             request.action, state
         )
 
-        if not preconditions_met and not request.dry_run:
+        if not preconditions_met:
             return AWIExecutionResponse(
                 execution_id=execution_id,
                 session_id=request.session_id,
                 action=request.action,
                 status="error",
                 parameters=response_parameters,
+                effect_status="not_dispatched",
                 error=f"Preconditions not met: {unmet}",
             )
 
@@ -238,6 +253,7 @@ class AWISessionManager:
                     action=request.action,
                     status="passkey_required",
                     parameters=response_parameters,
+                    effect_status="not_dispatched",
                     error="This action requires biometric verification. "
                     "Call POST /v1/awi/passkey/challenge first.",
                 )
@@ -259,9 +275,8 @@ class AWISessionManager:
                 # A failed live browser action must surface as a failure. The
                 # previous fallback re-ran the mock logic and reported
                 # ``status="success"``, so the governed route signed a success
-                # receipt (and debited the wallet) for an action that never
-                # executed. Return a typed error; the governance layer treats
-                # any non-success status as uncharged.
+                # receipt. An exception does not prove absence of partial
+                # browser effects; retain that uncertainty in the response.
                 logger.warning(f"DOM bridge routing failed: {e}")
                 return AWIExecutionResponse(
                     execution_id=execution_id,
@@ -269,7 +284,19 @@ class AWISessionManager:
                     action=request.action,
                     status="error",
                     parameters=response_parameters,
+                    effect_status="unknown",
                     error=f"dom_bridge_failed: {e}",
+                )
+            if not result.get("success", False):
+                return AWIExecutionResponse(
+                    execution_id=execution_id,
+                    session_id=request.session_id,
+                    action=request.action,
+                    status="error",
+                    parameters=response_parameters,
+                    result=result,
+                    effect_status="unknown",
+                    error="dom_bridge_failed",
                 )
         else:
             # Fall back to the existing mock/internal logic for headless/API-only AWI sessions
@@ -307,7 +334,6 @@ class AWISessionManager:
         duration_ms = int(
             (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
         )
-        cost = self._vocabulary.get_estimated_cost(request.action)
         await self._save_session(request.session_id)
 
         return AWIExecutionResponse(
@@ -320,7 +346,6 @@ class AWISessionManager:
             new_state=state,
             representation=representation,
             duration_ms=duration_ms,
-            cost_estimate=cost if request.dry_run else None,
         )
 
     async def _execute_action_logic(
@@ -500,9 +525,7 @@ class AWISessionManager:
             metadata["steer_instructions_sha256"] = self._hash_text(
                 intervention.steer_instructions
             )
-            metadata["steer_instructions_length"] = len(
-                intervention.steer_instructions
-            )
+            metadata["steer_instructions_length"] = len(intervention.steer_instructions)
 
         try:
             await record_audit_event(

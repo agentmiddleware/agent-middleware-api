@@ -33,8 +33,10 @@ superlative.
 
 Your agent invokes a costly tool and the request times out. Agent Middleware
 puts one scoped, budgeted boundary in front of the call: replaying the same
-request and accepted idempotency key cannot create another gateway dispatch or
-debit; finalized gateway outcomes carry signed receipts.
+request and accepted idempotency key cannot create another debit or, for the
+configured upstream MCP tool, another gateway dispatch. Finalized or reconciled
+outcomes carry signed receipts; unresolved effects can require manual review
+without one.
 
 ## Thirty seconds
 
@@ -76,19 +78,22 @@ scoped signed permit -> governed MCP invoke -> wallet charge -> signed receipt
 - **Budgets that bind.** Decimal wallet balances with row-locked debits. Final
   permit checks and budget reservation happen while the permit row is locked,
   so competing invokes and revoke-versus-invoke races resolve correctly.
-- **Same-key replay after finalization.** An identical replay returns the
-  original result and receipt with no second gateway dispatch or debit. For the
-  configured upstream MCP tool, one persisted chain links the idempotency
-  record, permit reservation, ledger debit, dispatch attempt, receipt, and
-  audit event.
-- **Honest failure accounting.** For the configured upstream MCP tool,
-  confirmed pre-dispatch failures and upstream-returned errors are refunded
-  and receipted when finalization succeeds. Genuinely ambiguous
-  post-dispatch outcomes are marked `delivery_uncertain` and routed to
-  fail-closed manual review — never silently redispatched.
-- **Portable gateway evidence.** Signed receipts for success, denial, failure,
-  *and* `delivery_uncertain`, linked to permits, a verifiable per-wallet hash
-  chain, and — where a
+- **Same-key replay and charge deduplication.** A repeated accepted
+  idempotency identity cannot create a second debit. For the configured upstream MCP tool, it
+  cannot create a second gateway dispatch either. Once finalized, replay
+  returns the recorded outcome and receipt. One persisted upstream chain links
+  the idempotency record, permit reservation, ledger debit, dispatch attempt,
+  receipt, and audit event; local tools have no dispatch state machine.
+- **Honest failure accounting.** For the configured upstream tool, finalized
+  or reconciled pre-dispatch failures and upstream-returned errors are refunded
+  and receipted. Ambiguous post-dispatch outcomes become `delivery_uncertain`
+  when finalization or reconciliation succeeds. A local crash or exhausted
+  receipt/audit write after committed effects can leave no receipt and require
+  manual review. Do not retry an unresolved action with a new key; that can
+  execute and charge again.
+- **Portable gateway evidence.** Signed receipts on paths that finalize or
+  reconcile success, denial, failure, and `delivery_uncertain`, linked to
+  permits, a verifiable per-wallet hash chain, and — where a
   ledger record exists for that outcome — the ledger entry. A pre-dispatch
   denial has no debit to link. This is not a compliance-grade ledger or proof of
   physical work.
@@ -148,8 +153,9 @@ this does not pay for itself, and the first conversation should end there.
 
 **"Isn't this just an API gateway?"** A gateway answers whether a call is
 allowed. This binds the authorization to an internal credit budget and signed
-receipt, and prevents an identical replay under the same accepted key from
-creating another gateway dispatch or debit. The debit and receipt are the
+receipt when finalized, and prevents an identical replay under the same
+accepted key from creating another debit or, for the configured upstream MCP
+tool, another gateway dispatch. The debit and receipt are the
 product; the policy check is table stakes.
 
 **"We already have IAM."** Keep it. This is not an IAM replacement and does not
@@ -186,9 +192,9 @@ Otherwise the library is the correct answer and we will say so.
 least one verifies offline without calling its issuer. We do not claim to be
 alone here. What no project we surveyed *documents* is binding the debit to the
 idempotency record:
-one accepted key, at most one dispatch and ledger debit, and a receipt when
-finalization succeeds, in a single persisted chain for the configured upstream
-tool. (At most one *debit* — a refunded failure correctly writes a second,
+for the configured upstream tool, one accepted identity permits at most one
+dispatch and one ledger debit, linked to a receipt when finalized or reconciled.
+(At most one *debit* — a refunded failure correctly writes a second,
 compensating ledger entry against that debit.) Several of them enforce budgets
 and several dedupe replays; whether any binds the two is unresolved, and we say
 so rather than claiming the cell outright. The signature proves what happened;

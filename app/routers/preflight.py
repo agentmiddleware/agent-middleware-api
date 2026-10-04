@@ -29,8 +29,10 @@ router = APIRouter(
 # Request / Response Schemas
 # ---------------------------------------------------------------------------
 
+
 class PreflightRequest(BaseModel):
     """Optional overrides for preflight validation."""
+
     base_url: str = Field(
         default="",
         description="Production BASE_URL to validate (e.g., https://api.mycompany.com).",
@@ -47,6 +49,7 @@ class PreflightRequest(BaseModel):
 
 class PreflightCheckResult(BaseModel):
     """Single preflight check outcome."""
+
     name: str
     passed: bool
     severity: str = Field(..., description="critical, warning, or info")
@@ -56,6 +59,7 @@ class PreflightCheckResult(BaseModel):
 
 class PreflightResponse(BaseModel):
     """Pre-flight readiness report — the checklist before you turn the key."""
+
     checked_at: datetime
     verdict: str = Field(..., description="GO or NO-GO")
     total_checks: int
@@ -70,6 +74,7 @@ class PreflightResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
 
 @router.post(
     "/preflight",
@@ -113,8 +118,6 @@ async def run_preflight(
         failed=report.failed,
         warnings=report.warnings,
         critical_failures=report.critical_failures,
-        checks=[
-            PreflightCheckResult(**c) for c in report.checks
-        ],
+        checks=[PreflightCheckResult(**c) for c in report.checks],
         summary=report.summary,
     )

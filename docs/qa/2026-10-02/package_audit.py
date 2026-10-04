@@ -38,14 +38,15 @@ def inspect_package(package):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--site-packages", help="Inspect an isolated environment without activating its network guard")
+    parser.add_argument(
+        "--site-packages",
+        help="Inspect an isolated environment without activating its network guard",
+    )
     args = parser.parse_args()
     distributions = importlib.metadata.distributions(
         **({"path": [args.site_packages]} if args.site_packages else {})
     )
-    packages = sorted(
-        {(item.metadata["Name"], item.version) for item in distributions}
-    )
+    packages = sorted({(item.metadata["Name"], item.version) for item in distributions})
     with ThreadPoolExecutor(max_workers=8) as pool:
         results = list(pool.map(inspect_package, packages))
     report = {
@@ -53,12 +54,18 @@ if __name__ == "__main__":
         "scope": "Resolved isolated Python QA environment, including development tools",
         "packages": results,
         "package_count": len(results),
-        "vulnerable_package_count": sum(bool(item.get("vulnerabilities")) for item in results),
+        "vulnerable_package_count": sum(
+            bool(item.get("vulnerabilities")) for item in results
+        ),
         "unverified_package_count": sum("error" in item for item in results),
     }
     path = Path(__file__).parent / "artifacts" / "python-package-audit.json"
     path.write_text(json.dumps(report, indent=2) + "\n")
-    print(json.dumps({key: value for key, value in report.items() if key != "packages"}, indent=2))
+    print(
+        json.dumps(
+            {key: value for key, value in report.items() if key != "packages"}, indent=2
+        )
+    )
     for item in results:
         if item.get("vulnerabilities") or item.get("error"):
             print(json.dumps(item))

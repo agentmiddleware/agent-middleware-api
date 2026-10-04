@@ -39,9 +39,7 @@ def upgrade() -> None:
             server_default="not_required",
         ),
     )
-    op.add_column(
-        "wallets", sa.Column("kyc_verified_at", sa.DateTime(), nullable=True)
-    )
+    op.add_column("wallets", sa.Column("kyc_verified_at", sa.DateTime(), nullable=True))
 
     op.create_table(
         "service_registry",
@@ -56,7 +54,9 @@ def upgrade() -> None:
         ),
         sa.Column("owner_key", sa.String(255), nullable=False),
         sa.Column("category", sa.String(50), nullable=False),
-        sa.Column("credits_per_unit", sa.Numeric(precision=20, scale=8), nullable=False),
+        sa.Column(
+            "credits_per_unit", sa.Numeric(precision=20, scale=8), nullable=False
+        ),
         sa.Column("unit_name", sa.String(50), nullable=False, server_default="request"),
         sa.Column("mcp_manifest", sa.Text(), nullable=True),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
@@ -117,7 +117,9 @@ def upgrade() -> None:
             server_default=sa.func.now(),
         ),
     )
-    op.create_index("ix_kyc_verifications_wallet_id", "kyc_verifications", ["wallet_id"])
+    op.create_index(
+        "ix_kyc_verifications_wallet_id", "kyc_verifications", ["wallet_id"]
+    )
     op.create_index(
         "ix_kyc_verifications_stripe_session_id",
         "kyc_verifications",

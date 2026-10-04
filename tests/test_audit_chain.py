@@ -503,18 +503,24 @@ async def test_windowed_verify_of_valid_chain_is_valid(client, clean_database):
     provisioned = await provision_agent_wallet(client)
     wallet_id = provisioned["agent_wallet_id"]
     for n in range(4):
-        await record_audit_event(event="trust.window", wallet_id=wallet_id, metadata={"n": n})
+        await record_audit_event(
+            event="trust.window", wallet_id=wallet_id, metadata={"n": n}
+        )
         await asyncio.sleep(0.01)
 
     factory = get_session_factory()
     async with factory() as session:
         rows = (
-            await session.execute(
-                select(ControlPlaneAuditEventModel)
-                .where(ControlPlaneAuditEventModel.wallet_id == wallet_id)
-                .order_by(ControlPlaneAuditEventModel.seq)
+            (
+                await session.execute(
+                    select(ControlPlaneAuditEventModel)
+                    .where(ControlPlaneAuditEventModel.wallet_id == wallet_id)
+                    .order_by(ControlPlaneAuditEventModel.seq)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
     third_created = rows[2].created_at
 
     windowed = await verify_audit_chain(

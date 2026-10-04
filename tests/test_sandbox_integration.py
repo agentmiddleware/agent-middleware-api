@@ -217,14 +217,16 @@ class TestDryRunSession:
         )
 
         for i in range(3):
-            session.add_charge(SimulatedCharge(
-                charge_id=f"ch-{i}",
-                service_category="content_factory",
-                units=10.0,
-                credits=Decimal("100"),
-                description=f"Charge {i}",
-                timestamp=datetime.now(timezone.utc),
-            ))
+            session.add_charge(
+                SimulatedCharge(
+                    charge_id=f"ch-{i}",
+                    service_category="content_factory",
+                    units=10.0,
+                    credits=Decimal("100"),
+                    description=f"Charge {i}",
+                    timestamp=datetime.now(timezone.utc),
+                )
+            )
 
         assert session.total_simulated == Decimal("300")
         assert session.virtual_balance == Decimal("700")
@@ -247,6 +249,7 @@ class TestBillingRouterDryRun:
     async def client(self):
         from httpx import AsyncClient, ASGITransport
         from app.main import app
+
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as c:
             yield c
@@ -279,7 +282,11 @@ class TestBillingRouterDryRun:
         """POST /v1/billing/dry-run/charge simulates a charge."""
         wallet_resp = await client.post(
             "/v1/billing/wallets/sponsor",
-            json={"sponsor_name": "Test Sponsor", "email": "test@example.com", "initial_credits": 10000},
+            json={
+                "sponsor_name": "Test Sponsor",
+                "email": "test@example.com",
+                "initial_credits": 10000,
+            },
             headers={"X-API-Key": "test-key"},
         )
         wallet_id = wallet_resp.json()["wallet_id"]
@@ -299,14 +306,20 @@ class TestBillingRouterDryRun:
         assert data["credits_would_charge"] == 500.0
 
     @pytest.mark.anyio
-    async def test_simulate_charge_exact_field_preserves_decimal_precision(self, client):
+    async def test_simulate_charge_exact_field_preserves_decimal_precision(
+        self, client
+    ):
         """credits_would_charge_exact must come from the real Decimal math,
         not from round-tripping through a float first (which loses precision
         for values beyond float64's ~15-17 significant digits). This exercises
         the session-based dry-run path (ShadowLedger.simulate_charge)."""
         wallet_resp = await client.post(
             "/v1/billing/wallets/sponsor",
-            json={"sponsor_name": "Precision Sponsor", "email": "precision@example.com", "initial_credits": 10000000},
+            json={
+                "sponsor_name": "Precision Sponsor",
+                "email": "precision@example.com",
+                "initial_credits": 10000000,
+            },
             headers={"X-API-Key": "test-key"},
         )
         wallet_id = wallet_resp.json()["wallet_id"]
@@ -348,7 +361,11 @@ class TestBillingRouterDryRun:
         """DELETE /v1/billing/dry-run/session/{id} ends session."""
         wallet_resp = await client.post(
             "/v1/billing/wallets/sponsor",
-            json={"sponsor_name": "Test Sponsor", "email": "test@example.com", "initial_credits": 10000},
+            json={
+                "sponsor_name": "Test Sponsor",
+                "email": "test@example.com",
+                "initial_credits": 10000,
+            },
             headers={"X-API-Key": "test-key"},
         )
         wallet_id = wallet_resp.json()["wallet_id"]
@@ -362,7 +379,12 @@ class TestBillingRouterDryRun:
 
         await client.post(
             "/v1/billing/dry-run/charge",
-            json={"wallet_id": wallet_id, "service": "iot_bridge", "units": 1.0, "dry_run_session_id": session_id},
+            json={
+                "wallet_id": wallet_id,
+                "service": "iot_bridge",
+                "units": 1.0,
+                "dry_run_session_id": session_id,
+            },
             headers={"X-API-Key": "test-key"},
         )
 
@@ -382,7 +404,11 @@ class TestBillingRouterDryRun:
         """POST /v1/billing/dry-run/session/{id}/commit commits charges to billing."""
         wallet_resp = await client.post(
             "/v1/billing/wallets/sponsor",
-            json={"sponsor_name": "Commit Test", "email": "commit@test.com", "initial_credits": 10000},
+            json={
+                "sponsor_name": "Commit Test",
+                "email": "commit@test.com",
+                "initial_credits": 10000,
+            },
             headers={"X-API-Key": "test-key"},
         )
         wallet_id = wallet_resp.json()["wallet_id"]
@@ -428,7 +454,11 @@ class TestBillingRouterDryRun:
         counting it as a successful debit."""
         wallet_resp = await client.post(
             "/v1/billing/wallets/sponsor",
-            json={"sponsor_name": "Drained Commit Test", "email": "drained-commit@test.com", "initial_credits": 10},
+            json={
+                "sponsor_name": "Drained Commit Test",
+                "email": "drained-commit@test.com",
+                "initial_credits": 10,
+            },
             headers={"X-API-Key": "test-key"},
         )
         wallet_id = wallet_resp.json()["wallet_id"]
@@ -486,7 +516,11 @@ class TestBillingRouterDryRun:
         """POST /v1/billing/dry-run/session/{id}/revert discards charges."""
         wallet_resp = await client.post(
             "/v1/billing/wallets/sponsor",
-            json={"sponsor_name": "Revert Test", "email": "revert@test.com", "initial_credits": 10000},
+            json={
+                "sponsor_name": "Revert Test",
+                "email": "revert@test.com",
+                "initial_credits": 10000,
+            },
             headers={"X-API-Key": "test-key"},
         )
         wallet_id = wallet_resp.json()["wallet_id"]
@@ -543,7 +577,11 @@ class TestBillingRouterDryRun:
         """Committing session with no charges succeeds with message."""
         wallet_resp = await client.post(
             "/v1/billing/wallets/sponsor",
-            json={"sponsor_name": "Empty Commit", "email": "empty@test.com", "initial_credits": 10000},
+            json={
+                "sponsor_name": "Empty Commit",
+                "email": "empty@test.com",
+                "initial_credits": 10000,
+            },
             headers={"X-API-Key": "test-key"},
         )
         wallet_id = wallet_resp.json()["wallet_id"]

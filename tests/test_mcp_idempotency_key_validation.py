@@ -97,14 +97,20 @@ def counted_tool():
 
 async def _db_counts() -> dict[str, int]:
     async with get_session_factory()() as session:
-        permits = (await session.execute(select(func.count()).select_from(PermitModel))).scalar_one()
+        permits = (
+            await session.execute(select(func.count()).select_from(PermitModel))
+        ).scalar_one()
         records = (
-            await session.execute(select(func.count()).select_from(IdempotencyRecordModel))
+            await session.execute(
+                select(func.count()).select_from(IdempotencyRecordModel)
+            )
         ).scalar_one()
     return {"permits": int(permits), "idempotency_records": int(records)}
 
 
-async def _snapshot(client: AsyncClient, provisioned: dict, tool: CountedTool) -> dict[str, int]:
+async def _snapshot(
+    client: AsyncClient, provisioned: dict, tool: CountedTool
+) -> dict[str, int]:
     """Everything a refused call must leave untouched."""
     ledger = await client.get(
         f"/v1/billing/ledger/{provisioned['agent_wallet_id']}",
@@ -119,11 +125,18 @@ async def _snapshot(client: AsyncClient, provisioned: dict, tool: CountedTool) -
     }
 
 
-def _standard_call(tool: str, *, meta: Any = _ABSENT, request_id: int = 1, text: str = "one") -> dict:
+def _standard_call(
+    tool: str, *, meta: Any = _ABSENT, request_id: int = 1, text: str = "one"
+) -> dict:
     params: dict[str, Any] = {"name": tool, "arguments": {"text": text}}
     if meta is not _ABSENT:
         params["_meta"] = {META_KEY: meta}
-    return {"jsonrpc": "2.0", "id": request_id, "method": "tools/call", "params": params}
+    return {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "method": "tools/call",
+        "params": params,
+    }
 
 
 def _assert_invalid_key(response, reason_code: str) -> None:
@@ -150,7 +163,9 @@ INVALID_META_KEYS = [
     pytest.param([], "idempotency_key_not_a_string", id="array"),
     pytest.param({"key": "retry"}, "idempotency_key_not_a_string", id="object"),
     pytest.param(
-        "x" * (MAX_CLIENT_IDEMPOTENCY_KEY_LENGTH + 1), "idempotency_key_too_long", id="129-chars"
+        "x" * (MAX_CLIENT_IDEMPOTENCY_KEY_LENGTH + 1),
+        "idempotency_key_too_long",
+        id="129-chars",
     ),
     pytest.param("x" * 257, "idempotency_key_too_long", id="257-chars"),
     pytest.param("abc\x00def", "idempotency_key_control_characters", id="nul"),
@@ -167,14 +182,20 @@ async def test_standard_meta_key_invalid_is_refused_before_any_effect(
 
     # Control: the same wallet and tool execute exactly once under a valid key.
     control = await client.post(
-        "/mcp", json=_standard_call(counted_tool.name, meta="valid-control"), headers=headers
+        "/mcp",
+        json=_standard_call(counted_tool.name, meta="valid-control"),
+        headers=headers,
     )
     assert "result" in control.json(), control.text
     assert counted_tool.effects == ["one"]
 
     before = await _snapshot(client, provisioned, counted_tool)
     responses = [
-        await client.post("/mcp", json=_standard_call(counted_tool.name, meta=bad_key), headers=headers)
+        await client.post(
+            "/mcp",
+            json=_standard_call(counted_tool.name, meta=bad_key),
+            headers=headers,
+        )
         for _ in range(2)
     ]
     for response in responses:
@@ -189,7 +210,9 @@ async def test_standard_meta_key_invalid_is_refused_before_any_effect(
         pytest.param("", "idempotency_key_blank", id="empty-header"),
         pytest.param("   ", "idempotency_key_blank", id="blank-header"),
         pytest.param(
-            "h" * (MAX_CLIENT_IDEMPOTENCY_KEY_LENGTH + 1), "idempotency_key_too_long", id="129-chars"
+            "h" * (MAX_CLIENT_IDEMPOTENCY_KEY_LENGTH + 1),
+            "idempotency_key_too_long",
+            id="129-chars",
         ),
     ],
 )
@@ -201,7 +224,11 @@ async def test_standard_header_key_invalid_is_refused_before_any_effect(
     response = await client.post(
         "/mcp",
         json=_standard_call(counted_tool.name),
-        headers={**provisioned["agent_headers"], **MCP_HEADERS, "Idempotency-Key": bad_header},
+        headers={
+            **provisioned["agent_headers"],
+            **MCP_HEADERS,
+            "Idempotency-Key": bad_header,
+        },
     )
     _assert_invalid_key(response, reason_code)
     assert await _snapshot(client, provisioned, counted_tool) == before
@@ -215,7 +242,11 @@ async def test_standard_header_and_meta_conflict_is_refused(
     response = await client.post(
         "/mcp",
         json=_standard_call(counted_tool.name, meta="meta-key-1"),
-        headers={**provisioned["agent_headers"], **MCP_HEADERS, "Idempotency-Key": "header-key-1"},
+        headers={
+            **provisioned["agent_headers"],
+            **MCP_HEADERS,
+            "Idempotency-Key": "header-key-1",
+        },
     )
     _assert_invalid_key(response, "idempotency_key_conflict")
     assert await _snapshot(client, provisioned, counted_tool) == before
@@ -230,7 +261,11 @@ async def test_standard_header_valid_with_meta_invalid_is_refused(
     response = await client.post(
         "/mcp",
         json=_standard_call(counted_tool.name, meta=123),
-        headers={**provisioned["agent_headers"], **MCP_HEADERS, "Idempotency-Key": "header-key-2"},
+        headers={
+            **provisioned["agent_headers"],
+            **MCP_HEADERS,
+            "Idempotency-Key": "header-key-2",
+        },
     )
     _assert_invalid_key(response, "idempotency_key_not_a_string")
     assert await _snapshot(client, provisioned, counted_tool) == before
@@ -247,7 +282,9 @@ async def test_standard_repeated_distinct_headers_are_a_conflict(
         ("Idempotency-Key", "dup-a"),
         ("Idempotency-Key", "dup-b"),
     ]
-    response = await client.post("/mcp", json=_standard_call(counted_tool.name), headers=headers)
+    response = await client.post(
+        "/mcp", json=_standard_call(counted_tool.name), headers=headers
+    )
     _assert_invalid_key(response, "idempotency_key_conflict")
     assert await _snapshot(client, provisioned, counted_tool) == before
 
@@ -256,7 +293,11 @@ async def test_standard_same_key_in_header_and_meta_executes_once_and_replays(
     client, standard_mcp_enabled, clean_database, counted_tool
 ):
     provisioned = await provision_agent_wallet(client)
-    headers = {**provisioned["agent_headers"], **MCP_HEADERS, "Idempotency-Key": "same-1"}
+    headers = {
+        **provisioned["agent_headers"],
+        **MCP_HEADERS,
+        "Idempotency-Key": "same-1",
+    }
     body = _standard_call(counted_tool.name, meta="same-1")
     base = await _snapshot(client, provisioned, counted_tool)
 
@@ -355,7 +396,9 @@ async def test_standard_unkeyed_calls_are_documented_as_new_operations(
     body = _standard_call(counted_tool.name, meta=meta)
     base = await _snapshot(client, provisioned, counted_tool)
     receipts = [
-        (await client.post("/mcp", json=body, headers=headers)).json()["result"]["receipt"]["receipt_id"]
+        (await client.post("/mcp", json=body, headers=headers)).json()["result"][
+            "receipt"
+        ]["receipt_id"]
         for _ in range(2)
     ]
     assert len(set(receipts)) == 2
@@ -378,16 +421,36 @@ MALFORMED_ENVELOPES = [
     pytest.param({}, -32600, None, id="empty-object"),
     pytest.param({"id": 7, "method": 5}, -32600, 7, id="non-string-method"),
     pytest.param({"id": 8, "method": ""}, -32600, 8, id="empty-method"),
-    pytest.param({"id": 9, "method": "tools/call", "params": []}, -32602, 9, id="array-params"),
-    pytest.param({"id": 10, "method": "tools/call", "params": "x"}, -32602, 10, id="string-params"),
-    pytest.param({"id": 11, "method": "tools/list", "params": []}, -32602, 11, id="list-array-params"),
     pytest.param(
-        {"id": 12, "method": "tools/call", "params": {"mcpContext": [1]}}, -32602, 12, id="array-context"
+        {"id": 9, "method": "tools/call", "params": []}, -32602, 9, id="array-params"
     ),
     pytest.param(
-        {"id": 13, "method": "tools/call", "params": {"name": 5}}, -32602, 13, id="non-string-name"
+        {"id": 10, "method": "tools/call", "params": "x"},
+        -32602,
+        10,
+        id="string-params",
     ),
-    pytest.param({"id": 14, "method": "tools/call", "params": {}}, -32602, 14, id="missing-name"),
+    pytest.param(
+        {"id": 11, "method": "tools/list", "params": []},
+        -32602,
+        11,
+        id="list-array-params",
+    ),
+    pytest.param(
+        {"id": 12, "method": "tools/call", "params": {"mcpContext": [1]}},
+        -32602,
+        12,
+        id="array-context",
+    ),
+    pytest.param(
+        {"id": 13, "method": "tools/call", "params": {"name": 5}},
+        -32602,
+        13,
+        id="non-string-name",
+    ),
+    pytest.param(
+        {"id": 14, "method": "tools/call", "params": {}}, -32602, 14, id="missing-name"
+    ),
     pytest.param(
         {"id": 15, "method": "tools/call", "params": {"name": "t", "arguments": []}},
         -32602,
@@ -401,13 +464,21 @@ MALFORMED_ENVELOPES = [
         id="string-arguments",
     ),
     pytest.param(
-        {"id": 17, "method": "tools/call", "params": {"name": "t", "mcpContext": {"wallet_id": 7}}},
+        {
+            "id": 17,
+            "method": "tools/call",
+            "params": {"name": "t", "mcpContext": {"wallet_id": 7}},
+        },
         -32602,
         17,
         id="non-string-wallet",
     ),
     pytest.param(
-        {"id": 18, "method": "tools/call", "params": {"name": "t", "mcpContext": {"idempotency_key": 5}}},
+        {
+            "id": 18,
+            "method": "tools/call",
+            "params": {"name": "t", "mcpContext": {"idempotency_key": 5}},
+        },
         -32602,
         18,
         id="non-string-key",
@@ -419,9 +490,17 @@ MALFORMED_ENVELOPES = [
         id="object-id-is-nulled",
     ),
     pytest.param(
-        {"id": True, "method": "tools/call", "params": []}, -32602, None, id="boolean-id-is-nulled"
+        {"id": True, "method": "tools/call", "params": []},
+        -32602,
+        None,
+        id="boolean-id-is-nulled",
     ),
-    pytest.param({"id": "abc", "method": "nope"}, -32601, "abc", id="unknown-method-keeps-string-id"),
+    pytest.param(
+        {"id": "abc", "method": "nope"},
+        -32601,
+        "abc",
+        id="unknown-method-keeps-string-id",
+    ),
 ]
 
 
@@ -434,7 +513,9 @@ async def test_legacy_malformed_envelope_returns_controlled_jsonrpc_error(
         content=json.dumps(body),
         headers={**BOOTSTRAP_HEADERS, "Content-Type": "application/json"},
     )
-    assert response.status_code == 200, f"HTTP {response.status_code}: {response.text[:200]}"
+    assert response.status_code == 200, (
+        f"HTTP {response.status_code}: {response.text[:200]}"
+    )
     payload = response.json()
     assert payload["jsonrpc"] == "2.0"
     assert payload["id"] == echoed_id
@@ -456,7 +537,12 @@ async def test_legacy_malformed_json_keeps_http_400(client):
 async def test_legacy_tools_list_ignores_a_non_string_category(client):
     response = await client.post(
         "/mcp/messages",
-        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {"category": 5}},
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/list",
+            "params": {"category": 5},
+        },
         headers=BOOTSTRAP_HEADERS,
     )
     assert response.status_code == 200
@@ -492,7 +578,12 @@ def _legacy_call(
         context["idempotency_key"] = key
     params: dict[str, Any] = {"name": tool, "mcpContext": context}
     params["arguments"] = {"text": "one"} if arguments is _ABSENT else arguments
-    return {"jsonrpc": "2.0", "id": request_id, "method": "tools/call", "params": params}
+    return {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "method": "tools/call",
+        "params": params,
+    }
 
 
 async def test_legacy_valid_permit_with_malformed_members_has_no_effect_or_debit(
@@ -504,11 +595,35 @@ async def test_legacy_valid_permit_with_malformed_members_has_no_effect_or_debit
     before = await _snapshot(client, provisioned, counted_tool)
 
     cases = [
-        (_legacy_call(counted_tool.name, provisioned, permit, key="ok-1", arguments=[]), {}, None),
-        (_legacy_call(counted_tool.name, provisioned, permit, key="ok-1", arguments="x"), {}, None),
-        (_legacy_call(counted_tool.name, provisioned, permit, key=123), {}, "idempotency_key_not_a_string"),
-        (_legacy_call(counted_tool.name, provisioned, permit, key=""), {}, "idempotency_key_blank"),
-        (_legacy_call(counted_tool.name, provisioned, permit, key="k" * 129), {}, "idempotency_key_too_long"),
+        (
+            _legacy_call(
+                counted_tool.name, provisioned, permit, key="ok-1", arguments=[]
+            ),
+            {},
+            None,
+        ),
+        (
+            _legacy_call(
+                counted_tool.name, provisioned, permit, key="ok-1", arguments="x"
+            ),
+            {},
+            None,
+        ),
+        (
+            _legacy_call(counted_tool.name, provisioned, permit, key=123),
+            {},
+            "idempotency_key_not_a_string",
+        ),
+        (
+            _legacy_call(counted_tool.name, provisioned, permit, key=""),
+            {},
+            "idempotency_key_blank",
+        ),
+        (
+            _legacy_call(counted_tool.name, provisioned, permit, key="k" * 129),
+            {},
+            "idempotency_key_too_long",
+        ),
         (
             _legacy_call(counted_tool.name, provisioned, permit, key="body-1"),
             {"Idempotency-Key": "header-1"},
@@ -521,7 +636,9 @@ async def test_legacy_valid_permit_with_malformed_members_has_no_effect_or_debit
         ),
     ]
     for body, extra_headers, reason_code in cases:
-        response = await client.post("/mcp/messages", json=body, headers={**headers, **extra_headers})
+        response = await client.post(
+            "/mcp/messages", json=body, headers={**headers, **extra_headers}
+        )
         assert response.status_code == 200, response.text
         payload = response.json()
         assert "result" not in payload, payload
@@ -552,7 +669,9 @@ async def test_legacy_same_key_in_header_and_context_executes_once_and_replays(
     assert await _snapshot(client, provisioned, counted_tool) == after_first
 
 
-async def test_legacy_context_null_key_reads_as_absent(client, governed_legacy, counted_tool):
+async def test_legacy_context_null_key_reads_as_absent(
+    client, governed_legacy, counted_tool
+):
     """``idempotency_key: null`` is the typed schema's "no key"; governed calls then need one."""
     provisioned, permit = governed_legacy
     before = await _snapshot(client, provisioned, counted_tool)
@@ -583,7 +702,11 @@ async def test_rest_invoke_refuses_blank_or_conflicting_keys_before_any_effect(
     }
     blank = await client.post(
         f"/mcp/tools/{counted_tool.name}/invoke",
-        json={"name": counted_tool.name, "arguments": {"text": "one"}, "mcp_context": context},
+        json={
+            "name": counted_tool.name,
+            "arguments": {"text": "one"},
+            "mcp_context": context,
+        },
         headers=provisioned["agent_headers"],
     )
     assert blank.status_code == 400, blank.text
@@ -592,7 +715,11 @@ async def test_rest_invoke_refuses_blank_or_conflicting_keys_before_any_effect(
     context["idempotency_key"] = "rest-body-1"
     conflict = await client.post(
         f"/mcp/tools/{counted_tool.name}/invoke",
-        json={"name": counted_tool.name, "arguments": {"text": "one"}, "mcp_context": context},
+        json={
+            "name": counted_tool.name,
+            "arguments": {"text": "one"},
+            "mcp_context": context,
+        },
         headers={**provisioned["agent_headers"], "Idempotency-Key": "rest-header-1"},
     )
     assert conflict.status_code == 400, conflict.text
@@ -603,14 +730,24 @@ async def test_rest_invoke_refuses_blank_or_conflicting_keys_before_any_effect(
     headers = {**provisioned["agent_headers"], "Idempotency-Key": "rest-body-1"}
     first = await client.post(
         f"/mcp/tools/{counted_tool.name}/invoke",
-        json={"name": counted_tool.name, "arguments": {"text": "one"}, "mcp_context": context},
+        json={
+            "name": counted_tool.name,
+            "arguments": {"text": "one"},
+            "mcp_context": context,
+        },
         headers=headers,
     )
     assert first.status_code == 200, first.text
     replay = await client.post(
         f"/mcp/tools/{counted_tool.name}/invoke",
-        json={"name": counted_tool.name, "arguments": {"text": "one"}, "mcp_context": context},
+        json={
+            "name": counted_tool.name,
+            "arguments": {"text": "one"},
+            "mcp_context": context,
+        },
         headers=headers,
     )
-    assert replay.json()["receipt"]["receipt_id"] == first.json()["receipt"]["receipt_id"]
+    assert (
+        replay.json()["receipt"]["receipt_id"] == first.json()["receipt"]["receipt_id"]
+    )
     assert counted_tool.effects == ["one"]

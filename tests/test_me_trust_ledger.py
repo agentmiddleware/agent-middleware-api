@@ -140,9 +140,7 @@ async def test_agent_self_trust_ledger_excludes_other_wallet_records(
 
     a_receipts = await client.get("/v1/me/receipts", headers=wallet_a["agent_headers"])
     assert a_receipts.status_code == 200
-    a_receipt_ids = {
-        receipt["receipt_id"] for receipt in a_receipts.json()["receipts"]
-    }
+    a_receipt_ids = {receipt["receipt_id"] for receipt in a_receipts.json()["receipts"]}
     assert receipt_a in a_receipt_ids
     assert receipt_b not in a_receipt_ids
 

@@ -132,9 +132,7 @@ async def count_duplicate_denial_receipts() -> tuple[int | None, str | None]:
             timeout=DUPLICATE_DENIAL_COUNT_TIMEOUT_SECONDS,
         )
     except (RuntimeError, SQLAlchemyError, asyncio.TimeoutError) as exc:
-        logger.warning(
-            "duplicate_denial_count_unavailable: %s", type(exc).__name__
-        )
+        logger.warning("duplicate_denial_count_unavailable: %s", type(exc).__name__)
         return None, type(exc).__name__
     return count, None
 
@@ -595,6 +593,68 @@ class McpDispatchAttemptService:
                     return existing
                 return attempt
 
+    async def _validate_action_owner(
+        self,
+        *,
+        session: AsyncSession,
+        record: IdempotencyRecordModel,
+        permit: PermitModel,
+        wallet_id: str,
+        key_id: str | None,
+        public_tool_id: str,
+        upstream_tool_name: str,
+        upstream_origin: str,
+        arguments: dict[str, Any] | None,
+    ) -> PermitValidation | None:
+        """Apply identical authority/digest/owner checks on prepare and recovery."""
+        from app.services.action_permits import (
+            action_execution_identity,
+            validate_action_request,
+        )
+        from app.services.idempotency import ACTION_MCP_IDEMPOTENCY_ENDPOINT
+        from app.services.service_registry import get_service_registry
+
+        if record.endpoint == ACTION_MCP_IDEMPOTENCY_ENDPOINT or any(
+            getattr(permit, field) is not None
+            for field in (
+                "action_contract_version",
+                "action_payload_hash",
+                "action_schema_id",
+                "action_schema_version",
+                "action_public_tool_id",
+                "action_upstream_binding_hash",
+            )
+        ):
+            registry = get_service_registry()
+            service = await registry.get(public_tool_id)
+            binding = registry.get_action_binding(service) if service else None
+            if binding is None or service is None:
+                return PermitValidation(False, "action_tool_binding_required", permit)
+            if (
+                service["upstream_tool_name"] != upstream_tool_name
+                or service["upstream_origin"] != upstream_origin
+            ):
+                return PermitValidation(False, "action_binding_mismatch", permit)
+            action_validation = await validate_action_request(
+                permit,
+                binding,
+                wallet_id,
+                key_id,
+                arguments or {},
+                "replay",
+                session=session,
+            )
+            if not action_validation.allowed:
+                return action_validation
+            identity = action_execution_identity(permit, binding)
+            if (
+                record.endpoint != identity.endpoint
+                or record.idempotency_key != identity.idempotency_key
+                or record.request_hash != sha256_hex(identity.request_payload)
+            ):
+                raise DispatchAttemptConflictError("dispatch_action_owner_invalid")
+        return None
+
     async def authorize_reserve_and_prepare(
         self,
         *,
@@ -664,6 +724,19 @@ class McpDispatchAttemptService:
                     )
                     if permit is None:
                         return PermitValidation(False, "permit_not_found", None), None
+                    action_denial = await self._validate_action_owner(
+                        session=session,
+                        record=record,
+                        permit=permit,
+                        wallet_id=wallet_id,
+                        key_id=key_id,
+                        public_tool_id=public_tool_id,
+                        upstream_tool_name=upstream_tool_name,
+                        upstream_origin=upstream_origin,
+                        arguments=arguments,
+                    )
+                    if action_denial is not None:
+                        return action_denial, None
                     await self._assert_approval_binding(
                         session,
                         record=record,
@@ -1108,8 +1181,11 @@ class McpDispatchAttemptService:
                         record = await recovery_session.get(
                             IdempotencyRecordModel,
                             idempotency_record_id,
+                            with_for_update=True,
                         )
-                        permit = await recovery_session.get(PermitModel, permit_id)
+                        permit = await recovery_session.get(
+                            PermitModel, permit_id, with_for_update=True
+                        )
                         if (
                             record is None
                             or record.wallet_id != wallet_id
@@ -1119,6 +1195,21 @@ class McpDispatchAttemptService:
                             raise DispatchPrepareCommitUncertainError(
                                 "dispatch_prepare_commit_uncertain"
                             )
+                        action_denial = await self._validate_action_owner(
+                            session=recovery_session,
+                            record=record,
+                            permit=permit,
+                            wallet_id=wallet_id,
+                            key_id=key_id,
+                            public_tool_id=public_tool_id,
+                            upstream_tool_name=upstream_tool_name,
+                            upstream_origin=upstream_origin,
+                            arguments=arguments,
+                        )
+                        if action_denial is not None:
+                            raise DispatchPrepareCommitUncertainError(
+                                "dispatch_prepare_action_authority_invalid"
+                            )
                         await self._assert_approval_binding(
                             recovery_session,
                             record=record,
@@ -1127,7 +1218,19 @@ class McpDispatchAttemptService:
                             wallet_id=wallet_id,
                             public_tool_id=public_tool_id,
                         )
-                        if _unsupported_upstream_constraints(permit):
+                        if _unsupported_upstream_constraints(
+                            permit,
+                            tool_name=(
+                                public_tool_id
+                                if permit.action_contract_version == 1
+                                and existing.call_slot_reserved
+                                and json.loads(
+                                    permit.tool_call_counts_json or "{}"
+                                ).get(public_tool_id)
+                                == 1
+                                else None
+                            ),
+                        ):
                             # A row created by an older worker may already hold a
                             # reservation the atomic path cannot re-validate.
                             # Keep it commit-uncertain so the reconciler owns
@@ -1325,6 +1428,12 @@ class McpDispatchAttemptService:
                         attempt.idempotency_record_id,
                         with_for_update=True,
                     )
+                    # Accepted action preparation is permanent even when a
+                    # later effect-free failure releases its budget/call slot.
+                    if record is not None and record.endpoint == "/mcp/action/v1":
+                        raise DispatchClaimUnavailableError(
+                            "dispatch_action_owner_retained"
+                        )
                     if record is None or record.ledger_entry_id is not None:
                         raise DispatchClaimUnavailableError("dispatch_attempt_advanced")
                     operation_debit = (

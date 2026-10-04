@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from failure_lab.configurations import ALL_CONFIGURATIONS, AttemptOutcome, Configuration, Target
+from failure_lab.configurations import (
+    ALL_CONFIGURATIONS,
+    AttemptOutcome,
+    Configuration,
+    Target,
+)
 from failure_lab.faults import FaultMode, FaultPlan
 from failure_lab.identity import OperationIdentity
 from failure_lab.scenarios.base import (
@@ -111,7 +116,9 @@ class ExecuteThenLoseResponse(Scenario):
         "effect. Only the independent effect ledger speaks to that here.",
     )
 
-    async def run_configuration(self, target: Target, log: EventLog) -> ConfigurationResult:
+    async def run_configuration(
+        self, target: Target, log: EventLog
+    ) -> ConfigurationResult:
         hold_seconds = float(self.options.get("hold_seconds", DEFAULT_HOLD_SECONDS))
         timeout_seconds = self._client_budget(target)
         call_timeout = self._gateway_call_timeout(target)
@@ -179,7 +186,9 @@ class ExecuteThenLoseResponse(Scenario):
             amount_minor_units=amount,
         )
 
-        first = await target.agent.submit(identity, refund, timeout_seconds=timeout_seconds)
+        first = await target.agent.submit(
+            identity, refund, timeout_seconds=timeout_seconds
+        )
         # Read BEFORE the retry, because every observation below opens by
         # saying the tool executed and its response was withheld. Arming a
         # fault is not evidence that it fired, and a post-retry total cannot
@@ -241,7 +250,9 @@ class ExecuteThenLoseResponse(Scenario):
         # below describes the probe alone. The control is a real governed call
         # and adds its own debit and receipt afterwards; those land in
         # ``liveness_control`` instead.
-        measurements = await self.measure(target, attempts, operation_ids=[operation_id])
+        measurements = await self.measure(
+            target, attempts, operation_ids=[operation_id]
+        )
         ledger_count = target.ledger.execution_count(operation_id)
         layer_requests = target.injector.dispatch_count(operation_id)
         reached_tool = target.injector.reached_tool_count(operation_id)
@@ -631,7 +642,9 @@ class ExecuteThenLoseResponse(Scenario):
             )
         else:
             observation += (
-                " The correct native baseline did NOT hold: " + "; ".join(failures) + "."
+                " The correct native baseline did NOT hold: "
+                + "; ".join(failures)
+                + "."
             )
         risks = [
             HARNESS_SCOPE_RISK,

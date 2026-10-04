@@ -81,7 +81,9 @@ def main():
         sys.exit(2)
 
     fix_data = fix_resp.json()
-    print(f"[Auto-PR] Fix generated. Files changed: {fix_data.get('files_changed', [])}")
+    print(
+        f"[Auto-PR] Fix generated. Files changed: {fix_data.get('files_changed', [])}"
+    )
 
     # --- Step 3: Write output ---
     result = {

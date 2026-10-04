@@ -9,7 +9,7 @@ import json
 import logging
 import uuid
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, cast
 
@@ -1213,14 +1213,18 @@ class BillingEngine:
     # --- Arbitrage Reporting ---
 
     async def get_arbitrage_report(self) -> ArbitrageReport:
-        """Compute swarm arbitrage profitability across all services."""
+        """Compute profitability in [now - 24 hours, now), across all wallets."""
+        end = utc_now()
+        start = end - timedelta(days=1)
         async with self._session_factory()() as session:
             result = await session.execute(
                 select(LedgerEntryModel).where(
                     cast(
                         ColumnElement[bool],
                         LedgerEntryModel.action == LedgerAction.DEBIT.value,
-                    )
+                    ),
+                    cast(ColumnElement[bool], LedgerEntryModel.timestamp >= start),
+                    cast(ColumnElement[bool], LedgerEntryModel.timestamp < end),
                 )
             )
             entries = list(result.scalars().all())
@@ -1273,14 +1277,8 @@ class BillingEngine:
                 reverse=True,
             )[:5]
 
-            now = datetime.now(timezone.utc)
-            yesterday = (now - __import__("datetime").timedelta(days=1)).strftime(
-                "%Y-%m-%d"
-            )
-            today = now.strftime("%Y-%m-%d")
-
             return ArbitrageReport(
-                period=f"{yesterday} to {today}",
+                period=f"{start.isoformat()}Z to {end.isoformat()}Z (end exclusive)",
                 total_revenue=float(total_revenue),
                 total_revenue_exact=str(total_revenue),
                 total_compute_cost=float(total_cost),

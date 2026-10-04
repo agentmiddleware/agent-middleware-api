@@ -2648,6 +2648,7 @@
 
       if (invuln <= 0) {
         sweepers.forEach(function (s) {
+          if (invuln > 0 || game.over) return;
           if (s.x !== player.x || s.y !== player.y) return;
           invuln = 1.4;
           game.lives -= 1;
@@ -3428,9 +3429,9 @@
       var rx = Math.floor(runner.x - camX);
       var ry = Math.floor(runner.y);
       ctx.fillStyle = ink.verify;
-      ctx.fillRect(rx - 4, ry - 12, 8, 12);
+      ctx.fillRect(rx - 4, ry, 8, 12);
       ctx.fillStyle = ink.bg;
-      ctx.fillRect(rx + (runner.face > 0 ? 0 : -3), ry - 9, 3, 2);
+      ctx.fillRect(rx + (runner.face > 0 ? 0 : -3), ry + 3, 3, 2);
 
       ctx.font = '8px "IBM Plex Mono", monospace';
       ctx.fillStyle = clock < 10 ? ink.danger : ink.dim;
@@ -6295,13 +6296,14 @@
     var game = { id: "tap-forge", score: 0, lives: 3, over: false };
     var fx = makeFx();
     var bits = makeParticles(60);
-    var bank, owned, pick, rate, quota, quotaLeft, era, held, message, messageAge;
+    var bank, owned, pick, rate, quota, quotaLeft, era, held, message, messageAge, scoreRemainder;
 
     game.reset = function () {
       game.score = 0;
       game.lives = 3;
       game.over = false;
       bank = 0;
+      scoreRemainder = 0;
       owned = [0, 0, 0, 0];
       pick = 0;
       rate = 0;
@@ -6328,7 +6330,10 @@
       // human is doing anything, which is the joke and the genre.
       var earned = rate * dt;
       bank += earned;
-      game.score += Math.floor(earned);
+      scoreRemainder += earned;
+      var wholeScore = Math.floor(scoreRemainder);
+      game.score += wholeScore;
+      scoreRemainder -= wholeScore;
       quotaLeft -= dt;
 
       var pressed = input.fire || input.up || input.down;

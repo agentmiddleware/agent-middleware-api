@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 from typing import Any, Optional, cast
 from uuid import uuid4
 
-from sqlalchemy import select, update
+from sqlalchemy import case, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -332,6 +332,41 @@ class APIKeyService:
             )
             key = result.scalar_one_or_none()
         return key is not None and _key_is_live(key, utc_now())
+
+    async def consume_derived_key_use(self, key_id: str, wallet_id: str) -> bool:
+        """Atomically authenticate derived authority against its origin's budget.
+
+        The signed JWT proves the key identity. This guarded write binds its
+        wallet, status, expiry and remaining uses without needing the raw key.
+        """
+        now = to_naive_utc(utc_now())
+        async with self._session_factory()() as session:
+            consumed = await session.execute(
+                update(APIKeyModel)
+                .where(
+                    col(APIKeyModel.key_id) == key_id,
+                    col(APIKeyModel.wallet_id) == wallet_id,
+                    col(APIKeyModel.status) == APIKeyStatus.ACTIVE.value,
+                    or_(
+                        col(APIKeyModel.expires_at).is_(None),
+                        col(APIKeyModel.expires_at) >= now,
+                    ),
+                    or_(
+                        col(APIKeyModel.max_uses).is_(None),
+                        col(APIKeyModel.use_count) < col(APIKeyModel.max_uses),
+                    ),
+                )
+                .values(
+                    use_count=case(
+                        (col(APIKeyModel.max_uses).is_(None), APIKeyModel.use_count),
+                        else_=APIKeyModel.use_count + 1,
+                    ),
+                    last_used_at=now,
+                )
+                .execution_options(synchronize_session=False)
+            )
+            await session.commit()
+            return (cast(Any, consumed).rowcount or 0) == 1
 
     async def is_key_bounded(self, key_id: str | None) -> bool:
         """True if this key carries a use budget (max_uses) or an expiry.
@@ -798,9 +833,7 @@ class APIKeyService:
                     donor = max(bounding_keys, key=_donor_rank)
                     emergency_expires_at = donor.expires_at
                     if donor.max_uses is not None:
-                        emergency_max_uses = max(
-                            donor.max_uses - donor.use_count, 0
-                        )
+                        emergency_max_uses = max(donor.max_uses - donor.use_count, 0)
 
                 full_key, key_hash, key_prefix = generate_api_key()
                 new_key_id = f"key_{uuid4().hex[:12]}"

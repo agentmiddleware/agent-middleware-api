@@ -323,7 +323,9 @@ class TestBehavioralSandboxEngine:
         self, sample_env_request, sqlite_store, monkeypatch
     ):
         """Sandbox env state survives process-local dictionary loss."""
-        monkeypatch.setattr(behavioral_sandbox, "get_durable_state", lambda: sqlite_store)
+        monkeypatch.setattr(
+            behavioral_sandbox, "get_durable_state", lambda: sqlite_store
+        )
 
         first_engine = BehavioralSandboxEngine(redis_url="redis://localhost:6379")
         env = await first_engine.create_environment(sample_env_request)

@@ -42,6 +42,7 @@ from ..core.auth import (
 )
 from ..core.oidc_iga import (
     EnterprisePrincipal,
+    IGAUseReservation,
     IGAError,
     enforce_tool_call,
     is_iga_issuer_token,
@@ -58,6 +59,13 @@ from ..services.billing_engine import (
     LedgerWriteContendedError,
 )
 from ..services.service_registry import get_service_registry
+from ..services.action_permits import (
+    action_execution_identity,
+    canonical_action_payload,
+    validate_action_request,
+)
+from ..db.database import get_session_factory
+from ..db.models import PermitModel
 from ..services.mcp_generator import get_mcp_generator
 from ..services.dogfood_tool import sync_dogfood_tool_registration
 from ..services.mcp_phase9_tools import sync_proof_surface_mcp_registration
@@ -65,6 +73,7 @@ from ..services.mcp_dispatch_attempts import (
     DispatchAttemptConflictError,
     DispatchClaimUnavailableError,
     DispatchPrepareCommitUncertainError,
+    DispatchPrepareRolledBackError,
     DispatchResultRejectedError,
     DispatchResultTooLargeError,
     McpDispatchAttemptService,
@@ -966,7 +975,7 @@ async def _execute_registered_tool(
     Those coordinates name whichever row holds them now; only the granted id
     names ours.
     """
-    owned_record: dict[str, str] = {}
+    owned_record: dict[str, Any] = {}
     try:
         return await _execute_registered_tool_inner(
             tool_name=tool_name,
@@ -983,33 +992,198 @@ async def _execute_registered_tool(
             request_payload=request_payload,
             owned_record=owned_record,
         )
+    except ToolPermissionDenied as exc:
+        if exc.receipt is None and permit_id and wallet_id:
+            exc.receipt = await _action_request_denial_receipt(
+                permit_id=permit_id,
+                wallet_id=wallet_id,
+                auth=auth,
+                tool_name=tool_name,
+                arguments=arguments,
+                reason=str(exc),
+                endpoint=endpoint,
+                transport=transport,
+                request_id=request_id,
+                transport_key=idempotency_key,
+            )
+        raise
     except (
         AuditChainContendedError,
         ReceiptWriteContendedError,
         PermitWriteContendedError,
     ):
         record_id = owned_record.get("record_id")
-        if record_id and wallet_id and idempotency_key:
+        record_key = owned_record.get("key", idempotency_key)
+        if record_id and wallet_id and record_key:
             idem = get_idempotency_service()
             # The two endpoints a governed record can live under: the canonical
             # one, and the request's own when a pre-canonical legacy row was
             # adopted. The record id is what makes trying both safe -- it pins
             # the release to the row this invocation was granted, so a lookup
             # that lands on another row is a no-op rather than a delete.
-            for record_endpoint in {GOVERNED_MCP_IDEMPOTENCY_ENDPOINT, endpoint}:
+            for record_endpoint in (
+                {owned_record["endpoint"]}
+                if "endpoint" in owned_record
+                else {GOVERNED_MCP_IDEMPOTENCY_ENDPOINT, endpoint}
+            ):
                 try:
-                    await idem.abandon(
+                    abandoned = await idem.abandon(
                         wallet_id=wallet_id,
                         endpoint=record_endpoint,
-                        idempotency_key=idempotency_key,
+                        idempotency_key=record_key,
                         expected_record_id=record_id,
                     )
+                    if abandoned and record_endpoint == "/mcp/action/v1":
+                        # Only confirmed deletion proves this invocation's use
+                        # unaccepted. Inner cleanup may already have released
+                        # it; in that case abandon returns False, not a refund.
+                        await _release_iga_use(
+                            owned_record.get("iga_granted_use"),
+                            tool_name,
+                            reason="preacceptance_write_contended",
+                        )
                 except Exception:
                     logger.exception(
                         "mcp_audit_contended_idempotency_abandon_failed",
                         extra={"wallet_id": wallet_id},
                     )
         raise
+
+
+async def _action_request_denial_receipt(
+    *,
+    permit_id: str,
+    wallet_id: str,
+    auth: AuthContext,
+    tool_name: str,
+    arguments: dict[str, Any],
+    reason: str,
+    endpoint: str,
+    transport: str,
+    request_id: str | None,
+    transport_key: str | None,
+) -> dict[str, Any] | None:
+    """Receipt a verified subject's refused request, never its execution owner.
+
+    Expiry/revocation removes execution authority, not eligibility for denial
+    evidence. Foreign or unsigned authority does not establish that eligibility.
+    """
+    if not auth.is_bootstrap_admin and auth.wallet_id != wallet_id:
+        return None
+    async with get_session_factory()() as session:
+        model = await session.get(PermitModel, permit_id)
+    if (
+        model is None
+        or model.action_contract_version != 1
+        or model.subject_wallet_id != wallet_id
+        or (model.subject_key_id and model.subject_key_id != auth.key_id)
+    ):
+        return None
+    try:
+        if not await get_permit_service().verify_signature(model):
+            return None
+    except (TypeError, ValueError):
+        return None
+    # This hashes the refused request. It is intentionally not the authorized
+    # action digest and carries no idempotency/dispatch/ledger owner linkage.
+    denied_request = {
+        "kind": "action_request_denial",
+        "permit_id": permit_id,
+        "wallet_id": wallet_id,
+        "tool_name": tool_name,
+        "arguments": arguments,
+    }
+    decision = evaluate_tool_invocation(
+        auth=auth,
+        wallet_id=wallet_id,
+        tool_name=tool_name,
+        estimated_cost=None,
+        request_id=request_id,
+    )
+    audit = await _audit_mcp_invocation(
+        decision=decision,
+        endpoint=endpoint,
+        transport=transport,
+        ok=False,
+        error=reason,
+        effects_committed=False,
+        extra_metadata={
+            "evidence_scope": "request_denial",
+            "permit_id": permit_id,
+            "transport_idempotency_key": transport_key,
+            "request_hash": sha256_hex(denied_request),
+        },
+    )
+    receipt = await get_receipt_service().create_receipt(
+        permit_id=permit_id,
+        wallet_id=wallet_id,
+        key_id=auth.key_id,
+        tool=tool_name,
+        request_payload=denied_request,
+        response_payload={"error": reason},
+        ledger_entry_id=None,
+        credits_authorized=Decimal("0"),
+        credits_charged=Decimal("0"),
+        outcome="denied",
+        reason_code=_stable_receipt_reason(reason),
+        audit_event_id=audit.event_id,
+        constraints_evaluated={"evidence_scope": "request_denial"},
+    )
+    return _receipt_response_payload(receipt)
+
+
+async def _assert_action_current_access(
+    *,
+    permit_id: str,
+    wallet_id: str,
+    auth: AuthContext,
+    tool_name: str,
+    arguments: dict[str, Any],
+    money: AgentMoney,
+    estimated_cost: Decimal,
+    phase: str,
+) -> None:
+    registry = get_service_registry()
+    service = await registry.get(tool_name)
+    binding = registry.get_action_binding(service) if service else None
+    if binding is None or service is None:
+        raise ToolPermissionDenied("action_tool_binding_required")
+    async with get_session_factory()() as session:
+        model = await session.get(PermitModel, permit_id)
+    if model is None:
+        raise ToolPermissionDenied("permit_not_found")
+    validation = await validate_action_request(
+        model,
+        binding,
+        wallet_id,
+        auth.key_id,
+        arguments,
+        "replay" if phase == "replay" else "admission",
+    )
+    if not validation.allowed:
+        raise ToolPermissionDenied(validation.reason or "action_permit_denied")
+    try:
+        principal = _verified_enterprise_principal(auth.enterprise_bearer_token)
+        if principal is not None:
+            iga = await enforce_tool_call(principal, tool_name, consume=False)
+            if not iga.allowed:
+                raise ToolPermissionDenied(iga.reason)
+    except IGAError as exc:
+        raise ToolPermissionDenied(exc.reason) from exc
+    from ..core.runtime_mode import SERVICE_NAMES, is_simulation
+
+    category = service.get("category", ServiceCategory.PLATFORM_FEE.value)
+    policy = await evaluate_wallet_policy(
+        wallet_id=wallet_id,
+        tool_name=tool_name,
+        service_category=category,
+        estimated_cost=estimated_cost,
+        daily_spend_used=await money.get_daily_spend(wallet_id),
+        simulation=is_simulation(category) if category in SERVICE_NAMES else False,
+        approval_gate_active=False,
+    )
+    if not policy.allowed:
+        raise ToolPermissionDenied(policy.reason or "policy_denied")
 
 
 async def _execute_registered_tool_inner(
@@ -1026,7 +1200,7 @@ async def _execute_registered_tool_inner(
     quote_id: str | None = None,
     idempotency_key: str | None = None,
     request_payload: dict[str, Any] | None = None,
-    owned_record: dict[str, str] | None = None,
+    owned_record: dict[str, Any] | None = None,
 ) -> dict:
     if not tool_name:
         raise ValueError("Missing tool name")
@@ -1091,6 +1265,46 @@ async def _execute_registered_tool_inner(
     service = registry.get_local(tool_name)
     if not service:
         service = await registry.get_persistent(tool_name)
+    action_identity = None
+    action_binding = registry.get_action_binding(service) if service else None
+    action_model = None
+    if permit_id:
+        async with get_session_factory()() as session:
+            action_model = await session.get(PermitModel, permit_id)
+    is_action = action_model is not None and any(
+        getattr(action_model, field) is not None
+        for field in (
+            "action_contract_version",
+            "action_payload_hash",
+            "action_schema_id",
+            "action_schema_version",
+            "action_public_tool_id",
+            "action_upstream_binding_hash",
+        )
+    )
+    if action_binding is not None or is_action:
+        if action_binding is None:
+            raise ToolPermissionDenied("action_tool_binding_required")
+        if not is_action or action_model is None:
+            raise ToolPermissionDenied("action_permit_required")
+        if quote_id:
+            raise ToolPermissionDenied("action_quote_unsupported")
+        validation = await validate_action_request(
+            action_model, action_binding, wallet_id, auth.key_id, arguments, "replay"
+        )
+        if not validation.allowed:
+            raise ToolPermissionDenied(validation.reason or "action_permit_denied")
+        action_identity = action_execution_identity(action_model, action_binding)
+        # Forward the same materialized defaults that were signed by the issuer.
+        arguments = json.loads(
+            canonical_action_payload(action_binding, wallet_id, arguments)
+        )["arguments"]
+        governed_call = True
+        idempotency_endpoint = action_identity.endpoint
+        idempotency_key = action_identity.idempotency_key
+        effective_request_payload = action_identity.request_payload
+        effective_request_hash = sha256_hex(effective_request_payload)
+
     if not service:
         # Durable replay is authoritative even if an operator has since
         # removed the executable registration. This is essential for terminal
@@ -1185,7 +1399,7 @@ async def _execute_registered_tool_inner(
     # unpermitted MCP is otherwise allowed.
     if service.get("require_permit"):
         governed_call = True
-    if governed_call:
+    if governed_call and action_identity is None:
         idempotency_endpoint = GOVERNED_MCP_IDEMPOTENCY_ENDPOINT
 
     registered_cost = _registered_tool_cost(service, category)
@@ -1289,27 +1503,75 @@ async def _execute_registered_tool_inner(
         )
         raise ValueError("idempotency_key_required")
 
+    if action_identity is not None:
+        existing = await idem.get_action_record(
+            wallet_id=wallet_id, internal_key=action_identity.idempotency_key
+        )
+        await _assert_action_current_access(
+            permit_id=permit_id or "",
+            wallet_id=wallet_id,
+            auth=auth,
+            tool_name=tool_name,
+            arguments=arguments,
+            money=money,
+            estimated_cost=Decimal("0") if existing else registered_cost,
+            phase="replay" if existing else "admission",
+        )
+        if existing is None:
+            admission = await get_permit_service().validate_for_action(
+                permit_id=permit_id or "",
+                wallet_id=wallet_id,
+                tool_name=tool_name,
+                estimated_credits=registered_cost,
+                key_id=auth.key_id,
+                arguments=arguments,
+            )
+            if not admission.allowed:
+                # Another valid caller can finish between lookup and admission.
+                # Its used budget/call slot must not prevent adoption of its owner.
+                raced_owner = await idem.get_action_record(
+                    wallet_id=wallet_id, internal_key=action_identity.idempotency_key
+                )
+                if raced_owner is None or admission.reason not in {
+                    "permit_budget_exceeded",
+                    "permit_max_calls_exceeded",
+                    "permit_aggregate_value_cap_exceeded",
+                }:
+                    raise ToolPermissionDenied(
+                        admission.reason or "action_permit_denied"
+                    )
+
     if governed_call and idempotency_key and not idem_started:
         try:
-            idem_begin = await _begin_governed_mcp_idempotency(
-                idem=idem,
-                wallet_id=wallet_id,
-                idempotency_key=idempotency_key,
-                tool_name=tool_name,
-                endpoint=endpoint,
-                logical_request_payload=effective_request_payload,
-                legacy_request_payload=request_payload,
-                operation_kind=execution_backend,
-                wait_timeout_seconds=(
-                    idempotency_wait_seconds
-                    if execution_backend == "upstream_mcp"
-                    else 0.0
-                ),
-            )
+            if action_identity is not None:
+                idem_begin = await idem.begin_action_with_record(
+                    wallet_id=wallet_id,
+                    identity=action_identity,
+                    wait_timeout_seconds=idempotency_wait_seconds,
+                )
+            else:
+                idem_begin = await _begin_governed_mcp_idempotency(
+                    idem=idem,
+                    wallet_id=wallet_id,
+                    idempotency_key=idempotency_key,
+                    tool_name=tool_name,
+                    endpoint=endpoint,
+                    logical_request_payload=effective_request_payload,
+                    legacy_request_payload=request_payload,
+                    operation_kind=execution_backend,
+                    wait_timeout_seconds=(
+                        idempotency_wait_seconds
+                        if execution_backend == "upstream_mcp"
+                        else 0.0
+                    ),
+                )
             replay = idem_begin.replay
             idem_started = True
             if owned_record is not None:
                 owned_record["record_id"] = idem_begin.record_id
+                if action_identity is not None:
+                    owned_record["endpoint"] = action_identity.endpoint
+                    owned_record["key"] = action_identity.idempotency_key
         except (IdempotencyConflictError, IdempotencyInProgressError) as exc:
             await _audit_mcp_invocation(
                 effects_committed=False,
@@ -1328,6 +1590,19 @@ async def _execute_registered_tool_inner(
                 raise
             raise ValueError(str(exc))
         if replay and replay.response_json:
+            if action_identity is not None:
+                # A waiter may observe completion after authority was revoked.
+                # This denial must never finalize or overwrite the accepted owner.
+                await _assert_action_current_access(
+                    permit_id=permit_id or "",
+                    wallet_id=wallet_id,
+                    auth=auth,
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    money=money,
+                    estimated_cost=Decimal("0"),
+                    phase="replay",
+                )
             await _assert_governed_replay_access(
                 permit_id=permit_id,
                 wallet_id=wallet_id,
@@ -1366,6 +1641,9 @@ async def _execute_registered_tool_inner(
             reason = permit_validation.reason or "permit_denied"
             if permit_model:
                 receipt_payload = await _finalize_governed_denial(
+                    unaccepted_action_owner_id=idem_begin.record_id
+                    if idem_begin
+                    else None,
                     idem=idem,
                     effects_committed=False,
                     approval_consumed=False,
@@ -1386,6 +1664,9 @@ async def _execute_registered_tool_inner(
                 )
             elif permit_validation.reason:
                 await _complete_governed_denial_idempotency(
+                    unaccepted_action_owner_id=idem_begin.record_id
+                    if idem_begin
+                    else None,
                     idem=idem,
                     idem_started=idem_started,
                     wallet_id=wallet_id,
@@ -1415,7 +1696,9 @@ async def _execute_registered_tool_inner(
     iga_denial_details: dict[str, Any] | None = None
     # The exact grant an ALLOW consumed a use under, kept so a later
     # pre-dispatch refusal that charges nothing can hand the use back.
-    iga_granted_use: tuple[EnterprisePrincipal, str, str] | None = None
+    iga_granted_use: (
+        tuple[EnterprisePrincipal, str, str, IGAUseReservation | None] | None
+    ) = None
     try:
         enterprise_principal = _verified_enterprise_principal(
             auth.enterprise_bearer_token
@@ -1433,7 +1716,10 @@ async def _execute_registered_tool_inner(
                     enterprise_principal,
                     iga_decision.group,
                     iga_decision.policy_id,
+                    iga_decision.reservation,
                 )
+                if action_identity is not None and owned_record is not None:
+                    owned_record["iga_granted_use"] = iga_granted_use
     except IGAError as exc:
         # Catches verification failures for bearers routed to the IGA layer
         # (bad signature / audience / expiry / kid from a pinned enterprise
@@ -1461,6 +1747,7 @@ async def _execute_registered_tool_inner(
         receipt_payload = None
         if governed_call and permit_model:
             receipt_payload = await _finalize_governed_denial(
+                unaccepted_action_owner_id=idem_begin.record_id if idem_begin else None,
                 idem=idem,
                 effects_committed=False,
                 approval_consumed=False,
@@ -1481,6 +1768,7 @@ async def _execute_registered_tool_inner(
             )
         else:
             await _complete_governed_denial_idempotency(
+                unaccepted_action_owner_id=idem_begin.record_id if idem_begin else None,
                 idem=idem,
                 idem_started=idem_started,
                 wallet_id=wallet_id,
@@ -1553,6 +1841,8 @@ async def _execute_registered_tool_inner(
         if governed_call and permit_model:
             reason = policy.reason or "policy_denied"
             receipt_payload = await _finalize_governed_denial(
+                unaccepted_iga_use=iga_granted_use,
+                unaccepted_action_owner_id=idem_begin.record_id if idem_begin else None,
                 idem=idem,
                 effects_committed=False,
                 approval_consumed=False,
@@ -1713,6 +2003,8 @@ async def _execute_registered_tool_inner(
                 },
             )
             receipt_payload = await _finalize_governed_denial(
+                unaccepted_iga_use=iga_granted_use,
+                unaccepted_action_owner_id=idem_begin.record_id if idem_begin else None,
                 idem=idem,
                 effects_committed=False,
                 approval_consumed=approval_check is not None,
@@ -1787,6 +2079,11 @@ async def _execute_registered_tool_inner(
                 # caller retries the same key.
                 raise
             except Exception as exc:
+                if action_identity is not None and not isinstance(
+                    exc, DispatchPrepareRolledBackError
+                ):
+                    # Unknown preparation failures cannot prove non-acceptance.
+                    raise IdempotencyInProgressError("idempotency_in_progress") from exc
                 reason = "upstream_prepare_failed"
                 audit_event = await _audit_mcp_invocation(
                     effects_committed=False,
@@ -1807,6 +2104,8 @@ async def _execute_registered_tool_inner(
                     },
                 )
                 receipt_payload = await _finalize_governed_denial(
+                    unaccepted_iga_use=iga_granted_use,
+                    unaccepted_action_owner_id=idem_begin.record_id,
                     idem=idem,
                     effects_committed=False,
                     approval_consumed=approval_check is not None,
@@ -1870,6 +2169,10 @@ async def _execute_registered_tool_inner(
             reason = permit_validation.reason or "permit_denied"
             if permit_model:
                 receipt_payload = await _finalize_governed_denial(
+                    unaccepted_iga_use=iga_granted_use,
+                    unaccepted_action_owner_id=idem_begin.record_id
+                    if idem_begin
+                    else None,
                     idem=idem,
                     effects_committed=False,
                     approval_consumed=approval_check is not None,
@@ -1893,6 +2196,11 @@ async def _execute_registered_tool_inner(
                 )
             elif permit_validation.reason:
                 await _complete_governed_denial_idempotency(
+                    unaccepted_iga_use=iga_granted_use,
+                    tool_name=tool_name,
+                    unaccepted_action_owner_id=idem_begin.record_id
+                    if idem_begin
+                    else None,
                     idem=idem,
                     idem_started=idem_started,
                     wallet_id=wallet_id,
@@ -1916,6 +2224,8 @@ async def _execute_registered_tool_inner(
         ):
             reason = QUOTE_REASON_CONSUMED
             if dispatch_service is not None and dispatch_attempt is not None:
+                if action_identity is not None:
+                    raise IdempotencyInProgressError("idempotency_in_progress")
                 try:
                     await dispatch_service.abandon_effect_free_prepared_attempt(
                         attempt_id=dispatch_attempt.attempt_id,
@@ -2042,6 +2352,10 @@ async def _execute_registered_tool_inner(
         # mapping belongs with the retry, not after it.
         raise IdempotencyInProgressError("idempotency_in_progress") from None
     except LedgerWriteContendedError:
+        if action_identity is not None and dispatch_attempt is not None:
+            # Accepted action authority never reopens. Keep preparation and its
+            # reservation for action-aware terminal reconciliation.
+            raise IdempotencyInProgressError("idempotency_in_progress") from None
         # Every attempt at the debit rolled back whole, so no money moved and
         # nothing was dispatched. What IS committed is the permit reservation
         # and the in-progress idempotency record, and neither heals itself: the
@@ -2124,6 +2438,7 @@ async def _execute_registered_tool_inner(
                     wallet_id=wallet_id,
                     endpoint=idempotency_endpoint,
                     idempotency_key=idempotency_key,
+                    expected_record_id=idem_begin.record_id,
                 )
             except Exception:
                 logger.exception(
@@ -2290,6 +2605,9 @@ async def _execute_registered_tool_inner(
             transport=transport,
             idempotency_key=idempotency_key,
             idempotency_record_id=idem_begin.record_id,
+            native_idempotency_key=(
+                action_identity.native_idempotency_key if action_identity else None
+            ),
             tool_name=tool_name,
             request_payload=effective_request_payload,
             arguments=arguments,
@@ -2736,6 +3054,7 @@ async def _execute_upstream_after_charge(
     description: str,
     policy_metadata: dict[str, Any],
     approval_check: Any | None,
+    native_idempotency_key: str | None = None,
 ) -> dict[str, Any]:
     """Dispatch once and durably classify every post-charge remote outcome."""
 
@@ -2797,7 +3116,7 @@ async def _execute_upstream_after_charge(
         upstream_result = await executor.call_tool(
             arguments,
             invocation_id=idempotency_record_id,
-            idempotency_key=idempotency_key,
+            idempotency_key=native_idempotency_key or idempotency_key,
             before_dispatch=claim_dispatch,
         )
     except UpstreamMcpReturnedError as exc:
@@ -3341,14 +3660,28 @@ def _governed_error_payload(
 async def _complete_governed_denial_idempotency(
     *,
     idem: Any,
+    unaccepted_action_owner_id: str | None = None,
+    unaccepted_iga_use: tuple[EnterprisePrincipal, str, str, IGAUseReservation | None]
+    | None = None,
     idem_started: bool,
     wallet_id: str,
     endpoint: str,
     idempotency_key: str | None,
     reason: str,
     status_code: int = 403,
+    tool_name: str = "",
 ) -> None:
     if not idem_started or not idempotency_key:
+        return
+    if endpoint == "/mcp/action/v1" and unaccepted_action_owner_id is not None:
+        if not await idem.abandon(
+            wallet_id=wallet_id,
+            endpoint=endpoint,
+            idempotency_key=idempotency_key,
+            expected_record_id=unaccepted_action_owner_id,
+        ):
+            raise IdempotencyInProgressError("idempotency_in_progress")
+        await _release_iga_use(unaccepted_iga_use, tool_name, reason=reason)
         return
     await idem.complete(
         wallet_id=wallet_id,
@@ -3361,7 +3694,7 @@ async def _complete_governed_denial_idempotency(
 
 
 async def _release_iga_use(
-    iga_granted_use: tuple[Any, str, str] | None,
+    iga_granted_use: tuple[Any, str, str, IGAUseReservation | None] | None,
     tool_name: str,
     *,
     reason: str,
@@ -3386,6 +3719,7 @@ async def _release_iga_use(
             tool_name,
             group=iga_granted_use[1],
             policy_id=iga_granted_use[2],
+            reservation=iga_granted_use[3],
         )
     except Exception:
         logger.exception(
@@ -3447,6 +3781,9 @@ async def _release_local_permit_reservation(
 async def _finalize_governed_denial(
     *,
     idem: Any,
+    unaccepted_action_owner_id: str | None = None,
+    unaccepted_iga_use: tuple[EnterprisePrincipal, str, str, IGAUseReservation | None]
+    | None = None,
     permit_model: Any,
     wallet_id: str,
     key_id: str | None,
@@ -3492,7 +3829,26 @@ async def _finalize_governed_denial(
     true exactly when ``_require_human_approval`` returned, which it does
     solely for the approval this call consumed.
     """
-    if idempotency_record_id is None and idempotency_key:
+    detached_action = (
+        endpoint == "/mcp/action/v1" and unaccepted_action_owner_id is not None
+    )
+    if detached_action:
+        # Delete only this invocation's still-unprepared owner, under the same
+        # lock and accounting invariants used by action cleanup. A concurrent
+        # preparation or uncertain checkpoint must keep its authority intact.
+        released = await idem.abandon(
+            wallet_id=wallet_id,
+            endpoint=endpoint,
+            idempotency_key=idempotency_key or "",
+            expected_record_id=unaccepted_action_owner_id,
+        )
+        if not released:
+            raise IdempotencyInProgressError("idempotency_in_progress")
+        # The exact owner is now proven unaccepted. Return only the IGA use
+        # consumed by this invocation; prepared/uncertain owners never reach it.
+        await _release_iga_use(unaccepted_iga_use, tool_name, reason=reason)
+        idempotency_record_id = None
+    if not detached_action and idempotency_record_id is None and idempotency_key:
         record = await idem.get_record(
             wallet_id=wallet_id,
             endpoint=endpoint,
@@ -3552,6 +3908,8 @@ async def _finalize_governed_denial(
         # wrapper can free the idempotency record this invocation still owns.
         raise
     receipt_payload = _receipt_response_payload(receipt)
+    if detached_action:
+        return receipt_payload
     await idem.complete(
         wallet_id=wallet_id,
         endpoint=endpoint,

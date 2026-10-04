@@ -390,7 +390,9 @@ def test_wrappers_require_an_sdk_that_ships_the_trust_loop() -> None:
         if not floors or max(floors) < B2A_SDK_TRUST_LOOP_FLOOR:
             offenders.append(f"{rel}: b2a-sdk{specifier} admits a pre-trust-loop SDK")
         if not specifier.contains(sdk_version):
-            offenders.append(f"{rel}: b2a-sdk{specifier} excludes in-tree {sdk_version}")
+            offenders.append(
+                f"{rel}: b2a-sdk{specifier} excludes in-tree {sdk_version}"
+            )
     assert not offenders, (
         f"wrappers must require b2a-sdk>={B2A_SDK_TRUST_LOOP_FLOOR}: {offenders}"
     )

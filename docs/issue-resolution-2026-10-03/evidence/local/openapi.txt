@@ -1,0 +1,3 @@
+{"event": "cors_wildcard_active: credential-less wildcard CORS is the documented default for this header-authenticated API; set CORS_ORIGINS to an explicit list to change it (see SECURITY_LIMITATIONS.md)", "level": "info", "timestamp": "2026-10-04T02:06:51.366486Z"}
+{"event": "proof_surfaces_disabled: ENABLE_PROOF_SURFACES=false; only CORE_TRUST_ROUTERS are mounted (dormant trust surfaces and proof surfaces stay unmounted and unadvertised)", "level": "info", "timestamp": "2026-10-04T02:06:51.366705Z"}
+/Users/sellers/.openclaw/worktrees/amw-issues-20261003-release/docs/openapi.json matches app.openapi()

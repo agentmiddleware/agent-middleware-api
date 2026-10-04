@@ -78,7 +78,11 @@ def _failure_mode(report: VerificationReport) -> str | None:
     reason = report.signature.reason
     if "does not verify over signing_input" in reason:
         return "signature_check"
-    if "no published key" in reason or "names no key" in reason or "Ed25519 key" in reason:
+    if (
+        "no published key" in reason
+        or "names no key" in reason
+        or "Ed25519 key" in reason
+    ):
         return "key_resolution"
     if "not a 64-byte Ed25519 signature" in reason:
         return "signature_decode"
@@ -167,7 +171,9 @@ class ReceiptTampering(Scenario):
         "the signature. They are enumerated in the result.",
     )
 
-    async def run_configuration(self, target: Target, log: EventLog) -> ConfigurationResult:
+    async def run_configuration(
+        self, target: Target, log: EventLog
+    ) -> ConfigurationResult:
         gateway, tenant, permit = target.require_gateway()
         configuration = target.configuration.value
 
@@ -205,7 +211,9 @@ class ReceiptTampering(Scenario):
 
         receipt_id = outcome.receipt_id
         if receipt_id is None:
-            measurements = await self.measure(target, attempts, operation_ids=[operation_id])
+            measurements = await self.measure(
+                target, attempts, operation_ids=[operation_id]
+            )
             emit(
                 "receipt.missing",
                 "the governed call returned no receipt, so there is nothing to tamper with",
@@ -259,10 +267,13 @@ class ReceiptTampering(Scenario):
             key_source=KeySource.ISSUER_ORIGIN,
             downstream_observation=observation,
         )
-        genuine_no_observation = verify(bundle, keys, key_source=KeySource.ISSUER_ORIGIN)
+        genuine_no_observation = verify(
+            bundle, keys, key_source=KeySource.ISSUER_ORIGIN
+        )
         baseline_claims = _claims(genuine)
         genuine_assertions = {
-            "signature_established": genuine.signature.status is ClaimStatus.ESTABLISHED,
+            "signature_established": genuine.signature.status
+            is ClaimStatus.ESTABLISHED,
             "issuer_trust_not_established": (
                 genuine.issuer_trust.status is ClaimStatus.NOT_ESTABLISHED
             ),
@@ -291,7 +302,9 @@ class ReceiptTampering(Scenario):
         )
 
         # -- control: re-serializing without changing a value must still verify
-        control_field = "tool" if "tool" in signed_payload else sorted(signed_payload)[0]
+        control_field = (
+            "tool" if "tool" in signed_payload else sorted(signed_payload)[0]
+        )
         control_bundle = tamper(
             bundle, f"signing_input.{control_field}", signed_payload[control_field]
         )
@@ -369,7 +382,9 @@ class ReceiptTampering(Scenario):
         signed_rows = [row for row in rows if row.get("side") == "signed"]
         envelope_rows = [row for row in rows if row.get("side") == "envelope"]
         signed_measured = [row for row in signed_rows if row.get("edited")]
-        signed_unmeasured = [row["field"] for row in signed_rows if not row.get("edited")]
+        signed_unmeasured = [
+            row["field"] for row in signed_rows if not row.get("edited")
+        ]
         signed_survivors = [
             row["field"] for row in signed_measured if row.get("signature_valid")
         ]
@@ -427,7 +442,9 @@ class ReceiptTampering(Scenario):
         signed_case_field = (
             "signing_input.outcome"
             if "signing_input.outcome" in applied
-            else next((path for path in applied if path.startswith("signing_input.")), None)
+            else next(
+                (path for path in applied if path.startswith("signing_input.")), None
+            )
         )
         signed_tampered = (
             tamper(bundle, signed_case_field, applied[signed_case_field])
@@ -446,7 +463,9 @@ class ReceiptTampering(Scenario):
             emit=emit,
         )
 
-        measurements = await self.measure(target, attempts, operation_ids=[operation_id])
+        measurements = await self.measure(
+            target, attempts, operation_ids=[operation_id]
+        )
 
         # -- 6. verdict -----------------------------------------------------
         # Unmeasured coverage is not coverage: a field the specification names
@@ -647,8 +666,7 @@ class ReceiptTampering(Scenario):
                     {
                         "receipt_id": receipt_id,
                         "subject": (
-                            "the same bundle with no downstream observation "
-                            "supplied"
+                            "the same bundle with no downstream observation supplied"
                         ),
                         "verifier": "failure_lab.verifier (independent: imports "
                         "neither app nor b2a_sdk)",
@@ -860,7 +878,9 @@ async def _gateway_verify_surface(
 
     # ... and is the id the only thing it will take? Same bundle, id removed.
     without_id = {k: v for k, v in signed_tampered.items() if k != "receipt_id"}
-    no_id_probe = await post(without_id, label="the tampered bundle with receipt_id removed")
+    no_id_probe = await post(
+        without_id, label="the tampered bundle with receipt_id removed"
+    )
     requires_receipt_id = no_id_probe["http_status"] >= 400
 
     envelope_case = await ask(

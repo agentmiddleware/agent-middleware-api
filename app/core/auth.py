@@ -389,7 +389,9 @@ async def _auth_from_jwt(token: str) -> AuthContext:
 
     from ..services.api_key_service import get_api_key_service
 
-    if not await get_api_key_service().is_key_live(payload.key_id):
+    if not await get_api_key_service().consume_derived_key_use(
+        payload.key_id, payload.sub
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={

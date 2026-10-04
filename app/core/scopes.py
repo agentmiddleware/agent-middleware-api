@@ -26,6 +26,7 @@ def require_scope(*required_scopes: str) -> Callable[[F], F]:
     (they have implicit full access). JWT callers must have at least
     one of the required scopes.
     """
+
     def decorator(func: F) -> F:
         @wraps(func)
         async def wrapper(*args, **kwargs) -> F:
@@ -40,7 +41,10 @@ def require_scope(*required_scopes: str) -> Callable[[F], F]:
             if auth is None:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail={"error": "unauthenticated", "message": "Authentication required."},
+                    detail={
+                        "error": "unauthenticated",
+                        "message": "Authentication required.",
+                    },
                 )
 
             # API key callers have implicit full access. "static-dev" is the
