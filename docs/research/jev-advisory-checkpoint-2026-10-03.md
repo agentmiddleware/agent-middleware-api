@@ -4,13 +4,22 @@ Date: 2026-10-03. Status: independently reviewed research evidence.
 
 ## Decision
 
-Keep Jev outside AMW's deterministic authorization, accounting, execution, and
-release gates. The configuration evaluated here frequently accepted claims
-that its supplied evidence contradicted or did not establish. Typed responses
-are useful interfaces, but this trial does not establish dependable decisions.
-Any future advisory integration remains subject to the customer-validation
-invariant in [`AGENTS.md`](../../AGENTS.md) and the existing proof-surface
-freeze. This record adds no runtime integration or dependency.
+Keep `JEV_RISK_GUARD=off` pending customer-specific validation. AMW already
+contains an optional Jev guard, with an
+[off default](../../app/core/config.py#L150). Its
+[enforce path](../../app/routers/mcp.py#L1655) can deny an ungoverned call or
+require human approval for a governed call when Jev escalates. That is an
+execution gate, not purely advisory metadata.
+
+This synthetic trial does not evaluate or validate that shipped guard and does
+not justify enabling enforcement. Its evaluated configuration frequently
+accepted claims that the supplied evidence contradicted or did not establish.
+Deployment configuration was not inspected or changed by this checkpoint.
+Preserve AMW's deterministic authorization, accounting, execution, and release
+gates. Any change to the optional guard remains subject to the
+customer-validation invariant in [`AGENTS.md`](../../AGENTS.md) and the
+existing proof-surface freeze. This record adds no runtime integration or
+dependency.
 
 This checkpoint supplements the
 [TypeSafe consumed reference](typesafe-system-one-2026-10-03.md). It evaluates
@@ -126,5 +135,6 @@ TypeSafe documents unrelated-state and option-order sensitivity among its
 A focused follow-up would reuse the failed merge case with only its own
 evidence and claim, preserving criteria and expected labels. That test was
 prepared but not executed. It could isolate a context-selection hypothesis;
-it would not by itself validate an AMW integration. Keep deterministic gates
-and existing feature freezes in place.
+it would not by itself validate the existing AMW guard. Keep the guard off,
+deterministic gates intact, and existing feature freezes in place pending
+applicable validation.
