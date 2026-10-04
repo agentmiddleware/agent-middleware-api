@@ -1,0 +1,32 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/sellers/.openclaw/worktrees/amw-issues-20261003-release
+configfile: pyproject.toml
+plugins: cov-7.1.0, asyncio-1.4.0, anyio-4.15.1
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 4994 items
+
+tests/test_acp_bridge.py ........................                        [  0%]
+tests/test_acta_receipt_interop.py ................                      [  0%]
+tests/test_action_database_guard.py .................................... [  1%]
+.                                                                        [  1%]
+tests/test_action_integration.py .......                                 [  1%]
+tests/test_action_invocation.py ........................................ [  2%]
+.................................................................        [  3%]
+tests/test_action_legacy_recovery.py .                                   [  3%]
+tests/test_action_migrations.py ............
+
+=============================== warnings summary ===============================
+tests/test_failure_lab_diagnostic.py:32
+  /Users/sellers/.openclaw/worktrees/amw-issues-20261003-release/tests/test_failure_lab_diagnostic.py:32: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient
+
+../../../Projects/agent-middleware-api/.venv/lib/python3.12/site-packages/starlette/testclient.py:53
+  /Users/sellers/Projects/agent-middleware-api/.venv/lib/python3.12/site-packages/starlette/testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! KeyboardInterrupt !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+/Users/sellers/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/selectors.py:415: KeyboardInterrupt
+(to show a full traceback on KeyboardInterrupt use --full-trace)
+======================= 202 passed, 2 warnings in 33.25s =======================

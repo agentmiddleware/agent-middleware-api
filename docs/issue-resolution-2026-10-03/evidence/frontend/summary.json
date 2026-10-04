@@ -1,0 +1,30 @@
+{
+  "stats": {
+    "startTime": "2026-10-04T01:59:45.971Z",
+    "duration": 26967.114999999998,
+    "expected": 33,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "projects": {
+    "chromium": {
+      "expected": 11
+    },
+    "firefox": {
+      "expected": 11
+    },
+    "webkit": {
+      "expected": 11
+    }
+  },
+  "source_hashes_unchanged": true,
+  "source_head": "58ccc4edcef301806b4d44ee6790131a325798e2",
+  "final_servers_stopped": [
+    {
+      "pid": 27960,
+      "command": "/opt/homebrew/Cellar/python@3.14/3.14.5/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /tmp/amw-release-frontend-20261003/final-serve.py"
+    }
+  ],
+  "test_only_file": "docs/qa/2026-10-02/ux-regressions.spec.cjs"
+}
