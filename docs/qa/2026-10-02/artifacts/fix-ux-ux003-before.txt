@@ -1,0 +1,67 @@
+✖ UX-003: operator runtime links resolve on the served origin (74.447375ms)
+✖ UX-003: inspection commands require an explicit API origin (10.307708ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 0
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 322.898833
+
+✖ failing tests:
+
+test at docs/qa/2026-10-02/ux-contracts.test.cjs:71:1
+✖ UX-003: operator runtime links resolve on the served origin (74.447375ms)
+  AssertionError [ERR_ASSERTION]: /health/dependencies must inspect the served runtime
+  + actual - expected
+
+  + 'https://api.thisisatest.tech'
+  - 'http://127.0.0.1:8765'
+         ^
+
+      at TestContext.<anonymous> (/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api/docs/qa/2026-10-02/ux-contracts.test.cjs:83:18)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.start (node:internal/test_runner/test:1257:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'https://api.thisisatest.tech',
+    expected: 'http://127.0.0.1:8765',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at docs/qa/2026-10-02/ux-contracts.test.cjs:94:1
+✖ UX-003: inspection commands require an explicit API origin (10.307708ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /export API_URL="http:\/\/127\.0\.0\.1:8000"/. Input:
+
+  "export AGENT_MIDDLEWARE_API_KEY=[REDACTED] +
+    '\n' +
+    'curl --fail-with-body \\\n' +
+    '  -H "X-API-Key: [REDACTED] \\\n' +
+    '  "https://api.thisisatest.tech/v1/me/permits"\n' +
+    '\n' +
+    'curl --fail-with-body \\\n' +
+    '  -H "X-API-Key: [REDACTED] \\\n' +
+    '  "https://api.thisisatest.tech/v1/me/receipts"\n' +
+    '\n' +
+    'curl --fail-with-body \\\n' +
+    '  -H "X-API-Key: [REDACTED] \\\n' +
+    '  "https://api.thisisatest.tech/v1/me/audit/events"'
+
+      at TestContext.<anonymous> (/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api/docs/qa/2026-10-02/ux-contracts.test.cjs:98:12)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'export AGENT_MIDDLEWARE_API_KEY=[REDACTED] --fail-with-body \\\n  -H "X-API-Key: [REDACTED] \\\n  "https://api.thisisatest.tech/v1/me/permits"\n\ncurl --fail-with-body \\\n  -H "X-API-Key: [REDACTED] \\\n  "https://api.thisisatest.tech/v1/me/receipts"\n\ncurl --fail-with-body \\\n  -H "X-API-Key: [REDACTED] \\\n  "https://api.thisisatest.tech/v1/me/audit/events"',
+    expected: /export API_URL="http:\/\/127\.0\.0\.1:8000"/,
+    operator: 'match',
+    diff: 'simple'
+  }

@@ -1,0 +1,146 @@
+FILE site/compare/index.html
+350:             those distinctions matters for your tool, install the library and
+351:             keep your afternoon.
+352:           </p>
+353:         </div>
+354:       </section>
+355: 
+356:       <section class="section" aria-labelledby="who-title">
+357:         <p class="section-kicker">04 / Fit</p>
+358:         <h2 id="who-title">Who this is actually for.</h2>
+359:         <div class="proof-grid artifact-grid">
+360:           <article class="proof-col">
+361:             <div class="proof-label">
+362:               <span>A good fit</span>
+363:               <span class="badge">worth a call</span>
+364:             </div>
+365:             <ul class="fit-list">
+366:               <li>You run one internal MCP tool where a duplicate call costs real money or causes a real side effect.</li>
+367:               <li>An agent retried something expensive and you could not prove afterwards what actually ran.</li>
+368:               <li>Someone outside the engineering team needs to check the record.</li>
+369:               <li>You can bring one real tool and one engineer to a pilot.</li>
+370:             </ul>
+371:           </article>
+372:           <article class="proof-col replay">
+373:             <div class="proof-label">
+374:               <span>A poor fit</span>
+375:               <span class="badge">use something else</span>
+376:             </div>
+377:             <ul class="fit-list">
+378:               <li>You want governance across every tool and framework at once. That is a platform; this is one boundary.</li>
+379:               <li>Your tool calls are cheap and idempotent already. Nothing here pays for itself.</li>
+380:               <li>You need a certified compliance product with regulatory mappings. See the audit layers above.</li>
+381:               <li>You need identity and SSO for agents. Keep your IAM; this sits downstream of it.</li>
+382:             </ul>
+383:           </article>
+384:         </div>
+385:       </section>
+386: 
+387:       <section class="section" aria-labelledby="faq-title">
+FILE site/styles.css
+226: .proof-col:not(.replay) :focus-visible {
+231: html[data-a11y-contrast="high"] .proof-col:not(.replay) :focus-visible {
+337:   color: var(--text-dim);
+546:   color: var(--text-dim);
+561:   color: var(--text-dim);
+582:   color: var(--text-dim);
+594:   color: var(--text-dim);
+723:   color: var(--text-dim);
+770:   color: var(--text-dim);
+777: .proof-col {
+779:   background: var(--paper);
+794: .proof-col:not(.replay) {
+799: .proof-col::after {
+812: .proof-col p {
+817: .proof-col a:not(.button) {
+822: .proof-col a:not(.button):hover {
+931:   color: var(--text-dim);
+985:   color: var(--text-dim);
+1002:   color: var(--text-dim);
+1063:   color: var(--text-dim);
+1088:   color: var(--text-dim);
+1131: .proof-col dl {
+1137: .proof-col dl .row {
+1145: .proof-col dt {
+1149: .proof-col dd {
+1181: .proof-col.replay {
+1188: .proof-col.replay::after {
+1192: .proof-col.replay p {
+1193:   color: var(--text-dim);
+1196: .proof-col.replay .proof-label {
+1197:   color: var(--text-dim);
+1201: .proof-col.replay .badge {
+1206: .proof-col.replay a:not(.button) {
+1210: .proof-col.replay a:not(.button):hover {
+1221:   color: var(--text-dim);
+1231:   color: var(--text-dim);
+1251:   color: var(--text-dim);
+1269:   color: var(--text-dim);
+1309:   color: var(--text-dim);
+1336:   color: var(--text-dim);
+1388:   color: var(--text-dim);
+1397:   color: var(--text-dim);
+1424:   color: var(--text-dim);
+1463:   color: var(--text-dim);
+1483:   color: var(--text-dim);
+1525:   color: var(--text-dim);
+1537:   color: var(--text-dim);
+1556:   color: var(--text-dim);
+1629:   color: var(--text-dim);
+1690:   color: var(--text-dim);
+1750:   color: var(--text-dim);
+1777:   color: var(--text-dim);
+1802:   color: var(--text-dim);
+1820:   color: var(--text-dim);
+1905:   color: var(--text-dim);
+1931:   color: var(--text-dim);
+1969:   color: var(--text-dim);
+1977:   border-color: var(--text-dim);
+2123:   color: var(--text-dim);
+2194:   color: var(--text-dim);
+2212:   color: var(--text-dim);
+2222:   color: var(--text-dim);
+2235:   color: var(--text-dim);
+2313:   color: var(--text-dim);
+2371:   .proof-col,
+FILE static/dashboard.html
+230:       border-radius: var(--radius-xs);
+231:       padding: 0.1em 0.4em;
+232:       overflow-wrap: anywhere;
+233:     }
+234:     pre code { font-size: inherit; border: 0; padding: 0; overflow-wrap: normal; }
+235:     ul { margin: 1rem 0 0; padding-left: 1.25rem; }
+236:     li + li { margin-top: 0.5rem; }
+237: 
+238:     footer {
+239:       display: flex;
+240:       flex-wrap: wrap;
+241:       gap: 0.5rem 1rem;
+242:       padding: 1.5rem var(--pad-x) 2.5rem;
+243:       border-top: 1px solid var(--line);
+244:       color: var(--text-dim);
+245:       font-size: 0.9rem;
+246:     }
+247: 
+248:     footer a { display: inline-flex; align-items: center; min-height: 44px; }
+249: 
+250:     :focus-visible {
+251:       outline: var(--focus-ring);
+252:       outline-offset: 3px;
+253:     }
+254: 
+255:     .skip-link {
+256:       position: absolute;
+257:       left: -9999px;
+258:       top: 0;
+259:       z-index: 100;
+260:       padding: 0.75rem 1.25rem;
+dashboard pre/style
+177:       overflow-wrap: anywhere;
+214:     pre {
+215:       overflow-x: auto;
+232:       overflow-wrap: anywhere;
+234:     pre code { font-size: inherit; border: 0; padding: 0; overflow-wrap: normal; }
+269:     @media (prefers-reduced-motion: reduce) {
+373:       <pre><code>export AGENT_MIDDLEWARE_API_KEY=[REDACTED]
+385:   "https://api.thisisatest.tech/v1/me/audit/events"</code></pre>

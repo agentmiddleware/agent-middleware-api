@@ -1,0 +1,2 @@
+Accepted defects [('BE-100', 'Medium'), ('FE-001', 'Medium'), ('FE-002', 'Medium'), ('UX-001', 'Medium'), ('UX-002', 'Medium'), ('BE-002', 'Low'), ('BE-003', 'Low'), ('UX-003', 'Low')]
+Consolidated finding evidence and 5Medium/3Low summary written; backend execution still pending.

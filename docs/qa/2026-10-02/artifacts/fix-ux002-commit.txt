@@ -1,0 +1,2 @@
+[qa/2026-10-02-fixes 8238663] fix(UX-002): make operator commands keyboard focusable
+ 3 files changed, 24 insertions(+), 2 deletions(-)

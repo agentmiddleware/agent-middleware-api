@@ -219,4 +219,3 @@ The recovered prior exact-SHA evidence separately records PostgreSQL accounting 
 - The PostgreSQL work is targeted proof for migrations038/042 and approval timing, not an every-migration downgrade audit or a live production rehearsal.
 - Ambiguous x402 receipt/compensation paths deliberately retain ownership for manual review; operators still require reconciliation procedures.
 - Hosted CI, deployment identity, external provider behavior and independent customer receipt verification remain unverified for unpublished repairs.
-

@@ -1,0 +1,149 @@
+wrappers/crewai-agent-middleware/tests/test_permit_cache.py:3:from datetime import UTC, datetime
+wrappers/crewai-agent-middleware/tests/test_permit_cache.py:5:import httpx
+wrappers/crewai-agent-middleware/tests/test_permit_cache.py:6:import pytest
+wrappers/crewai-agent-middleware/tests/test_permit_cache.py:8:from crewai_b2a import B2AClient, CrewAIB2ATool
+wrappers/openai-agent-middleware/tests/test_governed_flow.py:9:from __future__ import annotations
+wrappers/openai-agent-middleware/tests/test_governed_flow.py:11:import json
+wrappers/openai-agent-middleware/tests/test_governed_flow.py:12:from datetime import UTC, datetime, timedelta
+wrappers/openai-agent-middleware/tests/test_governed_flow.py:13:from decimal import Decimal
+wrappers/openai-agent-middleware/tests/test_governed_flow.py:14:from types import SimpleNamespace
+wrappers/openai-agent-middleware/tests/test_governed_flow.py:16:import httpx
+wrappers/openai-agent-middleware/tests/test_governed_flow.py:17:import pytest
+wrappers/openai-agent-middleware/tests/test_governed_flow.py:18:from b2a_sdk.errors import TransportError
+wrappers/openai-agent-middleware/tests/test_governed_flow.py:20:from openai_b2a import (
+wrappers/openai-agent-middleware/tests/test_governed_flow.py:29:from openai_b2a.runner import function_name_for
+wrappers/openai-agent-middleware/tests/test_governed_flow.py:117:    return B2AClient(api_key=[REDACTED], base_url="http://trust.test", transport=plane.transport())
+wrappers/openai-agent-middleware/tests/test_governed_flow.py:232:        api_key=[REDACTED], base_url="http://trust.test", transport=httpx.MockTransport(failing)
+wrappers/openai-agent-middleware/tests/test_governed_flow.py:284:        api_key=[REDACTED], base_url="http://trust.test", transport=httpx.MockTransport(handler)
+wrappers/openai-agent-middleware/tests/test_governed_flow.py:497:            api_key=[REDACTED], base_url="http://trust.test", transport=httpx.MockTransport(handler)
+wrappers/langchain-agent-middleware/tests/test_governed_flow.py:3:import ast
+wrappers/langchain-agent-middleware/tests/test_governed_flow.py:4:import json
+wrappers/langchain-agent-middleware/tests/test_governed_flow.py:5:from datetime import UTC, datetime
+wrappers/langchain-agent-middleware/tests/test_governed_flow.py:7:import httpx
+wrappers/langchain-agent-middleware/tests/test_governed_flow.py:8:import pytest
+wrappers/langchain-agent-middleware/tests/test_governed_flow.py:9:from b2a_sdk import IdempotencyConflictError
+wrappers/langchain-agent-middleware/tests/test_governed_flow.py:11:from langchain_b2a import B2AClient
+wrappers/langchain-agent-middleware/tests/test_governed_flow.py:12:from langchain_b2a.tools import get_mcp_tools
+wrappers/crewai-agent-middleware/tests/test_governed_flow.py:3:import ast
+wrappers/crewai-agent-middleware/tests/test_governed_flow.py:4:import json
+wrappers/crewai-agent-middleware/tests/test_governed_flow.py:5:from datetime import datetime, timezone
+wrappers/crewai-agent-middleware/tests/test_governed_flow.py:7:import httpx
+wrappers/crewai-agent-middleware/tests/test_governed_flow.py:8:import pytest
+wrappers/crewai-agent-middleware/tests/test_governed_flow.py:10:from crewai_b2a import B2AClient, CrewAIB2ATool
+wrappers/autogen-agent-middleware/tests/test_register_tools.py:10:from autogen import ConversableAgent
+wrappers/autogen-agent-middleware/tests/test_register_tools.py:12:from autogen_b2a import B2AFunctionTool, register_b2a_tools
+b2a_sdk/tests/test_local_permit_validator.py:11:from __future__ import annotations
+b2a_sdk/tests/test_local_permit_validator.py:13:import base64
+b2a_sdk/tests/test_local_permit_validator.py:14:import hashlib
+b2a_sdk/tests/test_local_permit_validator.py:15:import json
+b2a_sdk/tests/test_local_permit_validator.py:16:from datetime import datetime, timedelta, timezone
+b2a_sdk/tests/test_local_permit_validator.py:17:from decimal import Decimal
+b2a_sdk/tests/test_local_permit_validator.py:18:from typing import Any
+b2a_sdk/tests/test_local_permit_validator.py:20:import httpx
+b2a_sdk/tests/test_local_permit_validator.py:21:import pytest
+b2a_sdk/tests/test_local_permit_validator.py:23:from b2a_sdk.client import AgentMiddlewareClient
+b2a_sdk/tests/test_local_permit_validator.py:24:from b2a_sdk.edge_client import GovernedEdgeSession, LocalPermitValidator
+b2a_sdk/tests/test_local_permit_validator.py:25:from b2a_sdk.errors import PermitDeniedError
+b2a_sdk/tests/test_local_permit_validator.py:26:from b2a_sdk.receipt_verifier import VerificationError, key_set_from_document
+b2a_sdk/tests/test_local_permit_validator.py:424:        base_url="https://gateway.example",
+b2a_sdk/tests/test_local_permit_validator.py:477:        base_url="https://gateway.example",
+b2a_sdk/tests/test_local_permit_validator.py:503:        base_url="https://gateway.example",
+b2a_sdk/tests/test_trust_client.py:1:from __future__ import annotations
+b2a_sdk/tests/test_trust_client.py:3:import json
+b2a_sdk/tests/test_trust_client.py:4:from datetime import datetime, timedelta, timezone
+b2a_sdk/tests/test_trust_client.py:5:from decimal import Decimal
+b2a_sdk/tests/test_trust_client.py:7:import httpx
+b2a_sdk/tests/test_trust_client.py:8:import pytest
+b2a_sdk/tests/test_trust_client.py:10:from b2a_sdk import (
+b2a_sdk/tests/test_trust_client.py:21:from b2a_sdk.x402 import X402Client
+b2a_sdk/tests/test_trust_client.py:69:        base_url="https://gateway.example",
+b2a_sdk/tests/test_trust_client.py:78:        assert client.base_url == "https://api.thisisatest.tech"
+b2a_sdk/tests/test_trust_client.py:341:    client = client_cls(api_key=[REDACTED], base_url="https://gateway.example")
+b2a_sdk/tests/test_trust_client.py:360:            base_url="https://gateway.example",
+b2a_sdk/tests/test_sdk.py:5:import asyncio
+b2a_sdk/tests/test_sdk.py:6:import json
+b2a_sdk/tests/test_sdk.py:7:from unittest.mock import AsyncMock, MagicMock
+b2a_sdk/tests/test_sdk.py:9:import httpx
+b2a_sdk/tests/test_sdk.py:10:import pytest
+b2a_sdk/tests/test_sdk.py:12:from b2a_sdk import (
+b2a_sdk/tests/test_sdk.py:43:        base_url="http://test",
+b2a_sdk/tests/test_sdk.py:195:            base_url="http://test",
+b2a_sdk/tests/test_sdk.py:513:            top_up_url="http://test/top-up",
+b2a_sdk/tests/test_sdk.py:532:            top_up_url="http://test/top-up",
+b2a_sdk/tests/test_sdk.py:545:            top_up_url="http://test/top-up",
+wrappers/autogen-agent-middleware/tests/test_governed_flow.py:3:import json
+wrappers/autogen-agent-middleware/tests/test_governed_flow.py:4:from datetime import datetime, timezone
+wrappers/autogen-agent-middleware/tests/test_governed_flow.py:6:import httpx
+wrappers/autogen-agent-middleware/tests/test_governed_flow.py:7:import pytest
+wrappers/autogen-agent-middleware/tests/test_governed_flow.py:8:from b2a_sdk import IdempotencyConflictError
+wrappers/autogen-agent-middleware/tests/test_governed_flow.py:10:from autogen_b2a import B2AClient, B2AFunctionTool
+b2a_sdk/tests/test_receipt_verifier.py:8:from __future__ import annotations
+b2a_sdk/tests/test_receipt_verifier.py:10:import base64
+b2a_sdk/tests/test_receipt_verifier.py:11:import json
+b2a_sdk/tests/test_receipt_verifier.py:13:import pytest
+b2a_sdk/tests/test_receipt_verifier.py:15:from b2a_sdk import receipt_verifier, verify_cli
+b2a_sdk/tests/test_receipt_verifier.py:16:from b2a_sdk.receipt_verifier import (
+b2a_sdk/tests/test_receipt_verifier.py:35:        "issuer": "https://api.example.com",
+b2a_sdk/tests/test_receipt_verifier.py:215:    result = verify_bundle(_bundle(), {}, expected_issuer="https://other.example.com")
+b2a_sdk/tests/test_offline_verify_no_httpx.py:12:These tests run the offline path in a subprocess with httpx forced unavailable.
+b2a_sdk/tests/test_offline_verify_no_httpx.py:19:from __future__ import annotations
+b2a_sdk/tests/test_offline_verify_no_httpx.py:21:import base64
+b2a_sdk/tests/test_offline_verify_no_httpx.py:22:import json
+b2a_sdk/tests/test_offline_verify_no_httpx.py:23:import os
+b2a_sdk/tests/test_offline_verify_no_httpx.py:24:import subprocess
+b2a_sdk/tests/test_offline_verify_no_httpx.py:25:import sys
+b2a_sdk/tests/test_offline_verify_no_httpx.py:26:from pathlib import Path
+b2a_sdk/tests/test_offline_verify_no_httpx.py:28:import pytest
+b2a_sdk/tests/test_offline_verify_no_httpx.py:38:def _run(code: str, *, block_httpx: bool) -> subprocess.CompletedProcess:
+b2a_sdk/tests/test_offline_verify_no_httpx.py:46:    return subprocess.run(
+b2a_sdk/tests/test_363_surface.py:9:from unittest.mock import AsyncMock, MagicMock, patch
+b2a_sdk/tests/test_363_surface.py:11:import pytest
+b2a_sdk/tests/test_363_surface.py:13:from b2a_sdk import AgentMiddlewareClient, InsufficientFundsError
+b2a_sdk/tests/test_363_surface.py:14:from b2a_sdk.errors import APIError, AuthenticationError
+b2a_sdk/tests/test_363_surface.py:15:from b2a_sdk.models import ACPCheckoutRequest, ACPCheckoutResponse, ACPLineItem
+b2a_sdk/tests/test_363_surface.py:16:from b2a_sdk.x402 import X402Client, parse_402_response
+b2a_sdk/tests/test_363_surface.py:24:        return AgentMiddlewareClient(api_key=[REDACTED], base_url="http://test")
+b2a_sdk/tests/test_363_surface.py:123:            api_key=[REDACTED], base_url="http://test", bearer_token=[REDACTED]
+b2a_sdk/tests/test_363_surface.py:225:            base_url="http://test",
+b2a_sdk/tests/test_363_surface.py:235:            base_url="http://test",
+b2a_sdk/tests/test_363_surface.py:245:        return X402Client(api_key=[REDACTED], base_url="http://test")
+b2a_sdk/tests/test_363_surface.py:336:        return X402Client(api_key=[REDACTED], base_url="http://test")
+b2a_sdk/tests/test_363_surface.py:396:        return X402Client(api_key=[REDACTED], base_url="http://test")
+b2a_sdk/tests/test_363_surface.py:457:        return X402Client(api_key=[REDACTED], base_url="http://test")
+b2a_sdk/tests/test_363_surface.py:596:                api_key=[REDACTED], base_url="http://test", bearer_token=[REDACTED]
+b2a_sdk/tests/test_363_surface.py:602:            api_key=[REDACTED], base_url="http://test", bearer_token=[REDACTED]  tok-abc  "
+b2a_sdk/tests/test_363_surface.py:608:        client = AgentMiddlewareClient(api_key=[REDACTED], base_url="http://test")
+wrappers/autogen-agent-middleware/tests/test_permit_cache.py:3:from datetime import UTC, datetime
+wrappers/autogen-agent-middleware/tests/test_permit_cache.py:5:import httpx
+wrappers/autogen-agent-middleware/tests/test_permit_cache.py:6:import pytest
+wrappers/autogen-agent-middleware/tests/test_permit_cache.py:8:from autogen_b2a import B2AClient, B2AFunctionTool
+CI SDK command         with:
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            b2a_sdk/pyproject.toml
+            wrappers/${{ matrix.wrapper }}-agent-middleware/pyproject.toml
+
+      - name: Install SDK and wrapper package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ./b2a_sdk "./wrappers/${{ matrix.wrapper }}-agent-middleware[dev]"
+
+      # Separate jobs avoid framework dependency conflicts and repeated test
+      # module names. Explicit pytest boundaries exclude root app fixtures and
+      # source-path overrides so these tests exercise the installed packages.
+      - name: Run wrapper unit tests
+        working-directory: wrappers/${{ matrix.wrapper }}-agent-middleware
+        run: >-
+          python -m pytest -c pyproject.toml --rootdir=. --confcutdir=.
+          -o pythonpath= -o asyncio_mode=auto tests/ -q --tb=short
+
+  # Railway runs Postgres; the rest of CI runs SQLite. Dialect differences that
+  # SQLite accepts silently (notably tz-aware datetimes bound to the schema's
+  # TIMESTAMP WITHOUT TIME ZONE columns, which asyncpg rejects outright) are
+  # invisible everywhere else and only surface as production 500s.

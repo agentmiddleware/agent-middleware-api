@@ -1,0 +1,767 @@
+tools {'node': '/opt/homebrew/bin/node', 'npm': '/opt/homebrew/bin/npm', 'npx': '/opt/homebrew/bin/npx'}
+tmp-browser False
+dashboard True
+build #!/usr/bin/env python3
+"""Render the static marketing site only when launch contacts are real.
+
+The source HTML deliberately contains non-deployable tokens. Vercel runs this
+script and serves only ``dist/``; a missing or obviously provisional contact
+therefore fails the build instead of leaking a fake funnel into production.
+
+The Vercel Web Analytics loader is emitted only when
+``PUBLIC_ENABLE_VERCEL_ANALYTICS=true``. Deploying the ``/_vercel/insights``
+script tag against a project whose Web Analytics is not enabled makes every
+page load log a 404 plus a MIME-type refusal in the browser console, so the
+default build omits the tag entirely.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import html
+import json
+import os
+import re
+import shutil
+import sys
+import tempfile
+from datetime import datetime, timedelta, timezone
+from html.parser import HTMLParser
+from pathlib import Path
+from urllib.parse import quote, urlparse
+
+
+SITE_ROOT = Path(__file__).resolve().parent
+REPO_ROOT = SITE_ROOT.parent
+DEFAULT_OUTPUT = SITE_ROOT / "dist"
+# Required launch contacts. Pilot intake is email-first by design: a prospect
+# sends the tool scenario and gets a written reply, and a call happens only when
+# a scenario needs one. So the accountable name and the monitored address gate
+# the build; a booking link is optional and never a prerequisite.
+CONTACT_FIELDS = {
+    "@@PUBLIC_DISPLAY_NAME@@": "PUBLIC_DISPLAY_NAME",
+    "@@PUBLIC_CONTACT_EMAIL@@": "PUBLIC_CONTACT_EMAIL",
+}
+BOOKING_TOKEN = [REDACTED]
+BOOKING_CONTEXT_TOKEN = [REDACTED]
+PILOT_EMAIL_TOKEN = [REDACTED]
+PILOT_EMAIL_BODY = """One-tool paid pilot enquiry
+
+1. Tool or action (synthetic or redacted only):
+2. What goes wrong on retry:
+3. How we check whether the action ran:
+4. Cost of one duplicate or unproven call (money, recovery hours, or customer consequence; measured or estimated):
+5. Budget owner and target decision date:
+
+Optional workflow assumptions: monthly actions, baseline duplicate rate, expected reduction, and total monthly cost.
+
+Do not include production secrets, credentials, or customer data.
+"""
+BOOKING_FIELD = "PUBLIC_BOOKING_URL"
+# Markup that only makes sense with a booking link sits between these two
+# comments. When no link is configured the whole block is removed, so the
+# emitted page never carries an empty href or an unresolved token; when one is
+# configured only the marker comments are removed.
+BOOKING_BLOCK_START = "<!-- booking:start -->"
+BOOKING_BLOCK_END = "<!-- booking:end -->"
+# Marker lines may end in LF or CRLF, and the closing marker may end the
+# file; the block is dropped or unwrapped identically either way.
+_BOOKING_BLOCK = re.compile(
+    rf"^[ \t]*{re.escape(BOOKING_BLOCK_START)}[ \t]*\r?\n.*?"
+    rf"^[ \t]*{re.escape(BOOKING_BLOCK_END)}[ \t]*(?:\r?\n|\Z)",
+    flags=re.DOTALL | re.MULTILINE,
+)
+_BOOKING_MARKER_LINE = re.compile(
+    rf"^[ \t]*(?:{re.escape(BOOKING_BLOCK_START)}|{re.escape(BOOKING_BLOCK_END)})[ \t]*(?:\r?\n|\Z)",
+    flags=re.MULTILINE,
+)
+ANALYTICS_FLAG = "PUBLIC_ENABLE_VERCEL_ANALYTICS"
+ANALYTICS_TOKEN = [REDACTED]
+ANALYTICS_FLAG_ENABLED = frozenset({"true"})
+ANALYTICS_FLAG_DISABLED = frozenset({"", "false"})
+# The queue shim lives in /va-init.js rather than an inline <script> so the
+# deployed Content-Security-Policy can stay script-src 'self' with no
+# 'unsafe-inline'. It must load before the insights script reads window.vaq.
+ANALYTICS_SCRIPTS = """<script src="/va-init.js?v=gateway-18"></script>
+    <script defer src="/_vercel/insights/script.js"></script>"""
+# Shared chrome is rendered at build time so it also works without JavaScript.
+SITE_PARTIALS = {
+    "@@SITE_NAV@@": "partials/nav.html",
+    "@@SITE_FOOTER@@": "partials/footer.html",
+}
+STYLES_CSS_VERSION_TOKEN = [REDACTED]
+CONCEPT_CSS_VERSION_TOKEN = [REDACTED]
+BUILD_DATE_TOKEN = [REDACTED]
+FAQ_JSONLD_TOKEN = [REDACTED]
+HERO_CONSOLE_TOKEN = [REDACTED]
+LOOP_TRANSCRIPT_TOKEN = [REDACTED]
+LIVE_VERIFICATION_TOKEN = [REDACTED]
+# The day the published sample receipt was issued, read from the receipt's own
+# signed claims so the page can never drift from the artifact it describes.
+PROOF_RECEIPT_ISSUED_TOKEN = [REDACTED]
+TRANSCRIPT = SITE_ROOT / "proof" / "transcript.json"
+LIVE_RECEIPT = SITE_ROOT / "proof" / "receipt.json"
+LIVE_KEYS = SITE_ROOT / "proof" / "trust-keys.json"
+#: The hero shows the loop's spine; the governed-path section shows all of it.
+HERO_CONSOLE_STEPS = ("authorize", "invoke", "replay", "verify")
+SECURITY_TXT_EXPIRES_TOKEN = [REDACTED]
+# security.txt must carry a future Expires (RFC 9116 §2.5.5). Regenerating it
+# one year out on every build means a deployed site never serves a lapsed file.
+SECURITY_TXT_LIFETIME_DAYS = 365
+TEXT_ASSETS = (
+    "index.html",
+    "proof/index.html",
+    "compare/index.html",
+    "concept/index.html",
+    "404.html",
+    "sitemap.xml",
+    ".well-known/security.txt",
+    # The machine-pointer files cite the published receipt's issue date, read
+    # from the bundle at build time like the HTML pages, so the two can never
+    # disagree.
+    "llm.txt",
+    "llms.txt",
+    "llms-full.txt",
+)
+COPY_ASSETS = (
+    ".well-known",
+    "a11y.js",
+    "a11y-preload.js",
+    "arcade-boot.js",
+    "arcade.css",
+    "arcade.js",
+    "fonts",
+    "fonts.css",
+    "analytics.js",
+    "pilot-fit.js",
+    "compare",
+    "concept",
+    "favicon.svg",
+    "social-card.png",
+    "proof",
+    "robots.txt",
+    "sitemap.xml",
+    "styles.css",
+    "va-init.js",
+    "wave.js",
+)
+REQUIRED_PUBLIC_ASSETS = (
+    *SITE_PARTIALS.values(),
+    *TEXT_ASSETS,
+    *COPY_ASSETS,
+    "proof/receipt.json",
+    "proof/trust-keys.json",
+    "proof/transcript.json",
+)
+PROVISIONAL_TERMS = (
+    "change me",
+    "changeme",
+    "example.com",
+    "example.org",
+    "example.net",
+    "fake",
+    "placeholder",
+    "provisional",
+    "test@",
+    "your email",
+    "your name",
+)
+RESERVED_HOSTS = {"example", "invalid", "localhost", "test"}
+RESERVED_HOST_SUFFIXES = tuple(f".{host}" for host in RESERVED_HOSTS)
+
+
+class LaunchConfigurationError(ValueError):
+    """Raised when a build would publish an unusable human funnel."""
+
+
+def _reject_provisional(field: str, value: str) -> None:
+    lowered = value.casefold()
+    if any(term in lowered for term in PROVISIONAL_TERMS):
+        raise LaunchConfigurationError(f"{field} contains a provisional value")
+    if "@@" in value:
+        raise LaunchConfigurationError(f"{field} contains an unresolved token")
+
+
+def _is_reserved_hostname(hostname: str) -> bool:
+    normalized = hostname.casefold().rstrip(".")
+    return normalized in RESERVED_HOSTS or normalized.endswith(RESERVED_HOST_SUFFIXES)
+
+
+def validated_contacts(
+    environment: dict[str, str], *, escape_markup: bool = True
+) -> dict[str, str]:
+    """Return contact values or refuse to build the public site.
+
+    ``escape_markup`` is on for HTML and XML targets. Plain-text targets such as
+    ``.well-known/security.txt`` take the raw value, because an entity-escaped
+    address there would be served verbatim to whoever reads the file.
+    """
+
+    missing = [
+        name
+        for name in CONTACT_FIELDS.values()
+        if not environment.get(name, "").strip()
+    ]
+    if missing:
+        raise LaunchConfigurationError(
+            "missing required launch contact values: " + ", ".join(sorted(missing))
+        )
+
+    display_name = environment["PUBLIC_DISPLAY_NAME"].strip()
+    email = environment["PUBLIC_CONTACT_EMAIL"].strip()
+    booking_url = environment.get(BOOKING_FIELD, "").strip()
+
+    for field, value in (
+        ("PUBLIC_DISPLAY_NAME", display_name),
+        ("PUBLIC_CONTACT_EMAIL", email),
+        (BOOKING_FIELD, booking_url),
+    ):
+        if value:
+            _reject_provisional(field, value)
+
+    if (
+        display_name.casefold() == "agent middleware api"
+        or len(display_name) < 3
+        or re.search(
+            r"\b(?:example|fake|placeholder|provisional|test)\b",
+            display_name,
+            flags=re.IGNORECASE,
+        )
+    ):
+        raise LaunchConfigurationError(
+            "PUBLIC_DISPLAY_NAME must identify an accountable person or entity"
+        )
+    if re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email) is None:
+        raise LaunchConfigurationError(
+            "PUBLIC_CONTACT_EMAIL is not a valid email address"
+        )
+    if _is_reserved_hostname(email.rsplit("@", 1)[1]):
+        raise LaunchConfigurationError(
+            "PUBLIC_CONTACT_EMAIL must use a routable public domain"
+        )
+
+    # Optional: a configured booking link is validated as strictly as before,
+    # and an absent one simply leaves the booking blocks out of the build.
+    if booking_url:
+        booking = urlparse(booking_url)
+        if booking.scheme != "https" or not booking.hostname:
+            raise LaunchConfigurationError(
+                "PUBLIC_BOOKING_URL must be an absolute HTTPS URL"
+            )
+        if booking.username or booking.password:
+            [REDACTED] LaunchConfigurationError(
+                "PUBLIC_BOOKING_URL must not contain credentials"
+            )
+        if _is_reserved_hostname(booking.hostname):
+            raise LaunchConfigurationError(
+                "PUBLIC_BOOKING_URL must use a routable public domain"
+            )
+        blocked_booking_hosts = {
+            "api.thisisatest.tech",
+            "thisisatest.tech",
+            "www.thisisatest.tech",
+        }
+        if booking.hostname.casefold() in blocked_booking_hosts:
+            raise LaunchConfigurationError(
+                "PUBLIC_BOOKING_URL must point to a booking service"
+            )
+
+    if not escape_markup:
+        values = {
+            "@@PUBLIC_DISPLAY_NAME@@": display_name,
+            "@@PUBLIC_CONTACT_EMAIL@@": email,
+        }
+        if booking_url:
+            values[BOOKING_TOKEN] = booking_url
+        return values
+    escaped = {
+        "@@PUBLIC_DISPLAY_NAME@@": html.escape(display_name),
+        "@@PUBLIC_CONTACT_EMAIL@@": html.escape(email, quote=True),
+    }
+    if booking_url:
+        escaped[BOOKING_TOKEN] = html.escape(booking_url, quote=True)
+    return escaped
+
+
+def booking_configured(environment: dict[str, str]) -> bool:
+    """Whether the build carries the optional booking link."""
+
+    return bool(environment.get(BOOKING_FIELD, "").strip())
+
+
+def render_booking_blocks(markup: str, *, configured: bool) -> str:
+    """Resolve the optional booking blocks in one page.
+
+    With a booking link configured only the marker comments go; without one
+    the whole block goes, so no page ever ships an empty ``href`` or a
+    ``@@PUBLIC_BOOKING_URL@@`` token. Unbalanced markers are a launch error.
+    """
+
+    if markup.count(BOOKING_BLOCK_START) != markup.count(BOOKING_BLOCK_END):
+        raise LaunchConfigurationError("booking block markers are unbalanced")
+    if configured:
+        return _BOOKING_MARKER_LINE.sub("", markup)
+    rendered = _BOOKING_BLOCK.sub("", markup)
+    if BOOKING_BLOCK_START in rendered or BOOKING_BLOCK_END in rendered:
+        raise LaunchConfigurationError(
+            "booking block markers must each sit on their own line"
+        )
+    return rendered
+
+
+def vercel_analytics_enabled(environment: dict[str, str]) -> bool:
+    """Return whether the build should emit the Vercel Web Analytics loader.
+
+    A misspelled value fails the build instead of silently disabling analytics
+    the operator meant to turn on.
+    """
+
+    raw = environment.get(ANALYTICS_FLAG, "").strip().casefold()
+    if raw in ANALYTICS_FLAG_ENABLED:
+        return True
+    if raw in ANALYTICS_FLAG_DISABLED:
+        return False
+    raise LaunchConfigurationError(
+        f'{ANALYTICS_FLAG} must be "true", "false", or unset'
+    )
+
+
+def _copy_asset(relative_path: str, output: Path) -> None:
+    source = SITE_ROOT / relative_path
+    destination = output / relative_path
+    if source.is_dir():
+        # Withhold the operator note only. A blanket "*.md" would also silently
+        # drop Markdown from .well-known or proof if either ever gained one, and
+        # it would strip fonts/OFL.txt's neighbours; the license itself is
+        # plain text precisely so it stays published.
+        shutil.copytree(
+            source,
+            destination,
+            dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns("README.md"),
+        )
+        return
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, destination)
+
+
+FONT_MANIFEST = SITE_ROOT / "fonts.manifest.json"
+FONT_PRELOAD_TOKEN = [REDACTED]
+FONT_STYLESHEET = SITE_ROOT / "fonts.css"
+FONTS_CSS_VERSION_TOKEN = [REDACTED]
+
+
+def fonts_css_version() -> str:
+    """Return a cache key derived from the generated stylesheet's content.
+
+    fonts.css names content-hashed woff2 files and vendor_fonts.py deletes the
+    ones it replaces. A hand-maintained token would let a visitor hold a cached
+    stylesheet that points at files the deploy has already removed, so the
+    stylesheet's own key has to move whenever its bytes do.
+    """
+
+    try:
+        payload = FONT_STYLESHEET.read_bytes()
+    except OSError as error:
+        raise LaunchConfigurationError(
+            f"fonts.css is missing; re-run vendor_fonts.py ({error})"
+        ) from error
+    return hashlib.sha256(payload).hexdigest()[:8]
+
+
+def _require_declared_fonts() -> None:
+    """Refuse to deploy a stylesheet whose @font-face files are not present.
+
+    ``fonts`` appearing in REQUIRED_PUBLIC_ASSETS only proves the directory
+    exists; an interrupted ``vendor_fonts.py`` run can leave it empty, and every
+    src would then 404 on the live site with the build still reporting success.
+    """
+
+    declared = set(
+        re.findall(
+            r'url\("/fonts/([^"]+)"\)',
+            (SITE_ROOT / "fonts.css").read_text(encoding="utf-8"),
+        )
+    )
+    if not declared:
+        raise La
+pilot (function () {
+  "use strict";
+
+  const calculator = document.querySelector(".pilot-fit");
+  if (!calculator) return;
+
+  const fields = Array.from(calculator.querySelectorAll("input"));
+  const summary = calculator.querySelector("[data-fit-summary]");
+  const guidance = calculator.querySelector("[data-fit-guidance]");
+  const next = calculator.querySelector("[data-fit-next]");
+  const alternative = calculator.querySelector("[data-fit-alternative]");
+  const money = new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 2,
+  });
+  const roundedAmount = new Intl.NumberFormat("en-US", {
+    useGrouping: false,
+    maximumFractionDigits: 2,
+  });
+
+  function update() {
+    next.hidden = true;
+    alternative.hidden = true;
+    guidance.textContent = "";
+    for (const field of fields) {
+      const invalid = field.validity.badInput ||
+        (field.value !== "" && (!field.checkValidity() ||
+          !Number.isFinite(field.valueAsNumber)));
+      field.setAttribute("aria-invalid", String(invalid));
+    }
+    const invalid = fields.find((field) => field.getAttribute("aria-invalid") === "true");
+    if (invalid) {
+      summary.textContent = "Check your inputs: use non-negative numbers, whole actions, and percentages from 0 to 100.";
+      return;
+    }
+    if (fields.some((field) => field.required && field.value === "")) {
+      summary.textContent = "Enter the four workflow assumptions to estimate avoided loss.";
+      return;
+    }
+
+    const [actions, rate, loss, reduction, cost] = fields.map((field) => field.valueAsNumber);
+    const avoidedDuplicates = actions * (rate / 100) * (reduction / 100);
+    const avoidedLoss = avoidedDuplicates * loss;
+    const hasCost = fields[4].value !== "";
+    const threshold = hasCost && avoidedDuplicates > 0 ? cost / avoidedDuplicates : 0;
+    if (![avoidedDuplicates, avoidedLoss, threshold].every(Number.isFinite)) {
+      summary.textContent = "These values are too large to calculate. Use smaller estimates.";
+      return;
+    }
+
+    summary.textContent = "Estimated avoided duplicate loss: " + money.format(avoidedLoss) + " / month.";
+    if (avoidedDuplicates === 0) {
+      guidance.textContent = "These assumptions imply no avoided duplicates, so duplicate prevention alone cannot justify an added cost.";
+      alternative.hidden = false;
+    } else if (!hasCost) {
+      guidance.textContent = "Economic fit is still unknown. Add your total monthly cost to compare; a service quote and operating scope are needed before deciding.";
+    } else {
+      const comparison = " Break-even loss per duplicate: " + money.format(threshold) + ".";
+      // Use the same decimal rounding as the displayed currency amounts.
+      const displayedLoss = Number(roundedAmount.format(avoidedLoss));
+      const displayedCost = Number(roundedAmount.format(cost));
+      if (displayedLoss > displayedCost) {
+        guidance.textContent = "Estimated avoided loss exceeds total monthly cost by " + money.format(displayedLoss - displayedCost) + "." + comparison + " This is a reason to validate the assumptions in a paid pilot, not evidence of savings.";
+        next.hidden = false;
+      } else {
+        guidance.textContent = "Estimated avoided loss does not exceed total monthly cost." + comparison + " Start with simpler reliability or upstream idempotency controls. Any separate operational benefit needs its own evidence.";
+        alternative.hidden = false;
+      }
+    }
+  }
+
+  calculator.addEventListener("input", update);
+  calculator.querySelector("[data-fit-inputs]").hidden = false;
+  calculator.querySelector("[data-fit-result]").hidden = false;
+  update();
+})();
+
+SDK /**
+ * AWI TypeScript SDK — Phase 8
+ * TypeScript client for Agentic Web Interface (AWI) services
+ *
+ * Based on arXiv:2506.10953v1 - "Build the web for agents, not agents for the web"
+ */
+
+import axios, { AxiosInstance, AxiosResponse } from "axios";
+
+export interface AWIConfig {
+  baseUrl: string;
+  apiKey: [REDACTED];
+  walletId?: string;
+  timeout?: number;
+}
+
+export interface AWISession {
+  session_id: string;
+  target_url: string;
+  status: "created" | "active" | "paused" | "completed" | "failed";
+  max_steps: number;
+  step_count: number;
+  created_at: string;
+}
+
+export interface AWIExecutionResult {
+  execution_id: string;
+  session_id: string;
+  action: string;
+  status: string;
+  result?: Record<string, unknown>;
+  error?: string;
+  representation?: unknown;
+  duration_ms?: number;
+  cost_estimate?: number;
+}
+
+export interface AWIRepresentation {
+  representation_id: string;
+  representation_type: string;
+  content: unknown;
+  metadata: Record<string, unknown>;
+  generated_at: string;
+}
+
+export type AWIAction =
+  | "search_and_sort"
+  | "add_to_cart"
+  | "checkout"
+  | "fill_form"
+  | "login"
+  | "logout"
+  | "navigate_to"
+  | "click_button"
+  | "scroll"
+  | "select_option"
+  | "upload_file"
+  | "extract_data"
+  | "get_representation";
+
+export type AWIRepresentationType =
+  | "full_dom"
+  | "summary"
+  | "embedding"
+  | "low_res_screenshot"
+  | "accessibility_tree"
+  | "json_structure"
+  | "text_extraction";
+
+export type AWIActionTier = "semantic" | "compatibility";
+export type AWIActionStatus = "stable" | "provisional" | "deprecated";
+export type AWIActionRiskLevel = "low" | "medium" | "high";
+
+export interface AWIActionDefinition {
+  action: AWIAction;
+  category: string;
+  description: string;
+  parameters: Record<string, Record<string, unknown>>;
+  required_preconditions: string[];
+  postconditions: string[];
+  estimated_cost: number;
+  tier: AWIActionTier;
+  status: AWIActionStatus;
+  risk_level: AWIActionRiskLevel;
+  sensitive_parameters: string[];
+}
+
+export interface AWIVocabulary {
+  actions: AWIActionDefinition[];
+  categories: string[];
+}
+
+/** Longest Idempotency-Key the governed AWI routes accept. */
+export const MAX_IDEMPOTENCY_KEY_LENGTH = 128;
+
+export interface AWIExecuteOptions {
+  representation?: AWIRepresentationType;
+  dryRun?: boolean;
+  /** Permit authorizing tool `awi_execute`; sent as X-Permit-Id. */
+  permitId: string;
+  /** Caller-chosen key for this logical action; reuse it on retry. */
+  idempotencyKey: string;
+}
+
+/**
+ * AWI TypeScript Client
+ *
+ * @example
+ * ```typescript
+ * const client = new AWIClient({
+ *   baseUrl: "https://api.example.com",
+ *   apiKey: [REDACTED],
+ *   walletId: "wallet-123"
+ * });
+ *
+ * const session = await client.createSession("https://shop.example.com");
+ * const result = await client.execute(
+ *   session.session_id,
+ *   "search_and_sort",
+ *   { query: "laptops", sort_by: "price" },
+ *   { permitId: "permit-from-POST-/v1/permits", idempotencyKey: "search-1" }
+ * );
+ * ```
+ */
+export class AWIClient {
+  private client: AxiosInstance;
+  private config: AWIConfig;
+
+  constructor(config: AWIConfig) {
+    this.config = config;
+    this.client = axios.create({
+      baseURL: config.baseUrl,
+      timeout: config.timeout || 30000,
+      // Never follow redirects: axios forwards X-API-Key to the new host.
+      maxRedirects: 0,
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": config.apiKey,
+      },
+    });
+  }
+
+  async discover(): Promise<AWIVocabulary> {
+    const response: AxiosResponse = await this.client.get("/v1/awi/vocabulary");
+    return response.data;
+  }
+
+  async createSession(
+    targetUrl: string,
+    options?: {
+      maxSteps?: number;
+      allowHumanPause?: boolean;
+    }
+  ): Promise<AWISession> {
+    const response: AxiosResponse = await this.client.post("/v1/awi/sessions", {
+      target_url: targetUrl,
+      max_steps: options?.maxSteps || 100,
+      allow_human_pause: options?.allowHumanPause ?? true,
+      wallet_id: this.config.walletId,
+    });
+    return response.data;
+  }
+
+  /**
+   * Execute an AWI action. POST /v1/awi/execute is governed: it requires a
+   * permit (X-Permit-Id) and an Idempotency-Key. Throws before sending when
+   * either is blank or the key is longer than 128 characters.
+   */
+  async execute(
+    sessionId: string,
+    action: AWIAction,
+    parameters: Record<string, unknown> | undefined,
+    options: AWIExecuteOptions
+  ): Promise<AWIExecutionResult> {
+    const permitId =
+      typeof options?.permitId === "string" ? options.permitId.trim() : "";
+    if (!permitId) {
+      throw new Error("permitId must not be blank");
+    }
+    const idempotencyKey =
+      typeof options?.idempotencyKey === "string"
+        ? options.idempotencyKey.trim()
+        : "";
+    if (!idempotencyKey) {
+      throw new Error("idempotencyKey must not be blank");
+    }
+    // Count code points, as the server does, not UTF-16 code units.
+    const keyLength = idempotencyKey.replace(
+      /[\uD800-\uDBFF][\uDC00-\uDFFF]/g,
+      "_"
+    ).length;
+    if (keyLength > MAX_IDEMPOTENCY_KEY_LENGTH) {
+      throw new Error(
+        `idempotencyKey must be at most ${MAX_IDEMPOTENCY_KEY_LENGTH} characters`
+      );
+    }
+    const response: AxiosResponse = await this.client.post(
+      "/v1/awi/execute",
+      {
+        session_id: sessionId,
+        action,
+        parameters: parameters || {},
+        representation_request: options.representation,
+        dry_run: options.dryRun ?? false,
+      },
+      {
+        headers: {
+          "X-Permit-Id": permitId,
+          "Idempotency-Key": idempotencyKey,
+        },
+      }
+    );
+    return response.data;
+  }
+
+  async getRepresentation(
+    sessionId: string,
+    representationType: AWIRepresentationType,
+    options?: Record<string, unknown>
+  ): Promise<AWIRepresentation> {
+    const response: AxiosResponse = await this.client.post("/v1/awi/represent", {
+      session_id: sessionId,
+      representation_type: representationType,
+      options: options || {},
+    });
+    return response.data;
+  }
+
+  async pause(sessionId: string, reason?: string): Promise<unknown> {
+    const response: AxiosResponse = await this.client.post("/v1/awi/intervene", {
+      session_id: sessionId,
+      action: "pause",
+      reason,
+    });
+    return response.data;
+  }
+
+  async resume(sessionId: string): Promise<unknown> {
+    const response: AxiosResponse = await this.client.post("/v1/awi/intervene", {
+      session_id: sessionId,
+      action: "resume",
+    });
+    return response.data;
+  }
+
+  async steer(
+    sessionId: string,
+    instructions: string
+  ): Promise<unknown> {
+    const response: AxiosResponse = await this.client.post("/v1/awi/intervene", {
+      session_id: sessionId,
+      action: "steer",
+      steer_instructions: instructions,
+    });
+    return response.data;
+  }
+
+  async getSession(sessionId: string): Promise<AWISession> {
+    const response: AxiosResponse = await this.client.get(
+      `/v1/awi/sessions/${sessionId}`
+    );
+    return response.data;
+  }
+
+  async destroySession(sessionId: string): Promise<void> {
+    await this.client.delete(`/v1/awi/sessions/${sessionId}`);
+  }
+
+  async createTask(
+    taskType: string,
+    targetUrl: string,
+    actionSequence: Array<Record<string, unknown>>,
+    priority?: number
+  ): Promise<unknown> {
+    const response: AxiosResponse = await this.client.post("/v1/awi/tasks", {
+      task_type: taskType,
+      target_url: targetUrl,
+      action_sequence: actionSequence,
+      priority: priority || 5,
+    });
+    return response.data;
+  }
+
+  async getTaskStatus(taskId: string): Promise<unknown> {
+    const response: AxiosResponse = await this.client.get(
+      `/v1/awi/tasks/${taskId}`
+    );
+    return response.data;
+  }
+
+  async getQueueStatus(): Promise<unknown> {
+    const response: AxiosResponse = await this.client.get(
+      "/v1/awi/queue/status"
+    );
+    return response.data;
+  }
+}
+
+export default AWIClient;
+
+qa ['docs/qa/2026-10-02/artifacts', 'docs/qa/2026-10-02/FRONTEND-SESSION.md', 'docs/qa/2026-10-02/UX-SESSION.md', 'docs/qa/2026-10-02/COORDINATION-SESSION.md', 'docs/qa/2026-10-02/CLAIMS-SESSION.md', 'docs/qa/2026-10-02/run_logged.py', 'docs/qa/2026-10-02/BACKEND-SESSION.md']

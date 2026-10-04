@@ -1,0 +1,14 @@
+[
+  {
+    "url": "http://127.0.0.1:8769/",
+    "status": 200,
+    "csp": "default-src 'self' data: blob:; connect-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; object-src 'none'; frame-src 'none'; form-action 'self'; base-uri 'self'",
+    "axe_injected": true
+  },
+  {
+    "url": "http://127.0.0.1:8770/dashboard.html",
+    "status": 200,
+    "csp": "default-src 'self' data: blob:; connect-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; object-src 'none'; frame-src 'none'; form-action 'self'; base-uri 'self'",
+    "axe_injected": true
+  }
+]

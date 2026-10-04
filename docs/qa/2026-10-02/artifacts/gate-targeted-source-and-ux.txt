@@ -1,0 +1,162 @@
+# UX QA report — 2026-10-02
+
+Resumed an interrupted sweep; existing logs/artifacts retained. Local-only browser pass, no credentials or authenticated production calls.
+
+## Written exploratory charters
+
+1. **Accessibility and keyboard (15 minutes):** Public overview/proof/compare/404 and operator index; axe WCAG 2.2 A/AA; landmark/headings/accessible names; skip link, tab order, accessibility options, calculator labels and status announcements. Goal: a keyboard or screen-reader user can discover the pilot and interpret evidence without hidden information.
+2. **Responsive and state behavior (10 minutes):** 1440px desktop, 390px mobile, 320px reflow; calculator empty/invalid/valid states; reduced motion; default and enlarged text; screenshot important states. Goal: no clipped controls, trapped focus, or ambiguous recovery.
+3. **Nielsen/developer experience (10 minutes):** Review ten heuristics against public pages and README/quickstart using code-backed evidence; inspect error recovery, user control, consistency, documentation accuracy, and stated limits. Goal: a new integrator can identify a safe local path and understand operational boundaries.
+
+Axe is a sampled automated check, not WCAG certification. Screen-reader semantics are inspected from the accessibility tree; no physical assistive-technology speech session. Browser outbound requests are blocked except loopback, and public API calls are mocked or blocked.
+
+## Results
+
+Pending browser tooling and local server readiness.
+
+1: from __future__ import annotations
+2: 
+3: import asyncio
+4: import json
+5: import re
+6: import time
+7: import uuid
+8: from collections.abc import Sequence
+9: from dataclasses import dataclass
+10: from datetime import timedelta
+11: from typing import Any, cast
+12: 
+13: from sqlalchemy import or_, select
+14: from sqlalchemy.exc import IntegrityError, OperationalError
+15: from sqlalchemy.ext.asyncio import AsyncSession
+16: from sqlalchemy.sql.elements import ColumnElement
+17: from sqlmodel import col
+18: 
+19: from app.core.resilience import run_with_write_conflict_retry
+20: from app.core.config import get_settings
+21: from app.core.time import to_naive_utc, utc_now
+22: from app.db.database import get_session_factory
+23: from app.db.models import (
+24:     IdempotencyRecordModel,
+25:     LedgerEntryModel,
+26:     McpDispatchAttemptModel,
+27:     ReceiptModel,
+28: )
+29: from app.services.signing_keys import sha256_hex
+30: 
+31: GOVERNED_MCP_IDEMPOTENCY_ENDPOINT = "/mcp/invoke"
+32: 
+33: 
+34: class IdempotencyConflictError(RuntimeError):
+35:     """Raised when an idempotency key is reused for a different request."""
+36: 
+37: 
+38: class IdempotencyInProgressError(RuntimeError):
+39:     """Raised when an idempotency key is already executing without a result."""
+40: 
+41: 
+42: class IdempotencyCreationDisabledError(RuntimeError):
+43:     """Raised when only existing requests may be replayed."""
+44: 
+45: 
+46: # Caller-supplied replay keys are stored verbatim in the
+47: # idempotency_records.idempotency_key column, a String(128) since migration
+48: # 016, so 128 is the durable limit; the Python SDK enforces the same bound
+49: # before sending. Accepting a longer key would pass on SQLite in tests and be
+50: # refused by PostgreSQL mid-call, after the caller's retry protection had
+51: # already been promised.
+52: MAX_CLIENT_IDEMPOTENCY_KEY_LENGTH = 128
+53: _CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f]")
+54: 
+55: 
+56: class InvalidIdempotencyKeyError(ValueError):
+57:     """A caller explicitly supplied a replay key the gateway cannot honor.
+58: 
+59:     This is distinct from an absent key. Absence means an un-keyed call, and
+60:     the transports document what that costs. Presence with an unusable value
+61:     means the caller asked for retry protection and would silently not get
+62:     it, so the call is refused before any permit, debit, or dispatch.
+63:     """
+64: 
+65:     def __init__(self, reason_code: str, message: str, *, source: str) -> None:
+66:         super().__init__(message)
+67:         self.reason_code = reason_code
+68:         self.source = source
+69: 
+70:     def as_error_data(self) -> dict[str, Any]:
+71:         """Machine-actionable detail for the transport's error envelope."""
+72:         return {
+73:             "error": "invalid_idempotency_key",
+74:             "reason_code": self.reason_code,
+75:             "source": self.source,
+76:             "remediation": {
+77:                 "type": "retry_with_valid_idempotency_key",
+78:                 "detail": (
+79:                     "Send exactly one idempotency key: a non-blank string of at "
+80:                     f"most {MAX_CLIENT_IDEMPOTENCY_KEY_LENGTH} characters with no "
+81:                     "control characters (UTF-8 bytes when sent as a header), or "
+82:                     "the same key in every source. Nothing was minted, charged, "
+83:                     "or dispatched."
+84:                 ),
+85:             },
+86:         }
+87: 
+88: 
+89: def validate_client_idempotency_key(value: object, *, source: str) -> str:
+90:     """Return ``value`` exactly as supplied or raise ``InvalidIdempotencyKeyError``.
+91: 
+92:     A usable key is a JSON string with at least one non-whitespace character,
+93:     at most ``MAX_CLIENT_IDEMPOTENCY_KEY_LENGTH`` characters, and no C0 control
+94:     characters or DEL. The value is never stripped, truncated, stringified,
+95:     or otherwise normalized: two distinct valid keys must stay two distinct
+96:     keys, and the key the caller sent is the key the ledger records.
+97:     """
+98:     if not isinstance(value, str):
+99:         raise InvalidIdempotencyKeyError(
+100:             "idempotency_key_not_a_string",
+101:             f"invalid_idempotency_key: {source} must be a JSON string",
+102:             source=source,
+103:         )
+104:     if not value.strip():
+105:         raise InvalidIdempotencyKeyError(
+106:             "idempotency_key_blank",
+107:             f"invalid_idempotency_key: {source} must contain a non-whitespace "
+108:             "character",
+109:             source=source,
+110:         )
+111:     if len(value) > MAX_CLIENT_IDEMPOTENCY_KEY_LENGTH:
+112:         raise InvalidIdempotencyKeyError(
+113:             "idempotency_key_too_long",
+114:             f"invalid_idempotency_key: {source} must be at most "
+115:             f"{MAX_CLIENT_IDEMPOTENCY_KEY_LENGTH} characters",
+116:             source=source,
+117:         )
+118:     if _CONTROL_CHARACTERS.search(value):
+119:         raise InvalidIdempotencyKeyError(
+120:             "idempotency_key_control_characters",
+121:             f"invalid_idempotency_key: {source} must not contain control characters",
+122:             source=source,
+123:         )
+124:     return value
+125: 
+126: 
+127: IDEMPOTENCY_KEY_HEADER_SOURCE = "Idempotency-Key header"
+128: 
+129: 
+130: def decode_idempotency_key_header(line: str) -> str:
+131:     """Return an ``Idempotency-Key`` header line as the text the client sent.
+132: 
+133:     Header bytes reach the application decoded as latin-1, so a key a client
+134:     sent as UTF-8 would otherwise arrive as mojibake: it would not equal the
+135:     same key sent in the body, and UTF-8 continuation bytes in 0x80-0x9F
+136:     would read as C1 control characters. The line is re-read as UTF-8 and
+137:     nothing else, so every wire value has at most one reading and two
+138:     different byte sequences can never alias to one key; bytes that are not
+139:     valid UTF-8 are refused (``idempotency_key_not_utf8``) rather than kept
+140:     as latin-1 text.
+141:     """
+142:     try:
+143:         return line.encode("latin-1").decode("utf-8")
+144:     except UnicodeError as exc:
+145:         raise InvalidIdempotencyKeyError(
+AUTH FILES ['app/routers/auth.py', 'app/core/auth.py', 'app/schemas/auth.py', 'app/services/webauthn_provider.py']

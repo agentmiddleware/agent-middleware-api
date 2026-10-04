@@ -336,12 +336,12 @@
       </p>
       <div class="links">
         <a href="https://www.thisisatest.tech/proof/">
-          <strong>Hosted public proof</strong>
+          <strong>Hosted portable receipt proof</strong>
           <span>Artifact, matching key snapshot, and offline verification command.</span>
         </a>
         <a href="/health/dependencies">
           <strong>Runtime truth</strong>
-          <span>Dependency posture, feature flags, build SHA, and metric scope metadata.</span>
+          <span>Dependency posture, feature flags, build SHA, and metric scope metadata for the API origin serving this page.</span>
         </a>
         <a href="/.well-known/trust-keys.json">
           <strong>Current trust keys</strong>
@@ -372,7 +372,7 @@
         Set <code>API_URL</code> to the origin serving this page, without a trailing slash;
         the example below uses the local server default.
       </p>
-      <pre tabindex="0" role="region" aria-labelledby="inspection-heading"><code>export API_URL='http://127.0.0.1:8000'
+      <pre tabindex="0" role="region" aria-label="Authenticated inspection commands"><code>export API_URL="http://127.0.0.1:8000"
 export AGENT_MIDDLEWARE_API_KEY='replace-in-your-terminal'
 
 curl --fail-with-body \

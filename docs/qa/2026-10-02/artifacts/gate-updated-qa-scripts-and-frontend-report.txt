@@ -1,0 +1,82 @@
+SCRIPTS ['package_audit.py', 'secret_scan.py', 'frontend-components.test.cjs', 'frontend.spec.cjs', 'ux_browser_qa.cjs', 'browser-loopback.mjs', 'build_claim_inventory.py', 'ux_csp_server.py', 'playwright.config.cjs', 'run_logged.py']
+# Frontend QA pass
+
+PR: opened by orchestrator
+
+CI status: pending at time of writing
+
+## Scope and method
+
+The repository has a static marketing site (`site/`), a static operator index (`static/dashboard.html`), and an unshipped AWI TypeScript SDK (`awi_sdk/typescript/`). There is no React application or authenticated dashboard workflow. README.md:260–267 explicitly says there is no published TypeScript package; SDK findings therefore concern the checked-in integration surface, not an established public package release.
+
+Risk order: (1) credentials/receipt claims and retry boundaries, (2) calculator correctness and public proof failure states, (3) SDK build and API ergonomics, (4) mobile/accessibility and asset performance. Runtime backend routes and Python suites belong to the backend pass; accessibility and screenshot fallback belong to the UX pass.
+
+The test pyramid uses existing site checks first, browser-free component and transport-contract tests second, and browser smoke scenarios last. The component fallback executes the unmodified product JavaScript in jsdom; it does not establish layout, engine compatibility, focus behavior, or Web Vitals. No product behavior or package manifest was changed.
+
+Timed exploratory charters:
+
+| Charter | Timebox | Questions | Outcome |
+| --- | --- | --- | --- |
+| FE-C1: bootstrap and build | 10 minutes | Can a clean consumer build the static site and SDK without production settings? | Site builds with synthetic contact fixture; SDK declared build fails (FE-001). |
+| FE-C2: public flow/browser smoke | 10 minutes | Do primary pages, calculator, proof, no-JS and mobile flows work across Chromium/Firefox/WebKit? | 24 cases collected; every engine failed at launch before navigation. Two existing browser programs failed at launch too. UX owns safe alternate browser investigation. |
+| FE-C3: component and SDK boundaries | 10 minutes | Do invalid/empty/overflow inputs fail safely; does the SDK preserve authorization and retry identity? | 8 passing tests, 2 expected failures. Calculator and proof error cases pass; SDK zero step limit is promoted to 100 (FE-002). |
+
+All shell commands, including failed bootstrap attempts, are recorded in [FRONTEND-SESSION.md](FRONTEND-SESSION.md). The short first identity/read command preceded discovery of the logging wrapper and is reconstructed there; subsequent commands used `run_logged.py`.
+
+## Findings
+
+| ID | Severity | Group | Title | Exact reproduction | Expected vs actual | Evidence | Suggested fix |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| FE-001 | Medium | Frontend / SDK DX | Declared TypeScript SDK build cannot produce its advertised entrypoints | Copy `awi_sdk/typescript/{package.json,index.ts,LICENSE}` into an isolated directory; install the declared dependencies with scripts disabled; run `npm run build`. The retained test `FE-001: declared SDK build produces its advertised entrypoints` reproduces this without network using already installed temporary tooling. | Expected: exit 0, `dist/index.js` and `dist/index.d.ts`. Actual: `tsc` prints help and exits 1 because no project config or source arguments exist. | `awi_sdk/typescript/package.json:5`, `:6`, `:8`; [isolated build output](artifacts/frontend-sdk-isolated-build.txt); [expected failure](artifacts/frontend-component-contract-final.txt). Explicit-source strict typecheck passes, narrowing this to packaging/build configuration. | Before unfreezing this SDK, add a minimal tsconfig with source include, output directory and declaration emission, and verify the packed entrypoints. Keep it documented as unshipped until then. |
+| FE-002 | Medium | Frontend / SDK DX | A zero session step limit silently becomes 100 | Invoke `AWIClient.createSession('http://127.0.0.1:8769/synthetic', {maxSteps: 0})` with a stubbed Axios transport; inspect the submitted `max_steps`. Run the retained `FE-002: maxSteps=0 is not silently promoted to 100 actions` expected-failure test. | Expected: reject invalid zero locally or transmit zero so the API's `ge=1` validator rejects it. Actual: SDK submits `max_steps: 100`, granting a larger action limit than requested. `priority: 0` is similarly normalized to 5, though the session step limit is the consequential case. | `awi_sdk/typescript/index.ts:157`, `:279`; API validator `app/schemas/awi.py:157` and `:275`; [source lines](artifacts/frontend-sdk-contract-lines.txt); [mock-only regression output](artifacts/frontend-component-contract-final.txt). | Use nullish defaults (`??`) and optionally validate the documented bounds before transport. Preserve explicit invalid input for validation rather than replacing it. |
+
+No confirmed secret exposure was found in this pass. Synthetic test key text is not a usable credential. Production addresses appearing in source were inspected as text; none was requested.
+
+## Validation results
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Static-site default build | Correctly refuses missing contact settings, exit 2 | [output](artifacts/frontend-site-build-default.txt) |
+| Static-site local fixture build | PASS, output only in `/private/tmp/amw-qa-site-dist`; no environment files read or changed | [output](artifacts/frontend-site-build-local-tmpdir.txt) |
+| Site JS syntax | PASS, all 9 scripts with `node --check`; no lint/type script is declared for the dependency-free site | [output](artifacts/frontend-frontend-static-checks.txt) |
+| SDK declared build | FAIL, reproduced after installing its own declared TypeScript 5.9.3 and Axios 1.20.0 dependencies | [output](artifacts/frontend-sdk-isolated-build.txt) |
+| SDK strict explicit-source typecheck | PASS with ES2020/Node16 configuration; does not repair its declared build | [output](artifacts/frontend-sdk-explicit-typecheck.txt) |
+| npm vulnerability audits | PASS: zero known vulnerabilities in the resolved SDK dependency tree; site has zero dependencies | [SDK](artifacts/frontend-sdk-dependency-audit.txt), [site](artifacts/frontend-site-dependency-audit.txt) |
+| Existing pilot calculator browser script | BLOCKED at Chromium process launch | [output](artifacts/frontend-existing-pilot-browser-tests.txt) |
+| Existing design/browser script | BLOCKED at Chromium process launch | [output](artifacts/frontend-existing-design-browser-tests.txt) |
+| Added cross-browser suite | 24 attempts: 0 assertions reached; all launch failures, not evidence of 24 product defects | [JSON report](artifacts/frontend-playwright.json), [per-engine summary](artifacts/frontend-browser-engine-outcomes.txt) |
+| Added DOM/SDK contract tests | PASS overall: 8 pass, 0 unexpected failures, 2 expected failures (Node TODO); exit 0 | [output](artifacts/frontend-component-contract-final.txt) |
+| Performance | Static byte inventory only; no Lighthouse/Web Vitals score claimed | [asset report](artifacts/frontend-asset-budget.json) |
+
+Browser limitations: Chromium fails with macOS `bootstrap_check_in ... MachPortRendezvousServer ... Permission denied (1100)`/SIGTRAP; Firefox aborts with SIGABRT; WebKit aborts with exit 134. All three browser packages installed successfully. No screenshot, console-clean claim, successful network waterfall, cross-browser pass, or rendered performance result can be inferred from these attempts. Review the UX report for alternate browser evidence.
+
+The optional arcade bundle is 610,364 bytes (143,737 gzip) and total build assets are 1,324,673 bytes. This is an inventory, not initial page transfer: `site/arcade-boot.js:4–9` loads the arcade on user intent. It is not logged as a performance defect without measurement.
+
+## Coverage and remaining gaps
+
+Before added tests: browser coverage unavailable because the existing test programs could not start Chromium. The initial Node coverage attempt reports only test-driver source and is **not** product coverage; do not use its 7.49% number as a baseline.
+
+After added tests, Node V8 measured the actual scripts loaded into jsdom:
+
+| Script | Line | Branch | Function |
+| --- | ---: | ---: | ---: |
+| `site/pilot-fit.js` | 100.00% | 96.15% | 100.00% |
+| `site/proof/proof.js` | 100.00% | 84.62% | 100.00% |
+| Combined measured scripts | 100.00% | 90.38% | 100.00% |
+
+This is neither a whole-frontend percentage nor a measured before/after delta. V8 did not report source-level coverage for the transpiled SDK. Animation, arcade gameplay, accessibility preference scripts, analytics, visual layout, rendered keyboard behavior, browser download/mail handlers, production headers, real API integration and network timing remain untested by this pass. No customer or live-production proof is implied.
+
+## Reproduction and retained QA tooling
+
+All added files are under `docs/qa/2026-10-02/`. Install QA dependencies outside the repository (verified versions: Node 26.7.0; `@playwright/test`/`playwright` 1.63.0, `axe-core` 4.13.0, `jsdom` 30.1.1, TypeScript 5.9.3, Axios 1.20.0, `@types/node` 26.6.4). These are QA tool dependencies, not product dependencies. `QA_NODE_MODULES` can override the default temporary module path.
+
+```sh
+python3 docs/qa/2026-10-02/run_logged.py --group frontend --label reinstall-tools -- npm install --prefix /private/tmp/amw-qa-browser --cache /private/tmp/amw-qa-npm-cache --ignore-scripts --no-audit --no-fund @playwright/test@1.63.0 axe-core@4.13.0 jsdom@30.1.1 typescript@5.9.3 axios@1.20.0 @types/node@26.6.4
+python3 docs/qa/2026-10-02/run_logged.py --group frontend --label rerun-components -- node --test --experimental-test-coverage docs/qa/2026-10-02/frontend-components.test.cjs
+```
+
+For a runner that can launch browsers, install the Playwright browser packages with `PLAYWRIGHT_BROWSERS_PATH=/private/tmp/amw-qa-playwright-browsers`; build with synthetic `PUBLIC_DISPLAY_NAME=QA-Sweep`, `PUBLIC_CONTACT_EMAIL=qa@qa-sweep-build.dev`, `TMPDIR=/private/tmp` into a new temporary output path. Serve it on loopback port 8765, and `static/` on port 8766. Run `playwright test --config docs/qa/2026-10-02/playwright.config.cjs` through the logger. These contact values are build-only test fixtures; no email is sent. The browser tests block all non-loopback requests, block service workers, and mock only the exact local receipt URL. Existing scripts can use the retained `browser-loopback.mjs` adapter as their Playwright module argument.
+
+Expected failures intentionally remain documented as TODO tests so the component command stays green. Product fixes are not included. Recommended next step: fix SDK packaging and zero-boundary semantics if that SDK is retained, then rerun the retained browser suite in a permitted local browser environment before claiming frontend compatibility or visual quality.
+
+axe server file not at expected name

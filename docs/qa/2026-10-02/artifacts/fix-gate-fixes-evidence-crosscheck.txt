@@ -1,0 +1,19 @@
+missing linked paths ['FIX-SESSION-LOG.md']
+ARTIFACT fix-full-app-after.txt
+3671 passed, 60 skipped, 4 deselected, 71 warnings in 310.48s (0:05:10)
+ARTIFACT fix-python-sdk-after.txt
+129 passed in 1.18s
+ARTIFACT fix-openai-wrapper-after.txt
+65 passed in 0.50s
+ARTIFACT fix-strict-posture-after.txt
+12 passed in 3.59s
+ARTIFACT fix-ux-final-node-suite.txt
+ℹ tests 16
+ℹ pass 15
+ℹ fail 0
+ℹ skipped 0
+ℹ todo 1
+ARTIFACT fix-ux-full-playwright-execution-isolated.txt
+Running 33 tests using 1 worker
+  33 failed
+coverage ratios 87.567478 87.566966

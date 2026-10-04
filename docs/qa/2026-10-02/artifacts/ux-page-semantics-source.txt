@@ -1,0 +1,60 @@
+FILE site/proof/index.html
+172:     <a class="skip-link" href="#main">Skip to content</a>
+175:     <main id="main" class="proof-page">
+178:         <h1>Verify this receipt yourself.</h1>
+189:       <section class="section proof-artifact-section" aria-labelledby="artifact-title">
+193:             <h2 id="artifact-title">Signed claims from the portable bundle.</h2>
+199:         <div class="proof-grid artifact-grid" aria-live="polite">
+230:               aria-label="Download receipt.json — sample Ed25519 receipt"
+238:               aria-label="Download trust-keys.json — Ed25519 public keys"
+245:       <section class="protocol-section verify-section" aria-labelledby="verify-title">
+248:           <h2 id="verify-title">Check the signed bytes fully offline.</h2>
+282:       <section class="section pilot-section proof-contact" aria-labelledby="proof-contact-title">
+285:           <h2 id="proof-contact-title">Test the same loop on one MCP tool.</h2>
+297:             one. <a href="/#pilot">Read the pilot scope</a> and
+298:             <a href="/#economic-fit">estimate economic fit</a>.
+305:               aria-label="Start a pilot by email (opens your mail app)"
+311:               aria-label="Email @@PUBLIC_CONTACT_EMAIL@@"
+320:               aria-label="Book a call if your scenario needs one (opens in a new tab)"
+321:               >Book a call if your scenario needs one <span aria-hidden="true">↗</span></a
+FILE site/compare/index.html
+127:     <a class="skip-link" href="#main">Skip to content</a>
+130:     <main id="main">
+133:         <h1>Several tools sign receipts. One debit is the difference.</h1>
+141:       <section class="section" aria-labelledby="honest-title">
+143:         <h2 id="honest-title">Signed, offline-verifiable receipts are no longer rare in this field.</h2>
+150:             <a href="/proof/" data-analytics-event="proof_click">proof page</a>
+163:       <section class="section" aria-labelledby="matrix-title">
+165:         <h2 id="matrix-title">The comparison, including the rows we lose.</h2>
+166:         <div class="compare-scroll" tabindex="0" role="region" aria-labelledby="matrix-title">
+167:           <table class="compare-table">
+303:       <section class="section" aria-labelledby="latch-title">
+305:         <h2 id="latch-title">Versus a decorator library you can install today.</h2>
+356:       <section class="section" aria-labelledby="who-title">
+358:         <h2 id="who-title">Who this is actually for.</h2>
+387:       <section class="section" aria-labelledby="faq-title">
+389:         <h2 id="faq-title">Compliance, pricing, and other honest answers.</h2>
+455:       <section class="provenance-section" aria-labelledby="compare-cta-title">
+459:             <h2 id="compare-cta-title">Do not take the table on faith.</h2>
+487:             <h2>Still think it fits?</h2>
+493:               needs one. <a href="/#economic-fit">Estimate economic fit</a> and
+494:               <a href="/#pilot">read the pilot scope</a> before writing.
+501:                 aria-label="Start a pilot by email (opens your mail app)"
+516:                 aria-label="Book a call if your scenario needs one (opens in a new tab)"
+517:                 >Book a call if your scenario needs one <span aria-hidden="true">↗</span></a
+FILE site/concept/index.html
+28:     <a class="skip-link" href="#main">Skip to content</a>
+32:     <div class="wave-fallback" aria-hidden="true"></div>
+33:     <canvas id="wave-canvas" class="wave-canvas" aria-hidden="true"></canvas>
+37:     <main id="main" class="hero concept-hero">
+40:           <span class="eyebrow-mark" aria-hidden="true"></span>
+43:         <h1>Unlock your future&nbsp;growth</h1>
+51:             aria-label="Contact us by email (opens your mail app)"
+56:         <p id="wave-stats" class="constraint-line" aria-hidden="true"></p>
+FILE site/arcade-boot.js
+16:    - The launcher ships hidden and is revealed only once this script runs, so
+38:   launcher.hidden = false;
+41:     if (launchWrap) launchWrap.hidden = false;
+49:     launcher.setAttribute("aria-busy", "true");
+60:         launcher.removeAttribute("aria-busy");
+71:         launcher.removeAttribute("aria-busy");

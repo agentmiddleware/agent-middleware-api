@@ -1,0 +1,203 @@
+FILE site/README.md
+32: therefore refuses to emit `dist/` until both required values are provided:
+34: - `PUBLIC_DISPLAY_NAME`: accountable public person or entity
+35: - `PUBLIC_CONTACT_EMAIL`: monitored email address, the primary CTA on every
+40: - `PUBLIC_BOOKING_URL`: absolute HTTPS booking URL. When set, a secondary
+80: building and serving `dist` locally:
+93: PUBLIC_DISPLAY_NAME="..." \
+94: PUBLIC_CONTACT_EMAIL="..." \
+95: python3 build_site.py            # add PUBLIC_BOOKING_URL="https://..." to render the optional link
+96: python3 -m http.server 8765 --directory dist
+105:   with `data-wave="preset"` and scrolling lerps between them — sea →
+229:   `PUBLIC_ENABLE_VERCEL_ANALYTICS=true`.
+241: returning visitors
+293: ninety distinct genres between them; ninety chips would be a worse maze than
+319: read the same keys always feel the same under a thumb.
+392: chips are derived from `CABINETS` itself — `ALL` plus each distinct `genre` in
+411: each throw or return junk here, and **none of those is a reason for the waiting
+448:   `aria-modal`, Escape closes it, focus returns to the launcher, and the page
+477: python3 vendor_fonts.py --check  # verify the committed output matches upstream
+489: standalone files is plain redistribution, so condition 2 applies in full. The
+559: deploys; `dist/` gets only the PNG.
+575: `PUBLIC_BOOKING_URL` was configured at build time. Event payloads never
+579: `PUBLIC_ENABLE_VERCEL_ANALYTICS=true` is set at build time; the default build
+602: the stdlib-only `python3 build_site.py` command before serving `dist/`. The
+FILE site/build_site.py
+5: script and serves only ``dist/``; a missing or obviously provisional contact
+9: ``PUBLIC_ENABLE_VERCEL_ANALYTICS=true``. Deploying the ``/_vercel/insights``
+34: DEFAULT_OUTPUT = SITE_ROOT / "dist"
+40:     "@@PUBLIC_DISPLAY_NAME@@": "PUBLIC_DISPLAY_NAME",
+41:     "@@PUBLIC_CONTACT_EMAIL@@": "PUBLIC_CONTACT_EMAIL",
+43: BOOKING_TOKEN = [REDACTED]
+58: BOOKING_FIELD = "PUBLIC_BOOKING_URL"
+76: ANALYTICS_FLAG = "PUBLIC_ENABLE_VERCEL_ANALYTICS"
+146: REQUIRED_PUBLIC_ASSETS = (
+185:     return normalized in RESERVED_HOSTS or normalized.endswith(RESERVED_HOST_SUFFIXES)
+191:     """Return contact values or refuse to build the public site.
+208:     display_name = environment["PUBLIC_DISPLAY_NAME"].strip()
+209:     email = environment["PUBLIC_CONTACT_EMAIL"].strip()
+213:         ("PUBLIC_DISPLAY_NAME", display_name),
+214:         ("PUBLIC_CONTACT_EMAIL", email),
+230:             "PUBLIC_DISPLAY_NAME must identify an accountable person or entity"
+234:             "PUBLIC_CONTACT_EMAIL is not a valid email address"
+238:             "PUBLIC_CONTACT_EMAIL must use a routable public domain"
+247:                 "PUBLIC_BOOKING_URL must be an absolute HTTPS URL"
+251:                 "PUBLIC_BOOKING_URL must not contain credentials"
+255:                 "PUBLIC_BOOKING_URL must use a routable public domain"
+264:                 "PUBLIC_BOOKING_URL must point to a booking service"
+269:             "@@PUBLIC_DISPLAY_NAME@@": display_name,
+270:             "@@PUBLIC_CONTACT_EMAIL@@": email,
+274:         return values
+276:         "@@PUBLIC_DISPLAY_NAME@@": html.escape(display_name),
+277:         "@@PUBLIC_CONTACT_EMAIL@@": html.escape(email, quote=True),
+281:     return escaped
+287:     return bool(environment.get(BOOKING_FIELD, "").strip())
+295:     ``@@PUBLIC_BOOKING_URL@@`` token. Unbalanced markers are a launch error.
+301:         return _BOOKING_MARKER_LINE.sub("", markup)
+307:     return rendered
+311:     """Return whether the build should emit the Vercel Web Analytics loader.
+319:         return True
+321:         return False
+327: def _copy_asset(relative_path: str, output: Path) -> None:
+329:     destination = output / relative_path
+341:         return
+353:     """Return a cache key derived from the generated stylesheet's content.
+363:     except OSError as error:
+367:     return hashlib.sha256(payload).hexdigest()[:8]
+373:     ``fonts`` appearing in REQUIRED_PUBLIC_ASSETS only proves the directory
+407:     except (OSError, ValueError) as error:
+412:     # json.loads happily returns a list or a string; manifest.get would then
+438:     return "\n".join(
+468:             return
+470:             return
+479:             return
+485:             return
+505:     verifier output was recorded against a different receipt than the one
+512:     except FileNotFoundError as exc:
+517:     except json.JSONDecodeError as exc:
+538:         if not (rows_ok or isinstance(step.get("output"), str)):
+541:                 "[key, value] rows or an output string"
+547:         if step["id"] == "verify" and not str(step.get("output", "")).startswith(
+564:         isinstance(live.get(key), str) for key in ("receipt_id", "command", "output")
+567:             "transcript lacks the live receipt's verifier output"
+573:     except (OSError, ValueError, KeyError, TypeError) as exc:
+579:     except OSError as exc:
+583:     if live.get("exit_code") != 0 or not live["output"].startswith("VERIFIED"):
+588:     # The verdict line is the first line of verify_cli output, so the id
+589:     # must appear there: matching it anywhere in the output would accept a
+591:     if live["receipt_id"] != published_id or not live["output"].startswith(
+595:             "transcript's live verifier output is for "
+596:             f"{live['output'].splitlines()[0]!r} (recorded as "
+605:             "transcript's live verifier output was recorded against different "
+609:     # The same holds for the key set the verifier checked the signature
+614:             "transcript's live verifier output was recorded against different "
+639:     return transcript
+644:     return isinstance(value, (int, float)) and not isinstance(value, bool)
+653:     return f"{float(value):.1f}"
+668:     return f'<p class="console-latency">{html.escape(text)}</p>'
+672:     """Return the ISO date the published sample receipt was issued.
+683:     except (OSError, ValueError, KeyError, TypeError) as exc:
+687:     return issued.date().isoformat()
+690: def _console_output(text: str) -> str:
+697:     return "\n".join(lines)
+705:     return "\n".join([first, *rest])
+743:         if isinstance(step.get("output"), str):
+745:                 f'<pre class="console-output"><code>{_console_output(step["output"])}</code></pre>'
+765:     return "\n".join(parts)
+769:     """The offline verifier's real output for the published receipt."""
+771:     return (
+778:         f'<pre class="console-output"><code>{_console_output(live["output"])}</code></pre>'
+820:     return "\n".join([first, *(indent + line for line in rest)])
+823: def _validated_output_path(output: Path) -> Path:
+826:     resolved = output.resolve()
+827:     default_output = DEFAULT_OUTPUT.resolve()
+833:         raise LaunchConfigurationError("output must not contain the source tree")
+834:     if resolved == default_output:
+835:         return resolved
+838:             "output must not be another path inside the repository"
+844:         return resolved
+846:         "output must be site/dist or a new path under the system temp directory"
+851:     """Return the date tokens shared by the sitemap and security.txt."""
+855:     return {
+861: def render_site(output: Path, environment: dict[str, str]) -> None:
+865:     name = text_replacements["@@PUBLIC_DISPLAY_NAME@@"]
+875:         + quote(text_replacements["@@PUBLIC_CONTACT_EMAIL@@"], safe="@")
+888:         for relative_path in REQUIRED_PUBLIC_ASSETS
+906:     output = _validated_output_path(output)
+908:     shutil.rmtree(output, ignore_errors=True)
+909:     output.mkdir(parents=True)
+911:         _copy_asset(relative_path, output)
+995:         destination = output / relative_path
+1002:     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+1005:         render_site(args.output, dict(os.environ))
+1006:     except LaunchConfigurationError as exc:
+1008:         return 2
+1009:     return 0
+FILE README.md
+21: tool and at most one wallet debit. A replay returns the original result and
+22: receipt; a changed payload under the same key fails closed with an error and no
+65: ## See it in sixty seconds
+87:                                         retry returned PAY-0001
+103: **asserts** rather than prints: the call charges once, the replay returns the
+120: shares: an agent that restarts with a new key pays twice. Mechanism, report
+126: make quickstart        # boots a real strict-trust server on 127.0.0.1:8000
+129: Then follow [docs/quickstart.md](docs/quickstart.md): mint your own
+133: (`make quickstart-check`), so the documented path cannot silently rot.
+135: `make live-loop-proof` (against a running quickstart) writes a handoff bundle to
+144: | **Charge-once under retry** | Same idempotency key → same receipt, no second dispatch, no second debit. A changed payload under that key conflicts. | `tests/test_adversarial_five_claims.py` |
+209: self-provisioning the quickstart above uses is local-only — a production-like
+214: curl -sS -X POST "$API_URL/mcp/messages" \
+250: export MCP_UPSTREAM_PUBLIC_TOOL_ID=partner.notes.write
+265: wheels and sdists on Python 3.10–3.12 and attaches them to `python-sdk-v*`
+316: | Run the loop yourself | [docs/quickstart.md](docs/quickstart.md) |
+331: it, and redistribute it, but do not offer it to third parties as a competing
+FILE docs/quickstart.md
+1: # Quickstart: from `git clone` to a verified receipt
+3: In about 15 minutes, with no operator, no pre-shared key, and no bespoke
+15: (`tests/test_quickstart_path.py`), so if this page and the code ever
+22: Python 3.11+, `git`, `make`, `curl`, and [`uv`](https://docs.astral.sh/uv/):
+25: curl -LsSf https://astral.sh/uv/install.sh | sh
+36: make quickstart
+40: persists it with the database under `data/quickstart/` (gitignored). Wait
+44: [quickstart] Trust plane is up: http://127.0.0.1:8000
+68: curl -s "$API_URL/.well-known/agent.json"
+69: curl -s "$API_URL/mcp/tools.json"
+78: No credential is needed to get a credential — the quickstart server allows
+83:   curl -s -X POST "$API_URL/v1/dev-keys/self-provision" \
+85:     -d '{"agent_id": "quickstart-stranger"}'
+114:   curl -s -X POST "$API_URL/v1/permits" \
+116:     -H "Idempotency-Key: quickstart-permit-1" \
+141:   curl -s -X POST "$API_URL/mcp/messages" \
+152:           \"idempotency_key\": \"quickstart-note-1\"
+173: Send the **exact same request again** — same idempotency key, same payload:
+176: curl -s -X POST "$API_URL/mcp/messages" \
+187:         \"idempotency_key\": \"quickstart-note-1\"
+197: Now try the sharper attack: **same idempotency key, different payload** —
+201: curl -s -X POST "$API_URL/mcp/messages" \
+208:       \"arguments\": {\"text\": \"DIFFERENT text, same key\"},
+212:         \"idempotency_key\": \"quickstart-note-1\"
+219: "probably the same" guess. One key means one operation, forever.
+224: curl -s "$API_URL/v1/billing/ledger/$WALLET_ID" -H "X-API-Key: [REDACTED] | python3 -m json.tool
+234: curl -s -X POST "$API_URL/v1/audit/verify-chain" \
+250:   curl -s -X POST "$API_URL/mcp/messages" \
+261:           \"idempotency_key\": \"quickstart-note-$N\"
+272: curl -s -X POST "$API_URL/mcp/messages" \
+283:         \"idempotency_key\": \"quickstart-note-4\"
+304: curl -s "$API_URL/v1/receipts/$RECEIPT_ID/portable" \
+305:   -H "X-API-Key: [REDACTED] -o data/quickstart/receipt-bundle.json
+306: curl -s "$API_URL/.well-known/trust-keys.json" -o data/quickstart/trust-keys.json
+310:   --bundle data/quickstart/receipt-bundle.json \
+311:   --keys data/quickstart/trust-keys.json
+316:   signed by   quickstart-local-ed25519
+329: bundle = json.load(open("data/quickstart/receipt-bundle.json"))
+335: json.dump(bundle, open("data/quickstart/forged-receipt.json", "w"))
+340:   --bundle data/quickstart/forged-receipt.json \
+341:   --keys data/quickstart/trust-keys.json
+359:   curl -s -X POST "$API_URL/v1/permits" \
+361:     -H "Idempotency-Key: quickstart-permit-2" \
+375: curl -s -X POST "$API_URL/mcp/messages" \
+386:         \"idempotency_key\": \"quickstart-denied-1\"
+414: State persists across restarts (`make quickstart` resumes where you left
+419: make quickstart QUICKSTART_ARGS="--reset"
+422: Reset before repeating the walkthrough: idempotency is forever, so
+AGENT subdirs []

@@ -1,0 +1,112 @@
+QA dependency versions {'@playwright/test': '1.63.0', 'playwright': '1.63.0', 'axe-core': '4.13.0', 'jsdom': '30.1.1', 'typescript': '5.9.3', 'axios': '1.20.0', '@types/node': '26.6.4'}
+SDK isolated dependencies {'typescript': '5.9.3', 'axios': '1.20.0', '@types/node': '20.19.43'}
+1: /* ==========================================================================
+2:    THE HUMAN WAITING ROOM — the door, not the room.
+3: 
+4:    /arcade.js is the largest thing the landing page can load, and nobody
+5:    needs it until they press START. This file is what ships on every visit
+6:    instead: it reveals the launcher (the arcade's proof of life used to be
+7:    arcade.js itself running), and fetches /arcade.js and /arcade.css the
+8:    first time someone asks for the room — on click, on a ?arcade= deep link,
+9:    or speculatively on hover/focus so the click feels instant.
+10: 
+11:    Contracts this file lives inside, the same as arcade.js:
+12: 
+13:    - CSP is script-src 'self' / style-src 'self' with no 'unsafe-inline'. The
+14:      script and stylesheet are injected as same-origin <script> and <link>
+15:      elements, which the policy allows; nothing inline is created.
+16:    - The launcher ships hidden and is revealed only once this script runs, so
+17:      a visitor without JavaScript never sees a control that does nothing.
+18:    - The asset URLs come from the launcher's data attributes, so the cache
+19:      token lives in the HTML with every other asset reference and the build's
+20:      token check covers them.
+21:    - Once arcade.js has loaded it owns the launcher: it attaches its own click
+22:      handler and handles ?arcade= itself, exactly as it did when it loaded
+23:      eagerly. This file steps aside after the first load.
+24:    ========================================================================== */
+25: (function () {
+26:   "use strict";
+27: 
+28:   var doc = document;
+29:   var launcher = doc.getElementById("arcade-launch");
+30:   if (!launcher || !doc.createElement("canvas").getContext) return;
+31: 
+32:   var scriptSrc = launcher.getAttribute("data-arcade-script");
+33:   var styleHref = launcher.getAttribute("data-arcade-style");
+34:   if (!scriptSrc || !styleHref) return;
+35: 
+36:   // Same reveal arcade.js performs, moved here so it happens on every visit
+37:   // without the room itself being downloaded.
+38:   launcher.hidden = false;
+39:   if (typeof launcher.closest === "function") {
+40:     var launchWrap = launcher.closest(".footer-arcade");
+41:     if (launchWrap) launchWrap.hidden = false;
+42:   }
+43: 
+44:   var loading = null;
+45: 
+46:   function load() {
+47:     if (window.__amwArcade) return Promise.resolve(window.__amwArcade);
+48:     if (loading) return loading;
+49:     launcher.setAttribute("aria-busy", "true");
+50:     loading = new Promise(function (resolve, reject) {
+51:       var link = doc.createElement("link");
+52:       link.rel = "stylesheet";
+53:       link.href = styleHref;
+54:       doc.head.appendChild(link);
+55: 
+56:       var script = doc.createElement("script");
+57:       script.src = scriptSrc;
+58:       script.async = true;
+59:       script.onload = function () {
+60:         launcher.removeAttribute("aria-busy");
+61:         if (window.__amwArcade) {
+62:           resolve(window.__amwArcade);
+63:           return;
+64:         }
+65:         // The file arrived but never announced itself. Drop the failed
+66:         // attempt so the next press injects again instead of reusing it.
+67:         loading = null;
+68:         reject(new Error("arcade did not initialise"));
+69:       };
+70:       script.onerror = function () {
+71:         launcher.removeAttribute("aria-busy");
+72:         loading = null;
+73:         reject(new Error("arcade failed to load"));
+74:       };
+75:       doc.body.appendChild(script);
+76:     });
+77:     return loading;
+78:   }
+79: 
+80:   // First click: fetch, then open. Later clicks: arcade.js has attached its
+81:   // own listener by then, so this one does nothing.
+82:   launcher.addEventListener("click", function () {
+83:     if (window.__amwArcade) return;
+84:     load()
+85:       .then(function (arcade) {
+86:         arcade.open();
+87:       })
+88:       .catch(function () {
+89:         /* The launcher stays usable; a retry re-injects the script. */
+90:       });
+91:   });
+92: 
+93:   // Warm the cache once intent is likely; a hover or a focus is cheap to
+94:   // guess wrong on and makes the eventual press instant.
+95:   function warm() {
+96:     load().catch(function () {});
+97:   }
+98:   launcher.addEventListener("pointerenter", warm, { once: true });
+99:   launcher.addEventListener("focus", warm, { once: true });
+100: 
+101:   // ?arcade=<cabinet-id> opens straight into a cabinet, ?arcade=1 opens the
+102:   // selector. arcade.js reads the parameter itself once it runs, so this only
+103:   // has to start the download.
+104:   try {
+105:     if (new URLSearchParams(window.location.search).get("arcade")) warm();
+106:   } catch (error) {
+107:     /* URLSearchParams is absent on very old engines; the launcher still works. */
+108:   }
+109: })();
+all-browser specs collected 24; launcher failures preserved

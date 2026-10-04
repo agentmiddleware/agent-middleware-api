@@ -1,0 +1,6 @@
+ux-axe-404-mobile.json []
+ux-axe-compare-mobile.json [{"id": "color-contrast", "impact": "serious", "targets": [["article:nth-child(1) > ul > li:nth-child(1)"], ["article:nth-child(1) > ul > li:nth-child(2)"], ["article:nth-child(1) > ul > li:nth-child(3)"], ["article:nth-child(1) > ul > li:nth-child(4)"]]}]
+ux-axe-concept-mobile.json []
+ux-axe-dashboard-mobile.json [{"id": "scrollable-region-focusable", "impact": "serious", "targets": [["pre"]]}]
+ux-axe-home-mobile.json []
+ux-axe-proof-mobile.json []

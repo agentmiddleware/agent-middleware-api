@@ -1,0 +1,351 @@
+FILE tests/test_mcp_idempotency_key_validation.py
+1: """Present-but-unusable replay keys and malformed envelopes are refused early.
+2: 
+3: Regression coverage for two review findings against c6b0534:
+4: 
+5: * ``POST /mcp`` (standard MCP) silently replaced an explicitly supplied but
+6:   malformed ``io.agentmiddleware/idempotency_key`` with a generated key, so
+7:   identical retries carrying the bad key executed and charged twice.
+8: * ``POST /mcp/messages`` (legacy JSON-RPC) assumed mapping types before
+9:   reading the envelope and answered malformed bodies with HTTP 500.
+10: 
+11: Every negative case counts effects, ledger entries, permits, and idempotency
+12: records: a receipt count alone cannot tell "refused" from "executed and the
+13: receipt was dropped".
+14: """
+15: 
+16: from __future__ import annotations
+17: 
+18: import json
+19: from typing import Any
+20: 
+21: import pytest
+22: from httpx import ASGITransport, AsyncClient
+23: from sqlalchemy import func, select
+24: 
+25: from app.core.config import get_settings
+26: from app.db.database import get_session_factory
+27: from app.db.models import IdempotencyRecordModel, PermitModel
+28: from app.main import app
+29: from app.schemas.billing import ServiceCategory
+30: from app.services.idempotency import MAX_CLIENT_IDEMPOTENCY_KEY_LENGTH
+31: from app.services.service_registry import get_service_registry
+32: from tests.test_trust_helpers import (
+33:     BOOTSTRAP_HEADERS,
+34:     create_tool_permit,
+35:     provision_agent_wallet,
+36: )
+37: 
+38: META_KEY = "io.agentmiddleware/idempotency_key"
+39: MCP_HEADERS = {
+40:     "Accept": "application/json, text/event-stream",
+41:     "Content-Type": "application/json",
+42: }
+43: _ABSENT = object()
+44: 
+45: 
+46: @pytest.fixture
+47: async def client():
+48:     # raise_app_exceptions=False: a malformed envelope must come back as a
+49:     # controlled status, and the assertion message should say which one.
+50:     transport = ASGITransport(app=app, raise_app_exceptions=False)
+51:     async with AsyncClient(transport=transport, base_url="http://test") as c:
+52:         yield c
+53: 
+54: 
+55: @pytest.fixture
+56: def standard_mcp_enabled(monkeypatch):
+57:     monkeypatch.setenv("ENABLE_STANDARD_MCP_ENDPOINT", "true")
+58:     get_settings.cache_clear()
+59:     yield
+60:     monkeypatch.setenv("ENABLE_STANDARD_MCP_ENDPOINT", "false")
+61:     get_settings.cache_clear()
+62: 
+63: 
+64: class CountedTool:
+65:     """A local governed tool whose every side effect is counted."""
+66: 
+67:     def __init__(self, name: str, credits: float = 2.0) -> None:
+68:         self.name = name
+69:         self.effects: list[str] = []
+70:         self._registry = get_service_registry()
+71:         self._registry.register_local(
+72:             service_id=name,
+73:             name=name,
+74:             description="Counted side effect for idempotency-key validation tests",
+75:             category=ServiceCategory.AGENT_COMMS,
+76:             func=self._effect,
+77:             credits_per_unit=credits,
+78:             unit_name="call",
+79:         )
+80: 
+81:     def _effect(self, text: str = "one") -> dict[str, str]:
+82:         self.effects.append(text)
+83:         return {"text": text}
+84: 
+85:     def close(self) -> None:
+86:         self._registry.unregister_local(self.name)
+87: 
+88: 
+89: @pytest.fixture
+90: def counted_tool():
+91:     tool = CountedTool("keycheck.effect")
+92:     try:
+93:         yield tool
+94:     finally:
+95:         tool.close()
+96: 
+97: 
+98: async def _db_counts() -> dict[str, int]:
+99:     async with get_session_factory()() as session:
+100:         permits = (await session.execute(select(func.count()).select_from(PermitModel))).scalar_one()
+101:         records = (
+102:             await session.execute(select(func.count()).select_from(IdempotencyRecordModel))
+103:         ).scalar_one()
+104:     return {"permits": int(permits), "idempotency_records": int(records)}
+105: 
+106: 
+107: async def _snapshot(client: AsyncClient, provisioned: dict, tool: CountedTool) -> dict[str, int]:
+108:     """Everything a refused call must leave untouched."""
+109:     ledger = await client.get(
+110:         f"/v1/billing/ledger/{provisioned['agent_wallet_id']}",
+111:         headers=provisioned["agent_headers"],
+112:     )
+113:     assert ledger.status_code == 200, ledger.text
+114:     counts = await _db_counts()
+115:     return {
+116:         "effects": len(tool.effects),
+117:         "ledger_entries": len(ledger.json()["entries"]),
+118:         **counts,
+119:     }
+120: 
+121: 
+122: def _standard_call(tool: str, *, meta: Any = _ABSENT, request_id: int = 1, text: str = "one") -> dict:
+123:     params: dict[str, Any] = {"name": tool, "arguments": {"text": text}}
+124:     if meta is not _ABSENT:
+125:         params["_meta"] = {META_KEY: meta}
+126:     return {"jsonrpc": "2.0", "id": request_id, "method": "tools/call", "params": params}
+127: 
+128: 
+129: def _assert_invalid_key(response, reason_code: str) -> None:
+130:     assert response.status_code == 200, response.text
+131:     payload = response.json()
+132:     assert "result" not in payload, payload
+133:     error = payload["error"]
+134:     assert error["code"] == -32602, error
+135:     assert error["message"].startswith("invalid_idempotency_key"), error
+136:     assert error["data"]["error"] == "invalid_idempotency_key"
+137:     assert error["data"]["reason_code"] == reason_code, error
+138:     assert error["data"]["remediation"]["type"] == "retry_with_valid_idempotency_key"
+139: 
+140: 
+141: # --------------------------------------------------------------------------- #
+142: # Standard MCP endpoint: params._meta and Idempotency-Key header
+143: # --------------------------------------------------------------------------- #
+144: 
+145: INVALID_META_KEYS = [
+146:     pytest.param("", "idempotency_key_blank", id="empty-string"),
+147:     pytest.param("   ", "idempotency_key_blank", id="whitespace"),
+148:     pytest.param(123, "idempotency_key_not_a_string", id="integer"),
+149:     pytest.param(True, "idempotency_key_not_a_string", id="boolean"),
+150:     pytest.param([], "idempotency_key_not_a_string", id="array"),
+151:     pytest.param({"key": "retry"}, "idempotency_key_not_a_string", id="object"),
+152:     pytest.param(
+153:         "x" * (MAX_CLIENT_IDEMPOTENCY_KEY_LENGTH + 1), "idempotency_key_too_long", id="129-chars"
+154:     ),
+155:     pytest.param("x" * 257, "idempotency_key_too_long", id="257-chars"),
+156:     pytest.param("abc\x00def", "idempotency_key_control_characters", id="nul"),
+157:     pytest.param("abc\ndef", "idempotency_key_control_characters", id="newline"),
+158: ]
+159: 
+160: 
+161: @pytest.mark.parametrize("bad_key,reason_code", INVALID_META_KEYS)
+162: async def test_standard_meta_key_invalid_is_refused_before_any_effect(
+163:     client, standard_mcp_enabled, clean_database, counted_tool, bad_key, reason_code
+164: ):
+165:     provisioned = await provision_agent_wallet(client)
+FILE tests/test_trust_negative_security.py
+1: """Negative-path security invariants for the governed invocation pipeline.
+2: 
+3: These cover the gaps not already exercised elsewhere:
+4: - an expired permit is denied at invocation time (no charge),
+5: - a permit whose budget is too small is denied (no charge),
+6: - a receipt stripped of its signature fails verification.
+7: 
+8: (Wrong-wallet, wrong-tool, missing-idempotency-key, replay-with-changed-payload,
+9: tampered-receipt, and tampered-audit cases live in test_mcp_trust*.py,
+10: test_idempotency.py, test_receipts.py, and test_audit_chain.py.)
+11: """
+12: 
+13: from __future__ import annotations
+14: 
+15: from datetime import datetime, timedelta, timezone
+16: from unittest.mock import patch
+17: 
+18: import pytest
+19: from httpx import ASGITransport, AsyncClient
+20: from sqlalchemy import select
+21: 
+22: from app.core.time import utc_now
+23: from app.db.database import get_session_factory
+24: from app.db.models import PermitModel, ReceiptModel
+25: from app.main import app
+26: from app.schemas.billing import ServiceCategory
+27: from app.services.policies import evaluate_wallet_policy as real_evaluate_wallet_policy
+28: from app.services.receipts import get_receipt_service
+29: from app.services.service_registry import get_service_registry
+30: from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
+31: 
+32: 
+33: @pytest.fixture
+34: async def client():
+35:     transport = ASGITransport(app=app)
+36:     async with AsyncClient(transport=transport, base_url="http://test") as c:
+37:         yield c
+38: 
+39: 
+40: def _register_tool(tool_name: str, credits_per_unit: float = 2.0) -> None:
+41:     get_service_registry().register_local(
+42:         service_id=tool_name,
+43:         name=tool_name,
+44:         description="negative-security test tool",
+45:         category=ServiceCategory.AGENT_COMMS,
+46:         func=lambda message="ok": {"message": message},
+47:         credits_per_unit=credits_per_unit,
+48:         unit_name="call",
+49:     )
+50: 
+51: 
+52: def _mcp_call(wallet_id: str, permit_id: str, tool_name: str, idem: str) -> dict:
+53:     return {
+54:         "jsonrpc": "2.0",
+55:         "id": idem,
+56:         "method": "tools/call",
+57:         "params": {
+58:             "name": tool_name,
+59:             "arguments": {"message": "hi"},
+60:             "mcpContext": {
+61:                 "wallet_id": wallet_id,
+62:                 "permit_id": permit_id,
+63:                 "idempotency_key": idem,
+64:             },
+65:         },
+66:     }
+67: 
+68: 
+69: async def _ledger_debits(client, provisioned, tool_name) -> list:
+70:     ledger = await client.get(
+71:         f"/v1/billing/ledger/{provisioned['agent_wallet_id']}",
+72:         headers=provisioned["agent_headers"],
+73:     )
+74:     return [
+75:         entry
+76:         for entry in ledger.json()["entries"]
+77:         if entry["service_category"] == "agent_comms"
+78:         and tool_name in entry.get("description", "")
+79:     ]
+80: 
+81: 
+82: @pytest.mark.anyio
+83: async def test_expired_permit_is_denied_without_charge(client, clean_database):
+FILE app/services/signing_keys.py
+1: from __future__ import annotations
+2: 
+3: import base64
+4: import binascii
+5: import hashlib
+6: import json
+7: from datetime import datetime, timezone
+8: from decimal import Decimal
+9: from typing import Any, cast
+10: 
+11: from cryptography.exceptions import InvalidSignature
+12: from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+13:     Ed25519PrivateKey,
+14:     Ed25519PublicKey,
+15: )
+16: from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+17: from sqlalchemy import select
+18: from sqlalchemy.exc import IntegrityError
+19: from sqlalchemy.ext.asyncio import AsyncSession
+20: from sqlalchemy.sql.elements import ColumnElement
+21: 
+22: from app.core.config import Settings, get_settings
+23: from app.core.time import utc_now
+24: from app.db.database import get_session_factory
+25: from app.db.models import SigningKeyModel
+26: 
+27: 
+28: class SigningKeyError(RuntimeError):
+29:     """Raised when trust-plane signing or verification cannot proceed."""
+30: 
+31: 
+32: # Names the exact byte-level contract :func:`canonical_json` implements, so an
+33: # independent verifier can state which rules it was written against. Bump only
+34: # when the bytes a signature covers change shape — never for additive fields,
+35: # which are already handled by signing them only when present.
+36: RECEIPT_CANONICALIZATION = "awi-canonical-json/1"
+37: 
+38: 
+39: def _decode_private_key(configured: str) -> Ed25519PrivateKey:
+40:     """Decode strict base64 Ed25519 seed material without exposing it."""
+41: 
+42:     try:
+43:         raw = base64.b64decode(configured, validate=True)
+44:         return Ed25519PrivateKey.from_private_bytes(raw)
+45:     except (binascii.Error, ValueError) as exc:
+46:         raise SigningKeyError("invalid_trust_signing_private_key") from exc
+47: 
+48: 
+49: def validate_signing_key_configuration(settings: Settings | None = None) -> str:
+50:     """Validate configured signing material without touching durable state.
+51: 
+52:     Returns a non-secret state for startup logs and dependency health. The
+53:     configured value must be strict base64 that decodes to the 32-byte seed
+54:     accepted by ``Ed25519PrivateKey.from_private_bytes``.
+55:     """
+56: 
+57:     settings = settings or get_settings()
+58:     configured = settings.TRUST_SIGNING_PRIVATE_KEY_B64.strip()
+59:     if configured:
+60:         _decode_private_key(configured)
+61:         return "loaded"
+62:     if settings.TRUST_MODE_ENABLED:
+63:         raise SigningKeyError("trust_signing_private_key_required")
+64:     return "ephemeral"
+65: 
+66: 
+67: def canonical_json(
+68:     payload: dict[str, Any],
+69:     *,
+70:     ensure_ascii: bool = True,
+71:     allow_nan: bool = True,
+72: ) -> str:
+73:     """Serialize a payload into stable JSON before hashing or signing."""
+74: 
+75:     def normalize(value: Any) -> Any:
+76:         if isinstance(value, Decimal):
+77:             normalized = value.normalize()
+78:             if normalized == normalized.to_integral():
+79:                 return format(normalized, "f")
+80:             return format(normalized, "f")
+81:         if isinstance(value, datetime):
+82:             if value.tzinfo is None:
+83:                 value = value.replace(tzinfo=timezone.utc)
+84:             return value.astimezone(timezone.utc).isoformat()
+85:         if isinstance(value, dict):
+86:             return {str(k): normalize(v) for k, v in sorted(value.items())}
+87:         if isinstance(value, list):
+88:             return [normalize(v) for v in value]
+89:         return value
+90: 
+91:     return json.dumps(
+92:         normalize(payload),
+93:         separators=(",", ":"),
+94:         sort_keys=True,
+95:         ensure_ascii=ensure_ascii,
+96:         allow_nan=allow_nan,
+97:     )
+98: 
+99: 
+100: def sha256_hex(payload: dict[str, Any] | str | bytes) -> str:

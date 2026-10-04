@@ -1,0 +1,32 @@
+rg: tests/test_wallet_authorization.py: No such file or directory (os error 2)
+rg: tests/test_rate_limit.py: No such file or directory (os error 2)
+tests/test_api_keys.py:154:async def test_rotate_api_key_without_revoke(client, api_headers, sponsor_wallet):
+tests/test_api_keys.py:197:async def test_rotate_api_key_rejects_revoke_without_key_id(
+tests/test_api_keys.py:276:async def test_revoke_api_key(client, api_headers, sponsor_wallet):
+tests/test_api_keys.py:301:async def test_revoke_api_key_not_found(client, api_headers, sponsor_wallet):
+tests/test_api_keys.py:311:async def test_emergency_revoke(client, api_headers, sponsor_wallet):
+tests/test_api_keys.py:386:async def test_db_created_key_authenticates_and_is_wallet_scoped(
+tests/test_api_keys.py:436:async def test_revoked_db_key_cannot_authenticate(client, api_headers, sponsor_wallet):
+tests/test_api_keys.py:774:async def test_emergency_revoke_with_own_last_use_stays_bounded(
+tests/test_api_keys.py:808:async def test_rotate_capped_key_requires_revoke_old(
+tests/test_api_keys.py:934:async def test_rotate_revoked_key_is_rejected(client, api_headers, sponsor_wallet):
+tests/test_api_keys.py:970:async def test_emergency_revoked_keys_cannot_be_rotated_back(
+tests/test_api_keys.py:1103:async def test_bounded_wallet_key_cross_tenant_mint_is_still_wallet_denied(
+tests/test_request_body_limit.py:185:async def test_non_http_scopes_are_passed_through(limited_app):
+tests/test_receipts.py:33:async def test_receipt_signature_verifies_and_detects_tampering(
+tests/test_receipts.py:388:async def test_receipt_evidence_denies_cross_wallet_access(
+tests/test_receipts.py:416:async def test_receipt_evidence_detects_ledger_tampering(
+tests/test_receipts.py:460:async def test_receipt_evidence_does_not_expose_cross_wallet_artifacts(
+tests/test_standard_mcp_endpoint.py:230:async def test_tools_call_requires_wallet_scoped_key(client, standard_mcp_enabled):
+tests/test_upstream_mcp.py:377:async def test_url_guard_allows_only_public_https_or_local_loopback_http() -> None:
+tests/test_upstream_mcp.py:412:async def test_url_guard_rejects_dns_to_private_link_local_and_reserved() -> None:
+tests/test_upstream_mcp.py:432:async def test_default_http_client_disables_redirects_and_redacts_auth() -> None:
+tests/test_upstream_mcp.py:667:async def test_transport_rejects_oversized_content_length_before_body() -> None:
+tests/test_upstream_mcp.py:766:async def test_discovery_stops_streaming_before_buffering_oversized_response() -> None:
+tests/test_upstream_mcp.py:791:async def test_call_stops_streaming_before_buffering_oversized_response() -> None:
+tests/test_upstream_mcp.py:1221:async def test_oversized_or_invalid_response_is_rejected_after_dispatch() -> None:
+tests/test_permits.py:33:async def test_permit_cannot_name_foreign_subject_wallet(client, clean_database):
+tests/test_permits.py:214:async def test_verify_does_not_leak_permit_to_unauthorized_caller(
+tests/test_permits.py:266:async def test_permit_rejects_out_of_scope_tool(client, clean_database):
+tests/test_permits.py:325:async def test_permit_service_rejects_invalid_issuance_requests(
+tests/test_permits.py:781:async def test_permit_out_of_scale_body_from_unauthenticated_caller_is_401(

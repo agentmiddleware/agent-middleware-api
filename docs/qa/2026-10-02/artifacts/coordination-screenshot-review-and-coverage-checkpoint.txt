@@ -1,0 +1,4 @@
+Root visual inspection via view_image: ux-cua-home-desktop.jpg, ux-cua-home-enlarged-320.jpg, ux-cua-calculator-invalid.jpg. Asked UX owner to clarify/retake unusually scaled invalid screenshot.
+images 14
+bytes 5499142
+Coverage pending qualified baseline: initial 3624 passed /60 skipped /8 guard-related failures, no product regression inferred.

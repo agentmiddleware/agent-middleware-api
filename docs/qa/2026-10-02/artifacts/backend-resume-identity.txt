@@ -1,0 +1,797 @@
+/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api
+qa/2026-10-02-sweep
+https://github.com/PetrefiedThunder/agent-middleware-api.git
+/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api d45754e [qa/2026-10-02-sweep]
+?? docs/qa/
+Initial bootstrap command: pwd; read run_logged.py and COORDINATION-SESSION.md (completed successfully before logger use)
+COMMAND ['pwd']
+COMMAND ['git', 'branch', '--show-current']
+COMMAND ['git', 'remote', 'get-url', 'origin']
+COMMAND ['git', 'worktree', 'list']
+COMMAND ['git', 'status', '--short']
+FILE AGENTS.md
+# AGENTS.md
+
+## Project Mission
+
+This repo is being evaluated as possible trust infrastructure for autonomous agents.
+Do not treat it as a generic agent app backend.
+
+The strongest thesis:
+
+> A control layer for agent-to-tool actions where every autonomous action is scoped, authorized, metered, signed, receipted, auditable, and governable.
+
+The weaker thesis to avoid:
+
+> An agent backend with lots of features.
+
+## Core Loop
+
+Judge the product against this loop:
+
+discover → authenticate → authorize → invoke → meter → receipt → audit → govern
+
+Every major feature should support this loop. If a feature does not support this loop, question whether it should be frozen, deleted, or moved out of the main wedge.
+
+## Current Company Phase: Customer Validation
+
+The active company milestone is the 30-day customer-validation sprint in
+`docs/30-day-customer-validation.md`, not another core release.
+
+Apply this business invariant:
+
+> No new core capability without documented evidence from a named prospective
+> customer.
+
+Work may proceed without new customer evidence only when it is:
+
+- a security or correctness fix
+- a reliability fix in the existing one-tool loop
+- a documentation or integration fix required to complete an active pilot
+- maintenance required to keep existing release gates green
+
+Before unfreezing a capability, require one named active prospect, one concrete
+consequential tool, a documented current-workflow blocker, a committed owner and
+date, and the smallest vertical slice that clears the blocker. Demo enthusiasm,
+generic competitor parity, and speculative roadmap requests are not evidence.
+
+Judge external validation against the partner-owned milestone: one partner
+agent, one partner staging tool, one partner engineer, and one receipt that
+engineer verifies independently. Do not count local demos, self-issued public
+proof, or the stranger test as customer validation.
+
+## Product Wedge Candidates
+
+When making product or architecture recommendations, evaluate these wedges.
+**They are not peers — the ordering is the point.** The 2026-08 competitive
+sweep ([`docs/market-research-2026-08.md`](docs/market-research-2026-08.md), and
+§9 for the 2026-08-25 re-test) established that signed, offline-verifiable
+receipts are **table stakes**, not a wedge: they ship in Microsoft's
+`agent-governance-toolkit`, Pipelock, and protect-mcp/ScopeBlind. Lead with the
+debit, cite the signature as supporting evidence, never as the differentiator.
+See [`WEDGE.md`](WEDGE.md) §"Signed receipts are table stakes now".
+
+1. **exactly-once economic authorization at the gateway boundary** — one
+   accepted idempotency key yields at most one gateway dispatch **to the
+   configured upstream MCP tool** and at most one ledger debit, linked by a
+   single persisted chain, with a receipt on every path that finalizes or
+   reconciles. (Local governed tools have no dispatch state machine.) This is the wedge. ("Exactly-once" is the
+   deduplication term of art: never a duplicate charge, not always a charge.)
+2. **crash-semantics accounting** — **for the configured upstream MCP tool**, a
+   genuinely ambiguous post-dispatch outcome becomes a distinct receipted state
+   rather than a silent redispatch. Local governed tools fail closed into manual
+   review; they have no dispatch state machine.
+3. agent authorization gateway
+4. usage metering layer for agent tools
+5. MCP governance proxy
+6. secure delegated tool execution API
+7. **signed receipt ledger for agent actions — demoted 2026-08.** Real here and
+   worth saying, but no longer differentiating. Do not build or pitch around it
+   as the wedge.
+8. **agent audit log platform — demoted 2026-08**, same reason.
+
+Do not recommend "full agent middleware platform" unless the narrower wedges are already credible.
+
+## Engineering Priorities
+
+Prioritize:
+
+- delegated authority
+- permit lifecycle
+- scoped authorization
+- idempotency
+- replay protection
+- billing/accounting integrity under crash
+- usage metering
+- signed receipts
+- tenant isolation
+- tool execution safety
+- auditability
+- revocation
+- governance policy
+- billing/accounting integrity
+- developer SDK/demo path
+
+## Security-Critical Areas
+
+Treat these as security-critical:
+
+- auth
+- authorization
+- tenants
+- permits
+- delegations
+- receipts
+- billing/metering
+- audit logs
+- tool execution
+- secrets
+- CI/CD
+- deployment
+- migrations
+
+For changes in these areas, include tests for invalid input, unauthorized access, and relevant negative paths.
+
+## Agent-Specific Risks
+
+Always consider:
+
+- prompt injection
+- tool injection
+- agentic workflow injection
+- confused deputy attacks
+- replay attacks
+- permit misuse
+- over-budget invocation
+- billing double-charge
+- unsafe tool execution
+- unverifiable receipts
+- weak key management
+- cross-tenant data leakage
+
+## Analysis Rules
+
+When analyzing the repo:
+
+- cite specific files and functions
+- separate README claims from code evidence
+- separate real flows from stubs or demos
+- identify overbuilt or unfocused areas
+- recommend what to freeze/delete, not only what to build
+
+Use reality levels:
+
+- verified
+- partially verified
+- not verified
+- stubbed
+- demo-only
+- misleading
+- contradicted
+- too early to tell
+
+## Implementation Rules
+
+Prefer vertical slices over broad skeletons.
+
+A good change usually includes:
+
+- one focused behavior
+- one clear model/service/route change
+- tests proving the behavior
+- negative-path tests where relevant
+- minimal public API disruption
+
+Do not introduce new dependencies unless necessary and justified.
+
+## Local Credentials for Agents
+
+When you need an API key against a local instance, provision your own —
+do not ask for production secrets and never hardcode keys:
+
+- **Admin-shaped local testing**: run
+  `python scripts/generate_static_dev_keys.py`, put the printed value in
+  `.env` as `STATIC_DEV_API_KEYS=...`, and restart the server. Static
+  `amw_dev_` keys are bootstrap admins in local-compatible environments
+  only and are deliberately never rotated.
+- **Wallet-scoped keys with no restart** (server already running with
+  `ENABLE_DEV_KEY_SELF_PROVISION=true`): `POST /v1/dev-keys/self-provision`
+  mints a sponsor wallet, agent wallet, and wallet-scoped key with no
+  pre-shared secret. Use this to exercise the real permit → invoke →
+  receipt loop as a non-admin caller.
+
+Both surfaces are refused by production-like deployments at boot. Details:
+`docs/static-dev-api-keys.md`.
+
+## Final Summary Format
+
+End every task with:
+
+- Files changed
+- What changed
+- Tests run
+- What passed
+- What was not tested
+- Remaining risks
+- Recommended next step
+
+## Cursor Cloud specific instructions
+
+The startup update script installs `uv` (to `~/.local/bin`, already on PATH) and
+prepares a `.venv` (gitignored) at the repo root with everything in
+`requirements.txt` plus `ruff`. So all dev tools are directly runnable without
+re-resolving: `.venv/bin/{pytest,ruff,mypy,uvicorn,alembic,python}`. Activate
+with `source .venv/bin/activate` or call binaries by path.
+
+- Runtime deps live in `requirements.txt`, NOT `pyproject.toml` `[project.dependencies]`. `ruff` is not pinned in `requirements.txt`; the update script installs it alongside.
+- Lint / type-check: `ruff check .` and `mypy app` (both must pass; CI runs them).
+- Tests: `.venv/bin/pytest tests/ -q -m "not proof"` for the fast product loop (equivalent to `make test`); `make test-all` runs the full suite including proof surfaces. Canonical `make` targets exist for everything (see `Makefile`).
+- Run the app (dev): `make quickstart` is the golden path — it boots the real strict-trust server on `http://127.0.0.1:8000` (loopback ONLY), auto-generates and persists an Ed25519 signing seed under `data/quickstart/`, enables self-serve key minting + one governed dogfood tool (`partner.notes.write`), and follows `docs/quickstart.md`. `QUICKSTART_ARGS="--reset"` wipes state.
+- Non-obvious boot requirement: the raw server (`uvicorn app.main:app`) refuses to start in default strict-trust mode without `TRUST_SIGNING_PRIVATE_KEY_B64` (base64 of 32 random bytes) — it fails with `SigningKeyError: trust_signing_private_key_required`. `make quickstart` handles this for you; only set it manually if launching uvicorn directly.
+- Local storage: SQLite is the intended local default for both the ORM DB (`DATABASE_URL=sqlite+aiosqlite://...`) and durable state (`STATE_BACKEND=sqlite`). No Postgres or Redis is needed for the core loop, tests, or `make quickstart`. Postgres is only required for the crash-recovery proof (`make prove-crash-recovery`).
+- Gotcha: `make quickstart`, `make test`, and the other `make`/proof targets invoke `uv run --with-requirements requirements.txt ...`, which builds an ephemeral uv environment and IGNORES the prepared `.venv`. That is fine and self-contained, but for fast iteration prefer the prebuilt `.venv` directly (e.g. `.venv/bin/pytest ...`, `.venv/bin/python scripts/quickstart.py`).
+- Do not ask for production secrets. For a governed caller against a local instance, use `POST /v1/dev-keys/self-provision` on the quickstart server (see "Local Credentials for Agents" above and `docs/quickstart.md`).
+
+FILE tests/AGENTS.md
+# AGENTS.md — Tests
+
+Tests should verify business-critical behavior, not just happy paths.
+
+Prefer:
+
+- negative-path tests
+- authorization failure tests
+- tenant isolation tests
+- billing/idempotency tests
+- receipt verification tests
+- replay prevention tests
+- malformed input tests
+
+Do not remove tests unless replacing them with equal or better coverage.
+
+FILE pyproject.toml
+[project]
+name = "agent-native-middleware"
+version = "1.3.0"
+description = "Governed MCP authorization, metering, signed receipts, and audit evidence"
+license = "BUSL-1.1"
+requires-python = ">=3.11"
+
+[project.optional-dependencies]
+# mcp <2 is deliberate and must match requirements.txt: 2.x renamed FastMCP to
+# MCPServer and moved McpError. Dependabot major bumps are ignored (#460).
+mcp = ["mcp>=1.29.0,<2", "httpx>=0.28.1,<0.29", "httpcore==1.0.9", "anyio>=4.14.2", "pydantic-settings>=2.14.2"]
+playwright = ["playwright>=1.40.0"]
+browser = ["playwright>=1.40.0"]
+webauthn = ["webauthn>=1.0.0", "cryptography>=50.0.0", "pyasn1>=0.6.4"]
+# Deprecated no-op extras keep existing install commands valid, but intentionally
+# provide no persistent backend while the Dependabot alert reports no patch.
+chromadb = []
+rag = []
+observability = ["structlog>=24.1.0"]
+resilience = ["tenacity>=8.0.0"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = [".", "b2a_sdk/src", "wrappers/openai-agent-middleware/src"]
+markers = [
+    "proof: exercises an example proof-surface workload, not the trust-plane product. Skipped by `make test`; run the full suite with `make test-all`.",
+    "dormant: exercises a dormant trust surface (JWT auth, KYC, planner, Stripe webhooks, billing expansion) that production leaves unmounted; the conftest fixture mounts those routes for these tests. Stays in the fast core loop.",
+    "production_trust: runs under production-like trust flags (TRUST_MODE_ENABLED=true, ALLOW_LEGACY_UNPERMITTED_MCP=false, ENABLE_PROOF_SURFACES=false). Dedicated CI job sets those env vars.",
+]
+filterwarnings = [
+    # Pydantic v2 calls the deprecated datetime.utcnow() internally
+    # (pydantic/_internal/_fields.py), emitting ~1,600 warnings that bury real
+    # signal. Scoped to pydantic so any utcnow reintroduction in our own code
+    # still surfaces.
+    "ignore::DeprecationWarning:pydantic._internal._fields",
+]
+
+[tool.coverage.run]
+# SQLAlchemy's asyncio bridge switches greenlets on every awaited statement
+# inside a session. Without greenlet-aware tracing, coverage's tracer is
+# dropped after the first such switch, so every line that follows it in a
+# session body is reported as never executed even though the tests ran it.
+# The trust coverage gate measures exactly those bodies.
+concurrency = ["greenlet"]
+
+FILE requirements.txt
+# Agent Middleware API - Dependencies
+# Python 3.11+
+
+# --- Core Framework ---
+fastapi>=0.141.1
+uvicorn[standard]>=0.53.0
+pydantic>=2.13.5
+pydantic-settings>=2.14.2
+email-validator>=2.3.0  # Keep FastAPI/Pydantic OpenAPI email schema stable in CI
+structlog>=24.1.0       # Structured startup/runtime logging
+
+# --- IoT Protocol Bridge ---
+aiomqtt>=2.5.1          # Async MQTT client
+aiocoap>=0.4.17          # CoAP protocol support
+
+# --- Telemetry / Autonomous PM ---
+httpx>=0.28.1,<0.29     # Upstream MCP DNS pinning relies on httpcore's sni_hostname extension contract
+httpcore==1.0.9         # Verified implementation of the DNS-pin + TLS SNI handoff; update only with its integration test
+anyio>=4.14.2           # Transitive via httpx/starlette; >=4.14.2 fixes CVE-2026-63374 (TLSStream IDNA 2003 cert spoofing, critical) and CVE-2026-64847 (process-pool stderr block)
+
+# --- Media Engine ---
+python-multipart>=0.0.32 # File upload support (>=0.0.30 fixes CVE-2026-53538/53539, >=0.0.31 fixes CVE-2026-53540)
+
+# --- Utilities ---
+python-dotenv>=1.2.3    # .env file loading
+cryptography>=50.0.0       # Ed25519 trust-plane signatures (>=50.0.0 fixes GHSA-g6cj-pr64-35w5)
+PyJWT>=2.15.0           # JWT auth (app/core/jwt.py, oidc_iga); explicit — previously only transitive via mcp's pyjwt[crypto]
+redis>=8.1.0            # Redis-backed rate limiting and runtime persistence
+asyncpg>=0.31.0         # PostgreSQL-backed runtime persistence
+greenlet>=3.5.6         # SQLAlchemy async engine support
+stripe>=15.6.1           # Stripe payment processing
+mcp>=1.29.0,<2         # MCP SDK; >=1.29.0 provides the pre-parse request-body guard used by public/partner transports; <2 is deliberate: 2.x renamed FastMCP to MCPServer, moved McpError, and changed the lowlevel Server internals that mcp_public/mcp_standard override. Dependabot major bumps are ignored (#460); lift only in a dedicated migration PR.
+
+# --- Database ---
+sqlmodel>=0.0.47,<0.0.48  # Naive-UTC mappings are qualified with this minor release.
+alembic>=1.20.0        # Database migrations
+aiosqlite>=0.22.1      # Async SQLite driver for testing
+
+# --- Development ---
+pytest>=9.1.1
+pytest-asyncio>=1.4.0
+pytest-cov>=7.1.0
+mypy>=2.3.1            # Type checking
+
+FILE tests/conftest.py
+"""
+Shared test configuration.
+Sets up pytest-asyncio, database, and common fixtures.
+"""
+
+import os
+from collections.abc import Mapping
+from datetime import datetime
+from pathlib import Path
+
+import pytest
+import pytest_asyncio
+from sqlalchemy import DateTime, event, inspect as sa_inspect, text
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session
+
+# --- Proof-surface test classification -------------------------------------
+# The product is the trust plane (app/trust + the core trust routers). Everything
+# else is a "proof surface" — example workloads that exercise the spine but are
+# NOT the product (see README "Core platform vs. example workloads"). Tests for
+# these are auto-marked `proof` so the inner dev loop can skip them:
+#     make test       -> fast, core only  (pytest -m "not proof")
+#     make test-all   -> full suite       (what CI runs)
+# Conservative by design: when a test's surface is ambiguous, leave it OUT of
+# this set so it stays in the fast (core) loop and is never silently skipped.
+PROOF_SURFACE_TEST_MODULES = frozenset(
+    {
+        "test_awi",
+        "test_awi_adoption",
+        "test_awi_dom_bridge_integration",
+        "test_awi_governed_mcp",
+        "test_awi_http_governance",
+        "test_awi_phase9",
+        "test_behavioral_sandbox",
+        "test_broadcast",
+        "test_comms",
+        "test_agent_comms_durable",
+        "test_content_factory_generation_durable",
+        "test_content_store",
+        "test_discover_phase9",
+        "test_discovery",
+        "test_discovery_consistency",
+        "test_discovery_drift",
+        "test_discovery_honesty",
+        "test_factory",
+        "test_iot",
+        "test_iot_registry",
+        "test_media",
+        "test_oracle",
+        "test_oracle_durable_crawl",
+        "test_oracle_store",
+        "test_protocol",
+        "test_red_team",
+        "test_rtaas",
+        "test_sandbox",
+        "test_sandbox_integration",
+        "test_telemetry",
+        "test_telemetry_scope",
+        "test_telemetry_store",
+    }
+)
+
+
+# Tests that exercise dormant trust surfaces — routers and billing expansion
+# routes that production (ENABLE_PROOF_SURFACES=false) does not mount: JWT
+# auth, KYC, planner, Stripe webhooks, child/swarm wallets, transfers,
+# top-ups, marketplace, velocity status, and the dry-run sandbox. These are
+# real trust features (not proof scaffolding), so they stay in the fast core
+# loop; the autouse fixture below mounts the dormant routes for them without
+# flipping ENABLE_PROOF_SURFACES.
+DORMANT_SURFACE_TEST_MODULES = frozenset(
+    {
+        "test_acp_bridge",
+        "test_api_keys",
+        "test_audit_routes",
+        "test_billing",
+        "test_discovery_drift",
+        "test_golden_path",
+        "test_kyc",
+        "test_mcp_trust_mode",
+        "test_mcp_upstream_governed",
+        "test_planner_constraints",
+        "test_pods",
+        "test_policy_bundles",
+        "test_revocation_containment",
+        "test_secret_persistence",
+        "test_stripe_integration",
+        "test_swarm_wallets",
+        "test_tenant_isolation_hardening",
+        "test_transfers",
+        "test_trust_package",
+        "test_velocity_monitor",
+        "test_wallet_ledger_integrity",
+        "test_wallet_status_enforcement",
+        "test_x402",
+    }
+)
+
+
+def pytest_collection_modifyitems(config, items):
+    """Auto-apply the `proof` / `dormant` markers by test module."""
+    proof = pytest.mark.proof
+    dormant = pytest.mark.dormant
+    for item in items:
+        stem = Path(item.nodeid.split("::", 1)[0]).stem
+        if stem in PROOF_SURFACE_TEST_MODULES:
+            item.add_marker(proof)
+        if stem in DORMANT_SURFACE_TEST_MODULES:
+            item.add_marker(dormant)
+
+
+def iter_routes(routes):
+    """Yield every leaf route from an app/router route list.
+
+    Newer FastAPI versions wrap `app.include_router()` results in an
+    `_IncludedRouter` that has no `.path` of its own. Walk into its
+    `original_router.routes` so callers see the real `APIRoute` instances.
+    """
+    for route in routes:
+        if hasattr(route, "path"):
+            yield route
+            continue
+        original = getattr(route, "original_router", None)
+        if original is not None and hasattr(original, "routes"):
+            yield from iter_routes(original.routes)
+
+
+# Set up SQLite for testing before any imports
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test.db")
+# Durable state stays in memory for the suite. State this explicitly: the tests
+# always ran on memory state, but only as an accident of auto-resolution
+# choosing postgres and asyncpg then failing on the SQLite DSN above. Once a
+# SQLite DATABASE_URL resolves to the SQLite backend, "auto" opens a real
+# aiosqlite connection whose worker thread is not a daemon, and an unclosed one
+# blocks interpreter shutdown. See the teardown in setup_database.
+os.environ.setdefault("STATE_BACKEND", "memory")
+# Ephemeral SQLite create_all even when a job sets ENVIRONMENT=production
+# (production_trust CI). Never applies to Postgres — see allows_metadata_create_all.
+os.environ.setdefault("ALLOW_METADATA_CREATE_ALL", "true")
+# Match the application default. Proof-marked tests opt in through the fixture
+# below, so importing the app in an ordinary test never silently mounts demos.
+os.environ.setdefault("ENABLE_PROOF_SURFACES", "false")
+# Configure auth so tests don't hit the fail-safe 503 in verify_api_key.
+# Tests authenticate with X-API-Key: [REDACTED] (see RateLimitMiddleware, which
+# also special-cases this value to bypass rate limiting).
+os.environ.setdefault("VALID_API_KEYS", "test-key")
+# Production now defaults to strict trust mode (TRUST_MODE_ENABLED=true,
+# ALLOW_LEGACY_UNPERMITTED_MCP=false). Many tests predate that flip and
+# exercise MCP paths without supplying permits; opt the test suite back into
+# legacy/permissive behavior unless an individual test explicitly monkeypatches
+# strict mode (see test_mcp_trust_mode.py and test_trust_negative_security.py
+# for examples that flip back to strict at the test boundary).
+os.environ.setdefault("TRUST_MODE_ENABLED", "false")
+os.environ.setdefault("ALLOW_LEGACY_UNPERMITTED_MCP", "true")
+# Stop the suite from self-throttling. RateLimitMiddleware exempts only the
+# literal "test-key"; unauthenticated requests all share the "anonymous"
+# bucket and provisioned agent keys each get their own, so a fast full-suite
+# run can cross the 120/min default and return 429 where a test expects
+# 401/403 (observed as a flaky `assert 429 == 401` in
+# test_tenant_isolation_hardening). Raising the limit for tests removes the
+# cross-test coupling without changing production behavior; the one test that
+# exercises limiting (test_runtime_degradation) builds its own middleware with
+# an explicit per-instance limit and is unaffected.
+os.environ.setdefault("RATE_LIMIT_PER_MINUTE", "1000000")
+
+
+def interleaving_factory(real_factory, hook, state, *, fire_on: int = 1):
+    """Wrap a session factory so `hook` runs once, mid-transaction.
+
+    Fires after ``fire_on`` statements have been issued on the wrapped session,
+    which places it after the value under test has been read and before it is
+    written back.
+
+    ``fire_on`` counts statements that reach ``Session.execute``. ``session.get``
+    does **not**: it is delegated straight to the inner session, so a row loaded
+    that way is invisible here. Choosing a seam before such a load lets the
+    service re-read the row *after* the concurrent write lands, and the race
+    never happens -- a test that does that passes against the unfixed service
+    while ``state["fired"]`` reads true throughout. Always confirm a new seam by
+    reverting the service and watching the test fail.
+    """
+
+    class _Session:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+        async def execute(self, *args, **kwargs):
+            state["executes"] = state.get("executes", 0) + 1
+            n = state["executes"]
+            # Fire *after* the statement returns, so the hook lands once the
+            # value has been read but before anything is written back. Firing
+            # beforehand would place the concurrent writer ahead of the read,
+            # which is not the race. Counting completed reads also keeps the
+            # seam identical across the fixed and unfixed code, which differ in
+            # how many statements they issue.
+            result = await self._inner.execute(*args, **kwargs)
+            if n == fire_on and not state.get("fired"):
+                state["fired"] = True
+                await hook()
+            return result
+
+    class _CM:
+        def __init__(self, cm):
+            self._cm = cm
+
+        async def __aenter__(self):
+            return _Session(await self._cm.__aenter__())
+
+        async def __aexit__(self, *exc):
+            return await self._cm.__aexit__(*exc)
+
+    return lambda: (lambda: _CM(real_factory()))
+
+
+def running_on_sqlite() -> bool:
+    """True when this run's ``DATABASE_URL`` names SQLite.
+
+    ``DATABASE_URL`` above is a ``setdefault``, so exporting one before pytest
+    points the whole suite at another engine. Tests that force a concurrent
+    writer into the middle of an open transaction need to know: on SQLite the
+    surrounding ``SELECT ... FOR UPDATE`` is a silent no-op and the second
+    writer proceeds, which is exactly the condition those tests exist to
+    exercise. On PostgreSQL the lock is real, so the second writer waits for a
+    transaction that cannot commit until the second writer returns, and the
+    test hangs rather than fails.
+    """
+    from app.core.db_urls import is_sqlite_url
+
+    return is_sqlite_url(os.environ.get("DATABASE_URL", ""))
+
+
+#: Guard for tests whose interleave depends on the row lock being a no-op.
+#: They are skipped, not adapted: their subject is what happens when nothing
+#: serializes the writers, which is not a state PostgreSQL can be put into.
+requires_sqlite_row_lock_noop = pytest.mark.skipif(
+    not running_on_sqlite(),
+    reason=(
+        "forces a concurrent writer inside an open transaction; needs the "
+        "SQLite no-op row lock, and would deadlock against a real one"
+    ),
+)
+
+
+@pytest.fixture(scope="session")
+def anyio_backend():
+    return "asyncio"
+
+
+def _mount_dormant_test_routes() -> None:
+    """Mount dormant trust surfaces (+ Stripe webhooks) on the shared app once.
+
+    Mirrors what app.main does when ENABLE_PROOF_SURFACES is true, via the
+    same mount_dormant_trust_surfaces helper so the sets cannot drift. The
+    webhooks router is added here because production mounts it on Stripe
+    configuration, which the suite deliberately never sets globally.
+    """
+    from app.main import app, mount_dormant_trust_surfaces
+    from app.routers import webhooks
+
+    if getattr(app.state, "dormant_test_routes_mounted", False):
+        return
+    mount_dormant_trust_surfaces(app)
+    app.include_router(webhooks.router)
+    app.state.dormant_test_routes_mounted = True
+
+
+@pytest.fixture(autouse=True)
+def enable_proof_surfaces_for_marked_tests(request):
+    """Explicitly opt proof-marked tests into the frozen route collection."""
+    if request.node.get_closest_marker("proof") is None:
+        yield
+        return
+
+    from app.core.config import get_settings
+    from app.main import PROOF_SURFACE_ROUTERS, app
+    from app.services.mcp_phase9_tools import sync_proof_surface_mcp_registration
+
+    cfg = get_settings()
+    previous = cfg.ENABLE_PROOF_SURFACES
+    cfg.ENABLE_PROOF_SURFACES = True
+    if not getattr(app.state, "proof_test_routes_mounted", False):
+        for router_module in PROOF_SURFACE_ROUTERS:
+            app.include_router(router_module.router)
+        app.state.proof_test_routes_mounted = True
+    # Proof-surface flows may also lean on dormant trust surfaces (e.g. child
+    # wallets for swarm demos); production mounts both groups under the same
+    # flag, so the test posture mirrors that.
+    _mount_dormant_test_routes()
+    sync_proof_surface_mcp_registration()
+    try:
+        yield
+    finally:
+        cfg.ENABLE_PROOF_SURFACES = previous
+        sync_proof_surface_mcp_registration()
+
+
+@pytest.fixture(autouse=True)
+def mount_dormant_surfaces_for_marked_tests(request):
+    """Mount dormant trust routes for dormant-marked tests.
+
+    Unlike the proof fixture this does NOT flip ENABLE_PROOF_SURFACES: the
+    dormant routers have no request-time flag checks, and several dormant
+    modules also assert flag-off behavior of other payloads (e.g. core-only
+    billing categories).
+    """
+    if request.node.get_closest_marker("dormant") is None:
+        yield
+        return
+    _mount_dormant_test_routes()
+    yield
+
+
+@pytest_asyncio.fixture(scope="session", autouse=True)
+async def setup_database():
+    """Set up database tables before any tests run."""
+    from app.core.durable_state import close_durable_state
+    from app.db.database import init_db, close_db
+
+    # Close any existing connection
+    await close_db()
+
+    # Start from a clean SQLite file so stale rows from prior runs
+    # (e.g., unique constraints on seeded session IDs) don't leak
+    # into the next run.
+    for db_file in ("test.db", "test.db-shm", "test.db-wal"):
+        if os.path.exists(db_file):
+            os.remove(db_file)
+
+    # Initialize tables
+    await init_db()
+
+    yield
+
+    # Cleanup
+    await close_db()
+    # Release any durable-state backend a test opted into. aiosqlite runs each
+    # connection on a non-daemon worker thread, so an unclosed one keeps the
+    # interpreter alive after the run finishes — the suite passes and pytest
+    # never exits. STATE_BACKEND=memory above means this is normally a no-op;
+    # it exists so a test that deliberately selects a real backend cannot wedge
+    # the process.
+    await close_durable_state()
+
+
+#: Tables ``clean_database`` empties, in delete order: every table is listed
+#: before any table it holds a foreign key to, so a bulk DELETE succeeds with
+#: PRAGMA foreign_keys=ON (Postgres-parity for SQLite tests). ``wallets`` comes
+#: last, after its self-FK on parent_wallet_id is cleared. A table in
+#: SQLModel.metadata that is neither listed here nor named in
+#: tests/test_clean_database_coverage.py's exemption set fails that test, so a
+#: new trust-plane table cannot silently escape per-test cleanup.
+CLEAN_DATABASE_TABLES = (
+    "receipts",
+    "mcp_dispatch_attempts",
+    "human_approvals",
+    "permit_requests",
+    "quotes",
+    "idempotency_records",
+    "permits",
+    "agent_comms_messages",
+    "content_factory_generations",
+    "ledger_entries",
+    "billing_alerts",
+    "policy_bundles",
+    "daily_balance_snapshots",
+    "kyc_verifications",
+    "refresh_tokens",
+    "api_keys",
+    "key_rotation_logs",
+    "service_registry",
+    "control_plane_audit_events",
+    "audit_chain_heads",
+    "signing_keys",
+    "wallets",
+)
+
+
+@pytest_asyncio.fixture(scope="function")
+async def clean_database():
+    """Clean database tables between tests."""
+    from app.db.database import get_session_factory
+
+    factory = get_session_factory()
+    async with factory() as session:
+        for table in CLEAN_DATABASE_TABLES:
+            if table == "wallets":
+                await session.execute(
+                    text("UPDATE wallets SET parent_wallet_id = NULL")
+                )
+            await session.execute(text(f"DELETE FROM {table}"))
+        await session.commit()
+
+    yield
+
+
+@pytest.fixture
+def enforce_naive_utc_datetime_columns():
+    """Fail before SQLite hides an aware value bound to the naive-UTC schema.
+
+    PostgreSQL's asyncpg driver rejects this mismatch, while SQLite silently
+    serializes the value and lets the same test pass. Inspect both ORM flushes
+    and Core/SQL query parameters. Keep this opt-in so focused production-parity
+    tests can guard trust-critical paths without expanding unrelated scope.
+    """
+
+    def iter_parameter_values(value):
+        if isinstance(value, Mapping):
+            for nested in value.values():
+                yield from iter_parameter_values(nested)
+        elif isinstance(value, (list, tuple, set)):
+            for nested in value:
+                yield from iter_parameter_values(nested)
+        else:
+            yield value
+
+    def assert_naive_datetime_values(session, _flush_context, _instances):
+        for instance in [*session.new, *session.dirty]:
+            mapper = sa_inspect(instance).mapper
+            for attribute in mapper.column_attrs:
+                if not any(
+                    isinstance(column.type, DateTime) and not column.type.timezone
+                    for column in attribute.columns
+                ):
+                    continue
+                value = getattr(instance, attribute.key, None)
+                if isinstance(value, datetime) and value.utcoffset() is not None:
+                    raise AssertionError(
+                        f"{type(instance).__name__}.{attribute.key} must be naive UTC"
+                    )
+
+    def assert_naive_statement_parameters(
+        connection,
+        clauseelement,
+        multiparams,
+        params,
+        _execution_options,
+    ):
+        compiled_params = clauseelement.compile(dialect=connection.dialect).params
+        for value in iter_parameter_values((multiparams, params, compiled_params)):
+            if isinstance(value, datetime) and value.utcoffset() is not None:
+                raise AssertionError("SQL datetime parameters must be naive UTC")
+
+    event.listen(Session, "before_flush", assert_naive_datetime_values)
+    event.listen(Engine, "before_execute", assert_naive_statement_parameters)
+    try:
+        yield
+    finally:
+        event.remove(Session, "before_flush", assert_naive_datetime_values)
+        event.remove(Engine, "before_execute", assert_naive_statement_parameters)
+

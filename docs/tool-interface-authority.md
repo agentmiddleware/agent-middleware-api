@@ -32,18 +32,21 @@ DENY              constraint violated -> machine-actionable denial
 
 ### ALLOW
 
-Unchanged: the server mints a bounded, signed, single-tool, short-lived
-permit from the caller's wallet and runs the governed execution path. For
-the configured upstream MCP tool, one accepted idempotency identity permits
-at most one gateway dispatch and at most one debit. Local governed tools
-have no dispatch state machine.
+The server mints a bounded, signed, single-tool, short-lived permit from the
+caller's wallet, meters the call, and writes a signed receipt when the outcome
+finalizes. For the configured upstream MCP tool, identical retries under the
+same accepted idempotency key allow at most one gateway dispatch and at most
+one debit. This does not guarantee delivery or a downstream effect.
+Local governed tools have no dispatch state machine and interrupted calls fail
+closed into manual review.
 
-The arrows above describe paths that finalize successfully. They do not
-guarantee a receipt after every effect: a local crash or exhausted receipt/audit
-write after committed effects can leave no receipt and require manual review.
-Upstream ambiguity is receipted as `delivery_uncertain` when finalization or
-reconciliation succeeds. Do not retry an unresolved action with a new key;
-follow [failure-semantics.md](failure-semantics.md) for recovery.
+The receipt arrows above describe completed paths. Effects or a debit may
+commit before an audit or receipt write fails, returning
+`manual_review_required` with no receipt. Do not retry with a new idempotency key:
+that can execute and charge the call again. Reconcile from the ledger and audit
+chain; see [failure semantics](failure-semantics.md). Upstream ambiguity is
+receipted as `delivery_uncertain` only when finalization or reconciliation
+succeeds.
 
 ### REQUIRE_APPROVAL
 

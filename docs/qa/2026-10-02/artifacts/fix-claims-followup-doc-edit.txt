@@ -1,0 +1,1 @@
+Changed ELEVATOR_PITCH.md: comparison row plus four directly related completion/upstream qualifiers.

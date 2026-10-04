@@ -1,0 +1,98 @@
+app/main.py-515-        "- **One-shot gateway dispatch/debit** — at most once per accepted action\n"
+app/main.py-516-        "- **Explicit uncertainty** — `delivery_uncertain` is not auto-redispatched\n"
+app/main.py-517-        "- **Linked gateway evidence** — receipt and audit data for reconciliation\n"
+app/main.py:518:        "- **Discovery** — `.well-known/agent.json`, `/mcp/tools.json`, "
+app/main.py-519-        "`/llms.txt`, `/v1/discover`\n\n"
+app/main.py-520-        "### Proof Surfaces\n\n"
+app/main.py-521-        "Agentic-web, browser, content, oracle, sandbox, media, IoT, red-team, "
+--
+app/main.py-525-        "Protected endpoints require an API key via the `X-API-Key` header.\n\n"
+app/main.py-526-        "### For Agents\n\n"
+app/main.py-527-        "Start at `/.well-known/agent.json`, then `/llms.txt` and "
+app/main.py:528:        "`/mcp/tools.json`. Prefer `PUBLIC_URL` over any localhost server entry."
+app/main.py-529-    ),
+app/main.py-530-    docs_url="/docs",
+app/main.py-531-    redoc_url="/redoc",
+--
+app/main.py-990-                    "receipt)."
+app/main.py-991-                ),
+app/main.py-992-                "endpoints": [
+app/main.py:993:                    "GET /mcp/tools.json",
+app/main.py:994:                    "GET /.well-known/mcp/tools.json",
+app/main.py-995-                    "POST /mcp/messages",
+app/main.py-996-                    *(
+app/main.py-997-                        ["POST /mcp"]
+--
+app/routers/mcp.py-5-Governed MCP proxy for the agent trust plane (permits, metering, receipts).
+app/routers/mcp.py-6-
+app/routers/mcp.py-7-Provides:
+app/routers/mcp.py:8:- /mcp/tools.json - MCP manifest discovery
+app/routers/mcp.py-9-- /mcp/messages - JSON-RPC message handling
+app/routers/mcp.py-10-
+app/routers/mcp.py-11-This enables agents to:
+--
+app/routers/mcp.py-1494-        # A category outside SERVICE_NAMES has no SIMULATION_MODE_* setting
+app/routers/mcp.py-1495-        # to read, so there is nothing to look up and nothing to warn about.
+app/routers/mcp.py-1496-        # truth_for_category() applies the same rule when it labels such a
+app/routers/mcp.py:1497:        # category "platform" for /mcp/tools.json. These keep the fail-open
+app/routers/mcp.py-1498-        # default set above; a genuine lookup failure for a flagged category
+app/routers/mcp.py-1499-        # still falls through to the warning.
+app/routers/mcp.py-1500-        if category.value in SERVICE_NAMES:
+--
+site/llms.txt-33-
+site/llms.txt-34-1. GET https://api.thisisatest.tech/.well-known/agent.json
+site/llms.txt-35-2. GET https://api.thisisatest.tech/llms.txt
+site/llms.txt:36:3. GET https://api.thisisatest.tech/mcp/tools.json
+site/llms.txt-37-4. GET https://api.thisisatest.tech/openapi.json
+site/llms.txt-38-
+site/llms.txt-39-Before assuming real side effects, fetch:
+--
+tests/test_production_trust_posture.py-197-async def test_tools_json_omits_proof_stubs_under_prod_flags(
+tests/test_production_trust_posture.py-198-    client, production_trust_flags
+tests/test_production_trust_posture.py-199-):
+tests/test_production_trust_posture.py:200:    resp = await client.get("/mcp/tools.json", headers=_OPERATOR_KEY_HEADERS)
+tests/test_production_trust_posture.py-201-    assert resp.status_code == 200
+tests/test_production_trust_posture.py-202-    names = {tool["name"] for tool in resp.json()["tools"]}
+tests/test_production_trust_posture.py-203-    assert names.isdisjoint(PROOF_SURFACE_MCP_STUB_IDS)
+--
+tests/test_production_trust_posture.py-212-    client, production_trust_flags
+tests/test_production_trust_posture.py-213-):
+tests/test_production_trust_posture.py-214-    for path in (
+tests/test_production_trust_posture.py:215:        "/mcp/tools.json",
+tests/test_production_trust_posture.py-216-        "/mcp/tools",
+tests/test_production_trust_posture.py-217-        "/mcp/tools/partner.echo",
+tests/test_production_trust_posture.py-218-        "/v1/discover",
+tests/test_production_trust_posture.py:219:        "/.well-known/mcp/tools.json",
+tests/test_production_trust_posture.py-220-    ):
+tests/test_production_trust_posture.py-221-        resp = await client.get(path)
+tests/test_production_trust_posture.py-222-        assert resp.status_code == 401, path
+--
+tests/test_production_trust_posture.py-228-@pytest.mark.anyio
+tests/test_production_trust_posture.py-229-async def test_unknown_key_cannot_read_tool_catalog(client, production_trust_flags):
+tests/test_production_trust_posture.py-230-    resp = await client.get(
+tests/test_production_trust_posture.py:231:        "/mcp/tools.json", headers={"X-API-Key": "bogusbogus-not-a-real-key"}
+tests/test_production_trust_posture.py-232-    )
+tests/test_production_trust_posture.py-233-    assert resp.status_code == 403
+tests/test_production_trust_posture.py-234-    assert resp.json()["detail"]["error"] == "invalid_api_key"
+--
+site/index.html-685-            ><code>GET /llms.txt</code>
+site/index.html-686-          </a>
+site/index.html-687-          <a
+site/index.html:688:            href="https://api.thisisatest.tech/mcp/tools.json"
+site/index.html-689-            target="_blank"
+site/index.html-690-            rel="noopener noreferrer"
+site/index.html-691-          >
+site/index.html-692-            <span
+site/index.html-693-              >MCP discovery <span class="ext" aria-hidden="true">↗</span></span
+site/index.html:694:            ><code>GET /mcp/tools.json</code>
+site/index.html-695-          </a>
+site/index.html-696-          <a
+site/index.html-697-            href="https://api.thisisatest.tech/health/dependencies"
+--
+site/index.html-705-          </a>
+site/index.html-706-        </div>
+site/index.html-707-        <p class="machine-note">
+site/index.html:708:          Four unauthenticated GETs against the API origin; each opens the raw
+site/index.html-709-          JSON in a new tab. Protected routes answer these same requests with
+site/index.html-710-          401 until an operator-issued key is presented.
+site/index.html-711-        </p>
