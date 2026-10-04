@@ -50,8 +50,10 @@ async def clean_database():
 
 
 @pytest_asyncio.fixture(loop_scope="session")
-async def action_runtime(monkeypatch, clean_database):
-    async for value in action.action_runtime.__wrapped__(monkeypatch, clean_database):
+async def action_runtime(monkeypatch, clean_database, action_permit_route):
+    async for value in action.action_runtime.__wrapped__(
+        monkeypatch, clean_database, action_permit_route
+    ):
         yield value
 
 

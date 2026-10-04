@@ -737,7 +737,9 @@ PROOF_SURFACE_ROUTERS = (
     awi_enhanced,
 )
 
-app.include_router(permits.action_router)
+# Action issuance stays frozen: the configured upstream has no qualified
+# ActionToolBinding. Only explicit test fixtures mount permits.action_router;
+# production and proof-enabled apps retain recovery without advertising issuance.
 for router_module in CORE_TRUST_ROUTERS:
     app.include_router(
         router_module.router,
