@@ -34,7 +34,6 @@ from sqlalchemy.exc import IntegrityError
 from ..audit.lightweight import record_audit
 from ..core.config import DuplicateGuardMode, get_settings
 from ..policy.jev_guard import evaluate_jev_guard
-from ..services.audit_chain import AuditEventConflictError
 from ..services.jev_guard_metadata import jev_audit_id, load_jev_guard_metadata
 from ..core.auth import (
     AuthContext,
@@ -49,7 +48,11 @@ from ..core.oidc_iga import (
     parse_enterprise_token,
     release_tool_use,
 )
-from ..trust import AuditChainContendedError, RefundReconciliationContendedError
+from ..trust import (
+    AuditChainContendedError,
+    AuditEventConflictError,
+    RefundReconciliationContendedError,
+)
 from ..services.billing_engine import (
     LedgerOperationConflictError,
     LedgerWriteContendedError,
