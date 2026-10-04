@@ -1,0 +1,439 @@
+rg: tests/test_openapi_contract.py: No such file or directory (os error 2)
+scripts/agent_ops_war_room_demo.py:173:        openapi = await _get_json(client, "/openapi.json")
+scripts/human_preflight.sh:68:check_http "OpenAPI" "/openapi.json" "200"
+scripts/export_openapi.py:3:Export OpenAPI 3 schema from the FastAPI app to docs/openapi.json.
+scripts/export_openapi.py:6:shape at GET /openapi.json.
+scripts/export_openapi.py:9:  python scripts/export_openapi.py              # write docs/openapi.json
+scripts/export_openapi.py:10:  python scripts/export_openapi.py --check      # exit 1 if file is stale (CI)
+scripts/export_openapi.py:35:        default=Path("docs/openapi.json"),
+scripts/export_openapi.py:36:        help="Destination JSON file (default: docs/openapi.json)",
+scripts/export_openapi.py:56:            print(f"Missing {out_path}; run: python scripts/export_openapi.py", file=sys.stderr)
+scripts/export_openapi.py:62:                "Run: python scripts/export_openapi.py",
+scripts/trust_release_gate.sh:46:"${PYTHON_CMD[@]}" scripts/export_openapi.py --check
+#!/usr/bin/env python3
+"""Render the static marketing site only when launch contacts are real.
+
+The source HTML deliberately contains non-deployable tokens. Vercel runs this
+script and serves only ``dist/``; a missing or obviously provisional contact
+therefore fails the build instead of leaking a fake funnel into production.
+
+The Vercel Web Analytics loader is emitted only when
+``PUBLIC_ENABLE_VERCEL_ANALYTICS=true``. Deploying the ``/_vercel/insights``
+script tag against a project whose Web Analytics is not enabled makes every
+page load log a 404 plus a MIME-type refusal in the browser console, so the
+default build omits the tag entirely.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import html
+import json
+import os
+import re
+import shutil
+import sys
+import tempfile
+from datetime import datetime, timedelta, timezone
+from html.parser import HTMLParser
+from pathlib import Path
+from urllib.parse import quote, urlparse
+
+
+SITE_ROOT = Path(__file__).resolve().parent
+REPO_ROOT = SITE_ROOT.parent
+DEFAULT_OUTPUT = SITE_ROOT / "dist"
+# Required launch contacts. Pilot intake is email-first by design: a prospect
+# sends the tool scenario and gets a written reply, and a call happens only when
+# a scenario needs one. So the accountable name and the monitored address gate
+# the build; a booking link is optional and never a prerequisite.
+CONTACT_FIELDS = {
+    "@@PUBLIC_DISPLAY_NAME@@": "PUBLIC_DISPLAY_NAME",
+    "@@PUBLIC_CONTACT_EMAIL@@": "PUBLIC_CONTACT_EMAIL",
+}
+BOOKING_TOKEN = [REDACTED]
+BOOKING_CONTEXT_TOKEN = [REDACTED]
+PILOT_EMAIL_TOKEN = [REDACTED]
+PILOT_EMAIL_BODY = """One-tool paid pilot enquiry
+
+1. Tool or action (synthetic or redacted only):
+2. What goes wrong on retry:
+3. How we check whether the action ran:
+4. Cost of one duplicate or unproven call (money, recovery hours, or customer consequence; measured or estimated):
+5. Budget owner and target decision date:
+
+Optional workflow assumptions: monthly actions, baseline duplicate rate, expected reduction, and total monthly cost.
+
+Do not include production secrets, credentials, or customer data.
+"""
+BOOKING_FIELD = "PUBLIC_BOOKING_URL"
+# Markup that only makes sense with a booking link sits between these two
+# comments. When no link is configured the whole block is removed, so the
+# emitted page never carries an empty href or an unresolved token; when one is
+# configured only the marker comments are removed.
+BOOKING_BLOCK_START = "<!-- booking:start -->"
+BOOKING_BLOCK_END = "<!-- booking:end -->"
+# Marker lines may end in LF or CRLF, and the closing marker may end the
+# file; the block is dropped or unwrapped identically either way.
+_BOOKING_BLOCK = re.compile(
+    rf"^[ \t]*{re.escape(BOOKING_BLOCK_START)}[ \t]*\r?\n.*?"
+    rf"^[ \t]*{re.escape(BOOKING_BLOCK_END)}[ \t]*(?:\r?\n|\Z)",
+    flags=re.DOTALL | re.MULTILINE,
+)
+_BOOKING_MARKER_LINE = re.compile(
+    rf"^[ \t]*(?:{re.escape(BOOKING_BLOCK_START)}|{re.escape(BOOKING_BLOCK_END)})[ \t]*(?:\r?\n|\Z)",
+    flags=re.MULTILINE,
+)
+ANALYTICS_FLAG = "PUBLIC_ENABLE_VERCEL_ANALYTICS"
+ANALYTICS_TOKEN = [REDACTED]
+ANALYTICS_FLAG_ENABLED = frozenset({"true"})
+ANALYTICS_FLAG_DISABLED = frozenset({"", "false"})
+# The queue shim lives in /va-init.js rather than an inline <script> so the
+# deployed Content-Security-Policy can stay script-src 'self' with no
+# 'unsafe-inline'. It must load before the insights script reads window.vaq.
+ANALYTICS_SCRIPTS = """<script src="/va-init.js?v=gateway-18"></script>
+    <script defer src="/_vercel/insights/script.js"></script>"""
+# Shared chrome is rendered at build time so it also works without JavaScript.
+SITE_PARTIALS = {
+    "@@SITE_NAV@@": "partials/nav.html",
+    "@@SITE_FOOTER@@": "partials/footer.html",
+}
+STYLES_CSS_VERSION_TOKEN = [REDACTED]
+CONCEPT_CSS_VERSION_TOKEN = [REDACTED]
+BUILD_DATE_TOKEN = [REDACTED]
+FAQ_JSONLD_TOKEN = [REDACTED]
+HERO_CONSOLE_TOKEN = [REDACTED]
+LOOP_TRANSCRIPT_TOKEN = [REDACTED]
+LIVE_VERIFICATION_TOKEN = [REDACTED]
+# The day the published sample receipt was issued, read from the receipt's own
+# signed claims so the page can never drift from the artifact it describes.
+PROOF_RECEIPT_ISSUED_TOKEN = [REDACTED]
+TRANSCRIPT = SITE_ROOT / "proof" / "transcript.json"
+LIVE_RECEIPT = SITE_ROOT / "proof" / "receipt.json"
+LIVE_KEYS = SITE_ROOT / "proof" / "trust-keys.json"
+#: The hero shows the loop's spine; the governed-path section shows all of it.
+HERO_CONSOLE_STEPS = ("authorize", "invoke", "replay", "verify")
+SECURITY_TXT_EXPIRES_TOKEN = [REDACTED]
+# security.txt must carry a future Expires (RFC 9116 §2.5.5). Regenerating it
+# one year out on every build means a deployed site never serves a lapsed file.
+SECURITY_TXT_LIFETIME_DAYS = 365
+TEXT_ASSETS = (
+    "index.html",
+    "proof/index.html",
+    "compare/index.html",
+    "concept/index.html",
+    "404.html",
+    "sitemap.xml",
+    ".well-known/security.txt",
+    # The machine-pointer files cite the published receipt's issue date, read
+    # from the bundle at build time like the HTML pages, so the two can never
+    # disagree.
+    "llm.txt",
+    "llms.txt",
+    "llms-full.txt",
+)
+COPY_ASSETS = (
+    ".well-known",
+    "a11y.js",
+    "a11y-preload.js",
+    "arcade-boot.js",
+    "arcade.css",
+    "arcade.js",
+    "fonts",
+    "fonts.css",
+    "analytics.js",
+    "pilot-fit.js",
+    "compare",
+    "concept",
+    "favicon.svg",
+    "social-card.png",
+    "proof",
+    "robots.txt",
+    "sitemap.xml",
+    "styles.css",
+    "va-init.js",
+    "wave.js",
+)
+REQUIRED_PUBLIC_ASSETS = (
+    *SITE_PARTIALS.values(),
+    *TEXT_ASSETS,
+    *COPY_ASSETS,
+    "proof/receipt.json",
+    "proof/trust-keys.json",
+    "proof/transcript.json",
+)
+PROVISIONAL_TERMS = (
+    "change me",
+    "changeme",
+    "example.com",
+    "example.org",
+    "example.net",
+    "fake",
+    "placeholder",
+    "provisional",
+    "test@",
+    "your email",
+    "your name",
+)
+RESERVED_HOSTS = {"example", "invalid", "localhost", "test"}
+RESERVED_HOST_SUFFIXES = tuple(f".{host}" for host in RESERVED_HOSTS)
+
+
+class LaunchConfigurationError(ValueError):
+    """Raised when a build would publish an unusable human funnel."""
+
+
+def _reject_provisional(field: str, value: str) -> None:
+    lowered = value.casefold()
+    if any(term in lowered for term in PROVISIONAL_TERMS):
+        raise LaunchConfigurationError(f"{field} contains a provisional value")
+    if "@@" in value:
+        raise LaunchConfigurationError(f"{field} contains an unresolved token")
+
+
+def _is_reserved_hostname(hostname: str) -> bool:
+    normalized = hostname.casefold().rstrip(".")
+    return normalized in RESERVED_HOSTS or normalized.endswith(RESERVED_HOST_SUFFIXES)
+
+
+def validated_contacts(
+    environment: dict[str, str], *, escape_markup: bool = True
+) -> dict[str, str]:
+    """Return contact values or refuse to build the public site.
+
+    ``escape_markup`` is on for HTML and XML targets. Plain-text targets such as
+    ``.well-known/security.txt`` take the raw value, because an entity-escaped
+    address there would be served verbatim to whoever reads the file.
+    """
+
+    missing = [
+        name
+        for name in CONTACT_FIELDS.values()
+        if not environment.get(name, "").strip()
+    ]
+    if missing:
+        raise LaunchConfigurationError(
+            "missing required launch contact values: " + ", ".join(sorted(missing))
+        )
+
+    display_name = environment["PUBLIC_DISPLAY_NAME"].strip()
+    email = environment["PUBLIC_CONTACT_EMAIL"].strip()
+    booking_url = environment.get(BOOKING_FIELD, "").strip()
+
+    for field, value in (
+        ("PUBLIC_DISPLAY_NAME", display_name),
+        ("PUBLIC_CONTACT_EMAIL", email),
+        (BOOKING_FIELD, booking_url),
+    ):
+        if value:
+            _reject_provisional(field, value)
+
+    if (
+        display_name.casefold() == "agent middleware api"
+        or len(display_name) < 3
+        or re.search(
+            r"\b(?:example|fake|placeholder|provisional|test)\b",
+            display_name,
+            flags=re.IGNORECASE,
+        )
+    ):
+        raise LaunchConfigurationError(
+            "PUBLIC_DISPLAY_NAME must identify an accountable person or entity"
+        )
+    if re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email) is None:
+        raise LaunchConfigurationError(
+            "PUBLIC_CONTACT_EMAIL is not a valid email address"
+        )
+    if _is_reserved_hostname(ema
+PACKAGE BUILDS
+b2a_sdk/pyproject.toml
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "b2a-sdk"
+version = "0.5.0"
+description = "Python SDK for governed MCP permits, idempotent agent-tool calls, receipts, and audit evidence"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+keywords = [
+    "mcp",
+    "model-context-protocol",
+    "agent-authorization",
+    "delegated-authorization",
+    "permits",
+    "idempotency",
+    "replay-protection",
+    "signed-receipts",
+    "audit",
+    "agent-governance",
+    "b2a",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+
+dependencies = [
+    "httpx>=0.27.0,<1",
+]
+
+[project.optional-dependencies]
+# Ed25519 verification of portable receipts. Kept out of the base install so
+# clients that only call tools do not pull a native dependency.
+# Floor matches the application's requirements.txt: 42.x–49.x carry known
+# advisories (e.g. GHSA-537c-gmf6-5ccf, PYSEC-2026-3553/3554); 50.0.0 is the
+# lowest version with none.
+verify = [
+    "cryptography>=50.0.0",
+]
+# Serving the marketplace over MCP (`python -m b2a_sdk.mcp serve`) and the
+# generated standalone server both import FastMCP, which mcp 2.x renamed to
+# MCPServer. Bound matches the application's requirements.txt.
+mcp = [
+    "mcp>=1.29.0,<2",
+]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.8.0",
+    "cryptography>=50.0.0",
+]
+
+[project.scripts]
+b2a-verify-receipt = "b2a_sdk.verify_cli:main"
+
+[project.urls]
+Homepage = "https://www.thisisatest.tech/"
+Documentation = "https://www.thisisatest.tech/"
+Repository = "https://github.com/PetrefiedThunder/agent-middleware-api"
+Issues = "https://github.com/PetrefiedThunder/agent-middleware-api/issues"
+Changelog = "https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/b2a_sdk/CHANGELOG.md"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4"]
+ignore = ["E501"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/b2a_sdk"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/b2a_sdk",
+    "tests",
+    "CHANGELOG.md",
+    "LICENSE",
+    "README.md",
+    "pyproject.toml",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+wrappers/openai-agent-middleware/pyproject.toml
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "openai-agent-middleware"
+version = "0.1.0"
+description = "OpenAI function-calling and Agents SDK integration for Agent Middleware API (governed permit -> invoke -> receipt)"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+# No dependency on the openai package: the runner accepts the tool-call shapes
+# OpenAI emits (Chat Completions tool_calls, Responses/Agents function_call
+# items) as plain attributes or dicts, so it works with any SDK version and is
+# testable without one.
+dependencies = [
+    "b2a-sdk>=0.4.0",
+    "httpx>=0.25.0",
+]
+
+[project.optional-dependencies]
+openai = ["openai>=1.0"]
+dev = ["pytest", "pytest-asyncio", "ruff"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/openai_b2a"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+# Relative to this directory, so `pytest wrappers/openai-agent-middleware/tests`
+# works from the repository root as well as from here. The bare `b2a_sdk/`
+# directory at the repository root would otherwise resolve as a namespace
+# package and shadow the real SDK under `b2a_sdk/src`.
+pythonpath = ["src", "../../b2a_sdk/src"]
+
+BASELINE AUXILIARY COMMANDS
+
+### 2026-10-03T00:49:49Z — report-confirm-added-tests
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', '-']`
+
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:49:49Z. [Output](artifacts/backend-report-confirm-added-tests.txt).
+
+### 2026-10-03T00:51:08Z — dependency-consistency
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['/private/tmp/amw-qa-python/bin/python', '-m', 'pip', 'check']`
+
+Outcome: exit 0; 0.4s; ended 2026-10-03T00:51:08Z. [Output](artifacts/backend-dependency-consistency.txt).
+
+### 2026-10-03T00:54:08Z — after-checkpoint
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', '-']`
+
+Outcome for `backend-after-checkpoint`: exit 0; 0.0s; ended 2026-10-03T00:54:08Z. [Output](artifacts/backend-after-checkpoint.txt).
+Outcome: exit 0; 309.7s; ended 2026-10-03T00:54:37Z. [Output](artifacts/backend-after-full.txt).
+
+### 2026-10-03T00:55:02Z — python-sdk-installed-tests
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api/b2a_sdk`
+
+Command (argv): `['env', 'PYTHONPATH=', 'COVERAGE_FILE=/private/tmp/amw-qa-sdk.coverage', '/private/tmp/amw-qa-python/bin/python', '-m', 'pytest', '-c', 'pyproject.toml', '--rootdir=.', '--confcutdir=.', '-o', 'pythonpath=', 'tests', '-q', '--tb=short', '--cov=b2a_sdk', '--cov-report=json:/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api/docs/qa/2026-10-02/artifacts/backend-sdk-coverage.json', '--cov-report=term']`
+
+Outcome for `backend-python-sdk-installed-tests`: exit 0; 2.0s; ended 2026-10-03T00:55:04Z. [Output](artifacts/backend-python-sdk-installed-tests.txt).
+
+### 2026-10-03T00:55:23Z — openai-wrapper-installed-tests
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api/wrappers/openai-agent-middleware`
+
+Command (argv): `['env', 'PYTHONPATH=', 'COVERAGE_FILE=/private/tmp/amw-qa-openai-wrapper.coverage', '/private/tmp/amw-qa-python/bin/python', '-m', 'pytest', '-c', 'pyproject.toml', '--rootdir=.', '--confcutdir=.', '-o', 'pythonpath=', '-o', 'asyncio_mode=auto', 'tests', '-q', '--tb=short', '--cov=openai_b2a', '--cov-report=json:/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api/docs/qa/2026-10-02/artifacts/backend-openai-wrapper-coverage.json', '--cov-report=term']`
+
+Outcome for `backend-openai-wrapper-installed-tests`: exit 0; 1.2s; ended 2026-10-03T00:55:24Z. [Output](artifacts/backend-openai-wrapper-installed-tests.txt).
+
+### 2026-10-03T00:55:31Z — production-posture-local
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['/private/tmp/amw-qa-python/bin/python', '-']`
+
+Outcome for `backend-production-posture-local`: exit 0; 5.2s; ended 2026-10-03T00:55:36Z. [Output](artifacts/backend-production-posture-local.txt).
+
+### 2026-10-03T00:55:41Z — coverage-comparison
+
+DOC SCHEMA SCRIPT

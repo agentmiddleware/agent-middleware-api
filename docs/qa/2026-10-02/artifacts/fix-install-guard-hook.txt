@@ -1,0 +1,1 @@
+Installed absolute local safety hook in temporary test environment

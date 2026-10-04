@@ -1,0 +1,1 @@
+EXPECTED PRE-FIX FAILURE: pitch still promises charge exactly once without a same-key scope.

@@ -80,10 +80,23 @@ def test_openapi_schema_is_valid_with_unique_operation_ids():
         app.openapi_schema = old_schema
 
 
-@pytest.mark.xfail(strict=True, reason="BE-002: Bearer authentication is absent from OpenAPI security schemes")
 def test_openapi_declares_supported_bearer_authentication():
-    schemes = app.openapi()["components"]["securitySchemes"].values()
-    assert any(s.get("type") == "http" and s.get("scheme") == "bearer" for s in schemes)
+    old_schema = app.openapi_schema
+    try:
+        app.openapi_schema = None
+        schema = app.openapi()
+        schemes = schema["components"]["securitySchemes"]
+        bearer = [name for name, definition in schemes.items()
+                  if definition.get("type") == "http" and definition.get("scheme") == "bearer"]
+        assert len(bearer) == 1
+        security = schema["paths"]["/v1/permits"]["get"]["security"]
+        assert {bearer[0]: []} in security
+        assert {"APIKeyHeader": []} in security
+        assert all(len(alternative) == 1 for alternative in security)
+        for path in ("/health", "/.well-known/agent.json"):
+            assert not schema["paths"][path]["get"].get("security")
+    finally:
+        app.openapi_schema = old_schema
 
 
 def test_scalar_unicode_replay_keys_roundtrip_without_normalization():
@@ -144,19 +157,25 @@ async def test_lone_surrogate_replay_key_is_rejected_before_effect_or_debit(
 
 
 @pytest.mark.parametrize("address", ["224.0.0.1", "239.255.255.250", "ff02::1", "ff05::1"])
-@pytest.mark.xfail(strict=True, reason="BE-003: is_global alone permits multicast addresses through outbound guards")
-async def test_outbound_url_guard_rejects_multicast(address, monkeypatch):
+@pytest.mark.parametrize("resolved", [False, True], ids=["literal", "mixed-dns"])
+async def test_outbound_url_guard_rejects_multicast(address, resolved, monkeypatch):
     from app.core.config import get_settings
     from app.core.url_guard import check_outbound_url
 
     monkeypatch.setattr(get_settings(), "ALLOW_PRIVATE_NETWORK_TARGETS", False)
     host = f"[{address}]" if ":" in address else address
+    if resolved:
+        async def resolve(_host):
+            return [(None, None, None, None, (value, 0)) for value in ("8.8.8.8", address)]
+
+        monkeypatch.setattr("app.core.url_guard._resolve_host", resolve)
+        host = "multicast.example"
     assert await check_outbound_url(f"http://{host}/") == "private_address_blocked"
 
 
 @pytest.mark.parametrize("address", ["224.0.0.1", "ff02::1"])
-@pytest.mark.xfail(strict=True, reason="BE-003: is_global alone permits multicast addresses through upstream guard")
-async def test_upstream_url_guard_rejects_multicast(address):
+@pytest.mark.parametrize("resolved", [False, True], ids=["literal", "mixed-dns"])
+async def test_upstream_url_guard_rejects_multicast(address, resolved):
     from decimal import Decimal
     from app.services.upstream_mcp import (
         UpstreamMcpConfiguration,
@@ -165,6 +184,12 @@ async def test_upstream_url_guard_rejects_multicast(address):
     )
 
     host = f"[{address}]" if ":" in address else address
+    if resolved:
+        host = "multicast.example"
+
+    async def resolve(_host, _port):
+        return ("8.8.8.8", address)
+
     configuration = UpstreamMcpConfiguration(
         url=f"https://{host}/mcp",
         origin=f"https://{host}",
@@ -177,5 +202,5 @@ async def test_upstream_url_guard_rejects_multicast(address):
         max_response_bytes=1024,
         environment="production",
     )
-    with pytest.raises(UpstreamMcpConfigurationError):
-        await validate_upstream_url(configuration)
+    with pytest.raises(UpstreamMcpConfigurationError, match="upstream_mcp_configuration_invalid"):
+        await validate_upstream_url(configuration, resolver=resolve)

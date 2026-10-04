@@ -1,0 +1,80 @@
+5:script and serves only ``dist/``; a missing or obviously provisional contact
+6:therefore fails the build instead of leaking a fake funnel into production.
+12:default build omits the tag entirely.
+17:import argparse
+34:DEFAULT_OUTPUT = SITE_ROOT / "dist"
+38:# the build; a booking link is optional and never a prerequisite.
+39:CONTACT_FIELDS = {
+41:    "@@PUBLIC_CONTACT_EMAIL@@": "PUBLIC_CONTACT_EMAIL",
+85:# Shared chrome is rendered at build time so it also works without JavaScript.
+107:# one year out on every build means a deployed site never serves a lapsed file.
+118:    # from the bundle at build time like the HTML pages, so the two can never
+172:    """Raised when a build would publish an unusable human funnel."""
+191:    """Return contact values or refuse to build the public site.
+200:        for name in CONTACT_FIELDS.values()
+209:    email = environment["PUBLIC_CONTACT_EMAIL"].strip()
+214:        ("PUBLIC_CONTACT_EMAIL", email),
+234:            "PUBLIC_CONTACT_EMAIL is not a valid email address"
+238:            "PUBLIC_CONTACT_EMAIL must use a routable public domain"
+242:    # and an absent one simply leaves the booking blocks out of the build.
+255:                "PUBLIC_BOOKING_URL must use a routable public domain"
+270:            "@@PUBLIC_CONTACT_EMAIL@@": email,
+277:        "@@PUBLIC_CONTACT_EMAIL@@": html.escape(email, quote=True),
+285:    """Whether the build carries the optional booking link."""
+293:    With a booking link configured only the marker comments go; without one
+311:    """Return whether the build should emit the Vercel Web Analytics loader.
+313:    A misspelled value fails the build instead of silently disabling analytics
+327:def _copy_asset(relative_path: str, output: Path) -> None:
+329:    destination = output / relative_path
+375:    src would then 404 on the live site with the build still reporting success.
+401:    even same-origin: without it the browser discards the preload and fetches
+413:    # raise AttributeError and the build would die with a traceback rather than
+446:    """Read the question/answer pairs out of a page's ``<dl class="faq-list">``.
+489:            # publish "terminal outcome , and" wherever an <em> meets a comma.
+505:    verifier output was recorded against a different receipt than the one
+506:    published beside it: republishing ``receipt.json`` without re-running
+538:        if not (rows_ok or isinstance(step.get("output"), str)):
+541:                "[key, value] rows or an output string"
+546:        # refuses to write a failed one; the build refuses to render it.
+547:        if step["id"] == "verify" and not str(step.get("output", "")).startswith(
+564:        isinstance(live.get(key), str) for key in ("receipt_id", "command", "output")
+567:            "transcript lacks the live receipt's verifier output"
+583:    if live.get("exit_code") != 0 or not live["output"].startswith("VERIFIED"):
+588:    # The verdict line is the first line of verify_cli output, so the id
+589:    # must appear there: matching it anywhere in the output would accept a
+591:    if live["receipt_id"] != published_id or not live["output"].startswith(
+595:            "transcript's live verifier output is for "
+596:            f"{live['output'].splitlines()[0]!r} (recorded as "
+605:            "transcript's live verifier output was recorded against different "
+614:            "transcript's live verifier output was recorded against different "
+619:    # other number on the page. A transcript without the demo's timed run is
+676:    itself attests to. A receipt without a parseable issue date is a launch
+690:def _console_output(text: str) -> str:
+691:    """A verifier's stdout as markup; the verdict word carries its own class."""
+743:        if isinstance(step.get("output"), str):
+745:                f'<pre class="console-output"><code>{_console_output(step["output"])}</code></pre>'
+769:    """The offline verifier's real output for the published receipt."""
+778:        f'<pre class="console-output"><code>{_console_output(live["output"])}</code></pre>'
+793:            '<dl class="faq-list"> to build it from'
+823:def _validated_output_path(output: Path) -> Path:
+824:    """Resolve a build target without authorizing deletion of existing data."""
+826:    resolved = output.resolve()
+827:    default_output = DEFAULT_OUTPUT.resolve()
+833:        raise LaunchConfigurationError("output must not contain the source tree")
+834:    if resolved == default_output:
+838:            "output must not be another path inside the repository"
+841:    # Tests and one-off previews may use a fresh temp path. Existing arbitrary
+846:        "output must be site/dist or a new path under the system temp directory"
+850:def _build_timestamps() -> dict[str, str]:
+861:def render_site(output: Path, environment: dict[str, str]) -> None:
+875:        + quote(text_replacements["@@PUBLIC_CONTACT_EMAIL@@"], safe="@")
+882:    timestamps = _build_timestamps()
+906:    output = _validated_output_path(output)
+908:    shutil.rmtree(output, ignore_errors=True)
+909:    output.mkdir(parents=True)
+911:        _copy_asset(relative_path, output)
+995:        destination = output / relative_path
+1001:    parser = argparse.ArgumentParser(description=__doc__)
+1002:    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+1005:        render_site(args.output, dict(os.environ))
+1007:        print(f"site build blocked: {exc}", file=sys.stderr)
