@@ -1,0 +1,2 @@
+Final app result recorded; 7 fixed / 0 partial / 1 deferred, Critical/High zero. Consolidated log created; final closeout will refresh it after final checks.
+Coverage: {'covered_lines': 21250, 'num_statements': 24267, 'percent_covered': 87.56747846870235, 'missing_lines': 3017}

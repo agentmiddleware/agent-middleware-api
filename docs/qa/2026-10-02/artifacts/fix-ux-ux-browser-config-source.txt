@@ -1,0 +1,41 @@
+{
+  "name": "agent-middleware-marketing-site",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "build": "python3 build_site.py"
+  }
+}
+
+False
+# Frontend QA pass
+
+PR: opened by orchestrator
+
+CI status: pending at time of writing
+
+## Scope and method
+
+The repository has a static marketing site (`site/`), a static operator index (`static/dashboard.html`), and an unshipped AWI TypeScript SDK (`awi_sdk/typescript/`). There is no React application or authenticated dashboard workflow. README.md:260–267 explicitly says there is no published TypeScript package; SDK findings therefore concern the checked-in integration surface, not an established public package release.
+
+Risk order: (1) credentials/receipt claims and retry boundaries, (2) calculator correctness and public proof failure states, (3) SDK build and API ergonomics, (4) mobile/accessibility and asset performance. Runtime backend routes and Python suites belong to the backend pass; accessibility and screenshot fallback belong to the UX pass.
+
+The test pyramid uses existing site checks first, browser-free component and transport-contract tests second, and browser smoke scenarios last. The component fallback executes the unmodified product JavaScript in jsdom; it does not establish layout, engine compatibility, focus behavior, or Web Vitals. No product behavior or package manifest was changed.
+
+Timed exploratory charters:
+
+| Charter | Timebox | Questions | Outcome |
+| --- | --- | --- | --- |
+| FE-C1: bootstrap and build | 10 minutes | Can a clean consumer build the static site and SDK without production settings? | Site builds with synthetic contact fixture; SDK declared build fails (FE-001). |
+| FE-C2: public flow/browser smoke | 10 minutes | Do primary pages, calculator, proof, no-JS and mobile flows work across Chromium/Firefox/WebKit? | 24 cases collected; every engine failed at launch before navigation. Two existing browser programs failed at launch too. UX owns safe alternate browser investigation. |
+| FE-C3: component and SDK boundaries | 10 minutes | Do invalid/empty/overflow inputs fail safely; does the SDK preserve authorization and retry identity? | 8 passing tests, 2 expected failures. Calculator and proof error cases pass; SDK zero step limit is promoted to 100 (FE-002). |
+
+All shell commands, including failed bootstrap attempts, are recorded in [FRONTEND-SESSION.md](FRONTEND-SESSION.md). The short first identity/read command preceded discovery of the logging wrapper and is reconstructed there; subsequent commands used `run_logged.py`.
+
+## Findings
+
+| ID | Severity | Group | Title | Exact reproduction | Expected vs actual | Evidence | Suggested fix |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| FE-001 | Medium | Frontend / SDK DX | Declared TypeScript SDK build cannot produce its advertised entrypoints | Copy `awi_sdk/typescript/{package.json,index.ts,LICENSE}` into an isolated directory; install the declared dependencies with scripts disabled; run `npm run build`. The retained test `FE-001: declared SDK build produces its advertised entrypoints` reproduces this without network using already installed temporary tooling. | Expected: exit 0, `dist/index.js` and `dist/index.d.ts`. Actual: `tsc` prints help and exits 1 because no project config or source arguments exist. | `awi_sdk/typescript/package.json:5`, `:6`, `:8`; [isolated build output](artifacts/frontend-sdk-isolated-build.txt); [expected failure](artifacts/frontend-component-contract-final.txt). Explicit-source strict typecheck passes, narrowing this to packaging/build configuration. | Before unfreezing this SDK, add a minimal tsconfig with source include, output directory and declaration emission, and verify the packed entrypoints. Keep it documented as unshipped until then. |
+| FE-002 | Medium | Frontend / SDK DX | A zero session step limit silently becomes 100 | Invoke `AWIClient.createSession('http://127.0.0.1:8769/synthetic', {maxSteps: 0})` with a stubbed Axios transport; inspect the submitted `max_steps`. Run the retained `FE-002: maxSteps=0 is not silently promoted to 100 actions` expected-failure test. | Expected: reject invalid zero locally or transmit zero so the API's `ge=1` validator rejects it. Actual: SDK submits `max_steps: 100`, granting a larger action limit than requested. `priority: 0` is similarly normalized to 5, though the session step limit is the consequential case. | `awi_sdk/typescript/index.ts:157`, `:279`; API validator `app/schemas/awi.py:157` and `:275`; [source lines](artifacts/frontend-sdk-contract-lines.txt); [mock-only regression output](artifacts/frontend-component-contract-final.txt). | Use nulli
+False

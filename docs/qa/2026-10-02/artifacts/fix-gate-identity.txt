@@ -1,0 +1,16 @@
+/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api 359d563 [qa/2026-10-02-fixes]
+https://github.com/PetrefiedThunder/agent-middleware-api.git
+qa/2026-10-02-fixes
+?? docs/qa/2026-10-02/FIX-CLAIMS-SESSION.md
+?? docs/qa/2026-10-02/FIX-GATE-SESSION.md
+?? docs/qa/2026-10-02/FIX-SDK-SESSION.md
+?? docs/qa/2026-10-02/FIX-UX-SESSION.md
+?? docs/qa/2026-10-02/artifacts/fix-claims-initial-context.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-instructions-findings.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-targeted-docs.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-context.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-identity.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-context.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-initial-inspect.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-source-read.txt
+/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api

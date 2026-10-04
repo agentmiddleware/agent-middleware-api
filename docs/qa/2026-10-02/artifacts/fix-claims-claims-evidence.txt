@@ -1,0 +1,4 @@
+  File "<string>", line 1
+    from pathlib import Path; import subprocess; subprocess.run(["rg","--files","-g","AGENTS.md","docs","tests"]); subprocess.run(["rg","-n","BE-100","docs/qa/2026-10-02/FINDINGS.md","docs/qa/2026-10-02/CLAIMS-REPORT.md"]); p=Path("docs/qa/2026-10-02/CLAIMS-REPORT.md"); s=p.read_text(); start=s.index("BE-100"); print(s[max(0,start-150):start+5500]); subprocess.run(["rg","-n","AMW|pytest process|test.db","/Users/sellers/.codex/memories/MEMORY.md"])]
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                   ^
+SyntaxError: unmatched ']'

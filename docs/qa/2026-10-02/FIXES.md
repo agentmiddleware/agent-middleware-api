@@ -1,0 +1,65 @@
+# QA fix pass — 2026-10-02
+
+Local branch: `qa/2026-10-02-fixes`, starting at `359d563`. No Critical or High findings were present. This pass considered all eight optional Medium/Low findings in the summary's recommended order. No remote mutation, deployment, provider command, migration, environment-file read, credential change, or secret-scan exception was authorized or performed.
+
+FixCounts: fixed=0 partial=0 deferred=0
+
+The machine-readable line above counts Critical and High findings only.
+
+| Finding ID | Severity | Title | Status | Commit SHA | Proving test (file::name) | Notes or reason deferred |
+| --- | --- | --- | --- | --- | --- | --- |
+| BE-100 | Medium | Integration guidance overstates receipt completion and local/upstream equivalence | fixed | `cfc1291`, `3297eb3` | `tests/test_qa_be100_documentation.py::test_be100_self_credentialing_scopes_retry_guarantees`, `::test_be100_tool_interface_scopes_retry_guarantees`, `::test_be100_pitch_scopes_retry_guarantees` | Corrected three guidance files; scoped upstream dispatch and finalized receipts, local manual review and fresh-key risk. Three tests failed on original guidance; 23 documentation/receipt/audit contention tests passed. Final gate caught one additional table claim; its regression failed before the follow-up and passed afterward. |
+| UX-001 | Medium | Comparison text fails WCAG AA contrast | fixed | `1a98a30` | `docs/qa/2026-10-02/ux-contracts.test.cjs::UX-001: paper and dark fit lists meet 4.5:1 contrast (default)`, `::UX-001: paper and dark fit lists meet 4.5:1 contrast (high)` | Uses existing paper text color only on paper fit lists. Both contrast-mode cases failed before and passed after; dark cards remain covered. Corresponding browser test is now ordinary; native launch is blocked. |
+| UX-002 | Medium | Scrolling operator commands lack explicit keyboard access | fixed | `8238663` | `docs/qa/2026-10-02/ux-contracts.test.cjs::UX-002: operator commands expose a named keyboard focus target` | Added tabindex, region role and name to the command block; existing focus outline retained. Negative control failed; offline focus assertion and 83 related Python tests passed. Browser regression now checks Tab, outline and ArrowRight; physical scrolling remains unverified. |
+| FE-002 | Medium | Explicit zero SDK action limit becomes 100 | fixed | `0440fdb` | `docs/qa/2026-10-02/frontend-components.test.cjs::FE-002: maxSteps=0 is not silently promoted to 100 actions` | One-line nullish default preserves zero and other explicit numbers for API validation. Two focused cases failed before, passed after. Added omitted/nullish/minimum/maximum/invalid boundary assertions; strict TypeScript check passed. |
+| FE-001 | Medium | Checked-in TypeScript SDK cannot run its declared build | deferred | — | `docs/qa/2026-10-02/frontend-components.test.cjs::FE-001: declared SDK build produces its advertised entrypoints` (retained TODO) | SDK is explicitly unshipped (`README.md:260-267`); no documented named active pilot requires it. The finding itself requires a pilot need before unfreezing packaging, consistent with the customer-validation freeze. Adding a packaging configuration would make that business decision. Declared build remains a known failure; no dependency change. |
+| BE-003 | Low | Outbound URL guards accept multicast destinations | fixed | `30ff418` | `tests/test_qa_20261002_backend.py::test_outbound_url_guard_rejects_multicast`, `::test_upstream_url_guard_rejects_multicast` | Explicit multicast rejection in both guards. All 12 literal/mixed-DNS cases failed before fix. Related result: 167 passed, one then-unfixed BE-002 xfail. Initial after-run exposed four incorrect message regex assertions in the new tests; corrected to the existing safe error code, with no product error-contract change. |
+| UX-003 | Low | Local operator links and examples target production | fixed | `ef29d58` | `docs/qa/2026-10-02/ux-contracts.test.cjs::UX-003: operator runtime links resolve on the served origin`, `::UX-003: inspection commands require an explicit API origin` | Runtime links use served origin; terminal examples use explicit local API_URL; external proof labeled hosted. Both new cases failed before, passed after; 83 related Python tests passed. No JavaScript key handling introduced. |
+| BE-002 | Low | OpenAPI omits supported Bearer authentication | fixed | `eb02ac1` | `tests/test_qa_20261002_backend.py::test_openapi_declares_supported_bearer_authentication` | Added optional HTTPBearer scheme as an OR alternative while preserving raw Authorization validation and precedence. Refreshed generated schema: only the scheme and 52 operation alternatives changed. Negative control failed; 130 QA/JWT/route-auth/tenant/IGA tests passed. |
+
+## Counts
+
+| Severity | Fixed | Partial | Deferred |
+| --- | ---: | ---: | ---: |
+| Critical | 0 | 0 | 0 |
+| High | 0 | 0 | 0 |
+| Medium | 4 | 0 | 1 |
+| Low | 3 | 0 | 0 |
+| All findings | 7 | 0 | 1 |
+
+## Full-suite comparison
+
+The reference baseline is the sweep after QA additions, not its earlier guard-failed run. All application proof/dormant surfaces are included with the same explicit safety exclusions.
+
+| Suite | Sweep baseline | After fixes |
+| --- | --- | --- |
+| Application | 3,655 passed / 0 failed / 60 skipped / 7 xfailed / 4 deselected | 3,671 passed / 0 failed / 60 skipped / 0 xfailed / 4 deselected (final run: 301.23 seconds; first run: identical counts in 310.48 seconds) |
+| Installed Python SDK | 129 passed | 129 passed / 0 failed / 0 skipped |
+| Installed OpenAI wrapper | 65 passed | 65 passed / 0 failed / 0 skipped |
+| Separate strict local posture | 12 passed | 12 passed / 0 failed / 0 skipped |
+| Frontend component/SDK plus new UX contracts | 8 passed / 0 unexpected failed / 2 TODO | 15 passed / 0 failed / 0 skipped / 1 TODO (FE-001) |
+| Native browser | 24 pre-navigation launch failures; nine later UX combinations only collected | All 33 attempted / 0 passed / 33 infrastructure launch failures / 0 skipped; no product assertions reached |
+
+The 16 additional app passes are seven promoted QA expected failures, six new mixed-DNS cases and three documentation cases. The original pre-QA existing-suite count was 3,628 passed / 60 skipped / 4 deselected. No new product regression appeared; no fix was reverted.
+
+Coverage in both fix runs is 21,250/24,267 statements (87.567478%), compared with the sweep's 21,249/24,266 (87.566966%). The denominator increased by the new Bearer scheme declaration; this tiny arithmetic change is not a meaningful coverage improvement. Coverage JSON and binary files remain temporary and are not committed. Resource/deprecation warnings occurred in both the sweep (66) and both fix runs (71). The logs retain unclosed-SQLite and deprecation warnings; they were not changed in this pass.
+
+Evidence: [final app run and skip reasons](artifacts/fix-full-app-final.txt), [first app run](artifacts/fix-full-app-after.txt), [Python SDK](artifacts/fix-python-sdk-after.txt), [OpenAI wrapper](artifacts/fix-openai-wrapper-after.txt), [strict posture](artifacts/fix-strict-posture-after.txt), [frontend/UX](artifacts/fix-ux-final-node-suite.txt), [browser attempt](artifacts/fix-ux-full-playwright-execution-isolated.txt).
+
+## Build, typecheck and lint
+
+- Static site build passed using synthetic public contact data; output is outside the repository.
+- Python SDK and OpenAI wrapper wheel/source builds passed; outputs are outside the repository.
+- Strict explicit-source TypeScript check passed. Declared SDK build remains the FE-001 failure.
+- Ruff passed; mypy passed for 185 app files; 16 JavaScript syntax checks passed.
+- Fresh OpenAPI export check passed before and after; runtime and committed schemas match.
+- Full frontend/UX Node suite: 15 passed, 0 failed, 0 skipped, 1 deferred FE-001 TODO.
+- Native browser matrix: all 33 cases attempted, including all nine formerly expected-failure UX combinations. Chromium: 11 sandbox launch failures. Firefox/WebKit: 22 executable-not-found failures because their downloaded folders were renamed to `.disabled-crashes` by an unknown actor; files still exist there. Earlier probes hit native launch aborts in both engines. Package versions and requested revisions match. No product assertions were reached; the native compatibility result is blocked, not passed. [Tooling diagnosis](artifacts/fix-ux-browser-tooling-discrepancy.txt). Occupied original QA ports were not reused or stopped; isolated temporary servers were stopped after the run.
+
+## Scope, review and remaining risks
+
+Independent local gate reviewed the complete fix range through `3297eb3` and found no remaining review issues. Targeted negative controls prove the original failures. Changed-file Gitleaks scan passed with zero detections under unchanged rules (237 files at that checkpoint); final staged Gitleaks scan also passed with zero detections (see the final closeout entries in FIX-SESSION-LOG.md). No package manifests or lockfiles were changed; temporary test-tool installation is not a product dependency upgrade. Pre-existing SDK priority-zero default behavior was observed but left outside this finding's scope.
+
+The full app suite keeps the sweep's safety exclusions: three provider-CLI test modules omitted and four environment-example-reading nodes deselected. SQLite cannot prove PostgreSQL concurrency/crash semantics; remote effects, live billing, deployed behavior, hosted CI and customer acceptance remain untested. The 60 skips retain the baseline categories: 44 PostgreSQL/infrastructure, 13 optional framework imports, one Python Playwright, one Linux-only and one opt-in long integration case. Physical browser keyboard scrolling, rendered contrast and screen-reader behavior remain unverified because native engines cannot launch. The fixes do not add downstream delivery guarantees or fresh-key deduplication.
+
+Original findings, coverage, session logs and evidence are preserved. New command artifacts normalize trailing horizontal whitespace and extra terminal blank lines after a staged whitespace-check failure; commands, output values and outcomes are retained. The summary receives only the requested fix-pass pointer. Complete command outcomes, decisions, dead ends and artifact links are in [FIX-SESSION-LOG.md](FIX-SESSION-LOG.md). Recommended next step: orchestrator review of these local commits, then its separately authorized publication workflow; resolve FE-001 only with named-pilot justification.

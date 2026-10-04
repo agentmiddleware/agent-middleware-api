@@ -1,0 +1,316 @@
+FILE README.md
+135: `make live-loop-proof` (against a running quickstart) writes a handoff bundle to
+136: `data/live-loop-proof/` — portable receipts, the issuer key set, and a
+137: `VERIFY.md` another engineer can follow with no account and no network access to
+138: this server.
+139:
+140: ## What it guarantees
+141:
+142: | Guarantee | What it means | Proof |
+143: |---|---|---|
+144: | **Charge-once under retry** | Same idempotency key → same receipt, no second dispatch, no second debit. A changed payload under that key conflicts. | `tests/test_adversarial_five_claims.py` |
+145: | **Budget containment** | A permit's `max_credits` is reserved by one atomic guarded `UPDATE`; concurrent invocations cannot over-spend it, including on SQLite. | `tests/test_permits.py`, `postgres_permit_concurrency` CI job |
+146: | **Interrupted-call accounting** | For the configured upstream tool, one persisted chain links the idempotency record, reservation, debit, dispatch attempt, receipt, and audit event. Ambiguity after the send claim is receipted `delivery_uncertain`, never silently redispatched. Local governed tools have no dispatch state machine and fail closed into manual review. | [docs/failure-semantics.md](docs/failure-semantics.md) |
+147: | **Offline-verifiable receipts** | Ed25519-signed; verifiable with no credentials and no network access to the issuer, using the SDK verifier or any JOSE tooling. | `GET /v1/receipts/{id}/portable`, `/.well-known/jwks.json` |
+148: | **Authority before money** | Out-of-scope, expired, revoked, or tampered permits are denied with a reason code *before* any charge. When a valid permit was present, that refusal is itself a signed receipt. Unpermitted and unknown-tool calls fail closed without one. | `tests/test_adversarial_five_claims.py` |
+149:
+150: CI runs the full release gate as one required check (`trust_release_gate`), so
+151: these claims cannot regress into `main` unproven.
+152: [docs/PROOF_MATRIX.md](docs/PROOF_MATRIX.md) maps every proof command to the
+153: invariant it asserts — and to what it does not prove.
+154:
+155: ## What it does not do
+156:
+157: - **Not universal exactly-once.** Gateway replay safety makes the *remote* side
+158:   effect exactly once only if the upstream tool also honors the forwarded
+159:   idempotency key.
+160: - **Not proof of downstream effect.** The dispatch claim is committed *before*
+161:   the network send, so it records the authority to send — not that a send
+162:   happened, and never that the tool acted.
+163: - **Not settlement or compliance.** An internal credit ledger, not merchant
+164:   settlement, dispute handling, or a certified compliance record.
+165: - **Not an IAM replacement.** Wallet isolation is application-layer
+166:   authorization and query scoping; PostgreSQL RLS and a public multi-tenant
+167:   isolation guarantee are not implemented.
+168: - **Not a transparency log.** Receipts verify offline, but nothing is anchored
+169:   externally, and audit chains are tamper-evident rather than immutable against
+170:   an administrator who controls both the database and its chain metadata.
+FILE app/routers/mcp.py
+215:
+216:     The audit event or the receipt could not be written for a call that had
+217:     already run or already moved the wallet. Both losses are deliberately
+218:     non-retryable, and this type is what carries that: it is not a subclass of
+219:     ``AuditChainContendedError`` or ``ReceiptWriteContendedError``, so neither
+220:     the routers' ``-32005`` handlers nor the idempotency unwind in
+221:     ``_execute_registered_tool`` can catch it and hand a charged caller a
+222:     "retry".
+223:
+224:     It exists because ``-32603``/``internal_error`` was the wrong answer, not
+225:     because the outcome is knowable. ``-32603`` is this pipeline's *unclassified*
+226:     channel -- `docs/failure-semantics.md` defines it as "a failure the pipeline
+227:     did not classify" -- and these two sites are the opposite of unclassified:
+228:     each caught a typed contention error, asked whether effects were committed,
+229:     and chose non-retryability on purpose. Reporting a deliberated state through
+230:     the unclassified channel left operators unable to separate it from a genuine
+231:     bug without grepping correlation ids, and left a client free to read
+232:     "internal error" as "try again", which with a *fresh* idempotency key runs
+233:     and charges the call a second time.
+234:
+235:     What the name claims is only the situation, never the outcome: effects are
+236:     committed, no receipt exists, the record is counted for manual review, and
+237:     the caller must not retry. Whether the tool's effect landed downstream stays
+238:     exactly as unknowable as it was. This is therefore not wedge #2 -- that wedge
+239:     turns an ambiguous outcome into a distinct *receipted* state, and the
+240:     defining feature here is that no receipt could be written at all. It is the
+241:     honest name for falling out of the receipted state machine.
+242:     """
+243:
+244:     jsonrpc_code = -32007
+245:     status_code = 500
+246:
+247:     def __init__(self, reason: str) -> None:
+248:         super().__init__(reason)
+249:         self.reason = reason
+250:
+251:
+252: def _terminal_record_contended_data(reason: str) -> dict[str, Any]:
+253:     """The machine-actionable body for a ``-32007``, shared by every surface.
+254:
+255:     Shaped like the other remediation-carrying errors on this path so a client
+256:     reads one convention: what went wrong, the specific reason code, and the
+257:     one action that is correct.
+258:     """
+259:     return {
+260:         "error": "manual_review_required",
+261:         "reason_code": reason,
+262:         "remediation": {
+263:             "type": "reconcile_out_of_band",
+264:             "detail": (
+265:                 "The call's effects are committed and no receipt was written. "
+266:                 "Do not retry with a new idempotency key: that would run and "
+267:                 "charge the call a second time. A governed record, where one "
+268:                 "was opened, stays held by the invocation that ran and answers "
+269:                 "idempotency_in_progress until an operator resolves it. This "
+270:                 "record is counted for manual review; reconcile from the "
+271:                 "ledger entry and the audit chain."
+272:             ),
+273:         },
+274:     }
+275:
+FILE app/routers/mcp.py
+2180:     assert isinstance(charge_result, LedgerEntry), (
+2181:         f"Expected LedgerEntry from non-dry-run charge, got {type(charge_result).__name__}"
+2182:     )
+2183:     assert credits_charged is not None
+2184:
+2185:     if execution_backend == "upstream_mcp":
+2186:         assert upstream_executor is not None
+2187:         assert dispatch_service is not None
+2188:         assert dispatch_attempt is not None
+2189:         assert permit_model is not None
+2190:         assert idem_begin is not None
+2191:         assert idempotency_key is not None
+2192:         return await _execute_upstream_after_charge(
+2193:             executor=upstream_executor,
+2194:             dispatch_service=dispatch_service,
+2195:             dispatch_attempt=dispatch_attempt,
+2196:             decision=decision,
+2197:             money=money,
+2198:             idem=idem,
+2199:             permit_model=permit_model,
+2200:             wallet_id=wallet_id,
+2201:             key_id=auth.key_id,
+2202:             endpoint=endpoint,
+2203:             idempotency_endpoint=idempotency_endpoint,
+2204:             transport=transport,
+2205:             idempotency_key=idempotency_key,
+2206:             idempotency_record_id=idem_begin.record_id,
+2207:             tool_name=tool_name,
+2208:             request_payload=effective_request_payload,
+2209:             arguments=arguments,
+2210:             registered_cost=registered_cost,
+2211:             credits_charged=credits_charged,
+2212:             ledger_entry_id=charge_result.entry_id,
+2213:             description=description,
+2214:             policy_metadata=policy_metadata,
+2215:             approval_check=approval_check,
+2216:         )
+2217:
+2218:     assert func is not None
+2219:     try:
+2220:         if inspect.iscoroutinefunction(func):
+2221:             result = await func(**arguments)
+2222:         else:
+2223:             result = func(**arguments)
+2224:     except Exception as exc:
+2225:         try:
+2226:             await money.refund_charge(
+2227:                 wallet_id=wallet_id,
+2228:                 charge_entry_id=charge_result.entry_id,
+FILE tests/test_receipt_write_contention_surface.py
+1: """What a contended receipt insert is allowed to tell the caller.
+2:
+3: The receipt is the last write on the governed money path, and it was the only
+4: one without a write-conflict restart: the wallet debit, the permit reserve, the
+5: idempotency record and the dispatch attempt all wrap theirs in
+6: ``run_with_write_conflict_retry``. So once those stopped losing SQLite locks,
+7: the surviving contention landed on ``INSERT INTO receipts`` and escaped as an
+8: unclassified JSON-RPC ``internal_error``.
+9:
+10: That is the specific thing this file exists to prevent, and the reason it
+11: matters is the one written on ``LedgerWriteContendedError``: a client that
+12: cannot tell an unclassified failure from a named retryable one has to assume
+13: its money may have moved. The case actually observed in CI was a *denial* --
+14: ``outcome='denied'``, ``reason_code='permit_budget_exceeded'``,
+15: ``credits_charged=0`` -- where nothing had been charged and the true answer was
+16: sitting in the row that failed to insert.
+17:
+18: The classification splits the same way the audit chain's does, and for the same
+19: reason (see ``tests/test_audit_chain_contention_surface.py``):
+20:
+21: - a refusal that ran nothing may say "retry", because a second attempt costs
+22:   nothing and no terminal record was left behind;
+23: - a call that already ran and was charged may not, because "retry" would invite
+24:   a second execution of something the caller has paid for.
+25:
+26: Contention is injected at the receipt service's own session factory rather than
+27: raced. A test that waits for a real lock passes on a fast machine for the wrong
+28: reason -- which is exactly how the original defect survived roughly three weeks
+29: of being called flaky.
+30: """
+31:
+32: from __future__ import annotations
+33:
+34: import uuid
+35: from collections.abc import Awaitable, Callable
+36: from datetime import datetime, timedelta, timezone
+37: from decimal import Decimal
+38: from typing import Any
+39:
+40: import pytest
+41: from httpx import ASGITransport, AsyncClient
+42: from sqlalchemy import func, select
+43: from sqlalchemy.exc import OperationalError
+44:
+45: from app.core.config import get_settings
+46: from app.core.resilience import WRITE_CONFLICT_MAX_ATTEMPTS
+47: from app.db.database import get_session_factory
+48: from app.db.models import (
+49:     IdempotencyRecordModel,
+50:     McpDispatchAttemptModel,
+51:     ReceiptModel,
+52:     WalletModel,
+53: )
+54: from app.main import app
+55: from app.routers.mcp import RECEIPT_WRITE_CONTENDED_AFTER_EFFECTS
+56: from app.schemas.billing import ServiceCategory
+57: from app.services import human_approval as human_approval_module
+58: from app.services import receipts as receipts_module
+59: from app.services.human_approval import HumanApprovalService
+60: from app.services.receipts import ReceiptWriteContendedError, get_receipt_service
+61: from app.services.service_registry import get_service_registry
+62: from app.services.upstream_mcp import UpstreamMcpResult
+63: from tests.test_trust_helpers import (
+64:     BOOTSTRAP_HEADERS,
+65:     create_tool_permit,
+66:     provision_agent_wallet,
+67: )
+68:
+69: TOOL_COST = 2.0
+70:
+71:
+72: @pytest.fixture
+73: async def client() -> AsyncClient:
+74:     transport = ASGITransport(app=app)
+75:     async with AsyncClient(transport=transport, base_url="http://test") as value:
+76:         yield value
+77:
+78:
+79: @pytest.fixture
+80: def standard_mcp_enabled(monkeypatch):
+81:     monkeypatch.setenv("ENABLE_STANDARD_MCP_ENDPOINT", "true")
+82:     get_settings.cache_clear()
+83:     yield
+84:     monkeypatch.setenv("ENABLE_STANDARD_MCP_ENDPOINT", "false")
+85:     get_settings.cache_clear()
+86:
+87:
+88: @pytest.fixture
+89: def echo_tool():
+90:     tool_name = "receipt-contention-echo"
+91:     runs = {"count": 0}
+92:
+93:     def echo(message: str = "ok") -> dict[str, Any]:
+94:         runs["count"] += 1
+95:         return {"message": message}
+96:
+97:     get_service_registry().register_local(
+98:         service_id=tool_name,
+99:         name="Receipt contention echo",
+100:         description="Receipt write-contention surface test tool",
+FILE tests/test_audit_chain_contention_surface.py
+1: """Where an audit-chain loss is retryable, and the one place it must not be.
+2:
+3: ``append_chained_audit_event`` retries a contended per-wallet chain head 64
+4: times and then raises ``AuditChainContendedError``. What that should mean to
+5: the caller depends entirely on whether the call had already run.
+6:
+7: A refusal that ran nothing -- a permit denial, a lost quote -- can say "retry":
+8: no tool executed and no wallet moved, so a second attempt costs nothing and the
+9: first left no terminal record behind. That is the retryable ``-32005`` answer.
+10:
+11: Every audit write past the charge is the opposite, and is the reason this file
+12: exists. It audits *after* the tool ran and the wallet was charged, so "retry"
+13: would invite a second execution of a call the caller already paid for. Nor can
+14: it be softened into a success: ``create_receipt`` takes
+15: ``audit_event_id=audit_event.event_id``, so no audit event means no signed
+16: receipt either, and ``reconcile_stuck_records`` repairs a stuck record only when
+17: a receipt exists -- without one it counts the record for manual review instead.
+18: The honest answer there is its own non-retryable code, ``-32007``: the state is
+19: one the pipeline classified deliberately, so spending the unclassified
+20: ``-32603`` on it hid a known outcome among genuine bugs and left a client free
+21: to read "internal error" as "try again".
+22:
+23: Finalization is only the most obvious of those sites. The local
+24: refund-succeeded path and the upstream post-charge helpers audit after
+25: execution too, and guarding finalize alone left both free to hand a caller who
+26: had already run and paid a "retry" -- so each is pinned separately below rather
+27: than trusted to a shared reading of the control flow.
+28:
+29: The retryable half carries its own obligation, tested here too: the -32005 has
+30: to name a retry the caller can actually make. A governed call has an
+31: idempotency record open by the time these refusals happen, and reconciliation
+32: deliberately does not delete uncharged local records, so a record left in
+33: progress would meet every retry of that key with ``idempotency_in_progress``
+34: forever.
+35:
+36: The last two tests pin that obligation from both sides.
+37:
+38: A remote refusal has already driven its dispatch attempt terminal, and
+39: ``mcp_dispatch_attempts`` pins the record by a NOT NULL foreign key, so the
+40: release cannot happen at all -- the unwind's DELETE raises and is only logged.
+41: There the retryable answer has to name the reconciler that owns the record
+42: instead of a retry of the key.
+43:
+44: A local refusal behind a human-approval gate is the opposite, and is why the
+45: retryable answer is kept there rather than withheld. The single-use approval is
+46: spent, so the retry is refused -- but refused with a signed, receipted
+47: human_approval_consumed denial, which is a terminal answer. Withholding the
+48: release to spare the caller that refusal would strand the key instead, in
+49: exactly the way the paragraph above describes, and no ``-32007`` would be owed
+50: either: nothing was charged and nothing ran, so there is no committed effect for
+51: that code to name. The second request is asserted, not just the first, because
+52: that is where the difference shows.
+53: """
+54:
+55: from __future__ import annotations
+56:
+57: import hashlib
+58: import json
+59: from collections.abc import Awaitable, Callable
+60: from decimal import Decimal
+61: from typing import Any
+62:
+63: import pytest
+64: from httpx import ASGITransport, AsyncClient
+65: from sqlalchemy import select

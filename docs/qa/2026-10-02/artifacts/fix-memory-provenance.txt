@@ -1,0 +1,12 @@
+
+### rollout_summary_files
+
+- rollout_summaries/2026-09-28T02-47-54-1DNd-delegated_33_item_backlog_audit_amw_regengine.md (cwd=/Users/sellers/Documents/Codex/2026-09-27/how-x20, rollout_path=/Users/sellers/.codex/sessions/2026/09/27/rollout-2026-09-27T19-47-54-01a0e5e9-6970-75f2-bace-54db160ab20f.jsonl, updated_at=2026-09-28T07:14:10+00:00, thread_id=01a0e5e9-6970-75f2-bace-54db160ab20f, partial; eight disjoint lanes plus integrator)
+
+### keywords
+
+- 700743, codex-backlog-2026-09-27.md, team-worktree, git remote get-url origin, agent-middleware-api, RegEngine, Dollarloop, test.db, SQLite, one pytest per worktree
+
+## Task 2: Harden AMW retry proof and Railway release-source guard locally
+
+### rollout_summary_files

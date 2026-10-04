@@ -1,0 +1,1 @@
+Prepared final closeout: aggregate UTC logs, explicit documentation-only path allowlist, staged whitespace/secret checks, requested local commit, clean-status readback. Final commit/readback recorded at an explicit log-freeze boundary to avoid recursive log changes.

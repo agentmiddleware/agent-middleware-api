@@ -1,0 +1,63 @@
+diff --git a/docs/qa/2026-10-02/ux-contracts.test.cjs b/docs/qa/2026-10-02/ux-contracts.test.cjs
+index 35c66dd..798f533 100644
+--- a/docs/qa/2026-10-02/ux-contracts.test.cjs
++++ b/docs/qa/2026-10-02/ux-contracts.test.cjs
+@@ -54,3 +54,16 @@ for (const contrast of ['default', 'high']) {
+     } finally {dom.window.close();}
+   });
+ }
++
++test('UX-002: operator commands expose a named keyboard focus target', () => {
++  const dom = page('static/dashboard.html');
++  try {
++    const {document} = dom.window;
++    const code = document.querySelector('pre');
++    assert.equal(code.tabIndex, 0, 'Scrollable commands must join sequential keyboard navigation');
++    assert.equal(code.getAttribute('role'), 'region');
++    assert.equal(code.getAttribute('aria-label'), 'Authenticated inspection commands');
++    code.focus();
++    assert.equal(document.activeElement, code);
++  } finally {dom.window.close();}
++});
+diff --git a/docs/qa/2026-10-02/ux-regressions.spec.cjs b/docs/qa/2026-10-02/ux-regressions.spec.cjs
+index f113b21..aac9b98 100644
+--- a/docs/qa/2026-10-02/ux-regressions.spec.cjs
++++ b/docs/qa/2026-10-02/ux-regressions.spec.cjs
+@@ -25,7 +25,6 @@ test('UX-001: comparison fit text meets minimum contrast', async ({page}) => {
+ });
+
+ test('UX-002: dashboard scrollable commands have explicit keyboard access', async ({page}) => {
+-  test.fail(true, 'UX-002: scrollable pre has neither tabindex nor focusable content.');
+   await page.goto('http://127.0.0.1:8766/dashboard.html');
+   const code = page.locator('pre');
+   const state = await code.evaluate(element => ({
+@@ -35,6 +34,16 @@ test('UX-002: dashboard scrollable commands have explicit keyboard access', asyn
+     ) !== null,
+   }));
+   expect(!state.scrolls || state.keyboardAccessible).toBe(true);
++  await expect(code).toHaveAccessibleName('Authenticated inspection commands');
++  await page.locator('a[href$="/llms.txt"]').focus();
++  await page.keyboard.press('Tab');
++  await expect(code).toBeFocused();
++  expect(await code.evaluate(element => parseFloat(getComputedStyle(element).outlineWidth)))
++    .toBeGreaterThan(0);
++  if (state.scrolls) {
++    await page.keyboard.press('ArrowRight');
++    await expect.poll(() => code.evaluate(element => element.scrollLeft)).toBeGreaterThan(0);
++  }
+ });
+
+ test('UX-003: operator runtime links remain on the served origin', async ({page}) => {
+diff --git a/static/dashboard.html b/static/dashboard.html
+index 39c0566..3724b31 100644
+--- a/static/dashboard.html
++++ b/static/dashboard.html
+@@ -370,7 +370,7 @@
+         Inspect your own permits, receipts, and audit events from a trusted terminal.
+         Keep the key in your environment; do not paste it into a public web page.
+       </p>
+-      <pre><code>export AGENT_MIDDLEWARE_API_KEY=[REDACTED]
++      <pre tabindex="0" role="region" aria-label="Authenticated inspection commands"><code>export AGENT_MIDDLEWARE_API_KEY=[REDACTED]
+
+ curl --fail-with-body \
+   -H "X-API-Key: [REDACTED] \

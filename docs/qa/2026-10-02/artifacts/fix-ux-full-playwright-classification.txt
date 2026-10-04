@@ -1,0 +1,1 @@
+Chromium report contains MachPortRendezvous sandbox permission failure: True

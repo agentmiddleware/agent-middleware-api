@@ -1,0 +1,74 @@
+diff --git a/app/core/auth.py b/app/core/auth.py
+index f58b6d0..350038c 100644
+--- a/app/core/auth.py
++++ b/app/core/auth.py
+@@ -12,7 +12,7 @@ from dataclasses import dataclass, replace
+ from typing import Annotated
+
+ from fastapi import Depends, Header, HTTPException, Request, Security, status
+-from fastapi.security import APIKeyHeader
++from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
+ [REDACTED] .config import get_settings
+ from .oidc_iga import EnterprisePrincipal, IGADecision, IGAError, is_iga_issuer_token
+ from .trust_mode import is_production_like_environment
+@@ -32,6 +32,12 @@ api_key_header = APIKeyHeader(
+ )
+
+
++bearer_header = HTTPBearer(
++    auto_error=False,
++    description="Bearer [REDACTED] via Authorization; this header takes precedence over X-API-Key.",
++)
++
++
+ @dataclass(frozen=True)
+ class AuthContext:
+     """Authenticated caller details used for tenant-scoped authorization."""
+@@ -124,6 +130,7 @@ CREDENTIAL_ACCEPTANCE: ContextVar[CredentialAcceptance | None] = ContextVar(
+ async def get_auth_context(
+     api_key: [REDACTED] | None = Security(api_key_header),
+     authorization: Annotated[str | None, Header()] = None,
++    _bearer: HTTPAuthorizationCredentials | None = Security(bearer_header),
+ ) -> AuthContext:
+     """
+     Validate credentials and return caller context.
+@@ -137,6 +144,8 @@ async def get_auth_context(
+     this module is already imported, and a captured `settings` would keep
+     serving the stale key list.
+     """
++    # HTTPBearer [REDACTED] the OpenAPI alternative; raw Authorization stays
++    # authoritative so malformed headers cannot fall back to an API key.
+     context = await _resolve_auth_context(api_key, authorization)
+     acceptance = CREDENTIAL_ACCEPTANCE.get()
+     if acceptance is not None:
+diff --git a/tests/test_qa_20261002_backend.py b/tests/test_qa_20261002_backend.py
+index 56844ad..cced5d8 100644
+--- a/tests/test_qa_20261002_backend.py
++++ b/tests/test_qa_20261002_backend.py
+@@ -80,10 +80,23 @@ def test_openapi_schema_is_valid_with_unique_operation_ids():
+         app.openapi_schema = old_schema
+
+
+-@pytest.mark.xfail(strict=True, reason="BE-002: Bearer [REDACTED] is absent from OpenAPI security schemes")
+ def test_openapi_declares_supported_bearer_authentication():
+-    schemes = app.openapi()["components"]["securitySchemes"].values()
+-    assert any(s.get("type") == "http" and s.get("scheme") == "bearer" for s in schemes)
++    old_schema = app.openapi_schema
++    try:
++        app.openapi_schema = None
++        schema = app.openapi()
++        schemes = schema["components"]["securitySchemes"]
++        bearer = [name for name, definition in schemes.items()
++                  if definition.get("type") == "http" and definition.get("scheme") == "bearer"]
++        assert len(bearer) == 1
++        security = schema["paths"]["/v1/permits"]["get"]["security"]
++        assert {bearer[0]: []} in security
++        assert {"APIKeyHeader": []} in security
++        assert all(len(alternative) == 1 for alternative in security)
++        for path in ("/health", "/.well-known/agent.json"):
++            assert not schema["paths"][path]["get"].get("security")
++    finally:
++        app.openapi_schema = old_schema
+
+
+ def test_scalar_unicode_replay_keys_roundtrip_without_normalization():
