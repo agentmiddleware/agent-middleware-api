@@ -2,7 +2,7 @@ name: CI — Agent Middleware API
 
 on:
   push:
-    branches: [master, main, develop, openclaw/amw-schema040-bridge]
+    branches: [master, main, develop, openclaw/amw-schema040-bridge, hotfix/redis-health-34fbdb9]
   pull_request:
     branches: [master, main]
 
