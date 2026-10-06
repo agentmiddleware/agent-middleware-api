@@ -15,7 +15,9 @@ Two behaviors are switchable so the same deployment answers both questions:
 * Post-effect failure (per call, ``after_effect``). ``none`` returns normally,
   ``error`` raises after the effect is committed, and ``hang`` holds the
   response after the effect is committed so a gateway timeout lands in the
-  ``delivery_uncertain`` window.
+  ``delivery_uncertain`` window. ``hang_seconds`` must exceed the gateway's
+  ``MCP_UPSTREAM_CALL_TIMEOUT_SECONDS`` by a safe margin (default 90 against
+  the gateway default of 30).
 
 This is a synthetic fixture, not evidence of partner-owned customer validation.
 """
@@ -37,7 +39,11 @@ from starlette.responses import JSONResponse
 
 CONTROL_HEADER = "X-MCP-Refund-Control"
 REFUND_TOOL_NAME = "partner.refund"
-MAX_HANG_SECONDS = 120.0
+# The gateway's MCP_UPSTREAM_CALL_TIMEOUT_SECONDS defaults to 30 and is
+# configurable, so a hang must outlast that timeout by a wide margin to land in
+# delivery_uncertain deterministically instead of racing the response.
+DEFAULT_HANG_SECONDS = 90.0
+MAX_HANG_SECONDS = 600.0
 _AFTER_EFFECT_MODES = ("none", "error", "hang")
 _INVOCATION_META_KEY = "io.agentmiddleware/invocation_id"
 _IDEMPOTENCY_META_KEY = "io.agentmiddleware/idempotency_key"
@@ -192,19 +198,25 @@ def _apply_refund(
     return {"effect_id": int(effect_id), "deduplicated": False}
 
 
-def _effect_rows(refund_ref: str | None = None) -> list[dict[str, Any]]:
-    sql = (
-        "SELECT effect_id, refund_ref, amount_cents, invocation_id, "
-        "idempotency_key, worker_pid, created_at FROM refund_effects"
-    )
+def _effect_rows(refund_ref: str | None = None) -> tuple[list[dict[str, Any]], int]:
+    """Return up to 1000 effect rows plus the true total for the same filter."""
+    where = ""
     parameters: tuple[str, ...] = ()
     if refund_ref is not None:
-        sql += " WHERE refund_ref = ?"
+        where = " WHERE refund_ref = ?"
         parameters = (refund_ref,)
-    sql += " ORDER BY effect_id LIMIT 1000"
     with _connect() as connection:
-        rows = connection.execute(sql, parameters).fetchall()
-    return [dict(row) for row in rows]
+        total = connection.execute(
+            "SELECT COUNT(*) FROM refund_effects" + where, parameters
+        ).fetchone()[0]
+        rows = connection.execute(
+            "SELECT effect_id, refund_ref, amount_cents, invocation_id, "
+            "idempotency_key, worker_pid, created_at FROM refund_effects"
+            + where
+            + " ORDER BY effect_id LIMIT 1000",
+            parameters,
+        ).fetchall()
+    return [dict(row) for row in rows], int(total)
 
 
 def _totals() -> dict[str, int]:
@@ -247,7 +259,7 @@ async def partner_refund(
     amount_cents: int,
     ctx: Context,
     after_effect: str = "none",
-    hang_seconds: float = 30.0,
+    hang_seconds: float = DEFAULT_HANG_SECONDS,
 ) -> dict[str, Any]:
     if not refund_ref or len(refund_ref) > 512:
         raise ValueError("refund_ref must contain between 1 and 512 characters")
@@ -320,8 +332,15 @@ async def stress_effects(request: Request) -> JSONResponse:
         return JSONResponse(
             {"detail": "refund_partner_refund_ref_invalid"}, status_code=400
         )
-    rows = await asyncio.to_thread(_effect_rows, refund_ref)
-    return JSONResponse({"count": len(rows), "effects": rows})
+    rows, total = await asyncio.to_thread(_effect_rows, refund_ref)
+    return JSONResponse(
+        {
+            "count": total,
+            "returned": len(rows),
+            "truncated": len(rows) < total,
+            "effects": rows,
+        }
+    )
 
 
 @server.custom_route("/__stress/mode", methods=["POST"], include_in_schema=False)

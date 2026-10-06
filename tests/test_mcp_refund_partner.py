@@ -89,6 +89,50 @@ def test_honoring_mode_rejects_key_reuse_with_different_arguments(
     )
 
 
+def test_effects_endpoint_reports_the_true_total_beyond_the_row_limit(
+    tmp_path: Path,
+) -> None:
+    _run(
+        tmp_path,
+        "from starlette.testclient import TestClient\n"
+        "from tests.support import mcp_refund_partner_app as p\n"
+        "with p._connect() as connection:\n"
+        "    connection.executemany(\n"
+        '        "INSERT INTO refund_effects (refund_ref, amount_cents, '
+        'invocation_id, idempotency_key, worker_pid) VALUES (?, ?, ?, ?, ?)",\n'
+        "        [('big', 1, 'i', f'k{n}', 1) for n in range(1001)]\n"
+        "        + [('small', 1, 'i', 'ks', 1)],\n"
+        "    )\n"
+        "    connection.commit()\n"
+        "client = TestClient(p.app)\n"
+        "headers = {p.CONTROL_HEADER: 'refund-control'}\n"
+        "body = client.get('/__stress/effects', headers=headers,\n"
+        "    params={'refund_ref': 'big'}).json()\n"
+        "assert body['count'] == 1001, body['count']\n"
+        "assert body['returned'] == 1000\n"
+        "assert body['truncated'] is True\n"
+        "small = client.get('/__stress/effects', headers=headers,\n"
+        "    params={'refund_ref': 'small'}).json()\n"
+        "assert (small['count'], small['returned'], small['truncated']) "
+        "== (1, 1, False)\n",
+    )
+
+
+def test_default_hang_outlasts_the_default_gateway_timeout(tmp_path: Path) -> None:
+    _run(
+        tmp_path,
+        "import inspect\n"
+        "from app.core.config import Settings\n"
+        "from tests.support import mcp_refund_partner_app as p\n"
+        "gateway_default = Settings.model_fields["
+        "'MCP_UPSTREAM_CALL_TIMEOUT_SECONDS'].default\n"
+        "default = inspect.signature(p.partner_refund)"
+        ".parameters['hang_seconds'].default\n"
+        "assert default >= 2 * gateway_default, (default, gateway_default)\n"
+        "assert p.MAX_HANG_SECONDS > default\n",
+    )
+
+
 def test_control_endpoints_require_the_control_token_and_switch_mode(
     tmp_path: Path,
 ) -> None:

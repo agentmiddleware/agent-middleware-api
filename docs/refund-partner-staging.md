@@ -11,16 +11,21 @@ service in the **staging** environment only.
 
 ## Behavior
 
-- Tool `partner.refund(refund_ref, amount_cents, after_effect="none", hang_seconds=30)`.
+- Tool `partner.refund(refund_ref, amount_cents, after_effect="none", hang_seconds=90)`.
 - Reads the forwarded `_meta["io.agentmiddleware/idempotency_key"]` and
   `_meta["io.agentmiddleware/invocation_id"]`; both are required.
 - `POST /__stress/mode {"honor_idempotency": true|false}` switches at runtime.
   Off: each dispatch commits a new effect. On: a repeated key returns the first
   effect, and the same key with different arguments is rejected.
 - `after_effect`: `none` returns, `error` raises after the effect is committed,
-  `hang` holds the response after the effect is committed.
+  `hang` holds the response after the effect is committed. `hang_seconds`
+  defaults to 90 (max 600) and must exceed the gateway's
+  `MCP_UPSTREAM_CALL_TIMEOUT_SECONDS` (default 30) by a wide margin, or the
+  response can win the race and the call will not end as `delivery_uncertain`.
 - `GET /__stress/health` and `GET /__stress/effects[?refund_ref=...]` report
-  counts, total cents refunded, and the effect rows. All `/__stress/*` routes
+  counts, total cents refunded, and the effect rows. `/__stress/effects`
+  returns at most 1000 rows; `count` is the true total, `returned` is the row
+  count, and `truncated` says whether rows were cut. All `/__stress/*` routes
   require the `X-MCP-Refund-Control` header.
 
 ## Deploy (staging only)
