@@ -101,6 +101,8 @@ You reused an `Idempotency-Key` with different payload. Use a fresh UUID for eac
 ### `delivery_uncertain` receipt
 The gateway claimed a send but has no trustworthy terminal result. Delivery and the downstream effect may or may not have occurred; this receipt does not prove upstream acceptance or execution. Under the configured conservative policy, the charge stands and replaying the same key returns the uncertain outcome without redispatching. Do not retry automatically. Reconcile against authoritative downstream state before making a new attempt. See [docs/partner-first-tool-runbook.md](docs/partner-first-tool-runbook.md).
 
+On the standard `/mcp` endpoint this outcome arrives as a `tools/call` result with `isError: true` and `_meta["io.agentmiddleware/outcome"].status` set to `"unknown"`, with the do-not-resend instruction in its text, not as a JSON-RPC `-32005` error. `/mcp/messages` and the REST surface keep `-32005`.
+
 ---
 
 ## Examples fail

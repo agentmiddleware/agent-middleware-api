@@ -17,6 +17,7 @@ from mcp.types import LATEST_PROTOCOL_VERSION
 from app.core.config import get_settings
 from app.main import app
 from app.routers import mcp_standard as standard_mcp_router
+from app.routers.mcp import GovernedToolError
 from app.schemas.billing import ServiceCategory
 from app.services.idempotency import (
     IdempotencyInProgressError,
@@ -24,6 +25,7 @@ from app.services.idempotency import (
 )
 from app.services.mcp_generator import McpGenerator
 from app.services.service_registry import get_service_registry
+from tests.test_delivery_uncertain_replay import AmbiguousExecutor
 from tests.test_trust_helpers import BOOTSTRAP_HEADERS, provision_agent_wallet
 
 # The SDK's streamable HTTP transport requires an explicit Accept header.
@@ -464,6 +466,173 @@ async def test_tools_call_reports_governed_invoke_contention_with_existing_code(
         "code": -32005,
         "message": "idempotency_in_progress",
     }
+
+
+# ── A lost upstream response must not read as retryable to the model ────────
+# -32005 is this surface's retryable code, and a JSON-RPC error commonly
+# reaches the model as its message alone, so delivery_uncertain is returned
+# as a tool result (isError) the model can read. The receipt evidence and the
+# no-redispatch replay are unchanged.
+
+
+def _register_ambiguous_upstream(tool_name: str) -> AmbiguousExecutor:
+    executor = AmbiguousExecutor()
+    get_service_registry().register_upstream(
+        service_id=tool_name,
+        name="Standard Ambiguous Upstream",
+        description="Upstream tool whose response is lost after dispatch",
+        category=ServiceCategory.AGENT_COMMS,
+        executor=executor,
+        input_schema={"type": "object", "properties": {"test": {"type": "string"}}},
+        output_schema=None,
+        credits_per_unit=2.0,
+        upstream_tool_name=tool_name,
+        upstream_origin="https://test.example.com",
+    )
+    return executor
+
+
+@pytest.mark.anyio
+async def test_tools_call_delivery_uncertain_is_a_tool_result_the_model_can_read(
+    client, standard_mcp_enabled, clean_database
+):
+    provisioned = await provision_agent_wallet(client)
+    tool_name = "standard-ambiguous-upstream"
+    executor = _register_ambiguous_upstream(tool_name)
+    call = _rpc(
+        "tools/call", params={"name": tool_name, "arguments": {"test": "value"}}
+    )
+    headers = {
+        **provisioned["agent_headers"],
+        **MCP_HEADERS,
+        "Idempotency-Key": "standard-uncertain-1",
+    }
+    try:
+        first = await client.post("/mcp", json=call, headers=headers)
+        assert first.status_code == 200
+        body = first.json()
+        assert "error" not in body
+        result = body["result"]
+        assert result["isError"] is True
+        text = result["content"][0]["text"]
+        assert text.startswith("delivery_uncertain: outcome unknown.")
+        assert "The gateway will not resend it." in text
+        assert "Do not call this tool again for the same action" in text
+        assert "same Idempotency-Key returns this same result" in text
+
+        receipt = result["receipt"]
+        assert receipt["outcome"] == "delivery_uncertain"
+        assert text.endswith(f"Receipt: {receipt['receipt_id']}.")
+        assert result["_meta"]["io.agentmiddleware/receipt"] == receipt
+        outcome = result["_meta"]["io.agentmiddleware/outcome"]
+        assert outcome["status"] == "unknown"
+        assert outcome["reason"] == "delivery_uncertain"
+        assert outcome["redispatched"] is False
+        assert outcome["remediation"]["type"] == "verify_before_new_attempt"
+        assert outcome["dispatch"]["state"] == "delivery_uncertain"
+        assert executor.dispatch_count == 1
+
+        # Same key: the identical result, no second dispatch, no second debit.
+        replay = await client.post("/mcp", json=call, headers=headers)
+        assert replay.status_code == 200
+        assert replay.json() == body
+        assert executor.dispatch_count == 1
+
+        ledger = await client.get(
+            f"/v1/billing/ledger/{provisioned['agent_wallet_id']}",
+            headers=provisioned["agent_headers"],
+        )
+        assert ledger.status_code == 200
+        debits = [e for e in ledger.json()["entries"] if e["action"] == "debit"]
+        assert len(debits) == 1
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.anyio
+async def test_tools_call_delivery_uncertain_without_key_warns_a_retry_is_a_new_call(
+    client, standard_mcp_enabled, clean_database
+):
+    provisioned = await provision_agent_wallet(client)
+    tool_name = "standard-ambiguous-upstream-keyless"
+    executor = _register_ambiguous_upstream(tool_name)
+    try:
+        response = await client.post(
+            "/mcp",
+            json=_rpc(
+                "tools/call",
+                params={"name": tool_name, "arguments": {"test": "value"}},
+            ),
+            headers={**provisioned["agent_headers"], **MCP_HEADERS},
+        )
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+    assert response.status_code == 200
+    result = response.json()["result"]
+    assert result["isError"] is True
+    text = result["content"][0]["text"]
+    assert "carried no Idempotency-Key" in text
+    assert "a new, separately charged call" in text
+    assert "same Idempotency-Key returns" not in text
+    assert result["_meta"]["io.agentmiddleware/outcome"]["status"] == "unknown"
+    assert executor.dispatch_count == 1
+
+
+@pytest.mark.anyio
+async def test_tools_call_other_governed_errors_stay_jsonrpc_errors(
+    client,
+    standard_mcp_enabled,
+    clean_database,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Only delivery_uncertain leaves the error channel; the rest keep codes."""
+    provisioned = await provision_agent_wallet(client)
+    tool_name = "standard-governed-upstream-error"
+
+    async def upstream_returned_error(*_args, **_kwargs):
+        raise GovernedToolError(
+            "upstream_returned_error",
+            receipt={"receipt_id": "rcpt_test", "outcome": "upstream_returned_error"},
+            extra_data={
+                "dispatch": {"attempt_id": "att_test", "state": "returned_error"}
+            },
+            status_code=502,
+            jsonrpc_code=-32006,
+        )
+
+    registry = get_service_registry()
+    registry.register_local(
+        service_id=tool_name,
+        name="Standard Governed Upstream Error",
+        description="Standard MCP governed terminal-error contract test",
+        category=ServiceCategory.AGENT_COMMS,
+        func=lambda: {"ok": True},
+        credits_per_unit=2.0,
+        unit_name="call",
+    )
+    monkeypatch.setattr(
+        standard_mcp_router, "_handle_tools_call", upstream_returned_error
+    )
+    try:
+        response = await client.post(
+            "/mcp",
+            json=_rpc("tools/call", params={"name": tool_name, "arguments": {}}),
+            headers={
+                **provisioned["agent_headers"],
+                **MCP_HEADERS,
+                "Idempotency-Key": "standard-upstream-error-1",
+            },
+        )
+    finally:
+        registry.unregister_local(tool_name)
+
+    assert response.status_code == 200
+    error = response.json()["error"]
+    assert error["code"] == -32006
+    assert error["message"] == "upstream_returned_error"
+    assert error["data"]["receipt"]["receipt_id"] == "rcpt_test"
+    assert error["data"]["dispatch"]["state"] == "returned_error"
 
 
 # ── Bodies the reply could not carry are refused before dispatch ─────────────

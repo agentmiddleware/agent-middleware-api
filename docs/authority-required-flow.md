@@ -223,9 +223,14 @@ approver card shows the frozen terms of the denied call, nothing broader.
 `-32005` means both `delivery_uncertain` (terminal, charged, do not
 redispatch) and the human-approval waits (retryable, uncharged, please
 resume) — opposite instructions under one code. On `/mcp` the worst of this
-is already solved: `human_approval_pending` carries
-`data.error = "authority_required"` while `delivery_uncertain`'s data
-carries `receipt` and `dispatch` and never an `error` key. The remaining
+is solved by moving `delivery_uncertain` out of the error channel: it returns
+a tool result with `isError: true`, explicit do-not-resend text, the receipt,
+and `_meta["io.agentmiddleware/outcome"].status == "unknown"`
+(`_delivery_uncertain_tool_result` in `app/routers/mcp_standard.py`), because
+a JSON-RPC error commonly reaches the model as its message alone.
+`human_approval_pending` still carries `data.error = "authority_required"`.
+`/mcp/messages` and REST keep `delivery_uncertain` on `-32005`, where its
+data carries `receipt` and `dispatch` and never an `error` key. The remaining
 collision is `human_approval_unavailable`: it is raised as `-32005` with an
 empty data object that reaches the client as no `data` at all
 (`app/routers/mcp.py` passes `data={}`, and `app/routers/mcp_standard.py`
