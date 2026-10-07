@@ -15,11 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tool again before checking the downstream system; the signed receipt
   (top-level `receipt` and `_meta["io.agentmiddleware/receipt"]`); and
   `_meta["io.agentmiddleware/outcome"]` (`status: "unknown"`, the dispatch
-  attempt, `remediation`). It was a JSON-RPC `-32005` error, which is this
-  surface's retryable code and commonly reaches the model as its message
-  alone. A call sent without a client Idempotency-Key is told that calling
-  again is a new, separately charged call. Same-key replay is identical and
-  never redispatches. `/mcp/messages`, REST, and the Python SDK are unchanged.
+  attempt, `idempotency_key_supplied`, `remediation`). It was a JSON-RPC
+  `-32005` error, which is this surface's retryable code and commonly
+  reaches the model as its message alone. A call sent without a client
+  Idempotency-Key is told, in both the text and the remediation, that
+  calling again is a new, separately charged call. Same-key replay is
+  identical and never redispatches. `/mcp/messages`, REST, and the Python
+  SDK are unchanged.
 
 ### Added — optional Jev risk advice
 

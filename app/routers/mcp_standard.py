@@ -400,15 +400,28 @@ def _delivery_uncertain_tool_result(
     """
     receipt = error.receipt or {}
     receipt_id = receipt.get("receipt_id")
+    # A keyless call's key was generated here and never returned, so the
+    # caller cannot replay it: both the text and the structured remediation
+    # must say a new attempt is a new charge rather than promise a replay.
     if client_key_supplied:
         retry_guidance = (
             "Repeating this request with the same Idempotency-Key returns this "
             "same result without running the tool again."
         )
+        remediation_detail = (
+            "Check the downstream system of record for this action before any "
+            "new attempt. A same-key replay returns this result and never "
+            "redispatches."
+        )
     else:
         retry_guidance = (
             "This request carried no Idempotency-Key, so calling the tool again "
             "would run it again as a new, separately charged call."
+        )
+        remediation_detail = (
+            "Check the downstream system of record for this action before any "
+            "new attempt. This call carried no Idempotency-Key, so any new "
+            "attempt is a new dispatch and a new charge."
         )
     sentences = [
         "delivery_uncertain: outcome unknown.",
@@ -425,13 +438,10 @@ def _delivery_uncertain_tool_result(
         "status": "unknown",
         "reason": _DELIVERY_UNCERTAIN,
         "redispatched": False,
+        "idempotency_key_supplied": client_key_supplied,
         "remediation": {
             "type": "verify_before_new_attempt",
-            "detail": (
-                "Check the downstream system of record for this action before "
-                "any new attempt. A same-key replay returns this result and "
-                "never redispatches."
-            ),
+            "detail": remediation_detail,
         },
     }
     dispatch = error.extra_data.get("dispatch")

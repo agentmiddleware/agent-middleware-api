@@ -528,7 +528,10 @@ async def test_tools_call_delivery_uncertain_is_a_tool_result_the_model_can_read
         assert outcome["status"] == "unknown"
         assert outcome["reason"] == "delivery_uncertain"
         assert outcome["redispatched"] is False
+        assert outcome["idempotency_key_supplied"] is True
         assert outcome["remediation"]["type"] == "verify_before_new_attempt"
+        detail = outcome["remediation"]["detail"]
+        assert "same-key replay returns this result" in detail
         assert outcome["dispatch"]["state"] == "delivery_uncertain"
         assert executor.dispatch_count == 1
 
@@ -575,7 +578,14 @@ async def test_tools_call_delivery_uncertain_without_key_warns_a_retry_is_a_new_
     assert "carried no Idempotency-Key" in text
     assert "a new, separately charged call" in text
     assert "same Idempotency-Key returns" not in text
-    assert result["_meta"]["io.agentmiddleware/outcome"]["status"] == "unknown"
+    outcome = result["_meta"]["io.agentmiddleware/outcome"]
+    assert outcome["status"] == "unknown"
+    # The generated key was never returned, so the structured remediation
+    # must not promise a replay the caller cannot make.
+    assert outcome["idempotency_key_supplied"] is False
+    detail = outcome["remediation"]["detail"]
+    assert "same-key replay" not in detail
+    assert "any new attempt is a new dispatch and a new charge" in detail
     assert executor.dispatch_count == 1
 
 
