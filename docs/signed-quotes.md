@@ -58,6 +58,15 @@ back to the live price. The caller asked to be charged a specific number;
 substituting a different one is the one outcome a price lock must never
 produce. Re-quote and retry.
 
+This denial applies to a new invocation, not retrieval of an already completed
+result. Retrying the same completed invocation with its original consumed quote,
+idempotency key and logical request returns the cached result and receipt after
+the usual wallet and permit-key access checks. It does not consume the quote,
+reserve permit budget, dispatch or debit again. Keep the original quote and key
+when recovering a lost completed response. A different key, changed logical
+request, or missing/incomplete stored result cannot use this exception; a quote
+remains single-use for charging.
+
 An invoke that consumed a quote and then failed to charge (insufficient funds)
 **returns the quote to `active`**, so a top-up inside the window can still use
 the price it was promised.
