@@ -76,7 +76,15 @@ def export_bundle(
     with httpx.Client(base_url=base, headers=headers, timeout=60.0) as client:
         health = _get(client, "/health")
         wallets_payload = _get(client, "/v1/billing/wallets")
+        _require(
+            isinstance(wallets_payload, dict),
+            "GET /v1/billing/wallets returned a non-object response",
+        )
         wallets = wallets_payload.get("wallets") or []
+        _require(
+            isinstance(wallets, list),
+            "GET /v1/billing/wallets returned wallets in an unexpected shape",
+        )
         if wallet_id:
             wallets = [w for w in wallets if w.get("wallet_id") == wallet_id]
             _require(bool(wallets), f"wallet_id not found: {wallet_id}")
