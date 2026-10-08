@@ -2,9 +2,11 @@
 
 A retried charge, transfer, or fiat top-up prepare without an
 Idempotency-Key cannot be told apart from a new request, so the server
-would move money twice. These tests pin the fix: the key is required by
-default, a same-key retry replays the original result without moving
-money again, and the prepare key reaches Stripe's PaymentIntent creation.
+would move money twice. These tests pin the fix: with
+REQUIRE_IDEMPOTENCY_KEY on the key is required, with it off (the default,
+so legacy clients keep working) a keyless call still succeeds, a same-key
+retry replays the original result without moving money again, and the
+prepare key reaches Stripe's PaymentIntent creation.
 """
 
 from unittest.mock import MagicMock, patch
@@ -58,14 +60,34 @@ async def funded_agent(client, api_headers, clean_database):
     return agent.json()["wallet_id"]
 
 
+@pytest.fixture(autouse=True)
+def _require_idempotency_key(monkeypatch):
+    """Turn the requirement on for this module; it is opt-in by default."""
+    monkeypatch.setenv("REQUIRE_IDEMPOTENCY_KEY", "true")
+    get_settings.cache_clear()
+    yield
+    monkeypatch.delenv("REQUIRE_IDEMPOTENCY_KEY", raising=False)
+    get_settings.cache_clear()
+
+
 def _relax_idempotency_requirement(monkeypatch):
     monkeypatch.setenv("REQUIRE_IDEMPOTENCY_KEY", "false")
     get_settings.cache_clear()
 
 
 def _restore_idempotency_requirement(monkeypatch):
+    monkeypatch.setenv("REQUIRE_IDEMPOTENCY_KEY", "true")
+    get_settings.cache_clear()
+
+
+def test_requirement_is_off_by_default(monkeypatch):
+    """Opt-in: with no env override the key stays optional for legacy clients."""
     monkeypatch.delenv("REQUIRE_IDEMPOTENCY_KEY", raising=False)
     get_settings.cache_clear()
+    try:
+        assert get_settings().REQUIRE_IDEMPOTENCY_KEY is False
+    finally:
+        get_settings.cache_clear()
 
 
 @pytest.mark.anyio

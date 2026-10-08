@@ -27,8 +27,9 @@ def require_idempotency_key(idempotency_key: str | None) -> None:
     """Refuse a money-moving request that arrived without an Idempotency-Key.
 
     A retry without a key cannot be told apart from a new request, so the
-    server would execute it twice. When ``REQUIRE_IDEMPOTENCY_KEY`` is off
-    (client migration window) the key stays optional and this is a no-op.
+    server would execute it twice. ``REQUIRE_IDEMPOTENCY_KEY`` is off by
+    default (legacy clients keep working); while off the key stays optional
+    and this is a no-op.
     """
     if idempotency_key:
         return

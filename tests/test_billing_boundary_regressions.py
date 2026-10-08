@@ -8,6 +8,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
+from app.core.config import get_settings
 from app.core.time import utc_now
 from app.db.database import get_session_factory
 from app.db.models import IdempotencyRecordModel, LedgerEntryModel, WalletModel
@@ -65,9 +66,35 @@ async def test_terminal_policy_denial_replays_even_after_policy_changes(
         )
 
 
+@pytest.fixture
+def require_idempotency_key_on(monkeypatch):
+    """REQUIRE_IDEMPOTENCY_KEY is opt-in; turn it on for one test only."""
+    monkeypatch.setenv("REQUIRE_IDEMPOTENCY_KEY", "true")
+    get_settings.cache_clear()
+    yield
+    monkeypatch.delenv("REQUIRE_IDEMPOTENCY_KEY", raising=False)
+    get_settings.cache_clear()
+
+
+@pytest.mark.anyio
+async def test_unknown_wallet_charge_is_404_without_key_when_requirement_off(
+    client, clean_database, monkeypatch
+):
+    monkeypatch.delenv("REQUIRE_IDEMPOTENCY_KEY", raising=False)
+    get_settings.cache_clear()
+    try:
+        params = {"wallet_id": "missing-billing-wallet", "service": "platform_fee"}
+        unkeyed = await client.post(
+            "/v1/billing/charge", params=params, headers=BOOTSTRAP_HEADERS
+        )
+        assert unkeyed.status_code == 404
+    finally:
+        get_settings.cache_clear()
+
+
 @pytest.mark.anyio
 async def test_unknown_wallet_charge_is_404_with_key_400_without(
-    client, clean_database
+    client, clean_database, require_idempotency_key_on
 ):
     params = {"wallet_id": "missing-billing-wallet", "service": "platform_fee"}
     unkeyed = await client.post(
