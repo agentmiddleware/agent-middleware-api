@@ -54,7 +54,9 @@ async def test_upload_video_without_url(client, api_headers):
     assert resp.status_code == 202
     data = resp.json()
     assert data["status"] == "awaiting_upload"
-    assert data["upload_url"] is not None
+    # No direct-upload route exists, so no upload URL is advertised.
+    assert data["upload_url"] is None
+    assert "/upload" not in resp.text
 
 
 @pytest.mark.anyio

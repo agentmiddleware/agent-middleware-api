@@ -307,15 +307,28 @@ class ContentPipelineResponse(BaseModel):
 
 
 class GeneratedContent(BaseModel):
-    """A single generated content piece."""
+    """A metadata record describing a generated piece: no bytes are rendered
+    or stored, so there is nothing to download."""
 
     content_id: str
     pipeline_id: str
     format: ContentFormat
     title: str
     description: str | None = None
-    download_url: str
-    thumbnail_url: str | None = None
+    download_url: str = Field(
+        default="",
+        description=(
+            "Always empty on this proof surface: pieces are metadata only "
+            "and no download route exists. Empty means no rendered bytes."
+        ),
+    )
+    thumbnail_url: str | None = Field(
+        default=None,
+        description=(
+            "Always null on this proof surface: no thumbnails are rendered "
+            "and no thumbnail route exists."
+        ),
+    )
     duration_seconds: float | None = None
     dimensions: str | None = Field(
         default=None,
@@ -350,15 +363,16 @@ class PlatformAnalytics(BaseModel):
 
 
 class AnalyticsIngestRequest(BaseModel):
-    """Submit engagement data to improve scheduling."""
+    """Submit engagement data for storage and summary."""
 
     metrics: list[PlatformAnalytics] = Field(
         ...,
         min_length=1,
         max_length=500,
         description=(
-            "Engagement metrics from platform APIs. The scheduler "
-            "learns from this data."
+            "Engagement metrics from platform APIs. Metrics are stored and "
+            "summarized; recommendations still use fixed default curves, so "
+            "ingesting data does not change scheduling."
         ),
     )
 
@@ -372,7 +386,8 @@ class AnalyticsIngestResponse(BaseModel):
 
 
 class ScheduleRecommendation(BaseModel):
-    """Algorithmic recommendation for when/where to post."""
+    """Simulated recommendation for when/where to post, picked from fixed
+    default engagement curves rather than measured data."""
 
     content_id: str
     platform: str
@@ -381,7 +396,10 @@ class ScheduleRecommendation(BaseModel):
         ...,
         ge=0.0,
         le=1.0,
-        description="Model confidence in this time slot's engagement potential.",
+        description=(
+            "Fixed default-curve score for this time slot, not a measured "
+            "engagement prediction."
+        ),
     )
     reasoning: str = Field(
         ...,

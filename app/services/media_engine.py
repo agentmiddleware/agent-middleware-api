@@ -214,15 +214,17 @@ class ClipRenderer:
 
         duration = hook.end_time_seconds - hook.start_time_seconds
 
+        # No bytes are rendered and no download/thumbnail routes exist, so
+        # the URLs stay null instead of advertising dead links.
         clip = GeneratedClip(
             clip_id=clip_id,
             video_id=video.video_id,
             hook_id=hook.hook_id,
             aspect_ratio=aspect_ratio,
             duration_seconds=round(duration, 1),
-            download_url=f"/v1/media/clips/{clip_id}/download",
+            download_url=None,
             caption_style=caption_style,
-            thumbnail_url=f"/v1/media/clips/{clip_id}/thumbnail",
+            thumbnail_url=None,
             generated_at=datetime.now(timezone.utc),
         )
 

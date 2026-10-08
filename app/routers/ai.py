@@ -137,9 +137,11 @@ async def make_decision(
     auth: AuthContext = Depends(get_auth_context),
 ):
     """
-    Make an autonomous decision based on context.
+    Developer helper: ask the model to suggest an action for a context.
 
-    The AI analyzes the situation and recommends the best action.
+    Not autonomous decision-making: when no LLM key is configured or the
+    model output does not parse, the response falls back to heuristic text
+    with a fixed confidence score. Treat the output as ungrounded.
     """
     ai = get_agent_intelligence()
     await ai.initialize()
@@ -191,9 +193,10 @@ async def diagnose_and_heal(
     auth: AuthContext = Depends(get_auth_context),
 ):
     """
-    Automatically diagnose and suggest a fix for an issue.
+    Developer helper: ask the model to suggest a fix for an issue.
 
-    The AI analyzes error logs and produces a potential fix.
+    The suggestion is ungrounded when no LLM key is configured or the
+    model output does not parse.
     Note: Fixes are not auto-applied — human review recommended.
     """
     ai = get_agent_intelligence()
@@ -242,9 +245,10 @@ async def get_heal(heal_id: str, auth: AuthContext = Depends(get_auth_context)):
 @router.post("/query", response_model=QueryResponse)
 async def query_natural_language(request: QueryRequest):
     """
-    Ask questions about the system in natural language.
+    Developer helper: ask the model a question in natural language.
 
-    The AI answers based on the provided data context or general knowledge.
+    When no LLM key is configured the answer is a labeled mock string, not
+    a real response.
     """
     ai = get_agent_intelligence()
     await ai.initialize()
@@ -301,9 +305,10 @@ async def learn_from_experience(
     auth: AuthContext = Depends(get_auth_context),
 ):
     """
-    Learn from an experience.
+    Developer helper: store a model-generated summary of an experience.
 
-    The AI extracts patterns and stores insights for future decisions.
+    When no LLM key is configured the stored insight is a labeled mock
+    string, not a real summary.
     """
     ai = get_agent_intelligence()
     await ai.initialize()
