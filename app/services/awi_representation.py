@@ -84,6 +84,9 @@ class ProgressiveRepresentationEngine:
                 "generation_time_ms": int(generation_time * 1000),
                 "size_bytes": self._estimate_size(content),
                 "options": options,
+                # True when the page state came from the mock path rather
+                # than a loaded browser page.
+                "page_state_simulated": bool(page_state.get("simulated", False)),
             },
         }
 
@@ -173,6 +176,7 @@ class ProgressiveRepresentationEngine:
             "quality": quality,
             "max_width": max_width,
             "placeholder": "[Screenshot data - base64 encoded]",
+            "simulated": True,
             "size_hint": "small",
             "text_overlay": self._extract_text(page_state.get("html", ""))[:200],
         }

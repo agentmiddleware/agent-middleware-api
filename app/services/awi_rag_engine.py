@@ -679,6 +679,21 @@ class AWIRAGEngine:
 
         return deleted
 
+    def uses_live_embeddings(self) -> bool:
+        """Report whether scoring uses a hosted embedding model.
+
+        Live embeddings require a text-embedding model plus a configured
+        LLM key. Otherwise search runs on deterministic hash vectors,
+        which behave like keyword recall rather than meaning based search.
+        """
+        from ..core.config import get_settings
+
+        try:
+            api_key = get_settings().LLM_API_KEY
+        except Exception:
+            return False
+        return bool(self._embedding_model.startswith("text-embedding") and api_key)
+
     async def get_stats(self) -> dict[str, Any]:
         """Get statistics about the memory store."""
         total_memories = len(self._memories)
@@ -697,6 +712,7 @@ class AWIRAGEngine:
             "total_accesses": total_accesses,
             "embedding_model": self._embedding_model,
             "embedding_dimension": self._embedding_dimension,
+            "embeddings_simulated": not self.uses_live_embeddings(),
             "vector_store": "chroma" if self._use_chroma else "in_memory",
         }
 
