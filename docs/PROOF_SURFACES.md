@@ -103,6 +103,8 @@ named customer needs them (see AGENTS.md, "Current Company Phase").
 | `app.routers.auth` (dormant) | JWT exchange (`/v1/auth/*`) — second auth story; wedge contract is `X-API-Key` |
 | `app.routers.kyc` (dormant) | Stripe Identity KYC |
 | `app.routers.planner` (dormant) | Budget optimizer |
+| `app.routers.pods` (dormant) | Named groups of agent API keys under one shared budget |
+| `app.routers.x402` (dormant) | Settlement facilitation (permit-governed 402 authorization, shadow-ledger metering, signed receipts); the `docs/settlement-rails.md` freeze holds, so it never writes real ledger entries |
 | `app.routers.billing.expansion_router` (dormant) | Child/swarm wallets, transfers, top-ups, marketplace, velocity status, dry-run sandbox |
 
 They mount via `app.main.mount_dormant_trust_surfaces` when
@@ -116,6 +118,23 @@ surface gates.
 Re-promoting one to `CORE_TRUST_ROUTERS` requires the unfreeze evidence bar
 in AGENTS.md: a named active prospect, a concrete tool, a documented
 workflow blocker, a committed owner and date.
+
+## Frozen: action-permit issuance (`permits.action_router`)
+
+Product decision: server-issued action permits (`POST /v1/action-permits`)
+stay **frozen**. The configured upstream has no qualified ActionToolBinding,
+so no deployment mounts the router — not production, not proof-enabled
+instances. Only explicit test fixtures mount it (`action_permit_route` in
+`tests/conftest.py`), and recovery paths are retained.
+
+Consequences for sellers and demos:
+
+- `POST /v1/action-permits` answers 404 in every deployment. Do not pitch
+  server-issued action permits until this freeze is explicitly lifted.
+- The route appears in neither the API root service index (`GET /`), nor
+  `GET /v1/discover`, nor the OpenAPI schema of any shipped posture.
+- Lifting the freeze needs the same unfreeze evidence bar as a dormant
+  surface above, plus a qualified upstream binding.
 
 ## Agent rules
 

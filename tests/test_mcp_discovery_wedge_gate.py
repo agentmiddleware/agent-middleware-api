@@ -164,6 +164,31 @@ async def test_awi_manifest_404_when_proof_off(client, proof_surfaces_off):
 
 
 @pytest.mark.anyio
+async def test_frozen_action_issuance_never_advertised_when_proof_off(
+    client, proof_surfaces_off
+):
+    """Frozen action-permit issuance stays unmounted and unadvertised.
+
+    `permits.action_router` is only ever mounted by explicit test fixtures,
+    so the wedge posture must neither route nor advertise it: no root service
+    entry, no discover vocabulary, no OpenAPI path, and a 404 on the wire.
+    """
+    root = await client.get("/")
+    assert root.status_code == 200
+    for entry in root.json()["services"]["mcp_server"]["endpoints"]:
+        assert "action-permit" not in entry
+
+    discover = await client.get("/v1/discover")
+    assert discover.status_code == 200
+    assert "action-permit" not in discover.text
+
+    assert "/v1/action-permits" not in app.openapi()["paths"]
+
+    resp = await client.post("/v1/action-permits", json={})
+    assert resp.status_code == 404
+
+
+@pytest.mark.anyio
 async def test_llm_txt_uses_public_url_and_wedge_quickstart(client, monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "PUBLIC_URL", "https://api.thisisatest.tech")
