@@ -2581,3 +2581,248 @@ async def test_agent_wallet_provisioning_error_completes_idempotency_record(
     )
     assert replay.status_code == 404, replay.text
     assert replay.json() == first.json()
+
+
+# --- QA deep pass: charge aliases, boundary validation, top-up gate ---
+
+
+async def _make_funded_agent(
+    client, api_headers, sponsor_credits=10000.0, budget_credits=5000.0
+):
+    sponsor_resp = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={
+            "sponsor_name": "QA Boundary Corp",
+            "email": "qa-boundary@t.com",
+            "initial_credits": sponsor_credits,
+        },
+        headers=api_headers,
+    )
+    assert sponsor_resp.status_code == 201, sponsor_resp.text
+    sponsor_id = sponsor_resp.json()["wallet_id"]
+    agent_resp = await client.post(
+        "/v1/billing/wallets/agent",
+        json={
+            "sponsor_wallet_id": sponsor_id,
+            "agent_id": "qa-boundary-bot",
+            "budget_credits": budget_credits,
+        },
+        headers=api_headers,
+    )
+    assert agent_resp.status_code == 201, agent_resp.text
+    return sponsor_id, agent_resp.json()["wallet_id"]
+
+
+@pytest.mark.anyio
+async def test_charge_accepts_service_category_query_param(
+    client, api_headers, clean_database
+):
+    """The canonical service_category parameter bills like the service alias."""
+    _, agent_wallet_id = await _make_funded_agent(client, api_headers)
+    resp = await client.post(
+        f"/v1/billing/charge?wallet_id={agent_wallet_id}"
+        "&service_category=telemetry_pm&units=4",
+        headers=api_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["service_category"] == "telemetry_pm"
+    assert data["amount"] == -4.0  # 4 units x 1 credit
+
+
+@pytest.mark.anyio
+async def test_charge_explicit_service_category_wins_over_alias(
+    client, api_headers, clean_database
+):
+    """When both spellings arrive, the explicit parameter decides the price."""
+    _, agent_wallet_id = await _make_funded_agent(client, api_headers)
+    resp = await client.post(
+        f"/v1/billing/charge?wallet_id={agent_wallet_id}"
+        "&service_category=iot_bridge&service=telemetry_pm&units=10",
+        headers=api_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["service_category"] == "iot_bridge"
+    assert data["amount"] == -20.0  # 10 units x 2 credits, not 10 x 1
+
+
+@pytest.mark.anyio
+async def test_charge_unknown_service_value_is_422(client, api_headers):
+    resp = await client.post(
+        "/v1/billing/charge?wallet_id=wlt-qa-unknown&service=not_a_service",
+        headers=api_headers,
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_ledger_limit_bounds_are_validated(client, api_headers, clean_database):
+    """Ledger pagination limits are enforced before any row is read."""
+    _, agent_wallet_id = await _make_funded_agent(client, api_headers)
+    too_small = await client.get(
+        f"/v1/billing/ledger/{agent_wallet_id}?limit=0", headers=api_headers
+    )
+    assert too_small.status_code == 422
+    too_large = await client.get(
+        f"/v1/billing/ledger/{agent_wallet_id}?limit=201", headers=api_headers
+    )
+    assert too_large.status_code == 422
+    ok = await client.get(
+        f"/v1/billing/ledger/{agent_wallet_id}?limit=1", headers=api_headers
+    )
+    assert ok.status_code == 200
+    assert ok.json()["total"] == 1
+
+
+@pytest.mark.anyio
+async def test_transfer_negative_amount_is_rejected_without_moving_credits(
+    client, api_headers, clean_database
+):
+    """A negative transfer amount is refused and neither balance changes."""
+    sponsor_a = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={
+            "sponsor_name": "QA Transfer A",
+            "email": "qa-a@t.com",
+            "initial_credits": 1000,
+        },
+        headers=api_headers,
+    )
+    sponsor_b = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={
+            "sponsor_name": "QA Transfer B",
+            "email": "qa-b@t.com",
+            "initial_credits": 1000,
+        },
+        headers=api_headers,
+    )
+    wallet_a = sponsor_a.json()["wallet_id"]
+    wallet_b = sponsor_b.json()["wallet_id"]
+    resp = await client.post(
+        f"/v1/billing/transfer?from_wallet_id={wallet_a}"
+        f"&to_wallet_id={wallet_b}&amount=-5",
+        headers=api_headers,
+    )
+    assert resp.status_code == 422, resp.text
+    for wallet_id in (wallet_a, wallet_b):
+        got = await client.get(f"/v1/billing/wallets/{wallet_id}", headers=api_headers)
+        assert got.json()["balance"] == 1000.0
+
+
+@pytest.mark.anyio
+async def test_prepare_top_up_rejects_non_positive_fiat(
+    client, api_headers, clean_database
+):
+    """A zero fiat amount is refused before any payment provider is called."""
+    sponsor_id, _ = await _make_funded_agent(client, api_headers)
+    resp = await client.post(
+        f"/v1/billing/top-up/prepare?wallet_id={sponsor_id}&amount_fiat=0",
+        headers=api_headers,
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_prepare_top_up_kyc_gate_refuses_unverified_wallet(
+    client, api_headers, clean_database, monkeypatch
+):
+    """With KYC gating on, an unverified wallet cannot start a fiat top-up."""
+    monkeypatch.setattr(get_settings(), "KYC_REQUIRED_FOR_TOPUP", True)
+    sponsor_id, _ = await _make_funded_agent(client, api_headers)
+    resp = await client.post(
+        f"/v1/billing/top-up/prepare?wallet_id={sponsor_id}&amount_fiat=50.0",
+        headers=api_headers,
+    )
+    assert resp.status_code == 403, resp.text
+    assert resp.json()["detail"]["error"] == "kyc_required"
+
+
+@pytest.mark.anyio
+async def test_create_sponsor_wallet_rejects_negative_initial_credits(
+    client, api_headers
+):
+    """Credit issuance cannot start with a negative balance."""
+    resp = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={
+            "sponsor_name": "Negative Corp",
+            "email": "negative@t.com",
+            "initial_credits": -100.0,
+        },
+        headers=api_headers,
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_agent_wallet_zero_budget_is_rejected(
+    client, api_headers, clean_database
+):
+    """Provisioning an agent wallet with no budget is refused."""
+    sponsor_resp = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={
+            "sponsor_name": "Zero Budget Corp",
+            "email": "zero@t.com",
+            "initial_credits": 1000,
+        },
+        headers=api_headers,
+    )
+    assert sponsor_resp.status_code == 201
+    resp = await client.post(
+        "/v1/billing/wallets/agent",
+        json={
+            "sponsor_wallet_id": sponsor_resp.json()["wallet_id"],
+            "agent_id": "zero-budget-bot",
+            "budget_credits": 0,
+        },
+        headers=api_headers,
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.anyio
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "BUG app/routers/billing.py transfer 402 path: the stored idempotency "
+        "body is the flat error dict while the first response renders it "
+        "wrapped in detail, so the replay body differs from the original."
+    ),
+)
+async def test_failed_transfer_replay_matches_original_error_body(
+    client, api_headers, clean_database
+):
+    """A retried failed transfer must replay the exact original error body."""
+    sponsor_id, agent_wallet_id = await _make_funded_agent(
+        client, api_headers, sponsor_credits=10000.0, budget_credits=100.0
+    )
+    headers = {**api_headers, "Idempotency-Key": "qa-transfer-402-replay"}
+    url = (
+        f"/v1/billing/transfer?from_wallet_id={agent_wallet_id}"
+        f"&to_wallet_id={sponsor_id}&amount=500"
+    )
+    first = await client.post(url, headers=headers)
+    assert first.status_code == 402, first.text
+    replay = await client.post(url, headers=headers)
+    assert replay.status_code == 402, replay.text
+    assert replay.json() == first.json()
+
+
+@pytest.mark.anyio
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "BUG app/routers/billing.py get_velocity_status: an unknown wallet "
+        "answers 200 with an error body instead of 404 like every other "
+        "wallet endpoint in this router."
+    ),
+)
+async def test_velocity_status_for_unknown_wallet_is_404(client, api_headers):
+    """Velocity status for a missing wallet must be a 404, not a 200."""
+    resp = await client.get(
+        "/v1/billing/wallets/wlt-no-such-wallet/velocity", headers=api_headers
+    )
+    assert resp.status_code == 404
