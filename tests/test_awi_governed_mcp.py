@@ -49,6 +49,41 @@ def test_always_governed_tools_are_registered_with_require_permit():
         assert record.get("require_permit") is True
 
 
+def test_pointer_tool_descriptions_name_the_http_route_pointer():
+    """Discovery must not present endpoint pointers as live browser actions."""
+    pointer_ids = {tool["service_id"] for tool in MCP_PHASE9_TOOLS} - {
+        "awi_passkey_challenge"
+    }
+    assert pointer_ids, "expected pointer tools beside the live challenge tool"
+    for tool in MCP_PHASE9_TOOLS:
+        if tool["service_id"] == "awi_passkey_challenge":
+            assert "HTTP route pointer" not in tool["description"]
+        else:
+            assert "HTTP route pointer" in tool["description"], tool["service_id"]
+
+
+def test_marketplace_stub_descriptions_say_preview_only(monkeypatch):
+    """Discovery must not present contract-only stubs as live integrations."""
+    from app.core.config import get_settings
+    from app.services.mcp_phase9_tools import (
+        DEFAULT_MCP_STUB_SERVICE_IDS,
+        register_default_mcp_services,
+        unregister_proof_surface_mcp_stubs,
+    )
+
+    monkeypatch.setattr(get_settings(), "ENABLE_PROOF_SURFACES", True)
+    register_default_mcp_services()
+    try:
+        registry = get_service_registry()
+        for service_id in sorted(DEFAULT_MCP_STUB_SERVICE_IDS):
+            record = registry.get_local(service_id)
+            assert record is not None, service_id
+            assert record["description"].startswith("Preview only:"), service_id
+    finally:
+        unregister_proof_surface_mcp_stubs()
+        _reregister_phase9()
+
+
 @pytest.mark.anyio
 async def test_manifest_annotates_require_permit(client):
     resp = await client.get("/mcp/tools.json")
