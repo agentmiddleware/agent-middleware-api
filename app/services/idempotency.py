@@ -10,13 +10,16 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, cast
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, delete as sa_delete, or_, select
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col
 
-from app.core.resilience import run_with_write_conflict_retry
+from app.core.resilience import (
+    is_retryable_write_conflict,
+    run_with_write_conflict_retry,
+)
 from app.core.config import get_settings
 from app.core.time import to_naive_utc, utc_now
 from app.db.database import get_session_factory
@@ -569,10 +572,13 @@ class IdempotencyService:
                     replay=replay,
                 )
             except OperationalError as exc:
-                # SQLite can report a write-contention race as "database is
-                # locked" instead of a unique-key IntegrityError. Preserve the
-                # same bounded replay behavior and never expose a raw 500.
-                if "database is locked" not in str(exc):
+                # SQLite can report a write-contention race as a lock error
+                # instead of a unique-key IntegrityError. Classify with the
+                # same predicate the write-conflict retry uses ("database
+                # table is locked" and snapshot variants take the same
+                # bounded replay path as "database is locked") and never
+                # expose a raw 500. Anything substantive still propagates.
+                if not is_retryable_write_conflict(exc):
                     raise
                 await session.rollback()
                 result = await session.execute(
@@ -859,9 +865,27 @@ class IdempotencyService:
                 and not await may_abandon_action_owner(record, session)
             ):
                 return False
-            await session.delete(record)
+            # Delete under the same eligibility terms just re-checked above.
+            # The row lock that would serialize this with a concurrent
+            # complete() is a silent no-op on SQLite, so a response or charge
+            # checkpoint committed after this transaction's read must still
+            # refuse: re-checking in the statement keeps a lost race from
+            # erasing replay protection for money that already moved. A zero
+            # rowcount means the row moved on; that is a no-op, not an error.
+            deleted = await session.execute(
+                sa_delete(IdempotencyRecordModel)
+                .where(
+                    cast(
+                        ColumnElement[bool],
+                        IdempotencyRecordModel.record_id == record.record_id,
+                    ),
+                    cast(Any, IdempotencyRecordModel.response_json).is_(None),
+                    cast(Any, IdempotencyRecordModel.ledger_entry_id).is_(None),
+                )
+                .execution_options(synchronize_session=False)
+            )
             await session.commit()
-            return True
+            return (cast(Any, deleted).rowcount or 0) == 1
 
     async def mark_charged(
         self,
