@@ -5,6 +5,12 @@
 > passed the registry preflight. See
 > [MCP Registry Submission](mcp-registry-submission.md).
 
+**Preflight status (all must be YES before submitting):**
+
+- [ ] Public contact monitored (same bar as the registry preflight).
+- [ ] Standard MCP endpoint enabled on a live deployment.
+- [ ] Registry preflight passed against that deployment.
+
 ## Listing Information
 
 **Service Name:** Agent Middleware API

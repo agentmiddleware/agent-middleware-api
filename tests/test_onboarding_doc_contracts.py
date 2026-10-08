@@ -20,8 +20,23 @@ def read(name):
 
 def test_golden_path_dogfood_arguments_bind_without_invoking_tool():
     doc = read("golden-path.md")
-    replacement = re.search(r'with `(\{"text": "hello"\})`', doc)
-    assert replacement, "The stock dogfood substitution must include its arguments"
+    # The page runs verbatim on a stock server: no substitution paragraph,
+    # no test-only tool names.
+    assert "golden-path-echo" not in doc
+    assert "another-registered-tool" not in doc
+    assert "ENABLE_DOGFOOD_TOOL=true" in doc
+    assert "ENABLE_DOGFOOD_SECOND_TOOL=true" in doc
+    # The permit and both invokes target the stock dogfood tool.
+    assert doc.count("partner.notes.write") >= 4
+    assert "partner.notes.count" in doc
+    assert "tool:partner.notes.write:invoke" in doc
+    # Every documented invoke argument object must bind to _write_note.
+    # The doc shows shell-escaped JSON, so unescape before parsing.
+    payloads = [
+        match.replace('\\"', '"')
+        for match in re.findall(r'\\"arguments\\": (\{[^}]*\})', doc)
+    ]
+    assert payloads, "The golden path must show its invoke arguments"
     tree = ast.parse((ROOT / "app/services/dogfood_tool.py").read_text())
     function = next(
         n
@@ -33,8 +48,9 @@ def test_golden_path_dogfood_arguments_bind_without_invoking_tool():
     ast.fix_missing_locations(module)
     scope = {}
     exec(compile(module, "dogfood-signature", "exec"), scope)
-    inspect.signature(scope["_write_note"]).bind(**json.loads(replacement[1]))
-    assert "both the first invoke and its replay" in doc
+    for payload in payloads:
+        inspect.signature(scope["_write_note"]).bind(**json.loads(payload))
+    assert "when replaying" in doc
 
 
 def test_partner_install_has_verification_extra_for_source_and_wheel():

@@ -11,6 +11,15 @@ hourly.
 
 ## Publish gate (read first)
 
+**Preflight status (all must be YES before publishing):**
+
+- [ ] Public contact monitored: `CONTACT_EMAIL` (or equivalent) set to a
+  monitored inbox, no placeholder values.
+- [ ] Endpoint enabled: a deployment approved to serve `POST /mcp`
+  (`ENABLE_STANDARD_MCP_ENDPOINT=true`) is live at the remote URL.
+- [ ] Preflight passed: the publish workflow's live `initialize` plus
+  `tools/list` probe succeeds against that deployment.
+
 **The entry is intentionally unpublished, and `server.json` declares no
 remote.** A registry entry would declare a `streamable-http` remote at
 `POST /mcp`. That endpoint is implemented (`app/routers/mcp_standard.py`:

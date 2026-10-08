@@ -3,6 +3,24 @@
 **Audience:** operators deploying the trust-plane API.  
 **Product lens:** [`WEDGE.md`](../WEDGE.md) + [`SECURITY_LIMITATIONS.md`](../SECURITY_LIMITATIONS.md).
 
+## Minimal path (20 lines)
+
+1. Provision one Railway project per customer: one API service, one
+   PostgreSQL, one Redis, one unique public domain.
+2. Set the required variables in [Required production variables](#required-production-variables)
+   (signing seed and key id, `VALID_API_KEYS`, `DATABASE_URL`, `ENVIRONMENT=production`).
+3. Keep `ENABLE_PROOF_SURFACES=false` and `ENABLE_DOGFOOD_TOOL=false`.
+4. Cut the release from a clean exact-SHA checkout per
+   [Canonical deploy path](#canonical-deploy-path) (`prepare_railway_release.py` + `railway up`).
+5. Run [Preflight](#preflight--before-you-ship): expect GO, no NO GO.
+6. Complete one PostgreSQL restore drill before onboarding customer data.
+7. Verify with [After deploy](#after-deploy--verify): health, stamp, and the dogfood loop.
+8. Accept only synthetic or redacted workloads; make no SLA, RTO, or RPO claim.
+
+Each step links into the detail below; the checklist in
+[`deployment-verification-checklist.md`](deployment-verification-checklist.md)
+is the proof the deployment happened.
+
 ## Managed single-tenant compliance-evidence pilot
 
 The supported enterprise pilot is vendor-managed single-tenant. Each customer
