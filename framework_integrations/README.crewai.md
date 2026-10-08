@@ -1,8 +1,14 @@
 # CrewAI Integration
 
-Use Agent Middleware API tools in CrewAI agents and crews.
+Use Agent Middleware API tools in CrewAI agents and crews through the
+governed wrapper. Every call goes through the
+**permit → invoke → signed receipt** loop:
 
-## Status: use the governed wrapper
+- [`wrappers/crewai-agent-middleware`](../wrappers/crewai-agent-middleware/README.md)
+  — `CrewAIB2ATool`.
+- For LangGraph, `framework_integrations.LangGraphGovernedTools`.
+
+## Status: the governed wrapper is the supported path
 
 `framework_integrations.get_crewai_tools` is not supported and raises
 `NotImplementedError`. CrewAI executes every tool through a synchronous
@@ -11,13 +17,6 @@ Use Agent Middleware API tools in CrewAI agents and crews.
 that opened them, so the call after the first fails with "Event loop is
 closed". The earlier tools never awaited the client at all: no request was
 sent, and the balance and AWI tools returned a coroutine repr or crashed.
-
-Use the governed CrewAI wrapper instead. Every call goes through the
-**permit → invoke → signed receipt** loop:
-
-- [`wrappers/crewai-agent-middleware`](../wrappers/crewai-agent-middleware/README.md)
-  — `CrewAIB2ATool`.
-- For LangGraph, `framework_integrations.LangGraphGovernedTools`.
 
 ## Installation
 

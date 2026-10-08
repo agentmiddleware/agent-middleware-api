@@ -11,12 +11,12 @@ DB-created key scoped to its own wallet.
 > yourself with no operator-issued key, start with
 > [docs/quickstart.md](quickstart.md) (`make quickstart`) instead.
 >
-> **About the tool name:** the examples below invoke `golden-path-echo`,
-> which exists only where an operator (or the test/battery harness) has
-> registered it. On a stock local server, set `ENABLE_DOGFOOD_TOOL=true`
-> and substitute `partner.notes.write` (2 credits/call) everywhere
-> `golden-path-echo` appears. Also replace the echo arguments
-> `{"message": "hello"}` with `{"text": "hello"}` in both the first invoke and its replay.
+> **About the tool name:** the examples below invoke `partner.notes.write`
+> (2 credits/call), which exists on a stock local server started with
+> `ENABLE_DOGFOOD_TOOL=true`. Where an operator (or the test/battery
+> harness) has registered `golden-path-echo` instead, substitute that name
+> and its `{"message": "hello"}` arguments everywhere `partner.notes.write`
+> and `{"text": "hello"}` appear.
 > Keep the same permit and invocation idempotency keys when replaying.
 
 ## Prerequisites
@@ -135,8 +135,8 @@ export PERMIT_JSON=$(
       \"issuer_wallet_id\": \"$AGENT_WALLET_ID\",
       \"subject_wallet_id\": \"$AGENT_WALLET_ID\",
       \"subject_key_id\": \"$AGENT_KEY_ID\",
-      \"allowed_tools\": [\"golden-path-echo\"],
-      \"scopes\": [\"tool:golden-path-echo:invoke\", \"billing:charge\"],
+      \"allowed_tools\": [\"partner.notes.write\"],
+      \"scopes\": [\"tool:partner.notes.write:invoke\", \"billing:charge\"],
       \"max_credits\": 50,
       \"expires_at\": \"$(date -u -d '+30 minutes' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v+30M +%Y-%m-%dT%H:%M:%SZ)\"
     }"
@@ -164,12 +164,13 @@ curl -i "$API_URL/v1/billing/wallets/$SPONSOR_WALLET_ID" \
 
 Expected result: `403 Forbidden`.
 
-## 7. Simulate Cost Before Acting
+## Optional (dormant): Simulate Cost Before Acting
 
 > **Dormant expansion surface.** The dry-run sandbox (and the velocity
-> status read in step 9) mounts only when the local instance runs with
+> status read near the end) mounts only when the local instance runs with
 > `ENABLE_PROOF_SURFACES=true`. Production deployments do not mount these
-> routes; the wedge path is quote → permit → invoke → receipt.
+> routes; the wedge path is quote → permit → invoke → receipt. Skip this
+> section unless you started the server with that flag.
 
 ```bash
 DRY_RUN_JSON=$(
@@ -193,7 +194,7 @@ curl -X POST "$API_URL/v1/billing/dry-run/charge" \
   }"
 ```
 
-## 6a. Optional: Attach A Wallet Policy
+## Optional: Attach A Wallet Policy
 
 Operators can constrain the agent wallet before execution:
 
@@ -213,7 +214,7 @@ If an MCP invocation, billing charge, or planner action violates the active
 wallet policy, it is denied before execution or charge and the audit event
 includes the `policy_id` and evaluated constraints.
 
-## 7. Invoke Or Discover Tools
+## 7. Invoke A Governed Tool
 
 Fetch the MCP manifest:
 
@@ -235,8 +236,8 @@ INVOKE_JSON=$(
     \"id\": \"golden-call-1\",
     \"method\": \"tools/call\",
     \"params\": {
-      \"name\": \"golden-path-echo\",
-      \"arguments\": {\"message\": \"hello\"},
+      \"name\": \"partner.notes.write\",
+      \"arguments\": {\"text\": \"hello\"},
       \"mcpContext\": {
         \"wallet_id\": \"$AGENT_WALLET_ID\",
         \"permit_id\": \"$PERMIT_ID\",
@@ -250,7 +251,9 @@ export RECEIPT_ID=$(echo "$INVOKE_JSON" | jq -r '.result.receipt.receipt_id')
 echo "$RECEIPT_ID"
 ```
 
-Replace `golden-path-echo` with a tool from `/mcp/tools.json`.
+The tool name above is the stock local tool. For any other tool, first
+confirm it appears in `/mcp/tools.json`, then use its name, arguments,
+and scopes in the permit (step 5) and here.
 
 Replay the exact same request and confirm the receipt ID is unchanged:
 
@@ -264,8 +267,8 @@ REPLAY_JSON=$(
     \"id\": \"golden-call-1\",
     \"method\": \"tools/call\",
     \"params\": {
-      \"name\": \"golden-path-echo\",
-      \"arguments\": {\"message\": \"hello\"},
+      \"name\": \"partner.notes.write\",
+      \"arguments\": {\"text\": \"hello\"},
       \"mcpContext\": {
         \"wallet_id\": \"$AGENT_WALLET_ID\",
         \"permit_id\": \"$PERMIT_ID\",
@@ -278,10 +281,29 @@ REPLAY_JSON=$(
 echo "$REPLAY_JSON" | jq -r '.result.receipt.receipt_id'
 ```
 
-Try a different registered tool under the same permit and confirm the response
-is denied with a signed denial receipt:
+A permit names the tools it allows, so invoking a tool outside that list
+is denied before any charge. Issue a second permit that allows a different
+tool, then try to use it for `partner.notes.write`:
 
 ```bash
+DENY_PERMIT_JSON=$(
+  curl -s -X POST "$API_URL/v1/permits" \
+    -H "X-API-Key: $BOOTSTRAP_KEY" \
+    -H "Idempotency-Key: golden-path-permit-2" \
+    -H "Content-Type: application/json" \
+    -d "{
+      \"issuer_wallet_id\": \"$AGENT_WALLET_ID\",
+      \"subject_wallet_id\": \"$AGENT_WALLET_ID\",
+      \"subject_key_id\": \"$AGENT_KEY_ID\",
+      \"allowed_tools\": [\"some.other.tool\"],
+      \"scopes\": [\"tool:some.other.tool:invoke\", \"billing:charge\"],
+      \"max_credits\": 50,
+      \"expires_at\": \"$(date -u -d '+30 minutes' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v+30M +%Y-%m-%dT%H:%M:%SZ)\"
+    }"
+)
+
+export DENY_PERMIT_ID=$(echo "$DENY_PERMIT_JSON" | jq -r '.permit_id')
+
 curl -s -X POST "$API_URL/mcp/messages" \
   -H "X-API-Key: $AGENT_API_KEY" \
   -H "Content-Type: application/json" \
@@ -290,16 +312,21 @@ curl -s -X POST "$API_URL/mcp/messages" \
     \"id\": \"golden-denial-1\",
     \"method\": \"tools/call\",
     \"params\": {
-      \"name\": \"another-registered-tool\",
-      \"arguments\": {},
+      \"name\": \"partner.notes.write\",
+      \"arguments\": {\"text\": \"hello\"},
       \"mcpContext\": {
         \"wallet_id\": \"$AGENT_WALLET_ID\",
-        \"permit_id\": \"$PERMIT_ID\",
+        \"permit_id\": \"$DENY_PERMIT_ID\",
         \"idempotency_key\": \"golden-path-denial-001\"
       }
     }
   }" | jq '.error'
 ```
+
+Expected: `permit_tool_not_allowed` with a signed denial receipt that
+carries no charge. (Invoking a name that is not registered at all answers
+`Tool not found` instead, which is a different, unsigned failure: the
+permit check runs only against a tool the server knows.)
 
 ## 8. Inspect The Operation Record
 
@@ -380,7 +407,8 @@ curl "$API_URL/v1/billing/wallets/$AGENT_WALLET_ID/velocity" \
 - Sponsor and agent wallets are created.
 - Agent API key authenticates.
 - Agent API key can access only its own wallet.
-- Dry-run simulation returns a cost estimate.
+- (Only with `ENABLE_PROOF_SURFACES=true`) Dry-run simulation returns a
+  cost estimate.
 - MCP manifest is available.
 - Signed permit creation binds wallet, key, tool, budget, and expiry.
 - Governed MCP invocation returns a signed receipt.
@@ -391,4 +419,5 @@ curl "$API_URL/v1/billing/wallets/$AGENT_WALLET_ID/velocity" \
 - Control-plane audit records are inspectable with the bootstrap key.
 - Operators can inspect the policy decision, audit event, ledger entry, and
   request/correlation ID for the scoped tool call.
-- Ledger and velocity endpoints are inspectable with the agent key.
+- Ledger endpoint is inspectable with the agent key (velocity only with
+  `ENABLE_PROOF_SURFACES=true`).
