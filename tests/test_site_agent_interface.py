@@ -251,9 +251,8 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
     # abstraction, and "refund" is the action the calculator's example prices.
     failure = (
         "An agent issues a customer refund through an internal MCP tool. The "
-        "call times out, the agent retries, and without a boundary the refund "
-        "runs twice. Someone pays in lost money, recovery time, or a customer "
-        "problem. Put a number on that cost. If preventing it cannot justify "
+        "call times out, the agent retries, and the refund runs "
+        "twice. If preventing it cannot justify "
         "this boundary, we will tell you."
     )
     # What a credit is, in one place, because the page meters calls while its
@@ -278,7 +277,7 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
     credit = (
         "A credit is a closed-loop metering unit for the pilot on an "
         "operator-provisioned wallet, not payment rails. The gateway reserves "
-        "the tool's registered credit price against the permit before "
+        "the tool's credit price against the permit before "
         "anything runs, and writes at most one ledger debit per accepted "
         "idempotency key. A denied call is never charged; a call the gateway "
         "can prove never reached the tool is refunded. Once committed to "
@@ -286,7 +285,7 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
         "did not run: a timeout or a crash from that "
         "point stays charged, and is never retried for you. "
         "Refunding an ambiguous call automatically would pay a caller to "
-        "induce timeouts against a tool that had already done the work. "
+        "induce timeouts against a tool that already did the work. "
         "Credits never become invoices, settlement, or payment rails, "
         "and the pilot is priced separately, in writing."
     )
@@ -294,9 +293,9 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
     # saying so would let the transcript be read as a customer's refund.
     stand_in = "The tool in the recording is a stand-in echo tool, not a refund tool"
     boundary = (
-        "Agent Middleware API is a transaction boundary between your autonomous "
+        "Agent Middleware API is a transaction boundary between your "
         "agents and your consequential MCP tools. The "
-        "first call executes and is charged once; a same-key retry cannot "
+        "first call is charged once; a same-key retry cannot "
         "dispatch or debit again. Every completed "
         "call returns a signed receipt you can verify offline."
     )
@@ -305,8 +304,7 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
         "authority for machine actions."
     )
     only_path = (
-        "The gateway sits between the agent and one tool, and becomes the only "
-        "path to that tool once you close the tool's other routes."
+        "The gateway becomes the only path once you close the tool's other routes."
     )
 
     assert headline in text
@@ -344,7 +342,10 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
     assert "Who owns the budget and when they decide." in text
     assert "synthetic or redacted examples only" in text.casefold()
     assert "Never send production secrets" in text
-    assert "a call is available only when a scenario needs one" in text.casefold()
+    # The pilot scope line no longer carries the call-availability clause; the
+    # optional booking link below is now its only carrier, and it is asserted
+    # alongside the CTA order below.
+    assert "one tool, one operator, one action" in text.casefold()
     # One label for the primary CTA everywhere; earlier variants drifted.
     assert "Book a pilot" not in text
     assert "Discuss fit" not in text
@@ -1149,12 +1150,11 @@ def test_faq_structured_data_is_generated_from_the_visible_answers(tmp_path) -> 
 
     expected_production_answer = (
         "Production beta, not production complete. The supported beta is "
-        "vendor-managed and dedicated per customer: each customer receives "
-        "separate API, PostgreSQL, Redis, signing material, and administrator "
+        "vendor-managed and dedicated per customer: separate API, "
+        "PostgreSQL, Redis, signing material, and administrator "
         "resources. It is not a shared multi-tenant SaaS, and optional "
         "proof-surface routers are outside the supported production posture. "
-        "There are no replicas or consensus. Read the security limitations "
-        "before deciding."
+        "There are no replicas or consensus."
     )
     production_answer = next(
         entry["acceptedAnswer"]["text"]
