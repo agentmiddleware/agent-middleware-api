@@ -32,6 +32,15 @@ class Settings(BaseSettings):
     BUILD_COMMIT_SHA: str = ""
     ENVIRONMENT: str = "local"
     DEBUG: bool = False
+    # Local-only escape hatch for the DEBUG empty-key auth bootstrap in
+    # app/core/auth.py (any unknown key authenticates as bootstrap admin when
+    # DEBUG is on and no keys are configured). Defaults to False so a demo,
+    # trial, or shared box that runs with DEBUG on and empty key lists fails
+    # closed instead of granting admin to any key-shaped string. Opt in only
+    # for loopback-local development (docker-compose sets it); production-like
+    # boots refuse to start when this is true (see
+    # app/core/trust_mode.validate_trust_mode_config).
+    ALLOW_DEBUG_OPEN_AUTH: bool = False
 
     # --- Server ---
     HOST: str = "0.0.0.0"

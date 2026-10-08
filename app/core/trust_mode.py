@@ -137,6 +137,7 @@ def validate_trust_mode_config(
     signing_private_key_b64: str | None,
     allow_legacy_unpermitted_mcp: bool,
     debug: bool = False,
+    allow_debug_open_auth: bool = False,
     webauthn_allow_mock: bool = False,
     enable_proof_surfaces: bool = True,
     static_dev_api_keys: str = "",
@@ -190,6 +191,12 @@ def validate_trust_mode_config(
             violations.append(
                 "DEBUG must be false in production-like environments "
                 "(DEBUG empty-key auth bootstrap is a deploy footgun)"
+            )
+        if allow_debug_open_auth:
+            violations.append(
+                "ALLOW_DEBUG_OPEN_AUTH must be false in production-like "
+                "environments (it restores the DEBUG empty-key bootstrap "
+                "admin even where DEBUG itself is off)"
             )
         if webauthn_allow_mock:
             violations.append(
@@ -300,6 +307,7 @@ def validate_trust_mode_guardrails(settings: Settings) -> None:
         signing_private_key_b64=settings.TRUST_SIGNING_PRIVATE_KEY_B64,
         allow_legacy_unpermitted_mcp=settings.ALLOW_LEGACY_UNPERMITTED_MCP,
         debug=settings.DEBUG,
+        allow_debug_open_auth=settings.ALLOW_DEBUG_OPEN_AUTH,
         webauthn_allow_mock=settings.WEBAUTHN_ALLOW_MOCK,
         enable_proof_surfaces=settings.ENABLE_PROOF_SURFACES,
         static_dev_api_keys=settings.STATIC_DEV_API_KEYS,

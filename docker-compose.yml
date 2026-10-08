@@ -11,6 +11,10 @@ services:
       - .env
     environment:
       - DEBUG=true
+      # Local-dev only: keeps the DEBUG empty-key bootstrap admin working for
+      # loopback development when .env has no VALID_API_KEYS. Never set this
+      # on a demo, trial, shared, or production-like box.
+      - ALLOW_DEBUG_OPEN_AUTH=true
     volumes:
       - ./app:/app/app  # Hot reload in dev
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload

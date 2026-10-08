@@ -2,6 +2,10 @@
 FastAPI Dependency Injection for service orchestrators.
 Each service is a singleton — one instance shared across all requests.
 This is the spine connecting routers to actual business logic.
+
+NOTE: this file has nothing to do with authentication. The real auth
+wiring (API keys, JWT Bearer, wallet isolation) lives in app/core/auth.py,
+with scope enforcement in app/core/scopes.py.
 """
 
 from functools import lru_cache
