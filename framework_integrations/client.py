@@ -103,6 +103,8 @@ class B2AClient:
         options: list[str],
     ) -> str:
         """Make an AI-powered decision."""
+        if not options:
+            raise ValueError("options must not be empty")
         payload = {
             "agent_id": self.config.wallet_id,
             "context": context,

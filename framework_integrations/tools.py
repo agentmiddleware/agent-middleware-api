@@ -147,7 +147,7 @@ def get_crewai_tools(client: B2AClient) -> list[Any]:
     )
 
 
-def get_autogen_tools(client: B2AClient) -> list[Any]:
+def get_autogen_tools(client: B2AClient) -> dict[str, Any]:
     """
     Get AutoGen-compatible tools from B2A client.
 

@@ -65,9 +65,12 @@ class B2AFunctionTool:
         """
         if arguments is None:
             arguments = {}
-        if not idempotency_key or not idempotency_key.strip():
+        if not isinstance(idempotency_key, str) or not idempotency_key.strip():
             raise ValueError("idempotency_key is required and must not be blank")
-        if not permit_idempotency_key or not permit_idempotency_key.strip():
+        if (
+            not isinstance(permit_idempotency_key, str)
+            or not permit_idempotency_key.strip()
+        ):
             raise ValueError("permit_idempotency_key is required and must not be blank")
 
         # Retain the body before the first await: a lost acknowledgement must
