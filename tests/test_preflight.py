@@ -299,3 +299,204 @@ async def test_preflight_math_consistency(client):
 
     assert data["passed"] + data["failed"] == data["total_checks"]
     assert data["total_checks"] == len(data["checks"])
+
+
+# ---------------------------------------------------------------------------
+# Break-it regressions: validation bypasses found by adversarial probing
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_preflight_rejects_blank_base_url(client):
+    """Whitespace-only base_url must fail the critical check, not pass it."""
+    resp = await client.post(
+        "/v1/launch/preflight",
+        json={"base_url": "   "},
+        headers=HEADERS,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+
+    base_url_checks = [c for c in data["checks"] if c["name"] == "base_url_valid"]
+    assert len(base_url_checks) == 1
+    assert base_url_checks[0]["passed"] is False
+    assert base_url_checks[0]["severity"] == "critical"
+
+
+@pytest.mark.anyio
+async def test_preflight_rejects_blank_campaign_source_url(client):
+    """Whitespace-only campaign_source_url must fail, not pass as real."""
+    resp = await client.post(
+        "/v1/launch/preflight",
+        json={"campaign_source_url": "   "},
+        headers=HEADERS,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+
+    content_checks = [c for c in data["checks"] if c["name"] == "content_source_url"]
+    assert len(content_checks) == 1
+    assert content_checks[0]["passed"] is False
+    assert content_checks[0]["severity"] == "critical"
+
+
+def test_engine_rejects_empty_string_overrides():
+    """Engine-level empty strings fail closed (the router strips only "" )."""
+    import anyio
+
+    async def _run():
+        engine = PreflightEngine()
+        return await engine.run({"base_url": "", "campaign_source_url": ""})
+
+    report = anyio.run(_run)
+    by_name = {c["name"]: c for c in report.checks}
+    assert by_name["base_url_valid"]["passed"] is False
+    assert by_name["base_url_valid"]["severity"] == "critical"
+    assert by_name["manifests_resolvable"]["passed"] is False
+    assert by_name["content_source_url"]["passed"] is False
+
+
+@pytest.mark.anyio
+async def test_preflight_rejects_suffixed_placeholder_keys(client, monkeypatch):
+    """Placeholder keys with trailing junk (test-key-xyz, changeme123) fail."""
+    real_admin_key = "prod-admin-2f9c41d07be84a6e9d3c"
+    settings = get_settings()
+    monkeypatch.setattr(
+        settings,
+        "VALID_API_KEYS",
+        f"test-key-xyz123,changeme-prod,placeholder1,{real_admin_key}",
+    )
+
+    resp = await client.post(
+        "/v1/launch/preflight",
+        json={},
+        headers={"X-API-Key": real_admin_key},
+    )
+
+    assert resp.status_code == 200
+    key_checks = [
+        c for c in resp.json()["checks"] if c["name"] == "api_keys_not_placeholder"
+    ]
+    assert len(key_checks) == 1
+    assert key_checks[0]["passed"] is False
+    assert key_checks[0]["severity"] == "critical"
+    assert "3 placeholder" in key_checks[0]["message"]
+    for secret in ("test-key-xyz123", "changeme-prod", "placeholder1", real_admin_key):
+        assert secret not in resp.text
+
+
+@pytest.mark.anyio
+async def test_preflight_rejects_infixed_placeholder_key(client, monkeypatch):
+    """A key like my-test-key reads as a test key, not production."""
+    real_admin_key = "prod-admin-2f9c41d07be84a6e9d3c"
+    settings = get_settings()
+    monkeypatch.setattr(settings, "VALID_API_KEYS", f"my-test-key,{real_admin_key}")
+
+    resp = await client.post(
+        "/v1/launch/preflight",
+        json={},
+        headers={"X-API-Key": real_admin_key},
+    )
+
+    assert resp.status_code == 200
+    key_checks = [
+        c for c in resp.json()["checks"] if c["name"] == "api_keys_not_placeholder"
+    ]
+    assert len(key_checks) == 1
+    assert key_checks[0]["passed"] is False
+
+
+def test_placeholder_detector_spares_real_keys():
+    """Random-looking keys that merely contain test letters still pass."""
+    from app.services.preflight import _is_placeholder
+
+    assert _is_placeholder("prod-admin-2f9c41d07be84a6e9d3c") is False
+    assert _is_placeholder("contest-key-9f31ab") is False
+    assert _is_placeholder("latest-key-44c1") is False
+    assert _is_placeholder("test-key-xyz123") is True
+    assert _is_placeholder("changeme123") is True
+    assert _is_placeholder("my-test-key") is True
+    assert _is_placeholder("xxxabc") is True
+
+
+@pytest.mark.anyio
+async def test_preflight_rejects_bare_live_stripe_prefix(client):
+    """sk_live_ with no secret must not pass as a live key."""
+    resp = await client.post(
+        "/v1/launch/preflight",
+        json={"stripe_secret_key": "sk_live_"},
+        headers=HEADERS,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+
+    stripe_checks = [c for c in data["checks"] if c["name"] == "stripe_key_live"]
+    assert len(stripe_checks) == 1
+    assert stripe_checks[0]["passed"] is False
+
+
+@pytest.mark.anyio
+async def test_preflight_accepts_domain_containing_placeholder_letters(client):
+    """notexample.com is a real domain, not the example.com placeholder."""
+    resp = await client.post(
+        "/v1/launch/preflight",
+        json={"base_url": "https://api.notexample.com"},
+        headers=HEADERS,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+
+    base_url_checks = [c for c in data["checks"] if c["name"] == "base_url_valid"]
+    assert len(base_url_checks) == 1
+    assert base_url_checks[0]["passed"] is True
+
+
+@pytest.mark.anyio
+async def test_preflight_still_flags_placeholder_subdomain(client):
+    """api.yourdomain.com is still caught after the host-aware fix."""
+    resp = await client.post(
+        "/v1/launch/preflight",
+        json={"base_url": "https://api.yourdomain.com"},
+        headers=HEADERS,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+
+    base_url_checks = [c for c in data["checks"] if c["name"] == "base_url_valid"]
+    assert len(base_url_checks) == 1
+    assert base_url_checks[0]["passed"] is False
+
+
+@pytest.mark.anyio
+async def test_preflight_accepts_uppercase_https_scheme(client):
+    """HTTPS://... uses TLS; the scheme check is case-insensitive."""
+    resp = await client.post(
+        "/v1/launch/preflight",
+        json={"base_url": "HTTPS://api.myrealdomain.com"},
+        headers=HEADERS,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+
+    https_checks = [c for c in data["checks"] if c["name"] == "base_url_https"]
+    assert len(https_checks) == 1
+    assert https_checks[0]["passed"] is True
+
+
+@pytest.mark.anyio
+async def test_preflight_states_reachability_not_checked(client):
+    """GO-path messages must not imply directories or manifests were pinged."""
+    resp = await client.post(
+        "/v1/launch/preflight",
+        json={
+            "base_url": "https://api.myrealdomain.com",
+            "campaign_source_url": "https://cdn.myrealdomain.com/launch-video.mp4",
+        },
+        headers=HEADERS,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    by_name = {c["name"]: c for c in data["checks"]}
+
+    assert "reachability not checked" in by_name["manifests_resolvable"]["message"]
+    assert "reachability not checked" in by_name["oracle_directories_total"]["message"]
