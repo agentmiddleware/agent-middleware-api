@@ -62,6 +62,27 @@ decision to unfreeze. Prefer deleting unused stubs over growing them.
 Module docstrings on these routers (and related stubs) start with
 `PROOF SURFACE — frozen`.
 
+## Simulated output labels
+
+Every response from a simulated surface carries an explicit
+`"simulated": true` field, and the OpenAPI summary/description of each
+simulated endpoint says so. Simulated output must never be demoed or quoted
+as live results, traction, or security evidence.
+
+| Surface | Labeled responses | What is simulated |
+|---------|-------------------|-------------------|
+| AWI (`awi`, `awi_enhanced`) | `AWIExecutionResponse.simulated` (true unless a live Playwright DOM bridge is attached), `AWIRepresentationResponse.simulated` (true for mock embedding and placeholder screenshot) | Mock action success, fake initial page state, hash-based RAG embeddings, placeholder screenshots |
+| Media (`media`) | `ViralHook`, `GeneratedClip`, `ClipGenerationResponse`, `DistributionResult`, `DistributionResponse` (all `simulated: true`); placeholder transcript noted on video status | Random hooks, metadata-only clips, placeholder download/thumbnail URLs, distribution that posts nothing |
+| IoT (`iot`) | `BridgeMessageResponse.simulated`, `simulated` on subscribe and protocol translator payloads | MQTT publish that only logs, canned CoAP replies, subscribe URLs with no routes behind them |
+| Oracle (`oracle`) | `IndexedAPI`, `RegistrationResult`, `RegistrationResponse`, `VisibilityScore`, `NetworkGraphResponse` (all `simulated: true`) | Hardcoded directory list, synthetic metadata, local-only registration, derived scores and graphs |
+| Broadcast (`broadcast`) | `BroadcastJobResponse`, `DiscoveryMetricsResponse`, per-target and job-list `simulated: true` | Hash-sampled delivery status, hash-seeded metrics, manually posted sample events |
+| Red team (`red_team`) | `ScanResponse`, `ScanReport`, `VulnerabilityListResponse` (all `simulated: true`) | Modeled scans that send no traffic and attack nothing |
+| RTaaS (`rtaas`) | `JobResponse`, job-list entries, vulnerabilities payload (`simulated: true`) | Deterministic hash-of-URL findings; no target contacted |
+| Sentinel approvals (`permit_requests`) | `PermitRequestResponse.simulated`, `decided_by="simulation"`, `reason="simulated_auto_approval"` | Auto-approval with no human in the loop when Sentinel is unconfigured (local/dev only; refused in production-like environments) |
+
+Keep simulated scans and metrics out of security pitches and traction
+claims.
+
 ## Accept / freeze stubs (no feature work)
 
 Leave as-is; do not “finish” them into product:

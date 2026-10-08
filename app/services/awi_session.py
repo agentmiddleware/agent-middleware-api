@@ -260,6 +260,9 @@ class AWISessionManager:
 
         # Phase 9: Route to Playwright DOM bridge if attached
         dom_session_id = self._dom_sessions.get(request.session_id)
+        # Responses must say whether they came from a live browser or the
+        # mock fallback, so demos cannot present mock success as browsing.
+        simulated = dom_session_id is None
         if dom_session_id:
             logger.info(
                 f"Routing action {request.action.value} to live Playwright DOM bridge for session {request.session_id}"
@@ -342,6 +345,7 @@ class AWISessionManager:
             action=request.action,
             status="success",
             parameters=response_parameters,
+            simulated=simulated,
             result=result,
             new_state=state,
             representation=representation,
@@ -417,6 +421,7 @@ class AWISessionManager:
             representation_type=request.representation_type,
             content=result.get("content"),
             metadata=result.get("metadata", {}),
+            simulated=bool(result.get("simulated", False)),
             generated_at=datetime.now(timezone.utc),
         )
 

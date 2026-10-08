@@ -87,6 +87,13 @@ class BroadcastRequest(BaseModel):
 
 
 class BroadcastTargetDetail(BaseModel):
+    simulated: bool = Field(
+        default=True,
+        description=(
+            "Always true: per-directory status comes from a hash sample, "
+            "not from contacting any directory."
+        ),
+    )
     directory_id: str
     directory_name: str
     url: str
@@ -98,6 +105,13 @@ class BroadcastTargetDetail(BaseModel):
 
 
 class DiscoveryMetricsResponse(BaseModel):
+    simulated: bool = Field(
+        default=True,
+        description=(
+            "Always true: metrics are seeded from a hash formula and move "
+            "only on manually posted sample events. Never present as traction."
+        ),
+    )
     impressions: int
     lookups: int
     integrations: int
@@ -106,6 +120,13 @@ class DiscoveryMetricsResponse(BaseModel):
 
 
 class BroadcastJobResponse(BaseModel):
+    simulated: bool = Field(
+        default=True,
+        description=(
+            "Always true: delivery outcomes and metrics are simulated. "
+            "No external directory is contacted."
+        ),
+    )
     job_id: str
     service_name: str
     service_version: str
@@ -143,10 +164,12 @@ class DiscoveryEventRequest(BaseModel):
     "",
     response_model=BroadcastJobResponse,
     status_code=201,
-    summary="Broadcast API to Agent Directories",
+    summary="Broadcast API to Agent Directories (simulated)",
     description=(
-        "Pushes discovery artifacts (llm.txt, OpenAPI, agent.json) "
-        "to all registered agent directories. The network effects engine."
+        "SIMULATED: no external directory is contacted. Per-directory "
+        "status comes from a hash sample and discovery metrics are seeded "
+        "sample data that must never be presented as traction. The "
+        "response carries simulated=true."
     ),
 )
 async def broadcast_api(
@@ -204,6 +227,7 @@ async def list_jobs(
             {
                 "job_id": j.job_id,
                 "service_name": j.service_name,
+                "simulated": True,
                 "directories_confirmed": j.directories_confirmed,
                 "status": j.status,
                 "created_at": str(j.created_at),

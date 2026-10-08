@@ -585,6 +585,7 @@ class MQTTTranslator:
 
         return {
             "ack": True,
+            "simulated": True,
             "broker": self.broker_url,
             "topic": topic,
             "payload_size": len(payload_bytes),
@@ -604,10 +605,10 @@ class CoAPTranslator:
     """CoAP protocol translator stub. Wire up aiocoap in production."""
 
     async def get(self, uri: str) -> dict:
-        return {"status": "2.05", "payload": {}, "uri": uri}
+        return {"status": "2.05", "simulated": True, "payload": {}, "uri": uri}
 
     async def put(self, uri: str, payload: dict) -> dict:
-        return {"status": "2.04", "payload": payload, "uri": uri}
+        return {"status": "2.04", "simulated": True, "payload": payload, "uri": uri}
 
 
 # ---------------------------------------------------------------------------
@@ -717,6 +718,9 @@ class ProtocolBridge:
             "device_id": device_id,
             "topic": topic,
             "status": "active",
+            # No poll or websocket route exists behind the URLs the router
+            # builds from this; callers must not treat them as live feeds.
+            "simulated": True,
         }
 
     async def get_audit_log(self, limit: int = 100) -> list[dict]:

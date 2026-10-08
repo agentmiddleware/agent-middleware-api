@@ -201,6 +201,8 @@ async def deregister_device(
     summary="Send a message to a device",
     description=(
         "Send a message through the protocol bridge to the device's native protocol. "
+        "SIMULATED: no message reaches a real device (MQTT publish only logs, "
+        "CoAP returns canned responses). The response carries simulated=true. "
         "The topic must match an allowed ACL pattern. Messages to denied topics "
         "(e.g., camera feeds) will be rejected with a 403."
     ),
@@ -245,9 +247,10 @@ async def send_message(
     "/devices/{device_id}/subscribe",
     summary="Subscribe to device messages",
     description=(
-        "Subscribe to messages from a device topic. Returns a webhook URL "
-        "or WebSocket endpoint that agents can poll for incoming data. "
-        "Topic must have READ permission in the device's ACL."
+        "Subscribe to messages from a device topic. SIMULATED: the returned "
+        "webhook and websocket URLs have no poll or websocket route behind "
+        "them and no live feed exists. Topic must have READ permission in "
+        "the device's ACL."
     ),
 )
 async def subscribe_to_device(

@@ -103,6 +103,13 @@ class VulnerabilitySchema(BaseModel):
 class JobResponse(BaseModel):
     """RTaaS scanning job result."""
 
+    simulated: bool = Field(
+        default=True,
+        description=(
+            "Always true: findings are deterministic samples from a hash of "
+            "the target URL. No target is contacted."
+        ),
+    )
     job_id: str
     tenant_id: str
     status: str
@@ -186,6 +193,7 @@ async def list_jobs(
             {
                 "job_id": j.job_id,
                 "tenant_id": j.tenant_id,
+                "simulated": True,
                 "status": j.status,
                 "targets_count": len(j.targets),
                 "vulnerabilities_found": len(j.vulnerabilities),
@@ -232,6 +240,7 @@ async def get_vulnerabilities(
 
     return {
         "job_id": job_id,
+        "simulated": True,
         "total": len(vulns),
         "vulnerabilities": [
             {

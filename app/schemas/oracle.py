@@ -110,6 +110,13 @@ class IndexedCapability(BaseModel):
 class IndexedAPI(BaseModel):
     """An API that has been crawled and indexed by the Oracle."""
 
+    simulated: bool = Field(
+        default=True,
+        description=(
+            "Always true: results come from a hardcoded directory list or "
+            "synthetic metadata. No live HTTP crawl is performed."
+        ),
+    )
     api_id: str
     url: str
     name: str
@@ -203,6 +210,12 @@ class RegistrationRequest(BaseModel):
 class RegistrationResult(BaseModel):
     """Result of registering with a single directory."""
 
+    simulated: bool = Field(
+        default=True,
+        description=(
+            "Always true: no HTTP registration with an external directory is performed."
+        ),
+    )
     directory_url: str
     directory_type: DirectoryType
     status: OracleStatus
@@ -213,6 +226,10 @@ class RegistrationResult(BaseModel):
 class RegistrationResponse(BaseModel):
     """Aggregated registration results."""
 
+    simulated: bool = Field(
+        default=True,
+        description="Always true: no external directory is contacted.",
+    )
     results: list[RegistrationResult]
     total_attempted: int
     total_registered: int
@@ -225,6 +242,13 @@ class RegistrationResponse(BaseModel):
 class VisibilityScore(BaseModel):
     """Our API's visibility score across agent networks."""
 
+    simulated: bool = Field(
+        default=True,
+        description=(
+            "Always true: computed from simulated crawl and registration "
+            "sample data, not live network traffic."
+        ),
+    )
     overall_score: float = Field(
         ...,
         ge=0.0,
@@ -271,6 +295,10 @@ class NetworkGraphNode(BaseModel):
 class NetworkGraphResponse(BaseModel):
     """The agent network graph centered on our API."""
 
+    simulated: bool = Field(
+        default=True,
+        description="Always true: built from simulated index sample data.",
+    )
     nodes: list[NetworkGraphNode]
     edges: list[dict]
     total_nodes: int

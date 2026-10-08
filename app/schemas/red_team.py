@@ -86,6 +86,10 @@ class Vulnerability(BaseModel):
 
 
 class VulnerabilityListResponse(BaseModel):
+    simulated: bool = Field(
+        default=True,
+        description="Always true: modeled findings, not live scan results.",
+    )
     vulnerabilities: list[Vulnerability]
     total: int
     critical_count: int
@@ -125,6 +129,10 @@ class ScanRequest(BaseModel):
 class ScanResponse(BaseModel):
     """Response after initiating a scan."""
 
+    simulated: bool = Field(
+        default=True,
+        description="Always true: scans send no traffic and attack nothing.",
+    )
     scan_id: str
     status: ScanStatus
     target_services: list[str]
@@ -137,6 +145,13 @@ class ScanResponse(BaseModel):
 class ScanReport(BaseModel):
     """Full scan report."""
 
+    simulated: bool = Field(
+        default=True,
+        description=(
+            "Always true: modeled findings only, not live security testing. "
+            "Must not be presented as pentest evidence."
+        ),
+    )
     scan_id: str
     status: ScanStatus
     started_at: datetime
