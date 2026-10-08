@@ -48,6 +48,7 @@ from .core.rate_limiter import RateLimitMiddleware, rate_limit_discovery
 from .core.runtime_mode import get_simulation_modes
 from .middleware.head_method import HeadMethodMiddleware
 from .middleware.request_body_limit import RequestBodyLimitMiddleware
+from .middleware.request_id import RequestIdMiddleware
 from .middleware.security_headers import SecurityHeadersMiddleware
 from .core.trust_mode import (
     is_production_like_environment,
@@ -584,6 +585,10 @@ def add_cors_middleware(application: FastAPI, origins: list[str]) -> None:
         allow_credentials=not allow_all_origins,
         allow_methods=["*"],
         allow_headers=["*"],
+        # Credentialed browser callers can only read safelisted response
+        # headers unless the server names them here; without this entry the
+        # request ID below would be invisible to the apps that need it most.
+        expose_headers=["X-Request-ID"],
     )
 
 
@@ -616,6 +621,12 @@ app.add_middleware(SecurityHeadersMiddleware)
 # layer below — routing included — sees a GET, and the response leaves with
 # the GET's status and headers but no body, per RFC 9110 §9.3.2.
 app.add_middleware(HeadMethodMiddleware)
+
+# Request ID assignment and propagation, outside everything: the value is
+# chosen before any layer runs and stamped on the way out, so short-circuit
+# responses (413, 429, CORS preflights) carry the same handle as handled
+# ones and every caller can match a request to its receipt or error.
+app.add_middleware(RequestIdMiddleware)
 
 
 def _json_safe_numbers(value: Any) -> Any:
