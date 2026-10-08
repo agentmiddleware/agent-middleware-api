@@ -6,9 +6,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import asc, desc, literal, select, true, update
+from sqlalchemy import asc, desc, func, literal, or_, select, true, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.orm import aliased
 
@@ -101,6 +102,27 @@ def _sign_with_previous(
     model.signature_key_id = signature_key_id
 
 
+def _canonical_wallet_id(wallet_id: str | None) -> str | None:
+    """Collapse a missing or blank wallet id to the wallet-less chain.
+
+    ``None``, ``""`` and whitespace share one head (the key ``""``). Leaving
+    them as different event wallets splits that chain: verification of either
+    side then disagrees with the head.
+    """
+    if wallet_id is None or not wallet_id.strip():
+        return None
+    return wallet_id
+
+
+def _null_wallet_clause() -> ColumnElement[bool]:
+    """Rows that belong to the wallet-less chain, including legacy blanks."""
+    wallet_id = ControlPlaneAuditEventModel.wallet_id
+    return or_(
+        cast(Any, wallet_id).is_(None),
+        cast(ColumnElement[bool], func.trim(wallet_id) == ""),
+    )
+
+
 async def sign_audit_model(model: ControlPlaneAuditEventModel) -> None:
     """Sign an audit event by reading the current chain head (no insert).
 
@@ -108,17 +130,20 @@ async def sign_audit_model(model: ControlPlaneAuditEventModel) -> None:
     write path uses :func:`append_chained_audit_event`, which serializes
     concurrent writers.
     """
+    model.wallet_id = _canonical_wallet_id(model.wallet_id)
     key = await get_signing_key_service().ensure_active_key()
     factory = get_session_factory()
     async with factory() as session:
+        if model.wallet_id is None:
+            wallet_clause: ColumnElement[bool] = _null_wallet_clause()
+        else:
+            wallet_clause = cast(
+                ColumnElement[bool],
+                ControlPlaneAuditEventModel.wallet_id == model.wallet_id,
+            )
         result = await session.execute(
             select(ControlPlaneAuditEventModel)
-            .where(
-                cast(
-                    ColumnElement[bool],
-                    ControlPlaneAuditEventModel.wallet_id == model.wallet_id,
-                )
-            )
+            .where(wallet_clause)
             .order_by(
                 desc(cast(ColumnElement[Any], ControlPlaneAuditEventModel.seq)),
                 desc(cast(ColumnElement[Any], ControlPlaneAuditEventModel.created_at)),
@@ -154,9 +179,11 @@ class AuditChainContendedError(RuntimeError):
     reason = "audit_chain_head_contention"
 
 
-def _assert_same_audit_intent(
+async def _assert_same_audit_intent(
     existing: ControlPlaneAuditEventModel,
     intended: ControlPlaneAuditEventModel,
+    *,
+    session: AsyncSession,
 ) -> None:
     """Adopt an existing event only when its complete signed intent matches.
 
@@ -200,18 +227,36 @@ def _assert_same_audit_intent(
         metadata_json=existing.metadata_json,
         previous_hash=existing.previous_hash,
     )
+    signature = existing.signature
+    signature_key_id = existing.signature_key_id
     if (
         existing.payload_hash != sha256_hex(payload)
-        or existing.signature is None
-        or existing.signature_key_id is None
+        or signature is None
+        or signature_key_id is None
         or existing.chain_hash
         != sha256_hex(
             {
                 "previous_hash": existing.previous_hash,
                 "payload_hash": existing.payload_hash,
-                "signature": existing.signature,
+                "signature": signature,
             }
         )
+    ):
+        raise AuditEventConflictError("audit_event_integrity_conflict")
+    # Hashes can be rebuilt from a replaced signature without the signing key.
+    # Adopting that row would tell the caller the original evidence is still
+    # the one on the chain.
+    signed_payload = {
+        **payload,
+        "payload_hash": existing.payload_hash,
+        "alg": "Ed25519",
+        "kid": signature_key_id,
+    }
+    if not await get_signing_key_service().verify_payload(
+        signed_payload,
+        signature=signature,
+        key_id=signature_key_id,
+        session=session,
     ):
         raise AuditEventConflictError("audit_event_integrity_conflict")
 
@@ -229,6 +274,7 @@ async def append_chained_audit_event(
     SQLite and Postgres (no reliance on ``SELECT ... FOR UPDATE``), so two
     racing writers can never share a predecessor and fork the chain.
     """
+    model.wallet_id = _canonical_wallet_id(model.wallet_id)
     wallet_key = model.wallet_id or ""
     # Provision the active signing key before the transaction so signing inside
     # it is pure crypto (no nested DB write / lock).
@@ -260,7 +306,7 @@ async def append_chained_audit_event(
                     model.event_id,
                 )
                 if existing is not None:
-                    _assert_same_audit_intent(existing, model)
+                    await _assert_same_audit_intent(existing, model, session=session)
                     return existing
 
                 row = (
@@ -366,12 +412,33 @@ class AuditChainVerification:
     broken_event_id: str | None = None
 
 
+def _event_in_window(
+    created_at: datetime,
+    created_after: datetime | None,
+    created_before: datetime | None,
+) -> bool:
+    created_at = to_naive_utc(created_at)
+    if created_after is not None and created_at < created_after:
+        return False
+    if created_before is not None and created_at > created_before:
+        return False
+    return True
+
+
 async def verify_audit_chain(
     *,
     wallet_id: str | None,
     created_after: datetime | None = None,
     created_before: datetime | None = None,
 ) -> AuditChainVerification:
+    # A blank id is the wallet-less chain, not a request to walk every wallet.
+    # wallet_id=None (the argument omitted) still means the global walk below.
+    if wallet_id is not None and _canonical_wallet_id(wallet_id) is None:
+        return await _verify_single_chain(
+            wallet_id=None,
+            created_after=created_after,
+            created_before=created_before,
+        )
     if wallet_id is None:
         # Global verification: walk every per-wallet chain, INCLUDING the
         # wallet-less chain (events whose wallet_id IS NULL -- system and
@@ -383,7 +450,9 @@ async def verify_audit_chain(
             wallet_ids_result = await session.execute(
                 select(cast(Any, ControlPlaneAuditEventModel.wallet_id)).distinct()
             )
-            event_wallets = {row[0] for row in wallet_ids_result.all()}
+            event_wallets = {
+                _canonical_wallet_id(row[0]) for row in wallet_ids_result.all()
+            }
             # Also enumerate wallets from the chain-head table. Deriving the list
             # from events alone let an attacker who deleted ALL of a wallet's
             # events erase that wallet from the check entirely: with no events it
@@ -391,12 +460,13 @@ async def verify_audit_chain(
             # would flag the surviving head as audit_chain_truncated) is never
             # called for it. The head row is the durable anchor, so a wallet with
             # a head must always be verified even when its events are gone. Head
-            # keys use "" for the wallet-less chain; map it back to NULL.
+            # keys use "" for the wallet-less chain; canonicalization maps that
+            # back to NULL, and blank event wallet ids join the same chain.
             head_keys_result = await session.execute(
                 select(cast(Any, AuditChainHeadModel.wallet_key)).distinct()
             )
             head_wallets = {
-                (row[0] if row[0] != "" else None) for row in head_keys_result.all()
+                _canonical_wallet_id(row[0]) for row in head_keys_result.all()
             }
             distinct_wallets = event_wallets | head_wallets
         checked = 0
@@ -435,8 +505,13 @@ async def _verify_single_chain(
     created_after: datetime | None = None,
     created_before: datetime | None = None,
 ) -> AuditChainVerification:
-    """Verify one wallet's audit chain (``wallet_id=None`` -> the wallet-less
-    chain of ``wallet_id IS NULL`` events)."""
+    """Verify one wallet's audit chain.
+
+    ``wallet_id=None`` is the wallet-less chain (SQL NULL and blank ids).
+    Time bounds choose which events are reported. They do not narrow the
+    integrity walk: a window used to skip earlier tampering, skip the head,
+    and treat an out-of-order timestamp as a broken link.
+    """
     created_after = to_naive_utc(created_after) if created_after else None
     created_before = to_naive_utc(created_before) if created_before else None
     stmt = select(ControlPlaneAuditEventModel).order_by(
@@ -444,98 +519,56 @@ async def _verify_single_chain(
         asc(cast(ColumnElement[Any], ControlPlaneAuditEventModel.created_at)),
     )
     if wallet_id is None:
-        stmt = stmt.where(cast(Any, ControlPlaneAuditEventModel.wallet_id).is_(None))
+        stmt = stmt.where(_null_wallet_clause())
     else:
         stmt = stmt.where(
             cast(
                 ColumnElement[bool], ControlPlaneAuditEventModel.wallet_id == wallet_id
             )
         )
-    if created_after:
-        stmt = stmt.where(
-            cast(
-                ColumnElement[bool],
-                ControlPlaneAuditEventModel.created_at >= created_after,
-            )
-        )
-    if created_before:
-        stmt = stmt.where(
-            cast(
-                ColumnElement[bool],
-                ControlPlaneAuditEventModel.created_at <= created_before,
-            )
-        )
 
     factory = get_session_factory()
     async with factory() as session:
-        head = None
-        if created_after is None and created_before is None:
-            # One statement gives events and head the same database snapshot.
-            # A separate head SELECT could see a legitimate concurrent append
-            # and label the earlier event snapshot as a truncated chain.
-            # Anchor the outer joins to one row so an empty/deleted event set
-            # still loads its head and actual truncation remains detectable.
-            anchor = select(literal(1).label("anchor")).subquery()
-            event_rows = aliased(ControlPlaneAuditEventModel, stmt.subquery())
-            head_rows = aliased(
-                AuditChainHeadModel,
-                select(AuditChainHeadModel)
-                .where(
-                    cast(
-                        ColumnElement[bool],
-                        AuditChainHeadModel.wallet_key == (wallet_id or ""),
-                    )
-                )
-                .subquery(),
-            )
-            snapshot = await session.execute(
-                select(event_rows, head_rows)
-                .select_from(anchor)
-                .outerjoin(event_rows, true())
-                .outerjoin(head_rows, true())
-                .order_by(
-                    cast(ColumnElement[Any], event_rows.seq),
-                    cast(ColumnElement[Any], event_rows.created_at),
-                )
-            )
-            rows = snapshot.all()
-            events = [row[0] for row in rows if row[0] is not None]
-            head = rows[0][1] if rows else None
-        else:
-            result = await session.execute(stmt)
-            events = list(result.scalars().all())
-
-    # A window that excludes the wallet's genesis event starts mid-chain: the
-    # first in-window event legitimately links to an event *outside* the
-    # window. Seed the expected predecessor from the last stored event before
-    # the window instead of from genesis, otherwise every non-genesis window
-    # reports a valid chain as tampered (``audit_previous_hash_mismatch``).
-    previous_hash: str | None = None
-    if events and created_after:
-        first_seq = events[0].seq
-        pred_stmt = (
-            select(cast(Any, ControlPlaneAuditEventModel.chain_hash))
+        # One statement gives events and head the same database snapshot.
+        # A separate head SELECT could see a legitimate concurrent append
+        # and label the earlier event snapshot as a truncated chain.
+        # Anchor the outer joins to one row so an empty/deleted event set
+        # still loads its head and actual truncation remains detectable.
+        anchor = select(literal(1).label("anchor")).subquery()
+        event_rows = aliased(ControlPlaneAuditEventModel, stmt.subquery())
+        head_rows = aliased(
+            AuditChainHeadModel,
+            select(AuditChainHeadModel)
             .where(
-                cast(ColumnElement[bool], ControlPlaneAuditEventModel.seq < first_seq)
-            )
-            .order_by(desc(cast(ColumnElement[Any], ControlPlaneAuditEventModel.seq)))
-            .limit(1)
-        )
-        if wallet_id is None:
-            pred_stmt = pred_stmt.where(
-                cast(Any, ControlPlaneAuditEventModel.wallet_id).is_(None)
-            )
-        else:
-            pred_stmt = pred_stmt.where(
                 cast(
                     ColumnElement[bool],
-                    ControlPlaneAuditEventModel.wallet_id == wallet_id,
+                    AuditChainHeadModel.wallet_key == (wallet_id or ""),
                 )
             )
-        async with factory() as session:
-            previous_hash = (await session.execute(pred_stmt)).scalar_one_or_none()
+            .subquery(),
+        )
+        snapshot = await session.execute(
+            select(event_rows, head_rows)
+            .select_from(anchor)
+            .outerjoin(event_rows, true())
+            .outerjoin(head_rows, true())
+            .order_by(
+                cast(ColumnElement[Any], event_rows.seq),
+                cast(ColumnElement[Any], event_rows.created_at),
+            )
+        )
+        rows = snapshot.all()
+        events = [row[0] for row in rows if row[0] is not None]
+        head = rows[0][1] if rows else None
+
+    previous_hash: str | None = None
     first_event_id = events[0].event_id if events else None
     last_event_id = events[-1].event_id if events else None
+    # seq 0 is the pre-sequence default. A chain that actually uses sequence
+    # numbers has to be 1..N with no holes: seq is not covered by the signature,
+    # so a hole with the hashes left intact would otherwise verify.
+    sequence_numbered = any(event.seq for event in events)
+    expected_seq = 1
     for event in events:
         payload = audit_payload(
             event_id=event.event_id,
@@ -617,11 +650,23 @@ async def _verify_single_chain(
                 "audit_chain_hash_mismatch",
                 event.event_id,
             )
+        if sequence_numbered and event.seq != expected_seq:
+            return AuditChainVerification(
+                False,
+                len(events),
+                first_event_id,
+                last_event_id,
+                "audit_sequence_gap",
+                event.event_id,
+            )
+        expected_seq += 1
         previous_hash = event.chain_hash
 
     # Tail-truncation check: the last verified event must match the head the
     # append path recorded. If the head says seq=N/chain_hash=H but the loaded
-    # chain ends earlier (or is empty), the tail was deleted.
+    # chain ends earlier (or is empty), the tail was deleted. This runs for
+    # time-windowed calls too. A window used to skip the head, so deleting
+    # the tail and then verifying "since" a date reported a valid prefix.
     if head is not None:
         last_event = events[-1] if events else None
         if last_event is None or (
@@ -636,10 +681,30 @@ async def _verify_single_chain(
                 "audit_chain_truncated",
                 last_event.event_id if last_event else None,
             )
+    elif sequence_numbered:
+        # Append writes the head in the same transaction as the event. A
+        # numbered chain with no head has lost that anchor (for example the
+        # tail and the head were both deleted). The surviving prefix would
+        # otherwise verify.
+        return AuditChainVerification(
+            False,
+            len(events),
+            first_event_id,
+            last_event_id,
+            "audit_chain_head_missing",
+            last_event_id,
+        )
 
+    reported = events
+    if created_after is not None or created_before is not None:
+        reported = [
+            event
+            for event in events
+            if _event_in_window(event.created_at, created_after, created_before)
+        ]
     return AuditChainVerification(
         True,
-        len(events),
-        first_event_id,
-        last_event_id,
+        len(reported),
+        reported[0].event_id if reported else None,
+        reported[-1].event_id if reported else None,
     )
