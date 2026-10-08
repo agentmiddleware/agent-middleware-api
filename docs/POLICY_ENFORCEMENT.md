@@ -114,10 +114,20 @@ configured-upstream paths.
 
 `app/services/policies.py::evaluate_wallet_policy`
 
-Evaluates every **active** `PolicyBundle` attached to the wallet. No bundles =
-allow. Within each bundle the checks run in order and the first failure wins.
-All monetary comparisons are done in `Decimal` end-to-end (thresholds stored as
-`Decimal`, incoming cost normalized rather than compared as float).
+Evaluates every **active** `PolicyBundle` attached to the wallet, oldest first,
+and the first denial wins: multiple active bundles combine as deny-if-any,
+with no priority or override between them, so stacking a stricter bundle only
+narrows what is allowed. A wallet with **no active bundles is allowed** —
+bundles are opt-in guardrails, so a buyer who sets up nothing has no
+guardrails at all. Within each bundle the checks run in order and the first
+failure wins. All monetary comparisons are done in `Decimal` end-to-end
+(thresholds stored as `Decimal`, incoming cost normalized rather than compared
+as float).
+
+Buyers manage their own bundles through `/v1/policies` with their wallet key:
+a key owner can create, list, view, change, and deactivate (soft-delete via
+`DELETE`, which sets `is_active=false` and keeps history) bundles for their
+own wallet. Only the bootstrap admin can manage another wallet's bundles.
 
 | Check | Reason code |
 |-------|-------------|
@@ -128,6 +138,7 @@ All monetary comparisons are done in `Decimal` end-to-end (thresholds stored as
 | `estimated > max_cost_per_action` | `max_cost_per_action_exceeded` |
 | `daily_spend_used + estimated > daily_spend_limit` | `daily_spend_limit_exceeded` |
 | Bundle sets `daily_spend_limit` but `daily_spend_used` is unknown | `daily_spend_unknown` (denied; an unproven cap is never skipped) |
+| Bundle sets `daily_spend_limit` but the action's `estimated_cost` is unknown | `estimated_cost_unknown` (denied; an unproven cap is never skipped) |
 | Bundle requires real effects but the call is in simulation mode | `real_effects_required` |
 | Requested `risk_tier` sits above the bundle's `risk_tier` ceiling (`low < medium < high`) or is an unknown tier | `risk_tier_not_allowed` (the requested tier is recorded on the decision as `requested_risk_tier`) |
 
@@ -282,6 +293,8 @@ authorization guarantee.
 | `policy_constraint_corrupt` | C | A wallet policy allow-list column is corrupt; denied rather than read as unrestricted |
 | `max_cost_per_action_exceeded` | C | Per-action cost cap hit |
 | `daily_spend_limit_exceeded` | C | Daily spend cap hit |
+| `daily_spend_unknown` | C | Daily cap set but past spend unknown; denied |
+| `estimated_cost_unknown` | C | Daily cap set but action cost unknown; denied |
 | `real_effects_required` | C | Real-effects policy vs simulation mode |
 | `human_approval_unavailable` | D | Approval service unreachable (**retryable**) |
 | `permit_recipient_domain_mismatch` | E | Upstream origin ≠ permit's bound domain |

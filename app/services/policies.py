@@ -199,6 +199,21 @@ async def patch_policy_bundle(
     return _to_response(row)
 
 
+async def deactivate_policy_bundle(policy_id: str) -> PolicyBundleResponse | None:
+    """Soft-delete a bundle: it stays in history but stops being evaluated."""
+    factory = get_session_factory()
+    async with factory() as session:
+        row = await session.get(PolicyBundleModel, policy_id)
+        if not row:
+            return None
+        row.is_active = False
+        row.updated_at = utc_now()
+        session.add(row)
+        await session.commit()
+        await session.refresh(row)
+    return _to_response(row)
+
+
 async def wallet_human_approval_required(wallet_id: str) -> bool:
     """True when any active policy bundle for this wallet demands a human decision.
 
@@ -242,12 +257,23 @@ async def evaluate_wallet_policy(
 ) -> PolicyEvaluation:
     """Evaluate a wallet's active policy bundles against one intended action.
 
+    Merge rule: every active bundle is evaluated in creation order and the
+    first denial wins (deny if any bundle denies). There is no priority or
+    override between bundles, so stacking a stricter bundle only narrows
+    what is allowed. A wallet with no active bundles is allowed: bundles
+    are opt-in guardrails, not a default-deny posture.
+
     ``approval_gate_active`` declares that the invoke being evaluated already
     runs through the permit-level human-approval gate. A policy's
     ``human_approval_required`` constraint is then satisfied by that gate
     (recorded in ``evaluated_constraints``) instead of denying — every OTHER
     constraint in the bundle is still enforced. Callers with no approval gate
     keep the fail-closed denial.
+
+    Unknown costs fail closed against a daily cap: when a bundle sets
+    ``daily_spend_limit``, both past spend (``daily_spend_used``) and the
+    action's ``estimated_cost`` must be known, otherwise the call is denied,
+    since an unproven cap is never skipped.
     """
     stmt = (
         select(PolicyBundleModel)
@@ -359,7 +385,16 @@ async def evaluate_wallet_policy(
                     policy.policy_id,
                     {"evaluated": evaluated},
                 )
-            if est is not None and daily + est > policy.daily_spend_limit:
+            if est is None:
+                # The action's cost is unknown, so the cap cannot be shown
+                # to hold either. Fail closed instead of skipping the check.
+                return PolicyEvaluation(
+                    False,
+                    "estimated_cost_unknown",
+                    policy.policy_id,
+                    {"evaluated": evaluated},
+                )
+            if daily + est > policy.daily_spend_limit:
                 return PolicyEvaluation(
                     False,
                     "daily_spend_limit_exceeded",

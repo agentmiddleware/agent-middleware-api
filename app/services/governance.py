@@ -17,12 +17,22 @@ async def record_governed_action(
     request_id: str | None = None,
     estimated_cost: float | None = None,
     committed_cost: float | None = None,
-    allowed: bool = True,
+    allowed: bool | None = None,
     reason: str | None = None,
     ok: bool = True,
     error: str | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> PolicyDecision:
+    """Record an audit event shaped like a policy decision.
+
+    This records a verdict, it does not decide one: it never evaluates
+    wallet policy bundles. Pass an ``allowed`` verdict obtained from
+    ``evaluate_wallet_policy`` (or another real authorization check), or
+    omit it to derive the verdict from wallet ownership (allowed only when
+    the caller is the bootstrap admin or owns ``wallet_id``). A caller that
+    passes ``allowed=True`` without such a check is logging its own
+    approval, so prefer omitting it.
+    """
     decision = evaluate_governed_action(
         auth=auth,
         wallet_id=wallet_id,
