@@ -7,9 +7,9 @@
 > (`app/routers/mcp.py`), calling `QuoteService.validate_for_action`,
 > `consume`, and `release` in `app/services/quotes.py`. Its "production-ready"
 > and "Remaining risks: None identified" verdicts are not current claims;
-> [`WEDGE.md`](WEDGE.md) lists production-ready payments or settlement under
+> [`WEDGE.md`](../../WEDGE.md) lists production-ready payments or settlement under
 > "What Not To Claim Yet". The maintained record is
-> [`docs/signed-quotes.md`](docs/signed-quotes.md) plus
+> [`docs/signed-quotes.md`](../signed-quotes.md) plus
 > `tests/test_signed_quotes.py` and `tests/test_quote_vertical_slice.py`.
 
 ## Task Outcome: ✅ ALREADY COMPLETE ON MAIN

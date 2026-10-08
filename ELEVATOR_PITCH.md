@@ -65,8 +65,9 @@ may already be sufficient; the first conversation must establish that they are
 not before this product is proposed.
 
 **The wedge.** Not a general MCP gateway, and not payments. The narrow,
-differentiating primitive is **exactly-once economic authorization at the
-gateway boundary**:
+differentiating primitive is **at-most-one economic authorization at the
+gateway boundary**: one accepted idempotency key yields at most one gateway
+dispatch to the configured upstream tool and at most one ledger debit:
 
 ```text
 scoped signed permit -> governed MCP invoke -> wallet charge -> signed receipt
@@ -97,6 +98,18 @@ scoped signed permit -> governed MCP invoke -> wallet charge -> signed receipt
   ledger record exists for that outcome — the ledger entry. A pre-dispatch
   denial has no debit to link. This is not a compliance-grade ledger or proof of
   physical work.
+
+**Human approval (Sentinel).** When a permit requires it, the agent cannot
+run the tool until a named human approves. The request goes to Sentinel
+([pauseapi.app](https://pauseapi.app)): the approver opens an email or text
+magic link and approves or rejects, and only an approval mints the permit, so
+nothing is reserved or charged before the human decides. Each approval covers
+the exact tool, arguments, and price the human reviewed and is used up on
+first use. Local demos simulate this approval and label the record simulated;
+a pilot needs a real Sentinel tenant with approvers who answer inside the
+timeout. Sentinel is the approval channel, not a standalone product: one ask,
+one decision, recorded on the receipt. Operator detail:
+[`docs/human-approval-gate.md`](docs/human-approval-gate.md).
 
 **Why believe it.** The proof is executable, not asserted:
 

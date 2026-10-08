@@ -49,7 +49,10 @@ versions.
 For a commercial license, or to run the core as a managed deployment, open a
 GitHub issue titled "Commercial license" or contact the maintainer through
 the GitHub profile at <https://github.com/PetrefiedThunder>. Pricing is not
-public during the design-partner phase (see [`WEDGE.md`](WEDGE.md)).
+public during the design-partner phase (see [`WEDGE.md`](WEDGE.md)). The shape
+of a design-partner pilot, one paid internal tool behind the proxy with
+partner-owned acceptance, is described in
+[`DESIGN_PARTNER_GUIDE.md`](DESIGN_PARTNER_GUIDE.md).
 
 ## Contributions
 

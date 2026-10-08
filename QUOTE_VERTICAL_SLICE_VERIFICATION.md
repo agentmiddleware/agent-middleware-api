@@ -2,7 +2,7 @@
 
 > **Status (2026-10-01): historical PR artifact, not maintained.** This is a
 > verification snapshot from PR #331, written against commit `254a4ad`; its
-> companion is [`FINAL_SUMMARY.md`](FINAL_SUMMARY.md). The `mcp.py` line ranges
+> companion is [`FINAL_SUMMARY.md`](docs/history/FINAL_SUMMARY.md). The `mcp.py` line ranges
 > below (L702-734, L1193-1227, L1233-1251, L1277-1282) are stale: quote
 > validation, consumption, and release-on-failure all live in
 > `_execute_registered_tool_inner` (`app/routers/mcp.py`), calling
