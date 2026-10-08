@@ -214,7 +214,12 @@ async def test_docs_index_gates_proof_services(client, proof_surfaces_off):
 
 def test_agentmarket_listing_is_wedge_honest():
     text = open("docs/agentmarket-listing.md", encoding="utf-8").read().lower()
-    assert "exactly-once" in text
+    # Buyer copy must use the scoped promise from WEDGE.md ("at most one"),
+    # not an unscoped debit guarantee. Past audits flagged unconditional
+    # one-debit wording as the top recurring overclaim theme.
+    assert "at most one" in text
+    assert "exactly-once gateway debit" not in text
+    assert "exactly once only" not in text
     assert "not a full agent middleware platform" in text
     assert "do **not** list" in text or "do not list" in text
     # Must not pitch AWI/RAG as product capabilities section.
