@@ -122,6 +122,17 @@ async def test_endpoint_disabled_by_default(client):
 
 
 @pytest.mark.anyio
+async def test_disabled_endpoint_names_the_enable_flag(client):
+    # An authenticated operator hitting a disabled endpoint must learn the
+    # exact flag to set, not a bare "Not Found".
+    resp = await client.post("/mcp", json=_initialize(), headers=BOOTSTRAP_MCP_HEADERS)
+    assert resp.status_code == 404
+    detail = resp.json()["detail"]
+    assert detail["error"] == "standard_mcp_endpoint_disabled"
+    assert "ENABLE_STANDARD_MCP_ENDPOINT" in detail["remediation"]
+
+
+@pytest.mark.anyio
 async def test_endpoint_requires_credentials(client, standard_mcp_enabled):
     resp = await client.post("/mcp", json=_initialize(), headers=MCP_HEADERS)
     assert resp.status_code == 401
@@ -212,8 +223,11 @@ async def test_get_and_delete_are_method_not_allowed(client, standard_mcp_enable
     resp = await client.get("/mcp", headers=BOOTSTRAP_MCP_HEADERS)
     assert resp.status_code == 405
     assert resp.headers["allow"] == "POST"
+    assert resp.json()["error"] == "method_not_allowed"
+    assert "POST" in resp.json()["detail"]
     resp = await client.request("DELETE", "/mcp", headers=BOOTSTRAP_MCP_HEADERS)
     assert resp.status_code == 405
+    assert resp.json()["error"] == "method_not_allowed"
 
 
 @pytest.mark.anyio
@@ -224,6 +238,38 @@ async def test_cross_origin_browser_calls_are_rejected(client, standard_mcp_enab
         headers={**BOOTSTRAP_MCP_HEADERS, "Origin": "https://evil.example"},
     )
     assert resp.status_code == 403
+
+
+@pytest.mark.anyio
+async def test_origin_and_host_refusals_name_the_setting(
+    client, standard_mcp_enabled, monkeypatch
+):
+    # Config-caused refusals must tell the operator which setting to fix.
+    refused_origin = await client.post(
+        "/mcp",
+        json=_rpc("ping"),
+        headers={**BOOTSTRAP_MCP_HEADERS, "Origin": "https://evil.example"},
+    )
+    assert refused_origin.status_code == 403
+    origin_detail = refused_origin.json()["detail"]
+    assert origin_detail["error"] == "origin_not_allowed"
+    assert "PUBLIC_URL" in origin_detail["remediation"]
+
+    monkeypatch.setenv("PUBLIC_URL", "https://api.example.com")
+    get_settings.cache_clear()
+    try:
+        wrong_host = await client.post(
+            "/mcp",
+            json=_rpc("ping"),
+            headers={**BOOTSTRAP_MCP_HEADERS, "Host": "other.example.com"},
+        )
+    finally:
+        monkeypatch.setenv("PUBLIC_URL", "")
+        get_settings.cache_clear()
+    assert wrong_host.status_code == 421
+    host_detail = wrong_host.json()["detail"]
+    assert host_detail["error"] == "host_not_allowed"
+    assert "PUBLIC_URL" in host_detail["remediation"]
 
 
 @pytest.mark.anyio

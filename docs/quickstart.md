@@ -407,7 +407,11 @@ safe. The key must be a non-blank string of at most 128 characters; a key
 that is present but unusable is refused before anything is minted or charged,
 and a call with no key at all is a new charged operation every time.
 `tests/test_minimal_path_e2e.py` drives exactly this with the official
-Python SDK client.
+Python SDK client. Outside `make quickstart` (which sets
+`ENABLE_STANDARD_MCP_ENDPOINT=true` for you), an operator must set that flag
+or `POST /mcp` answers 404. Wallets whose policy requires human approval must
+send an `Idempotency-Key`, or the call is refused before anything is minted;
+the same key then polls the pending decision without paging a human twice.
 
 ## Starting over
 
