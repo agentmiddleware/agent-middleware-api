@@ -19,6 +19,7 @@ from ..core.config import get_settings
 from ..core.dependencies import get_agent_money
 from .http_idempotency import (
     begin_http_idempotency as _begin_idempotency,
+    validate_http_idempotency_key as _validate_idempotency_key,
 )
 from ..services.agent_money import (
     AgentMoney,
@@ -641,12 +642,14 @@ async def charge_wallet(
 
     # Idempotency is opt-in via the Idempotency-Key header: a client that
     # retries a charge (e.g. after a timeout) with the same key gets the
-    # original outcome replayed instead of being billed twice.
+    # original outcome replayed instead of being billed twice. A supplied
+    # key is validated like on every other keyed HTTP route, so a blank or
+    # overlong key is refused before anything is charged.
     idem = None
     idem_key: str | None = None
     if idempotency_key:
         idem = get_idempotency_service()
-        idem_key = idempotency_key
+        idem_key = _validate_idempotency_key(idempotency_key)
         try:
             replay = await idem.begin(
                 wallet_id=wallet_id,
