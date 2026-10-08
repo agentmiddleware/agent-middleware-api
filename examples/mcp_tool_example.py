@@ -6,20 +6,31 @@ Example demonstrating how to create an MCP-enabled tool using the B2A SDK.
 
 This file shows:
 1. Creating a simple billable tool with @mcp_tool
-2. Registering it with the service registry
-3. Invoking it via the MCP protocol
+2. Printing the local tool metadata (no backend registration happens here)
+3. Invoking tools via the MCP protocol against a running gateway
+
+What each flag needs:
+- ``--register`` is local only: it prints the decorated tool metadata and
+  the curl commands to call them. It contacts no server and registers
+  nothing with any backend or registry.
+- ``--list`` and ``--generate`` need a running gateway (``B2A_API_URL``,
+  default ``http://localhost:8000``) that serves the MCP manifest.
+- ``--serve`` starts the legacy standalone MCP server. It needs a running
+  gateway plus the ``mcp`` package (``pip install 'b2a-sdk[mcp]'``); the
+  supported path for new code is the governed POST /mcp flow documented
+  in docs/quickstart.md.
 
 Usage:
-    # Register tools (typically done at app startup)
+    # Print local tool metadata (no server needed)
     python examples/mcp_tool_example.py --register
 
-    # List available tools
+    # List available tools (needs a running gateway)
     python examples/mcp_tool_example.py --list
 
-    # Generate tools.json
+    # Generate tools.json (needs a running gateway)
     python examples/mcp_tool_example.py --generate
 
-    # Run standalone MCP server
+    # Run the legacy standalone MCP server (needs gateway + mcp package)
     python examples/mcp_tool_example.py --serve
 """
 
@@ -156,10 +167,10 @@ def on_registration(service_id: str, func, input_schema, output_schema):
 
 
 async def register_tools():
-    """Register all tools with the backend."""
+    """Print local tool metadata (contacts no server, registers nothing)."""
     register_mcp_tool_callback(on_registration)
 
-    print("Tools registered:")
+    print("Local tool metadata (no backend registration performed):")
     print(f"  - {process_data._b2a_mcp_metadata}")
     print(f"  - {summarize_url._b2a_mcp_metadata}")
     print(f"  - {generate_image._b2a_mcp_metadata}")
@@ -206,11 +217,25 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="B2A MCP Tool Example")
-    parser.add_argument("--register", action="store_true", help="Register tools")
-    parser.add_argument("--list", action="store_true", help="List available tools")
-    parser.add_argument("--generate", action="store_true", help="Generate tools.json")
     parser.add_argument(
-        "--serve", action="store_true", help="Run standalone MCP server"
+        "--register",
+        action="store_true",
+        help="Print local tool metadata (no server needed, registers nothing)",
+    )
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="List tools from a running gateway (needs B2A_API_URL)",
+    )
+    parser.add_argument(
+        "--generate",
+        action="store_true",
+        help="Generate tools.json from a running gateway (needs B2A_API_URL)",
+    )
+    parser.add_argument(
+        "--serve",
+        action="store_true",
+        help="Run the legacy standalone MCP server (needs gateway + mcp package)",
     )
     args = parser.parse_args()
 
@@ -225,7 +250,7 @@ if __name__ == "__main__":
     else:
         parser.print_help()
         print("\nExample usage:")
-        print("  python examples/mcp_tool_example.py --register  # Register tools")
-        print("  python examples/mcp_tool_example.py --list     # List tools")
-        print("  python examples/mcp_tool_example.py --generate # Generate tools.json")
-        print("  python examples/mcp_tool_example.py --serve   # Run MCP server")
+        print("  python examples/mcp_tool_example.py --register  # Local metadata only")
+        print("  python examples/mcp_tool_example.py --list     # Needs a gateway")
+        print("  python examples/mcp_tool_example.py --generate # Needs a gateway")
+        print("  python examples/mcp_tool_example.py --serve   # Legacy server")

@@ -15,6 +15,12 @@ repository after `python -m pip install -r requirements.txt`.
 
 ## Quick Start
 
+For new code prefer the governed middleware (permit -> invoke -> signed
+receipt): ``framework_integrations.langgraph_middleware.governed_tool``
+and ``LangGraphGovernedTools``. The ``get_*_tools`` factories below wrap
+legacy ungoverned helpers (no permit, no receipt) and emit a
+``DeprecationWarning``.
+
 ```python
 from framework_integrations import B2AClient, get_langgraph_tools, get_llamaindex_tools
 
