@@ -88,6 +88,25 @@ still unreleased.
 
 ### Fixed
 
+- **charge() HTTP 402**: A payment-required body whose `detail` is not an
+  object, whose JSON cannot be read, or whose `shortfall` is not a finite
+  number now raises `InsufficientFundsError` with that body attached, instead
+  of `AttributeError`, `ValueError`, or `JSONDecodeError`. A server
+  `top_up_url` is kept. A path that starts with `/` is joined to the client
+  base URL. The dashboard URL is used only when the server omits one. HTTP 403
+  is unchanged and still raises `httpx.HTTPStatusError`.
+- **x402 settle errors**: `permit_write_contended` (HTTP 503) stays `APIError`
+  with status 503, so a caller can retry that same idempotency key. Other
+  `permit_*` denials stay `PermitDeniedError` and keep the real status (400
+  or 404) instead of a hardcoded 403. A body whose error is
+  `insufficient_funds` raises `InsufficientFundsError`. Any other HTTP 402,
+  including `x402_invalid_requirement`, stays `APIError`.
+- **Idempotency-Key**: the SDK, the edge client, and the legacy framework
+  client reject C0 and DEL characters before sending. The framework client
+  now strips surrounding whitespace and enforces 128 characters on the
+  stripped key, matching the SDK, so a padded key is not a second charge.
+  A key already stored with its padding will not match a later stripped retry.
+
 - **x402 HTTP 402 handling**: The x402 module's `parse_402()` and `settle_402()`
   methods do not collapse an HTTP 402 status into `InsufficientFundsError`. A
   402 response with valid x402 headers is parsed as a payment requirement, not

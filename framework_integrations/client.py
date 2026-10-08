@@ -8,6 +8,32 @@ from dataclasses import dataclass
 from typing import Any, Optional
 import httpx
 
+# Same rules as b2a_sdk.client.AgentMiddlewareClient._validate_idempotency_key.
+# This module must not import b2a_sdk: the legacy client stays usable with
+# only httpx. The server stores the key it is sent, so a padded key and the
+# stripped key would be two different charges.
+_MAX_IDEMPOTENCY_KEY_LENGTH = 128
+
+
+def _header_value(value: object, name: str) -> str:
+    """Strip a header value and reject blank or control-character text."""
+    if not isinstance(value, str):
+        raise ValueError(f"{name} must be a string")
+    text = value.strip()
+    if not text:
+        raise ValueError(f"{name} must not be blank")
+    if any(ord(char) < 32 or ord(char) == 127 for char in text):
+        raise ValueError(f"{name} must not contain control characters")
+    return text
+
+
+def _idempotency_key_for_header(value: object) -> str:
+    """Return the idempotency key to send on the wire."""
+    key = _header_value(value, "idempotency_key")
+    if len(key) > _MAX_IDEMPOTENCY_KEY_LENGTH:
+        raise ValueError("idempotency_key must be at most 128 characters")
+    return key
+
 
 @dataclass
 class B2AConfig:
@@ -160,15 +186,12 @@ class B2AClient:
     ) -> dict[str, Any]:
         """Call the proof-only AWI route with its required governance headers.
 
-        Reuse the caller-owned idempotency key verbatim for one logical action.
-        The server remains responsible for authorization and accounting.
+        Reuse the caller-owned idempotency key for one logical action. Surrounding
+        whitespace is removed so a retry matches the Python SDK. The server
+        remains responsible for authorization and accounting.
         """
-        if not isinstance(permit_id, str) or not permit_id.strip():
-            raise ValueError("permit_id must not be blank")
-        if not isinstance(idempotency_key, str) or not idempotency_key.strip():
-            raise ValueError("idempotency_key must not be blank")
-        if len(idempotency_key) > 128:
-            raise ValueError("idempotency_key must be at most 128 characters")
+        permit = _header_value(permit_id, "permit_id")
+        key = _idempotency_key_for_header(idempotency_key)
         payload = {
             "session_id": session_id,
             "action": action,
@@ -178,8 +201,8 @@ class B2AClient:
             f"{self.config.api_url}/v1/awi/execute",
             headers={
                 **self._headers(),
-                "X-Permit-Id": permit_id,
-                "Idempotency-Key": idempotency_key,
+                "X-Permit-Id": permit,
+                "Idempotency-Key": key,
             },
             json=payload,
         )
@@ -221,11 +244,11 @@ class B2AClient:
         the units (a caller cannot name an amount). ``idempotency_key`` is
         required and caller-owned: retrying with the same key replays the
         original outcome instead of debiting the wallet a second time.
+        Surrounding whitespace is removed. A blank key, a key longer than 128
+        characters, or a key with a control character is refused before the
+        request is sent.
         """
-        # The server treats an empty Idempotency-Key as "no key", which would
-        # silently drop the double-charge protection, so refuse it here.
-        if not idempotency_key or not idempotency_key.strip():
-            raise ValueError("idempotency_key is required and must not be blank")
+        key = _idempotency_key_for_header(idempotency_key)
         params: dict[str, str | float] = {
             "wallet_id": self.config.wallet_id,
             "service": service_category,
@@ -237,7 +260,7 @@ class B2AClient:
             params["request_path"] = request_path
         response = await self._client.post(
             f"{self.config.api_url}/v1/billing/charge",
-            headers={**self._headers(), "Idempotency-Key": idempotency_key},
+            headers={**self._headers(), "Idempotency-Key": key},
             params=params,
         )
         response.raise_for_status()
