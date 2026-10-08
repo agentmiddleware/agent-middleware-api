@@ -58,7 +58,10 @@ def upgrade() -> None:
         op.add_column(
             "mcp_dispatch_attempts",
             sa.Column(
-                "call_slot_reserved", sa.Boolean(), nullable=False, server_default="0"
+                "call_slot_reserved",
+                sa.Boolean(),
+                nullable=False,
+                server_default=sa.false(),
             ),
         )
 
