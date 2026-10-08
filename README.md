@@ -235,7 +235,8 @@ an observation into a finding.
 Autonomous clients fetch, in order:
 
 1. `GET /.well-known/agent.json` — canonical bootstrap and product boundary
-2. `GET /llms.txt` — agent-oriented prose and vocabulary
+2. `GET /llms.txt` — agent-oriented prose and vocabulary (the API-served
+   copy is canonical for the gateway; the marketing site ships its own copy)
 3. `GET /mcp/tools.json` — registered tools, permit requirements, exact pricing
 4. `GET /openapi.json` — the canonical API contract
 
@@ -306,8 +307,10 @@ The typed `AgentMiddlewareClient` covers discovery, permits, governed
 invocation, receipt verification, and evidence retrieval, and surfaces
 idempotency conflicts and delivery uncertainty as explicit errors. CI builds
 wheels and sdists on Python 3.10–3.12 and attaches them to `python-sdk-v*`
-releases. **It is not published to PyPI, and there is no TypeScript package** —
-install from this repository:
+releases. **It is not published to PyPI, and there is no published
+TypeScript package for the gateway client** — install the Python client from
+this repository. (The `awi_sdk/typescript` tree in this repo targets the AWI
+surface, not gateway permits and receipts.):
 
 ```bash
 python -m pip install -e './b2a_sdk[dev]'
