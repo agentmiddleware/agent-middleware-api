@@ -999,7 +999,7 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(
         prog="python -m failure_lab serve",
-        description="Run the Agent Action Safety Check on this machine.",
+        description="Run the lost-response failure check on this machine.",
     )
     parser.add_argument("--host", default="127.0.0.1", help="loopback addresses only")
     parser.add_argument("--port", type=int, default=8080)

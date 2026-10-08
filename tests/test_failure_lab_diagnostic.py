@@ -377,6 +377,28 @@ def test_every_conclusion_kind_has_a_plain_english_gloss():
         assert CONCLUSION_GLOSS.get(kind.value), f"{kind.value} has no gloss"
 
 
+def test_the_landing_headline_names_the_test_not_a_safety_verdict():
+    """The page leads with the failure it can run, never with safety.
+
+    "Agent Action Safety Check" read as a verdict about the visitor's system
+    while the page measures one injected failure in a sandbox. The headline
+    must name the test, and no safety-verdict wording may appear anywhere on
+    the landing page.
+    """
+    html = pages.render_index(
+        scenarios=["T03"],
+        defaults=["T03"],
+        scenario_titles={"T03": "Execute then lose response"},
+        external_targets_enabled=False,
+    )
+    assert pages.HEADLINE in html
+    assert "response" in pages.HEADLINE.lower()
+    lowered = html.lower()
+    assert "safety check" not in lowered
+    assert "safety verdict" not in lowered
+    assert "see if your ai is safe" not in lowered
+
+
 def test_a_signature_is_never_presented_as_proof_the_action_happened():
     """The rule the PRD states outright, asserted on a rendered page."""
     html = _html(_gateway_prevents())

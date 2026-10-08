@@ -43,10 +43,10 @@ from failure_lab.diagnostic.answer import Answer, DiagnosticAnswer, ScenarioRow
 from failure_lab.diagnostic.offer import OFFER, Offer
 from failure_lab.diagnostic.steps import PHASE_LABELS, Step
 
-#: The one line this page leads with. Specific, testable, and not a claim about
-#: anybody's safety: the PRD forbids "see if your AI is safe" and this is the
-#: sentence it gives instead.
-HEADLINE = "Agent Action Safety Check"
+#: The one line this page leads with. It names the single failure mode the page
+#: can run, not a verdict about anybody's safety: the PRD forbids "see if your
+#: AI is safe" framing, so the headline stays on the test, never on safety.
+HEADLINE = "Lost-response failure check"
 SUBHEADLINE = (
     "Test what happens when your agent's tool executes but its response disappears."
 )
