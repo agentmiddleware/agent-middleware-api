@@ -3,9 +3,13 @@ Agent Financial Gateways Router
 ---------------------------------
 Two-tier wallet system: human sponsors (liability sinks) fund agent wallets.
 Per-action micro-metering charges fractions of a cent per API call.
-Swarm arbitrage silently books margin on every transaction.
 
-This is how the API generates revenue autonomously.
+Prices are cost plus a stated operator margin: every charge records what the
+caller paid (revenue), what the action cost to serve (compute cost), and the
+difference (margin) on the ledger, totaled per service by the operator
+arbitrage report. Margin here is an internal accounting number, not money
+collected from anyone: credits are prepaid units topped up through Stripe,
+and no settlement or payout runs on this path.
 """
 
 from decimal import Decimal
@@ -953,6 +957,20 @@ async def prepare_top_up(
 
     settings = get_settings()
 
+    # Fail with a clear coded error instead of leaking the Stripe SDK's auth
+    # failure: without a key no PaymentIntent can exist, so say so up front.
+    if not settings.STRIPE_SECRET_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error": "card_top_up_unavailable",
+                "message": (
+                    "Card top-up is not configured on this deployment "
+                    "(no Stripe key); wallets are funded by the operator."
+                ),
+            },
+        )
+
     if settings.KYC_REQUIRED_FOR_TOPUP:
         from ..services.kyc_service import get_kyc_service
 
@@ -1303,12 +1321,31 @@ async def get_pricing(
     # matches the one Stripe settlement mints credits at. The exact field is
     # derived from the Decimal rather than from the float, so a non-round rate
     # is advertised without binary-float noise.
-    exchange_rate = get_settings().EXCHANGE_RATE
+    settings = get_settings()
+    exchange_rate = settings.EXCHANGE_RATE
+    # Card top-up needs both halves of the money-in path: a Stripe key so the
+    # PaymentIntent call can succeed, and the mounted prepare route that takes
+    # it. Advertise the conjunction so no client or demo implies card payments
+    # work on a deployment where they cannot.
+    card_top_up_available = bool(
+        settings.STRIPE_SECRET_KEY and settings.ENABLE_PROOF_SURFACES
+    )
+    if card_top_up_available:
+        card_top_up_message = (
+            "Card top-up is available via POST /v1/billing/top-up/prepare."
+        )
+    else:
+        card_top_up_message = (
+            "Card top-up is not available on this deployment; "
+            "wallets are funded by the operator."
+        )
     return PricingTableResponse(
         pricing=money.get_pricing_table(),
         exchange_rate=float(exchange_rate),
         exchange_rate_exact=str(exchange_rate),
         last_updated=datetime.now(timezone.utc),
+        card_top_up_available=card_top_up_available,
+        card_top_up_message=card_top_up_message,
     )
 
 

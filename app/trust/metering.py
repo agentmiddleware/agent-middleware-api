@@ -1,7 +1,10 @@
 """Trust-plane facade: wallet ledger and spend metering.
 
-Re-exports the canonical wallet/ledger engine from
-:mod:`app.services.agent_money`.
+This module is a thin re-export only, not a second metering engine. The
+canonical implementation lives in :mod:`app.services.agent_money`; every
+name here is the same object, and no pricing, charging, or ledger logic may
+be added here. Import from here only when expressing the trust-plane
+dependency; the behavior under test is always the engine's.
 """
 
 from __future__ import annotations

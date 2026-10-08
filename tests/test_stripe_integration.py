@@ -13,10 +13,25 @@ from httpx import AsyncClient, ASGITransport
 from sqlalchemy import update as sa_update
 from sqlalchemy.exc import IntegrityError
 
+from app.core.config import get_settings
 from app.core.time import utc_now
 from tests.conftest import interleaving_factory, requires_sqlite_row_lock_noop
 from app.main import app
 from app.services.stripe_integration import StripeIntegration, StripeSettlementError
+
+
+@pytest.fixture
+def stripe_key_configured(monkeypatch):
+    """Prepare tests pretend a Stripe key is configured (the SDK stays mocked).
+
+    The route refuses to call Stripe with no key configured, so tests that
+    exercise the success path must opt into the configured posture and leave
+    the shared settings cache clean behind them.
+    """
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_fake_key_for_testing")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 @pytest.fixture
@@ -137,7 +152,7 @@ def refunded_charge(
 
 @pytest.mark.anyio
 async def test_prepare_top_up_creates_payment_intent(
-    client, sponsor_wallet, api_headers
+    client, sponsor_wallet, api_headers, stripe_key_configured
 ):
     """Test that /top-up/prepare creates a Stripe PaymentIntent."""
     wallet_id = sponsor_wallet["wallet_id"]
@@ -174,7 +189,7 @@ async def test_prepare_top_up_creates_payment_intent(
 
 @pytest.mark.anyio
 async def test_prepare_top_up_rejects_non_usd_in_api_and_service(
-    client, sponsor_wallet, api_headers
+    client, sponsor_wallet, api_headers, stripe_key_configured
 ):
     wallet_id = sponsor_wallet["wallet_id"]
     integration = StripeIntegration()
@@ -201,7 +216,7 @@ async def test_prepare_top_up_rejects_non_usd_in_api_and_service(
 
 @pytest.mark.anyio
 async def test_prepare_top_up_rejects_agent_and_child_wallets(
-    client, wallet_hierarchy, api_headers
+    client, wallet_hierarchy, api_headers, stripe_key_configured
 ):
     with patch(
         "app.services.stripe_integration.stripe.PaymentIntent.create"
@@ -219,7 +234,9 @@ async def test_prepare_top_up_rejects_agent_and_child_wallets(
 
 
 @pytest.mark.anyio
-async def test_prepare_top_up_wallet_not_found(client, api_headers):
+async def test_prepare_top_up_wallet_not_found(
+    client, api_headers, stripe_key_configured
+):
     """Test that /top-up/prepare returns 404 for non-existent wallet."""
     with patch(
         "app.services.stripe_integration.stripe.PaymentIntent.create"
@@ -231,6 +248,36 @@ async def test_prepare_top_up_wallet_not_found(client, api_headers):
             headers=api_headers,
         )
         assert resp.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_prepare_top_up_without_stripe_key_answers_503(
+    client, sponsor_wallet, api_headers, monkeypatch
+):
+    """With no Stripe key, prepare must say card top-up is unavailable.
+
+    The suite default (no key) matches a default deployment. The route must
+    answer a coded 503 pointing at operator funding, never call the Stripe
+    SDK, and never leak the SDK's auth failure text.
+    """
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "")
+    get_settings.cache_clear()
+    try:
+        wallet_id = sponsor_wallet["wallet_id"]
+        with patch(
+            "app.services.stripe_integration.stripe.PaymentIntent.create"
+        ) as mock_create:
+            mock_create.side_effect = AssertionError("Stripe must not be called")
+            resp = await client.post(
+                f"/v1/billing/top-up/prepare?wallet_id={wallet_id}&amount_fiat=50.0",
+                headers=api_headers,
+            )
+        assert resp.status_code == 503, resp.text
+        detail = resp.json()["detail"]
+        assert detail["error"] == "card_top_up_unavailable"
+        assert "operator" in detail["message"]
+    finally:
+        get_settings.cache_clear()
 
 
 @pytest.mark.anyio
@@ -939,7 +986,7 @@ class TestStripeWebhookIdempotency:
 
     @pytest.mark.anyio
     async def test_duplicate_webhook_returns_200(
-        self, client, sponsor_wallet, api_headers
+        self, client, sponsor_wallet, api_headers, stripe_key_configured
     ):
         """
         Test that duplicate payment_intent webhooks don't cause errors.

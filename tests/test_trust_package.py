@@ -178,3 +178,16 @@ def test_adapter_seam_is_exposed():
     assert trust.McpGovernedAdapter is McpGovernedAdapter
     assert issubclass(McpGovernedAdapter, GovernedInvocationAdapter)
     assert McpGovernedAdapter.protocol == "mcp"
+
+
+def test_metering_module_is_a_pure_reexport():
+    """app.trust.metering must stay a facade, never a second engine.
+
+    Auditors flagged the module as looking like a duplicate metering engine.
+    Every public name must be the identical object from app.services, so a
+    second pricing, charging, or ledger implementation cannot hide here.
+    """
+    import app.trust.metering as metering
+
+    for name in metering.__all__:
+        assert getattr(metering, name) is getattr(agent_money, name), name
