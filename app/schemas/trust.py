@@ -348,6 +348,13 @@ class ReceiptVerifyRequest(BaseModel):
 
 
 class ReceiptVerifyResponse(BaseModel):
+    """Outcome of the operator signature check (receipt signature only).
+
+    `valid` covers the stored signature over the canonical signing input. It
+    does not cover permit, ledger, audit, or dispatch linkage; see the
+    evidence endpoints for those chained checks.
+    """
+
     valid: bool
     reason: str | None = None
     receipt: ReceiptResponse | None = None

@@ -348,6 +348,10 @@ forged, `2` undetermined (for example an unknown key) — a verifier that
 conflates "forged" with "could not check" will eventually raise a fraud
 alarm during a key-server outage.
 
+Handing this to someone else? `docs/auditor-handoff.md` is the one page to
+send with the bundle: which files, which command, what each result means,
+and the honest limits.
+
 ## 9. Get denied by authority (optional, ~1 minute)
 
 A permit is not a session token — it names the tools it allows. Issue a

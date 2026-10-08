@@ -300,7 +300,23 @@ async def get_portable_receipt(
     )
 
 
-@router.post("/verify", response_model=ReceiptVerifyResponse)
+@router.post(
+    "/verify",
+    response_model=ReceiptVerifyResponse,
+    summary="Check a receipt's signature (operator tool)",
+    description=(
+        "Checks the receipt signature only: that the stored signature verifies "
+        "over the receipt's canonical signing input. It does not recheck "
+        "permit, ledger, audit, or dispatch linkage, so `valid: true` here does "
+        "not mean the full evidence bundle is valid. For the chained checks, "
+        "use `GET /v1/receipts/{receipt_id}/evidence` or "
+        "`GET /v1/evidence/{receipt_id}`. This is an operator tool: it takes a "
+        "receipt id, needs a credential, and needs an admin credential when "
+        "the receipt is missing. Third party verification is always via a "
+        "handed portable bundle plus the public keys (see "
+        "docs/auditor-handoff.md)."
+    ),
+)
 async def verify_receipt(
     request: ReceiptVerifyRequest,
     auth: AuthContext = Depends(get_auth_context),
