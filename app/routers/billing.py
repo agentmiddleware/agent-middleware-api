@@ -835,6 +835,35 @@ async def charge_wallet(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=frozen_detail,
         )
+    except ValueError as e:
+        # The engine refuses charges it cannot meter (a sub-precision amount
+        # that would round to zero on write). Without this branch that
+        # refusal escapes as a 500, which tells the caller to retry a
+        # request that will never succeed.
+        await _record_billing_governance(
+            event="billing.charge",
+            auth=auth,
+            wallet_id=wallet_id,
+            service_category=category.value,
+            endpoint=endpoint,
+            request_id=request_id,
+            ok=False,
+            error="invalid_charge",
+            metadata={"units": units, "request_path": request_path},
+        )
+        invalid_detail = {
+            "error": "invalid_charge",
+            "wallet_id": wallet_id,
+            "message": str(e),
+        }
+        await _complete_idempotency(
+            {"detail": invalid_detail},
+            status.HTTP_400_BAD_REQUEST,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=invalid_detail,
+        )
 
 
 # --- Top-Up ---

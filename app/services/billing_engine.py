@@ -82,6 +82,13 @@ class LedgerOperationConflictError(RuntimeError):
     """Raised when one governed operation key describes different debits."""
 
 
+#: Smallest charge the ledger can persist. Balances and ledger amounts are
+#: stored at 8 decimal places, so anything smaller rounds to zero on write:
+#: the call would answer 200, deliver the metered service, and leave both
+#: the balance and a zero-value debit row exactly where they were.
+MINIMUM_CHARGE_AMOUNT = Decimal("0.00000001")
+
+
 def _as_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
@@ -647,6 +654,17 @@ class BillingEngine:
 
         unit_name, credits_per_unit, _ = pricing
         charge_amount = units * credits_per_unit
+
+        # Estimates never write, so sub-precision amounts stay answerable
+        # there. The floor below applies to real debits only.
+        if charge_amount < MINIMUM_CHARGE_AMOUNT and not dry_run:
+            # A smaller amount rounds to zero at the ledger's 8 stored
+            # decimals: it would answer success while moving nothing. Refuse
+            # it instead of metering service for free.
+            raise ValueError(
+                f"charge amount {charge_amount} is below the minimum "
+                f"meterable unit {MINIMUM_CHARGE_AMOUNT}"
+            )
 
         if dry_run:
             return await self._dry_run_charge(
