@@ -26,14 +26,22 @@ async def two_wallets(client, api_headers):
     """Create two wallets for transfer testing."""
     resp1 = await client.post(
         "/v1/billing/wallets/sponsor",
-        json={"sponsor_name": "Sender", "email": "sender@t.com", "initial_credits": 10000},
+        json={
+            "sponsor_name": "Sender",
+            "email": "sender@t.com",
+            "initial_credits": 10000,
+        },
         headers=api_headers,
     )
     sender_id = resp1.json()["wallet_id"]
 
     resp2 = await client.post(
         "/v1/billing/wallets/sponsor",
-        json={"sponsor_name": "Receiver", "email": "receiver@t.com", "initial_credits": 0},
+        json={
+            "sponsor_name": "Receiver",
+            "email": "receiver@t.com",
+            "initial_credits": 0,
+        },
         headers=api_headers,
     )
     receiver_id = resp2.json()["wallet_id"]
@@ -65,8 +73,12 @@ async def test_transfer_success(client, two_wallets, api_headers):
     assert data["amount"] == 1000.0
     assert data["status"] == "completed"
 
-    sender_balance = await client.get(f"/v1/billing/wallets/{sender_id}", headers=api_headers)
-    receiver_balance = await client.get(f"/v1/billing/wallets/{receiver_id}", headers=api_headers)
+    sender_balance = await client.get(
+        f"/v1/billing/wallets/{sender_id}", headers=api_headers
+    )
+    receiver_balance = await client.get(
+        f"/v1/billing/wallets/{receiver_id}", headers=api_headers
+    )
 
     assert sender_balance.json()["balance"] == 9000.0
     assert receiver_balance.json()["balance"] == 1000.0
@@ -164,8 +176,12 @@ async def test_transfer_records_ledger(client, two_wallets, api_headers):
         headers=api_headers,
     )
 
-    sender_ledger = await client.get(f"/v1/billing/ledger/{sender_id}", headers=api_headers)
-    receiver_ledger = await client.get(f"/v1/billing/ledger/{receiver_id}", headers=api_headers)
+    sender_ledger = await client.get(
+        f"/v1/billing/ledger/{sender_id}", headers=api_headers
+    )
+    receiver_ledger = await client.get(
+        f"/v1/billing/ledger/{receiver_id}", headers=api_headers
+    )
 
     sender_entries = sender_ledger.json()["entries"]
     receiver_entries = receiver_ledger.json()["entries"]

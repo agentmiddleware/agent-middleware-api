@@ -55,10 +55,20 @@ classified as already sent; they are never claimable again.
 | `failed_unrefunded` | A refund was owed and the refund **itself** failed | Charged; a durable operator work item is created atomically with the receipt | Depends on the underlying failure | 500 / `-32603` | `test_governed_refund_failure_keeps_permit_budget_reserved`, `test_refund_reconciliation_retries_exactly_once_and_preserves_agent_replay` |
 
 Requests rejected before a valid permit and an executable tool are established
-(unknown tool, `permit_required`, `permit_not_found`) terminate with a signed
-terminal *idempotency record* but no receipt — there is no authority to bill
-against. The README states this limit; the replay still returns the original
-envelope.
+produce no receipt — there is no authority to bill against. The README states
+this limit. What they leave behind differs by reason:
+
+- An unknown tool (`Tool not found`) or `permit_not_found` on a governed call
+  that carries an idempotency key completes a terminal *idempotency record*;
+  a same-key replay returns the original error envelope.
+- `permit_required` on a resolved tool, and a resolved tool that is not
+  executable, record nothing: the governed idempotency record is only begun
+  after the permit check, so the completion call in `app/routers/mcp.py` is a
+  no-op. A same-key retry returns the same error while nothing has changed,
+  and after minting a permit it executes normally
+  (`test_strict_mode_missing_permit_denial_leaves_no_idempotency_record`).
+  Whether that stays the contract is the open D2 decision in
+  [authority-required-flow.md](authority-required-flow.md).
 
 A failure the pipeline did not classify — an exception that is none of the
 typed denials, tool failures, or reason-coded errors above — is reported as

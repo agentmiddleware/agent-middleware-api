@@ -2,7 +2,7 @@ name: CI — Agent Middleware API
 
 on:
   push:
-    branches: [master, main, develop, openclaw/amw-schema040-bridge]
+    branches: [master, main, develop, openclaw/amw-schema040-bridge, hotfix/redis-health-34fbdb9]
   pull_request:
     branches: [master, main]
 
@@ -366,10 +366,13 @@ jobs:
         # DATABASE_URL controls the shared application fixtures. TEST_POSTGRES_URL
         # alone only selects the dedicated datetime regression fixture below.
         # Keep asyncpg's connection pool on one event loop across this suite.
+        # The rapid-fire accounting test skips on SQLite; REQUIRE_POSTGRES_TESTS
+        # makes it fail here instead if this step ever loses its Postgres URL.
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/trust_ci
           STATE_BACKEND: postgres
           ENVIRONMENT: test
+          REQUIRE_POSTGRES_TESTS: "1"
         run: |
           pytest -p no:anyio \
             -o asyncio_default_fixture_loop_scope=session \
@@ -380,6 +383,7 @@ jobs:
             tests/test_audit_chain.py \
             tests/test_key_management.py \
             tests/test_idempotency.py \
+            tests/test_security_fuzz_battery.py::test_rapid_fire_invokes_all_accounted \
             -v --tb=short
 
       - name: Run PostgreSQL datetime regressions

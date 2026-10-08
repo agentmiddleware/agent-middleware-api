@@ -1,0 +1,13 @@
+{
+  "command": [
+    "pre-commit",
+    "run",
+    "--all-files"
+  ],
+  "workdir": "/Users/sellers/.openclaw/worktrees/amw-issues-20261003-release",
+  "head_before": "079bb7290f6ed86c6762baec02827305b5cb9da7",
+  "started_at": "2026-10-04T02:07:13.445516+00:00",
+  "exit_code": 0,
+  "finished_at": "2026-10-04T02:07:14.403406+00:00",
+  "head_after": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+}

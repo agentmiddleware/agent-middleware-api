@@ -1,5 +1,16 @@
 # Quote-Locked Pricing Vertical Slice — Implementation Verification
 
+> **Status (2026-10-01): historical PR artifact, not maintained.** This is a
+> verification snapshot from PR #331, written against commit `254a4ad`; its
+> companion is [`FINAL_SUMMARY.md`](FINAL_SUMMARY.md). The `mcp.py` line ranges
+> below (L702-734, L1193-1227, L1233-1251, L1277-1282) are stale: quote
+> validation, consumption, and release-on-failure all live in
+> `_execute_registered_tool_inner` (`app/routers/mcp.py`), calling
+> `QuoteService.validate_for_action`, `consume`, and `release` in
+> `app/services/quotes.py`. The maintained record is
+> [`docs/signed-quotes.md`](docs/signed-quotes.md) plus
+> `tests/test_signed_quotes.py` and `tests/test_quote_vertical_slice.py`.
+
 ## Status: ✅ COMPLETE ON MAIN
 
 The quote-locked pricing vertical slice described in WEDGE.md is **already fully implemented** on the current main branch (commit `254a4ad`).

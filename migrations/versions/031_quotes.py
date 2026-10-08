@@ -31,9 +31,7 @@ def upgrade() -> None:
         sa.Column("quote_id", sa.String(length=64), nullable=False),
         sa.Column("wallet_id", sa.String(length=50), nullable=False),
         sa.Column("tool", sa.String(length=128), nullable=False),
-        sa.Column(
-            "quoted_credits", sa.Numeric(precision=20, scale=8), nullable=False
-        ),
+        sa.Column("quoted_credits", sa.Numeric(precision=20, scale=8), nullable=False),
         sa.Column("category", sa.String(length=50), nullable=False),
         sa.Column(
             "status", sa.String(length=16), nullable=False, server_default="active"
@@ -41,9 +39,7 @@ def upgrade() -> None:
         sa.Column("issued_at", sa.DateTime(), nullable=False),
         sa.Column("expires_at", sa.DateTime(), nullable=False),
         sa.Column("consumed_at", sa.DateTime(), nullable=True),
-        sa.Column(
-            "consumed_by_idempotency_key", sa.String(length=128), nullable=True
-        ),
+        sa.Column("consumed_by_idempotency_key", sa.String(length=128), nullable=True),
         sa.Column("signature", sa.Text(), nullable=False),
         sa.Column("key_id", sa.String(length=64), nullable=False),
         sa.ForeignKeyConstraint(["wallet_id"], ["wallets.wallet_id"]),

@@ -190,7 +190,9 @@ class DirectAgent(Agent):
         started = time.perf_counter()
         try:
             async with asyncio.timeout(timeout_seconds):
-                response = await self._client.post("/refunds", json=arguments, headers=headers)
+                response = await self._client.post(
+                    "/refunds", json=arguments, headers=headers
+                )
         except TimeoutError:
             return AttemptOutcome(
                 configuration=self.configuration.value,
@@ -222,7 +224,9 @@ class DirectAgent(Agent):
                 configuration=self.configuration.value,
                 identity=identity.as_dict(),
                 status="replayed" if replayed else "succeeded",
-                client_visible_state="confirmed_replay" if replayed else "confirmed_success",
+                client_visible_state="confirmed_replay"
+                if replayed
+                else "confirmed_success",
                 http_status=201,
                 latency_ms=latency_ms,
                 refund=body,
@@ -289,7 +293,11 @@ class GatewayAgent(Agent):
 
     def with_permit(self, permit_id: str | None) -> GatewayAgent:
         return GatewayAgent(
-            self.configuration, self.gateway, self.tenant, permit_id, transport=self.transport
+            self.configuration,
+            self.gateway,
+            self.tenant,
+            permit_id,
+            transport=self.transport,
         )
 
     async def submit(
@@ -300,7 +308,11 @@ class GatewayAgent(Agent):
         timeout_seconds: float = 5.0,
     ) -> AttemptOutcome:
         arguments = _refund_arguments(refund)
-        invoke = self.gateway.invoke_rest if self.transport == "rest" else self.gateway.invoke
+        invoke = (
+            self.gateway.invoke_rest
+            if self.transport == "rest"
+            else self.gateway.invoke
+        )
         started = time.perf_counter()
         try:
             async with asyncio.timeout(timeout_seconds):
@@ -325,7 +337,11 @@ class GatewayAgent(Agent):
             refund_result = dict(outcome.structured)
         status = outcome.status
         visible = _gateway_visible_state(outcome)
-        if status == "success" and refund_result is not None and refund_result.get("replayed"):
+        if (
+            status == "success"
+            and refund_result is not None
+            and refund_result.get("replayed")
+        ):
             visible = "confirmed_replay"
         return AttemptOutcome(
             configuration=self.configuration.value,
@@ -363,9 +379,13 @@ class Target:
             raise RuntimeError(f"{self.configuration.value} has no gateway")
         return self.gateway, self.tenant, self.permit
 
-    def gateway_agent(self, permit_id: str | None, *, transport: str = "jsonrpc") -> GatewayAgent:
+    def gateway_agent(
+        self, permit_id: str | None, *, transport: str = "jsonrpc"
+    ) -> GatewayAgent:
         gateway, tenant, _ = self.require_gateway()
-        return GatewayAgent(self.configuration, gateway, tenant, permit_id, transport=transport)
+        return GatewayAgent(
+            self.configuration, gateway, tenant, permit_id, transport=transport
+        )
 
 
 @dataclass
@@ -375,7 +395,9 @@ class LabEnvironment:
     run_dir: Path
     app: Any
     admin_api_key: str
-    downstream_bearer_token: str = field(default_factory=lambda: secrets.token_urlsafe(24))
+    downstream_bearer_token: str = field(
+        default_factory=lambda: secrets.token_urlsafe(24)
+    )
     control_token: str = field(default_factory=lambda: secrets.token_urlsafe(24))
     credits_per_call: str = "5"
     call_timeout_seconds: float = 2.0

@@ -1,0 +1,378 @@
+{
+  "source_sha": "4ac5a56880a493ed3e275eef9a305423d31e8a2b",
+  "source_tree": "9ceb072c9bbf9333bbe3c38042c1cb590eccaefd",
+  "source_objects": {
+    "app": "fa0b97615d9ceb559842d7b1692f2b316e842a3f",
+    "tests": "00a49136d296186f087780f8d74fd0305db40060",
+    "static": "7adce9a27ff4e72b5f3728b4974338cff7a6d0e7",
+    "site": "b7975ce82175a87963d32f729fdff6b40fb550cb",
+    "awi_sdk": "42d9c5aa3602ab05e78ae2fa450425ab18c7b234",
+    "b2a_sdk": "d061704b8405abaef144e3132e6fae030a8d521d",
+    "requirements.txt": "a89babd334731aa66ccf9e25e02ca03c3c9f0208",
+    "pyproject.toml": "79eceea77a9487222ff3d515ac6006eef44da347"
+  },
+  "workdir": "/Users/sellers/.openclaw/worktrees/amw-issues-20261002-aggregate",
+  "branch": "openclaw/amw-issues-20261002-aggregate",
+  "remote": "https://github.com/PetrefiedThunder/agent-middleware-api.git",
+  "clean_after": true,
+  "command": [
+    "/Users/sellers/Projects/agent-middleware-api/.venv/bin/python",
+    "-m",
+    "pytest",
+    "tests/",
+    "-x",
+    "-q",
+    "-ra",
+    "--basetemp=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/amw-aggregate-full-4ac5a56-8749qv9m/pytest"
+  ],
+  "result": {
+    "exit_code": 0,
+    "passed": 4866,
+    "skipped": 85,
+    "warnings": 6,
+    "deselected": 0,
+    "includes_proof_tests": true,
+    "seconds": 309.54,
+    "summary": "4866 passed, 85 skipped, 6 warnings in 309.54s (0:05:09)"
+  },
+  "started_at": "2026-10-03T03:48:18.345652+00:00",
+  "finished_at": "2026-10-03T03:53:28.982293+00:00",
+  "skip_categories": {
+    "PostgreSQL or explicit disposable-database harness": 69,
+    "Optional framework or browser dependency missing": 14,
+    "Linux-only CI test": 1,
+    "Opt-in constant-loop integration": 1
+  },
+  "skips": [
+    {
+      "count": 1,
+      "file": "tests/test_action_migrations.py",
+      "line": 167,
+      "reason": "requires fresh disposable local action migration DB",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 1,
+      "file": "tests/test_action_multiprocess.py",
+      "line": 213,
+      "reason": "set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 6,
+      "file": "tests/test_action_multiprocess.py",
+      "line": 254,
+      "reason": "set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 1,
+      "file": "tests/test_action_multiprocess.py",
+      "line": 362,
+      "reason": "set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 1,
+      "file": "tests/test_action_multiprocess.py",
+      "line": 386,
+      "reason": "set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 1,
+      "file": "tests/test_action_multiprocess.py",
+      "line": 406,
+      "reason": "set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 2,
+      "file": "tests/test_action_postgres.py",
+      "line": 58,
+      "reason": "requires explicitly opted-in disposable local amw_action PostgreSQL database",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 1,
+      "file": "tests/test_action_postgres.py",
+      "line": 65,
+      "reason": "requires explicitly opted-in disposable local amw_action PostgreSQL database",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 1,
+      "file": "tests/test_action_postgres.py",
+      "line": 69,
+      "reason": "requires explicitly opted-in disposable local amw_action PostgreSQL database",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 2,
+      "file": "tests/test_action_postgres.py",
+      "line": 96,
+      "reason": "requires explicitly opted-in disposable local amw_action PostgreSQL database",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 1,
+      "file": "tests/test_action_postgres.py",
+      "line": 181,
+      "reason": "requires explicitly opted-in disposable local amw_action PostgreSQL database",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 5,
+      "file": "tests/test_action_postgres.py",
+      "line": 185,
+      "reason": "requires explicitly opted-in disposable local amw_action PostgreSQL database",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 1,
+      "file": "tests/test_awi_phase9.py",
+      "line": 708,
+      "reason": "Playwright not installed",
+      "category": "Optional framework or browser dependency missing"
+    },
+    {
+      "count": 1,
+      "file": "tests/test_ci_second_tool_denial.py",
+      "line": 165,
+      "reason": "CI workflow test only runs on Linux (GitHub Actions environment)",
+      "category": "Linux-only CI test"
+    },
+    {
+      "count": 1,
+      "file": "tests/test_constant_test_loop.py",
+      "line": 345,
+      "reason": "Set RUN_CONSTANT_TEST_LOOP_INTEGRATION=1 to run full integration test",
+      "category": "Opt-in constant-loop integration"
+    },
+    {
+      "count": 1,
+      "file": "tests/test_dispatch_call_slot_migration.py",
+      "line": 28,
+      "reason": "requires fresh disposable migration PostgreSQL",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 3,
+      "file": "tests/test_duplicate_guard_postgres_concurrency.py",
+      "line": 37,
+      "reason": "requires a PostgreSQL DATABASE_URL for real row-lock semantics",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 6,
+      "file": "tests/test_framework_legacy_tools.py",
+      "line": 260,
+      "reason": "could not import 'langchain_core.tools': No module named 'langchain_core'",
+      "category": "Optional framework or browser dependency missing"
+    },
+    {
+      "count": 1,
+      "file": "tests/test_framework_legacy_tools.py",
+      "line": 273,
+      "reason": "could not import 'langchain_core.tools': No module named 'langchain_core'",
+      "category": "Optional framework or browser dependency missing"
+    },
+    {
+      "count": 6,
+      "file": "tests/test_framework_legacy_tools.py",
+      "line": 285,
+      "reason": "could not import 'llama_index.core.tools': No module named 'llama_index'",
+      "category": "Optional framework or browser dependency missing"
+    },
+    {
+      "count": 1,
+      "file": "tests/test_mcp_postgres_multiprocess.py",
+      "line": 1065,
+      "reason": "set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 1,
+      "file": "tests/test_mcp_postgres_multiprocess.py",
+      "line": 1124,
+      "reason": "set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 1,
+      "file": "tests/test_mcp_postgres_multiprocess.py",
+      "line": 1174,
+      "reason": "set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 1,
+      "file": "tests/test_mcp_postgres_multiprocess.py",
+      "line": 1261,
+      "reason": "set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 1,
+      "file": "tests/test_mcp_postgres_multiprocess.py",
+      "line": 1350,
+      "reason": "set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 1,
+      "file": "tests/test_mcp_postgres_multiprocess.py",
+      "line": 1419,
+      "reason": "set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 1,
+      "file": "tests/test_mcp_postgres_multiprocess.py",
+      "line": 1534,
+      "reason": "set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 1,
+      "file": "tests/test_mcp_postgres_multiprocess.py",
+      "line": 1601,
+      "reason": "set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 1,
+      "file": "tests/test_mcp_postgres_multiprocess.py",
+      "line": 1662,
+      "reason": "set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 7,
+      "file": "tests/test_mcp_postgres_multiprocess.py",
+      "line": 1933,
+      "reason": "set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 1,
+      "file": "tests/test_permit_postgres_concurrency.py",
+      "line": 396,
+      "reason": "requires a PostgreSQL DATABASE_URL for real row-lock semantics",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 1,
+      "file": "tests/test_permit_postgres_concurrency.py",
+      "line": 474,
+      "reason": "requires a PostgreSQL DATABASE_URL for real row-lock semantics",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 1,
+      "file": "tests/test_permit_postgres_concurrency.py",
+      "line": 578,
+      "reason": "requires a PostgreSQL DATABASE_URL for real row-lock semantics",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 1,
+      "file": "tests/test_permit_postgres_concurrency.py",
+      "line": 637,
+      "reason": "requires a PostgreSQL DATABASE_URL for real row-lock semantics",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 1,
+      "file": "tests/test_permit_postgres_concurrency.py",
+      "line": 689,
+      "reason": "requires a PostgreSQL DATABASE_URL for real row-lock semantics",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 1,
+      "file": "tests/test_permit_postgres_concurrency.py",
+      "line": 746,
+      "reason": "requires a PostgreSQL DATABASE_URL for real row-lock semantics",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 1,
+      "file": "tests/test_permit_postgres_concurrency.py",
+      "line": 902,
+      "reason": "requires a PostgreSQL DATABASE_URL for real row-lock semantics",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 1,
+      "file": "tests/test_permit_postgres_concurrency.py",
+      "line": 955,
+      "reason": "requires a PostgreSQL DATABASE_URL for real row-lock semantics",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 12,
+      "file": "tests/test_permit_postgres_concurrency.py",
+      "line": 147,
+      "reason": "requires a PostgreSQL DATABASE_URL for real row-lock semantics",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 1,
+      "file": "tests/test_postgres_datetime_binding.py",
+      "line": 203,
+      "reason": "TEST_POSTGRES_URL not set; Postgres-dialect coverage skipped",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 1,
+      "file": "tests/test_postgres_datetime_binding.py",
+      "line": 225,
+      "reason": "TEST_POSTGRES_URL not set; Postgres-dialect coverage skipped",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 1,
+      "file": "tests/test_postgres_datetime_binding.py",
+      "line": 263,
+      "reason": "TEST_POSTGRES_URL not set; Postgres-dialect coverage skipped",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 1,
+      "file": "tests/test_postgres_datetime_binding.py",
+      "line": 323,
+      "reason": "TEST_POSTGRES_URL not set; Postgres-dialect coverage skipped",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 1,
+      "file": "tests/test_postgres_datetime_binding.py",
+      "line": 346,
+      "reason": "TEST_POSTGRES_URL not set; Postgres-dialect coverage skipped",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    },
+    {
+      "count": 1,
+      "file": "tests/test_security_fuzz_battery.py",
+      "line": 705,
+      "reason": "requires PostgreSQL for accurate concurrent budget accounting",
+      "category": "PostgreSQL or explicit disposable-database harness"
+    }
+  ],
+  "evidence": {
+    "start.json": {
+      "path": "/tmp/amw-all-issues-20261002/aggregate/full-4ac5a56/start.json",
+      "sha256": "efbd0a0b0fdbb82a906ee42e9ae8ab097d01efd8cd5c2a85d708989a20962745"
+    },
+    "result.json": {
+      "path": "/tmp/amw-all-issues-20261002/aggregate/full-4ac5a56/result.json",
+      "sha256": "de410fd0027b7e941796a7b636bf8af2b7164550d9df6eb59f3e501c6b51ab48"
+    },
+    "full.log": {
+      "path": "/tmp/amw-all-issues-20261002/aggregate/full-4ac5a56/full.log",
+      "sha256": "8205b3f170f4a114ea3171f5b03cfe2aacd7e1931e2ee664b88a55689bd034c3"
+    }
+  },
+  "scope": "Local complete Python tests/ suite. No production/provider or remote CI validation performed by aggregate validator."
+}

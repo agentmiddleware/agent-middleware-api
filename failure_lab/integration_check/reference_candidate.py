@@ -138,7 +138,9 @@ class ReferenceIntegration(CandidateIntegration):
             structured = result.get("structuredContent") or {}
             replayed = bool(structured.get("replayed"))
             return (
-                Understanding.CONFIRMED_REPLAY if replayed else Understanding.CONFIRMED_SUCCESS,
+                Understanding.CONFIRMED_REPLAY
+                if replayed
+                else Understanding.CONFIRMED_SUCCESS,
                 receipt.get("receipt_id"),
                 "the gateway returned a terminal success",
             )
@@ -225,7 +227,10 @@ class ReferenceIntegration(CandidateIntegration):
         """
         self._record_intent(ctx, ctx.intent)
         first = self._read(await self._invoke(ctx, ctx.intent))
-        if first[0] in (Understanding.CONFIRMED_SUCCESS, Understanding.CONFIRMED_REPLAY):
+        if first[0] in (
+            Understanding.CONFIRMED_SUCCESS,
+            Understanding.CONFIRMED_REPLAY,
+        ):
             return OperationReport(
                 understanding=first[0],
                 receipt_id=first[1],

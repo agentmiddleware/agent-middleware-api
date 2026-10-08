@@ -1,0 +1,445 @@
+{
+  "source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7",
+  "artifacts": [
+    {
+      "path": "evidence/local/full.txt",
+      "bytes": 34143,
+      "sha256": "fa443858a872000af4835e19b4ad411a2024271efe388c0d9ab3e02c29089784",
+      "source": "/tmp/amw-release-validation-20261003/full.txt",
+      "source_sha256": "fa443858a872000af4835e19b4ad411a2024271efe388c0d9ab3e02c29089784",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/local/full-result.json",
+      "bytes": 579,
+      "sha256": "f3e7e2b5b5426edadd924c92acd6ec2b79642fc4b62efb73cbb91668a04123fc",
+      "source": "/tmp/amw-release-validation-20261003/full-result.json",
+      "source_sha256": "f3e7e2b5b5426edadd924c92acd6ec2b79642fc4b62efb73cbb91668a04123fc",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/local/sdk.txt",
+      "bytes": 1233,
+      "sha256": "b8253530f8578411d058ebb7da8cfa1ebc14f49ac91f522eb77371fe32d78408",
+      "source": "/tmp/amw-release-validation-20261003/sdk.txt",
+      "source_sha256": "b8253530f8578411d058ebb7da8cfa1ebc14f49ac91f522eb77371fe32d78408",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/local/sdk-result.json",
+      "bytes": 638,
+      "sha256": "62676ce7f1ed6df661db16c6e115ad88dae46411ac53d4b11f966e91e86c53e3",
+      "source": "/tmp/amw-release-validation-20261003/sdk-result.json",
+      "source_sha256": "62676ce7f1ed6df661db16c6e115ad88dae46411ac53d4b11f966e91e86c53e3",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/local/hooks.txt",
+      "bytes": 240,
+      "sha256": "ae025d88afb881010817b47052c756c3f5c84d1646d2c51b7cbed533a37cb488",
+      "source": "/tmp/amw-release-validation-20261003/hooks.txt",
+      "source_sha256": "ae025d88afb881010817b47052c756c3f5c84d1646d2c51b7cbed533a37cb488",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/local/hooks-result.json",
+      "bytes": 393,
+      "sha256": "da11d3b6d46b06de08f8a34a00df1610f6748cbe8dea07c698170db8f1193ffb",
+      "source": "/tmp/amw-release-validation-20261003/hooks-result.json",
+      "source_sha256": "da11d3b6d46b06de08f8a34a00df1610f6748cbe8dea07c698170db8f1193ffb",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/local/openapi.txt",
+      "bytes": 610,
+      "sha256": "da86b42d65b086bda932d2cc256e9f2b118db3e9ebdde5db4b76fa17200beecc",
+      "source": "/tmp/amw-release-validation-20261003/openapi.txt",
+      "source_sha256": "da86b42d65b086bda932d2cc256e9f2b118db3e9ebdde5db4b76fa17200beecc",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/local/openapi-result.json",
+      "bytes": 462,
+      "sha256": "521a1b7dc1d13aa954d9037bc94efd5adb85c389bf26149d06b0a83d570932b1",
+      "source": "/tmp/amw-release-validation-20261003/openapi-result.json",
+      "source_sha256": "521a1b7dc1d13aa954d9037bc94efd5adb85c389bf26149d06b0a83d570932b1",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/local/docrefs.txt",
+      "bytes": 79,
+      "sha256": "d90acc6f5380a4e623954f9a3f82ab6601cdb90878578b2bf6d620fe77855626",
+      "source": "/tmp/amw-release-validation-20261003/docrefs.txt",
+      "source_sha256": "d90acc6f5380a4e623954f9a3f82ab6601cdb90878578b2bf6d620fe77855626",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/local/docrefs-result.json",
+      "bytes": 453,
+      "sha256": "43fd951a2703522a56aedb1aa6677fe110d1a1890202f461eb47597ef87eddf5",
+      "source": "/tmp/amw-release-validation-20261003/docrefs-result.json",
+      "source_sha256": "43fd951a2703522a56aedb1aa6677fe110d1a1890202f461eb47597ef87eddf5",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/local/inventory.txt",
+      "bytes": 36,
+      "sha256": "b183e1bf1e4fb2c02c31efb64f63f711794bec01b2673ee42ec61f62a6f4602c",
+      "source": "/tmp/amw-release-validation-20261003/inventory.txt",
+      "source_sha256": "b183e1bf1e4fb2c02c31efb64f63f711794bec01b2673ee42ec61f62a6f4602c",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/local/inventory-result.json",
+      "bytes": 470,
+      "sha256": "0da54cea344c7ddfdaba09df263635e6b633686a1e230d183a93100c293a580f",
+      "source": "/tmp/amw-release-validation-20261003/inventory-result.json",
+      "source_sha256": "0da54cea344c7ddfdaba09df263635e6b633686a1e230d183a93100c293a580f",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/local/initial-full.txt",
+      "bytes": 32350,
+      "sha256": "985260cd8a47858738270faa857e8b5dd765ed6eba039a212dfeebc8286d8769",
+      "source": "/tmp/amw-release-validation-20261003/initial-full.txt",
+      "source_sha256": "e9a5d1b307db4745c893c8d9ae8a582d19a240e38ab875fe58aa4fae263cb3ab",
+      "normalization": "trailing whitespace only"
+    },
+    {
+      "path": "evidence/local/initial-full-result.json",
+      "bytes": 535,
+      "sha256": "b5a00fe0d2db52a0b459e4ea8fb66051f3e2379a1be068965e35e72cf46732fb",
+      "source": "/tmp/amw-release-validation-20261003/initial-full-result.json",
+      "source_sha256": "b5a00fe0d2db52a0b459e4ea8fb66051f3e2379a1be068965e35e72cf46732fb",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/local/interrupted-full.txt",
+      "bytes": 2345,
+      "sha256": "f95322e48c56d29f8cb20a91582d4755783a0039c2b993f4247ed533a7ead227",
+      "source": "/tmp/amw-release-validation-20261003/interrupted-full.txt",
+      "source_sha256": "f95322e48c56d29f8cb20a91582d4755783a0039c2b993f4247ed533a7ead227",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/local/interrupted-full-result.json",
+      "bytes": 579,
+      "sha256": "707dd71af869284e0e5a0691103155f5b0728ff42c7f6bf7d34f5fb4e01566c7",
+      "source": "/tmp/amw-release-validation-20261003/interrupted-full-result.json",
+      "source_sha256": "707dd71af869284e0e5a0691103155f5b0728ff42c7f6bf7d34f5fb4e01566c7",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/local/site-env.txt",
+      "bytes": 590,
+      "sha256": "cf5573ed21dea1ef711625a619a30ba688ca6612ef697c654307d66d57fe0eae",
+      "source": "/tmp/amw-release-validation-20261003/site-env.txt",
+      "source_sha256": "cf5573ed21dea1ef711625a619a30ba688ca6612ef697c654307d66d57fe0eae",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/local/site-env-result.json",
+      "bytes": 666,
+      "sha256": "ea1ad778640484383573b74c39961d861c7b732c5938d886890d175874ac508d",
+      "source": "/tmp/amw-release-validation-20261003/site-env-result.json",
+      "source_sha256": "ea1ad778640484383573b74c39961d861c7b732c5938d886890d175874ac508d",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/local/gitleaks.txt",
+      "bytes": 174,
+      "sha256": "398980bc59b6e4abe8872f2e1248b7746d13df5c9d6f17301e52514f31e7e1f4",
+      "source": "/tmp/amw-release-validation-20261003/gitleaks.txt",
+      "source_sha256": "398980bc59b6e4abe8872f2e1248b7746d13df5c9d6f17301e52514f31e7e1f4",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/local/gitleaks.json",
+      "bytes": 3,
+      "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "source": "/tmp/amw-release-validation-20261003/gitleaks.json",
+      "source_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/local/branch-gitleaks.txt",
+      "bytes": 175,
+      "sha256": "edf401b8afb752f8d8b63cbdde59b3e51c0a3244d3c75416e591c0f52443195c",
+      "source": "/tmp/amw-release-validation-20261003/branch-gitleaks.txt",
+      "source_sha256": "edf401b8afb752f8d8b63cbdde59b3e51c0a3244d3c75416e591c0f52443195c",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/local/branch-gitleaks.json",
+      "bytes": 3,
+      "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "source": "/tmp/amw-release-validation-20261003/branch-gitleaks.json",
+      "source_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/local/packet-gitleaks-final.txt",
+      "bytes": 176,
+      "sha256": "159c41864d052ba64e2f425e2af28c49c2be0e8c49da445b218fea4d1aad651a",
+      "source": "/tmp/amw-release-validation-20261003/packet-gitleaks-final.txt",
+      "source_sha256": "159c41864d052ba64e2f425e2af28c49c2be0e8c49da445b218fea4d1aad651a",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/local/packet-gitleaks-final.json",
+      "bytes": 3,
+      "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "source": "/tmp/amw-release-validation-20261003/packet-gitleaks-final.json",
+      "source_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/postgres/summary.json",
+      "bytes": 1479,
+      "sha256": "70ba238ede75c0237031f64bfa7c3187634ee3cc317c4012462cc5734e07d29c",
+      "source": "/tmp/amw-release-postgres-final-20261003/summary.json",
+      "source_sha256": "70ba238ede75c0237031f64bfa7c3187634ee3cc317c4012462cc5734e07d29c",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/postgres/all-results.json",
+      "bytes": 12777,
+      "sha256": "88770e73c1582ec783058cecef73e334044de8ba865fd99332007f2cdb2d77cc",
+      "source": "/tmp/amw-release-postgres-final-20261003/all-results.json",
+      "source_sha256": "88770e73c1582ec783058cecef73e334044de8ba865fd99332007f2cdb2d77cc",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/postgres/setup-plan.json",
+      "bytes": 852,
+      "sha256": "ed07372761659faf91893add71c3a63d4d682a679265787bb6617cd5b9aea47e",
+      "source": "/tmp/amw-release-postgres-final-20261003/setup-plan.json",
+      "source_sha256": "ed07372761659faf91893add71c3a63d4d682a679265787bb6617cd5b9aea47e",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/postgres/ownership.json",
+      "bytes": 353,
+      "sha256": "b6c84bc6147a2578509e145a3d34a8319ca6c9520e4ac1350b9a69d3fe99813f",
+      "source": "/tmp/amw-release-postgres-final-20261003/ownership.json",
+      "source_sha256": "b6c84bc6147a2578509e145a3d34a8319ca6c9520e4ac1350b9a69d3fe99813f",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/postgres/shutdown.json",
+      "bytes": 185,
+      "sha256": "4a45948928095f5aab90b5b522b9ed65d574349a3cd6bbf49f86b5ad67b33da4",
+      "source": "/tmp/amw-release-postgres-final-20261003/shutdown.json",
+      "source_sha256": "4a45948928095f5aab90b5b522b9ed65d574349a3cd6bbf49f86b5ad67b33da4",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/postgres/optional-qa.json",
+      "bytes": 1018,
+      "sha256": "48c7e6a53b5adaaafd169b1dc368a88c28b5d8bb5f90a2f7850e0d9ab7594f71",
+      "source": "/tmp/amw-release-postgres-final-20261003/optional-qa.json",
+      "source_sha256": "48c7e6a53b5adaaafd169b1dc368a88c28b5d8bb5f90a2f7850e0d9ab7594f71",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/postgres/optional-qa.txt",
+      "bytes": 693,
+      "sha256": "df601f6b9cad27c05bf6e4fa4f765cc638ae300605ba216d9c5ad697f45d586b",
+      "source": "/tmp/amw-release-postgres-final-20261003/optional-qa.log",
+      "source_sha256": "df601f6b9cad27c05bf6e4fa4f765cc638ae300605ba216d9c5ad697f45d586b",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/postgres/action-accounting.txt",
+      "bytes": 680,
+      "sha256": "739e6bdfe6e5c363354e24b712aefc814a72122b2aaf79e62c0abe5dd14ed1f4",
+      "source": "/tmp/amw-release-postgres-final-20261003/action-accounting.log",
+      "source_sha256": "739e6bdfe6e5c363354e24b712aefc814a72122b2aaf79e62c0abe5dd14ed1f4",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/postgres/action-accounting.json",
+      "bytes": 871,
+      "sha256": "30cf8be7d3aff696e85798e3d82809e1c5784702c7fcee9839e13cf5fd0c8f0a",
+      "source": "/tmp/amw-release-postgres-final-20261003/action-accounting.json",
+      "source_sha256": "30cf8be7d3aff696e85798e3d82809e1c5784702c7fcee9839e13cf5fd0c8f0a",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/postgres/action-multiprocess.txt",
+      "bytes": 682,
+      "sha256": "01288ab6bbf1792928065dde5e69b04fc60a29992b70f451b79095dc7d42e229",
+      "source": "/tmp/amw-release-postgres-final-20261003/action-multiprocess.log",
+      "source_sha256": "01288ab6bbf1792928065dde5e69b04fc60a29992b70f451b79095dc7d42e229",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/postgres/action-multiprocess.json",
+      "bytes": 942,
+      "sha256": "3bde05bea7a4464907ff0b8d5eb0ef64335cbbdc2e158b0b17d7d9c88ed10872",
+      "source": "/tmp/amw-release-postgres-final-20261003/action-multiprocess.json",
+      "source_sha256": "3bde05bea7a4464907ff0b8d5eb0ef64335cbbdc2e158b0b17d7d9c88ed10872",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/postgres/action-migration.txt",
+      "bytes": 677,
+      "sha256": "f8a9b2c79efea9939916648112741fadde18f98e5b3a5b368b4e0fe16e05ace8",
+      "source": "/tmp/amw-release-postgres-final-20261003/action-migration.log",
+      "source_sha256": "f8a9b2c79efea9939916648112741fadde18f98e5b3a5b368b4e0fe16e05ace8",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/postgres/action-migration.json",
+      "bytes": 1051,
+      "sha256": "a2da08ec32e225406737d5a6762c5a268496736855bea6f97790288cc85e02b7",
+      "source": "/tmp/amw-release-postgres-final-20261003/action-migration.json",
+      "source_sha256": "a2da08ec32e225406737d5a6762c5a268496736855bea6f97790288cc85e02b7",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/postgres/dispatch-migration.txt",
+      "bytes": 679,
+      "sha256": "2c601e8950b7363d11c4cff6354d930f6439ec9d1ade7f663bc280097552eef8",
+      "source": "/tmp/amw-release-postgres-final-20261003/dispatch-migration.log",
+      "source_sha256": "2c601e8950b7363d11c4cff6354d930f6439ec9d1ade7f663bc280097552eef8",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/postgres/dispatch-migration.json",
+      "bytes": 1011,
+      "sha256": "00f46fa3530f915a06e0989208eaa158d7cfd694fc6348e8a7de759977a5bfd2",
+      "source": "/tmp/amw-release-postgres-final-20261003/dispatch-migration.json",
+      "source_sha256": "00f46fa3530f915a06e0989208eaa158d7cfd694fc6348e8a7de759977a5bfd2",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/postgres/permit-concurrency.txt",
+      "bytes": 681,
+      "sha256": "0c40934ee999a48c8036a9ced47b8b22bc2f1f5cc28d0e833d37ed2de91f1ffe",
+      "source": "/tmp/amw-release-postgres-final-20261003/permit-concurrency.log",
+      "source_sha256": "0c40934ee999a48c8036a9ced47b8b22bc2f1f5cc28d0e833d37ed2de91f1ffe",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/postgres/permit-concurrency.json",
+      "bytes": 882,
+      "sha256": "312d44ef3ea50b82e3e5abbba44812120733df5d0e5b18664ca1f2150638d1ea",
+      "source": "/tmp/amw-release-postgres-final-20261003/permit-concurrency.json",
+      "source_sha256": "312d44ef3ea50b82e3e5abbba44812120733df5d0e5b18664ca1f2150638d1ea",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/frontend/summary.json",
+      "bytes": 752,
+      "sha256": "92b1c71e7ad7224e91c838b8ff369a4c968032e6cc9a58694ae97241448e7654",
+      "source": "/tmp/amw-release-frontend-20261003/summary.json",
+      "source_sha256": "92b1c71e7ad7224e91c838b8ff369a4c968032e6cc9a58694ae97241448e7654",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/frontend/final-source-identity.json",
+      "bytes": 11098,
+      "sha256": "ddec5b1ab7c112ae6514a5994d7f69f7f704308787568928bac34bc8fc102916",
+      "source": "/tmp/amw-release-frontend-20261003/final-source-identity.json",
+      "source_sha256": "bddb44fca1136309ecbd6b6ad0b597cf4e88f76326888dbe152a3c1cd3a127f2",
+      "normalization": "source checksum mapping represented as explicit path and sha256 records; values verified against tracked files"
+    },
+    {
+      "path": "evidence/frontend/committed-source-verification.json",
+      "bytes": 268,
+      "sha256": "fc870fd2635e3a6aebba01f91fde535676e79715176244e1a3ae492387a5b754",
+      "source": "/tmp/amw-release-frontend-20261003/committed-source-verification.json",
+      "source_sha256": "fc870fd2635e3a6aebba01f91fde535676e79715176244e1a3ae492387a5b754",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/frontend/final-playwright.txt",
+      "bytes": 6758,
+      "sha256": "43b0297bf2f8b1a6d057a3f5dcd06e3d82d5b47338dbd5f15090c38899e9a2c2",
+      "source": "/tmp/amw-release-frontend-20261003/final-playwright.log",
+      "source_sha256": "43b0297bf2f8b1a6d057a3f5dcd06e3d82d5b47338dbd5f15090c38899e9a2c2",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/frontend/final-playwright-results.json",
+      "bytes": 40211,
+      "sha256": "5cec8d0b56d98ab6b1e3cb655719f95c9f59481eea2345cb50944a618b75c318",
+      "source": "/tmp/amw-release-frontend-20261003/final-playwright-results.json",
+      "source_sha256": "5cec8d0b56d98ab6b1e3cb655719f95c9f59481eea2345cb50944a618b75c318",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/frontend/components.txt",
+      "bytes": 1851,
+      "sha256": "151832dfe81cec514b2c0c90a826c4606902dba27d4010252219bd00ab6468e0",
+      "source": "/tmp/amw-release-frontend-20261003/components.log",
+      "source_sha256": "151832dfe81cec514b2c0c90a826c4606902dba27d4010252219bd00ab6468e0",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/frontend/sdk-package.txt",
+      "bytes": 423,
+      "sha256": "730d46410a789b839eb9bdab24a60686a1f47a9dff4c324dce8fc84a07247e0c",
+      "source": "/tmp/amw-release-frontend-20261003/sdk-package.log",
+      "source_sha256": "730d46410a789b839eb9bdab24a60686a1f47a9dff4c324dce8fc84a07247e0c",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/frontend/site-build.txt",
+      "bytes": 1,
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "source": "/tmp/amw-release-frontend-20261003/site-build.log",
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization": "trailing whitespace only"
+    },
+    {
+      "path": "evidence/frontend/site-design.txt",
+      "bytes": 134,
+      "sha256": "bbc05fc67e38ad397780d3c01eff944ce46ae618eefa6e98aa3140ba3259edaf",
+      "source": "/tmp/amw-release-frontend-20261003/site-design.log",
+      "source_sha256": "bbc05fc67e38ad397780d3c01eff944ce46ae618eefa6e98aa3140ba3259edaf",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/frontend/pilot-fit.txt",
+      "bytes": 127,
+      "sha256": "2db383424c904f0dd5737ccd0a4ab25443f5e362a998c476b2f8d68ffe89464f",
+      "source": "/tmp/amw-release-frontend-20261003/pilot-fit.log",
+      "source_sha256": "2db383424c904f0dd5737ccd0a4ab25443f5e362a998c476b2f8d68ffe89464f",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/frontend/playwright.txt",
+      "bytes": 8536,
+      "sha256": "62b730e5ae21c13886cad60c8dba5694f2d34f1a30c962ba9abc4c1eea10b5f8",
+      "source": "/tmp/amw-release-frontend-20261003/playwright.log",
+      "source_sha256": "320ee5dc4a18d23471c685e6b7452d694ec6a490e38d60d76f4440788319aa04",
+      "normalization": "trailing whitespace only"
+    },
+    {
+      "path": "evidence/frontend/main-playwright.txt",
+      "bytes": 2236,
+      "sha256": "7f0ec1bdeb772557efe2248ecd3beddf6bbff64316b673116f6654d5281e90c6",
+      "source": "/tmp/amw-release-frontend-20261003/main-playwright.log",
+      "source_sha256": "5e2fb5bdaabd5681f40cdabe3454d66a032637f8d1b2c76aa1857218d93fd81d",
+      "normalization": "trailing whitespace only"
+    },
+    {
+      "path": "evidence/frontend/webkit-keyboard-diagnostic.json",
+      "bytes": 1224,
+      "sha256": "32f49bea5ff4a5ec06e25dc0dfd9e177599e9b490741874def532f445d309232",
+      "source": "/tmp/amw-release-frontend-20261003/webkit-keyboard-diagnostic.json",
+      "source_sha256": "32f49bea5ff4a5ec06e25dc0dfd9e177599e9b490741874def532f445d309232",
+      "normalization": "none"
+    },
+    {
+      "path": "evidence/frontend/keyboard-held-key-validation.txt",
+      "bytes": 3310,
+      "sha256": "9f659726750ca3b6fb8480a9ac0d758f5e39195041a7bc4db50b42398e14fcd6",
+      "source": "/tmp/amw-release-frontend-20261003/keyboard-held-key-validation.log",
+      "source_sha256": "9f659726750ca3b6fb8480a9ac0d758f5e39195041a7bc4db50b42398e14fcd6",
+      "normalization": "none"
+    }
+  ]
+}

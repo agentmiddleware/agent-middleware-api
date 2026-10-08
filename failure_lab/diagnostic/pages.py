@@ -48,13 +48,10 @@ from failure_lab.diagnostic.steps import PHASE_LABELS, Step
 #: sentence it gives instead.
 HEADLINE = "Agent Action Safety Check"
 SUBHEADLINE = (
-    "Test what happens when your agent's tool executes but its response "
-    "disappears."
+    "Test what happens when your agent's tool executes but its response disappears."
 )
 CALL_TO_ACTION = "Run the failure test"
-REASSURANCE = (
-    "No production credentials required. Runs against a disposable sandbox."
-)
+REASSURANCE = "No production credentials required. Runs against a disposable sandbox."
 
 #: Which accent an answer is drawn in. The two that matter most share one, on
 #: purpose -- see the module docstring.
@@ -410,9 +407,9 @@ def render_index(
         f"""
         <div class="choice">
           <input type="checkbox" id="scenario-{_esc(test_id)}" name="scenario"
-                 value="{_esc(test_id)}"{' checked' if test_id in defaults else ''}>
+                 value="{_esc(test_id)}"{" checked" if test_id in defaults else ""}>
           <label for="scenario-{_esc(test_id)}">{_esc(test_id)}
-            <span class="hint">{_esc(scenario_titles.get(test_id, ''))}</span>
+            <span class="hint">{_esc(scenario_titles.get(test_id, ""))}</span>
           </label>
         </div>"""
         for test_id in scenarios
@@ -532,7 +529,7 @@ def _scenario_table(rows: list[ScenarioRow]) -> str:
   <td>{_esc(row.title)}</td>
   <td><span class="v v-{_esc(row.verdict)}">{_esc(row.verdict)}</span></td>
   <td>{_esc(row.conclusion_gloss or row.conclusion_kind)}</td>
-  <td>{_esc('yes' if row.matches_expectation else 'NO')}</td>
+  <td>{_esc("yes" if row.matches_expectation else "NO")}</td>
 </tr>"""
         for row in rows
     )
@@ -611,7 +608,7 @@ full trace</a>.</p>
 def _offer_block(offer: Offer) -> str:
     items = "".join(
         f"""<li><strong>{_esc(item.title)}</strong> — {_esc(item.detail)}
-        {'<span class="review">Needs a technical review of your downstream before it can be turned on.</span>' if item.manual_review else ''}
+        {'<span class="review">Needs a technical review of your downstream before it can be turned on.</span>' if item.manual_review else ""}
         </li>"""
         for item in offer.items
     )
@@ -646,7 +643,7 @@ def render_result(
 <section class="card bad">
   <p class="kicker">The check did not complete</p>
   <h2 style="margin:0 0 8px">This run produced no result.</h2>
-  <p>{_esc(record.error or 'The run ended without a reportable outcome.')}</p>
+  <p>{_esc(record.error or "The run ended without a reportable outcome.")}</p>
   <p class="sub">Nothing is shown below, because a partial run is not a result
   and a diagnostic that renders one anyway is worse than one that fails.</p>
 </section>

@@ -1,0 +1,1785 @@
+app/core/config.py:55:    # Backends: auto, postgres, redis, sqlite, memory
+app/core/config.py:59:    REDIS_URL: str = ""
+app/core/config.py:90:    #   {"https://example.okta.com/oauth2/default": {
+app/core/config.py:315:    LLM_BASE_URL: str = "https://api.openai.com/v1"
+app/core/config.py:322:    OLLAMA_BASE_URL: str = "http://localhost:11434"
+app/core/config.py:333:        "https://localhost,http://localhost:8000"  # Comma-separated
+app/core/config.py:401:        env_file=".env",
+app/core/config.py:402:        env_file_encoding="utf-8",
+app/db/database.py:154:            "sqlite" if is_sqlite else "postgres",
+app/db/database.py:202:    if engine.dialect.name != "postgresql":
+app/db/database.py:234:                "Set STATE_BACKEND=postgres and provide DATABASE_URL."
+tests/test_health_public_projection.py:5:runs on: postgres, redis, signing key, upstream MCP, version + commit SHA,
+tests/test_health_public_projection.py:29:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_governed_adapter.py:18:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_red_team.py:16:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_delivery_uncertain_replay.py:77:    async with AsyncClient(transport=transport, base_url="http://test") as value:
+tests/test_delivery_uncertain_replay.py:111:        upstream_origin="https://test.example.com",
+tests/test_delivery_uncertain_replay.py:155:            upstream_origin="https://test.example.com",
+tests/test_delivery_uncertain_replay.py:269:        upstream_origin="https://test.example.com",
+tests/test_mcp_upstream_governed.py:69:    async with AsyncClient(transport=transport, base_url="http://test") as value:
+tests/test_mcp_upstream_governed.py:190:        upstream_origin="https://partner.example",
+tests/test_constant_loop_permit_budget.py:27:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_security_headers.py:86:    assert "https://fonts.googleapis.com" in DOCS_HTML_CSP
+tests/test_security_headers.py:87:    assert "https://fonts.gstatic.com" in DOCS_HTML_CSP
+tests/test_acta_receipt_interop.py:55:        "issuer": "https://example.invalid",
+tests/test_acta_receipt_interop.py:148:    bundle["issuer"] = "https://attacker.invalid"
+tests/test_acta_receipt_interop.py:151:            bundle, _public_b64(key), expected_issuer="https://example.invalid"
+tests/test_awi_governed_mcp.py:26:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_awi_governed_mcp.py:149:            "target_url": "https://example.com",
+tests/test_broadcast.py:15:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_broadcast.py:31:            "base_url": "https://api.test.com",
+tests/test_broadcast.py:56:            "base_url": "https://api.targeted.com",
+tests/test_broadcast.py:76:            "base_url": "https://api.list.com",
+tests/test_broadcast.py:94:            "base_url": "https://api.detail.com",
+tests/test_broadcast.py:116:            "base_url": "https://api.metrics.com",
+tests/test_broadcast.py:140:            "base_url": "https://api.events.com",
+tests/test_broadcast.py:188:            "base_url": "https://api.invalid.com",
+tests/test_broadcast.py:239:        json=_broadcast_body("tenant-a-secret-api", "https://a-private.example"),
+tests/test_broadcast.py:317:            json=_broadcast_body("list-tenant-a-api", "https://list-a.example"),
+tests/test_broadcast.py:324:            json=_broadcast_body("list-tenant-b-api", "https://list-b.example"),
+tests/test_broadcast.py:331:            json=_broadcast_body("list-admin-api", "https://list-admin.example"),
+tests/test_broadcast.py:368:        json=_broadcast_body("auth-check-api", "https://auth-check.example"),
+tests/test_kyc.py:23:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_kyc.py:158:            "return_url": "https://example.com/callback",
+tests/test_kyc.py:173:            "return_url": "https://example.com/callback",
+tests/test_kyc.py:186:    mock_session.url = "https://verify.stripe.com/test_session"
+tests/test_kyc.py:193:            "return_url": "https://example.com/callback",
+tests/test_kyc.py:203:    assert data["session_url"] == "https://verify.stripe.com/test_session"
+tests/test_kyc.py:297:        json={"wallet_id": wallet_b, "return_url": "https://example.com/callback"},
+tests/test_kyc.py:329:    mock_session.url = "https://verify.stripe.com/test_session"
+tests/test_kyc.py:334:        json={"wallet_id": wallet_b, "return_url": "https://example.com/callback"},
+tests/test_kyc.py:363:    mock_session.url = "https://verify.stripe.com/test_session"
+tests/test_kyc.py:413:        json={"wallet_id": wallet_b, "return_url": "https://example.com/callback"},
+tests/test_kyc.py:462:            "return_url": "https://example.com/callback",
+tests/test_kyc.py:487:            "return_url": "https://example.com/callback",
+tests/test_kyc.py:510:            "return_url": "https://example.com/callback",
+tests/test_kyc.py:526:        "http://attacker.example.com/kyc-callback",
+tests/test_kyc.py:528:        "https://",
+tests/test_kyc.py:530:        "https://example.com/" + "a" * 2048,
+tests/test_kyc.py:561:    ["http://localhost:3000/kyc-callback", "http://127.0.0.1:8080/cb"],
+tests/test_kyc.py:620:            id=session_id, url="https://verify.stripe.com/sig_test"
+tests/test_kyc.py:626:                "return_url": "https://example.com/callback",
+tests/test_postgres_datetime_binding.py:95:        import subprocess
+tests/test_postgres_datetime_binding.py:125:        subprocess.run(["alembic", "upgrade", "head"], check=True, env=dict(os.environ))
+tests/test_postgres_datetime_binding.py:166:                transport=transport, base_url="http://pg-test"
+tests/test_postgres_datetime_binding.py:204:    async def test_create_permit_does_not_500_on_postgres(self, client, wallets):
+tests/test_postgres_datetime_binding.py:226:    async def test_api_key_rotation_revokes_old_key_on_postgres(self, client, wallets):
+tests/test_postgres_datetime_binding.py:377:                    "arguments": {"text": "hello from postgres"},
+tests/test_live_owner_waits.py:4:have live owners and must not be stolen by concurrent requests. Only attempts
+tests/test_live_owner_waits.py:43:    async with AsyncClient(transport=transport, base_url="http://test") as value:
+tests/test_live_owner_waits.py:89:        upstream_origin="https://test.example.com",
+tests/test_live_owner_waits.py:129:            upstream_origin="https://test.example.com",
+tests/test_live_owner_waits.py:201:        upstream_origin="https://test.example.com",
+tests/test_live_owner_waits.py:243:            upstream_origin="https://test.example.com",
+tests/test_discover_phase9.py:209:        assert "**Base URL:** http://localhost:8000" not in content
+tests/test_mcp_trust.py:35:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_audit_chain.py:22:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_receipt_portability.py:46:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_receipt_portability.py:462:        bundle, key_set, expected_issuer="https://not-this-plane.example"
+tests/test_receipt_portability.py:533:        "issuer": "https://api.example.com",
+tests/test_comms.py:15:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_comms.py:34:            "webhook_url": "https://my-agent.example.com/webhook",
+tests/test_edge_client_trust_gap.py:47:            base_url="http://test",
+tests/test_edge_client_trust_gap.py:54:                api_url="http://test",
+tests/test_edge_client_trust_gap.py:60:                base_url="http://test",
+tests/test_mcp_dispatch_claim.py:31:    async with AsyncClient(transport=transport, base_url="http://test") as value:
+tests/test_mcp_dispatch_claim.py:64:        upstream_origin="https://partner.example",
+tests/test_mcp_dispatch_claim.py:115:        upstream_origin="https://partner.example",
+tests/test_security_fuzz_battery.py:36:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_security_fuzz_battery.py:494:    ``https://sub.example.com``. A permit naming ``*.example.com`` must deny
+tests/test_security_fuzz_battery.py:514:        upstream_origin="https://sub.example.com",
+tests/test_security_fuzz_battery.py:692:    CI runs this in the postgres_trust job with REQUIRE_POSTGRES_TESTS=1, which
+tests/test_security_fuzz_battery.py:699:    if engine is None or engine.dialect.name != "postgresql":
+tests/test_head_method.py:21:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_ledger_write_contention.py:62:    async with AsyncClient(transport=transport, base_url="http://test") as value:
+tests/test_ledger_write_contention.py:506:        upstream_origin="https://partner.example",
+tests/test_mcp_internal_error_disclosure.py:49:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_rtaas.py:8:import subprocess
+tests/test_rtaas.py:23:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_rtaas.py:36:            {"url": "https://api.external-tool.com/v1/users", "method": "GET"},
+tests/test_rtaas.py:37:            {"url": "https://api.external-tool.com/v1/users", "method": "POST"},
+tests/test_rtaas.py:55:            {"url": "https://api.test-tool.io/auth", "method": "POST"},
+tests/test_rtaas.py:56:            {"url": "https://api.test-tool.io/data", "method": "GET"},
+tests/test_rtaas.py:57:            {"url": "https://api.test-tool.io/admin", "method": "DELETE"},
+tests/test_rtaas.py:76:        "targets": [{"url": "https://example.com/api"}],
+tests/test_rtaas.py:89:        "targets": [{"url": "https://example.com/api"}],
+tests/test_rtaas.py:103:        "targets": [{"url": "https://api.vulnerable.io/login"}],
+tests/test_rtaas.py:122:        "targets": [{"url": "https://example.com"}],
+tests/test_rtaas.py:136:            {"url": "https://api.tenant-a-private.example/v1/users", **target_extra}
+tests/test_rtaas.py:307:targets = [RTaaSTarget(url=f"https://api.example-{i}.com/v1") for i in range(12)]
+tests/test_rtaas.py:321:def _simulate_in_subprocess(hash_seed: str) -> dict:
+tests/test_rtaas.py:323:    proc = subprocess.run(
+tests/test_rtaas.py:337:    first = _simulate_in_subprocess("1")
+tests/test_rtaas.py:338:    second = _simulate_in_subprocess("2")
+tests/test_mcp_dispatch_evidence.py:32:    async with AsyncClient(transport=transport, base_url="http://test") as value:
+tests/test_mcp_dispatch_evidence.py:67:        upstream_origin="https://partner.example:8443",
+tests/test_mcp_dispatch_evidence.py:168:        "upstream_origin": "https://partner.example:8443",
+tests/test_mcp_dispatch_evidence.py:280:        upstream_origin="https://other-partner.example",
+tests/test_mcp_dispatch_evidence.py:325:            "https://tampered.example",
+tests/test_mcp_dispatch_evidence.py:393:        upstream_origin="https://partner.example",
+tests/test_mcp_dispatch_evidence.py:476:        "https://bearer-token:[REDACTED]
+tests/test_mcp_dispatch_evidence.py:482:    assert evidence["upstream_origin"] == "https://partner.example:8443"
+tests/test_v1_production.py:101:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_auto_pr_runner.py:23:API_URL = "https://middleware.example.test"
+tests/test_discovery_tools_consistency.py:27:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_billing.py:26:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_quote_vertical_slice.py:43:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_openai_wrapper_trust_loop.py:56:        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as raw:
+tests/test_openai_wrapper_trust_loop.py:63:                client = B2AClient(api_key=[REDACTED], base_url="http://test", transport=ASGITransport(app=app))
+tests/test_refund_reconciliation.py:39:    async with AsyncClient(transport=transport, base_url="http://test") as instance:
+tests/test_tool_interface_authority.py:65:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_tool_interface_authority.py:105:        settings, "SENTINEL_API_URL", "https://sentinel.test" if configured else ""
+tests/test_audit_chain_contention_surface.py:92:    async with AsyncClient(transport=transport, base_url="http://test") as value:
+tests/test_audit_chain_contention_surface.py:427:        upstream_origin="https://partner.example",
+tests/test_audit_chain_contention_surface.py:784:        upstream_origin="https://partner.example",
+tests/test_constant_loop_permit_linkage.py:25:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_permits.py:28:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_upstream_retry_cap_enforcement.py:61:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_upstream_retry_cap_enforcement.py:144:        upstream_origin="https://test.example",
+tests/test_upstream_retry_cap_enforcement.py:1021:        upstream_origin="https://test.example",
+tests/test_upstream_retry_cap_enforcement.py:1134:        upstream_origin="https://test.example",
+tests/test_health_sim_parity.py:23:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_permit_v2_constraints.py:32:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_permit_v2_constraints.py:806:    origin: str = "https://partner.example",
+tests/test_permit_v2_constraints.py:833:    _register_upstream_tool(tool_name, executor, origin="https://partner.example")
+tests/test_permit_v2_constraints.py:903:    _register_upstream_tool(tool_name, executor, origin="https://partner.example")
+tests/test_human_preflight.py:12:import subprocess
+tests/test_human_preflight.py:47:            requests.append((path, self.headers.get("X-API-Key")))
+tests/test_human_preflight.py:91:        return f"http://127.0.0.1:{server.server_address[1]}", requests
+tests/test_human_preflight.py:106:    return subprocess.run(
+tests/test_iot_registry.py:230:    monkeypatch.delenv("REDIS_URL", raising=False)
+tests/test_wallet_status_enforcement.py:32:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_swarm_wallets.py:15:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_agent_first_contract.py:16:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_live_script_target_safety.py:33:            environ={TARGET_ENV: "https://staging.example.test"},
+tests/test_live_script_target_safety.py:35:        == "https://staging.example.test"
+tests/test_live_script_target_safety.py:42:            "https://cli.example.test:8443/",
+tests/test_live_script_target_safety.py:44:            environ={TARGET_ENV: "https://environment.example.test"},
+tests/test_live_script_target_safety.py:46:        == "https://cli.example.test:8443"
+tests/test_live_script_target_safety.py:55:            environ={TARGET_ENV: "https://environment.example.test"},
+tests/test_live_script_target_safety.py:62:        " https://staging.example.test",
+tests/test_live_script_target_safety.py:63:        "https://staging.example.test ",
+tests/test_live_script_target_safety.py:64:        "\thttps://staging.example.test",
+tests/test_live_script_target_safety.py:65:        "https://staging.example.test\x7f",
+tests/test_live_script_target_safety.py:76:        "https://staging.example.test:",
+tests/test_live_script_target_safety.py:77:        "https://[::1]:",
+tests/test_live_script_target_safety.py:88:            "https://staging.example.test..",
+tests/test_live_script_target_safety.py:97:            "https://API.THISISATEST.TECH.:443/",
+tests/test_live_script_target_safety.py:104:            "https://API.THISISATEST.TECH.:443/",
+tests/test_live_script_target_safety.py:108:        == "https://api.thisisatest.tech"
+tests/test_live_script_target_safety.py:115:        ("http://localhost:8000/", "http://localhost:8000"),
+tests/test_live_script_target_safety.py:116:        ("http://LOCALHOST.:8000", "http://localhost:8000"),
+tests/test_live_script_target_safety.py:117:        ("http://127.42.1.9:8000", "http://127.42.1.9:8000"),
+tests/test_live_script_target_safety.py:118:        ("http://[::1]:8000/", "http://[::1]:8000"),
+tests/test_live_script_target_safety.py:119:        ("http://[0:0:0:0:0:0:0:1]:8000", "http://[::1]:8000"),
+tests/test_live_script_target_safety.py:131:            "http://staging.example.test",
+tests/test_live_script_target_safety.py:140:        ("https://[REDACTED]@staging.example.test", "embedded credentials"),
+tests/test_live_script_target_safety.py:141:        ("https://staging.example.test?mode=test", "query string"),
+tests/test_live_script_target_safety.py:142:        ("https://staging.example.test?", "query string"),
+tests/test_live_script_target_safety.py:143:        ("https://staging.example.test#section", "fragment"),
+tests/test_live_script_target_safety.py:144:        ("https://staging.example.test/v1", "path must be empty or /"),
+tests/test_live_script_target_safety.py:155:        ("https://STAGING.EXAMPLE.TEST/", "https://staging.example.test"),
+tests/test_live_script_target_safety.py:156:        ("https://staging.example.test:443/", "https://staging.example.test"),
+tests/test_live_script_target_safety.py:157:        ("https://staging.example.test:8443/", "https://staging.example.test:8443"),
+tests/test_live_script_target_safety.py:169:        ["--api-url", " https://staging.example.test"],
+tests/test_live_script_target_safety.py:175:        ["--api-url", "https://staging.example.test "],
+tests/test_live_script_target_safety.py:181:        ["--api-url", "\thttps://staging.example.test"],
+tests/test_live_script_target_safety.py:187:        ["--api-url", "https://staging.example.test\x7f"],
+tests/test_live_script_target_safety.py:193:        ["--api-url", "https://staging.example.test:"],
+tests/test_live_script_target_safety.py:199:        ["--api-url", "https://[::1]:"],
+tests/test_live_script_target_safety.py:205:        ["--api-url", "https://staging.example.test.."],
+tests/test_live_script_target_safety.py:211:        ["--api-url", "https://api.thisisatest.tech"],
+tests/test_live_script_target_safety.py:217:        ["--api-url", "http://staging.example.test"],
+tests/test_live_script_target_safety.py:223:        ["--api-url", "https://[REDACTED]@staging.example.test"],
+tests/test_live_script_target_safety.py:229:        ["--api-url", "https://staging.example.test?mode=test"],
+tests/test_live_script_target_safety.py:235:        ["--api-url", "https://staging.example.test#fragment"],
+tests/test_live_script_target_safety.py:241:        ["--api-url", "https://staging.example.test/v1"],
+tests/test_live_script_target_safety.py:247:        ["--api-url", "https://staging.example.test"],
+tests/test_live_script_target_safety.py:295:    monkeypatch.setenv(TARGET_ENV, "https://environment.example.test")
+tests/test_live_script_target_safety.py:342:        asyncio.run(module.main(["--api-url", "https://CLI.EXAMPLE.TEST:8443/"])) == 0
+tests/test_live_script_target_safety.py:344:    assert module.API_URL == "https://cli.example.test:8443"
+tests/test_live_script_target_safety.py:349:        assert created_with == ["https://cli.example.test:8443"]
+tests/test_live_script_target_safety.py:419:        pytest.param("http://staging.example.test", [], id="remote-cleartext"),
+tests/test_live_script_target_safety.py:421:            "https://api.thisisatest.tech", [], id="production-without-confirmation"
+tests/test_live_script_target_safety.py:424:            "https://API.THISISATEST.TECH./", [], id="production-alias-unconfirmed"
+tests/test_live_script_target_safety.py:427:            "https://[REDACTED]@staging.example.test",
+tests/test_live_script_target_safety.py:431:        pytest.param("https://staging.example.test/v1", [], id="non-root-path"),
+tests/test_live_script_target_safety.py:433:            "https://staging.example.test",
+tests/test_live_script_target_safety.py:434:            ["--api-url", "http://staging.example.test"],
+tests/test_live_script_target_safety.py:461:        environment_target="https://staging.example.test",
+tests/test_live_script_target_safety.py:474:            "https://STAGING.example.test:443/",
+tests/test_live_script_target_safety.py:476:            "https://staging.example.test",
+tests/test_live_script_target_safety.py:480:            "http://127.0.0.1:8000/", [], "http://127.0.0.1:8000", id="loopback-http"
+tests/test_live_script_target_safety.py:483:            "https://environment.example.test",
+tests/test_live_script_target_safety.py:484:            ["--api-url", "https://cli.example.test:8443"],
+tests/test_live_script_target_safety.py:485:            "https://cli.example.test:8443",
+tests/test_live_script_target_safety.py:489:            "https://api.thisisatest.tech",
+tests/test_live_script_target_safety.py:491:            "https://api.thisisatest.tech",
+tests/test_live_script_target_safety.py:523:        environment_target="http://staging.example.test",
+tests/test_telemetry_scope.py:14:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_telemetry_scope.py:27:        "git_repo_url": "https://github.com/agent/scraper",
+tests/test_telemetry_scope.py:107:        "git_repo_url": "https://github.com/agent/buggy",
+tests/test_telemetry_scope.py:128:    assert data["target_repo"] == "https://github.com/agent/buggy"
+tests/test_discovery_honesty.py:15:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_kyc_status_authority.py:38:    fake.url = "https://verify.stripe.test/session"
+tests/test_kyc_status_authority.py:76:            wallet_id, "https://example.test/return"
+tests/test_kyc_status_authority.py:186:            wallet_id, "https://example.test/return"
+tests/test_revocation_containment.py:37:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_mcp_postgres_multiprocess.py:17:import socket
+tests/test_mcp_postgres_multiprocess.py:18:import subprocess
+tests/test_mcp_postgres_multiprocess.py:61:    process: subprocess.Popen[str]
+tests/test_mcp_postgres_multiprocess.py:71:    process: subprocess.Popen[str]
+tests/test_mcp_postgres_multiprocess.py:134:        ("postgres://", "postgresql://", "postgresql+asyncpg://")
+tests/test_mcp_postgres_multiprocess.py:140:    if os.environ.get("STATE_BACKEND", "").strip().lower() != "postgres":
+tests/test_mcp_postgres_multiprocess.py:142:            "STATE_BACKEND=postgres is required for the opt-in harness",
+tests/test_mcp_postgres_multiprocess.py:227:    if engine is None or engine.dialect.name != "postgresql":
+tests/test_mcp_postgres_multiprocess.py:304:            temp_root=tmp_path_factory.mktemp("mcp-postgres-multiprocess"),
+tests/test_mcp_postgres_multiprocess.py:326:    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+tests/test_mcp_postgres_multiprocess.py:346:            except subprocess.TimeoutExpired:
+tests/test_mcp_postgres_multiprocess.py:380:            except subprocess.TimeoutExpired:
+tests/test_mcp_postgres_multiprocess.py:435:        process = subprocess.Popen(
+tests/test_mcp_postgres_multiprocess.py:454:            stderr=subprocess.STDOUT,
+tests/test_mcp_postgres_multiprocess.py:462:        base_url=f"http://127.0.0.1:{port}",
+tests/test_mcp_postgres_multiprocess.py:544:            "PUBLIC_URL": f"http://127.0.0.1:{port}",
+tests/test_mcp_postgres_multiprocess.py:546:            "REDIS_URL": "",
+tests/test_mcp_postgres_multiprocess.py:551:            "STATE_BACKEND": "postgres",
+tests/test_mcp_postgres_multiprocess.py:561:        process = subprocess.Popen(
+tests/test_mcp_postgres_multiprocess.py:580:            stderr=subprocess.STDOUT,
+tests/test_mcp_postgres_multiprocess.py:588:        base_url=f"http://127.0.0.1:{port}",
+tests/test_mcp_postgres_multiprocess.py:1240:    result = subprocess.run(
+tests/test_mcp_postgres_multiprocess.py:1244:        stdout=subprocess.PIPE,
+tests/test_mcp_postgres_multiprocess.py:1245:        stderr=subprocess.STDOUT,
+tests/test_partner_bootstrap_flags.py:56:        api_url="https://api.example.test",
+tests/test_ci_second_tool_denial.py:111:            "http://127.0.0.1:8000",
+tests/test_ci_second_tool_denial.py:119:    assert captured["api_url"] == "http://127.0.0.1:8000"
+tests/test_ci_second_tool_denial.py:128:        monkeypatch, ["--api-url", "http://127.0.0.1:8000"]
+tests/test_ci_second_tool_denial.py:139:        monkeypatch, ["--api-url", "http://127.0.0.1:8000"]
+tests/test_red_team_trust_plane.py:4:import subprocess
+tests/test_red_team_trust_plane.py:26:    result = subprocess.run(
+tests/test_acp_bridge.py:50:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_acp_bridge.py:468:                merchant_domain="https://merchant.example.com",
+tests/test_repeat_window_compatibility.py:39:        transport=ASGITransport(app=app), base_url="http://test"
+tests/test_mcp_legacy_envelope_validation.py:54:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_pods.py:19:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_denial_details_and_self_service.py:46:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_security_store.py:200:        targets=[RTaaSTarget(url="https://api.example.com/")],
+tests/test_security_store.py:209:                target_url="https://api.example.com/",
+tests/test_security_store.py:252:                url="https://a.example.com",
+tests/test_security_store.py:257:            RTaaSTarget(url="https://b.example.com"),
+tests/test_security_store.py:270:                target_url="https://a.example.com",
+tests/test_security_store.py:316:                targets=[RTaaSTarget(url="https://ex.com")],
+tests/test_permit_request_flow.py:48:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_permit_request_flow.py:60:        self.approval_url = "https://sentinel.test/a/abc123"
+tests/test_permit_request_flow.py:102:        settings, "SENTINEL_API_URL", "https://sentinel.test" if configured else ""
+tests/test_permit_request_flow.py:639:        "http://sentinel.test/a/abc123",
+tests/test_permit_request_flow.py:914:    """permit_requests.max_credits is Numeric(20, 8), like the permit it mints.
+tests/test_permit_request_flow.py:976:        return {"status": "pending", "approval_url": f"https://sentinel.test/a/{token}"}
+tests/test_iot.py:19:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_iot.py:217:async def test_subscribe_websocket_url_derived_from_request(
+tests/test_iot.py:230:    assert body["websocket_url"] == (
+tests/test_iot.py:236:async def test_subscribe_websocket_url_derived_from_public_url(
+tests/test_iot.py:239:    monkeypatch.setattr(get_settings(), "PUBLIC_URL", "https://api.example.com/")
+tests/test_iot.py:248:    assert body["websocket_url"] == (
+tests/test_sandbox_integration.py:251:        async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_agent_ops_war_room_demo.py:6:import subprocess
+tests/test_agent_ops_war_room_demo.py:31:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_agent_ops_war_room_demo.py:89:    # A subprocess must never share the parent pytest worker's SQLite file.
+tests/test_agent_ops_war_room_demo.py:92:    subprocess_env = os.environ.copy()
+tests/test_agent_ops_war_room_demo.py:93:    subprocess_env["DATABASE_URL"] = (
+tests/test_agent_ops_war_room_demo.py:96:    result = subprocess.run(
+tests/test_agent_ops_war_room_demo.py:99:        env=subprocess_env,
+tests/test_db_urls_durable_state.py:14:    is_postgres_url,
+tests/test_db_urls_durable_state.py:30:def test_as_sqlalchemy_url_postgres_variants():
+tests/test_db_urls_durable_state.py:31:    assert as_sqlalchemy_url("postgresql://[REDACTED]@h/db") == "postgresql+asyncpg://[REDACTED]@h/db"
+tests/test_db_urls_durable_state.py:32:    assert as_sqlalchemy_url("postgres://[REDACTED]@h/db") == "postgresql+asyncpg://[REDACTED]@h/db"
+tests/test_db_urls_durable_state.py:34:        as_sqlalchemy_url("postgresql+asyncpg://[REDACTED]@h/db")
+tests/test_db_urls_durable_state.py:35:        == "postgresql+asyncpg://[REDACTED]@h/db"
+tests/test_db_urls_durable_state.py:44:    assert as_asyncpg_url("postgresql+asyncpg://[REDACTED]@h/db") == "postgresql://[REDACTED]@h/db"
+tests/test_db_urls_durable_state.py:45:    assert as_asyncpg_url("postgresql://[REDACTED]@h/db") == "postgresql://[REDACTED]@h/db"
+tests/test_db_urls_durable_state.py:46:    assert as_asyncpg_url("postgres://[REDACTED]@h/db") == "postgresql://[REDACTED]@h/db"
+tests/test_db_urls_durable_state.py:50:    """is_postgres_url accepts any case, so the converters must too.
+tests/test_db_urls_durable_state.py:56:    assert is_postgres_url(upper)
+tests/test_db_urls_durable_state.py:57:    assert as_asyncpg_url(upper) == "postgresql://[REDACTED]@Host/DB"
+tests/test_db_urls_durable_state.py:58:    assert as_sqlalchemy_url(upper) == "postgresql+asyncpg://[REDACTED]@Host/DB"
+tests/test_db_urls_durable_state.py:59:    assert as_asyncpg_url("POSTGRES://[REDACTED]@h/db") == "postgresql://[REDACTED]@h/db"
+tests/test_db_urls_durable_state.py:63:    raw = "postgresql://[REDACTED]@h/db"
+tests/test_db_urls_durable_state.py:82:def test_is_postgres_url_rejects_non_postgres_backends():
+tests/test_db_urls_durable_state.py:83:    assert is_postgres_url("postgresql://[REDACTED]@h/db")
+tests/test_db_urls_durable_state.py:84:    assert is_postgres_url("postgres://[REDACTED]@h/db")
+tests/test_db_urls_durable_state.py:85:    assert is_postgres_url("postgresql+asyncpg://[REDACTED]@h/db")
+tests/test_db_urls_durable_state.py:86:    assert is_postgres_url("POSTGRESQL://[REDACTED]@h/db")
+tests/test_db_urls_durable_state.py:87:    assert not is_postgres_url("sqlite+aiosqlite:///./x.db")
+tests/test_db_urls_durable_state.py:88:    assert not is_postgres_url("")
+tests/test_db_urls_durable_state.py:95:    assert sqlite_path_from_url("postgresql://[REDACTED]@h/db") == ""
+tests/test_db_urls_durable_state.py:133:    monkeypatch.setenv("REDIS_URL", "")
+tests/test_db_urls_durable_state.py:147:    Regression: auto-resolution treated any non-empty DATABASE_URL as postgres,
+tests/test_db_urls_durable_state.py:157:    monkeypatch.setenv("REDIS_URL", "")
+tests/test_db_urls_durable_state.py:171:def test_auto_backend_still_uses_postgres_for_a_postgres_database_url(monkeypatch):
+tests/test_db_urls_durable_state.py:177:    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://[REDACTED]@h/db")
+tests/test_db_urls_durable_state.py:178:    monkeypatch.setenv("REDIS_URL", "")
+tests/test_db_urls_durable_state.py:183:    assert store._resolve_backend() == "postgres"
+tests/test_db_urls_durable_state.py:196:    monkeypatch.setenv("REDIS_URL", "")
+tests/test_db_urls_durable_state.py:237:async def test_postgres_init_fail_closed_in_production(monkeypatch):
+tests/test_db_urls_durable_state.py:241:    monkeypatch.setenv("STATE_BACKEND", "postgres")
+tests/test_db_urls_durable_state.py:243:        "DATABASE_URL", "postgresql+asyncpg://[REDACTED]@127.0.0.1:1/none"
+tests/test_db_urls_durable_state.py:253:    assert report["durable_state"]["intended_backend"] == "postgres"
+tests/test_db_urls_durable_state.py:264:    monkeypatch.setenv("DATABASE_URL", "postgresql://[REDACTED]@h/db")
+tests/test_db_urls_durable_state.py:276:def test_postgres_missing_url_refuses_production_like(monkeypatch):
+tests/test_db_urls_durable_state.py:280:    monkeypatch.setenv("STATE_BACKEND", "postgres")
+tests/test_db_urls_durable_state.py:282:    monkeypatch.setenv("REDIS_URL", "")
+tests/test_db_urls_durable_state.py:301:    monkeypatch.setenv("REDIS_URL", "")
+tests/test_db_urls_durable_state.py:344:    """Run the leaking script in a subprocess under a hard timeout.
+tests/test_db_urls_durable_state.py:349:    import subprocess
+tests/test_db_urls_durable_state.py:359:        proc = subprocess.run(
+tests/test_db_urls_durable_state.py:366:    except subprocess.TimeoutExpired as exc:
+tests/test_db_urls_durable_state.py:529:    import subprocess
+tests/test_db_urls_durable_state.py:533:        proc = subprocess.run(
+tests/test_db_urls_durable_state.py:539:    except subprocess.TimeoutExpired as exc:
+tests/test_db_urls_durable_state.py:540:        # The child is killed by subprocess.run before this propagates, so a
+tests/test_db_urls_durable_state.py:611:# on a future nothing can resolve. Runs in a subprocess so a regression is a
+tests/test_db_urls_durable_state.py:642:    import subprocess
+tests/test_db_urls_durable_state.py:652:        proc = subprocess.run(
+tests/test_db_urls_durable_state.py:659:    except subprocess.TimeoutExpired as exc:
+tests/test_db_urls_durable_state.py:715:    monkeypatch.setenv("REDIS_URL", "")
+tests/test_governed_persistence.py:46:    async with AsyncClient(transport=transport, base_url="http://test") as value:
+tests/test_governed_persistence.py:595:        upstream_origin="https://partner.example",
+tests/test_governed_persistence.py:606:        upstream_origin="https://partner.example",
+tests/test_governed_persistence.py:619:            upstream_origin="https://partner.example",
+tests/test_governed_persistence.py:702:        "upstream_origin": "https://partner.example",
+tests/test_governed_persistence.py:740:            upstream_origin="https://partner.example",
+tests/test_governed_persistence.py:805:            upstream_origin="https://partner.example",
+tests/test_governed_persistence.py:856:        upstream_origin="https://partner.example",
+tests/test_governed_persistence.py:902:            upstream_origin="https://partner.example",
+tests/test_governed_persistence.py:961:            upstream_origin="https://partner.example",
+tests/test_governed_persistence.py:1012:        upstream_origin="https://partner.example",
+tests/test_governed_persistence.py:1058:        "upstream_origin": "https://partner.example",
+tests/test_governed_persistence.py:1126:            upstream_origin="https://secret:[REDACTED],
+tests/test_governed_persistence.py:1131:        upstream_origin="https://partner.example",
+tests/test_governed_persistence.py:1177:        upstream_origin="https://partner.example",
+tests/test_governed_persistence.py:1293:            upstream_origin="https://partner.example",
+tests/test_governed_persistence.py:1502:        upstream_origin="https://partner.example",
+tests/test_tool_price_validation.py:51:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_mcp_transport_hardening.py:60:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_demo_ambiguous_retry.py:11:import subprocess
+tests/test_demo_ambiguous_retry.py:20:    result = subprocess.run(
+tests/test_wallet_ledger_integrity.py:46:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_idempotency_completion_contention.py:37:        transport=ASGITransport(app=app), base_url="http://test"
+tests/test_invariant_attack_harness.py:156:        "attack2_budget_postgres.py",
+tests/test_invariant_attack_harness.py:325:    "script_name", ["attack2_budget_postgres", "attack2_mechanism_sqlite"]
+tests/test_receipt_wallet_linkage.py:31:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_railway_preflight.py:17:import subprocess
+tests/test_railway_preflight.py:103:    private_secret = [REDACTED]
+tests/test_railway_preflight.py:118:        "postgresql://[REDACTED]@postgres.railway.internal/db",
+tests/test_railway_preflight.py:119:        "postgresql://[REDACTED]@127.0.0.1:5432/db",
+tests/test_railway_preflight.py:123:def test_public_db_mode_rejects_private_or_non_postgres_urls(
+tests/test_railway_preflight.py:142:    public_url = "postgresql://[REDACTED]@switchback.proxy.rlwy.net:5432/db"
+tests/test_railway_preflight.py:144:    monkeypatch.setenv("DATABASE_URL", "postgresql://[REDACTED]@internal/db")
+tests/test_railway_preflight.py:161:    public_url = "postgresql://[REDACTED]@switchback.proxy.rlwy.net:5432/db"
+tests/test_railway_preflight.py:466:    result = subprocess.run(
+tests/test_railway_preflight.py:536:    assert 'API_URL="https://api.thisisatest.tech"' in block
+tests/test_railway_preflight.py:563:    return subprocess.run(
+tests/test_railway_preflight.py:585:        "https://api.thisisatest.tech|production|"
+tests/test_railway_preflight.py:676:    result = subprocess.run(
+tests/test_railway_preflight.py:709:    return subprocess.run(
+tests/test_railway_preflight.py:918:        "public_url": "https://api.example.com",
+tests/test_railway_preflight.py:940:        "issuer": "https://api.example.com",
+tests/test_railway_preflight.py:1015:        "https://api.example.com"
+tests/test_railway_preflight.py:1062:        ("public_url", "http://api.example.com"),
+tests/test_railway_preflight.py:1063:        ("public_url", "https://api.example.com/customer"),
+tests/test_railway_preflight.py:1081:    secret = [REDACTED]
+tests/test_railway_preflight.py:1154:                "https://other.example.com",
+tests/test_railway_preflight.py:1211:            "https://api.example.com",
+tests/test_railway_preflight.py:1262:                "https://api.example.com",
+tests/test_railway_preflight.py:1300:    assert preflight.check_live("https://api.example.com") is True
+tests/test_railway_preflight.py:1308:            "https://api.example.com",
+tests/test_railway_preflight.py:1321:            "https://api.example.com",
+tests/test_railway_preflight.py:1340:            "https://api.example.com",
+tests/test_railway_preflight.py:1353:        {"issuer": "https://other.example.com", "keys": []},
+tests/test_railway_preflight.py:1406:            "https://api.example.com",
+tests/test_railway_preflight.py:1422:            "https://api.example.com",
+tests/test_railway_preflight.py:1444:            "https://api.example.com",
+tests/test_railway_preflight.py:1457:            "https://api.example.com",
+tests/test_railway_preflight.py:1470:            "https://api.example.com",
+tests/test_railway_preflight.py:1482:        {"unhealthy": ["postgres"]},
+tests/test_railway_preflight.py:1490:    assert preflight.check_live("https://api.example.com") is False
+tests/test_railway_preflight.py:1545:    assert preflight.check_live("https://api.example.com") is True
+tests/test_railway_preflight.py:1557:    assert preflight.check_live("https://api.example.com") is True
+tests/test_railway_preflight.py:1576:    assert preflight.check_live("https://api.example.com") is True
+tests/test_railway_preflight.py:1625:    assert preflight.check_live("https://api.example.com") is False
+tests/test_railway_preflight.py:1648:    assert preflight.check_live("https://api.example.com") is False
+tests/test_railway_preflight.py:1667:    assert preflight.check_live("https://api.example.com") is False
+tests/test_railway_preflight.py:1683:    production = config.Settings(_env_file=None, ENVIRONMENT="production")
+tests/test_railway_preflight.py:1728:    assert preflight.check_live("https://api.example.com") is False
+tests/test_railway_preflight.py:1755:    assert preflight.check_live("https://api.example.com") is False
+tests/test_railway_preflight.py:1762:    assert preflight.check_live("https://api.example.com") is True
+tests/test_railway_preflight.py:1769:    assert preflight.check_live("https://api.example.com") is False
+tests/test_railway_preflight.py:1791:    assert preflight.check_live("https://api.example.com", **kwargs) is False
+tests/test_railway_preflight.py:1813:    assert preflight.check_live("https://api.example.com", **kwargs) is False
+tests/test_railway_preflight.py:1839:    assert preflight.check_live("https://api.example.com", **kwargs) is False
+tests/test_railway_preflight.py:1847:            "https://api.example.com",
+tests/test_railway_preflight.py:1869:                "https://api.example.com",
+tests/test_railway_preflight.py:1878:    assert seen == [("https://api.example.com", "1.3.0", EXPECTED_COMMIT_SHA)]
+tests/test_railway_preflight.py:1888:    assert preflight.check_live("https://api.example.com") is False
+tests/test_railway_preflight.py:1896:    assert preflight.check_live("https://api.example.com") is False
+tests/test_railway_preflight.py:2067:def test_runtime_posture_is_not_blocked_by_other_dotenv_files(
+tests/test_railway_preflight.py:2079:def test_runtime_image_never_contains_a_dotenv_file():
+tests/test_railway_preflight.py:2095:    secret = [REDACTED]
+tests/test_railway_preflight.py:2128:    monkeypatch.setenv("DATABASE_URL", "postgresql://[REDACTED]@db.internal/app")
+tests/test_railway_preflight.py:2163:    private_secret = [REDACTED]
+tests/test_railway_preflight.py:2175:    arguments += ["--url", "https://api.example.com"]
+tests/test_railway_preflight.py:2192:    public_url = "postgresql://[REDACTED]@switchback.proxy.rlwy.net:5432/db"
+tests/test_railway_preflight.py:2200:    arguments += ["--url", "https://api.example.com"]
+tests/test_railway_preflight.py:2256:    arguments += ["--url", "https://api.example.com"]
+tests/test_railway_preflight.py:2262:        ("https://api.example.com", "1.3.0", EXPECTED_COMMIT_SHA),
+tests/test_railway_preflight.py:2283:    arguments = ["--live", "--strict", "--url", "https://api.example.com"]
+tests/test_railway_preflight.py:2289:            "https://api.example.com",
+tests/test_railway_preflight.py:2330:    arguments = ["--live", "--strict", "--url", "https://api.example.com"]
+tests/test_railway_preflight.py:2420:    assert preflight.main([*arguments, "--url", "https://api.example.com"]) == 1
+tests/test_railway_preflight.py:2494:    assert preflight.check_live("https://api.example.com") is True
+tests/test_railway_preflight.py:2506:    assert preflight.check_live("https://api.example.com") is True
+tests/test_railway_preflight.py:2519:            "https://api.example.com",
+tests/test_railway_preflight.py:2536:    assert preflight.check_live("https://api.example.com") is False
+tests/test_railway_preflight.py:2548:    assert preflight.check_live("https://api.example.com") is False
+tests/test_railway_preflight.py:2561:    assert preflight.check_live("https://api.example.com") is False
+tests/test_discovery_drift.py:45:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_velocity_monitor.py:159:        async with AsyncClient(transport=transport, base_url="http://test") as client:
+tests/test_commit_sha_precedence.py:19:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_onboarding_contract.py:12:import subprocess
+tests/test_onboarding_contract.py:79:    That combination previously failed startup with `socket.gaierror` because
+tests/test_onboarding_contract.py:261:        ignore_check = subprocess.run(
+tests/test_migrations.py:801:                        :campaign_id, 'Legacy campaign', 'https://example.com/v',
+tests/test_rotate_api_keys.py:32:def _env(monkeypatch, url="https://api.example.test", old="old-key-value", new="new-key-value"):
+tests/test_governed_debit_dispatch_fence.py:42:    async with AsyncClient(transport=transport, base_url="http://test") as value:
+tests/test_governed_debit_dispatch_fence.py:353:            "upstream_origin": "https://partner.example",
+tests/test_protocol.py:17:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_protocol.py:48:        "base_url": "https://api.widgets.io",
+tests/test_protocol.py:94:        "base_url": "https://api.test.com",
+tests/test_protocol.py:98:    assert aj["base_url"] == "https://api.test.com"
+tests/test_protocol.py:173:        "base_url": "https://tenant-a.internal.example",
+tests/test_protocol.py:264:    base_url = "https://wallet-register-denied.example"
+tests/test_protocol.py:288:    base_url = "https://protocol-register-ok.example"
+tests/test_permit_postgres_concurrency.py:144:def _require_opted_in_postgres() -> None:
+tests/test_permit_postgres_concurrency.py:146:    if engine is None or engine.dialect.name != "postgresql":
+tests/test_permit_postgres_concurrency.py:157:    _require_opted_in_postgres()
+tests/test_permit_postgres_concurrency.py:397:async def test_concurrent_operation_key_charge_is_one_debit_in_postgres(
+tests/test_permit_postgres_concurrency.py:475:async def test_legacy_and_canonical_mcp_identities_serialize_in_postgres(
+tests/test_permit_postgres_concurrency.py:479:    _require_opted_in_postgres()
+tests/test_permit_postgres_concurrency.py:747:async def test_concurrent_refund_reconciliation_is_exactly_once_in_postgres(
+tests/test_permit_postgres_concurrency.py:903:async def test_concurrent_receipt_get_or_create_returns_one_receipt_in_postgres(
+tests/test_permit_postgres_concurrency.py:956:async def test_conflicting_concurrent_receipt_reuse_rejects_in_postgres(
+tests/test_permit_postgres_concurrency.py:1040:        upstream_origin="https://partner.example",
+tests/test_permit_postgres_concurrency.py:1166:async def test_concurrent_identical_upstream_requests_share_one_result_in_postgres() -> (
+tests/test_permit_postgres_concurrency.py:1170:    _require_opted_in_postgres()
+tests/test_permit_postgres_concurrency.py:1180:        async with AsyncClient(transport=transport, base_url="http://test") as client:
+tests/test_permit_postgres_concurrency.py:1249:async def test_inflight_governed_debit_blocks_cleanup_then_refunds_once_in_postgres(
+tests/test_permit_postgres_concurrency.py:1253:    _require_opted_in_postgres()
+tests/test_permit_postgres_concurrency.py:1259:    async with AsyncClient(transport=transport, base_url="http://test") as client:
+tests/test_permit_postgres_concurrency.py:1290:        upstream_origin="https://partner.example",
+tests/test_permit_postgres_concurrency.py:1461:async def test_inflight_governed_debit_blocks_effect_free_abandon_in_postgres(
+tests/test_permit_postgres_concurrency.py:1465:    _require_opted_in_postgres()
+tests/test_permit_postgres_concurrency.py:1471:    async with AsyncClient(transport=transport, base_url="http://test") as client:
+tests/test_permit_postgres_concurrency.py:1502:        upstream_origin="https://partner.example",
+tests/test_permit_postgres_concurrency.py:1679:async def test_dispatch_claim_cas_is_exclusive_in_postgres() -> None:
+tests/test_permit_postgres_concurrency.py:1680:    _require_opted_in_postgres()
+tests/test_permit_postgres_concurrency.py:1686:    async with AsyncClient(transport=transport, base_url="http://test") as client:
+tests/test_permit_postgres_concurrency.py:1717:        upstream_origin="https://partner.example",
+tests/test_permit_postgres_concurrency.py:1803:        upstream_origin="https://partner.example",
+tests/test_permit_postgres_concurrency.py:1874:async def test_concurrent_dispatch_reconcilers_create_one_signed_audit_in_postgres(
+tests/test_permit_postgres_concurrency.py:1878:    _require_opted_in_postgres()
+tests/test_permit_postgres_concurrency.py:1884:    async with AsyncClient(transport=transport, base_url="http://test") as client:
+tests/test_permit_postgres_concurrency.py:1915:        upstream_origin="https://partner.example",
+tests/test_permit_postgres_concurrency.py:2009:async def test_conflicting_payload_during_upstream_dispatch_rejects_in_postgres() -> (
+tests/test_permit_postgres_concurrency.py:2013:    _require_opted_in_postgres()
+tests/test_permit_postgres_concurrency.py:2022:        async with AsyncClient(transport=transport, base_url="http://test") as client:
+tests/test_permit_postgres_concurrency.py:2121:async def test_concurrent_provisioning_never_overdraws_in_postgres() -> None:
+tests/test_permit_postgres_concurrency.py:2128:    _require_opted_in_postgres()
+tests/test_permit_postgres_concurrency.py:2153:async def test_concurrent_transfers_conserve_credits_in_postgres() -> None:
+tests/test_permit_postgres_concurrency.py:2160:    _require_opted_in_postgres()
+tests/test_permit_postgres_concurrency.py:2198:async def test_concurrent_reclaims_credit_the_parent_once_in_postgres() -> None:
+tests/test_permit_postgres_concurrency.py:2200:    _require_opted_in_postgres()
+tests/test_permit_postgres_concurrency.py:2307:        upstream_origin="https://partner.example",
+tests/test_permit_postgres_concurrency.py:2414:    _require_opted_in_postgres()
+tests/test_permit_postgres_concurrency.py:2421:        async with AsyncClient(transport=transport, base_url="http://test") as client:
+tests/test_permit_postgres_concurrency.py:2476:    _require_opted_in_postgres()
+tests/test_permit_postgres_concurrency.py:2483:        async with AsyncClient(transport=transport, base_url="http://test") as client:
+tests/test_awi_adapter_sdk_hardening.py:78:        self.requests.append(request)
+tests/test_awi_adapter_sdk_hardening.py:110:        middleware_url="http://middleware.test", api_key=[REDACTED]
+tests/test_awi_adapter_sdk_hardening.py:215:        "https://attacker.example/steal",
+tests/test_awi_adapter_sdk_hardening.py:216:        "http://attacker.example/steal",
+tests/test_awi_adapter_sdk_hardening.py:252:    adapter = AWIFallbackAdapter("http://middleware.test", MIDDLEWARE_KEY)
+tests/test_awi_adapter_sdk_hardening.py:274:    adapter = AWIFallbackAdapter("http://middleware.test", MIDDLEWARE_KEY)
+tests/test_awi_adapter_sdk_hardening.py:282:        session = await adapter.create_session("https://shop.example", "wallet-a")
+tests/test_awi_adapter_sdk_hardening.py:294:    adapter = AWIFallbackAdapter("http://middleware.test", MIDDLEWARE_KEY)
+tests/test_awi_adapter_sdk_hardening.py:305:            await adapter.create_session("https://shop.example", "wallet-a")
+tests/test_awi_adapter_sdk_hardening.py:474:    client = sdk.AWIClient(base_url="http://middleware.test", api_key=[REDACTED]
+tests/test_awi_adapter_sdk_hardening.py:510:    client = sdk.AWIClient(base_url="http://middleware.test", api_key=[REDACTED]
+tests/test_awi_adapter_sdk_hardening.py:543:            307, headers={"Location": "https://attacker.example/collect"}
+tests/test_awi_adapter_sdk_hardening.py:546:    client = sdk.AWIClient(base_url="http://middleware.test", api_key=[REDACTED]
+tests/test_awi_adapter_sdk_hardening.py:560:    edge = B2AEdgeClient(api_url="http://middleware.test", api_key=[REDACTED]
+tests/test_awi_adapter_sdk_hardening.py:589:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_awi_adapter_sdk_hardening.py:596:        base_url="http://test",
+tests/test_awi_adapter_sdk_hardening.py:631:        session = await owner_sdk.create_session("https://example.com")
+tests/test_awi_adapter_sdk_hardening.py:640:                {"url": "https://example.com/next"},
+tests/test_awi_adapter_sdk_hardening.py:651:            {"url": "https://example.com/next"},
+tests/test_awi_adapter_sdk_hardening.py:683:            "target_url": "https://example.com",
+tests/test_awi_adapter_sdk_hardening.py:697:    adapter = AWIExternalAdapter("http://test", headers["X-API-Key"])
+tests/test_awi_adapter_sdk_hardening.py:705:            {"url": "https://example.com/checkout"},
+tests/test_x402.py:44:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_x402.py:767:        base_url="http://test",
+tests/test_x402.py:810:        base_url="http://test",
+tests/test_schema_boot.py:6:import subprocess
+tests/test_schema_boot.py:42:        ("postgresql", "local", False),
+tests/test_schema_boot.py:43:        ("postgresql", "production", False),
+tests/test_schema_boot.py:44:        ("postgresql", "development", False),
+tests/test_schema_boot.py:59:        dialect_name="postgresql", environment="production"
+tests/test_schema_boot.py:276:    result = subprocess.run(
+tests/test_runtime_degradation.py:52:    async with AsyncClient(transport=transport, base_url="http://test") as http:
+tests/test_runtime_degradation.py:124:    async with AsyncClient(transport=transport, base_url="http://test") as http:
+tests/test_runtime_degradation.py:163:    async with AsyncClient(transport=transport, base_url="http://test") as http:
+tests/test_runtime_degradation.py:193:    async with AsyncClient(transport=transport, base_url="http://test") as http:
+tests/test_runtime_degradation.py:228:    async with AsyncClient(transport=transport, base_url="http://test") as http:
+tests/test_runtime_degradation.py:256:    async with AsyncClient(transport=transport, base_url="http://test") as http:
+tests/test_standard_mcp_endpoint.py:40:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_standard_mcp_endpoint.py:177:        headers={**BOOTSTRAP_MCP_HEADERS, "Origin": "https://evil.example"},
+tests/test_standard_mcp_endpoint.py:183:@pytest.mark.parametrize("origin", ["https://test", "http://test:444"])
+tests/test_standard_mcp_endpoint.py:200:    monkeypatch.setenv("PUBLIC_URL", "https://api.example.com")
+tests/test_standard_mcp_endpoint.py:209:                "Origin": "http://api.example.com",
+tests/test_standard_mcp_endpoint.py:218:                "Origin": "https://api.example.com",
+tests/test_oracle_store.py:56:        url="https://api.test.com",
+tests/test_oracle_store.py:81:            "url": "https://api.example.com",
+tests/test_oracle_store.py:172:            "url": "https://api.foo.example.com/v1",
+tests/test_oracle_store.py:180:            "url": "https://other.net/",
+tests/test_oracle_store.py:196:            directory_url="https://agents.dev/register",
+tests/test_oracle_store.py:206:            directory_url="https://broken.example.com/register",
+tests/test_oracle_store.py:224:    await store.record_discovery_hit("https://hackernews.com")
+tests/test_oracle_store.py:225:    await store.record_discovery_hit("https://hackernews.com")
+tests/test_oracle_store.py:226:    await store.record_discovery_hit("https://agents.dev")
+tests/test_oracle_store.py:233:    assert referrers["https://hackernews.com"] == 2
+tests/test_oracle_store.py:234:    assert referrers["https://agents.dev"] == 1
+tests/test_permit_repeat_window_rollout.py:24:        transport=ASGITransport(app=app), base_url="http://test"
+tests/test_permit_repeat_window_rollout.py:42:    assert Settings(_env_file=None).ENABLE_PERMIT_REPEAT_WINDOW_ISSUANCE is False
+tests/test_receipt_signing_input_snapshot.py:178:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_tenant_isolation_hardening.py:29:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_tenant_isolation_hardening.py:70:            "git_repo_url": "https://github.com/a/secret",
+tests/test_tenant_isolation_hardening.py:71:            "webhook_url": "https://a.example/hook",
+tests/test_sandbox.py:16:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_discovery_consistency.py:11:_INTEGRATION_STATUSES = frozenset({"simulated", "integrated", "platform", "postgres"})
+tests/test_discovery_consistency.py:37:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_discovery_consistency.py:57:        if status in ("simulated", "integrated", "postgres"):
+tests/test_demo_trust_plane.py:4:import subprocess
+tests/test_demo_trust_plane.py:13:    result = subprocess.run(
+tests/test_mcp_malformed_input_review_probes.py:24:    async with AsyncClient(transport=ASGITransport(app=app, raise_app_exceptions=False), base_url="http://test", trust_env=False) as client:
+tests/test_retire_owner_keys.py:208:    private_url = "postgresql://[REDACTED]@postgres.railway.internal/db"
+tests/test_retire_owner_keys.py:224:    public_url = "postgresql://[REDACTED]@switchback.proxy.rlwy.net:5432/db"
+tests/test_retire_owner_keys.py:243:    public_url = "postgresql://[REDACTED]@switchback.proxy.rlwy.net:5432/db"
+tests/test_retire_owner_keys.py:258:        "postgresql://[REDACTED]@switchback.proxy.rlwy.net:5432/db",
+tests/test_retire_owner_keys.py:259:        "postgresql://[REDACTED]@127.0.0.1:5432/db",
+tests/test_retire_owner_keys.py:261:            "postgresql://[REDACTED]@postgres.railway.internal/db"
+tests/test_retire_owner_keys.py:264:        "postgresql://[REDACTED]@postgres.railway.internal/db?port=6543",
+tests/test_retire_owner_keys.py:265:        "postgresql://[REDACTED]@postgres.railway.internal/db#override",
+tests/test_retire_owner_keys.py:289:        "postgresql://[REDACTED]@postgres.railway.internal:5432/database"
+tests/test_retire_owner_keys.py:291:    public_url = "postgresql://[REDACTED]@switchback.proxy.rlwy.net:5432/db"
+tests/test_retire_owner_keys.py:321:        "postgresql://[REDACTED]@postgres.railway.internal:5432/database"
+tests/test_permit_budget_threshold_alerts.py:36:    async with AsyncClient(transport=transport, base_url="http://test") as value:
+tests/test_secret_persistence.py:39:    async with AsyncClient(transport=transport, base_url="http://test") as value:
+tests/test_prepare_railway_release.py:6:import subprocess
+tests/test_prepare_railway_release.py:15:    result = subprocess.run(
+tests/test_failure_lab_verifier.py:13:import subprocess
+tests/test_failure_lab_verifier.py:58:        "issuer": "https://api.example.test",
+tests/test_failure_lab_verifier.py:77:    completed = subprocess.run(
+tests/test_failure_lab_verifier.py:161:    forged = tamper(bundle, "issuer", "https://attacker.test")
+tests/test_failure_lab_verifier.py:162:    report = verify(forged, keys, expected_issuer="https://api.example.test")
+tests/conftest.py:132:# choosing postgres and asyncpg then failing on the SQLite DSN above. Once a
+tests/test_awi_dom_bridge_integration.py:99:            AWISessionCreate(target_url="https://example.com")
+tests/test_awi_dom_bridge_integration.py:104:            current_url="https://example.com",
+tests/test_awi_dom_bridge_integration.py:123:                    new_url="https://example.com/results",
+tests/test_awi_dom_bridge_integration.py:152:            AWISessionCreate(target_url="https://example.com")
+tests/test_awi_dom_bridge_integration.py:162:                parameters={"url": "https://example.com/page2"},
+tests/test_awi_dom_bridge_integration.py:184:            AWISessionCreate(target_url="https://example.com")
+tests/test_awi_dom_bridge_integration.py:190:            parameters={"url": "https://example.com/page2"},
+tests/test_awi_dom_bridge_integration.py:211:            AWISessionCreate(target_url="https://example.com")
+tests/test_awi_dom_bridge_integration.py:224:                    current_url="https://example.com",
+tests/test_awi_dom_bridge_integration.py:227:                    "url": "https://example.com",
+tests/test_awi_dom_bridge_integration.py:247:            AWISessionCreate(target_url="https://example.com")
+tests/test_awi_dom_bridge_integration.py:271:            AWISessionCreate(target_url="https://example.com")
+tests/test_awi_dom_bridge_integration.py:287:            AWISessionCreate(target_url="https://example.com")
+tests/test_stress_test_live_verdicts.py:182:    return asyncio.run(stress.main(["--api-url", "http://127.0.0.1:8000"]))
+tests/test_max_calls_debug.py:22:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_receipts.py:28:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_health_dependencies.py:36:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_health_dependencies.py:46:        "REDIS_URL",
+tests/test_health_dependencies.py:89:        upstream_origin="https://partner.example",
+tests/test_health_dependencies.py:114:    simulated), the report should be healthy: postgres up, the rest either
+tests/test_health_dependencies.py:121:        "postgres",
+tests/test_health_dependencies.py:137:    assert report["dependencies"]["postgres"]["status"] == "up"
+tests/test_health_dependencies.py:166:    settings.SENTINEL_API_URL = "https://SENTINEL.example:443/"
+tests/test_health_dependencies.py:195:    assert calls == [("GET", "https://sentinel.example/health", None)]
+tests/test_health_dependencies.py:202:    settings.SENTINEL_API_URL = "https://sentinel.example"
+tests/test_health_dependencies.py:225:        "https://[REDACTED]@sentinel.example",
+tests/test_health_dependencies.py:226:        "https://sentinel.example?tenant=private",
+tests/test_health_dependencies.py:227:        "https://sentinel.example#private",
+tests/test_health_dependencies.py:228:        "https://sentinel.example/api",
+tests/test_health_dependencies.py:229:        "http://169.254.169.254/latest/meta-data",
+tests/test_health_dependencies.py:231:        "https://sentinel.example:",
+tests/test_health_dependencies.py:232:        "https://sentinel.example:0",
+tests/test_health_dependencies.py:233:        "https://[v1.sentinel.example]",
+tests/test_health_dependencies.py:234:        " https://sentinel.example",
+tests/test_health_dependencies.py:235:        "https://sentinel.example/\n",
+tests/test_health_dependencies.py:280:        ("http://127.0.0.1:8000/", "http://127.0.0.1:8000/health"),
+tests/test_health_dependencies.py:281:        ("http://[::1]:8000", "http://[::1]:8000/health"),
+tests/test_health_dependencies.py:326:    private_url = "https://private-sentinel.example"
+tests/test_health_dependencies.py:383:_INTERNAL_REDIS_ERROR = "Error 111 connecting to redis.railway.internal:6379"
+tests/test_health_dependencies.py:390:def _break_redis_and_postgres(monkeypatch):
+tests/test_health_dependencies.py:392:        raise ConnectionError(_INTERNAL_REDIS_ERROR)
+tests/test_health_dependencies.py:394:    async def postgres_down():
+tests/test_health_dependencies.py:398:    monkeypatch.setattr(health_module, "_check_postgres", postgres_down)
+tests/test_health_dependencies.py:408:    _break_redis_and_postgres(monkeypatch)
+tests/test_health_dependencies.py:416:    assert {"postgres", "redis"} <= set(body["unhealthy"])
+tests/test_health_dependencies.py:419:    assert body["dependencies"]["postgres"]["status"] == "down"
+tests/test_health_dependencies.py:420:    assert body["dependencies"]["postgres"]["error"] == "OSError"
+tests/test_health_dependencies.py:435:    _break_redis_and_postgres(monkeypatch)
+tests/test_health_dependencies.py:443:    assert body["dependencies"]["postgres"]["error"] == "OSError"
+tests/test_health_dependencies.py:511:    async def failing_postgres():
+tests/test_health_dependencies.py:514:    monkeypatch.setattr(health_module, "_check_postgres", failing_postgres)
+tests/test_health_dependencies.py:518:    assert "postgres" in report["unhealthy"]
+tests/test_health_dependencies.py:597:        "postgres",
+tests/test_mcp_trust_mode.py:36:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_factory.py:22:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_factory.py:40:            "source_url": "https://storage.example.com/launch.mp4",
+tests/test_factory.py:235:            "source_url": "https://yourdomain.com/content/b2a-launch-video",
+tests/test_factory.py:340:            "source_url": "https://example.com/video.mp4",
+tests/test_factory.py:368:            "source_url": "https://example.com/video.mp4",
+tests/test_factory.py:395:            "source_url": "https://example.com/vid.mp4",
+tests/test_factory.py:436:            "source_url": "https://example.com/v.mp4",
+tests/test_factory.py:464:            "source_url": "https://example.com/v.mp4",
+tests/test_factory.py:487:            "source_url": "https://example.com/v.mp4",
+tests/test_factory.py:545:            "source_url": "https://example.com/v.mp4",
+tests/test_factory.py:577:            "source_url": "https://a.example/secret-source.mp4",
+tests/test_factory.py:604:            "source_url": "https://a.example/secret-campaign.mp4",
+tests/test_factory.py:803:            "source_url": "https://storage.example.com/launch.mp4",
+tests/test_adversarial_five_claims.py:85:    async with AsyncClient(transport=transport, base_url="http://test") as value:
+tests/test_adversarial_five_claims.py:176:        upstream_origin="https://partner.example",
+tests/test_scaffolding_harden.py:54:        download_url="https://example.com/clip.mp4",
+tests/test_scaffolding_harden.py:107:        webhook_url="https://example.com/hook",
+tests/test_scaffolding_harden.py:140:    async with AsyncClient(transport=transport, base_url="http://test") as client:
+tests/test_site_pilot_fit.mjs:7:const baseURL = new URL(process.argv[2] || "http://127.0.0.1:8765");
+tests/test_site_pilot_fit.mjs:32:  page.on("request", (request) => requests.push(request.url()));
+tests/test_duplicate_guard_postgres_concurrency.py:33:def _require_opted_in_postgres() -> None:
+tests/test_duplicate_guard_postgres_concurrency.py:36:    if engine is None or engine.dialect.name != "postgresql":
+tests/test_duplicate_guard_postgres_concurrency.py:95:        upstream_origin="https://fake.example.com",
+tests/test_duplicate_guard_postgres_concurrency.py:126:    _require_opted_in_postgres()
+tests/test_duplicate_guard_postgres_concurrency.py:139:        base_url="http://test",
+tests/test_duplicate_guard_postgres_concurrency.py:288:    _require_opted_in_postgres()
+tests/test_duplicate_guard_postgres_concurrency.py:302:        base_url="http://test",
+tests/test_duplicate_guard_postgres_concurrency.py:411:    _require_opted_in_postgres()
+tests/test_duplicate_guard_postgres_concurrency.py:422:        base_url="http://test",
+tests/test_permit_signing_input_snapshot.py:238:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_approval_card_rendering.py:43:        approval_url="https://sentinel.example/decide?request=123&token=[REDACTED],
+tests/test_approval_card_rendering.py:79:    url = 'https://sentinel.example/decide?request=123&token=[REDACTED] onclick="alert(1)'
+tests/test_approval_card_rendering.py:115:    "http://sentinel.example/decide?request=123",
+tests/test_approval_card_rendering.py:118:    "https://[::1",
+tests/test_agent_comms_durable.py:32:    async with AsyncClient(transport=transport, base_url="http://test") as client:
+tests/test_agent_comms_durable.py:76:    async with AsyncClient(transport=transport, base_url="http://test") as client:
+tests/test_agent_comms_durable.py:95:    async with AsyncClient(transport=transport, base_url="http://test") as client:
+tests/test_agent_comms_durable.py:141:    async with AsyncClient(transport=transport, base_url="http://test") as client:
+tests/test_agent_comms_durable.py:197:    async with AsyncClient(transport=transport, base_url="http://test") as client:
+tests/test_agent_comms_durable.py:255:    async with AsyncClient(transport=transport, base_url="http://test") as client:
+tests/test_agent_comms_durable.py:315:    async with AsyncClient(transport=transport, base_url="http://test") as client:
+tests/test_framework_legacy_client.py:25:    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+tests/test_framework_legacy_client.py:30:    client = B2AClient(api_url="http://test", api_key=[REDACTED], wallet_id=wallet_id)
+tests/test_framework_legacy_client.py:49:    client = B2AClient(api_url="http://b2a.test", api_key=[REDACTED], wallet_id="wal-1")
+tests/test_framework_legacy_client.py:82:    client = B2AClient(api_url="http://b2a.test", api_key=[REDACTED], wallet_id="wal-1")
+tests/test_framework_legacy_client.py:98:    client = B2AClient(api_url="http://b2a.test", api_key=[REDACTED], wallet_id="wal-1")
+tests/test_agent_self_credential_proof.py:151:        ["agent_self_credential_proof.py", "--base-url", "http://127.0.0.1:8000"],
+tests/test_awi_adoption.py:76:            "servers": [{"url": "https://api.example.com"}],
+tests/test_awi_adoption.py:82:        assert manifest["base_url"] == "https://api.example.com"
+tests/test_awi_adoption.py:149:            target_url="https://example.com",
+tests/test_awi_adoption.py:155:        assert session.target_url == "https://example.com"
+tests/test_awi_adoption.py:190:            middleware_url="http://localhost:8000",
+tests/test_awi_adoption.py:194:        assert adapter.middleware_url == "http://localhost:8000"
+tests/test_awi_adoption.py:202:            middleware_url="http://localhost:8000",
+tests/test_awi_adoption.py:252:            transport=ASGITransport(app=app), base_url="http://test"
+tests/test_quickstart_path.py:22:import socket
+tests/test_quickstart_path.py:23:import subprocess
+tests/test_quickstart_path.py:39:    with socket.socket() as sock:
+tests/test_quickstart_path.py:51:        process = subprocess.Popen(
+tests/test_quickstart_path.py:63:            stderr=subprocess.STDOUT,
+tests/test_quickstart_path.py:66:    base_url = f"http://127.0.0.1:{port}"
+tests/test_quickstart_path.py:90:        except subprocess.TimeoutExpired:
+tests/test_quickstart_path.py:103:def _verify_cli(bundle_path: Path, keys_path: Path) -> subprocess.CompletedProcess:
+tests/test_quickstart_path.py:105:    return subprocess.run(
+tests/test_quickstart_path.py:305:) -> subprocess.CompletedProcess:
+tests/test_quickstart_path.py:309:    return subprocess.run(
+tests/test_quickstart_path.py:323:    for url in ("https://example.com", "http://example.com"):
+tests/test_quickstart_path.py:337:        "--api-url", f"http://127.0.0.1:{dead_port}",
+tests/test_quickstart_path.py:354:    dead_proxy = f"http://127.0.0.1:{_free_port()}"
+tests/test_quickstart_path.py:381:        "http://[REDACTED]@127.0.0.1:8000/base?token=[REDACTED]
+tests/test_quickstart_path.py:383:    assert sanitized == "http://127.0.0.1:8000/base"
+tests/test_quickstart_path.py:395:    result = subprocess.run(
+tests/test_dev_key_self_provision.py:58:        base_url="http://test",
+tests/test_dev_key_self_provision.py:87:    async with AsyncClient(transport=transport, base_url="http://test") as bare:
+tests/test_dev_key_self_provision.py:159:        headers={"Origin": "https://evil.example"},
+tests/test_dev_key_self_provision.py:173:        headers={"Origin": "http://test"},
+tests/test_wedge_honesty.py:20:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_human_accessibility.py:17:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_human_accessibility.py:96:    assert "https://www.thisisatest.tech/proof/" in page
+tests/test_human_accessibility.py:97:    assert "https://api.thisisatest.tech/health/dependencies" in page
+tests/test_human_accessibility.py:100:    assert 'href="https://api.thisisatest.tech/mcp/tools.json"' not in page
+tests/test_dogfood_tool_flag.py:27:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_vendor_fonts.py:32:  src: url(https://fonts.gstatic.com/s/static-{weight}-ext.woff2) format('woff2');
+tests/test_vendor_fonts.py:40:  src: url(https://fonts.gstatic.com/s/static-{weight}.woff2) format('woff2');
+tests/test_vendor_fonts.py:50:  src: url(https://fonts.gstatic.com/s/variable-ext.woff2) format('woff2');
+tests/test_vendor_fonts.py:58:  src: url(https://fonts.gstatic.com/s/variable.woff2) format('woff2');
+tests/test_constant_loop_receipt_signature.py:28:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_failure_lab.py:14:import subprocess
+tests/test_failure_lab.py:33:    result = subprocess.run(
+tests/test_failure_lab.py:279:    result = subprocess.run(
+tests/test_permit_write_contention_surface.py:75:    async with AsyncClient(transport=transport, base_url="http://test") as value:
+tests/test_permit_write_contention_surface.py:634:        upstream_origin="https://partner.example",
+tests/test_dogfood_trust_plane.py:6:import subprocess
+tests/test_dogfood_trust_plane.py:14:    result = subprocess.run(
+tests/test_planner_constraints.py:256:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_planner_constraints.py:442:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_planner_constraints.py:527:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/support/mcp_stress_app.py:372:        upstream_origin="https://stress-partner.example",
+tests/test_discover_kyc_honesty.py:18:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_public_mcp_endpoint.py:18:import subprocess
+tests/test_public_mcp_endpoint.py:80:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_public_mcp_endpoint.py:276:    completed = subprocess.run(
+tests/test_public_mcp_endpoint.py:294:        headers={**MCP_HEADERS, "Origin": "https://evil.example"},
+tests/test_public_mcp_endpoint.py:302:    ["https://test", "http://test:444"],
+tests/test_public_mcp_endpoint.py:319:    monkeypatch.setenv("PUBLIC_URL", "https://api.example.com")
+tests/test_public_mcp_endpoint.py:328:                "Origin": "https://rebind.evil",
+tests/test_public_mcp_endpoint.py:342:    monkeypatch.setenv("PUBLIC_URL", "https://api.example.com")
+tests/test_public_mcp_endpoint.py:351:                "Origin": "http://api.example.com",
+tests/test_public_mcp_endpoint.py:360:                "Origin": "https://api.example.com",
+tests/test_public_mcp_endpoint.py:610:            {"bundle": bundle, "expected_issuer": "https://other.example"},
+tests/test_runtime_mode.py:182:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_runtime_mode.py:215:        json={"url": "https://api.example.com", "directory_type": "openapi"},
+tests/test_runtime_mode.py:220:    assert data["url"] == "https://api.example.com"
+tests/test_mcp_generator.py:474:                transport=ASGITransport(app=app), base_url="http://test"
+tests/test_mcp_generator.py:498:            transport=ASGITransport(app=app), base_url="http://test"
+tests/test_mcp_generator.py:519:            transport=ASGITransport(app=app), base_url="http://test"
+tests/test_mcp_generator.py:544:            transport=ASGITransport(app=app), base_url="http://test"
+tests/test_mcp_generator.py:573:            transport=ASGITransport(app=app), base_url="http://test"
+tests/test_mcp_generator.py:622:                transport=ASGITransport(app=app), base_url="http://test"
+tests/test_mcp_generator.py:699:                transport=ASGITransport(app=app), base_url="http://test"
+tests/test_mcp_generator.py:771:                transport=ASGITransport(app=app), base_url="http://test"
+tests/test_mcp_generator.py:844:                transport=ASGITransport(app=app), base_url="http://test"
+tests/test_mcp_generator.py:916:                transport=ASGITransport(app=app), base_url="http://test"
+tests/test_mcp_generator.py:967:                transport=ASGITransport(app=app), base_url="http://test"
+tests/test_mcp_generator.py:1062:                transport=ASGITransport(app=app), base_url="http://test"
+tests/test_mcp_generator.py:1117:                transport=ASGITransport(app=app), base_url="http://test"
+tests/test_mcp_generator.py:1149:            transport=ASGITransport(app=app), base_url="http://test"
+tests/test_python_sdk_trust_loop.py:44:            base_url="http://test",
+tests/test_python_sdk_trust_loop.py:52:                base_url="http://test",
+tests/test_python_sdk_trust_loop.py:105:        base_url="http://test",
+tests/test_python_sdk_trust_loop.py:113:        base_url="http://test",
+tests/test_python_sdk_trust_loop.py:136:            base_url="http://test",
+tests/test_content_store.py:53:        source_url="https://example.com/video.mp4",
+tests/test_content_store.py:205:        source_url="https://example.com/source.mp4",
+tests/test_content_store.py:244:                source_url="https://example.com/x",
+tests/test_stripe_integration.py:25:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_stripe_integration.py:1053:        webhook = f"https://hooks.slack.com/services/{secret}"
+tests/test_phase7_followups.py:16:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_phase7_followups.py:22:    public = "https://api.thisisatest.tech"
+tests/test_phase7_followups.py:68:    assert _require_safe_api_url("https://api.example.com") == "https://api.example.com"
+tests/test_phase7_followups.py:69:    assert _require_safe_api_url("http://127.0.0.1:8000") == "http://127.0.0.1:8000"
+tests/test_phase7_followups.py:71:        _require_safe_api_url("http://api.example.com")
+tests/test_phase7_followups.py:74:        assert "https://" in str(exc)
+tests/test_site_design.mjs:6:const base = new URL(process.argv[2] || "http://127.0.0.1:8765");
+tests/test_dispatch_claim_migration.py:46:                    'https://partner.example', :request_hash,
+tests/test_dispatch_claim_migration.py:88:                    'https://partner.example', :request_hash,
+tests/test_permit_budget_drift_visibility.py:54:    async with AsyncClient(transport=transport, base_url="http://test") as value:
+tests/test_discovery.py:15:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_ai_router_isolation.py:57:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_mcp_idempotency_key_validation.py:51:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_me_trust_ledger.py:21:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_failure_lab_report.py:275:    assert "http://" not in head and "https://" not in head
+tests/test_constant_test_loop.py:12:import socket
+tests/test_constant_test_loop.py:13:import subprocess
+tests/test_constant_test_loop.py:37:    with socket.socket() as sock:
+tests/test_constant_test_loop.py:75:        process = subprocess.Popen(
+tests/test_constant_test_loop.py:89:            stderr=subprocess.STDOUT,
+tests/test_constant_test_loop.py:93:    base_url = f"http://127.0.0.1:{port}"
+tests/test_constant_test_loop.py:115:        except subprocess.TimeoutExpired:
+tests/test_constant_test_loop.py:123:        "API_URL": "http://api.thisisatest.tech",
+tests/test_constant_test_loop.py:126:    result = subprocess.run(
+tests/test_constant_test_loop.py:145:        "API_URL": "http://localhost:8000",
+tests/test_constant_test_loop.py:148:    result = subprocess.run(
+tests/test_constant_test_loop.py:156:    # The point is that URL validation didn't reject http://localhost
+tests/test_constant_test_loop.py:293:    result = subprocess.run(
+tests/test_constant_test_loop.py:296:            "api_url": "http://127.0.0.1:8000",
+tests/test_constant_test_loop.py:340:    result = subprocess.run(
+tests/test_constant_test_loop.py:372:    result = subprocess.run(
+tests/test_constant_test_loop.py:542:    result = subprocess.run(
+tests/test_constant_test_loop.py:547:            "https://api.thisisatest.tech",
+tests/test_constant_test_loop.py:559:    result = subprocess.run(
+tests/test_constant_test_loop.py:564:            "https://api.thisisatest.tech",
+tests/test_constant_test_loop.py:580:    result = subprocess.run(
+tests/test_constant_test_loop.py:585:            "https://api.example.org",
+tests/test_constant_test_loop.py:597:    result = subprocess.run(
+tests/test_constant_test_loop.py:602:            "https://api.example.org",
+tests/test_constant_test_loop.py:625:    result = subprocess.run(
+tests/test_constant_test_loop.py:643:    result = subprocess.run(
+tests/test_constant_test_loop.py:729:            "API_URL": "https://api.invalid",
+tests/test_constant_test_loop.py:735:    result = subprocess.run(
+tests/test_evidence_bundle.py:19:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_naive_utc_datetime_columns.py:25:from sqlalchemy.dialects import postgresql
+tests/test_naive_utc_datetime_columns.py:38:PG_DIALECT = postgresql.dialect()
+tests/test_content_factory_generation_durable.py:47:    async with AsyncClient(transport=transport, base_url="http://test") as client:
+tests/test_content_factory_generation_durable.py:62:    async with AsyncClient(transport=transport, base_url="http://test") as client:
+tests/test_content_factory_generation_durable.py:87:    async with AsyncClient(transport=transport, base_url="http://test") as client:
+tests/test_content_factory_generation_durable.py:116:    async with AsyncClient(transport=transport, base_url="http://test") as client:
+tests/test_content_factory_generation_durable.py:132:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_content_factory_generation_durable.py:292:    settings.LLM_BASE_URL = "https://llm.internal.example/v1"
+tests/test_content_factory_generation_durable.py:314:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_oracle_durable_crawl.py:27:    url = "https://phase1-durable.example/api"
+tests/test_oracle_durable_crawl.py:29:    async with AsyncClient(transport=transport, base_url="http://test") as client:
+tests/test_oracle_durable_crawl.py:48:    async with AsyncClient(transport=transport, base_url="http://test") as client:
+tests/test_oracle_durable_crawl.py:68:    url = "https://phase1-sim.example/api"
+tests/test_oracle_durable_crawl.py:70:    async with AsyncClient(transport=transport, base_url="http://test") as client:
+tests/test_cors_security.py:19:EVIL_ORIGIN = "https://evil.example"
+tests/test_cors_security.py:20:GOOD_ORIGIN = "https://good.example"
+tests/test_cors_security.py:35:    return AsyncClient(transport=ASGITransport(app=application), base_url="http://test")
+tests/test_signed_quotes.py:45:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_api_keys.py:18:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_agent_url_and_input_hardening.py:22:import socket
+tests/test_agent_url_and_input_hardening.py:46:    return BridgeSession(session_id="test-session", current_url="https://example.com")
+tests/test_agent_url_and_input_hardening.py:68:            ("http://", "missing_host"),
+tests/test_agent_url_and_input_hardening.py:69:            ("http://127.0.0.1:8000/admin", "private_address_blocked"),
+tests/test_agent_url_and_input_hardening.py:70:            ("http://10.0.0.5/internal", "private_address_blocked"),
+tests/test_agent_url_and_input_hardening.py:71:            ("http://192.168.1.1/", "private_address_blocked"),
+tests/test_agent_url_and_input_hardening.py:72:            ("http://169.254.169.254/latest/meta-data/", "private_address_blocked"),
+tests/test_agent_url_and_input_hardening.py:73:            ("http://[::1]:6379/", "private_address_blocked"),
+tests/test_agent_url_and_input_hardening.py:74:            ("http://localhost:8080/", "private_host_blocked"),
+tests/test_agent_url_and_input_hardening.py:76:                "http://metadata.google.internal/computeMetadata/",
+tests/test_agent_url_and_input_hardening.py:79:            ("http://foo.internal/", "private_host_blocked"),
+tests/test_agent_url_and_input_hardening.py:87:        assert await check_outbound_url("https://example.com/page") is None
+tests/test_agent_url_and_input_hardening.py:93:            "http://2130706433/",  # decimal-encoded 127.0.0.1
+tests/test_agent_url_and_input_hardening.py:94:            "http://0x7f000001/",  # hex-encoded 127.0.0.1
+tests/test_agent_url_and_input_hardening.py:95:            "http://017700000001/",  # octal-encoded 127.0.0.1
+tests/test_agent_url_and_input_hardening.py:96:            "http://0/",  # 0.0.0.0
+tests/test_agent_url_and_input_hardening.py:97:            "http://evil.example.com@127.0.0.1/",  # userinfo confusion
+tests/test_agent_url_and_input_hardening.py:98:            "http://[::ffff:169.254.169.254]/",  # ipv6-mapped metadata
+tests/test_agent_url_and_input_hardening.py:110:        assert await check_outbound_url("http://127.0.0.1@example.com/") is None
+tests/test_agent_url_and_input_hardening.py:116:            socket.gaierror(socket.EAI_NONAME, "Name or service not known"),
+tests/test_agent_url_and_input_hardening.py:129:            await check_outbound_url("https://intranet-only.example/")
+tests/test_agent_url_and_input_hardening.py:138:            raise socket.gaierror(socket.EAI_NONAME, "Name or service not known")
+tests/test_agent_url_and_input_hardening.py:143:                session, {"url": "https://intranet-only.example/"}
+tests/test_agent_url_and_input_hardening.py:151:        assert await check_outbound_url("http://127.0.0.1:8000/") is None
+tests/test_agent_url_and_input_hardening.py:162:                    "amount": "300); fetch('https://evil.example', "
+tests/test_agent_url_and_input_hardening.py:184:            "http://169.254.169.254/latest/meta-data/",
+tests/test_agent_url_and_input_hardening.py:185:            "http://localhost:8080/",
+tests/test_agent_url_and_input_hardening.py:197:            session, {"url": "https://example.com/products"}
+tests/test_agent_url_and_input_hardening.py:199:        assert commands[0].target == "https://example.com/products"
+tests/test_agent_url_and_input_hardening.py:232:    url = "https://example.com/login"
+tests/test_agent_url_and_input_hardening.py:461:            "fetch('https://evil.example', {method: 'POST', body: document.cookie})",
+tests/test_agent_url_and_input_hardening.py:462:            "window.scrollBy(0, 1); fetch('https://evil.example')",
+tests/test_agent_url_and_input_hardening.py:573:            {"url": "https://example.com/"},
+tests/test_agent_url_and_input_hardening.py:585:            {"url": "http://169.254.169.254/latest/meta-data/"},
+tests/test_agent_url_and_input_hardening.py:597:            {"url": "http://169.254.169.254/latest/meta-data/"},
+tests/test_production_trust_posture.py:15:import subprocess
+tests/test_production_trust_posture.py:48:    "PUBLIC_URL": "https://api.thisisatest.tech",
+tests/test_production_trust_posture.py:53:    "DATABASE_URL": "postgresql+asyncpg://[REDACTED]@db.internal:5432/trust",
+tests/test_production_trust_posture.py:124:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_production_trust_posture.py:162:    result = subprocess.run(
+tests/test_framework_legacy_tools.py:74:        {"target_url": "https://example.com", "max_steps": 5},
+tests/test_framework_legacy_tools.py:103:    client = B2AClient(api_url="http://b2a.test", api_key=[REDACTED], wallet_id=WALLET_ID)
+tests/test_failure_lab_diagnostic.py:19:drive real runs do so in a subprocess, for a reason that is itself part of the
+tests/test_failure_lab_diagnostic.py:417:            "/diagnostic/run", json={"target": "https://payments.example.com"}
+tests/test_failure_lab_diagnostic.py:433:            "/diagnostic/external", json={"target": "https://payments.example.com"}
+tests/test_failure_lab_diagnostic.py:454:                "target": "https://payments.example.com",
+tests/test_failure_lab_diagnostic.py:653:    import subprocess
+tests/test_failure_lab_diagnostic.py:655:    completed = subprocess.run(
+tests/test_request_body_limit.py:44:    return AsyncClient(transport=ASGITransport(app=limited_app), base_url="http://test")
+tests/test_request_body_limit.py:186:    """Lifespan and websocket scopes have no `method`; they must not KeyError."""
+tests/test_request_body_limit.py:198:    for scope_type in ("lifespan", "websocket"):
+tests/test_request_body_limit.py:200:    assert seen == ["lifespan", "websocket"]
+tests/test_max_calls_race.py:40:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_policy_bundles.py:22:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_railway_iac_config.py:7:import subprocess
+tests/test_railway_iac_config.py:44:    "REDIS_URL",
+tests/test_railway_iac_config.py:105:    assert "postgres://" not in source.lower()
+tests/test_railway_iac_config.py:166:        result = subprocess.run(
+tests/test_audit_routes.py:15:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_stale_commit_sha_prevention.py:27:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_framework_inprocess_validator.py:43:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_framework_inprocess_validator.py:76:        base_url="http://test",
+tests/test_framework_inprocess_validator.py:134:            base_url="http://test",
+tests/test_framework_inprocess_validator.py:203:        base_url="http://test",
+tests/test_framework_inprocess_validator.py:243:        base_url="http://test",
+tests/test_framework_inprocess_validator.py:309:            base_url="http://test",
+tests/test_framework_inprocess_validator.py:396:            base_url="http://test",
+tests/test_site_agent_interface.py:12:import subprocess
+tests/test_site_agent_interface.py:29:CANONICAL_API = "https://api.thisisatest.tech"
+tests/test_site_agent_interface.py:30:CANONICAL_MARKETING_SITE = "https://www.thisisatest.tech/"
+tests/test_site_agent_interface.py:40:    "PUBLIC_BOOKING_URL": "https://cal.com/design-partner-labs/one-tool-pilot",
+tests/test_site_agent_interface.py:154:    return subprocess.run(
+tests/test_site_agent_interface.py:193:        ("PUBLIC_BOOKING_URL", "https://calendar.company.test/pilot"),
+tests/test_site_agent_interface.py:194:        ("PUBLIC_BOOKING_URL", "https://calendar.invalid/pilot"),
+tests/test_site_agent_interface.py:374:        "https://calendly.com/regengine/30min",
+tests/test_site_agent_interface.py:375:        "https://cal.com/design-partner-labs/one-tool-pilot",
+tests/test_site_agent_interface.py:376:        "https://calendly.com/another-operator/regengine",
+tests/test_site_agent_interface.py:377:        "https://calendar.design-partner-labs.org/regengine/30min",
+tests/test_site_agent_interface.py:496:    assert "--expect-issuer https://api.thisisatest.tech" in proof
+tests/test_site_agent_interface.py:596:REPO_URL = "https://github.com/PetrefiedThunder/agent-middleware-api"
+tests/test_site_agent_interface.py:701:    assert '<link rel="canonical" href="https://www.thisisatest.tech/"' in page
+tests/test_site_agent_interface.py:702:    assert 'property="og:url" content="https://www.thisisatest.tech/"' in page
+tests/test_site_agent_interface.py:709:    assert "https://www.thisisatest.tech/social-card.png" in page
+tests/test_site_agent_interface.py:712:    assert "Sitemap: https://www.thisisatest.tech/sitemap.xml" in robots
+tests/test_site_agent_interface.py:713:    assert "https://www.thisisatest.tech/proof/" in sitemap
+tests/test_site_agent_interface.py:714:    assert "https://www.thisisatest.tech/compare/" in sitemap
+tests/test_site_agent_interface.py:992:    "index.html": "https://www.thisisatest.tech/",
+tests/test_site_agent_interface.py:993:    "proof/index.html": "https://www.thisisatest.tech/proof/",
+tests/test_site_agent_interface.py:994:    "compare/index.html": "https://www.thisisatest.tech/compare/",
+tests/test_site_agent_interface.py:1014:    assert document["@context"] == "https://schema.org"
+tests/test_site_agent_interface.py:1193:    # and no receipt (TRUST_MODEL.md; test_mcp_postgres_multiprocess asserts
+tests/test_site_agent_interface.py:1482:            f'rel="canonical" href="https://www.thisisatest.tech/{directory}/"' in page
+tests/test_site_agent_interface.py:1502:    assert "https://www.thisisatest.tech/llms-full.txt" in short
+tests/test_site_agent_interface.py:1984:            if alternative in visible.casefold() and href.startswith("https://")
+tests/test_site_agent_interface.py:3450:    assert "--expect-issuer https://api.thisisatest.tech" in live["command"]
+tests/test_site_agent_interface.py:3583:    result = subprocess.run(
+tests/test_sentinel_target_safety.py:26:        ("https://SENTINEL.example:443/", False, "https://sentinel.example"),
+tests/test_sentinel_target_safety.py:27:        ("https://8.8.8.8:8443", False, "https://8.8.8.8:8443"),
+tests/test_sentinel_target_safety.py:28:        ("http://127.0.0.1:8000/", True, "http://127.0.0.1:8000"),
+tests/test_sentinel_target_safety.py:29:        ("http://[::1]:8000", True, "http://[::1]:8000"),
+tests/test_sentinel_target_safety.py:43:        "https://[REDACTED]@sentinel.example",
+tests/test_sentinel_target_safety.py:44:        "https://sentinel.example?",
+tests/test_sentinel_target_safety.py:45:        "https://sentinel.example#",
+tests/test_sentinel_target_safety.py:46:        "https://sentinel.example/?",
+tests/test_sentinel_target_safety.py:47:        "https://sentinel.example/#",
+tests/test_sentinel_target_safety.py:48:        "https://sentinel.example/api",
+tests/test_sentinel_target_safety.py:49:        "https://sentinel.example:",
+tests/test_sentinel_target_safety.py:50:        "https://sentinel.example:0",
+tests/test_sentinel_target_safety.py:51:        "https://sentinel.example:65536",
+tests/test_sentinel_target_safety.py:52:        "http://sentinel.example",
+tests/test_sentinel_target_safety.py:54:        "https://169.254.169.254",
+tests/test_sentinel_target_safety.py:55:        "https://10.0.0.1",
+tests/test_sentinel_target_safety.py:56:        "https://224.0.0.1",
+tests/test_sentinel_target_safety.py:57:        "https://239.255.255.250",
+tests/test_sentinel_target_safety.py:58:        "https://[::]",
+tests/test_sentinel_target_safety.py:59:        "https://[::ffff:127.0.0.1]",
+tests/test_sentinel_target_safety.py:60:        "https://[::ffff:8.8.8.8]",
+tests/test_sentinel_target_safety.py:61:        "https://[::127.0.0.1]",
+tests/test_sentinel_target_safety.py:62:        "https://[::169.254.169.254]",
+tests/test_sentinel_target_safety.py:63:        "https://[64:ff9b::10.0.0.1]",
+tests/test_sentinel_target_safety.py:64:        "https://[fec0::1]",
+tests/test_sentinel_target_safety.py:65:        "https://[ff02::1]",
+tests/test_sentinel_target_safety.py:66:        "https://[ff0e::1]",
+tests/test_sentinel_target_safety.py:67:        "https://2130706433",
+tests/test_sentinel_target_safety.py:68:        "https://0x7f000001",
+tests/test_sentinel_target_safety.py:69:        "https://0177.0.0.1",
+tests/test_sentinel_target_safety.py:70:        "https://127.1",
+tests/test_sentinel_target_safety.py:71:        "https://redis",
+tests/test_sentinel_target_safety.py:72:        "https://metadata.google.internal",
+tests/test_sentinel_target_safety.py:73:        "https://sentinel.internal",
+tests/test_sentinel_target_safety.py:74:        "https://sentinel.local",
+tests/test_sentinel_target_safety.py:75:        "https://[v1.sentinel.example]",
+tests/test_sentinel_target_safety.py:76:        "https://[fe80::1%25en0]",
+tests/test_sentinel_target_safety.py:77:        "https://faß.de",
+tests/test_sentinel_target_safety.py:78:        " https://sentinel.example",
+tests/test_sentinel_target_safety.py:79:        "https://sentinel.example/\n",
+tests/test_sentinel_target_safety.py:90:        "http://localhost:8000",
+tests/test_sentinel_target_safety.py:91:        "https://localhost",
+tests/test_sentinel_target_safety.py:92:        "https://service.localhost",
+tests/test_sentinel_target_safety.py:93:        "https://127.0.0.1:8443",
+tests/test_sentinel_target_safety.py:104:        sentinel_health_url("https://SENTINEL.example:443/")
+tests/test_sentinel_target_safety.py:105:        == "https://sentinel.example/health"
+tests/test_sentinel_target_safety.py:136:    monkeypatch.setattr(settings, "SENTINEL_API_URL", "https://169.254.169.254")
+tests/test_sentinel_target_safety.py:166:        "https://SENTINEL.example:443/",
+tests/test_sentinel_target_safety.py:170:    assert captured["base_url"] == "https://sentinel.example"
+tests/test_sentinel_target_safety.py:183:        requests.append(request)
+tests/test_sentinel_target_safety.py:195:    sentinel = SentinelClient("https://SENTINEL.example:443/", "sk_live_safe")
+tests/test_sentinel_target_safety.py:212:    assert str(request.url) == "https://sentinel.example/v1/approvals"
+tests/test_sentinel_target_safety.py:225:        requests.append(request)
+tests/test_sentinel_target_safety.py:228:            headers={"Location": "https://attacker.example/collect"},
+tests/test_sentinel_target_safety.py:240:    sentinel = SentinelClient("https://api.pauseapi.app", "sk_live_safe")
+tests/test_sentinel_target_safety.py:248:    assert str(requests[0].url) == "https://api.pauseapi.app/v1/approvals/action-safe"
+tests/test_sentinel_target_safety.py:262:    monkeypatch.setattr(settings, "SENTINEL_API_URL", "https://api.pauseapi.app")
+tests/test_sentinel_target_safety.py:286:            "https://api.pauseapi.app",
+tests/test_sentinel_target_safety.py:296:            "https://api.pauseapi.app",
+tests/test_sentinel_target_safety.py:301:            "https://127.0.0.1",
+tests/test_sentinel_target_safety.py:337:    monkeypatch.setattr(settings, "SENTINEL_API_URL", "https://127.0.0.1")
+tests/test_sentinel_target_safety.py:346:    monkeypatch.setattr(settings, "SENTINEL_API_URL", "http://127.0.0.1:8000")
+tests/test_media.py:17:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_media.py:33:            "source_url": "https://storage.example.com/demo.mp4",
+tests/test_media.py:63:        json={"title": "Status Check", "source_url": "https://example.com/v.mp4"},
+tests/test_media.py:84:        json={"title": "Hook Test", "source_url": "https://example.com/v.mp4"},
+tests/test_media.py:126:_SECRET_SOURCE = "https://a-private.example/launch-cut.mp4"
+tests/test_awi_phase9.py:162:                "client_data_json": '{"type":"webauthn.get","challenge":"test","origin":"https://test.example.com"}',
+tests/test_awi_phase9.py:197:                "client_data_json": '{"type":"webauthn.get","challenge":"test","origin":"https://test.example.com"}',
+tests/test_awi_phase9.py:224:                "client_data_json": '{"type":"webauthn.get","challenge":"test","origin":"https://test.example.com"}',
+tests/test_awi_phase9.py:251:                "client_data_json": '{"type":"webauthn.get","challenge":"test","origin":"https://test.example.com"}',
+tests/test_awi_phase9.py:494:        session = await bridge.create_session("https://example.com")
+tests/test_awi_phase9.py:497:        assert session.current_url == "https://example.com"
+tests/test_awi_phase9.py:506:        session = await bridge.create_session("https://example.com")
+tests/test_awi_phase9.py:509:            await bridge.create_session("https://example.org")
+tests/test_awi_phase9.py:521:        session = await bridge.create_session("https://example.com")
+tests/test_awi_phase9.py:524:        replacement = await bridge.create_session("https://example.org")
+tests/test_awi_phase9.py:535:        session = await bridge.create_session("https://example.com")
+tests/test_awi_phase9.py:547:        session = await bridge.create_session("https://example.com")
+tests/test_awi_phase9.py:562:        session = await bridge.create_session("https://example.com")
+tests/test_awi_phase9.py:578:        session = await bridge.create_session("https://example.com")
+tests/test_awi_phase9.py:598:        session = await bridge.create_session("https://example.com/login")
+tests/test_awi_phase9.py:613:        session = await bridge.create_session("https://example.com")
+tests/test_awi_phase9.py:618:            parameters={"url": "https://example.com/shop"},
+tests/test_awi_phase9.py:629:        session = await bridge.create_session("https://example.com")
+tests/test_awi_phase9.py:645:        session = await bridge.create_session("https://example.com")
+tests/test_awi_phase9.py:675:            url = "https://example.com"
+tests/test_awi_phase9.py:680:        session = await bridge.create_session("https://example.com")
+tests/test_awi_phase9.py:710:        session = await bridge.create_session("https://example.com")
+tests/test_awi_phase9.py:729:            session_id="test", current_url="https://shop.example.com"
+tests/test_awi_phase9.py:736:            session_id="test", current_url="https://example.com/login"
+tests/test_awi_phase9.py:742:        session = BridgeSession(session_id="test", current_url="https://example.com")
+tests/test_awi_phase9.py:776:                target_url="https://example.com",
+tests/test_awi_phase9.py:784:            target_url="https://example.com",
+tests/test_awi_phase9.py:796:            await bridge.create_session("https://example.com", viewport=viewport)
+tests/test_awi_phase9.py:805:        async with AsyncClient(transport=transport, base_url="http://test") as client:
+tests/test_awi_phase9.py:814:                        "target_url": "https://example.com",
+tests/test_awi_phase9.py:827:                    "target_url": "https://example.com",
+tests/test_awi_phase9.py:991:            current_state={"url": "https://shop.example.com", "goal": "buy laptop"},
+tests/test_awi_phase9.py:1205:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_awi_phase9.py:1222:            "target_url": "https://example.com",
+tests/test_awi_phase9.py:1390:        session_id=dom_session_id, current_url="https://example.com"
+tests/test_public_metadata.py:31:            PUBLIC_CONTACT_URL="https://cal.com/design-partner-labs/pilot",
+tests/test_public_metadata.py:36:        "url": "https://cal.com/design-partner-labs/pilot",
+tests/test_public_metadata.py:45:        PUBLIC_CONTACT_URL="https://cal.com/design-partner-labs/pilot",
+tests/test_public_metadata.py:50:        "website": "https://cal.com/design-partner-labs/pilot",
+tests/test_public_metadata.py:61:            "PUBLIC_CONTACT_URL": "https://cal.com/design-partner-labs/pilot",
+tests/test_public_metadata.py:66:            "PUBLIC_CONTACT_URL": "https://cal.com/design-partner-labs/pilot",
+tests/test_public_metadata.py:71:            "PUBLIC_CONTACT_URL": "https://cal.com/design-partner-labs/pilot",
+tests/test_public_metadata.py:76:            "PUBLIC_CONTACT_URL": "http://company.test",
+tests/test_public_metadata.py:81:            "PUBLIC_CONTACT_URL": "https://cal.com/design-partner-labs/pilot",
+tests/test_public_metadata.py:86:            "PUBLIC_CONTACT_URL": "https://cal.com/design-partner-labs/pilot",
+tests/test_public_metadata.py:91:            "PUBLIC_CONTACT_URL": "https://cal.com/design-partner-labs/pilot",
+tests/test_public_metadata.py:96:            "PUBLIC_CONTACT_URL": "https://cal.com/design-partner-labs/pilot",
+tests/test_public_metadata.py:101:            "PUBLIC_CONTACT_URL": "https://",
+tests/test_public_metadata.py:106:            "PUBLIC_CONTACT_URL": "https://calendar.company.test/pilot",
+tests/test_public_metadata.py:111:            "PUBLIC_CONTACT_URL": "https://www.thisisatest.tech/",
+tests/test_build_provenance.py:187:    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+tests/test_receipt_write_contention_surface.py:75:    async with AsyncClient(transport=transport, base_url="http://test") as value:
+tests/test_receipt_write_contention_surface.py:776:        upstream_origin="https://partner.example",
+tests/test_receipt_write_contention_surface.py:937:    monkeypatch.setattr(settings, "SENTINEL_API_URL", "https://sentinel.test")
+tests/test_preflight.py:19:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_preflight.py:65:        json={"base_url": "https://api.yourdomain.com"},
+tests/test_preflight.py:82:        json={"base_url": "https://api.myrealdomain.com"},
+tests/test_preflight.py:98:        json={"base_url": "http://api.myrealdomain.com"},
+tests/test_preflight.py:172:        json={"campaign_source_url": "https://cdn.myrealdomain.com/launch-video.mp4"},
+tests/test_oracle.py:16:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_oracle.py:33:            "url": "https://api.anthropic.com",
+tests/test_oracle.py:42:    assert data["url"] == "https://api.anthropic.com"
+tests/test_oracle.py:56:            "url": "https://api.someunknown.com",
+tests/test_oracle.py:84:            "https://api.openai.com",
+tests/test_oracle.py:85:            "https://api.stripe.com",
+tests/test_oracle.py:86:            "https://api.github.com",
+tests/test_oracle.py:122:        json={"url": "https://api.anthropic.com", "directory_type": "openapi"},
+tests/test_oracle.py:127:        json={"url": "https://api.openai.com", "directory_type": "openapi"},
+tests/test_oracle.py:142:        json={"url": "https://api.twilio.com", "directory_type": "openapi"},
+tests/test_oracle.py:169:                    "directory_url": "https://agentdirectory.com/api/register",
+tests/test_oracle.py:173:                    "directory_url": "https://mcp-servers.io/register",
+tests/test_oracle.py:198:                    "directory_url": "https://example-dir.com/register",
+tests/test_oracle.py:244:        json={"url": "https://api.cloudflare.com", "directory_type": "openapi"},
+tests/test_oracle.py:252:                {"directory_url": "https://agents.dev/register", "directory_type": "agent_registry"},
+tests/test_oracle.py:268:        "/v1/oracle/discovery?referrer=https://agentdirectory.com",
+tests/test_oracle.py:280:        json={"url": "https://api.example.com", "directory_type": "openapi"},
+tests/test_oracle.py:310:        "/v1/oracle/discovery?referrer=https://wallet-injected.example",
+tests/test_oracle.py:318:        "/v1/oracle/discovery?referrer=https://agentdirectory.com",
+tests/test_oracle.py:329:    urls = [f"https://api{i}.oversized-batch.example" for i in range(26)]
+tests/test_oracle.py:355:    urls = [f"https://api{i}.capped-batch.example" for i in range(25)]
+tests/test_jwt_auth.py:52:    async with AsyncClient(transport=transport, base_url="http://test") as client:
+tests/test_signing_key_lifecycle.py:30:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_docker_commit_sha.py:13:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_partner_mcp.py:8:import subprocess
+tests/test_partner_mcp.py:113:        base_url=f"http://{_HOST}",
+tests/test_partner_mcp.py:130:            base_url="http://attacker.example",
+tests/test_partner_mcp.py:146:        base_url="http://health-probe.invalid",
+tests/test_partner_mcp.py:163:            base_url=f"http://{_HOST}",
+tests/test_partner_mcp.py:167:                f"http://{_HOST}/mcp",
+tests/test_partner_mcp.py:227:    result = subprocess.run(
+tests/test_telemetry.py:21:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_telemetry.py:343:        pm.pr_generator, "git_remote", "https://github.com/example/repo"
+tests/test_golden_path.py:21:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_minimal_path_e2e.py:3:Boots the real server (uvicorn subprocess, strict trust mode, sqlite) and
+tests/test_minimal_path_e2e.py:20:import socket
+tests/test_minimal_path_e2e.py:21:import subprocess
+tests/test_minimal_path_e2e.py:46:    with socket.socket() as sock:
+tests/test_minimal_path_e2e.py:72:    process = subprocess.Popen(
+tests/test_minimal_path_e2e.py:87:        stdout=subprocess.PIPE,
+tests/test_minimal_path_e2e.py:88:        stderr=subprocess.STDOUT,
+tests/test_minimal_path_e2e.py:90:    base_url = f"http://127.0.0.1:{port}"
+tests/test_minimal_path_e2e.py:112:        except subprocess.TimeoutExpired:
+tests/test_mcp_discovery_wedge_gate.py:23:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_mcp_discovery_wedge_gate.py:169:    monkeypatch.setattr(settings, "PUBLIC_URL", "https://api.thisisatest.tech")
+tests/test_mcp_discovery_wedge_gate.py:173:    assert "https://api.thisisatest.tech" in text
+tests/test_mcp_discovery_wedge_gate.py:174:    assert "**Base URL:** http://localhost:8000" not in text
+tests/test_wallet_concurrency.py:26:``tests/test_permit_postgres_concurrency.py``, and the paths #305 already
+tests/test_permit_reservation_unwind.py:49:    async with AsyncClient(transport=transport, base_url="http://test") as value:
+tests/test_refund_reconciliation_contention_surface.py:80:    async with AsyncClient(transport=transport, base_url="http://test") as value:
+tests/test_trust_boundary.py:69:    "app/routers/permit_requests.py",
+tests/test_trust_operator_inspection.py:22:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_upstream_mcp.py:58:        "MCP_UPSTREAM_URL": "http://localhost:9000/mcp",
+tests/test_upstream_mcp.py:65:    return Settings(_env_file=None, **values)
+tests/test_upstream_mcp.py:232:            MCP_UPSTREAM_URL="https://partner.example/mcp",
+tests/test_upstream_mcp.py:365:        ("https://[REDACTED]@example.com/mcp", "production"),
+tests/test_upstream_mcp.py:366:        ("https://example.com/mcp?tenant=a", "production"),
+tests/test_upstream_mcp.py:367:        ("https://example.com/mcp#fragment", "production"),
+tests/test_upstream_mcp.py:382:                MCP_UPSTREAM_URL="https://partner.example/mcp",
+tests/test_upstream_mcp.py:392:            MCP_UPSTREAM_URL="http://partner.example/mcp",
+tests/test_upstream_mcp.py:396:            MCP_UPSTREAM_URL="https://127.0.0.1/mcp",
+tests/test_upstream_mcp.py:399:        _configuration(MCP_UPSTREAM_URL="http://10.0.0.5/mcp"),
+tests/test_upstream_mcp.py:400:        _configuration(MCP_UPSTREAM_URL="https://169.254.169.254/latest/meta-data"),
+tests/test_upstream_mcp.py:401:        _configuration(MCP_UPSTREAM_URL="https://metadata.google.internal/mcp"),
+tests/test_upstream_mcp.py:417:        MCP_UPSTREAM_URL="https://partner.example/mcp",
+tests/test_upstream_mcp.py:447:        captured_requests.append(request)
+tests/test_upstream_mcp.py:465:        MCP_UPSTREAM_URL="https://partner.example:8443/mcp",
+tests/test_upstream_mcp.py:477:            await client.post("https://attacker.example/mcp")
+tests/test_upstream_mcp.py:489:    assert connected_request.url == httpx.URL("https://[2606:4700:4700::1111]:8443/mcp")
+tests/test_upstream_mcp.py:592:        lambda _socket, hostname, _context: observed_sni.append(hostname)
+tests/test_upstream_mcp.py:617:    socket_name = server.sockets[0].getsockname()
+tests/test_upstream_mcp.py:618:    port = int(socket_name[1])
+tests/test_upstream_mcp.py:620:        MCP_UPSTREAM_URL=f"https://localhost:{port}/mcp",
+tests/test_upstream_mcp.py:650:            MCP_UPSTREAM_URL="https://partner.example/mcp",
+tests/test_upstream_mcp.py:770:            MCP_UPSTREAM_URL="https://partner.example/mcp",
+tests/test_upstream_mcp.py:795:            MCP_UPSTREAM_URL="https://partner.example/mcp",
+tests/test_upstream_mcp.py:1402:        base_url="http://localhost",
+tests/test_upstream_mcp.py:1462:        upstream_origin="https://partner.example",
+tests/test_upstream_mcp.py:1587:        upstream_origin="https://partner.example",
+tests/test_api_key_constant_time.py:137:    async with AsyncClient(transport=transport, base_url="http://test") as client:
+tests/test_trust_negative_security.py:36:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_publish_live_proof.py:49:                "issuer": "https://api.thisisatest.tech",
+tests/test_publish_live_proof.py:104:        publish_live_proof._canonical_origin("https://api.thisisatest.tech/")
+tests/test_publish_live_proof.py:105:        == "https://api.thisisatest.tech"
+tests/test_publish_live_proof.py:109:        "http://api.thisisatest.tech",
+tests/test_publish_live_proof.py:110:        "https://api.thisisatest.tech.attacker.example",
+tests/test_publish_live_proof.py:111:        "https://api.thisisatest.tech/other",
+tests/test_publish_live_proof.py:112:        "https://api.thisisatest.tech:4443",
+tests/test_publish_live_proof.py:113:        "https://[REDACTED]@api.thisisatest.tech",
+tests/test_publish_live_proof.py:114:        "https://api-service-production-433c.up.railway.app",
+tests/test_publish_live_proof.py:157:        api_url="https://api.thisisatest.tech",
+tests/test_publish_live_proof.py:178:            api_url="https://api.thisisatest.tech",
+tests/test_publish_live_proof.py:197:            api_url="https://api.thisisatest.tech",
+tests/test_publish_live_proof.py:229:            api_url="https://api.thisisatest.tech",
+tests/test_iga_policy.py:51:OKTA_ISS = "https://example.okta.com/oauth2/default"
+tests/test_iga_policy.py:53:    "https://login.microsoftonline.com/11111111-2222-3333-4444-555555555555/v2.0"
+tests/test_iga_policy.py:364:        parse_enterprise_token(_mint(rsa_key, iss="https://evil.example.com"))
+tests/test_iga_policy.py:490:    vanity_iss = "https://idp.internal.example.com"
+tests/test_iga_policy.py:863:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_iga_policy.py:918:        upstream_origin="https://partner.example",
+tests/test_behavioral_sandbox.py:49:    monkeypatch.setenv("REDIS_URL", "")
+tests/test_behavioral_sandbox.py:184:    async def test_execute_python_subprocess(self, engine, sample_env_request):
+tests/test_behavioral_sandbox.py:185:        """Test Python subprocess execution."""
+tests/test_behavioral_sandbox.py:261:        monkeypatch.setattr(asyncio, "create_subprocess_exec", missing_docker)
+tests/test_behavioral_sandbox.py:275:    async def test_dry_run_python_subprocess_does_not_execute_code(
+tests/test_behavioral_sandbox.py:291:        assert result.output["mode"] == "python_subprocess_dry_run"
+tests/test_behavioral_sandbox.py:414:            transport=ASGITransport(app=app), base_url="http://test"
+tests/test_behavioral_sandbox.py:427:            transport=ASGITransport(app=app), base_url="http://test"
+tests/test_behavioral_sandbox.py:433:                    "environment_type": "python_subprocess",
+tests/test_behavioral_sandbox.py:451:            transport=ASGITransport(app=app), base_url="http://test"
+tests/test_behavioral_sandbox.py:486:            transport=ASGITransport(app=app), base_url="http://test"
+tests/test_behavioral_sandbox.py:515:            transport=ASGITransport(app=app), base_url="http://test"
+tests/test_behavioral_sandbox.py:537:            transport=ASGITransport(app=app), base_url="http://test"
+tests/test_behavioral_sandbox.py:557:            transport=ASGITransport(app=app), base_url="http://test"
+tests/test_permit_budget_integrity.py:39:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_awi.py:183:            "url": "https://example.com",
+tests/test_awi.py:205:            "url": "https://example.com",
+tests/test_awi.py:252:            target_url="https://example.com",
+tests/test_awi.py:272:                target_url="https://example.com",
+tests/test_awi.py:280:                target_url="https://example.com",
+tests/test_awi.py:288:                target_url="https://example.com",
+tests/test_awi.py:330:                    target_url="https://example.com",
+tests/test_awi.py:360:            target_url="https://example.com",
+tests/test_awi.py:367:        assert session.target_url == "https://example.com"
+tests/test_awi.py:377:                target_url="https://example.com",
+tests/test_awi.py:385:                parameters={"url": "https://new-page.com"},
+tests/test_awi.py:397:            AWISessionCreate(target_url="https://example.com/login")
+tests/test_awi.py:439:            AWISessionCreate(target_url="https://example.com/form")
+tests/test_awi.py:476:                    target_url="https://example.com",
+tests/test_awi.py:484:                    parameters={"url": "https://example.com/checkout"},
+tests/test_awi.py:493:            assert rehydrated.current_url == "https://example.com/checkout"
+tests/test_awi.py:506:                target_url="https://example.com",
+tests/test_awi.py:527:                target_url="https://example.com",
+tests/test_awi.py:556:                target_url="https://example.com",
+tests/test_awi.py:598:            AWISessionCreate(target_url="https://example.com")
+tests/test_awi.py:623:            transport=ASGITransport(app=app), base_url="http://test"
+tests/test_awi.py:628:                    "target_url": "https://example.com",
+tests/test_awi.py:637:            assert data["target_url"] == "https://example.com"
+tests/test_awi.py:643:            transport=ASGITransport(app=app), base_url="http://test"
+tests/test_awi.py:647:                json={"target_url": "https://example.com"},
+tests/test_awi.py:666:            transport=ASGITransport(app=app), base_url="http://test"
+tests/test_awi.py:682:                json={"target_url": "https://example.com", "wallet_id": wallet_id},
+tests/test_awi.py:693:                    "parameters": {"url": "https://new-page.com"},
+tests/test_awi.py:705:                    "parameters": {"url": "https://new-page.com"},
+tests/test_awi.py:725:            transport=ASGITransport(app=app), base_url="http://test"
+tests/test_awi.py:750:            transport=ASGITransport(app=app), base_url="http://test"
+tests/test_awi.py:786:            transport=ASGITransport(app=app), base_url="http://test"
+tests/test_awi.py:792:                    "target_url": "https://example.com",
+tests/test_awi.py:808:            transport=ASGITransport(app=app), base_url="http://test"
+tests/test_awi.py:821:            transport=ASGITransport(app=app), base_url="http://test"
+tests/test_awi.py:825:                json={"target_url": "https://example.com"},
+tests/test_awi.py:834:            transport=ASGITransport(app=app), base_url="http://test"
+tests/test_awi.py:858:                json={"target_url": "https://example.com", "wallet_id": wallet_a},
+tests/test_awi.py:871:                json={"target_url": "https://example.com", "wallet_id": wallet_b},
+tests/test_awi.py:884:                    "parameters": {"url": "https://blocked.example.com"},
+tests/test_awi.py:924:            transport=ASGITransport(app=app), base_url="http://test"
+tests/test_awi.py:939:                json={"target_url": "https://example.com", "wallet_id": wallet_id},
+tests/test_sqlite_backend.py:39:    os.environ["REDIS_URL"] = ""
+tests/test_published_proof.py:21:EXPECTED_ISSUER = "https://api.thisisatest.tech"
+tests/test_published_proof.py:88:    relabelled["issuer"] = "https://attacker.example"
+tests/test_human_approval_gate.py:58:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_human_approval_gate.py:96:        settings, "SENTINEL_API_URL", "https://sentinel.test" if configured else ""
+tests/test_human_approval_gate.py:661:    request = httpx.Request("POST", "https://sentinel.test/v1/approvals")
+tests/test_human_approval_gate.py:871:    monkeypatch.setattr(settings, "SENTINEL_API_URL", "https://sentinel.test")
+tests/test_human_approval_gate.py:904:    html_client = SentinelClient("https://sentinel.test", "sk_test_" + "0" * 64)
+tests/test_human_approval_gate.py:906:        base_url="https://sentinel.test",
+tests/test_human_approval_gate.py:1204:        return {"status": "pending", "approval_url": f"https://sentinel.test/a/{token}"}
+tests/test_mcp_dispatch_reconciliation.py:55:    async with AsyncClient(transport=transport, base_url="http://test") as value:
+tests/test_mcp_dispatch_reconciliation.py:147:        "upstream_origin": "https://partner.example",
+tests/test_mcp_dispatch_reconciliation.py:1311:        upstream_origin="https://partner.example",
+tests/test_mcp_dispatch_reconciliation.py:1335:        upstream_origin="https://partner.example",
+tests/test_transfers.py:15:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_permit_verification_sessions.py:30:        base_url="http://test",
+tests/test_trust_mode_guardrails.py:20:VALID_PRODUCTION_DATABASE_URL = "postgresql+asyncpg://[REDACTED]@db.internal:5432/trust"
+tests/test_trust_mode_guardrails.py:174:            public_url="https://api.example.com",
+tests/test_trust_mode_guardrails.py:245:    ``REDIS_URL`` satisfies that check completely while ``DATABASE_URL`` stays
+tests/test_trust_mode_guardrails.py:264:def test_production_accepts_a_postgres_database_url():
+tests/test_trust_mode_guardrails.py:645:            _env_file=None,
+tests/test_trust_mode_guardrails.py:655:        settings = Settings(_env_file=None, ENVIRONMENT="dev")
+tests/test_duplicate_guard_config.py:16:        transport=ASGITransport(app=app), base_url="http://test"
+tests/test_rate_limit_threshold.py:85:    async with AsyncClient(transport=transport, base_url="http://test") as http:
+tests/test_rate_limit_threshold.py:105:    async with AsyncClient(transport=transport, base_url="http://test") as http:
+tests/test_rate_limit_threshold.py:127:    async with AsyncClient(transport=transport, base_url="http://test") as http:
+tests/test_rate_limit_threshold.py:168:    async with AsyncClient(transport=transport, base_url="http://test") as http:
+tests/test_rate_limit_threshold.py:197:    async with AsyncClient(transport=transport, base_url="http://test") as http:
+tests/test_rate_limit_threshold.py:224:    assert limited._requests.get(bucket) in (None, [])
+tests/test_rate_limit_threshold.py:255:    async with AsyncClient(transport=transport, base_url="http://test") as http:
+tests/test_rate_limit_threshold.py:282:    async with AsyncClient(transport=transport, base_url="http://test") as http:
+tests/test_rate_limit_threshold.py:321:    async with AsyncClient(transport=transport, base_url="http://test") as http:
+tests/test_rate_limit_threshold.py:347:    async with AsyncClient(transport=transport, base_url="http://test") as http:
+tests/test_rate_limit_threshold.py:398:    async with AsyncClient(transport=transport, base_url="http://test") as http:
+tests/test_rate_limit_threshold.py:464:        async with AsyncClient(transport=transport, base_url="http://test") as http:
+tests/test_rate_limit_threshold.py:504:    async with AsyncClient(transport=transport, base_url="http://test") as http:
+tests/test_rate_limit_threshold.py:543:    async with AsyncClient(transport=transport, base_url="http://test") as http:
+tests/test_rate_limit_threshold.py:604:    async with AsyncClient(transport=transport, base_url="http://test") as http:
+tests/test_awi_http_governance.py:32:    async with AsyncClient(transport=transport, base_url="http://test") as c:
+tests/test_awi_http_governance.py:138:        json={"target_url": "https://example.com"},
+tests/test_awi_http_governance.py:149:            "parameters": {"url": "https://example.com/next"},
+tests/test_awi_http_governance.py:242:            "target_url": "https://example.com",
+tests/test_awi_http_governance.py:719:        json={"target_url": "https://example.com", "wallet_id": wallet_id},
+tests/test_awi_http_governance.py:741:            "parameters": {"url": "https://example.com/next"},
+Runtime deps present True
+SKILL
+---
+name: security-review
+description: Use this skill when adding authentication, handling user input, working with secrets, creating API endpoints, or implementing payment/sensitive features. Provides comprehensive security checklist and patterns.
+metadata:
+  origin: ECC
+---
+
+# Security Review Skill
+
+This skill ensures all code follows security best practices and identifies potential vulnerabilities.
+
+## When to Activate
+
+- Implementing authentication or authorization
+- Handling user input or file uploads
+- Creating new API endpoints
+- Working with secrets or credentials
+- Implementing payment features
+- Storing or transmitting sensitive data
+- Integrating third-party APIs
+
+## Security Checklist
+
+### 1. Secrets Management
+
+#### FAIL: NEVER Do This
+```typescript
+const apiKey = [REDACTED]  // Hardcoded secret
+const dbPassword = [REDACTED] // In source code
+```
+
+#### PASS: ALWAYS Do This
+```typescript
+const apiKey = [REDACTED]
+const dbUrl = process.env.DATABASE_URL
+
+// Verify secrets exist
+if (!apiKey) {
+  throw new Error('OPENAI_API_KEY not configured')
+}
+```
+
+#### Verification Steps
+- [ ] No hardcoded API keys, tokens, or passwords
+- [ ] All secrets in environment variables
+- [ ] `.env.local` in .gitignore
+- [ ] No secrets in git history
+- [ ] Production secrets in hosting platform (Vercel, Railway)
+
+### 2. Input Validation
+
+#### Always Validate User Input
+```typescript
+import { z } from 'zod'
+
+// Define validation schema
+const CreateUserSchema = z.object({
+  email: z.string().email(),
+  name: z.string().min(1).max(100),
+  age: z.number().int().min(0).max(150)
+})
+
+// Validate before processing
+export async function createUser(input: unknown) {
+  try {
+    const validated = CreateUserSchema.parse(input)
+    return await db.users.create(validated)
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return { success: false, errors: error.issues }
+    }
+    throw error
+  }
+}
+```
+
+#### File Upload Validation
+```typescript
+function validateFileUpload(file: File) {
+  // Size check (5MB max)
+  const maxSize = 5 * 1024 * 1024
+  if (file.size > maxSize) {
+    throw new Error('File too large (max 5MB)')
+  }
+
+  // Type check
+  const allowedTypes = ['image/jpeg', 'image/png', 'image/gif']
+  if (!allowedTypes.includes(file.type)) {
+    throw new Error('Invalid file type')
+  }
+
+  // Extension check
+  const allowedExtensions = ['.jpg', '.jpeg', '.png', '.gif']
+  const extension = file.name.toLowerCase().match(/\.[^.]+$/)?.[0]
+  if (!extension || !allowedExtensions.includes(extension)) {
+    throw new Error('Invalid file extension')
+  }
+
+  return true
+}
+```
+
+#### Verification Steps
+- [ ] All user inputs validated with schemas
+- [ ] File uploads restricted (size, type, extension)
+- [ ] No direct use of user input in queries
+- [ ] Whitelist validation (not blacklist)
+- [ ] Error messages don't leak sensitive info
+
+### 3. SQL Injection Prevention
+
+#### FAIL: NEVER Concatenate SQL
+```typescript
+// DANGEROUS - SQL Injection vulnerability
+const query = `SELECT * FROM users WHERE email = '${userEmail}'`
+await db.query(query)
+```
+
+#### PASS: ALWAYS Use Parameterized Queries
+```typescript
+// Safe - parameterized query
+const { data } = await supabase
+  .from('users')
+  .select('*')
+  .eq('email', userEmail)
+
+// Or with raw SQL -- the value goes in the params array, never in the
+// string. Use your driver's placeholder syntax (Postgres numbers its
+// placeholders, MySQL uses "?").
+await db.query(
+  'SELECT * FROM users WHERE email = ?',
+  [userEmail]
+)
+```
+
+<!-- Do not write a literal dollar-sign-N placeholder anywhere in this file.
+     Invoking this skill with arguments substitutes it away, and the example
+     above then renders as concatenated SQL -- the exact anti-pattern this
+     section warns against. Use "?" and name the Postgres form in prose. -->
+
+#### Verification Steps
+- [ ] All database queries use parameterized queries
+- [ ] No string concatenation in SQL
+- [ ] ORM/query builder used correctly
+- [ ] Supabase queries properly sanitized
+
+### 4. Authentication & Authorization
+
+#### JWT Token Handling
+```typescript
+// FAIL: WRONG: localStorage (vulnerable to XSS)
+localStorage.setItem('token', token)
+
+// PASS: CORRECT: httpOnly cookies
+res.setHeader('Set-Cookie',
+  `token=[REDACTED]; HttpOnly; Secure; SameSite=Strict; Max-Age=3600`)
+```
+
+#### Authorization Checks
+```typescript
+export async function deleteUser(userId: string, requesterId: string) {
+  // ALWAYS verify authorization first
+  const requester = await db.users.findUnique({
+    where: { id: requesterId }
+  })
+
+  if (requester.role !== 'admin') {
+    return NextResponse.json(
+      { error: 'Unauthorized' },
+      { status: 403 }
+    )
+  }
+
+  // Proceed with deletion
+  await db.users.delete({ where: { id: userId } })
+}
+```
+
+#### Row Level Security (Supabase)
+```sql
+-- Enable RLS on all tables
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+
+-- Users can only view their own data
+CREATE POLICY "Users view own data"
+  ON users FOR SELECT
+  USING (auth.uid() = id);
+
+-- Users can only update their own data
+CREATE POLICY "Users update own data"
+  ON users FOR UPDATE
+  USING (auth.uid() = id);
+```
+
+#### Verification Steps
+- [ ] Tokens stored in httpOnly cookies (not localStorage)
+- [ ] Authorization checks before sensitive operations
+- [ ] Row Level Security enabled in Supabase
+- [ ] Role-based access control implemented
+- [ ] Session management secure
+
+### 5. XSS Prevention
+
+#### Sanitize HTML
+```typescript
+import DOMPurify from 'isomorphic-dompurify'
+
+// ALWAYS sanitize user-provided HTML
+function renderUserContent(html: string) {
+  const clean = DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: ['b', 'i', 'em', 'strong', 'p'],
+    ALLOWED_ATTR: []
+  })
+  return <div dangerouslySetInnerHTML={{ __html: clean }} />
+}
+```
+
+#### Content Security Policy
+
+Start strict and loosen only with a documented removal plan. Do not default to
+`'unsafe-inline'` or `'unsafe-eval'`; they neutralize much of CSP's protection
+and should be treated as temporary compatibility debt.
+
+```typescript
+// next.config.js
+const securityHeaders = [
+  {
+    key: 'Content-Security-Policy',
+    value: `
+      default-src 'self';
+      base-uri 'self';
+      object-src 'none';
+      frame-ancestors 'none';
+      script-src 'self';
+      style-src 'self';
+      img-src 'self' data: https:;
+      font-src 'self';
+      connect-src 'self' https://api.example.com;
+    `.replace(/\s{2,}/g, ' ').trim()
+  }
+]
+```
+
+#### Verification Steps
+- [ ] User-provided HTML sanitized
+- [ ] CSP headers configured
+- [ ] No unvalidated dynamic content rendering
+- [ ] React's built-in XSS protection used
+
+### 6. CSRF Protection
+
+#### CSRF Tokens
+```typescript
+import { csrf } from '@/lib/csrf'
+
+export async function POST(request: Request) {
+  const token = [REDACTED]
+
+  if (!csrf.verify(token)) {
+    return NextResponse.json(
+      { error: 'Invalid CSRF token' },
+      { status: 403 }
+    )
+  }
+
+  // Process request
+}
+```
+
+#### SameSite Cookies
+```typescript
+res.setHeader('Set-Cookie',
+  `session=${sessionId}; HttpOnly; Secure; SameSite=Strict`)
+```
+
+#### Verification Steps
+- [ ] CSRF tokens on state-changing operations
+- [ ] SameSite=Strict on all cookies
+- [ ] Double-submit cookie pattern implemented
+
+### 7. Rate Limiting
+
+#### API Rate Limiting
+```typescript
+import rateLimit from 'express-rate-limit'
+
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // 100 requests per window
+  message: 'Too many requests'
+})
+
+// Apply to routes
+app.use('/api/', limiter)
+```
+
+#### Expensive Operations
+```typescript
+// Aggressive rate limiting for searches
+const searchLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 10, // 10 requests per minute
+  message: 'Too many search requests'
+})
+
+app.use('/api/search', searchLimiter)
+```
+
+#### Verification Steps
+- [ ] Rate limiting on all API endpoints
+- [ ] Stricter limits on expensive operations
+- [ ] IP-based rate limiting
+- [ ] User-based rate limiting (authenticated)
+
+### 8. Sensitive Data Exposure
+
+#### Logging
+```typescript
+// FAIL: WRONG: Logging sensitive data
+console.log('User login:', { email, password })
+console.log('Payment:', { cardNumber, cvv })
+
+// PASS: CORRECT: Redact sensitive data
+console.log('User login:', { email, userId })
+console.log('Payment:', { last4: card.last4, userId })
+```
+
+#### Error Messages
+```typescript
+// FAIL: WRONG: Exposing internal details
+catch (error) {
+  return NextResponse.json(
+    { error: error.message, stack: error.stack },
+    { status: 500 }
+  )
+}
+
+// PASS: CORRECT: Generic error messages
+catch (error) {
+  console.error('Internal error:', error)
+  return NextResponse.json(
+    { error: 'An error occurred. Please try again.' },
+    { status: 500 }
+  )
+}
+```
+
+#### Verification Steps
+- [ ] No passwords, tokens, or secrets in logs
+- [ ] Error messages generic for users
+- [ ] Detailed errors only in server logs
+- [ ] No stack traces exposed to users
+
+### 9. Blockchain Security (Solana)
+
+#### Wallet Verification
+```typescript
+import { verify } from '@solana/web3.js'
+
+async function verifyWalletOwnership(
+  publicKey: string,
+  signature: string,
+  message: string
+) {
+  try {
+    const isValid = verify(
+      Buffer.from(message),
+      Buffer.from(signature, 'base64'),
+      Buffer.from(publicKey, 'base64')
+    )
+    return isValid
+  } catch (error) {
+    return false
+  }
+}
+```
+
+#### Transaction Verification
+```typescript
+async function verifyTransaction(transaction: Transaction) {
+  // Verify recipient
+  if (transaction.to !== expectedRecipient) {
+    throw new Error('Invalid recipient')
+  }
+
+  // Verify amount
+  if (transaction.amount > maxAmount) {
+    throw new Error('Amount exceeds limit')
+  }
+
+  // Verify user has sufficient balance
+  const balance = await getBalance(transaction.from)
+  if (balance < transaction.amount) {
+    throw new Error('Insufficient balance')
+  }
+
+  return true
+}
+```
+
+#### Verification Steps
+- [ ] Wallet signatures verified
+- [ ] Transaction details validated
+- [ ] Balance checks before transactions
+- [ ] No blind transaction signing
+
+### 10. Dependency Security
+
+#### Regular Updates
+```bash
+# Check for vulnerabilities
+npm audit
+
+# Fix automatically fixable issues
+npm audit fix
+
+# Update dependencies
+npm update
+
+# Check for outdated packages
+npm outdated
+```
+
+#### Lock Files
+```bash
+# ALWAYS commit lock files
+git add package-lock.json
+
+# Use in CI/CD for reproducible builds
+npm ci  # Instead of npm install
+```
+
+#### Verification Steps
+- [ ] Dependencies up to date
+- [ ] No known vulnerabilities (npm audit clean)
+- [ ] Lock files committed
+- [ ] Dependabot enabled on GitHub
+- [ ] Regular security updates
+
+## Security Testing
+
+### Automated Security Tests
+```typescript
+// Test authentication
+test('requires authentication', async () => {
+  const response = await fetch('/api/protected')
+  expect(response.status).toBe(401)
+})
+
+// Test authorization
+test('requires admin role', async () => {
+  const response = await fetch('/api/admin', {
+    headers: { Authorization: `Bearer ${userToken}` }
+  })
+  expect(response.status).toBe(403)
+})
+
+// Test input validation
+test('rejects invalid input', async () => {
+  const response = await fetch('/api/users', {
+    method: 'POST',
+    body: JSON.stringify({ email: 'not-an-email' })
+  })
+  expect(response.status).toBe(400)
+})
+
+// Test rate limiting
+test('enforces rate limits', async () => {
+  const requests = Array(101).fill(null).map(() =>
+    fetch('/api/endpoint')
+  )
+
+  const responses = await Promise.all(requests)
+  const tooManyRequests = responses.filter(r => r.status === 429)
+
+  expect(tooManyRequests.length).toBeGreaterThan(0)
+})
+```
+
+## Pre-Deployment Security Checklist
+
+Before ANY production deployment:
+
+- [ ] **Secrets**: No hardcoded secrets, all in env vars
+- [ ] **Input Validation**: All user inputs validated
+- [ ] **SQL Injection**: All queries parameterized
+- [ ] **XSS**: User content sanitized
+- [ ] **CSRF**: Protection enabled
+- [ ] **Authentication**: Proper token handling
+- [ ] **Authorization**: Role checks in place
+- [ ] **Rate Limiting**: Enabled on all endpoints
+- [ ] **HTTPS**: Enforced in production
+- [ ] **Security Headers**: CSP, X-Frame-Options configured
+- [ ] **Error Handling**: No sensitive data in errors
+- [ ] **Logging**: No sensitive data logged
+- [ ] **Dependencies**: Up to date, no vulnerabilities
+- [ ] **Row Level Security**: Enabled in Supabase
+- [ ] **CORS**: Properly configured
+- [ ] **File Uploads**: Validated (size, type)
+- [ ] **Wallet Signatures**: Verified (if blockchain)
+
+## Resources
+
+- [OWASP Top 10](https://owasp.org/www-project-top-ten/)
+- [Next.js Security](https://nextjs.org/docs/security)
+- [Supabase Security](https://supabase.com/docs/guides/auth)
+- [Web Security Academy](https://portswigger.net/web-security)
+
+---
+
+**Remember**: Security is not optional. One vulnerability can compromise the entire platform. When in doubt, err on the side of caution.
+
+TEST COUNT 236

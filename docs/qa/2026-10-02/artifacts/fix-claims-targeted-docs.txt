@@ -1,0 +1,559 @@
+tests/AGENTS.md
+docs/qa/2026-10-02/FINDINGS.md:13:| BE-100 | Medium | Backend | Integration guidance overstates receipt completion and local/upstream equivalence | Read `docs/agent-self-credentialing.md:101-108`, `docs/tool-interface-authority.md:35-37`, and `ELEVATOR_PITCH.md:162-165`; compare with `app/routers/mcp.py:235-271,2185-2223` and `README.md:144-162`. | Expected: scoped at-most-one guarantees and disclosure of committed effects with missing receipts/manual review. Actual: unconditional one-debit/one-finalized-receipt wording and identical local/upstream governance despite distinct implementations. | [Claims report](CLAIMS-REPORT.md), [source trace](artifacts/claims-dispatch-and-autopermit-details.txt); receipt-contention tests named in the report. | Align integration pages with README/WEDGE; name the upstream-only dispatch state machine and manual-review/no-receipt outcomes. |
+docs/qa/2026-10-02/FINDINGS.md:15:| FE-002 | Medium | Frontend | Explicit zero SDK action limit becomes 100 | Call `AWIClient.createSession('http://127.0.0.1:8769/synthetic', {maxSteps: 0})` with the retained fake Axios transport; inspect the submitted body. Run the FE-002 Node TODO test. | Expected: local rejection or transmission of zero for the API's minimum-one validation. Actual: `max_steps: 100` is submitted. This is a mock-only contract reproduction, not 100 real tool actions. | `awi_sdk/typescript/index.ts:157`; API bound `app/schemas/awi.py:157`; [contract source](artifacts/frontend-sdk-contract-lines.txt); [test result](artifacts/frontend-component-contract-gate-rerun.txt). | Replace truthy defaults with nullish defaults and validate bounds where appropriate; preserve explicit invalid input for rejection. |
+docs/qa/2026-10-02/FINDINGS.md:16:| UX-001 | Medium | UX | Comparison text fails WCAG AA contrast | Build and serve the local site per [frontend report](FRONTEND-REPORT.md); open `/compare/#who-title` at 390×844 with default colors and run axe. | Expected: normal text contrast at least 4.5:1. Actual: four good-fit list items use `#9ca8cb` on `#f6f3e9`, measured at 2.13:1. | `site/styles.css:1802` and paper background at `:779`; `site/compare/index.html:365`; [axe](artifacts/ux-axe-compare-mobile.json); [screenshot](artifacts/ux-cua-compare-low-contrast.jpg); UX-001 expected-failure browser test. | Use the existing paper-surface text color for this list while preserving the dark-card colors; rerun contrast checks. |
+docs/qa/2026-10-02/FINDINGS.md:19:| BE-003 | Low | Backend | Outbound URL guards accept multicast destinations | With private targets disabled, call `check_outbound_url` on `http://224.0.0.1/` and `http://[ff02::1]/`; call `validate_upstream_url` on corresponding HTTPS targets under production-mode configuration. No connection is made. | Expected: reject multicast before connection. Actual: `is_global` classifies these addresses as acceptable and both guards allow them. No successful SSRF, remote access or tool execution was demonstrated. | `app/core/url_guard.py:41-49`; `app/services/upstream_mcp.py:406-412`; [boundary probe](artifacts/backend-ssrf-address-boundaries-retry.txt); six strict BE-003 xfail cases. | Explicitly reject `is_multicast` in both guards and test literal plus resolved addresses. |
+docs/qa/2026-10-02/FINDINGS.md:20:| UX-003 | Low | UX | Local operator links and examples target production | Open the local dashboard; inspect runtime, trust-key and agent-manifest link destinations plus authenticated curl examples. Do not follow links or run examples. | Expected: inspect the served runtime or clearly label a separately hosted sample. Actual: fixed production-origin links/examples appear unchanged on loopback. | `app/routers/static.py:159`; `static/dashboard.html:342,346,356,377-385`; [screenshot](artifacts/ux-cua-dashboard-scroll-region.jpg); UX-003 expected-failure browser test. | Use same-origin runtime links, an explicit `API_URL` in examples, and a separate label for hosted public proof. |
+docs/qa/2026-10-02/FINDINGS.md:34:- BE-101: accepted same-key gateway identity provides at-most-one dispatch/debit structure; PostgreSQL crash behavior needs its separate infrastructure proof.
+docs/qa/2026-10-02/FINDINGS.md:35:- BE-102: arbitrary downstream exactly-once effect is not guaranteed without upstream support.
+docs/qa/2026-10-02/FINDINGS.md:38:- BE-105: standard `POST /mcp` creates another auto-permit for a new key, outside same-permit deduplication even when enforcement is enabled; this is already documented.
+docs/qa/2026-10-02/FINDINGS.md:39:- BE-106: local dogfood proofs demonstrate their controlled replay scenario, not upstream crash semantics.
+docs/qa/2026-10-02/FINDINGS.md:42:- BE-109: historical results, test assertions and unrelated one-time/QoS terminology are recorded without treating them as current end-to-end guarantees.
+docs/qa/2026-10-02/FINDINGS.md:48:Earlier absolute-path snapshot scans produced **55 detections** because the existing anchored path allowances did not match temporary absolute paths. All were in test code: 43 generic-key, 11 credential-assignment and one Stripe-token-pattern alert. Independent context review found locally generated values, mocked fixtures, rejected-key tests and SDK redaction/header tests. **No live secret exposure was verified.** These scanner-method false positives remain recorded as `[REDACTED]` in [historical locations](artifacts/tracked-secret-scan.json) and [triage contexts](artifacts/tracked-secret-triage.json).
+docs/qa/2026-10-02/CLAIMS-REPORT.md:11:Timebox: approximately 30 minutes. Trace exactly-once and new-idempotency-key assertions from tracked documentation, code comments, schemas and UI copy into the actual replay and dispatch implementation. Review the highest-impact authorization, tenant isolation, resource-consumption and upstream-consumption controls against the OWASP API Top 10 categories. Distinguish a supported claim, a known limitation, a stale claim, and an unexecuted proof.
+docs/qa/2026-10-02/CLAIMS-REPORT.md:13:The local `code-review` and `security-review` skill checklists informed the review. CodeRabbit was not invoked: its skill says that it sends code diffs to an external API, which the orchestrator's package-only network restriction excludes. There was no attempt to authenticate or install that service. Pytest execution belongs to the separate Backend QA lane; this report's test references identify existing proofs, not a claim that this lane ran them.
+docs/qa/2026-10-02/CLAIMS-REPORT.md:19:| BE-100 | Medium | Backend | Integration guidance overstates receipt completion and local/upstream equivalence | Read `docs/agent-self-credentialing.md:101-108` and `docs/tool-interface-authority.md:35-37`; compare with `app/routers/mcp.py:235-241,259-271,2185-2223` and `README.md:144-162`. The error path is exercised by the existing terminal-record-contention tests listed below. | Guidance says at most one debit/dispatch for an accepted same-key identity, distinguishes the configured upstream dispatch state machine from local calls, and discloses charged calls whose receipt cannot be written and require manual review. | The self-credentialing page promises “one authorization, one debit, one finalized receipt” and says the governance path is identical. The tool-interface page promises the full “exactly-once dispatch” pipeline for every allowed call. The implementation branches for upstream/local execution and explicitly provides a manual-review outcome with committed effects and no receipt. `ELEVATOR_PITCH.md:162-165` repeats an unconditional one-dispatch/one-debit/one-receipt formulation. | [marketing claims](artifacts/claims-marketing-claims.txt), [claim context](artifacts/claims-claim-context-tests.txt), [dispatch branches](artifacts/claims-dispatch-and-autopermit-details.txt); `app/routers/mcp.py:_terminal_record_contended_data`, `_execute_registered_tool_inner`; `tests/test_receipt_write_contention_surface.py` and `tests/test_audit_chain_contention_surface.py`. | Align these integration pages and the pitch with README/WEDGE: use “at most one,” name the upstream-only durable dispatch boundary, and link manual-review/no-receipt outcomes. Preserve the safe fail-closed code. |
+docs/qa/2026-10-02/CLAIMS-REPORT.md:21:Severity is Medium because this guidance changes integration retry/reconciliation assumptions about money and irreversible actions; this is a documentation correctness finding, not proof of duplicate billing. No product fix was applied.
+docs/qa/2026-10-02/CLAIMS-REPORT.md:25:Every matched occurrence in the searched file scope is retained with file and line in [CLAIMS-INVENTORY.md](CLAIMS-INVENTORY.md) and [claims-inventory.json](artifacts/claims-inventory.json). Environment files and actual key/credential-store paths are excluded; ordinary code and documentation about secrets or credentials are included, including the BE-100 self-credentialing page. The following finding IDs classify the substantive families; verified or documented-limitation rows are explicitly **not defects** and do not inflate severity counts. References in tests, historical reports, games, MQTT QoS definitions and one-time registration helpers are identified separately from an end-to-end processing guarantee. Enumeration does not claim that every historical proof was rerun or that arbitrary paraphrases match the lexical search.
+docs/qa/2026-10-02/CLAIMS-REPORT.md:29:| BE-101 | Source-verified; no defect | Exactly-once is a deduplication term meaning at most one gateway dispatch/debit for the same accepted identity: `WEDGE.md:16-23`, `README.md:144-146`, `AGENTS.md:62-67`. | `IdempotencyRecordModel` has wallet/endpoint/key uniqueness and a cross-transport governed identity index (`app/db/models.py:1032-1057`); `idempotency.py:199-228` requires the same payload and returns stored response; each upstream attempt has a unique idempotency-record FK (`models.py:1082-1093`); dispatch claim uses a guarded state transition (`mcp_dispatch_attempts.py:1477-1549`). This proves structure, not a rerun of PostgreSQL crash/concurrency tests. | Retain this scoped terminology; never expand it to eventual delivery or an arbitrary remote effect. |
+docs/qa/2026-10-02/CLAIMS-REPORT.md:31:| BE-103 | Source-verified; no defect | New-key duplicates are allowed under default `log`, not deduplicated: `docs/POLICY_ENFORCEMENT.md:224-232`, `docs/denial-details.md:159-165`, `docs/articles/intent-is-not-authority.md:45`. | Default is `DuplicateGuardMode.LOG` (`app/core/config.py:144-151`); detected repeats increment a counter and continue (`mcp_dispatch_attempts.py:827-829`); existing `test_duplicate_detection_log_mode_allows` asserts two dispatches (`tests/test_upstream_retry_cap_enforcement.py:539-540`). | Explicitly choose enforcement where the pilot requires it; a test proving default duplicate dispatch is not a product regression. |
+docs/qa/2026-10-02/CLAIMS-REPORT.md:32:| BE-104 | Source-verified with bounded scope; no defect | New-key repeats are refused in `enforce` for the same permit/tool/arguments within the configured window, absent permit opt-out: `docs/denial-details.md:71`, `docs/POLICY_ENFORCEMENT.md:213-232`, `docs/articles/intent-is-not-authority.md:47`. | `mcp_dispatch_attempts.py:735-845` checks mode, opt-out, permit ID, public tool ID, request hash and cutoff, returning `duplicate_request_new_key` only in enforce mode. Existing test asserts one dispatch at `tests/test_upstream_retry_cap_enforcement.py:460-461`. PostgreSQL concurrency proof is separate and was not run by this lane. | Keep all scope qualifiers. Changed arguments, changed permit, expired window and intentional-repeat opt-out are not covered. |
+docs/qa/2026-10-02/CLAIMS-REPORT.md:33:| BE-105 | Source-verified limitation; no defect | Standard `POST /mcp` does not gain cross-key deduplication merely by enabling the guard: `docs/articles/intent-is-not-authority.md:66,94`. | `_mint_auto_permit` derives mint identity from the client key (`app/routers/mcp_standard.py:302-320`); another key creates another permit (`:329-348`). The guard matches the original permit ID (`mcp_dispatch_attempts.py:763-764`). Thus a fresh-key retry does not match the prior attempt. This was code-traced, not reproduced against a running server. | Do not advertise guard protection for fresh-key standard-MCP calls. Preserve a stable business/key identity at the caller, or document a deliberate separate design change with tests. |
+docs/qa/2026-10-02/CLAIMS-REPORT.md:34:| BE-106 | Source-verified bounded meaning; no defect | Local dogfood proof says exactly-once against a durable file: `docs/PROOF_MATRIX.md:22`, local demo/test comments. | The statement describes the controlled local proof scenario, not universal crash recovery. Local execution calls the function at `app/routers/mcp.py:2218-2223`; it has no upstream dispatch state machine. The matrix itself limits downstream claims at `:238-251`. | Prefer “same-key replay produces one file append in this proof”; retain local-crash limitations. BE-100 covers pages that claim path equivalence. |
+docs/qa/2026-10-02/CLAIMS-REPORT.md:36:| BE-108 | Partially verified; no defect demonstrated | Human approval/permit issuance mints once: `app/services/permit_requests.py:23-27`, `docs/permit-requests.md:67`, `app/services/human_approval.py:145`. | Issuance documents a conditional transition and reserved primary key; `tests/test_permit_request_flow.py` contains the corresponding concurrent poller cases. External approval delivery itself was not tested. | Scope “once” to durable permit issuance/approval identity, not guaranteed external notification delivery. |
+docs/qa/2026-10-02/CLAIMS-REPORT.md:37:| BE-109 | Recorded, no product-delivery claim | Historical changelog/proof reports; test assertions; migration descriptions; billing counters; one-time tool registration; IoT QoS value 2; arcade text. | These are searchable in the occurrence inventory. They are not independent promises of arbitrary downstream exactly-once behavior. Historical pass counts and external-source claims were not refreshed. | Keep historical results dated; do not reuse them as current CI or customer proof. |
+docs/qa/2026-10-02/CLAIMS-REPORT.md:47:| API1 Broken Object Level Authorization | Exact wallet match/admin in `app/core/auth.py:57-87`; permit listing scope in `app/routers/permits.py:60-70`; receipt ownership in `app/routers/receipts.py:34-57`. | `tests/test_permits.py:test_verify_does_not_leak_permit_to_unauthorized_caller`; `tests/test_receipts.py:test_receipt_evidence_denies_cross_wallet_access`. | Source controls present; no bypass demonstrated. Application scoping is not database RLS. |
+docs/qa/2026-10-02/CLAIMS-REPORT.md:48:| API2 Broken Authentication | Active issuing-key check for JWTs in `app/core/auth.py:381-403`; production/local bootstrap posture tested separately. | `tests/test_api_keys.py:test_revoked_db_key_cannot_authenticate`; `tests/test_production_trust_posture.py:test_anonymous_cannot_invoke_or_mint_in_production`. | Source and negative tests found; no real credentials or production endpoint tested. |
+docs/qa/2026-10-02/CLAIMS-REPORT.md:49:| API3 Broken Object Property Level Authorization | Permit inspection permits only issuer, subject or admin (`app/routers/permits.py:34-44`); receipt lists reject mismatched ownership (`receipts.py:40-57`). | `tests/test_receipts.py:test_receipt_evidence_does_not_expose_cross_wallet_artifacts`; `tests/test_permits.py:test_permit_cannot_name_foreign_subject_wallet`. | Focused trust-resource review; no exhaustive property-by-property mass-assignment analysis. |
+docs/qa/2026-10-02/CLAIMS-REPORT.md:51:| API5 Broken Function Level Authorization | Bootstrap-only duplicate-guard metrics (`app/main.py:1251-1255`); refund retry remains operator-only (`app/routers/receipts.py:165-167`). | `tests/test_duplicate_guard_config.py:test_duplicate_guard_health_endpoint_rejects_non_admin_keys`; `tests/test_route_auth_inventory.py`. | Core admin boundaries source-checked; complete route test execution belongs to backend log. |
+docs/qa/2026-10-02/CLAIMS-REPORT.md:52:| API6 Unrestricted Access to Sensitive Business Flows | Same-key identity, permit budget reservation, one-shot dispatch, scoped cross-key guard and approval checks; see BE-101/103/104/105. | `tests/test_upstream_retry_cap_enforcement.py`, `tests/test_trust_negative_security.py`, concurrency suites. | Default/new-permit limits are explicit. No stronger business-operation deduplication inferred. |
+docs/qa/2026-10-02/CLAIMS-REPORT.md:53:| API7 Server Side Request Forgery | Configured upstream URL rejects non-public addresses except explicit local/test loopback (`app/services/upstream_mcp.py:362-410`); redirects disabled (`:481,701-736`). | `tests/test_upstream_mcp.py:test_url_guard_rejects_dns_to_private_link_local_and_reserved`, `test_default_http_client_disables_redirects_and_redacts_auth`. | Code controls present; no internet or metadata endpoints contacted. |
+docs/qa/2026-10-02/CLAIMS-REPORT.md:54:| API8 Security Misconfiguration | Wildcard CORS disables credentials (`app/main.py:567-583`); proof surfaces and unsafe local flags have production posture tests. | `tests/test_cors_security.py`; `tests/test_trust_mode_guardrails.py`; `tests/test_production_trust_posture.py`. | Source/test inventory only; deployed flags deliberately not inspected. |
+docs/qa/2026-10-02/CLAIMS-REPORT.md:55:| API9 Improper Inventory Management | OpenAPI committed at `docs/openapi.json`; route-auth inventory and gated proof-surface tests exist; main loop separates supported tools from demos. | `tests/test_route_auth_inventory.py`, `tests/test_proof_surface_gate.py`. | Contract test execution and schema drift checks belong to backend pass. BE-100 documents misleading integration guidance. |
+docs/qa/2026-10-02/CLAIMS-REPORT.md:67:| Receipt listing | Refused | Own wallet or issuer/subject permit | Refused | Allowed | `app/routers/receipts.py:34-57` |
+docs/qa/2026-10-02/CLAIMS-REPORT.md:68:| Refund reconciliation list | Refused | Own wallet records | No other-wallet records | Cross-wallet queue | `app/routers/receipts.py:124-144` |
+docs/qa/2026-10-02/CLAIMS-REPORT.md:69:| Refund reconciliation retry | Refused | Refused | Refused | Allowed | `app/routers/receipts.py:165-167` |
+docs/qa/2026-10-02/CLAIMS-REPORT.md:72:| Public receipt verification keys | Public in production posture | Public | Public | Public | `tests/test_production_trust_posture.py:test_receipt_keys_remain_public_in_production` |
+docs/qa/2026-10-02/CLAIMS-REPORT.md:76:No new production vulnerability is claimed from this lane. No secrets were intentionally read or recorded. The lexical search omitted environment and actual key/credential-store paths. No live PostgreSQL, upstream MCP, external approval, distributed execution, or billing system was contacted; no dependency-advisory service was queried. Same-key races, refund recovery and auth tests must be read with the separate Backend QA outcomes. Correct BE-100 documentation first, then explicitly test the standard-MCP fresh-key boundary if that surface is part of an active pilot.
+FILE docs/agent-self-credentialing.md
+# Credentialing an agent to test this platform
+
+An agent asked to validate the trust plane hits a wall at the economic
+invariants: `discover → authenticate` are open, but `authorize → invoke →
+meter → receipt` all require a wallet-scoped API key, and production
+deliberately has no anonymous signup, no public key minting, and no free
+credit grant. That gate is correct and must stay. This document is the
+supported way around it: the agent credentials itself against a **local**
+instance running the same code, and proves the invariants there.
+
+What that does and does not establish is stated plainly at the bottom.
+
+## 1. Start a local instance with self-provisioning on
+
+```bash
+python -m venv .venv && .venv/bin/pip install -r requirements.txt
+mkdir -p data
+cp .env.example .env
+```
+
+Set these in `.env` (generate a fresh signing seed; never reuse one):
+
+```bash
+ENVIRONMENT=local
+DATABASE_URL=sqlite+aiosqlite:///./data/local_api.db
+ENABLE_DEV_KEY_SELF_PROVISION=true   # mints wallet-scoped keys, no shared secret
+ENABLE_DOGFOOD_TOOL=true             # registers partner.notes.write
+ENABLE_DOGFOOD_SECOND_TOOL=true      # registers partner.notes.count (scope-denial target)
+TRUST_SIGNING_PRIVATE_KEY_B64=$(python3 -c 'import base64,secrets; print(base64.b64encode(secrets.token_bytes(32)).decode())')
+TRUST_SIGNING_KEY_ID=local-dev-ed25519
+```
+
+```bash
+.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+Startup must log `trust_signing_key_ready`. Without a seed the app refuses
+to boot — trust mode has no unsigned fallback.
+
+## 2. Let the agent mint its own credential
+
+```bash
+curl -X POST http://localhost:8000/v1/dev-keys/self-provision \
+  -H 'Content-Type: application/json' -d '{"agent_id": "my-agent"}'
+```
+
+This returns a sponsor wallet, an agent wallet funded with synthetic dev
+credits, and a **wallet-scoped** key (shown once) — the same credential
+class `scripts/partner_api_key_bootstrap.py` produces for a partner, so the
+agent exercises the real permit/metering/receipt path rather than a special
+one. It is never bootstrap-admin: it cannot read the audit plane or reach
+another tenant's wallet. Call it from a CLI or SDK — a cross-origin `Origin`
+header is refused, because the route is unauthenticated and returns a live
+secret.
+
+## 3. Run the invariant proof
+
+```bash
+.venv/bin/python scripts/agent_self_credential_proof.py
+```
+
+The harness self-provisions, issues a permit scoped to one tool, and checks
+the claims that carry economic weight, exiting non-zero on any failure:
+
+| # | Invariant | Expected |
+|---|---|---|
+| 1 | charge-once | one governed invoke → exactly one debit |
+| 2 | replay | same idempotency key → cached receipt, no new debit, no second side effect |
+| 3 | concurrency | 5 identical in-flight calls → one success, one debit, one side effect |
+| 4 | reuse-conflict | same key, different body → 400, no debit |
+| 5 | scope-denial | tool outside the permit → 403 `permit_tool_not_allowed`, signed denial receipt, zero charged |
+| 6 | no-permit | governed tool without a permit → 403, no debit |
+| 7 | signature | every receipt verifies under the published Ed25519 key; tampered copies do not |
+
+Check 7 is a genuinely independent verification: it fetches the public key
+from `/.well-known/trust-keys.json`, verifies the portable receipt's
+`signing_input` with its own Ed25519 code, and then re-signs nothing —
+it mutates `credits_charged`, `outcome`, `tool`, and `wallet_id` in turn and
+requires each forgery to fail. A field already equal to the mutation value
+is skipped, so no check can pass vacuously.
+
+Two behaviors worth knowing before you read the output as a bug:
+
+- Under true concurrency the losing callers get **400**, not a replayed 200.
+  The gateway fails closed while the first call is in flight; the cached
+  receipt is served on retry once the winner settles.
+- A denial still mints a **signed receipt** with `credits_charged` 0. Denials
+  are evidence, not silence.
+
+## 4. What this proves — and what it does not
+
+Proven against this code: exactly-once gateway authorization, debit, and
+receipt finalization under replay, concurrency, conflict, and denial; and
+that receipts are tamper-evident under the published key.
+
+Not proven by this harness, and not claimed:
+
+- **Production behavior.** Same code, different infrastructure (Postgres,
+  Redis, a real upstream MCP server). A local pass is strong evidence about
+  the logic, not a measurement of the production deployment.
+- **Remote exactly-once.** The gateway guarantees one authorization, one
+  debit, one finalized receipt. A remote side effect is exactly-once only if
+  the upstream honors the forwarded idempotency key — the OpenAPI contract
+  narrows the claim to exactly that, correctly.
+- **The local tool is simulated.** `partner.notes.write` appends to a local
+  JSONL file and is labeled `simulation: true` in discovery. Production's
+  `partner.echo` is a real upstream call. The governance path is identical;
+  the work at the end of it is not.
+
+To reproduce the invariants against production, an operator must issue a
+wallet-scoped key and funded permit out of band. No agent should manufacture
+production credentials, and this surface cannot: production-like
+environments refuse to boot with `ENABLE_DEV_KEY_SELF_PROVISION` set, and
+the handler independently returns 403 there.
+
+FILE docs/tool-interface-authority.md
+# The Tool Interface Is the Product Surface
+
+Design goal: an agent discovers a normal MCP tool, calls it normally, and
+governance happens automatically because that is the only executable path.
+The agent should not have to understand "Agent Middleware" as a product
+category, learn `/v1/permits`, or construct `mcpContext`.
+
+The permit remains the cryptographically verifiable authorization object —
+it is just an **implementation primitive, not a UX primitive**. On the
+standard `/mcp` surface the middleware materializes the appropriate permit
+from wallet policy at call time.
+
+The design for generalizing this — one `authority_required` envelope for
+every insufficient-authority outcome, an explicit resume contract in the
+remediation payload, and remediation that carries a live approval handle —
+lives in [`authority-required-flow.md`](authority-required-flow.md).
+
+## The decision an invoke gets
+
+Every `tools/call` on the standard surface resolves to one of three
+outcomes, decided server-side:
+
+```text
+ALLOW             policy satisfied -> auto-permit -> execute -> signed receipt
+REQUIRE_APPROVAL  policy demands a human -> approval-gated auto-permit ->
+                  retryable pending_human_approval -> approve -> same call,
+                  same Idempotency-Key -> execute -> signed receipt
+DENY              constraint violated -> machine-actionable denial
+                  (reason code + details + remediation), receipted where a
+                  permit exists
+```
+
+### ALLOW
+
+Unchanged: the server mints a bounded, signed, single-tool, short-lived
+permit from the caller's wallet and runs the full
+permit → meter → exactly-once dispatch → signed receipt pipeline.
+
+### REQUIRE_APPROVAL
+
+When any active policy bundle for the caller's wallet sets
+`human_approval_required`, the auto-minted permit carries
+`requires_human_approval=true`, so the existing invoke-time approval gate
+(Sentinel-backed, fail-closed) pauses the call:
+
+```json
+{
+  "code": -32005,
+  "message": "human_approval_pending",
+  "data": {
+    "error": "authority_required",
+    "status": "pending_human_approval",
+    "approval_id": "appr-…",
+    "expires_at": "…",
+    "remediation": {
+      "type": "await_human_decision",
+      "detail": "Nothing was charged. Retry the identical tools/call with the same Idempotency-Key once the approval is decided; the same permit and approval are reused."
+    }
+  }
+}
+```
+
+Nothing is charged, no receipt exists, and the idempotency key is released —
+the retry that polls the decision resolves to the *same* permit and the
+*same* approval instead of paging a human again. Because that retry loop
+depends on the key, approval-gated calls **require** a client
+`Idempotency-Key` (or `params._meta["io.agentmiddleware/idempotency_key"]`);
+without one the call is refused with
+`idempotency_key_required_for_human_approval` and a remediation block.
+
+A key the client *does* supply — here, on the legacy MCP transports, or on
+the governed AWI HTTP routes — must be usable: the contract (at most 128
+characters, no control characters, one key per request, never trimmed or
+replaced by a generated one) and the `invalid_idempotency_key` refusal are
+specified in [`failure-semantics.md`](failure-semantics.md) under "What
+counts as a key".
+
+An approval-gated auto-permit lives for the whole approval window
+(`SENTINEL_APPROVAL_TIMEOUT_SECONDS`) plus the standard TTL as execution
+margin, so a decision made late in the window still executes instead of
+stranding as `permit_expired`.
+
+The gate satisfies only the policy's `human_approval_required` constraint.
+Every other constraint in the bundle — tool allowlists, category allowlists,
+`max_cost_per_action`, `daily_spend_limit`, `require_real_effects` — is
+still enforced (`evaluate_wallet_policy(approval_gate_active=True)`).
+
+### DENY
+
+Denials are machine-actionable, not bare strings:
+
+- Governed denials carry the same `details` object on `/mcp` as on
+  `/mcp/messages` (which limit was hit, by how much) plus the signed denial
+  receipt where one exists. See `docs/denial-details.md` for the reason-code
+  catalog.
+- An auto-mint the wallet cannot cover returns `-32004` with:
+
+```json
+{
+  "error": "authority_required",
+  "reason_code": "permit_budget_exceeds_wallet_balance",
+  "requested": {"tool": "…", "estimated_credits": "…"},
+  "remediation": {
+    "type": "fund_wallet_or_request_authority",
+    "check_authority": "GET /v1/me/authority",
+    "request_authority": "POST /v1/permit-requests"
+  }
+}
+```
+
+## Discovery describes the contract
+
+Each tool in `tools/list` / `/mcp/tools.json` now advertises the governance
+contract alongside pricing:
+
+```json
+{
+  "governed": true,
+  "receiptProvided": true,
+  "supportsIdempotency": true,
+  "economicAction": true,
+  "approvalMayBeRequired": true
+}
+```
+
+`economicAction` is true when the tool's per-call cost is non-zero.
+`approvalMayBeRequired` signals that wallet policy or the backing permit can
+pause any call on a human decision without that being an error. Sensitive
+policy internals (whose policy, what thresholds) are not exposed here.
+
+The governance annotations reflect the **active trust configuration**: a
+permissive local/demo deployment (`ALLOW_LEGACY_UNPERMITTED_MCP=true`,
+refused at boot in production-like environments) accepts ungoverned
+permit-less calls, so it advertises `governed`, `receiptProvided`,
+`supportsIdempotency`, and `approvalMayBeRequired` as `false` rather than
+promising guarantees that path does not provide. The exception is a
+`require_permit` tool: the router forces the governed path for it even in
+permissive mode, so it advertises the contract as `true` regardless.
+
+## "What authority do I currently have?"
+
+`GET /v1/me/authority` (wallet-scoped keys only) answers the planning
+question in one read:
+
+```json
+{
+  "wallet_id": "…",
+  "balance": "…",
+  "daily_spend_used": "…",
+  "human_approval_required": true,
+  "policies": [ … active policy bundles … ],
+  "active_permits": [ … unexpired status=active permits for this key … ],
+  "active_permits_total": 3,
+  "pending_permit_requests": [ … awaiting a human … ],
+  "pending_permit_requests_total": 1
+}
+```
+
+It is read-only and composes reads the caller could already make one at a
+time; listing never advances a decision or pages a human. Permits past their
+`expires_at` are excluded even while their stored status is still `active`.
+The two lists are previews capped at 50 rows; the `*_total` fields say
+whether a list is complete, and `/v1/me/permits` / `/v1/me/permit-requests`
+page through the remainder.
+
+## What stays the same
+
+`/v1/permits`, `/v1/permit-requests`, signed receipts, the ledger, and the
+governed `/mcp/messages` transport are unchanged and remain the right
+surface for operators and sophisticated integrations. The standard surface
+just stops requiring the agent to orchestrate those pieces manually in the
+common case.
+
+FILE ELEVATOR_PITCH.md
+# Elevator Pitch
+
+Pitch copy for Agent Middleware API. Every claim here is bounded by
+[`WEDGE.md`](WEDGE.md) and [`SECURITY_LIMITATIONS.md`](SECURITY_LIMITATIONS.md).
+If a version of this pitch ever outruns those two documents, the pitch is wrong,
+not the documents.
+
+For the supported evaluation, integration, SDK, security, and pilot paths, use
+the [documentation guide](docs/README.md).
+
+---
+
+## One line
+
+> **Authorize one agent action. Charge it once. Prove what happened.**
+
+## Subhead
+
+> One agent action, at most one debit — no matter how many times the agent
+> retries under the same accepted key. Verify the receipt without us.
+
+("At most one" is deliberate and matches `CONTEXT.md`:
+a crash before dispatch refunds, and a denied call never charges. The guarantee is
+never a duplicate charge, not always a charge.)
+
+The debit leads. Offline-verifiable signed receipts are real here and worth
+saying, but as of the 2026-08 sweep
+([`docs/market-research-2026-08.md`](docs/market-research-2026-08.md)) they are
+no longer rare, so they cannot carry the pitch and must never carry a
+superlative.
+
+## Ten seconds
+
+Your agent invokes a costly tool and the request times out. Agent Middleware
+puts one scoped, budgeted boundary in front of the call: replaying the same
+request and accepted idempotency key cannot create another gateway dispatch or
+debit, and the terminal gateway outcome gets a signed receipt.
+
+## Thirty seconds
+
+When an agent's tool call times out, can your current stack prove whether it was
+authorized and dispatched, prevent the retry from creating another debit, and
+show the economic consequence afterward?
+
+Agent Middleware API is a transaction boundary for metered MCP calls. An agent
+uses a wallet-scoped key and an Ed25519-signed permit bound to tool, scope,
+budget, and expiry. The gateway records one accepted request key, returns the
+original result and signed receipt on an identical replay, and rejects changed
+input under that key. Out-of-scope and over-budget calls fail before a debit.
+
+Run the [executable proof](README.md#see-it-in-sixty-seconds) locally,
+then evaluate the supported vendor-managed, single-tenant pilot with one real
+internal tool.
+
+## Two minutes (design-partner version)
+
+**The problem to test.** Give me one tool you are afraid to let an autonomous
+agent invoke. If the call times out, can you tell whether the gateway dispatched
+it, whether a retry creates another debit, who authorized the economic exposure,
+and what evidence survives afterward? Existing IAM, gateway, or logging controls
+may already be sufficient; the first conversation must establish that they are
+not before this product is proposed.
+
+**The wedge.** Not a general MCP gateway, and not payments. The narrow,
+differentiating primitive is **exactly-once economic authorization at the
+gateway boundary**:
+
+```text
+scoped signed permit -> governed MCP invoke -> wallet charge -> signed receipt
+-> ledger -> audit chain -> replay no double charge -> out-of-scope denial
+```
+
+**What that buys you.**
+
+- **Budgets that bind.** Decimal wallet balances with row-locked debits. Final
+  permit checks and budget reservation happen while the permit row is locked,
+  so competing invokes and revoke-versus-invoke races resolve correctly.
+- **Charge-once under failure.** A repeated idempotency key returns the original
+  result and receipt with no second gateway dispatch and no second debit. One
+  persisted chain links the idempotency record, permit reservation, ledger
+  debit, dispatch attempt, receipt, and audit event.
+- **Honest failure accounting.** Confirmed pre-dispatch failures and
+  upstream-returned errors are refunded and receipted. Genuinely ambiguous
+  post-dispatch outcomes are marked `delivery_uncertain` and routed to
+  fail-closed manual review — never silently redispatched.
+- **Portable gateway evidence.** Signed receipts for success, denial, failure,
+  *and* `delivery_uncertain`, linked to permits, a verifiable per-wallet hash
+  chain, and — where a
+  ledger record exists for that outcome — the ledger entry. A pre-dispatch
+  denial has no debit to link. This is not a compliance-grade ledger or proof of
+  physical work.
+
+**Why believe it.** The proof is executable, not asserted:
+
+| Command | What it proves |
+|---|---|
+| `make prove-trust-plane` | The full permit → invoke → charge → receipt → replay → deny loop |
+| `make dogfood-trust-plane` | The same loop against a tool with a real on-disk side effect |
+| `make prove-crash-recovery` | Crash consistency across two OS processes killed at commit boundaries |
+| `make red-team-trust-plane` | Adversarial attempts against the boundary |
+
+**The ask.** One partner-owned agent, one real staging tool, and one partner
+engineer behind the proxy. Intentionally retry the action, verify the receipt
+in the partner's environment, and ask whether removing the boundary would
+restore an unacceptable risk. If it does not earn a commercial next step, stop.
+
+---
+
+## Positioning in one table
+
+| Nearby category | Their center of gravity | Our difference |
+|---|---|---|
+| MCP trust gateways | Policy and evidence | Wallet debit plus economic idempotency |
+| MCP monetization / pay-per-tool | Payment rails | Internal budgets, no settlement claim |
+| Enterprise authz for MCP | Who may call | Meter, receipt, and charge exactly once |
+| Agent reliability libraries | Retry safety inside the caller | A boundary the agent cannot route around, and evidence a third party can check |
+| Agent audit / compliance layers | Regulatory mapping and exports | The economic consequence, not just the record of the call |
+
+Named projects, verification levels, and the rows we lose:
+[`docs/market-research-2026-08.md`](docs/market-research-2026-08.md).
+
+## Who it's for
+
+Platform engineering, AI infrastructure, or security teams that already run
+internal agents against MCP-style tools and need a control point *before* the
+tool is invoked — and who can bring one real tool to the first conversation.
+
+Concretely, the qualifying shape is **one tool where a duplicate call costs real
+money or causes a real side effect**, and where someone outside the engineering
+team may have to check what ran. If tool calls are cheap and already idempotent,
+this does not pay for itself, and the first conversation should end there.
+
+## Who it isn't for
+
+- Teams wanting governance across every tool and framework at once. That is a
+  platform; this is one boundary.
+- Teams whose deliverable is a certified compliance report with regulatory
+  mappings. Audit-layer products do that; this does not.
+- Teams shopping for agent identity or SSO. That is IAM, upstream of this.
+- Teams who need retry safety inside code they fully control and whose results
+  nobody outside the team has to believe. An in-process library is cheaper and
+  is the right answer.
+
+## Objections, answered honestly
+
+**"Isn't this just an API gateway?"** A gateway answers whether a call is
+allowed. This binds the authorization to an internal credit budget and signed
+receipt, and prevents an identical replay under the same accepted key from
+creating another gateway dispatch or debit. The debit and receipt are the
+product; the policy check is table stakes.
+
+**"We already have IAM."** Keep it. This is not an IAM replacement and does not
+try to be. IAM says an agent may call a tool; this bounds how much that agent
+may spend doing it and produces the evidence afterward.
+
+**"Can't we just log tool calls?"** Logs are written by the same system that
+made the call and can be rewritten by anyone with database access. Receipts are
+signed and chained, so tampering is *evident*. (Evident, not impossible — a
+database administrator who can alter both the data and its chain metadata is
+inside the trust boundary, and we say so.)
+
+**"Does exactly-once really hold across the network?"** For one accepted
+idempotency key at our boundary: one gateway dispatch, one debit, one receipt.
+A *remote* tool's own side effect is exactly once only if that tool also honors
+the forwarded key. Anything broader would overstate the distributed-systems
+guarantee.
+
+**"Why not just use an open-source library?"** If your problem is reliability,
+do. A decorator library gives you idempotency, timeouts, and budget caps for
+free, with no infrastructure. Two things it cannot give you: it protects only
+the call sites that import it, so an agent that constructs a call another way is
+simply not covered; and an in-process result cache is not evidence anyone
+outside your team can check. Buy a boundary when you need those two properties.
+Otherwise the library is the correct answer and we will say so.
+
+**"Don't other MCP gateways already sign receipts?"** Yes — several, and at
+least one verifies offline without calling its issuer. We do not claim to be
+alone here. What no project we surveyed *documents* is binding the debit to the
+idempotency record:
+one accepted key, one dispatch, one ledger debit, one receipt, in a single
+persisted chain. (One *debit* — a refunded failure correctly writes a second,
+compensating ledger entry against that debit.) Several of them enforce budgets
+and several dedupe replays; whether any binds the two is unresolved, and we say
+so rather than claiming the cell outright. The signature proves what happened;
+the ledger link is what makes a duplicate charge impossible rather than merely
+detectable.
+
+**"Can these receipts satisfy SOC 2 or the EU AI Act?"** Not on their own, and
+we will not say otherwise. A receipt evidences the signed *authorization
+decision* and the call's *terminal outcome*, linked to the permit and audit
+chain — and shows the record has not been altered since. Only a success receipt
+evidences that the call executed and was charged; denial, refunded-failure, and
+`delivery_uncertain` receipts evidence exactly those outcomes instead, which is
+the point of signing them. A denial is a refusal, not an authorization. Ledger
+linkage is present only where a ledger record exists — a debit, or the
+compensating entry that reversed it — so `_finalize_governed_denial` takes
+`ledger_entry_id` as optional and a pre-dispatch denial carries none. Whether
+that satisfies a given control is a determination for the operator's auditor.
+We publish no regulatory mappings and hold no certifications. If a mapped
+compliance report is the deliverable, an audit-layer product is the better
+purchase and we would rather lose the deal than imply coverage we do not have.
+
+**"Why is there no pricing page?"** Because fit is qualified before deployment.
+Most of the value of the early deployments is being wrong quickly with a partner
+who will say so, and self-serve signup produces installations that cannot be
+supported or learned from. The whole loop is runnable locally with no
+credentials and no contact with us.
+
+**"What's the maturity?"** Production beta, not production complete. Run the
+proofs locally; the supported design-partner posture is vendor-managed and
+single-tenant. Read `SECURITY_LIMITATIONS.md` before deciding.
+
+## What this pitch must never claim
+
+Do not say, imply, or let a slide suggest:
+
+- Production-ready payments or settlement.
+- Compliance-grade ledger storage.
+- Full autonomous-economic-actor infrastructure.
+- Universal policy enforcement across every agent framework.
+- Distributed exactly-once side effects in arbitrary upstream MCP servers.
+- A replacement for enterprise IAM, secrets management, or sandbox isolation.
+- Byzantine fault tolerance. There is one server, one database, and one
+  operator-held signing key — there are no replicas and no consensus.
+- That we are the only product doing any of this. Signed receipts, offline
+  verification, per-tool policy, and budget caps all exist elsewhere. A
+  superlative a prospect can falsify in one search costs more than it buys.
+- Compliance coverage, mapping, or readiness for any named framework.
+
+Refusing to overclaim is the product's defining discipline. The pitch inherits
+it.

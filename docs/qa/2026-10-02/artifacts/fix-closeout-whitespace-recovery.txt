@@ -1,0 +1,1 @@
+Recovered closeout after log-only whitespace failure. Existing staged paths remain explicit and validated; no reset, deletion, product edit or test change. Logger and aggregation now keep canonical whitespace.

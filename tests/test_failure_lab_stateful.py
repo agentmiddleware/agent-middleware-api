@@ -63,7 +63,13 @@ def test_the_model_covers_the_lifecycle_the_plan_names():
 def test_the_command_vocabulary_can_express_the_interesting_histories():
     kinds = {kind.value for kind in CommandKind}
     # Without these, whole classes of failure are unreachable by generation.
-    for required in ("invoke", "retry_same_key", "retry_new_key", "revoke", "reconcile"):
+    for required in (
+        "invoke",
+        "retry_same_key",
+        "retry_new_key",
+        "revoke",
+        "reconcile",
+    ):
         assert any(required in kind for kind in kinds), required
 
 
@@ -118,7 +124,9 @@ async def test_a_short_exploration_runs_and_reports_honestly(
     assert result.commands_executed > 0, "nothing ran, so nothing was checked"
     assert not result.errors, result.errors
     assert result.invariants, "the result does not record what it checked"
-    assert result.limitations, "an exploration that claims no limitation is overclaiming"
+    assert result.limitations, (
+        "an exploration that claims no limitation is overclaiming"
+    )
 
     document = result.as_dict()
     # The conclusion must not read as a proof.

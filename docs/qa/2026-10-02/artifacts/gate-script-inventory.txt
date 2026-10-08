@@ -1,0 +1,6 @@
+SCRIPTS ['docs/qa/2026-10-02/package_audit.py', 'docs/qa/2026-10-02/secret_scan.py', 'docs/qa/2026-10-02/browser-loopback.mjs', 'docs/qa/2026-10-02/ux_csp_server.py', 'docs/qa/2026-10-02/run_logged.py', 'docs/qa/2026-10-02/backend_safety/sitecustomize.py']
+REPORTS ['docs/qa/2026-10-02/FRONTEND-SESSION.md', 'docs/qa/2026-10-02/UX-REPORT.md', 'docs/qa/2026-10-02/GATE-SESSION.md', 'docs/qa/2026-10-02/UX-SESSION.md', 'docs/qa/2026-10-02/COORDINATION-SESSION.md', 'docs/qa/2026-10-02/CLAIMS-SESSION.md', 'docs/qa/2026-10-02/PLAN.md', 'docs/qa/2026-10-02/BACKEND-SESSION.md', 'docs/qa/2026-10-02/SESSION-LOG.md']
+requirements # Optional QA-only checks; no runtime dependency change.
+hypothesis==6.168.3
+openapi-spec-validator==0.9.0
+

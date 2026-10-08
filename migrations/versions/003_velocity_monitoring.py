@@ -25,7 +25,12 @@ def upgrade() -> None:
     )
     op.add_column(
         "wallets",
-        sa.Column("hourly_spent", sa.Numeric(precision=20, scale=8), nullable=False, server_default="0"),
+        sa.Column(
+            "hourly_spent",
+            sa.Numeric(precision=20, scale=8),
+            nullable=False,
+            server_default="0",
+        ),
     )
     op.add_column(
         "wallets",
@@ -37,7 +42,12 @@ def upgrade() -> None:
     )
     op.add_column(
         "wallets",
-        sa.Column("velocity_alerts_triggered", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column(
+            "velocity_alerts_triggered",
+            sa.Integer(),
+            nullable=False,
+            server_default="0",
+        ),
     )
 
 

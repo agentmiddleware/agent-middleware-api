@@ -1,0 +1,234 @@
+diff --git a/app/core/auth.py b/app/core/auth.py
+index f58b6d0..350038c 100644
+--- a/app/core/auth.py
++++ b/app/core/auth.py
+@@ -12,7 +12,7 @@ from dataclasses import dataclass, replace
+ from typing import Annotated
+
+ from fastapi import Depends, Header, HTTPException, Request, Security, status
+-from fastapi.security import APIKeyHeader
++from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
+ [REDACTED] .config import get_settings
+ from .oidc_iga import EnterprisePrincipal, IGADecision, IGAError, is_iga_issuer_token
+ from .trust_mode import is_production_like_environment
+@@ -32,6 +32,12 @@ api_key_header = APIKeyHeader(
+ )
+
+
++bearer_header = HTTPBearer(
++    auto_error=False,
++    description="Bearer [REDACTED] via Authorization; this header takes precedence over X-API-Key.",
++)
++
++
+ @dataclass(frozen=True)
+ class AuthContext:
+     """Authenticated caller details used for tenant-scoped authorization."""
+@@ -124,6 +130,7 @@ CREDENTIAL_ACCEPTANCE: ContextVar[CredentialAcceptance | None] = ContextVar(
+ async def get_auth_context(
+     api_key: [REDACTED] | None = Security(api_key_header),
+     authorization: Annotated[str | None, Header()] = None,
++    _bearer: HTTPAuthorizationCredentials | None = Security(bearer_header),
+ ) -> AuthContext:
+     """
+     Validate credentials and return caller context.
+@@ -137,6 +144,8 @@ async def get_auth_context(
+     this module is already imported, and a captured `settings` would keep
+     serving the stale key list.
+     """
++    # HTTPBearer [REDACTED] the OpenAPI alternative; raw Authorization stays
++    # authoritative so malformed headers cannot fall back to an API key.
+     context = await _resolve_auth_context(api_key, authorization)
+     acceptance = CREDENTIAL_ACCEPTANCE.get()
+     if acceptance is not None:
+diff --git a/docs/qa/2026-10-02/ux-contracts.test.cjs b/docs/qa/2026-10-02/ux-contracts.test.cjs
+index 798f533..c76c653 100644
+--- a/docs/qa/2026-10-02/ux-contracts.test.cjs
++++ b/docs/qa/2026-10-02/ux-contracts.test.cjs
+@@ -67,3 +67,38 @@ test('UX-002: operator commands expose a named keyboard focus target', () => {
+     assert.equal(document.activeElement, code);
+   } finally {dom.window.close();}
+ });
++
++test('UX-003: operator runtime links resolve on the served origin', () => {
++  const dom = page('static/dashboard.html');
++  try {
++    const {document} = dom.window;
++    const runtimePaths = ['/health/dependencies', '/.well-known/trust-keys.json',
++      '/.well-known/agent.json', '/llms.txt'];
++    const links = [...document.querySelectorAll('a[href]')];
++    for (const pathname of runtimePaths) {
++      const matches = links.filter(link => new URL(link.href).pathname === pathname);
++      assert(matches.length > 0, `Missing runtime link: ${pathname}`);
++      for (const link of matches) {
++        for (const origin of ['http://127.0.0.1:8765', 'https://operator.example']) {
++          assert.equal(new URL(link.getAttribute('href'), origin).origin, origin,
++            `${pathname} must inspect the served runtime`);
++        }
++      }
++    }
++    for (const link of links.filter(link => new URL(link.href).pathname === '/proof/')) {
++      assert.match(link.textContent, /hosted/i, 'External proof must be labeled as hosted');
++    }
++  } finally {dom.window.close();}
++});
++
++test('UX-003: inspection commands require an explicit API origin', () => {
++  const dom = page('static/dashboard.html');
++  try {
++    const code = dom.window.document.querySelector('pre').textContent;
++    assert.match(code, /export API_URL="http:\/\/127\.0\.0\.1:8000"/);
++    for (const endpoint of ['permits', 'receipts', 'audit/events']) {
++      assert(code.includes('"${API_URL}/v1/me/' + endpoint + '"'));
++    }
++    assert(!code.includes('https://api.thisisatest.tech'));
++  } finally {dom.window.close();}
++});
+diff --git a/docs/qa/2026-10-02/ux-regressions.spec.cjs b/docs/qa/2026-10-02/ux-regressions.spec.cjs
+index aac9b98..b9eab5a 100644
+--- a/docs/qa/2026-10-02/ux-regressions.spec.cjs
++++ b/docs/qa/2026-10-02/ux-regressions.spec.cjs
+@@ -1,4 +1,4 @@
+-// Known issues are expected failures until the corresponding product fix lands.
++// Regression coverage for the 2026-10-02 UX findings.
+ const modules = process.env.QA_NODE_MODULES || '/private/tmp/amw-qa-browser/node_modules';
+ const {test, expect} = require(`${modules}/@playwright/test`);
+ const axe = require(`${modules}/axe-core`);
+@@ -47,8 +47,13 @@ test('UX-002: dashboard scrollable commands have explicit keyboard access', asyn
+ });
+
+ test('UX-003: operator runtime links remain on the served origin', async ({page}) => {
+-  test.fail(true, 'UX-003: runtime links target a fixed production origin from local dashboard.');
+   await page.goto('http://127.0.0.1:8766/dashboard.html');
+-  const href = await page.getByRole('link', {name: /Runtime truth/}).first().getAttribute('href');
+-  expect(new URL(href, page.url()).origin).toBe(new URL(page.url()).origin);
++  for (const name of [/Runtime truth/, /Current trust keys/, /Agent manifest/, /llms.txt/]) {
++    const links = page.getByRole('link', {name});
++    await expect(links.first()).toBeVisible();
++    for (const link of await links.all()) {
++      const href = await link.getAttribute('href');
++      expect(new URL(href, page.url()).origin).toBe(new URL(page.url()).origin);
++    }
++  }
+ });
+diff --git a/static/dashboard.html b/static/dashboard.html
+index 3724b31..1a2ead8 100644
+--- a/static/dashboard.html
++++ b/static/dashboard.html
+@@ -336,16 +336,16 @@
+       </p>
+       <div class="links">
+         <a href="https://www.thisisatest.tech/proof/">
+-          <strong>Portable receipt proof</strong>
++          <strong>Hosted portable receipt proof</strong>
+           <span>Artifact, matching key snapshot, and offline verification command.</span>
+         </a>
+-        <a href="https://api.thisisatest.tech/health/dependencies">
++        <a href="/health/dependencies">
+           <strong>Runtime truth</strong>
+           <span>Dependency posture, feature flags, build SHA, and metric scope metadata.</span>
+         </a>
+-        <a href="https://api.thisisatest.tech/.well-known/trust-keys.json">
++        <a href="/.well-known/trust-keys.json">
+           <strong>Current trust keys</strong>
+-          <span>Public issuer keys exposed by the live API.</span>
++          <span>Public issuer keys exposed by this API.</span>
+         </a>
+       </div>
+     </section>
+@@ -353,11 +353,11 @@
+     <section aria-labelledby="discovery-heading">
+       <h2 id="discovery-heading">Machine discovery</h2>
+       <div class="links">
+-        <a href="https://api.thisisatest.tech/.well-known/agent.json">
++        <a href="/.well-known/agent.json">
+           <strong>Agent manifest</strong>
+           <span>Bootstrap metadata. Tool lists on this origin require a key.</span>
+         </a>
+-        <a href="https://api.thisisatest.tech/llms.txt">
++        <a href="/llms.txt">
+           <strong>llms.txt</strong>
+           <span>Machine-readable integration guidance.</span>
+         </a>
+@@ -369,20 +369,22 @@
+       <p class="section-copy">
+         Inspect your own permits, receipts, and audit events from a trusted terminal.
+         Keep the key in your environment; do not paste it into a public web page.
++        Set <code>API_URL</code> to this server's origin; the example below uses a local server.
+       </p>
+-      <pre tabindex="0" role="region" aria-label="Authenticated inspection commands"><code>export AGENT_MIDDLEWARE_API_KEY=[REDACTED]
++      <pre tabindex="0" role="region" aria-label="Authenticated inspection commands"><code>export API_URL="http://127.0.0.1:8000"
++export AGENT_MIDDLEWARE_API_KEY=[REDACTED]
+
+ curl --fail-with-body \
+   -H "X-API-Key: [REDACTED] \
+-  "https://api.thisisatest.tech/v1/me/permits"
++  "${API_URL}/v1/me/permits"
+
+ curl --fail-with-body \
+   -H "X-API-Key: [REDACTED] \
+-  "https://api.thisisatest.tech/v1/me/receipts"
++  "${API_URL}/v1/me/receipts"
+
+ curl --fail-with-body \
+   -H "X-API-Key: [REDACTED] \
+-  "https://api.thisisatest.tech/v1/me/audit/events"</code></pre>
++  "${API_URL}/v1/me/audit/events"</code></pre>
+     </section>
+
+     <section aria-labelledby="limits-heading">
+@@ -398,8 +400,8 @@ curl --fail-with-body \
+
+   <footer>
+     <a href="https://www.thisisatest.tech/">Agent Middleware API</a>
+-    <a href="https://www.thisisatest.tech/proof/">Proof</a>
+-    <a href="https://api.thisisatest.tech/health/dependencies">Runtime truth</a>
++    <a href="https://www.thisisatest.tech/proof/">Hosted proof</a>
++    <a href="/health/dependencies">Runtime truth</a>
+   </footer>
+ </body>
+ </html>
+diff --git a/tests/test_human_accessibility.py b/tests/test_human_accessibility.py
+index 365647c..1f89830 100644
+--- a/tests/test_human_accessibility.py
++++ b/tests/test_human_accessibility.py
+@@ -94,7 +94,7 @@ async def test_public_operator_index_has_no_fake_data_or_browser_key_handling(
+     assert "railway.app" not in page
+     assert "vercel.app" not in page
+     assert "https://www.thisisatest.tech/proof/" in page
+-    assert "https://api.thisisatest.tech/health/dependencies" in page
++    assert 'href="/health/dependencies"' in page
+     assert "Keep the key in your environment" in page
+     assert "Public governed-tool catalog" not in page
+     assert 'href="https://api.thisisatest.tech/mcp/tools.json"' not in page
+diff --git a/tests/test_qa_20261002_backend.py b/tests/test_qa_20261002_backend.py
+index 56844ad..cced5d8 100644
+--- a/tests/test_qa_20261002_backend.py
++++ b/tests/test_qa_20261002_backend.py
+@@ -80,10 +80,23 @@ def test_openapi_schema_is_valid_with_unique_operation_ids():
+         app.openapi_schema = old_schema
+
+
+-@pytest.mark.xfail(strict=True, reason="BE-002: Bearer [REDACTED] is absent from OpenAPI security schemes")
+ def test_openapi_declares_supported_bearer_authentication():
+-    schemes = app.openapi()["components"]["securitySchemes"].values()
+-    assert any(s.get("type") == "http" and s.get("scheme") == "bearer" for s in schemes)
++    old_schema = app.openapi_schema
++    try:
++        app.openapi_schema = None
++        schema = app.openapi()
++        schemes = schema["components"]["securitySchemes"]
++        bearer = [name for name, definition in schemes.items()
++                  if definition.get("type") == "http" and definition.get("scheme") == "bearer"]
++        assert len(bearer) == 1
++        security = schema["paths"]["/v1/permits"]["get"]["security"]
++        assert {bearer[0]: []} in security
++        assert {"APIKeyHeader": []} in security
++        assert all(len(alternative) == 1 for alternative in security)
++        for path in ("/health", "/.well-known/agent.json"):
++            assert not schema["paths"][path]["get"].get("security")
++    finally:
++        app.openapi_schema = old_schema
+
+
+ def test_scalar_unicode_replay_keys_roundtrip_without_normalization():

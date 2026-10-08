@@ -6,13 +6,18 @@ Ingest long-form video -> detect viral hooks -> reframe for vertical ->
 generate animated captions -> distribute to platforms via API.
 
 Wired to MediaEngine service via FastAPI dependency injection.
+
+Videos and clips are wallet-scoped: each records the wallet whose key created
+it, and every handler answers a foreign resource exactly like a missing one.
 """
+
+from functools import partial
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from ..core.auth import verify_api_key
+from ..core.auth import AuthContext, get_auth_context
 from ..core.dependencies import get_media_engine
-from ..services.media_engine import MediaEngine
+from ..services.media_engine import MediaEngine, StoredVideo
 from ..schemas.media import (
     VideoUploadRequest,
     VideoUploadResponse,
@@ -27,12 +32,38 @@ from ..schemas.media import (
 router = APIRouter(
     prefix="/v1/media",
     tags=["Programmatic Media Engine"],
-    dependencies=[Depends(verify_api_key)],
     responses={
         401: {"description": "Missing API key"},
         403: {"description": "Invalid API key"},
     },
 )
+
+
+def _owner_allowed(auth: AuthContext, owner_wallet_id: str | None) -> bool:
+    """Whether the caller may touch a resource owned by ``owner_wallet_id``.
+
+    Same rule as ``AuthContext.require_wallet_access`` (bootstrap admins, or
+    the exact owning wallet), returned as a bool so handlers can answer with
+    their existing 404 instead of a 403 that would confirm the id exists and
+    echo the owner's wallet id.
+    """
+    try:
+        auth.require_wallet_access(owner_wallet_id)
+    except HTTPException:
+        return False
+    return True
+
+
+async def _load_owned_video(
+    video_id: str,
+    engine: MediaEngine,
+    auth: AuthContext,
+) -> StoredVideo | None:
+    """Fetch a video the caller owns; None when it is missing or foreign."""
+    video = await engine.video_store.get(video_id)
+    if video is None or not _owner_allowed(auth, video.owner_wallet_id):
+        return None
+    return video
 
 
 @router.post(
@@ -48,6 +79,7 @@ router = APIRouter(
 )
 async def upload_video(
     request: VideoUploadRequest,
+    auth: AuthContext = Depends(get_auth_context),
     engine: MediaEngine = Depends(get_media_engine),
 ):
     video = await engine.ingest_video(
@@ -55,6 +87,7 @@ async def upload_video(
         source_url=request.source_url,
         language=request.language,
         metadata=request.metadata,
+        owner_wallet_id=auth.wallet_id,
     )
 
     return VideoUploadResponse(
@@ -74,9 +107,10 @@ async def upload_video(
 )
 async def get_video_status(
     video_id: str,
+    auth: AuthContext = Depends(get_auth_context),
     engine: MediaEngine = Depends(get_media_engine),
 ):
-    video = await engine.video_store.get(video_id)
+    video = await _load_owned_video(video_id, engine, auth)
     if not video:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -113,9 +147,10 @@ async def get_viral_hooks(
     min_confidence: float = Query(
         0.0, ge=0.0, le=1.0, description="Minimum confidence threshold"
     ),
+    auth: AuthContext = Depends(get_auth_context),
     engine: MediaEngine = Depends(get_media_engine),
 ):
-    video = await engine.video_store.get(video_id)
+    video = await _load_owned_video(video_id, engine, auth)
     if not video:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -143,8 +178,17 @@ async def get_viral_hooks(
 async def generate_clips(
     video_id: str,
     request: ClipGenerationRequest,
+    auth: AuthContext = Depends(get_auth_context),
     engine: MediaEngine = Depends(get_media_engine),
 ):
+    if await _load_owned_video(video_id, engine, auth) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": "video_not_found",
+                "message": f"Video '{video_id}' not found",
+            },
+        )
     try:
         clips = await engine.generate_clips(
             video_id=video_id,
@@ -172,14 +216,17 @@ async def generate_clips(
     response_model=DistributionResponse,
     summary="Distribute clips to social platforms",
     description=(
-        "Push generated clips directly to social platforms via their APIs. "
-        "No app is opened. Supports YouTube Shorts, TikTok, Instagram Reels, "
-        "X Video, and LinkedIn Video. Set optimize_schedule=true to let the "
-        "algorithm pick optimal posting windows based on historical engagement data."
+        "Simulated distribution of your generated clips: nothing is posted to "
+        "any platform. Each result carries status 'simulated' (or "
+        "'simulated_scheduled') and a placeholder post URL for YouTube Shorts, "
+        "TikTok, Instagram Reels, X Video, or LinkedIn Video. Clip ids you do "
+        "not own are reported as not found. Set optimize_schedule=true to pick "
+        "a posting window from default per-platform engagement windows."
     ),
 )
 async def distribute_clips(
     request: DistributionRequest,
+    auth: AuthContext = Depends(get_auth_context),
     engine: MediaEngine = Depends(get_media_engine),
 ):
     results = await engine.distribute_clips(
@@ -189,9 +236,13 @@ async def distribute_clips(
         hashtags=request.hashtags,
         schedule_at=request.schedule_at,
         optimize_schedule=request.optimize_schedule,
+        owner_allowed=partial(_owner_allowed, auth),
     )
 
-    published = sum(1 for r in results if r.status in ("published", "scheduled"))
+    # The distributor is simulation-only, so its simulated statuses count as
+    # distributed; counting only real publishes always reported zero.
+    distributed = {"published", "scheduled", "simulated", "simulated_scheduled"}
+    published = sum(1 for r in results if r.status in distributed)
     failed = sum(1 for r in results if r.status == "failed")
 
     return DistributionResponse(
@@ -209,10 +260,11 @@ async def distribute_clips(
 )
 async def get_clip(
     clip_id: str,
+    auth: AuthContext = Depends(get_auth_context),
     engine: MediaEngine = Depends(get_media_engine),
 ):
     clip = await engine.get_clip(clip_id)
-    if not clip:
+    if not clip or not _owner_allowed(auth, await engine.get_clip_owner(clip_id)):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"error": "clip_not_found"},

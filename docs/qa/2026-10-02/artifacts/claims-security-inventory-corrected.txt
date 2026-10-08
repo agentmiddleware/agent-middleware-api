@@ -1,0 +1,87 @@
+FILES
+tests/test_demo_trust_plane.py
+tests/test_trust_helpers.py
+tests/test_proof_surface_freeze.py
+tests/test_red_team_trust_plane.py
+tests/test_edge_client_trust_gap.py
+tests/test_cors_security.py
+tests/test_me_trust_ledger.py
+tests/test_dependency_security_policy.py
+tests/test_request_body_limit.py
+tests/test_publish_live_proof.py
+tests/test_trust_boundary.py
+tests/test_policy_bundles.py
+tests/test_agent_self_credential_proof.py
+tests/test_openai_wrapper_trust_loop.py
+tests/test_security_fuzz_battery.py
+tests/test_tool_interface_authority.py
+tests/test_security_headers.py
+tests/test_policy_decisions.py
+tests/test_trust_negative_security.py
+tests/test_trust_operator_inspection.py
+tests/test_published_proof.py
+tests/test_upstream_mcp.py
+tests/test_jwt_auth.py
+tests/test_mcp_trust.py
+tests/test_python_sdk_trust_loop.py
+tests/test_route_auth_inventory.py
+tests/test_dogfood_trust_plane.py
+tests/test_trust_coverage_gate_scope.py
+tests/test_security_store.py
+tests/test_kyc_status_authority.py
+tests/test_production_trust_posture.py
+tests/test_mcp_trust_mode.py
+tests/test_proof_surface_gate.py
+tests/test_upstream_retry_cap_enforcement.py
+tests/test_trust_package.py
+tests/test_iga_policy.py
+tests/test_rate_limit_threshold.py
+tests/test_trust_mode_guardrails.py
+tests/test_mcp_upstream_governed.py
+tests/test_proof_surface_freeze.py:25:def test_proof_surfaces_doc_exists_and_lists_routers():
+tests/test_proof_surface_freeze.py:34:def test_wedge_links_proof_surfaces_doc():
+tests/test_publish_live_proof.py:219:def test_publish_emergency_revokes_unknown_key_after_key_creation_failure(
+tests/test_policy_bundles.py:344:async def test_policy_requiring_real_effects_denies_frozen_proof_surfaces(
+tests/test_security_fuzz_battery.py:649:async def test_oversized_payload_on_invoke_is_refused(client, clean_database):
+tests/test_trust_negative_security.py:269:async def test_replay_not_served_to_unauthorized_caller(client, clean_database):
+tests/test_upstream_mcp.py:432:async def test_default_http_client_disables_redirects_and_redacts_auth() -> None:
+tests/test_upstream_mcp.py:642:async def test_injected_http_client_is_rejected_in_production() -> None:
+tests/test_upstream_mcp.py:667:async def test_transport_rejects_oversized_content_length_before_body() -> None:
+tests/test_upstream_mcp.py:766:async def test_discovery_stops_streaming_before_buffering_oversized_response() -> None:
+tests/test_upstream_mcp.py:791:async def test_call_stops_streaming_before_buffering_oversized_response() -> None:
+tests/test_upstream_mcp.py:1221:async def test_oversized_or_invalid_response_is_rejected_after_dispatch() -> None:
+tests/test_production_trust_posture.py:129:def test_production_trust_flags_are_strict(production_trust_flags):
+tests/test_production_trust_posture.py:151:def test_fresh_production_import_omits_passkey_routes():
+tests/test_production_trust_posture.py:181:async def test_agent_json_reports_proof_surfaces_off(client, production_trust_flags):
+tests/test_production_trust_posture.py:211:async def test_anonymous_tool_catalogs_are_401_in_production(
+tests/test_production_trust_posture.py:229:async def test_unknown_key_cannot_read_tool_catalog(client, production_trust_flags):
+tests/test_production_trust_posture.py:239:async def test_operator_key_can_read_tool_catalog(client, production_trust_flags):
+tests/test_production_trust_posture.py:247:async def test_anonymous_cannot_invoke_or_mint_in_production(
+tests/test_production_trust_posture.py:264:async def test_public_mcp_is_404_in_production_even_if_flag_on(
+tests/test_production_trust_posture.py:291:async def test_receipt_keys_remain_public_in_production(
+tests/test_production_trust_posture.py:308:async def test_agent_json_does_not_invite_public_use(client, production_trust_flags):
+tests/test_production_trust_posture.py:321:async def test_health_dependencies_reports_proof_surfaces_off(
+tests/test_proof_surface_gate.py:106:def test_proof_surfaces_can_be_omitted_from_mount_set():
+tests/test_iga_policy.py:292:async def test_unauthorized_principal_without_required_role_is_blocked(
+tests/test_rate_limit_threshold.py:138:def test_root_and_discover_publish_the_same_rate_limits() -> None:
+tests/test_rate_limit_threshold.py:150:async def test_rotating_invalid_keys_share_one_bounded_budget() -> None:
+tests/test_rate_limit_threshold.py:333:async def test_accepted_key_is_not_charged_for_unauthenticated_neighbours(
+tests/test_rate_limit_threshold.py:487:async def test_the_real_unknown_key_path_is_bounded() -> None:
+tests/test_trust_mode_guardrails.py:36:def test_classifier_marks_production_like_environments(environment: str):
+tests/test_trust_mode_guardrails.py:54:def test_production_trust_mode_requires_signing_private_key():
+tests/test_trust_mode_guardrails.py:70:def test_production_trust_mode_rejects_invalid_signing_private_key_material(
+tests/test_trust_mode_guardrails.py:85:def test_production_trust_mode_rejects_legacy_unpermitted_mcp():
+tests/test_trust_mode_guardrails.py:97:def test_production_trust_mode_reports_all_fail_closed_violations():
+tests/test_trust_mode_guardrails.py:112:def test_production_rejects_disabled_trust_mode(
+tests/test_trust_mode_guardrails.py:129:def test_production_rejects_debug_webauthn_mock_and_proof_surfaces():
+tests/test_trust_mode_guardrails.py:163:def test_production_refuses_anonymous_public_mcp_endpoint():
+tests/test_trust_mode_guardrails.py:181:def test_production_accepts_public_mcp_disabled():
+tests/test_trust_mode_guardrails.py:203:def test_production_refuses_a_sqlite_database_url(database_url: str):
+tests/test_trust_mode_guardrails.py:226:def test_production_refuses_a_missing_database_url():
+tests/test_trust_mode_guardrails.py:264:def test_production_accepts_a_postgres_database_url():
+tests/test_trust_mode_guardrails.py:285:def test_production_refuses_local_only_escape_hatches(
+tests/test_trust_mode_guardrails.py:310:def test_production_refuses_host_python_sandbox_backend(backend: str):
+tests/test_trust_mode_guardrails.py:333:def test_production_accepts_isolated_or_disabled_sandbox_backend(backend: str):
+tests/test_trust_mode_guardrails.py:536:async def test_lifespan_refuses_a_sqlite_database_url_in_production(monkeypatch):
+tests/test_mcp_upstream_governed.py:1508:async def test_removed_upstream_replay_denies_cross_wallet_key_for_unbound_permit(
+tests/test_mcp_upstream_governed.py:2905:async def test_unauthorized_wallet_cannot_reach_upstream_dispatch(

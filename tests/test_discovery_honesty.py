@@ -57,3 +57,52 @@ def test_manifest_builder_matches_live_endpoint_shape():
     )
     # Compatibility-only v1 alias.
     assert built["agent_first"]["product_wedge"] == "governed_mcp_trust_plane"
+
+
+def test_awi_discovery_names_only_http_routes_with_permit_guards():
+    import ast
+    from pathlib import Path
+    from app.routers.well_known import (
+        AWI_HTTP_PERMIT_ENDPOINTS,
+        PROOF_SURFACE_CATALOG,
+        build_awi_manifest,
+    )
+
+    root = Path(__file__).resolve().parents[1]
+    guarded = set()
+    for filename in ("awi.py", "awi_enhanced.py"):
+        tree = ast.parse((root / "app/routers" / filename).read_text())
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "begin_awi_http_governed"
+            ):
+                guarded.update(
+                    keyword.value.value
+                    for keyword in node.keywords
+                    if keyword.arg == "endpoint"
+                    and isinstance(keyword.value, ast.Constant)
+                )
+    assert set(AWI_HTTP_PERMIT_ENDPOINTS) == guarded
+    assert "POST /v1/awi/sessions" not in guarded
+    manifest = build_awi_manifest()
+    assert (
+        manifest["http_authorization"]["permit_required_endpoints"]
+        == AWI_HTTP_PERMIT_ENDPOINTS
+    )
+    assert manifest["http_authorization"]["required_headers"] == [
+        "X-Permit-Id",
+        "Idempotency-Key",
+    ]
+    assert manifest["http_authorization"]["additional_headers"] == {
+        "POST /v1/awi/rag/query": ["X-Wallet-Id"]
+    }
+    assert manifest["surface"] == "proof_surface"
+    assert any(
+        "unresolved accounting and admission limitations" in text
+        for text in manifest["known_limitations"]
+    )
+    awi = next(item for item in PROOF_SURFACE_CATALOG if item["id"] == "awi_automation")
+    assert awi["permit_required_http_endpoints"] == AWI_HTTP_PERMIT_ENDPOINTS
+    assert "governed_by_permits" not in awi  # avoid an unqualified all-routes boolean

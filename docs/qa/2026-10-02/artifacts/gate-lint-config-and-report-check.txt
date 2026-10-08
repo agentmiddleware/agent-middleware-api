@@ -1,0 +1,85 @@
+[lint]
+# Pyflakes: unused imports/variables, undefined names, redefinitions.
+# Previously this file selected only E501 and then immediately ignored it,
+# so `ruff check` passed with zero rules actually enforced.
+select = ["F"]
+
+FILE FINDINGS.md
+# QA findings — 2026-10-02
+
+PR: opened by orchestrator
+
+CI status: pending at time of writing
+
+This is the consolidated defect register. Source-verified limitations and correct claim findings are tracked separately below, without inflating defect severity counts. No product fixes were applied.
+
+## Confirmed defects
+
+| ID | Severity | Group | Title | Exact reproduction | Expected versus actual | Evidence | Suggested fix |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| BE-100 | Medium | Backend | Integration guidance overstates receipt completion and local/upstream equivalence | Read `docs/agent-self-credentialing.md:101-108`, `docs/tool-interface-authority.md:35-37`, and `ELEVATOR_PITCH.md:162-165`; compare with `app/routers/mcp.py:235-271,2185-2223` and `README.md:144-162`. | Expected: scoped at-most-one guarantees and disclosure of committed effects with missing receipts/manual review. Actual: unconditional one-debit/one-finalized-receipt wording and identical local/upstream governance despite distinct implementations. | [Claims report](CLAIMS-REPORT.md), [source trace](artifacts/claims-dispatch-and-autopermit-details.txt); receipt-contention tests named in the report. | Align integration pages with README/WEDGE; name the upstream-only dispatch state machine and manual-review/no-receipt outcomes. |
+
+Backend execution, frontend and UX findings are incorporated at pass closeout. This interim register does not imply those groups passed.
+
+## Exactly-once and new-key claim findings
+
+The complete [claim inventory](CLAIMS-INVENTORY.md) records **343 occurrences across 133 tracked files**, with each occurrence assigned to a substantive family. [CLAIMS-REPORT.md](CLAIMS-REPORT.md) records exact source/implementation evidence, limitations and suggested treatment for BE-101 through BE-109. These are verification findings, not new defects:
+
+- BE-101: accepted same-key gateway identity provides at-most-one dispatch/debit structure; PostgreSQL crash behavior needs its separate infrastructure proof.
+- BE-102: arbitrary downstream exactly-once effect is not guaranteed without upstream support.
+- BE-103: the default duplicate guard is `log`; a new key may dispatch and charge again.
+- BE-104: opt-in `enforce` only covers matching permit/tool/arguments within the window, with permit opt-out respected.
+- BE-105: standard `POST /mcp` creates another auto-permit for a new key, outside same-permit deduplication even when enforcement is enabled; this is already documented.
+- BE-106: local dogfood proofs demonstrate their controlled replay scenario, not upstream crash semantics.
+- BE-107: reservation/refund-once claims are partially verified by transactional structure and named tests.
+- BE-108: approval/permit issuance-once claims are scoped to durable identity, not external notification delivery.
+- BE-109: historical results, test assertions and unrelated one-time/QoS terminology are recorded without treating them as current end-to-end guarantees.
+
+## Secret exposure triage
+
+The tracked-source scan returned **55 detections**, all in test code: 43 generic-key, 11 credential-assignment and one Stripe-token-pattern alert. An independent gate review classified the reviewed contexts as locally generated values, mocked fixtures, rejected-key tests and SDK redaction/header tests. **No live secret exposure was verified.** Values are retained only as `[REDACTED]` in [scan locations](artifacts/tracked-secret-scan.json) and [triage contexts](artifacts/tracked-secret-triage.json).
+
+This is not a zero-detection scan or a credential-validity assertion. Environment/credential files and history were excluded by instruction. No secret-scan configuration, ignore list or baseline was modified.
+
+FILE COVERAGE.md
+# QA coverage — 2026-10-02
+
+PR: opened by orchestrator
+
+CI status: pending at time of writing
+
+## Measurement rules
+
+Backend coverage uses the same `app` source denominator before and after retained QA tests, with greenlet-aware tracing from `pyproject.toml`. Pass/fail counts and exclusions are reported separately from executed-line coverage. Coverage does not prove correctness, PostgreSQL parity, crash safety or production readiness.
+
+The existing backend baseline and focused QA probes are running. Their final measured totals and artifacts are added when the backend pass closes. No percentage is inferred from prior runs.
+
+## Frontend component scope
+
+The browser-free fallback executes the real `site/pilot-fit.js` and `site/proof/proof.js` with jsdom and mocked local data, plus a transpiled TypeScript SDK with a fake transport. Node V8 coverage for the **two named web scripts only** is 100% lines, 90.38% branches and 100% functions. This is not whole-site or SDK coverage. Exact artifacts and final command results are listed in the frontend report at closeout.
+
+The native Chromium, Firefox and WebKit baseline could not launch under the macOS sandbox. A blocked baseline is **not 0% coverage**. The separate Chrome computer-use fallback is exploratory evidence and is not substituted for the blocked cross-browser Playwright suite.
+
+## Untested or incomplete areas
+
+- Real remote MCP effects, databases, billing and provider integrations: prohibited.
+- PostgreSQL-specific multiprocess locking/crash recovery: requires isolated local infrastructure, not supplied by SQLite tests.
+- Hosted CI and deployed configuration/performance: orchestrator follow-up only.
+- Full browser matrix and whole-site JS branch coverage: constrained by sandbox/tooling; final UX report records actual fallback evidence.
+- Real screen-reader use and complete WCAG certification: beyond automated axe and DOM/keyboard checks.
+
+FILE SUMMARY.md
+# QA sweep summary — 2026-10-02
+
+PR: opened by orchestrator
+
+CI status: pending at time of writing
+
+Status: resumed sweep in progress; final pass totals and recommended fix order are added at closeout. No product behavior, deployment configuration, migrations, environment files or secret-scan exceptions changed. Work remains uncommitted on `qa/2026-10-02-sweep`.
+
+Counts: Critical=0 High=0 Medium=1 Low=0
+
+Counts currently reflect only the accepted BE-100 defect in the interim register, not completed frontend/backend/UX results. Verified claim limitations and secret-scanner test-fixture detections are excluded from defect counts.
+
+The final register is [FINDINGS.md](FINDINGS.md), with methods in [PLAN.md](PLAN.md), execution evidence in [SESSION-LOG.md](SESSION-LOG.md), and measured scope in [COVERAGE.md](COVERAGE.md).
+

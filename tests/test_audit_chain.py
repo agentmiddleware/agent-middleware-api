@@ -490,3 +490,62 @@ async def test_a_substantive_integrity_fault_stops_once_a_race_cannot_explain_it
 
     # Bounded by the race window, not by the contention budget.
     assert calls["n"] == 3, calls["n"]
+
+
+@pytest.mark.anyio
+async def test_windowed_verify_of_valid_chain_is_valid(client, clean_database):
+    """A ``created_after`` window that excludes genesis must still verify.
+
+    The first in-window event legitimately links to an event outside the
+    window; seeding the expected predecessor from genesis flagged every
+    non-genesis window of an untampered chain as ``audit_previous_hash_mismatch``.
+    """
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    for n in range(4):
+        await record_audit_event(
+            event="trust.window", wallet_id=wallet_id, metadata={"n": n}
+        )
+        await asyncio.sleep(0.01)
+
+    factory = get_session_factory()
+    async with factory() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(ControlPlaneAuditEventModel)
+                    .where(ControlPlaneAuditEventModel.wallet_id == wallet_id)
+                    .order_by(ControlPlaneAuditEventModel.seq)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    third_created = rows[2].created_at
+
+    windowed = await verify_audit_chain(
+        wallet_id=wallet_id,
+        created_after=third_created - timedelta(microseconds=1),
+    )
+    assert windowed.valid is True, windowed
+    assert windowed.checked_events == 2
+
+    # The seeded predecessor is really checked: tampering the chain_hash of
+    # the last event *outside* the window breaks the first in-window link.
+    async with factory() as session:
+        event = (
+            await session.execute(
+                select(ControlPlaneAuditEventModel).where(
+                    ControlPlaneAuditEventModel.event_id == rows[1].event_id
+                )
+            )
+        ).scalar_one()
+        event.chain_hash = "0" * 64
+        session.add(event)
+        await session.commit()
+    tampered = await verify_audit_chain(
+        wallet_id=wallet_id,
+        created_after=third_created - timedelta(microseconds=1),
+    )
+    assert tampered.valid is False
+    assert tampered.reason == "audit_previous_hash_mismatch"

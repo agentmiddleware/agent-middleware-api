@@ -11,44 +11,74 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from datetime import datetime
 
-from ..core.auth import verify_api_key
+from ..core.auth import AuthContext, get_auth_context
 from ..core.dependencies import get_rtaas_engine
-from ..services.rtaas import RTaaSEngine
+from ..schemas.red_team import AttackCategory
+from ..services.rtaas import RTaaSEngine, RTaaSJob
 
 router = APIRouter(
     prefix="/v1/rtaas",
     tags=["Red-Team-as-a-Service"],
-    dependencies=[Depends(verify_api_key)],
 )
+
+
+async def _load_owned_job(
+    job_id: str,
+    engine: RTaaSEngine,
+    auth: AuthContext,
+) -> RTaaSJob:
+    """Fetch a job the caller may read.
+
+    Jobs are wallet-scoped: ``tenant_id`` is the owning wallet. A job owned by
+    another wallet answers exactly like a missing one (404), so job ids cannot
+    be probed across tenants. Bootstrap admins may read any job.
+    """
+    job = await engine.get_job(job_id)
+    if job is None or not (
+        auth.is_bootstrap_admin
+        or (auth.wallet_id is not None and job.tenant_id == auth.wallet_id)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "job_not_found"},
+        )
+    return job
 
 
 # --- Schemas ---
 
 
 class RTaaSTargetSchema(BaseModel):
-    """An external endpoint to attack."""
+    """An endpoint description used to generate simulated findings."""
 
     url: str = Field(..., description="Full URL of the target endpoint.")
     method: str = Field(default="GET", description="HTTP method.")
     auth_header: str | None = Field(
-        None, description="Optional auth header value for authenticated endpoints."
+        None,
+        description=(
+            "Accepted for compatibility only. The simulation contacts no "
+            "target, so this value is never forwarded and never stored."
+        ),
     )
     description: str = Field(default="", description="What this endpoint does.")
 
 
 class CreateJobRequest(BaseModel):
-    """Submit external targets for Red Team scanning."""
+    """Describe targets for a simulated Red Team job."""
 
     tenant_id: str = Field(
         ...,
-        description="Your agent or wallet ID (for job tracking).",
+        description=(
+            "Owning wallet ID. Must be the caller's own wallet unless the "
+            "caller is a bootstrap admin."
+        ),
     )
     targets: list[RTaaSTargetSchema] = Field(
         ...,
         min_length=1,
-        description="List of external endpoints to attack.",
+        description="Endpoint descriptions for simulation; no targets are contacted.",
     )
-    attack_categories: list[str] | None = Field(
+    attack_categories: list[AttackCategory] | None = Field(
         None,
         description="Attack categories to run. None = all categories.",
     )
@@ -98,22 +128,30 @@ class JobListResponse(BaseModel):
     "/jobs",
     response_model=JobResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Create a Red Team scanning job",
+    summary="Create a simulated Red Team job",
     description=(
-        "Submit external endpoint URLs for penetration testing. "
-        "Our Red Team swarm will attack the specified targets and return "
-        "a structured vulnerability report with CWE mappings and remediation steps. "
-        "Use this before deploying any agent-built tool to production."
+        "Model a scan job using endpoint descriptions and return deterministic "
+        "simulated findings with CWE mappings and remediation examples. "
+        "No target is contacted or attacked. These findings provide no evidence "
+        "of security or release readiness."
     ),
 )
 async def create_job(
     request: CreateJobRequest,
+    auth: AuthContext = Depends(get_auth_context),
     engine: RTaaSEngine = Depends(get_rtaas_engine),
 ):
+    # A caller may only create a job for its own wallet; bootstrap admins may
+    # target any tenant.
+    auth.require_wallet_access(request.tenant_id)
     job = await engine.create_job(
         tenant_id=request.tenant_id,
         targets=[t.model_dump() for t in request.targets],
-        attack_categories=request.attack_categories,
+        attack_categories=(
+            [category.value for category in request.attack_categories]
+            if request.attack_categories is not None
+            else None
+        ),
         intensity=request.intensity,
     )
     return _job_to_response(job)
@@ -122,13 +160,26 @@ async def create_job(
 @router.get(
     "/jobs",
     response_model=JobListResponse,
-    summary="List scanning jobs",
-    description="View all RTaaS jobs, optionally filtered by tenant.",
+    summary="List simulated scanning jobs",
+    description=(
+        "View your wallet's RTaaS jobs. Bootstrap admins may filter by any "
+        "tenant, or omit the filter to list all."
+    ),
 )
 async def list_jobs(
     tenant_id: str | None = Query(None),
+    auth: AuthContext = Depends(get_auth_context),
     engine: RTaaSEngine = Depends(get_rtaas_engine),
 ):
+    # A wallet-scoped key may only ever list its own jobs: ignore any
+    # client-supplied tenant_id and force it to the caller's wallet, so this
+    # can't be used to enumerate other tenants. A non-admin caller without a
+    # wallet owns nothing (and must never reach the unfiltered list-all path).
+    # Bootstrap admins may filter by any tenant_id, or omit it to list all.
+    if not auth.is_bootstrap_admin:
+        if not auth.wallet_id:
+            return JobListResponse(jobs=[], total=0)
+        tenant_id = auth.wallet_id
     jobs = await engine.list_jobs(tenant_id)
     return JobListResponse(
         jobs=[
@@ -151,37 +202,29 @@ async def list_jobs(
     "/jobs/{job_id}",
     response_model=JobResponse,
     summary="Get job details",
-    description="Retrieve the full vulnerability report for an RTaaS job.",
+    description="Retrieve the simulated findings report for an RTaaS job.",
 )
 async def get_job(
     job_id: str,
+    auth: AuthContext = Depends(get_auth_context),
     engine: RTaaSEngine = Depends(get_rtaas_engine),
 ):
-    job = await engine.get_job(job_id)
-    if not job:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "job_not_found"},
-        )
+    job = await _load_owned_job(job_id, engine, auth)
     return _job_to_response(job)
 
 
 @router.get(
     "/jobs/{job_id}/vulnerabilities",
-    summary="Get vulnerabilities for a job",
-    description="Retrieve just the vulnerability list with remediation steps.",
+    summary="Get simulated findings for a job",
+    description="Retrieve modeled findings with remediation examples; no live scan was run.",
 )
 async def get_vulnerabilities(
     job_id: str,
     severity: str | None = Query(None, description="Filter by severity"),
+    auth: AuthContext = Depends(get_auth_context),
     engine: RTaaSEngine = Depends(get_rtaas_engine),
 ):
-    job = await engine.get_job(job_id)
-    if not job:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "job_not_found"},
-        )
+    job = await _load_owned_job(job_id, engine, auth)
 
     vulns = job.vulnerabilities
     if severity:

@@ -1,0 +1,239 @@
+rg: tests/test_url_guard.py: No such file or directory (os error 2)
+tests/test_upstream_mcp.py:45:    validate_upstream_url,
+tests/test_upstream_mcp.py:50:async def _global_resolver(_host: str, _port: int | None) -> Sequence[str]:
+tests/test_upstream_mcp.py:236:        resolver=_global_resolver,
+tests/test_upstream_mcp.py:377:async def test_url_guard_allows_only_public_https_or_local_loopback_http() -> None:
+tests/test_upstream_mcp.py:378:    assert await validate_upstream_url(_configuration()) == "127.0.0.1"
+tests/test_upstream_mcp.py:380:        await validate_upstream_url(
+tests/test_upstream_mcp.py:385:            resolver=_global_resolver,
+tests/test_upstream_mcp.py:405:            await validate_upstream_url(
+tests/test_upstream_mcp.py:407:                resolver=_global_resolver,
+tests/test_upstream_mcp.py:412:async def test_url_guard_rejects_dns_to_private_link_local_and_reserved() -> None:
+tests/test_upstream_mcp.py:413:    async def resolver(_host: str, _port: int | None) -> Sequence[str]:
+tests/test_upstream_mcp.py:421:        await validate_upstream_url(configuration, resolver=resolver)
+tests/test_upstream_mcp.py:423:    async def failed_resolver(_host: str, _port: int | None) -> Sequence[str]:
+tests/test_upstream_mcp.py:424:        raise OSError("resolver unavailable")
+tests/test_upstream_mcp.py:427:        await validate_upstream_url(configuration, resolver=failed_resolver)
+tests/test_upstream_mcp.py:450:    resolver_calls = 0
+tests/test_upstream_mcp.py:452:    async def rebinding_resolver(_host: str, _port: int | None) -> Sequence[str]:
+tests/test_upstream_mcp.py:453:        nonlocal resolver_calls
+tests/test_upstream_mcp.py:454:        resolver_calls += 1
+tests/test_upstream_mcp.py:455:        if resolver_calls == 1:
+tests/test_upstream_mcp.py:470:        resolver=rebinding_resolver,
+tests/test_upstream_mcp.py:486:    assert resolver_calls == 1
+tests/test_upstream_mcp.py:774:        resolver=_global_resolver,
+tests/test_upstream_mcp.py:799:        resolver=_global_resolver,
+"""
+API Key + JWT Bearer [REDACTED] for agent consumers.
+
+Agents pass credentials via:
+- X-API-Key header (legacy, long-lived keys)
+- Authorization: Bearer <jwt> header (modern, short-lived tokens)
+"""
+
+import hmac
+from contextvars import ContextVar
+from dataclasses import dataclass, replace
+from typing import Annotated
+
+from fastapi import Depends, Header, HTTPException, Request, Security, status
+from fastapi.security import APIKeyHeader
+from .config import get_settings
+from .oidc_iga import EnterprisePrincipal, IGADecision, IGAError, is_iga_issuer_token
+from .trust_mode import is_production_like_environment
+
+settings = get_settings()
+
+# Static development/training keys (STATIC_DEV_API_KEYS) must carry this
+# prefix. It keeps dev keys greppable/scannable and means a rotated
+# amw_live_ bootstrap key pasted into the wrong variable never
+# authenticates through the static-dev path.
+STATIC_DEV_KEY_PREFIX = "amw_dev_"
+
+api_key_header = APIKeyHeader(
+    name=settings.API_KEY_HEADER,
+    auto_error=False,
+    description="API key for agent authentication. Pass in the X-API-Key header.",
+)
+
+
+@dataclass(frozen=True)
+class AuthContext:
+    """Authenticated caller details used for tenant-scoped authorization."""
+
+    source: str
+    raw_key: str
+    key_id: str | None = None
+    wallet_id: str | None = None
+    is_bootstrap_admin: bool = False
+    scopes: list[str] = None  # type: ignore[assignment]
+    # Enterprise (Okta/Entra) bearer [REDACTED] accompanied an X-API-Key call. Set
+    # ONLY when the Authorization header carried a token whose UNVERIFIED
+    # issuer names a pinned IGA issuer (see get_auth_context). It is identity
+    # attribution for the human behind the agent, NEVER an API credential:
+    # enforcement points (app/core/oidc_iga.parse_enterprise_token +
+    # enforce_tool_call) fully verify it before any trust decision.
+    enterprise_bearer_token: [REDACTED] | None = None
+
+    def __post_init__(self):
+        if self.scopes is None:
+            object.__setattr__(self, "scopes", [])
+
+    def require_wallet_access(self, wallet_id: str | None) -> None:
+        """Allow bootstrap admins or the exact wallet owning a DB-backed key.
+
+        ``wallet_id`` may be ``None`` for a resource with no owning wallet (e.g.
+        a sandbox environment created by a bootstrap admin). A non-admin caller
+        always has a concrete ``self.wallet_id``, so an ownerless resource is
+        correctly denied to everyone but bootstrap admins.
+        """
+        if self.is_bootstrap_admin:
+            return
+        if self.wallet_id is not None and self.wallet_id == wallet_id:
+            return
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "wallet_access_denied",
+                "message": "API key is not authorized for this wallet.",
+                "wallet_id": wallet_id,
+            },
+        )
+
+    def require_bootstrap_admin(self) -> None:
+        """Allow only trusted bootstrap/admin environment keys."""
+        if self.is_bootstrap_admin:
+            return
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "admin_access_denied",
+                "message": "This operation requires a bootstrap admin API key.",
+            },
+        )
+
+
+# Internal marker on a response that failed *authentication* rather than
+# authorization. RateLimitMiddleware charges those to its shared
+# rejected-credential bucket and strips the header before the response leaves
+# the innermost middleware, so it is never a public surface. It exists because
+# an unknown-but-well-formed key is refused with 403, not 401, and the limiter
+# must not confuse that with an authenticated caller denied on scope
+# (wallet_access_denied, insufficient_scope), whose denials are ordinary
+# governed-loop traffic.
+CREDENTIAL_REJECTED_HEADER = "X-Credential-Rejected"
+_CREDENTIAL_REJECTED = {CREDENTIAL_REJECTED_HEADER: "1"}
+
+
+@dataclass
+class CredentialAcceptance:
+    """Whether ``get_auth_context`` accepted credentials during one request."""
+
+    accepted: bool = False
+
+
+# The converse signal, for RateLimitMiddleware's shared pre-auth bucket. A
+# request that never authenticates — a public route, a 404 — is never refused
+# either, so the rejected marker alone let a caller pick a fresh per-key
+# bucket by inventing an X-API-Key value per request; the limiter therefore
+# keeps the reservation unless this comes back accepted. A ContextVar rather
+# than request state because get_auth_context is also called without a
+# Request; a mutable holder rather than a flag because call_next runs the app
+# in a child task whose context is a copy, so only a shared object carries the
+# answer back out.
+CREDENTIAL_ACCEPTANCE: ContextVar[CredentialAcceptance | None] = ContextVar(
+    "credential_acceptance", default=None
+)
+
+
+async def get_auth_context(
+    api_key: [REDACTED] | None = Security(api_key_header),
+    authorization: Annotated[str | None, Header()] = None,
+) -> AuthContext:
+    """
+    Validate credentials and return caller context.
+
+    Checks in order:
+    1. Authorization: Bearer <jwt> (modern, short-lived)
+    2. X-API-Key header (legacy, long-lived keys)
+
+    Settings are read per call, not from the module-level singleton: tests and
+    the Postgres CI job rebind VALID_API_KEYS and clear the settings cache after
+    this module is already imported, and a captured `settings` would keep
+    serving the stale key list.
+    """
+    context = await _resolve_auth_context(api_key, authorization)
+    acceptance = CREDENTIAL_ACCEPTANCE.get()
+    if acceptance is not None:
+        acceptance.accepted = True
+    return context
+
+
+async def _resolve_auth_context(
+    api_key: [REDACTED] | None,
+    authorization: str | None,
+) -> AuthContext:
+    """Authenticate the caller; ``get_auth_context`` records the acceptance."""
+    settings = get_settings()
+
+    # A presented Authorization header is authoritative. Never fall back to a
+    # concurrently supplied API key when its scheme, shape, or token is invalid:
+    # doing so would let an invalid bearer [REDACTED] authenticate as a different
+    # principal than the caller intended.
+    if authorization is not None:
+        token = [REDACTED]
+        # Enterprise IGA reroute — deliberately narrow. is_iga_issuer_token
+        # peeks ONLY at the token's unverified `iss` claim and is True solely
+        # when it names an issuer pinned in IGA_TRUSTED_ISSUERS; with IGA
+        # disabled (the default) it is always False, so every bearer [REDACTED]
+        # today's internal-JWT handling byte for byte. When an enterprise
+        # bearer [REDACTED] alongside an X-API-Key, the API key is the
+        # authenticating credential (the recursive call below runs the
+        # standard API-key path unchanged) and the bearer [REDACTED] carried as
+        # human-identity attribution that the IGA enforcement points fully
+        # VERIFY (pinned key, algorithm allowlist, audience, issuer, expiry)
+        # before any trust decision — the unverified peek here only routes,
+        # it never authenticates. An enterprise bearer [REDACTED] NO accompanying
+        # API key is not an API credential: it falls through to
+        # _auth_from_jwt and fails with 401 exactly as before.
+        if api_key and is_iga_issuer_token(token):
+            context = await _resolve_auth_context(api_key, None)
+            return replace(context, enterprise_bearer_token=[REDACTED]
+        return await _auth_from_jwt(token)
+
+    # Preserve the pre-header direct-call/X-API-Key compatibility path.
+    if api_key and api_key.startswith("Bearer "):
+        token = [REDACTED]
+        return await _auth_from_jwt(token)
+
+    if api_key is None:
+        detail = {
+            "error": "missing_credentials",
+            "message": "X-API-Key or Authorization: Bearer [REDACTED] is required.",
+            "docs": "/docs",
+        }
+        # On a local instance that opted into self-serve dev keys, point a
+        # bootstrapping agent at the credential it can actually mint here.
+        # Gated so no production surface ever advertises it (production-like
+        # environments refuse to boot with the flag set anyway).
+        if settings.ENABLE_DEV_KEY_SELF_PROVISION and not (
+            is_production_like_environment(settings.ENVIRONMENT)
+        ):
+            detail["self_provision"] = (
+                "This local instance allows self-serve dev keys: POST "
+                "/v1/dev-keys/self-provision (empty body) to mint a "
+                "wallet-scoped key, then send it as X-API-Key."
+            )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=detail,
+        )
+
+    # RED TEAM FIX: Reject empty or whitespace-only keys.
+    stripped = api_key.strip()
+    if not stripped or len(stripped) < 8:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+
+TEST GUARD HOOK []

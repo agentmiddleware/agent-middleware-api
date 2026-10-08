@@ -41,28 +41,28 @@ async def test_discover_omits_kyc_when_stripe_not_configured(
 ):
     """When Stripe is not configured, /v1/discover must not list KYC capability."""
     import app.routers.discover as discover_mod
-    
+
     monkeypatch.setenv("STRIPE_SECRET_KEY", "")
     get_settings.cache_clear()
     cfg = get_settings()
     cfg.ENABLE_PROOF_SURFACES = True
     assert not cfg.STRIPE_SECRET_KEY
     monkeypatch.setattr(discover_mod, "settings", cfg, raising=False)
-    
+
     health_resp = await client.get("/health/dependencies")
     assert health_resp.status_code == 200
     health_data = health_resp.json()
     assert health_data["dependencies"]["stripe"]["status"] == "not_configured"
-    
+
     discover_resp = await client.get("/v1/discover")
     assert discover_resp.status_code == 200
     discover_data = discover_resp.json()
-    
+
     capability_names = {cap["name"] for cap in discover_data["capabilities"]}
     assert "kyc" not in capability_names, (
         "KYC capability must not be present when Stripe is not_configured"
     )
-    
+
     get_settings.cache_clear()
 
 
@@ -72,28 +72,28 @@ async def test_discover_includes_kyc_when_stripe_configured(
 ):
     """When Stripe is configured, /v1/discover must list KYC capability."""
     import app.routers.discover as discover_mod
-    
+
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_fake_key_for_testing")
     get_settings.cache_clear()
     cfg = get_settings()
     cfg.ENABLE_PROOF_SURFACES = True
     assert cfg.STRIPE_SECRET_KEY
     monkeypatch.setattr(discover_mod, "settings", cfg, raising=False)
-    
+
     discover_resp = await client.get("/v1/discover")
     assert discover_resp.status_code == 200
     discover_data = discover_resp.json()
-    
+
     capability_names = {cap["name"] for cap in discover_data["capabilities"]}
     assert "kyc" in capability_names, (
         "KYC capability must be present when Stripe is configured"
     )
-    
+
     kyc_cap = next(cap for cap in discover_data["capabilities"] if cap["name"] == "kyc")
     assert kyc_cap["surface"] == "product"
     assert kyc_cap["category"] == "compliance"
     assert "stripe" in kyc_cap["description"].lower()
-    
+
     get_settings.cache_clear()
 
 
@@ -103,7 +103,7 @@ async def test_discover_and_health_stripe_truth_match(
 ):
     """Discover's KYC presence must match health's stripe.status truth."""
     import app.routers.discover as discover_mod
-    
+
     for stripe_key, expected_health_status, should_have_kyc in [
         ("", "not_configured", False),
         ("sk_test_fake", "not_configured", True),
@@ -113,18 +113,18 @@ async def test_discover_and_health_stripe_truth_match(
         cfg = get_settings()
         cfg.ENABLE_PROOF_SURFACES = True
         monkeypatch.setattr(discover_mod, "settings", cfg, raising=False)
-        
+
         health_resp = await client.get("/health/dependencies")
         assert health_resp.status_code == 200
         health_data = health_resp.json()
         stripe_status = health_data["dependencies"]["stripe"]["status"]
-        
+
         discover_resp = await client.get("/v1/discover")
         assert discover_resp.status_code == 200
         discover_data = discover_resp.json()
         capability_names = {cap["name"] for cap in discover_data["capabilities"]}
         has_kyc = "kyc" in capability_names
-        
+
         if stripe_status == "not_configured":
             assert not has_kyc, (
                 f"When health reports stripe={stripe_status}, "
@@ -132,10 +132,9 @@ async def test_discover_and_health_stripe_truth_match(
             )
         else:
             assert has_kyc, (
-                f"When health reports stripe={stripe_status}, "
-                "discover must list KYC"
+                f"When health reports stripe={stripe_status}, discover must list KYC"
             )
-    
+
     get_settings.cache_clear()
 
 
@@ -153,9 +152,7 @@ async def test_discover_omits_kyc_when_proof_surfaces_off(client, monkeypatch):
 
     discover_resp = await client.get("/v1/discover")
     assert discover_resp.status_code == 200
-    capability_names = {
-        cap["name"] for cap in discover_resp.json()["capabilities"]
-    }
+    capability_names = {cap["name"] for cap in discover_resp.json()["capabilities"]}
     assert "kyc" not in capability_names
 
     get_settings.cache_clear()

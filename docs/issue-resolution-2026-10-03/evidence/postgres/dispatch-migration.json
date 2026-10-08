@@ -1,0 +1,25 @@
+{
+  "name": "dispatch-migration",
+  "head": "079bb7290f6ed86c6762baec02827305b5cb9da7",
+  "cwd": "/Users/sellers/.openclaw/worktrees/amw-issues-20261003-postgres",
+  "command": [
+    "/Users/sellers/Projects/agent-middleware-api/.venv/bin/python3",
+    "-m",
+    "pytest",
+    "tests/test_dispatch_call_slot_migration.py",
+    "-x",
+    "-ra",
+    "--tb=short",
+    "--junitxml=/tmp/amw-release-postgres-final-20261003/dispatch-migration.xml",
+    "--basetemp=/tmp/amw-release-postgres-final-20261003/dispatch-migration-artifacts"
+  ],
+  "started": "2026-10-04T02:02:57.484958+00:00",
+  "explicit_test_settings": {
+    "DATABASE_URL": "sqlite+aiosqlite:////tmp/amw-release-postgres-final-20261003/migration-fixture.sqlite",
+    "DISPATCH_MIGRATION_DATABASE_URL": "postgresql+asyncpg://sellers@127.0.0.1:55439/amw_action_final_dispatch",
+    "ALLOW_METADATA_CREATE_ALL": "true"
+  },
+  "exit_code": 0,
+  "finished": "2026-10-04T02:02:58.514128+00:00",
+  "head_after": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+}

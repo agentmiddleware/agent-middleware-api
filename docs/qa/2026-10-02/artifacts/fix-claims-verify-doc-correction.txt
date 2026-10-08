@@ -1,0 +1,8 @@
+ ELEVATOR_PITCH.md                | 21 ++++++++++++++-------
+ docs/agent-self-credentialing.md | 31 ++++++++++++++++++++-----------
+ docs/tool-interface-authority.md | 16 +++++++++++++---
+ 3 files changed, 47 insertions(+), 21 deletions(-)
+PASS: test_be100_self_credentialing_scopes_retry_guarantees
+PASS: test_be100_tool_interface_scopes_retry_guarantees
+PASS: test_be100_pitch_scopes_retry_guarantees
+All three documentation regressions pass directly; root must run pytest plus contention tests.

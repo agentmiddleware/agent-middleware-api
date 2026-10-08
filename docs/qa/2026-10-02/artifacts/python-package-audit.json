@@ -1,0 +1,509 @@
+{
+  "source": "Public PyPI per-version JSON package metadata; no private registry or advisory API",
+  "scope": "Resolved isolated Python QA environment, including development tools",
+  "packages": [
+    {
+      "name": "CacheControl",
+      "version": "0.14.4",
+      "vulnerabilities": []
+    },
+    {
+      "name": "Mako",
+      "version": "1.4.3",
+      "vulnerabilities": []
+    },
+    {
+      "name": "MarkupSafe",
+      "version": "3.0.4",
+      "vulnerabilities": []
+    },
+    {
+      "name": "PyJWT",
+      "version": "2.15.1",
+      "vulnerabilities": []
+    },
+    {
+      "name": "PyYAML",
+      "version": "6.0.3",
+      "vulnerabilities": []
+    },
+    {
+      "name": "Pygments",
+      "version": "2.21.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "SQLAlchemy",
+      "version": "2.0.54",
+      "vulnerabilities": []
+    },
+    {
+      "name": "aiocoap",
+      "version": "0.4.17",
+      "vulnerabilities": []
+    },
+    {
+      "name": "aiomqtt",
+      "version": "2.5.1",
+      "vulnerabilities": []
+    },
+    {
+      "name": "aiosqlite",
+      "version": "0.22.1",
+      "vulnerabilities": []
+    },
+    {
+      "name": "alembic",
+      "version": "1.20.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "annotated-doc",
+      "version": "0.0.5",
+      "vulnerabilities": []
+    },
+    {
+      "name": "annotated-types",
+      "version": "0.8.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "anyio",
+      "version": "4.15.1",
+      "vulnerabilities": []
+    },
+    {
+      "name": "ast_serialize",
+      "version": "0.12.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "asyncpg",
+      "version": "0.31.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "attrs",
+      "version": "26.1.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "boolean.py",
+      "version": "5.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "certifi",
+      "version": "2026.7.22",
+      "vulnerabilities": []
+    },
+    {
+      "name": "cffi",
+      "version": "2.1.1",
+      "vulnerabilities": []
+    },
+    {
+      "name": "charset-normalizer",
+      "version": "3.5.2",
+      "vulnerabilities": []
+    },
+    {
+      "name": "click",
+      "version": "8.5.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "coverage",
+      "version": "7.16.2",
+      "vulnerabilities": []
+    },
+    {
+      "name": "cryptography",
+      "version": "50.0.2",
+      "vulnerabilities": []
+    },
+    {
+      "name": "cyclonedx-python-lib",
+      "version": "11.12.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "defusedxml",
+      "version": "0.7.1",
+      "vulnerabilities": []
+    },
+    {
+      "name": "dnspython",
+      "version": "2.8.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "email-validator",
+      "version": "2.3.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "fastapi",
+      "version": "0.142.2",
+      "vulnerabilities": []
+    },
+    {
+      "name": "filelock",
+      "version": "4.0.9",
+      "vulnerabilities": []
+    },
+    {
+      "name": "greenlet",
+      "version": "3.5.6",
+      "vulnerabilities": []
+    },
+    {
+      "name": "h11",
+      "version": "0.16.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "httpcore",
+      "version": "1.0.9",
+      "vulnerabilities": []
+    },
+    {
+      "name": "httptools",
+      "version": "0.8.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "httpx",
+      "version": "0.28.1",
+      "vulnerabilities": []
+    },
+    {
+      "name": "httpx-sse",
+      "version": "0.4.3",
+      "vulnerabilities": []
+    },
+    {
+      "name": "hypothesis",
+      "version": "6.168.3",
+      "vulnerabilities": []
+    },
+    {
+      "name": "idna",
+      "version": "3.20",
+      "vulnerabilities": []
+    },
+    {
+      "name": "iniconfig",
+      "version": "2.3.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "jsonschema",
+      "version": "4.26.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "jsonschema-path",
+      "version": "0.5.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "jsonschema-specifications",
+      "version": "2025.9.1",
+      "vulnerabilities": []
+    },
+    {
+      "name": "lazy-object-proxy",
+      "version": "1.12.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "librt",
+      "version": "0.16.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "license-expression",
+      "version": "30.4.4",
+      "vulnerabilities": []
+    },
+    {
+      "name": "markdown-it-py",
+      "version": "4.2.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "mcp",
+      "version": "1.30.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "mdurl",
+      "version": "0.1.2",
+      "vulnerabilities": []
+    },
+    {
+      "name": "msgpack",
+      "version": "1.2.3",
+      "vulnerabilities": []
+    },
+    {
+      "name": "mypy",
+      "version": "2.4.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "mypy_extensions",
+      "version": "1.1.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "openapi-schema-validator",
+      "version": "0.9.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "openapi-spec-validator",
+      "version": "0.9.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "opentelemetry-api",
+      "version": "1.45.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "packageurl-python",
+      "version": "0.17.6",
+      "vulnerabilities": []
+    },
+    {
+      "name": "packaging",
+      "version": "26.3",
+      "vulnerabilities": []
+    },
+    {
+      "name": "paho-mqtt",
+      "version": "2.1.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "pathable",
+      "version": "0.6.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "pathspec",
+      "version": "1.1.1",
+      "vulnerabilities": []
+    },
+    {
+      "name": "pip",
+      "version": "26.2.1",
+      "vulnerabilities": []
+    },
+    {
+      "name": "pip-requirements-parser",
+      "version": "32.0.1",
+      "vulnerabilities": []
+    },
+    {
+      "name": "pip_api",
+      "version": "0.0.35",
+      "vulnerabilities": []
+    },
+    {
+      "name": "pip_audit",
+      "version": "2.10.1",
+      "vulnerabilities": []
+    },
+    {
+      "name": "platformdirs",
+      "version": "4.12.2",
+      "vulnerabilities": []
+    },
+    {
+      "name": "pluggy",
+      "version": "1.6.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "py-serializable",
+      "version": "2.1.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "pycparser",
+      "version": "3.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "pydantic",
+      "version": "2.13.5",
+      "vulnerabilities": []
+    },
+    {
+      "name": "pydantic-settings",
+      "version": "2.15.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "pydantic_core",
+      "version": "2.46.5",
+      "vulnerabilities": []
+    },
+    {
+      "name": "pyparsing",
+      "version": "3.3.3",
+      "vulnerabilities": []
+    },
+    {
+      "name": "pytest",
+      "version": "9.1.1",
+      "vulnerabilities": []
+    },
+    {
+      "name": "pytest-asyncio",
+      "version": "1.4.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "pytest-cov",
+      "version": "7.1.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "pytest-socket",
+      "version": "0.8.1",
+      "vulnerabilities": []
+    },
+    {
+      "name": "python-dotenv",
+      "version": "1.2.4",
+      "vulnerabilities": []
+    },
+    {
+      "name": "python-multipart",
+      "version": "0.0.32",
+      "vulnerabilities": []
+    },
+    {
+      "name": "redis",
+      "version": "8.1.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "referencing",
+      "version": "0.37.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "requests",
+      "version": "2.34.2",
+      "vulnerabilities": []
+    },
+    {
+      "name": "rfc3339-validator",
+      "version": "0.1.4",
+      "vulnerabilities": []
+    },
+    {
+      "name": "rich",
+      "version": "15.0.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "rpds-py",
+      "version": "2026.6.3",
+      "vulnerabilities": []
+    },
+    {
+      "name": "ruff",
+      "version": "0.16.10",
+      "vulnerabilities": []
+    },
+    {
+      "name": "six",
+      "version": "1.17.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "sortedcontainers",
+      "version": "2.4.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "sqlmodel",
+      "version": "0.0.47",
+      "vulnerabilities": []
+    },
+    {
+      "name": "sse-starlette",
+      "version": "3.5.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "starlette",
+      "version": "1.7.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "stripe",
+      "version": "16.0.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "structlog",
+      "version": "26.1.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "tomli",
+      "version": "2.4.1",
+      "vulnerabilities": []
+    },
+    {
+      "name": "tomli_w",
+      "version": "1.2.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "typing-inspection",
+      "version": "0.4.4",
+      "vulnerabilities": []
+    },
+    {
+      "name": "typing_extensions",
+      "version": "4.16.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "urllib3",
+      "version": "2.8.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "uvicorn",
+      "version": "0.54.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "uvloop",
+      "version": "0.23.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "watchfiles",
+      "version": "1.3.0",
+      "vulnerabilities": []
+    },
+    {
+      "name": "websockets",
+      "version": "17.1",
+      "vulnerabilities": []
+    }
+  ],
+  "package_count": 100,
+  "vulnerable_package_count": 0,
+  "unverified_package_count": 0
+}

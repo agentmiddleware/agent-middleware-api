@@ -23,7 +23,9 @@ Architecture:
 
 import asyncio
 import hashlib
+import json
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
@@ -38,6 +40,81 @@ if TYPE_CHECKING:
     from playwright.async_api import Page, BrowserContext
 
 logger = logging.getLogger(__name__)
+
+# Viewport bounds for browser contexts. The size feeds a real Chromium
+# context, so an unbounded one is a memory-exhaustion lever; mirrored by the
+# DOMBridgeSessionRequest schema bounds.
+VIEWPORT_WIDTH_RANGE = (320, 3840)
+VIEWPORT_HEIGHT_RANGE = (240, 2160)
+
+# Scroll offsets are clamped to this magnitude (pixels).
+_SCROLL_LIMIT = 20000
+# The only script page.evaluate ever runs for a command. Offsets travel as a
+# serialized argument, never as source text.
+_SCROLL_SCRIPT = "([dx, dy]) => window.scrollBy(dx, dy)"
+# The exact expression _handle_scroll emits for an EVALUATE command.
+_SCROLL_EXPRESSION = re.compile(r"window\.scrollBy\((-?\d{1,5}), (-?\d{1,5})\)")
+
+_REDACTED = "[REDACTED]"
+# Inputs whose values are credentials or session secrets. Their values are
+# never returned from page-state extraction or echoed by action previews.
+_SENSITIVE_INPUT_TYPES = frozenset({"password", "hidden"})
+_SENSITIVE_AUTOCOMPLETE_TOKENS = frozenset(
+    {
+        "current-password",
+        "new-password",
+        "one-time-code",
+        "cc-number",
+        "cc-csc",
+        "cc-exp",
+        "cc-exp-month",
+        "cc-exp-year",
+    }
+)
+_SENSITIVE_FIELD_NAME = re.compile(
+    r"pass(?:word|wd|code|phrase)|secret|token|one[-_ ]?time|card[-_ ]?num|"
+    r"(?<![a-z])(?:pwd|otp|ssn|cvv|cvc|csc|cc[-_ ]?(?:num|number|csc|exp))(?![a-z])",
+    re.IGNORECASE,
+)
+
+
+def _selector_literal(value: Any) -> str:
+    """Quote caller text as one Playwright/CSS string literal.
+
+    JSON string escaping (backslash and double quote) is also valid CSS and
+    Playwright selector escaping, so a quote in the text can neither close
+    the literal nor smuggle a ``>>`` engine chain into the selector.
+    """
+    return json.dumps(str(value), ensure_ascii=False)
+
+
+def _is_sensitive_field_name(*names: Any) -> bool:
+    """Whether a field name, id or selector names a credential field."""
+    return any(name and _SENSITIVE_FIELD_NAME.search(str(name)) for name in names)
+
+
+def _is_sensitive_input(item: dict[str, Any]) -> bool:
+    if str(item.get("type") or "").lower() in _SENSITIVE_INPUT_TYPES:
+        return True
+    autocomplete = str(item.get("autocomplete") or "").lower().split()
+    if any(token in _SENSITIVE_AUTOCOMPLETE_TOKENS for token in autocomplete):
+        return True
+    return _is_sensitive_field_name(item.get("name"), item.get("id"))
+
+
+def _redact_input_values(inputs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Replace credential input values with a marker (empty stays empty)."""
+    redacted = []
+    for item in inputs:
+        entry = dict(item)
+        if _is_sensitive_input(entry):
+            entry["value"] = _REDACTED if entry.get("value") else ""
+        redacted.append(entry)
+    return redacted
+
+
+def _clamp_scroll(amount: int) -> int:
+    return max(-_SCROLL_LIMIT, min(_SCROLL_LIMIT, amount))
 
 
 class BrowserSessionLimitExceeded(RuntimeError):
@@ -100,6 +177,9 @@ class PlaywrightCommand:
     wait_for_selectors: list[str] = field(default_factory=list)
     wait_for_timeout_ms: int = 0
     estimated_duration_ms: int = 500
+    # The value is a credential (e.g. a password FILL): it is executed but
+    # never echoed back by preview_action.
+    sensitive: bool = False
 
 
 @dataclass
@@ -385,6 +465,16 @@ class AWIPlaywrightBridge:
         if block_reason:
             raise ValueError(f"navigation blocked ({block_reason}): {target_url}")
 
+        if viewport is not None:
+            width, height = viewport
+            min_w, max_w = VIEWPORT_WIDTH_RANGE
+            min_h, max_h = VIEWPORT_HEIGHT_RANGE
+            if not (min_w <= width <= max_w and min_h <= height <= max_h):
+                raise ValueError(
+                    f"viewport must be between {min_w}x{min_h} and "
+                    f"{max_w}x{max_h}, got {width}x{height}"
+                )
+
         await self.cleanup_expired_sessions()
 
         if len(self._sessions) >= self._max_sessions:
@@ -580,7 +670,7 @@ class AWIPlaywrightBridge:
                 {
                     "type": c.command_type.value,
                     "target": c.target,
-                    "value": c.value,
+                    "value": _REDACTED if c.sensitive and c.value else c.value,
                     "options": c.options,
                 }
                 for c in commands
@@ -792,6 +882,11 @@ class AWIPlaywrightBridge:
                         target=element.css_selector,
                         value=str(value),
                         estimated_duration_ms=200,
+                        sensitive=(
+                            field_type == "password_input"
+                            or _is_sensitive_field_name(field_name)
+                            or _is_sensitive_input(element.attributes)
+                        ),
                     )
                 )
             else:
@@ -842,6 +937,7 @@ class AWIPlaywrightBridge:
                     target=password_element.css_selector,
                     value=password,
                     estimated_duration_ms=200,
+                    sensitive=True,
                 )
             )
 
@@ -992,29 +1088,29 @@ class AWIPlaywrightBridge:
     ) -> list[PlaywrightCommand]:
         """Handle scroll action."""
         direction = params.get("direction", "down")
-        # The amount is interpolated into a JS expression executed via
-        # page.evaluate — anything but a plain integer is script injection.
+        # Only a plain integer is accepted. The offsets are signed here in
+        # Python (never by prefixing "-" to text, which made a negative
+        # amount "--300"), and _execute_single_command re-parses the
+        # expression and passes the integers to a fixed script as data.
         try:
             amount = int(params.get("amount", 300))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             raise ValueError("scroll amount must be an integer")
-        amount = max(-20000, min(20000, amount))
+        amount = _clamp_scroll(amount)
 
-        if direction == "down":
-            scroll_expr = f"window.scrollBy(0, {amount})"
-        elif direction == "up":
-            scroll_expr = f"window.scrollBy(0, -{amount})"
+        if direction == "up":
+            dx, dy = 0, -amount
         elif direction == "left":
-            scroll_expr = f"window.scrollBy(-{amount}, 0)"
+            dx, dy = -amount, 0
         elif direction == "right":
-            scroll_expr = f"window.scrollBy({amount}, 0)"
+            dx, dy = amount, 0
         else:
-            scroll_expr = f"window.scrollBy(0, {amount})"
+            dx, dy = 0, amount
 
         return [
             PlaywrightCommand(
                 command_type=CommandType.EVALUATE,
-                target=scroll_expr,
+                target=f"window.scrollBy({dx}, {dy})",
                 wait_for_timeout_ms=200,
                 estimated_duration_ms=200,
             )
@@ -1073,7 +1169,9 @@ class AWIPlaywrightBridge:
             )
         root = Path(upload_dir).resolve()
         candidate = Path(file_path)
-        resolved = (candidate if candidate.is_absolute() else root / candidate).resolve()
+        resolved = (
+            candidate if candidate.is_absolute() else root / candidate
+        ).resolve()
         if not resolved.is_relative_to(root):
             raise ValueError("upload path escapes the configured upload directory")
         return str(resolved)
@@ -1116,6 +1214,7 @@ class AWIPlaywrightBridge:
                 target=selector,
                 value=value,
                 estimated_duration_ms=200,
+                sensitive=_is_sensitive_field_name(selector),
             )
         ]
 
@@ -1195,13 +1294,16 @@ class AWIPlaywrightBridge:
     ) -> Optional[DOMElement]:
         """Find a form element by its associated label."""
         label_lower = label.lower()
+        slug = label_lower.replace(" ", "-")
 
+        # Caller text is always quoted via _selector_literal so it cannot
+        # break out of the literal (or chain engines with ">>").
         label_patterns = [
-            f'label:has-text("{label}")',
-            f'[aria-label="{label}"]',
-            f'[aria-label*="{label_lower}"]',
-            f'[id="{label.lower().replace(" ", "-")}"]',
-            f"#label-{label.lower().replace(' ', '-')}",
+            f"label:has-text({_selector_literal(label)})",
+            f"[aria-label={_selector_literal(label)}]",
+            f"[aria-label*={_selector_literal(label_lower)}]",
+            f"[id={_selector_literal(slug)}]",
+            f"[id={_selector_literal('label-' + slug)}]",
         ]
 
         for selector in label_patterns:
@@ -1213,7 +1315,8 @@ class AWIPlaywrightBridge:
                     if element.tag == "label":
                         for_attr = element.attributes.get("for")
                         if for_attr:
-                            input_selector = f'#{for_attr}, [name="{for_attr}"]'
+                            literal = _selector_literal(for_attr)
+                            input_selector = f"[id={literal}], [name={literal}]"
                             inputs = await self._query_elements(session, input_selector)
                             if inputs:
                                 return inputs[0]
@@ -1233,9 +1336,9 @@ class AWIPlaywrightBridge:
         name_lower = name.lower()
 
         selectors = [
-            f'[name="{name}"]',
-            f'[name="{name_lower}"]',
-            f'[data-name="{name}"]',
+            f"[name={_selector_literal(name)}]",
+            f"[name={_selector_literal(name_lower)}]",
+            f"[data-name={_selector_literal(name)}]",
         ]
 
         for selector in selectors:
@@ -1254,11 +1357,12 @@ class AWIPlaywrightBridge:
         text: str,
     ) -> Optional[DOMElement]:
         """Find an element containing specific text."""
+        literal = _selector_literal(text)
         selectors = [
-            f'text="{text}"',
-            f'*:text-is("{text}")',
-            f'button:has-text("{text}")',
-            f'a:has-text("{text}")',
+            f"text={literal}",
+            f"*:text-is({literal})",
+            f"button:has-text({literal})",
+            f"a:has-text({literal})",
         ]
 
         for selector in selectors:
@@ -1688,7 +1792,12 @@ class AWIPlaywrightBridge:
             return []
 
     async def _get_inputs(self, session: BridgeSession) -> list[dict]:
-        """Get input elements using Playwright."""
+        """Get input elements using Playwright.
+
+        Credential values (password/hidden inputs, credential autocomplete
+        hints, credential-like names) are redacted: password values never
+        leave the page, and _redact_input_values enforces the full policy.
+        """
         if not session._page:
             return []
 
@@ -1701,13 +1810,16 @@ class AWIPlaywrightBridge:
                         id: input.id,
                         type: input.type || input.tagName.toLowerCase(),
                         placeholder: input.placeholder,
-                        value: input.value || '',
+                        autocomplete: input.getAttribute('autocomplete') || '',
+                        value: input.type === 'password'
+                            ? (input.value ? '[REDACTED]' : '')
+                            : (input.value || ''),
                         required: input.required,
                         disabled: input.disabled,
                     }));
                 }
             """)
-            return inputs or []
+            return _redact_input_values(inputs or [])
         except Exception as e:
             logger.warning(f"Failed to get inputs: {e}")
             return []
@@ -1730,9 +1842,10 @@ class AWIPlaywrightBridge:
         - SELECT -> page.select_option(selector, value)
         - PRESS -> page.keyboard.press(key)
         - HOVER -> page.hover(selector)
-        - SCROLL -> page.evaluate(JS scroll)
+        - SCROLL -> page.evaluate(fixed scroll script, [0, int value])
         - GOTO -> page.goto(url)
-        - EVALUATE -> page.evaluate(js)
+        - EVALUATE -> only the server-generated ``window.scrollBy(dx, dy)``
+          expression, re-parsed and run as the fixed scroll script
         - WAIT_FOR_SELECTOR -> page.wait_for_selector(selector)
         - WAIT_FOR_TIMEOUT -> page.wait_for_timeout(ms)
         """
@@ -1742,6 +1855,10 @@ class AWIPlaywrightBridge:
         page = session._page
 
         try:
+            # Validate script-bearing commands before any waiting, so a
+            # refused command has no side effects at all.
+            scroll_offsets = self._scroll_offsets(command)
+
             # Wait for timeout if specified
             if command.wait_for_timeout_ms > 0:
                 await asyncio.sleep(command.wait_for_timeout_ms / 1000)
@@ -1774,7 +1891,7 @@ class AWIPlaywrightBridge:
                 await page.hover(command.target)
 
             elif cmd_type == CommandType.SCROLL:
-                await page.evaluate(f"window.scrollBy(0, {command.value})")
+                await page.evaluate(_SCROLL_SCRIPT, list(scroll_offsets or (0, 0)))
                 await asyncio.sleep(0.3)  # Allow render
 
             elif cmd_type == CommandType.GOTO:
@@ -1785,7 +1902,7 @@ class AWIPlaywrightBridge:
                 )
 
             elif cmd_type == CommandType.EVALUATE:
-                await page.evaluate(command.target)
+                await page.evaluate(_SCROLL_SCRIPT, list(scroll_offsets or (0, 0)))
 
             elif cmd_type == CommandType.SET_INPUT_FILES:
                 await page.set_input_files(command.target, command.value)
@@ -1810,6 +1927,39 @@ class AWIPlaywrightBridge:
                 f"Command execution failed for {command.command_type.value}: {e}"
             )
             raise
+
+    @staticmethod
+    def _scroll_offsets(command: PlaywrightCommand) -> Optional[tuple[int, int]]:
+        """Validate the script-bearing commands and return (dx, dy).
+
+        page.evaluate runs arbitrary JavaScript in the browser session, so
+        it never receives command text. SCROLL needs a plain int value;
+        EVALUATE is restricted to the exact ``window.scrollBy(dx, dy)``
+        expression _handle_scroll emits. Either way the offsets are
+        re-derived as bounded integers and passed to a fixed script as data.
+        Returns None for every other command type.
+        """
+        if command.command_type == CommandType.SCROLL:
+            value = command.value
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError("scroll value must be an integer")
+            return 0, _clamp_scroll(value)
+
+        if command.command_type == CommandType.EVALUATE:
+            match = _SCROLL_EXPRESSION.fullmatch(str(command.target))
+            if match is None:
+                raise ValueError(
+                    "EVALUATE command not permitted: only server-generated "
+                    "scroll expressions may run"
+                )
+            dx, dy = (int(group) for group in match.groups())
+            if max(abs(dx), abs(dy)) > _SCROLL_LIMIT:
+                raise ValueError(
+                    "EVALUATE command not permitted: scroll offset out of range"
+                )
+            return dx, dy
+
+        return None
 
     # ─────────────────────────────────────────────────────────────────────────
     # Browser Initialization
@@ -1878,9 +2028,7 @@ class AWIPlaywrightBridge:
                 url, wait_until="networkidle", timeout=self._default_timeout_ms
             )
             navigated_url = session._page.url
-            session.current_url = (
-                url if navigated_url == f"{url}/" else navigated_url
-            )
+            session.current_url = url if navigated_url == f"{url}/" else navigated_url
             session.page_title = await session._page.title()
             logger.info(f"Navigated to {url} for session {session.session_id}")
         except Exception as e:

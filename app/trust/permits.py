@@ -6,19 +6,23 @@ Re-exports the canonical permit implementation from :mod:`app.services.permits`.
 from __future__ import annotations
 
 from app.services.permits import (
+    PermitCreationRejectedError,
     PermitError,
     PermitService,
     PermitValidation,
     PermitWriteContendedError,
     get_permit_service,
+    permit_constraints_snapshot,
     permit_model_to_response,
 )
 
 __all__ = [
+    "PermitCreationRejectedError",
     "PermitError",
     "PermitService",
     "PermitValidation",
     "PermitWriteContendedError",
     "get_permit_service",
+    "permit_constraints_snapshot",
     "permit_model_to_response",
 ]

@@ -1,0 +1,66 @@
+FILE docs/qa/2026-10-02/playwright.config.cjs
+1: const path = require('node:path');
+2: const {defineConfig} = require(process.env.QA_NODE_MODULES
+3:   ? `${process.env.QA_NODE_MODULES}/@playwright/test` : '/private/tmp/amw-qa-browser/node_modules/@playwright/test');
+4: module.exports = defineConfig({
+5:   testDir: __dirname,
+6:   testMatch: 'frontend.spec.cjs',
+7:   outputDir: path.join(__dirname, 'artifacts/frontend-playwright'),
+8:   reporter: [['list'], ['json', {outputFile: path.join(__dirname, 'artifacts/frontend-playwright.json')}]],
+9:   workers: 1,
+10:   timeout: 30000,
+11:   use: {baseURL: 'http://127.0.0.1:8765', viewport: {width: 1440, height: 1000},
+12:     reducedMotion: 'reduce', serviceWorkers: 'block', screenshot: 'only-on-failure'},
+13:   projects: ['chromium', 'firefox', 'webkit'].map(browserName => ({name: browserName, use: {browserName}})),
+14: });
+FILE app/routers/static.py
+146:     "/docs/agent-accountability.md",
+147:     summary="Agent accountability",
+148:     description=(
+149:         "Why an autonomous agent runs inside the permit/receipt loop, how to "
+150:         "verify a receipt offline, and what receipts do not prove."
+151:     ),
+152:     response_class=PlainTextResponse,
+153: )
+154: async def get_agent_accountability_md():
+155:     return _serve_markdown("/docs/agent-accountability.md")
+156: 
+157: 
+158: @router.get(
+159:     "/dashboard",
+160:     summary="Public operator evidence index",
+161:     description=(
+162:         "Truthful public status and evidence links. It contains no fabricated "
+163:         "telemetry, authenticated tenant data, or browser credential handling."
+164:     ),
+165:     response_class=HTMLResponse,
+166:     responses={404: {"description": "Dashboard not found"}},
+167: )
+168: async def get_human_dashboard():
+169:     dashboard_path = _REPO_ROOT / "static" / "dashboard.html"
+170:     if not dashboard_path.is_file():
+171:         raise HTTPException(status_code=404, detail="dashboard.html not found")
+172:     return HTMLResponse(
+173:         dashboard_path.read_text(encoding="utf-8"),
+174:         media_type="text/html; charset=utf-8",
+175:     )
+FILE site/styles.css
+1790: .compare-table strong {
+1791:   color: var(--text);
+1792: }
+1793: 
+1794: .fit-list {
+1795:   margin: 0.5rem 0 0;
+1796:   padding-left: 1.1rem;
+1797:   display: grid;
+1798:   gap: 0.7rem;
+1799: }
+1800: 
+1801: .fit-list li {
+1802:   color: var(--text-dim);
+1803:   line-height: 1.65;
+1804: }
+1805: 
+1806: .faq-list {
+1807:   margin-top: 2rem;
+1808:   display: grid;

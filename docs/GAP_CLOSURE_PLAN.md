@@ -1,5 +1,25 @@
 # Trust Plane Gap Closure Plan
 
+> **Status (2026-10-01): historical plan, frozen — not a spec or a progress
+> record.** Written 2026-08-04; [`SPRINT_PLAN.md`](SPRINT_PLAN.md) is its
+> sprint-by-sprint duplicate. New core capability stays frozen until a named
+> prospective customer documents the need
+> ([`30-day-customer-validation.md`](30-day-customer-validation.md); see the
+> superseded [`production-beta-roadmap.md`](production-beta-roadmap.md)), and
+> the unchecked boxes below were never updated. Against current code: per-key
+> rate limiting shipped as `RateLimitMiddleware` in `app/core/rate_limiter.py`
+> (a fixed-window counter in Redis, with an in-memory fallback), not as the
+> token-bucket design in 1.1; a token-bucket module written for 1.1 was never
+> mounted and has been removed. JWT exchange
+> (`POST /v1/auth/token`, `/refresh`, `/revoke` in `app/routers/auth.py`)
+> exists only as a dormant router, unmounted in production. OAuth 2.1/PKCE,
+> trust-event webhook delivery, the `/v1/dashboard/*` API, KMS/HSM signing, the
+> `POST /v1/admin/signing-keys/rotate` route, permit delegation, and Merkle
+> batching do not exist. For what the product is today, read
+> [`../WEDGE.md`](../WEDGE.md) and
+> [`../SECURITY_LIMITATIONS.md`](../SECURITY_LIMITATIONS.md); for signing-key
+> rotation as it works now, [`key-management.md`](key-management.md#status).
+
 **Target:** Close P0-P1 gaps identified in competitive analysis
 **Timeline:** 6 weeks to production-ready enterprise trust plane
 **Owner:** Agent-Middleware-API maintainers
@@ -13,7 +33,7 @@
 **Solution:** Token-bucket rate limiter per wallet + global burst protection.
 
 ```python
-# app/core/rate_limit.py
+# Proposed design — never mounted, since removed (see status above)
 class RateLimiter:
     """Token-bucket rate limiter backed by Redis.
 
@@ -25,7 +45,7 @@ class RateLimiter:
 ```
 
 **Deliverables:**
-- [ ] `app/core/rate_limit.py` — token bucket implementation
+- [ ] Token bucket implementation (never mounted, since removed; see status above)
 - [ ] Redis integration (use existing Redis on Railway)
 - [ ] Middleware: `RateLimitMiddleware` in `app/main.py`
 - [ ] Headers: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`

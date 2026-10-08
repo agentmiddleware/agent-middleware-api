@@ -147,11 +147,11 @@ partly accidental — idempotency behavior (verified by reproduction):
   completion call in `app/routers/mcp.py` no-ops because the record is only
   begun after the permit check — so a retry with the same key after minting
   a permit already executes normally, by accident rather than by contract.
-  (`docs/failure-semantics.md` currently says this case "terminates with a
-  signed terminal idempotency record"; reproduction shows no record is
-  created. The implementing slice must reconcile that sentence with a
-  pinned test.) `human_approval_pending` reaches the same place explicitly:
-  it abandons the record (`idem.abandon()`), so the same key resumes.
+  (`docs/failure-semantics.md` now states that no record is created, pinned
+  by `test_strict_mode_missing_permit_denial_leaves_no_idempotency_record`
+  in `tests/test_mcp_trust_mode.py`.) `human_approval_pending` reaches the
+  same place explicitly: it abandons the record (`idem.abandon()`), so the
+  same key resumes.
 - **Decided denials under an existing permit** (`permit_tool_not_allowed`,
   `permit_scope_missing`, `permit_budget_exceeded`,
   `permit_max_calls_exceeded`, `permit_aggregate_value_cap_exceeded`): these
@@ -223,9 +223,14 @@ approver card shows the frozen terms of the denied call, nothing broader.
 `-32005` means both `delivery_uncertain` (terminal, charged, do not
 redispatch) and the human-approval waits (retryable, uncharged, please
 resume) — opposite instructions under one code. On `/mcp` the worst of this
-is already solved: `human_approval_pending` carries
-`data.error = "authority_required"` while `delivery_uncertain`'s data
-carries `receipt` and `dispatch` and never an `error` key. The remaining
+is solved by moving `delivery_uncertain` out of the error channel: it returns
+a tool result with `isError: true`, explicit do-not-resend text, the receipt,
+and `_meta["io.agentmiddleware/outcome"].status == "unknown"`
+(`_delivery_uncertain_tool_result` in `app/routers/mcp_standard.py`), because
+a JSON-RPC error commonly reaches the model as its message alone.
+`human_approval_pending` still carries `data.error = "authority_required"`.
+`/mcp/messages` and REST keep `delivery_uncertain` on `-32005`, where its
+data carries `receipt` and `dispatch` and never an `error` key. The remaining
 collision is `human_approval_unavailable`: it is raised as `-32005` with an
 empty data object that reaches the client as no `data` at all
 (`app/routers/mcp.py` passes `data={}`, and `app/routers/mcp_standard.py`
@@ -300,5 +305,6 @@ so the evidence unlocks work, not debate.
 - D5 conformance: `human_approval_unavailable` carries the envelope (this
   assertion fails on today's code, so the slice cannot pass vacuously), and
   `delivery_uncertain` payloads never carry `authority_required`.
-- Reconcile `docs/failure-semantics.md`'s `permit_required` sentence with a
-  pinned test for whichever record semantics the slice ships.
+- Keep `docs/failure-semantics.md`'s `permit_required` sentence and its
+  pinned test (`test_strict_mode_missing_permit_denial_leaves_no_idempotency_record`)
+  in line with whichever record semantics the slice ships.

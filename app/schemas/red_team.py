@@ -14,6 +14,7 @@ from datetime import datetime
 
 class AttackCategory(str, Enum):
     """Categories of automated attack vectors."""
+
     ACL_BYPASS = "acl_bypass"
     AUTH_PROBE = "auth_probe"
     INJECTION = "injection"
@@ -26,11 +27,11 @@ class AttackCategory(str, Enum):
 
 
 class Severity(str, Enum):
-    CRITICAL = "critical"    # Data exposure, full auth bypass
-    HIGH = "high"            # Partial auth bypass, ACL leak
-    MEDIUM = "medium"        # Information disclosure, enumeration
-    LOW = "low"              # Best practice violations
-    INFO = "info"            # Observations, no direct risk
+    CRITICAL = "critical"  # Data exposure, full auth bypass
+    HIGH = "high"  # Partial auth bypass, ACL leak
+    MEDIUM = "medium"  # Information disclosure, enumeration
+    LOW = "low"  # Best practice violations
+    INFO = "info"  # Observations, no direct risk
 
 
 class ScanStatus(str, Enum):
@@ -49,8 +50,10 @@ class RemediationStatus(str, Enum):
 
 # --- Vulnerability ---
 
+
 class Vulnerability(BaseModel):
     """A discovered security vulnerability."""
+
     vuln_id: str
     scan_id: str
     category: AttackCategory
@@ -76,8 +79,7 @@ class Vulnerability(BaseModel):
     cwe_id: str | None = Field(
         None,
         description=(
-            "Common Weakness Enumeration ID (e.g. CWE-285 for "
-            "improper authorization)."
+            "Common Weakness Enumeration ID (e.g. CWE-285 for improper authorization)."
         ),
     )
     discovered_at: datetime
@@ -92,8 +94,10 @@ class VulnerabilityListResponse(BaseModel):
 
 # --- Scan ---
 
+
 class ScanRequest(BaseModel):
     """Initiate a Red Team scan."""
+
     target_services: list[str] = Field(
         default=["iot", "telemetry", "media", "comms", "factory"],
         description="Which service pillars to attack. Default: all.",
@@ -120,6 +124,7 @@ class ScanRequest(BaseModel):
 
 class ScanResponse(BaseModel):
     """Response after initiating a scan."""
+
     scan_id: str
     status: ScanStatus
     target_services: list[str]
@@ -131,6 +136,7 @@ class ScanResponse(BaseModel):
 
 class ScanReport(BaseModel):
     """Full scan report."""
+
     scan_id: str
     status: ScanStatus
     started_at: datetime

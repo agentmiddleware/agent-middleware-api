@@ -6,12 +6,17 @@ from decimal import Decimal
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from pydantic import ValidationError
 
 from app.core.time import utc_now
 from app.db.database import get_session_factory
 from app.db.models import PermitModel
 from app.main import app
-from app.schemas.trust import PermitCreateRequest
+from app.schemas.trust import (
+    ActionPermitFields,
+    PermitCreateRequest,
+    PermitRequestCreate,
+)
 from app.services.idempotency import get_idempotency_service
 from app.services.permits import PermitError, get_permit_service
 from tests.test_trust_helpers import (
@@ -306,7 +311,8 @@ async def test_permit_create_rejects_in_progress_idempotency_key(
         endpoint="/v1/permits",
         idempotency_key="permit-in-progress-key",
         request_payload=PermitCreateRequest(**request_payload).model_dump(
-            mode="json", exclude={"repeat_window_seconds"}
+            mode="json",
+            exclude={"repeat_window_seconds", *ActionPermitFields.model_fields},
         ),
     )
 
@@ -340,7 +346,6 @@ async def test_permit_service_rejects_invalid_issuance_requests(
     }
 
     invalid_cases = [
-        ({**base_request, "max_credits": Decimal("0")}, "max_credits_must_be_positive"),
         (
             {
                 **base_request,
@@ -366,6 +371,15 @@ async def test_permit_service_rejects_invalid_issuance_requests(
         with pytest.raises(PermitError) as exc_info:
             await service.create_permit(PermitCreateRequest(**payload))
         assert exc_info.value.reason == reason
+
+    # A zero budget is refused by the schema now; the service keeps its own
+    # guard for a request built without validation.
+    zero_budget = {**base_request, "max_credits": Decimal("0")}
+    with pytest.raises(ValidationError):
+        PermitCreateRequest(**zero_budget)
+    with pytest.raises(PermitError) as exc_info:
+        await service.create_permit(PermitCreateRequest.model_construct(**zero_budget))
+    assert exc_info.value.reason == "max_credits_must_be_positive"
 
 
 @pytest.mark.anyio
@@ -712,3 +726,155 @@ async def test_reserve_budget_refuses_an_expired_permit(
         model = await session.get(PermitModel, permit.permit_id)
         assert model is not None
         assert model.spent_credits == Decimal("0")
+
+
+def _scale_permit_body(wallet_id: str, key_id: str, **overrides) -> dict:
+    body = {
+        "issuer_wallet_id": wallet_id,
+        "subject_wallet_id": wallet_id,
+        "subject_key_id": key_id,
+        "allowed_tools": ["scale-tool"],
+        "scopes": ["tool:scale-tool:invoke", "billing:charge"],
+        "max_credits": 5,
+        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat(),
+    }
+    body.update(overrides)
+    return body
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "max_credits",
+    [0, -1, "-0.00000001", "1.123456789", "0.000000001", "1000000000000"],
+)
+async def test_permit_create_refuses_max_credits_outside_storage_scale(
+    client, clean_database, max_credits
+):
+    """max_credits must be positive and fit permits.max_credits Numeric(20, 8).
+
+    The permit is signed before it is persisted, so a value the column rounds
+    (1.123456789 -> 1.12345679) minted a permit whose signature never
+    verified, and 0.000000001 passed the service's ``> 0`` guard only to be
+    stored as zero. Zero and negatives were a 400 from that guard; all of
+    these are now a 422 at the boundary, before anything is signed or stored.
+    """
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+
+    resp = await client.post(
+        "/v1/permits",
+        json=_scale_permit_body(
+            wallet_id, provisioned["key_id"], max_credits=max_credits
+        ),
+        headers={**provisioned["agent_headers"], "Idempotency-Key": "scale-bad-1"},
+    )
+    assert resp.status_code == 422, resp.text
+    _, total = await get_permit_service().list_permits(wallet_id=wallet_id)
+    assert total == 0
+
+    # The refused body never claimed the idempotency key: a corrected retry
+    # under the same key mints normally.
+    retry = await client.post(
+        "/v1/permits",
+        json=_scale_permit_body(wallet_id, provisioned["key_id"]),
+        headers={**provisioned["agent_headers"], "Idempotency-Key": "scale-bad-1"},
+    )
+    assert retry.status_code == 201, retry.text
+
+
+@pytest.mark.anyio
+async def test_permit_out_of_scale_body_from_unauthenticated_caller_is_401(
+    client, clean_database
+):
+    """Bounds checking never runs ahead of authentication."""
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+
+    resp = await client.post(
+        "/v1/permits",
+        json=_scale_permit_body(
+            wallet_id, provisioned["key_id"], max_credits="1.123456789"
+        ),
+        headers={"Idempotency-Key": "scale-anon-1"},
+    )
+    assert resp.status_code == 401, resp.text
+    _, total = await get_permit_service().list_permits(wallet_id=wallet_id)
+    assert total == 0
+
+
+@pytest.mark.anyio
+async def test_permit_at_full_storage_scale_mints_and_verifies(client, clean_database):
+    """Eight decimals and a 64-character nonce are the column limits, and
+    still accepted: the stored permit verifies against its own signature."""
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    nonce = "n" * 64
+
+    resp = await client.post(
+        "/v1/permits",
+        json=_scale_permit_body(
+            wallet_id, provisioned["key_id"], max_credits="1.12345678", nonce=nonce
+        ),
+        headers={**provisioned["agent_headers"], "Idempotency-Key": "scale-ok-1"},
+    )
+    assert resp.status_code == 201, resp.text
+    permit = resp.json()
+    assert Decimal(str(permit["max_credits"])) == Decimal("1.12345678")
+    assert permit["nonce"] == nonce
+
+    verify_resp = await client.post(
+        "/v1/permits/verify",
+        json={
+            "permit_id": permit["permit_id"],
+            "wallet_id": wallet_id,
+            "tool": "scale-tool",
+            "estimated_credits": "1",
+        },
+        headers=provisioned["agent_headers"],
+    )
+    assert verify_resp.status_code == 200
+    assert verify_resp.json()["valid"] is True, verify_resp.json()
+
+
+@pytest.mark.parametrize("amount", ["0.00000001", "999999999999"])
+def test_permit_credit_fields_accept_lossless_small_and_large_values(amount):
+    """Boundary values must survive both Numeric(20, 8) and SQLite storage."""
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=30)
+    permit = PermitCreateRequest(
+        issuer_wallet_id="w",
+        subject_wallet_id="w",
+        max_credits=amount,
+        aggregate_value_cap=amount,
+        expires_at=expires_at,
+    )
+    assert permit.max_credits == Decimal(amount)
+    assert permit.aggregate_value_cap == Decimal(amount)
+    ask = PermitRequestCreate(
+        issuer_wallet_id="w",
+        subject_wallet_id="w",
+        allowed_tools=["t"],
+        max_credits=amount,
+        expires_at=expires_at,
+        justification="range",
+    )
+    assert ask.max_credits == Decimal(amount)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("nonce", ["x" * 65, "x" * 300], ids=["65-chars", "300-chars"])
+async def test_permit_create_refuses_nonce_longer_than_column(
+    client, clean_database, nonce
+):
+    """permits.nonce is String(64): a longer client nonce is a 422 here, not
+    a truncation error (500) from Postgres at insert."""
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+
+    resp = await client.post(
+        "/v1/permits",
+        json=_scale_permit_body(wallet_id, provisioned["key_id"], nonce=nonce),
+        headers={**provisioned["agent_headers"], "Idempotency-Key": "nonce-long-1"},
+    )
+    assert resp.status_code == 422, resp.text
+    _, total = await get_permit_service().list_permits(wallet_id=wallet_id)
+    assert total == 0

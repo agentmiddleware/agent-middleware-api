@@ -1,0 +1,1 @@
+Corrected newly added regex to existing public safe error code; retained original exception-type assertion and all literal/mixed-DNS negative cases. First after-run had 4 assertion failures because diagnostic text is intentionally hidden by exception class, not product failures.

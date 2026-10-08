@@ -1,0 +1,161 @@
+{"event": "cors_wildcard_active: credential-less wildcard CORS is the documented default for this header-authenticated API; set CORS_ORIGINS to an explicit list to change it (see SECURITY_LIMITATIONS.md)", "level": "info", "timestamp": "2026-10-03T03:39:26.323013Z"}
+{"event": "proof_surfaces_disabled: ENABLE_PROOF_SURFACES=false; only CORE_TRUST_ROUTERS are mounted (dormant trust surfaces and proof surfaces stay unmounted and unadvertised)", "level": "info", "timestamp": "2026-10-03T03:39:26.323395Z"}
+StreamableHTTP session manager started
+Terminating session: None
+HTTP Request: POST http://127.0.0.1:9000/mcp "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:9000/mcp "HTTP/1.1 200 OK"
+Negotiated protocol version: 2025-11-25
+Terminating session: None
+HTTP Request: POST http://127.0.0.1:9000/mcp "HTTP/1.1 202 Accepted"
+HTTP Request: POST http://localhost:9000/mcp "HTTP/1.1 202 Accepted"
+Processing request of type ListToolsRequest
+Terminating session: None
+HTTP Request: POST http://127.0.0.1:9000/mcp "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:9000/mcp "HTTP/1.1 200 OK"
+Registered upstream MCP service: refund.create (refund.create)
+Created sponsor wallet spn-0a812bf6a04b for Failure Lab D_gateway_naive_downstream
+HTTP Request: POST http://failure-lab.gateway/v1/billing/wallets/sponsor "HTTP/1.1 201 Created"
+Created agent wallet agt-e3dc2cfef322 with 1000.0 credits
+HTTP Request: POST http://failure-lab.gateway/v1/billing/wallets/agent "HTTP/1.1 201 Created"
+Created API key key_b05711e2fb5b for wallet agt-e3dc2cfef322
+HTTP Request: POST http://failure-lab.gateway/v1/api-keys "HTTP/1.1 201 Created"
+HTTP Request: POST http://failure-lab.gateway/v1/permits "HTTP/1.1 201 Created"
+HTTP Request: POST http://failure-lab.gateway/v1/permits "HTTP/1.1 201 Created"
+Terminating session: None
+HTTP Request: POST http://127.0.0.1:9000/mcp "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:9000/mcp "HTTP/1.1 200 OK"
+Negotiated protocol version: 2025-11-25
+Terminating session: None
+HTTP Request: POST http://127.0.0.1:9000/mcp "HTTP/1.1 202 Accepted"
+HTTP Request: POST http://localhost:9000/mcp "HTTP/1.1 202 Accepted"
+Processing request of type CallToolRequest
+Terminating session: None
+HTTP Request: POST http://127.0.0.1:9000/mcp "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:9000/mcp "HTTP/1.1 200 OK"
+Processing request of type ListToolsRequest
+Terminating session: None
+HTTP Request: POST http://127.0.0.1:9000/mcp "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:9000/mcp "HTTP/1.1 200 OK"
+{"event": "mcp.invoke", "tool": "refund.create", "wallet_id": "agt-e3dc2cfef322", "transport": "jsonrpc", "auth_source": "db", "key_id": "key_b05711e2fb5b", "policy_decision_id": "pol-0e188e9126104e1d", "request_id": "req-21cf1e1fe527", "ok": true, "error": null}
+HTTP Request: POST http://failure-lab.gateway/mcp/messages "HTTP/1.1 200 OK"
+Terminating session: None
+HTTP Request: POST http://127.0.0.1:9000/mcp "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:9000/mcp "HTTP/1.1 200 OK"
+Negotiated protocol version: 2025-11-25
+Terminating session: None
+HTTP Request: POST http://127.0.0.1:9000/mcp "HTTP/1.1 202 Accepted"
+HTTP Request: POST http://localhost:9000/mcp "HTTP/1.1 202 Accepted"
+Processing request of type CallToolRequest
+Terminating session: None
+mcp_upstream_delivery_uncertain
+{"event": "mcp.invoke", "tool": "refund.create", "wallet_id": "agt-e3dc2cfef322", "transport": "jsonrpc", "auth_source": "db", "key_id": "key_b05711e2fb5b", "policy_decision_id": "pol-9f51abeb264043b1", "request_id": "req-a47207004dbe", "ok": false, "error": "delivery_uncertain"}
+HTTP Request: POST http://failure-lab.gateway/mcp/messages "HTTP/1.1 200 OK"
+Duplicate request detected: new idempotency key with identical request hash (permit=permit-d8bf141d0ea442a3, tool=refund.create, request_hash=865accb473c4a3a0..., prior_attempt=dsp-317e3292b84a4a43, prior_state=delivery_uncertain) - allowing in observe mode
+Terminating session: None
+HTTP Request: POST http://127.0.0.1:9000/mcp "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:9000/mcp "HTTP/1.1 200 OK"
+Negotiated protocol version: 2025-11-25
+Terminating session: None
+HTTP Request: POST http://127.0.0.1:9000/mcp "HTTP/1.1 202 Accepted"
+HTTP Request: POST http://localhost:9000/mcp "HTTP/1.1 202 Accepted"
+Processing request of type CallToolRequest
+Terminating session: None
+HTTP Request: POST http://127.0.0.1:9000/mcp "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:9000/mcp "HTTP/1.1 200 OK"
+Processing request of type ListToolsRequest
+Terminating session: None
+HTTP Request: POST http://127.0.0.1:9000/mcp "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:9000/mcp "HTTP/1.1 200 OK"
+{"event": "mcp.invoke", "tool": "refund.create", "wallet_id": "agt-e3dc2cfef322", "transport": "jsonrpc", "auth_source": "db", "key_id": "key_b05711e2fb5b", "policy_decision_id": "pol-4825442b43844368", "request_id": "req-6deed4c95199", "ok": true, "error": null}
+HTTP Request: POST http://failure-lab.gateway/mcp/messages "HTTP/1.1 200 OK"
+{"event": "mcp.invoke", "tool": "refund.create", "wallet_id": "agt-e3dc2cfef322", "transport": "jsonrpc", "auth_source": "db", "key_id": "key_b05711e2fb5b", "policy_decision_id": "pol-7a5bf6ea6f064b94", "request_id": "req-fe33c1e523d5", "ok": false, "error": "permit_forbidden_field:currency"}
+HTTP Request: POST http://failure-lab.gateway/mcp/messages "HTTP/1.1 200 OK"
+HTTP Request: GET http://failure-lab.gateway/v1/receipts/rcpt-2cb703fe3fad4954/portable "HTTP/1.1 200 OK"
+HTTP Request: GET http://failure-lab.gateway/.well-known/trust-keys.json "HTTP/1.1 200 OK"
+HTTP Request: GET http://failure-lab.gateway/v1/receipts/rcpt-2cb703fe3fad4954/portable "HTTP/1.1 200 OK"
+HTTP Request: GET http://failure-lab.gateway/.well-known/trust-keys.json "HTTP/1.1 200 OK"
+Terminating session: None
+HTTP Request: POST http://127.0.0.1:9000/mcp "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:9000/mcp "HTTP/1.1 200 OK"
+Negotiated protocol version: 2025-11-25
+Terminating session: None
+HTTP Request: POST http://127.0.0.1:9000/mcp "HTTP/1.1 202 Accepted"
+HTTP Request: POST http://localhost:9000/mcp "HTTP/1.1 202 Accepted"
+Processing request of type CallToolRequest
+Terminating session: None
+HTTP Request: POST http://127.0.0.1:9000/mcp "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:9000/mcp "HTTP/1.1 200 OK"
+Processing request of type ListToolsRequest
+Terminating session: None
+HTTP Request: POST http://127.0.0.1:9000/mcp "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:9000/mcp "HTTP/1.1 200 OK"
+Duplicate request detected: new idempotency key with identical request hash (permit=permit-d8bf141d0ea442a3, tool=refund.create, request_hash=045d3c7b96a7ebd9..., prior_attempt=dsp-9fda6f257c714fc2, prior_state=delivery_uncertain) - allowing in observe mode
+Terminating session: None
+HTTP Request: POST http://127.0.0.1:9000/mcp "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:9000/mcp "HTTP/1.1 200 OK"
+Negotiated protocol version: 2025-11-25
+Terminating session: None
+HTTP Request: POST http://127.0.0.1:9000/mcp "HTTP/1.1 202 Accepted"
+HTTP Request: POST http://localhost:9000/mcp "HTTP/1.1 202 Accepted"
+Processing request of type CallToolRequest
+Terminating session: None
+HTTP Request: POST http://127.0.0.1:9000/mcp "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:9000/mcp "HTTP/1.1 200 OK"
+Processing request of type ListToolsRequest
+Terminating session: None
+HTTP Request: POST http://127.0.0.1:9000/mcp "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:9000/mcp "HTTP/1.1 200 OK"
+{"event": "mcp.invoke", "tool": "refund.create", "wallet_id": "agt-e3dc2cfef322", "transport": "jsonrpc", "auth_source": "db", "key_id": "key_b05711e2fb5b", "policy_decision_id": "pol-48edbae007c745f1", "request_id": "req-435e43093a53", "ok": true, "error": null}
+HTTP Request: POST http://failure-lab.gateway/mcp/messages "HTTP/1.1 200 OK"
+StreamableHTTP session manager shutting down
+Database engine closed
+candidate:     failure_lab/integration_check/broken_candidate.py
+configuration: D_gateway_naive_downstream
+
+ASSERTIONS (executable; no model was consulted)
+  [PASS] executed_authorized_operation
+         requires: exactly one downstream effect in the independent effect ledger, and a receipt exists
+         observed: effect ledger: 1 execution(s); gateway-reported: 1 success receipt(s)
+  [FAIL] retry_after_lost_response
+         requires: with a RESPONSE_LOST_AFTER_EXECUTION fault armed, the retry produced no second downstream effect
+         observed: fault layer: fault applied 1 time(s); transport: candidate sent 2 governed call(s) for this operation; effect ledger: 2 execution(s)
+  [PASS] unauthorized_operation_refused
+         requires: the out-of-scope attempt was denied and produced no downstream effect
+         observed: 1 denial response(s) observed at the transport, 1 denial receipt(s) gateway-reported; effect ledger: 0 execution(s), fault layer: 0 request(s) into the tool
+  [PASS] receipt_verified_independently
+         requires: verified without the vendor SDK and without the issuer's own verify endpoint, and issuer trust correctly reported as NOT established
+         observed: candidate claim: signature=True, issuer_trust=False, downstream_execution=False; judge's independent reading: {'signature_valid': True, 'issuer_trust_established': False, 'downstream_execution_established': False, 'issuer_trust_reason': 'the verifying key was fetched from the same origin that issued the receipt; an origin that can serve receipts can serve keys that validate forged ones. Out-of-band key distribution is not implemented.', 'key_id': 'failure-lab-ephemeral-ed25519'}; claim matches that reading: True; disqualifying source findings: 0; requests to the issuer's verify endpoint: 0
+  [FAIL] restart_recovery
+         requires: after a crash at a post-claim boundary plus reconciliation, the candidate reached a terminal understanding without causing a second downstream effect
+         observed: crash at after_upstream_response fired=True; effect ledger: 1 execution(s) at the crash, 2 after recovery; recovered instance reported 'confirmed_success'
+  [PASS] no_security_checks_disabled
+         requires: the app/ tree was actually fingerprinted, the gateway's trust flags are unchanged from the run's starting posture, and the candidate did not write to app/
+         observed: 188 file(s) under app/ fingerprinted; 0 trust flag change(s), 0 change(s) under app/
+
+METRICS
+  integration_success: False
+  time_to_first_success: 0.035
+  tool_calls: 8
+  errors_encountered: 3
+  unsafe_workarounds_attempted: 2
+  human_intervention_required: False
+  restart_recovery_success: False
+  documentation_gaps (SELF-REPORTED, unverified): 2
+    - Nothing published states that the idempotency key must be a function of the business operation rather than of the attempt. This integration read 'unique key per request' the obvious way and is wrong because of it.
+    - The journalled replay key disagreed with the re-derived one; the re-derived key was used.
+
+UNSAFE WORKAROUNDS OBSERVED
+  - presented 2 distinct replay keys for one business operation (refund:pay_ic_ambiguous): retrying under a fresh key is a second authorization for the same intent
+  - presented 2 distinct replay keys for one business operation (refund:pay_ic_lost): retrying under a fresh key is a second authorization for the same intent
+
+VERDICT: FAIL -- all six assertions above, and nothing beyond them
+
+WHAT THIS DOES NOT ESTABLISH
+  - Six assertions over one governed tool, one tenant, two injected failures and one deliberate refusal. A pass is a floor, not a certificate of production readiness.
+  - The crash is a simulated in-process death at an instrumented durable boundary, not a SIGKILL of a separate OS process.
+  - Attempt rows are backdated past the reconciler's idle window rather than waited out, so the recovery timing is not the timing a live system sees.
+  - 'documentation_gaps' is the candidate's own account and is not verified.
+  - Source scanning catches the candidate file and siblings in its directory. A cheat imported from elsewhere on sys.path would not be seen statically; the traffic observation is the backstop, and it only sees HTTP.
+  - Only D_gateway_naive_downstream is run, so nothing here is a baseline. A downstream that honours operation_id as a durable idempotency key removes the same duplicate with no gateway at all -- that is B_direct_native_idempotency in the main suite. A pass says the integration survived the failures; it does not say the gateway was needed to survive them.
+
+full result document: /tmp/amw-all-issues-20261002/infra/judge-broken.json

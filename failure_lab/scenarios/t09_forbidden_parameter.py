@@ -212,7 +212,9 @@ class ForbiddenParameter(Scenario):
         "general argument-validation audit of the tool interface.",
     )
 
-    async def run_configuration(self, target: Target, log: EventLog) -> ConfigurationResult:
+    async def run_configuration(
+        self, target: Target, log: EventLog
+    ) -> ConfigurationResult:
         gateway, tenant, _ = target.require_gateway()
         call_cost = Decimal(gateway.credits_per_call)
         generous = call_cost * 10
@@ -508,12 +510,16 @@ class ForbiddenParameter(Scenario):
         # and the run would still report PASS over the probes that remained.
         # The spec names these probes, so the run must show it made all of
         # them.
-        missing_permit = [name for name in PERMIT_PROBES if name not in {
-            row["probe"] for row in permit_rows
-        }]
-        missing_schema = [name for name in SCHEMA_PROBES if name not in {
-            row["probe"] for row in schema_rows
-        }]
+        missing_permit = [
+            name
+            for name in PERMIT_PROBES
+            if name not in {row["probe"] for row in permit_rows}
+        ]
+        missing_schema = [
+            name
+            for name in SCHEMA_PROBES
+            if name not in {row["probe"] for row in schema_rows}
+        ]
         if missing_permit or missing_schema:
             problems.append(
                 f"instrument: the probe matrix is incomplete -- "
@@ -668,9 +674,7 @@ class ForbiddenParameter(Scenario):
                         int(row["executions"]) for row in setup_calls
                     ),
                     "controls": len(controls),
-                    "controls_sound": sum(
-                        1 for row in controls if not row["problems"]
-                    ),
+                    "controls_sound": sum(1 for row in controls if not row["problems"]),
                     "control_executions": sum(
                         int(row["executions"]) for row in controls
                     ),
@@ -957,9 +961,7 @@ class ForbiddenParameter(Scenario):
                 f"No business effect landed, but the call was dispatched."
             )
         else:
-            parts.append(
-                "Both schema-shaped probes were also stopped before dispatch."
-            )
+            parts.append("Both schema-shaped probes were also stopped before dispatch.")
         clean_schema = [row for row in schema_rows if int(row["executions"]) == 0]
         parts.append(
             f"{len(clean_schema)}/{len(schema_rows)} schema-shaped probes "
@@ -1008,9 +1010,7 @@ class ForbiddenParameter(Scenario):
                 f"would have executed it."
             )
         charged = [
-            row
-            for row in schema_rows
-            if Decimal(row["net_charge_credits"]) != 0
+            row for row in schema_rows if Decimal(row["net_charge_credits"]) != 0
         ]
         if charged:
             risks.append(

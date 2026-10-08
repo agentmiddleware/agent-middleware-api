@@ -1,0 +1,89 @@
+FILE docs/qa/2026-10-02/UX-REPORT.md
+# UX QA report — 2026-10-02
+
+Resumed an interrupted sweep; existing logs/artifacts retained. Local-only browser pass, no credentials or authenticated production calls.
+
+## Written exploratory charters
+
+1. **Accessibility and keyboard (15 minutes):** Public overview/proof/compare/404 and operator index; axe WCAG 2.2 A/AA; landmark/headings/accessible names; skip link, tab order, accessibility options, calculator labels and status announcements. Goal: a keyboard or screen-reader user can discover the pilot and interpret evidence without hidden information.
+2. **Responsive and state behavior (10 minutes):** 1440px desktop, 390px mobile, 320px reflow; calculator empty/invalid/valid states; reduced motion; default and enlarged text; screenshot important states. Goal: no clipped controls, trapped focus, or ambiguous recovery.
+3. **Nielsen/developer experience (10 minutes):** Review ten heuristics against public pages and README/quickstart using code-backed evidence; inspect error recovery, user control, consistency, documentation accuracy, and stated limits. Goal: a new integrator can identify a safe local path and understand operational boundaries.
+
+Axe is a sampled automated check, not WCAG certification. Screen-reader semantics are inspected from the accessibility tree; no physical assistive-technology speech session. Browser outbound requests are blocked except loopback, and public API calls are mocked or blocked.
+
+## Results
+
+Pending browser tooling and local server readiness.
+
+FILE docs/qa/2026-10-02/BACKEND-REPORT.md
+# Backend QA pass
+
+Status: in progress. Resumed 2026-10-03 UTC from the interrupted sweep. PR: opened by orchestrator. CI status: pending at time of writing.
+
+## Scope and safety
+
+Worktree `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`, branch `qa/2026-10-02-sweep`, baseline `d45754e`. Test-only changes; no product fixes, commits, remote mutations, deployments, remote databases, billing calls, environment-file reads, or real credentials used. Runtime/test packages installed in `/private/tmp/amw-qa-python`. The only database operations use disposable local SQLite files created by the suite and a separately named surrogate probe DB.
+
+`backend_safety/sitecustomize.py` suppresses dotenv loaders, rejects external DNS/socket destinations before contact, denies external service CLIs, and rejects `.env` access. An absolute-path `.pth` hook in the isolated environment ensures Python subprocesses retain these controls even when an existing test replaces `PYTHONPATH`; a negative control passed. This is a Python audit guard, not an OS network sandbox. Reviewed shell/Node children use local mocked entrypoints or static assets. Three provider-CLI test modules are excluded to honor the explicit ban on running that CLI. PostgreSQL tests remain opt-in and skip because no test PostgreSQL URL or run flag is supplied.
+
+## Risk methods
+
+Highest priority is unauthorized execution, cross-wallet access, debit/dispatch replay integrity, ambiguous outcomes, and signing/evidence integrity. Existing route, service, database race, retry, and negative-security tests provide most of the pyramid; the QA additions fill public auth-contract, schema, and destination-boundary gaps. A 30-minute exploratory charter challenged replay-key encoding, credential precedence, schema metadata, and outbound IP equivalence classes. Optional Hypothesis runs 200 deterministic valid-Unicode cases; OpenAPI validation checks the generated document and unique operation IDs. No runtime dependency was added.
+
+## Verified evidence so far
+
+- `ruff check .`: passed after removing an unused import introduced in the QA harness.
+- `mypy app`: passed, 185 source files.
+- Fresh core OpenAPI validates: 73 paths, 76 operations, no duplicate operation IDs.
+- Lone-surrogate replay-key candidate was disproved: strict transport returns HTTP 400 `Invalid JSON`, with unchanged effects, ledger entries, permit count, and idempotency-record count. Retained a passing regression; BE-001 is a retired candidate, not a finding.
+- Both outbound URL guards accept multicast addresses because Python classifies them as `is_global=True`; no external connection was attempted.
+
+## Confirmed findings
+
+| ID | Severity | Title | Reproduction | Expected / actual | Evidence | Suggested fix |
+| --- | --- | --- | --- | --- | --- | --- |
+| BE-002 | Low | Supported Bearer [REDACTED] is missing from OpenAPI security schemes | Generate `app.openapi()` and inspect `components.securitySchemes`; compare `get_auth_context` accepting the Authorization header. | Expected an HTTP Bearer [REDACTED] usable by generated clients/Swagger authentication; actual only `APIKeyHeader` is declared. Runtime Bearer [REDACTED] itself is not bypassed. | `app/core/auth.py:28`, `app/core/auth.py:119`; `artifacts/backend-openapi-contract-probe.txt`; strict xfail `test_openapi_declares_supported_bearer_authentication`. | Declare optional HTTPBearer [REDACTED] API-key schemes with OR semantics while preserving authoritative Authorization precedence. |
+| BE-003 | Low | Destination guards accept multicast addresses as public targets | Call `check_outbound_url("http://224.0.0.1/")` and `check_outbound_url("http://[ff02::1]/")` with private targets disabled; call `validate_upstream_url` for corresponding HTTPS URLs in production configuration. | Expected rejection before connection; actual general guard returns None and upstream guard returns the multicast address. This demonstrates a classifier gap, not successful SSRF or tool execution. | `app/core/url_guard.py:41-49`, `app/services/upstream_mcp.py:406-412`; `artifacts/backend-ssrf-address-boundaries-retry.txt`; strict xfail multicast tests. | Reject `is_multicast` explicitly in both guards, alongside `is_global`; add literal and resolved-address regression cases. |
+
+## OWASP API Top 10 review lens
+
+| Risk | Evidence reviewed / validation |
+| --- | --- |
+| API1 Object authorization | `AuthContext.require_wallet_access`; existing tenant-isolation and replay-to-unauthorized-caller tests. |
+| API2 Authentication | Authoritative Authorization parsing, live API-key binding, JWT revocation checks; 24 added protected-route missing/malformed-credential cases. |
+| API3 Object property authorization | Existing permit scope, wallet constraints, KYC authority, and input-hardening tests; no universal mass-assignment proof claimed. |
+| API4 Resource consumption | Global streamed request-body cap, request throttling, response-size/time caps, bounded discovery; multicast classifier gap BE-003. |
+| API5 Function authorization | Bootstrap-admin guard and route auth inventory; generated-schema security discrepancy BE-002. |
+| API6 Sensitive business flows | Existing permit budgets, revocation, idempotency, dispatch fencing, reconciliation, and wallet-concurrency tests. |
+| API7 SSRF | URL checks, DNS-pinned upstream adapter, unsafe-origin tests; BE-003 low-priority guard completeness. DNS/network effects not exercised externally. |
+| API8 Misconfiguration | Strict-trust startup guardrails, production-posture tests, defaults; no hosted configuration inspected. |
+| API9 Inventory | Fresh generated OpenAPI; proof/dormant routers distinguished from core; no remote inventory. |
+| API10 Unsafe API consumption | Existing upstream schema/response-size/redirect/error/secret-reflection controls and local fake upstream tests. |
+
+## Results and limitations
+
+Full-suite, added-test, production-posture, SDK, and before/after coverage results will be inserted after execution. Local coverage cannot establish hosted PostgreSQL locks, real upstream side effects, provider behavior, or customer evidence. Dependency vulnerability metadata is owned by the coordination pass.
+
+FILE docs/qa/2026-10-02/GATE-REPORT.md
+# Independent QA gate review
+
+Status: in progress; final reports pending.
+
+Verified branch `qa/2026-10-02-sweep`, HEAD `d45754e`, expected GitHub remote, single worktree. Initial status contains only QA docs and the new QA backend test. Product files are unchanged. No commit, push, PR creation, deploy, credentials, environment-file reads or remote application calls were performed by gate.
+
+## Scope
+
+Local review-pr skill applied to QA additions. Reviewed root and tests AGENTS.md. Gate runs no pytest to avoid shared SQLite interference; test execution belongs to the backend pass. Every shell command after two reconstructed bootstrap reads is in GATE-SESSION.md with an artifact.
+
+## Checks so far
+
+- `run_logged.py` removes inherited application environment variables, avoids shell expansion, scrubs token-shaped output, and writes UTC command outcomes. It is not a secret detector or process sandbox.
+- `backend_safety/sitecustomize.py` suppresses dotenv reads and guards Python socket/DNS calls. Child processes overriding PYTHONPATH were identified with backend owner; an isolated-venv startup hook is being added. Non-Python subprocesses require separate inspection.
+- `browser-loopback.mjs` blocks non-loopback requests and service workers. `ux_csp_server.py` binds loopback only and applies resource/form restrictions. Browser tests must preserve their own page-route safety because page routes can override context routes.
+- Backend auth matrix and Unicode/OpenAPI expected failures are additive; xfails are strict and include finding IDs. Validator source at app/services/idempotency.py:89-124 accepts lone surrogates; the new test addresses a real UTF-8 boundary.
+- Gitleaks emitted 55 alerts (43 generic API key, 11 credential assignment, 1 Stripe). Independent AST review without literal output found SDK redaction/header fixtures, intentionally rejected dev keys, and mocked/local payment/email tests. No verified live-secret exposure. This does not prove the excluded environment/credential files or history are clean.
+
+## Remaining gate work
+
+Review final group reports, verify finding evidence/xfail outcomes, audit final path list, validate mandatory report metadata, and record browser/infrastructure limits without claiming a pass.
+

@@ -120,7 +120,14 @@ def percentile(values: Sequence[float], fraction: float) -> float | None:
 
 #: Statuses that mean the request was refused rather than admitted.
 REFUSED_STATUSES = frozenset(
-    {"rejected", "conflict", "key_conflict", "denied", "invalid_params", "insufficient_funds"}
+    {
+        "rejected",
+        "conflict",
+        "key_conflict",
+        "denied",
+        "invalid_params",
+        "insufficient_funds",
+    }
 )
 
 
@@ -247,7 +254,9 @@ class ScenarioResult:
     @property
     def matches_expectation(self) -> bool:
         observed = {c.configuration: c.verdict.value for c in self.configurations}
-        return all(observed.get(cfg) == verdict for cfg, verdict in self.expected.items())
+        return all(
+            observed.get(cfg) == verdict for cfg, verdict in self.expected.items()
+        )
 
     def mismatches(self) -> list[tuple[str, str, str]]:
         observed = {c.configuration: c.verdict.value for c in self.configurations}
@@ -287,7 +296,9 @@ class Scenario:
     expected: dict[str, str] = {}
     limitations: tuple[str, ...] = ()
     #: Configurations the scenario does not exercise get this verdict.
-    inapplicable_reason: str = "no gateway component to exercise in a direct integration"
+    inapplicable_reason: str = (
+        "no gateway component to exercise in a direct integration"
+    )
 
     def __init__(self, **options: Any) -> None:
         self.options = options
@@ -329,7 +340,9 @@ class Scenario:
     ) -> ScenarioResult:
         log = log or EventLog()
         started = _now()
-        selected = tuple(configurations) if configurations is not None else ALL_CONFIGURATIONS
+        selected = (
+            tuple(configurations) if configurations is not None else ALL_CONFIGURATIONS
+        )
         results: list[ConfigurationResult] = []
         for configuration in selected:
             if configuration not in self.configurations:
@@ -382,7 +395,9 @@ class Scenario:
 
     # -- helpers for subclasses ------------------------------------------
 
-    def not_applicable(self, configuration: Configuration, reason: str) -> ConfigurationResult:
+    def not_applicable(
+        self, configuration: Configuration, reason: str
+    ) -> ConfigurationResult:
         return ConfigurationResult(
             configuration=configuration.value,
             label=CONFIGURATION_LABELS[configuration],
@@ -420,7 +435,9 @@ class Scenario:
         """
         wanted = set(operation_ids) if operation_ids is not None else None
         effects = [
-            e for e in target.ledger.effects() if wanted is None or e.operation_id in wanted
+            e
+            for e in target.ledger.effects()
+            if wanted is None or e.operation_id in wanted
         ]
         crossings = [
             c
@@ -440,7 +457,9 @@ class Scenario:
             explicit_uncertain=sum(
                 1 for a in attempts if a.client_visible_state == "explicit_uncertain"
             ),
-            unresolved=sum(1 for a in attempts if a.client_visible_state == "no_information"),
+            unresolved=sum(
+                1 for a in attempts if a.client_visible_state == "no_information"
+            ),
             latency_p50_ms=percentile(latencies, 0.5),
             latency_p95_ms=percentile(latencies, 0.95),
         )

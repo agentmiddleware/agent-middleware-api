@@ -2,28 +2,86 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    Field,
+    StrictInt,
+    field_validator,
+    model_validator,
+)
 
+from app.core.credits import credit_amount_fits_storage
 from app.schemas.policies import PolicyBundleResponse
 
+# Permit and permit-request credit columns are Numeric(20, 8). A permit is
+# signed before it is persisted, so a value the column would round (a ninth
+# decimal, or a positive amount below 1e-8 that rounds to zero) yields a
+# permit whose stored terms no longer match its signature. Refuse those here.
+_CREDIT_DIGITS = 20
+_CREDIT_DECIMAL_PLACES = 8
 
-class PermitCreateRequest(BaseModel):
+
+def _require_storable_credit(amount: Decimal) -> Decimal:
+    if not credit_amount_fits_storage(amount):
+        raise ValueError("credit_amount_not_storable")
+    return amount
+
+
+# Numeric scale alone cannot detect large amounts rounded by SQLite's float
+# conversion. Apply this before signing, hashing approval terms, or acceptance.
+_PositiveStoredCredit = Annotated[
+    Decimal,
+    Field(gt=0, max_digits=_CREDIT_DIGITS, decimal_places=_CREDIT_DECIMAL_PLACES),
+    AfterValidator(_require_storable_credit),
+]
+
+
+class ActionPermitFields(BaseModel):
+    action_contract_version: int | None = Field(default=None, strict=True)
+    action_payload_hash: str | None = Field(
+        default=None, strict=True, pattern=r"^[0-9a-f]{64}$"
+    )
+    action_schema_id: str | None = Field(default=None, strict=True, min_length=1)
+    action_schema_version: str | None = Field(default=None, strict=True, min_length=1)
+    action_public_tool_id: str | None = Field(default=None, strict=True, min_length=1)
+    action_upstream_binding_hash: str | None = Field(
+        default=None, strict=True, pattern=r"^[0-9a-f]{64}$"
+    )
+
+    @model_validator(mode="after")
+    def _complete_action_binding(self) -> ActionPermitFields:
+        values = [getattr(self, name) for name in ActionPermitFields.model_fields]
+        if any(value is not None for value in values):
+            if any(value is None for value in values):
+                raise ValueError("incomplete_action_binding")
+            if self.action_contract_version != 1:
+                raise ValueError("unsupported_action_contract")
+        return self
+
+
+class PermitCreateRequest(ActionPermitFields):
     issuer_wallet_id: str
     subject_wallet_id: str
     subject_key_id: str | None = None
     scopes: list[str] = Field(default_factory=list)
     allowed_tools: list[str] = Field(default_factory=list)
-    max_credits: Decimal
+    max_credits: _PositiveStoredCredit
     expires_at: datetime
-    nonce: str | None = None
+    # permits.nonce is String(64).
+    nonce: str | None = Field(default=None, max_length=64)
     # Governed invokes under this permit block on a human decision (Sentinel)
     # before budget is reserved or credits are charged.
     requires_human_approval: bool = False
-    # Permit schema v2 constraints (all optional)
-    max_calls_per_tool: dict[str, int] = Field(default_factory=dict)
-    aggregate_value_cap: Decimal | None = None
+    # Permit schema v2 constraints (all optional). A limit below one call, or
+    # a cap of zero or less, could never admit a call; strict ints keep
+    # ``true`` from coercing to a one-call limit.
+    max_calls_per_tool: dict[str, Annotated[StrictInt, Field(ge=1)]] = Field(
+        default_factory=dict
+    )
+    aggregate_value_cap: _PositiveStoredCredit | None = None
     forbidden_fields: list[str] = Field(default_factory=list)
     recipient_domain: str | None = None
     # Opt-out from cross-key duplicate detection. When true, identical requests
@@ -45,7 +103,21 @@ class PermitCreateRequest(BaseModel):
         return value
 
 
-class PermitResponse(BaseModel):
+class ActionPermitCreateRequest(BaseModel):
+    """Trusted issuer selects one action; signed binding is server-derived."""
+
+    model_config = {"extra": "forbid"}
+    issuer_wallet_id: str
+    subject_wallet_id: str
+    subject_key_id: str | None = None
+    max_credits: _PositiveStoredCredit
+    expires_at: datetime
+    nonce: str | None = Field(default=None, max_length=64)
+    tool_name: str = Field(min_length=1)
+    arguments: dict[str, Any]
+
+
+class PermitResponse(ActionPermitFields):
     permit_id: str
     issuer_wallet_id: str
     subject_wallet_id: str
@@ -109,7 +181,9 @@ class PermitRequestCreate(BaseModel):
     subject_wallet_id: str
     allowed_tools: list[str] = Field(min_length=1)
     scopes: list[str] = Field(default_factory=list)
-    max_credits: Decimal = Field(gt=0)
+    # Hashed for the human at request time and stored as Numeric(20, 8), so
+    # a value the column would round fails its own integrity check at mint.
+    max_credits: _PositiveStoredCredit
     expires_at: datetime
     # Shown to the human approver: why the agent needs this authority.
     justification: str = Field(min_length=1, max_length=2000)
@@ -208,7 +282,7 @@ class PermitVerifyResponse(BaseModel):
     permit: PermitResponse | None = None
 
 
-class ReceiptResponse(BaseModel):
+class ReceiptResponse(ActionPermitFields):
     receipt_id: str
     idempotency_record_id: str | None = None
     dispatch_attempt_id: str | None = None

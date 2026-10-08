@@ -60,13 +60,17 @@ async def _debits(wallet_id: str) -> Decimal:
     factory = get_session_factory()
     async with factory() as session:
         rows = (
-            await session.execute(
-                select(LedgerEntryModel.amount).where(
-                    LedgerEntryModel.wallet_id == wallet_id,  # type: ignore[arg-type]
-                    LedgerEntryModel.action == "debit",  # type: ignore[arg-type]
+            (
+                await session.execute(
+                    select(LedgerEntryModel.amount).where(
+                        LedgerEntryModel.wallet_id == wallet_id,  # type: ignore[arg-type]
+                        LedgerEntryModel.action == "debit",  # type: ignore[arg-type]
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
     return sum((abs(amount) for amount in rows), Decimal("0"))
 
 
@@ -190,7 +194,10 @@ async def test_reclaiming_a_child_twice_cannot_mint_credits(
 
     async def _concurrent_reclaim() -> None:
         monkeypatch.setattr(
-            money._wallet_engine, "_session_factory", lambda: real_factory, raising=False
+            money._wallet_engine,
+            "_session_factory",
+            lambda: real_factory,
+            raising=False,
         )
         try:
             state["second"] = await money.reclaim_child_wallet(child_id)
@@ -598,7 +605,9 @@ async def test_a_period_rollover_is_not_charged_for_a_rejected_charge(
     monkeypatch.setattr(
         money._billing_engine,
         "_session_factory",
-        interleaving_factory(real_factory, _roll_the_period_and_freeze, state, fire_on=1),
+        interleaving_factory(
+            real_factory, _roll_the_period_and_freeze, state, fire_on=1
+        ),
     )
 
     result = await money.charge(

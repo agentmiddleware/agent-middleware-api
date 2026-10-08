@@ -128,7 +128,8 @@ async def caller(client, standard_mcp_enabled, clean_database, effects):
 def _standard_raw(raw_id: str, meta_key: str = '"k-1"') -> bytes:
     return (
         '{"jsonrpc":"2.0","id":%s,"method":"tools/call","params":{"name":"%s",'
-        '"arguments":{"text":"one"},"_meta":{"%s":%s}}}' % (raw_id, TOOL, META_KEY, meta_key)
+        '"arguments":{"text":"one"},"_meta":{"%s":%s}}}'
+        % (raw_id, TOOL, META_KEY, meta_key)
     ).encode("utf-8")
 
 
@@ -171,7 +172,9 @@ async def test_standard_unrenderable_json_is_refused_with_no_effect(
 async def test_standard_legacy_context_key_is_honored_and_replays(client, caller):
     body = _standard_call(context={"wallet_id": "ignored", "idempotency_key": "ctx-1"})
     first = _receipt_id(await client.post("/mcp", json=body, headers=caller["headers"]))
-    second = _receipt_id(await client.post("/mcp", json=body, headers=caller["headers"]))
+    second = _receipt_id(
+        await client.post("/mcp", json=body, headers=caller["headers"])
+    )
     assert first == second
     assert caller["effects"] == ["one"]
     assert await _debits(client, caller["provisioned"]) == 1
@@ -220,9 +223,13 @@ async def test_standard_utf8_header_key_agrees_with_the_same_meta_key(client, ca
     first = _receipt_id(
         await client.post("/mcp", json=_standard_call(meta=UTF8_KEY), headers=headers)
     )
-    header_only = _receipt_id(await client.post("/mcp", json=_standard_call(), headers=headers))
+    header_only = _receipt_id(
+        await client.post("/mcp", json=_standard_call(), headers=headers)
+    )
     meta_only = _receipt_id(
-        await client.post("/mcp", json=_standard_call(meta=UTF8_KEY), headers=caller["headers"])
+        await client.post(
+            "/mcp", json=_standard_call(meta=UTF8_KEY), headers=caller["headers"]
+        )
     )
     assert first == header_only == meta_only
     assert caller["effects"] == ["one"]
@@ -292,16 +299,27 @@ async def governed(client, clean_database, effects):
     }
 
 
-def _legacy_call(governed: dict, *, key: str | None = "legacy-1", **overrides: Any) -> dict:
+def _legacy_call(
+    governed: dict, *, key: str | None = "legacy-1", **overrides: Any
+) -> dict:
     context: dict[str, Any] = {
         "wallet_id": governed["provisioned"]["agent_wallet_id"],
         "permit_id": governed["permit"]["permit_id"],
     }
     if key is not None:
         context["idempotency_key"] = key
-    params: dict[str, Any] = {"name": TOOL, "arguments": {"text": "one"}, "mcpContext": context}
+    params: dict[str, Any] = {
+        "name": TOOL,
+        "arguments": {"text": "one"},
+        "mcpContext": context,
+    }
     params.update(overrides)
-    return {"jsonrpc": "2.0", "id": "legacy-1", "method": "tools/call", "params": params}
+    return {
+        "jsonrpc": "2.0",
+        "id": "legacy-1",
+        "method": "tools/call",
+        "params": params,
+    }
 
 
 @pytest.mark.anyio
@@ -319,7 +337,9 @@ async def test_legacy_unrenderable_json_is_invalid_json_with_no_effect(
 ):
     body = _legacy_call(governed)
     raw = json.dumps(body).replace('"legacy-1"', raw_id, 1).encode("utf-8")
-    response = await client.post("/mcp/messages", content=raw, headers=governed["headers"])
+    response = await client.post(
+        "/mcp/messages", content=raw, headers=governed["headers"]
+    )
     assert response.status_code == 400, response.text
     assert response.json()["detail"] == "Invalid JSON"
     assert governed["effects"] == []
@@ -339,12 +359,17 @@ async def test_legacy_deeply_nested_body_is_invalid_json_not_a_500(client):
     # ``detail`` string; a body it refuses to parse at all has no trustworthy
     # id to echo, so it is not a JSON-RPC error envelope.
     assert response.status_code == 400, response.text
-    assert response.json()["detail"] == "Invalid JSON: nesting depth exceeds the supported limit"
+    assert (
+        response.json()["detail"]
+        == "Invalid JSON: nesting depth exceeds the supported limit"
+    )
 
 
 @pytest.mark.anyio
 async def test_legacy_non_utf8_body_is_invalid_json_not_a_500(client):
-    response = await client.post("/mcp/messages", content=b"\xff\xfe\x00", headers=JSON_HEADERS)
+    response = await client.post(
+        "/mcp/messages", content=b"\xff\xfe\x00", headers=JSON_HEADERS
+    )
     assert response.status_code == 400, response.text
     assert response.json()["detail"] == "Invalid JSON"
 
@@ -354,7 +379,9 @@ async def test_legacy_params_key_inside_params_is_not_mistaken_for_the_envelope(
     client, governed
 ):
     body = _legacy_call(governed, params={"name": "some-other-tool", "arguments": {}})
-    response = await client.post("/mcp/messages", json=body, headers=governed["headers"])
+    response = await client.post(
+        "/mcp/messages", json=body, headers=governed["headers"]
+    )
     assert response.status_code == 200, response.text
     assert "result" in response.json(), response.text
     assert governed["effects"] == ["one"]
@@ -363,14 +390,20 @@ async def test_legacy_params_key_inside_params_is_not_mistaken_for_the_envelope(
 @pytest.mark.anyio
 async def test_legacy_utf8_header_key_matches_the_same_context_key(client, governed):
     headers = {**governed["headers"], "Idempotency-Key": UTF8_KEY.encode("utf-8")}
-    first = await client.post("/mcp/messages", json=_legacy_call(governed, key=UTF8_KEY), headers=headers)
-    replay = await client.post("/mcp/messages", json=_legacy_call(governed, key=None), headers=headers)
+    first = await client.post(
+        "/mcp/messages", json=_legacy_call(governed, key=UTF8_KEY), headers=headers
+    )
+    replay = await client.post(
+        "/mcp/messages", json=_legacy_call(governed, key=None), headers=headers
+    )
     assert _receipt_id(first) == _receipt_id(replay)
     assert governed["effects"] == ["one"]
 
 
 @pytest.mark.anyio
-async def test_legacy_non_utf8_header_key_is_refused_before_any_effect(client, governed):
+async def test_legacy_non_utf8_header_key_is_refused_before_any_effect(
+    client, governed
+):
     headers = {**governed["headers"], "Idempotency-Key": b"\xe9-1"}
     response = await client.post(
         "/mcp/messages", json=_legacy_call(governed, key=None), headers=headers

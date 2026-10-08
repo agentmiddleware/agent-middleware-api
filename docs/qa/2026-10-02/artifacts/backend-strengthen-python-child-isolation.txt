@@ -1,0 +1,1 @@
+Installed absolute-path QA safety hook in isolated test environment only: /private/tmp/amw-qa-python/lib/python3.13/site-packages/qa_safety.pth

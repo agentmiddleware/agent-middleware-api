@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.core.runtime_mode import is_simulation
+from app.db.database import get_session_factory
+from app.db.models import PolicyBundleModel
 from app.main import app
 from app.schemas.billing import ServiceCategory
 from app.services.audit_log import list_audit_events
@@ -375,3 +379,389 @@ async def test_policy_requiring_real_effects_denies_frozen_proof_surfaces(
         )
         assert evaluation.allowed is False, category
         assert evaluation.reason == "real_effects_required", category
+
+
+# --- Corrupt list columns fail closed ---------------------------------------
+#
+# A NULL allowed_tools_json / allowed_service_categories_json means "no
+# restriction on this dimension". A value that is present but is not a JSON
+# array of strings used to decode to None as well, so a corrupted restrictive
+# bundle silently allowed every tool (or category). These pin the fail-closed
+# reading: present-but-undecodable is a denial, never an unrestricted bundle.
+
+# Values the API never writes (it stores json.dumps(list[str]) or NULL). The
+# first four used to read as "no restriction"; the non-string lists read as an
+# allowlist of things that are not tool names.
+_CORRUPT_LIST_VALUES = [
+    "not-json",
+    '{"a": 1}',
+    '"policy-echo"',
+    "null",
+    "[1, 2]",
+    '["policy-echo", null]',
+]
+
+
+async def _set_policy_column(policy_id: str, column: str, value: str | None) -> None:
+    factory = get_session_factory()
+    async with factory() as session:
+        row = await session.get(PolicyBundleModel, policy_id)
+        assert row is not None
+        setattr(row, column, value)
+        session.add(row)
+        await session.commit()
+
+
+async def _restrictive_policy(client: AsyncClient, wallet_id: str) -> str:
+    created = await client.post(
+        "/v1/policies",
+        json={
+            "wallet_id": wallet_id,
+            "name": "Echo only, comms only",
+            "allowed_tools": ["policy-echo"],
+            "allowed_service_categories": ["agent_comms"],
+        },
+        headers={"X-API-Key": "test-key"},
+    )
+    assert created.status_code == 201
+    return created.json()["policy_id"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("corrupt", _CORRUPT_LIST_VALUES)
+async def test_corrupt_allowed_tools_column_denies(client, clean_database, corrupt):
+    wallet_id = await _wallet(client, "policy-corrupt-tools")
+    policy_id = await _restrictive_policy(client, wallet_id)
+    await _set_policy_column(policy_id, "allowed_tools_json", corrupt)
+
+    # Even the tool the bundle meant to allow is refused: the allowlist can no
+    # longer be read, so nothing it would have permitted can be shown.
+    for tool_name in ("policy-echo", "anything-else"):
+        evaluation = await evaluate_wallet_policy(
+            wallet_id=wallet_id,
+            tool_name=tool_name,
+            service_category="agent_comms",
+        )
+        assert evaluation.allowed is False, tool_name
+        assert evaluation.reason == "policy_constraint_corrupt", tool_name
+        assert evaluation.policy_id == policy_id
+        evaluated = evaluation.evaluated_constraints["evaluated"][-1]
+        assert evaluated["corrupt_constraint"] == "allowed_tools"
+        # The undecodable value itself is never echoed into audit metadata.
+        assert corrupt not in str(evaluation.evaluated_constraints)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("corrupt", [*_CORRUPT_LIST_VALUES, "[null]"])
+async def test_corrupt_allowed_categories_column_denies(
+    client, clean_database, corrupt
+):
+    wallet_id = await _wallet(client, "policy-corrupt-cats")
+    policy_id = await _restrictive_policy(client, wallet_id)
+    await _set_policy_column(policy_id, "allowed_service_categories_json", corrupt)
+
+    # service_category=None matters for "[null]": None in [None] used to pass.
+    for category in ("agent_comms", "iot_bridge", None):
+        evaluation = await evaluate_wallet_policy(
+            wallet_id=wallet_id,
+            tool_name="policy-echo",
+            service_category=category,
+        )
+        assert evaluation.allowed is False, category
+        assert evaluation.reason == "policy_constraint_corrupt", category
+        assert evaluation.policy_id == policy_id
+        evaluated = evaluation.evaluated_constraints["evaluated"][-1]
+        assert evaluated["corrupt_constraint"] == "allowed_service_categories"
+
+
+@pytest.mark.anyio
+async def test_null_list_columns_still_mean_no_restriction(client, clean_database):
+    wallet_id = await _wallet(client, "policy-null-lists")
+    policy_id = await _restrictive_policy(client, wallet_id)
+    await _set_policy_column(policy_id, "allowed_tools_json", None)
+    await _set_policy_column(policy_id, "allowed_service_categories_json", None)
+
+    evaluation = await evaluate_wallet_policy(
+        wallet_id=wallet_id,
+        tool_name="any-tool",
+        service_category="iot_bridge",
+    )
+    assert evaluation.allowed is True
+    assert evaluation.reason == "allowed"
+
+    # A well-formed list keeps its ordinary allowlist meaning.
+    await _set_policy_column(policy_id, "allowed_tools_json", '["policy-echo"]')
+    allowed = await evaluate_wallet_policy(wallet_id=wallet_id, tool_name="policy-echo")
+    assert allowed.allowed is True
+    denied = await evaluate_wallet_policy(wallet_id=wallet_id, tool_name="other-tool")
+    assert denied.allowed is False
+    assert denied.reason == "tool_not_allowed"
+
+
+@pytest.mark.anyio
+async def test_corrupt_bundle_on_one_wallet_does_not_touch_another(
+    client, clean_database
+):
+    corrupt_wallet = await _wallet(client, "policy-corrupt-a")
+    other_wallet = await _wallet(client, "policy-corrupt-b")
+    policy_id = await _restrictive_policy(client, corrupt_wallet)
+    await _set_policy_column(policy_id, "allowed_tools_json", "not-json")
+
+    other = await evaluate_wallet_policy(
+        wallet_id=other_wallet,
+        tool_name="policy-echo",
+        service_category="agent_comms",
+    )
+    assert other.allowed is True
+    assert other.policy_id is None
+
+
+@pytest.mark.anyio
+async def test_corrupt_bundle_reads_back_as_deny_all_not_unrestricted(
+    client, clean_database
+):
+    """The read path stays tolerant (no 500), but it must not report a corrupt
+    allowlist as null: null means "unrestricted", and a consumer of the
+    response model (the enterprise IGA bridge) enforces exactly what it says."""
+    wallet_id = await _wallet(client, "policy-corrupt-read")
+    policy_id = await _restrictive_policy(client, wallet_id)
+    await _set_policy_column(policy_id, "allowed_tools_json", "not-json")
+    await _set_policy_column(policy_id, "allowed_service_categories_json", '{"a": 1}')
+
+    got = await client.get(
+        f"/v1/policies/{policy_id}", headers={"X-API-Key": "test-key"}
+    )
+    assert got.status_code == 200
+    assert got.json()["allowed_tools"] == []
+    assert got.json()["allowed_service_categories"] == []
+
+    listed = await client.get(
+        f"/v1/policies?wallet_id={wallet_id}", headers={"X-API-Key": "test-key"}
+    )
+    assert listed.status_code == 200
+    assert listed.json()["policies"][0]["allowed_tools"] == []
+
+
+@pytest.mark.anyio
+async def test_wallet_key_cannot_clear_a_corrupt_restriction(client, clean_database):
+    """Unauthorized path: the agent the bundle restricts cannot turn the
+    corrupt column into NULL (unrestricted) itself."""
+    wallet_id = await _wallet(client, "policy-corrupt-unauth")
+    policy_id = await _restrictive_policy(client, wallet_id)
+    await _set_policy_column(policy_id, "allowed_tools_json", "not-json")
+
+    key = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": wallet_id, "key_name": "runtime"},
+        headers={"X-API-Key": "test-key"},
+    )
+    assert key.status_code == 201
+    patched = await client.patch(
+        f"/v1/policies/{policy_id}",
+        json={"allowed_tools": None},
+        headers={"X-API-Key": key.json()["api_key"]},
+    )
+    assert patched.status_code == 403
+
+    evaluation = await evaluate_wallet_policy(
+        wallet_id=wallet_id,
+        tool_name="policy-echo",
+        service_category="agent_comms",
+    )
+    assert evaluation.allowed is False
+    assert evaluation.reason == "policy_constraint_corrupt"
+
+
+@pytest.mark.anyio
+async def test_mcp_corrupt_policy_denies_before_charge(client, clean_database):
+    registry = get_service_registry()
+    registry.register_local(
+        service_id="policy-echo",
+        name="Policy Echo",
+        description="Allowed by the bundle until its allowlist was corrupted",
+        category=ServiceCategory.AGENT_COMMS,
+        func=lambda: {"ran": True},
+        credits_per_unit=2.0,
+        unit_name="call",
+    )
+    try:
+        wallet_id = await _wallet(client, "policy-corrupt-mcp")
+        policy_id = await _restrictive_policy(client, wallet_id)
+        await _set_policy_column(policy_id, "allowed_tools_json", "not-json")
+
+        response = await client.post(
+            "/mcp/messages",
+            json={
+                "jsonrpc": "2.0",
+                "id": "policy-corrupt-1",
+                "method": "tools/call",
+                "params": {
+                    "name": "policy-echo",
+                    "arguments": {},
+                    "mcpContext": {"wallet_id": wallet_id},
+                },
+            },
+            headers={"X-API-Key": "test-key"},
+        )
+        assert response.status_code == 200
+        assert response.json()["error"]["message"] == "policy_constraint_corrupt"
+
+        ledger = await client.get(
+            f"/v1/billing/ledger/{wallet_id}",
+            headers={"X-API-Key": "test-key"},
+        )
+        assert ledger.status_code == 200
+        assert all(
+            "policy-echo" not in entry.get("description", "")
+            for entry in ledger.json()["entries"]
+        )
+
+        events = await list_audit_events(wallet_id=wallet_id, tool="policy-echo")
+        assert len(events) == 1
+        assert events[0].ok is False
+        assert events[0].error == "policy_constraint_corrupt"
+        assert events[0].metadata["policy_id"] == policy_id
+    finally:
+        registry.unregister_local("policy-echo")
+
+
+# policy_bundles stores both limits as Numeric(18, 8) (ten integer digits),
+# name as String(255) and risk_tier as String(20). Starlette parses the bare
+# JSON literals Infinity/-Infinity/NaN, and ge=0 alone let +Infinity through.
+UNSTORABLE_LIMITS = [float("inf"), float("-inf"), float("nan"), 1e20, 1e10]
+UNSTORABLE_LIMIT_IDS = ["Infinity", "-Infinity", "NaN", "1e20", "1e10"]
+# The largest float the bounds accept; it still fits Numeric(18, 8).
+LARGEST_STORABLE_LIMIT = 9_999_999_999.0
+ADMIN = {"X-API-Key": "test-key"}
+
+
+def _raw_json(payload: dict) -> dict:
+    """httpx kwargs that send Infinity/NaN as the bare JSON literals."""
+    return {
+        "content": json.dumps(payload),
+        "headers": {**ADMIN, "Content-Type": "application/json"},
+    }
+
+
+async def _policy_total(client: AsyncClient, wallet_id: str) -> int:
+    listed = await client.get(f"/v1/policies?wallet_id={wallet_id}", headers=ADMIN)
+    assert listed.status_code == 200
+    return listed.json()["total"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("field", ["max_cost_per_action", "daily_spend_limit"])
+@pytest.mark.parametrize("value", UNSTORABLE_LIMITS, ids=UNSTORABLE_LIMIT_IDS)
+async def test_policy_create_refuses_unstorable_limits(
+    client, clean_database, field, value
+):
+    wallet_id = await _wallet(client, "policy-unstorable")
+    resp = await client.post(
+        "/v1/policies",
+        **_raw_json({"wallet_id": wallet_id, "name": "Unstorable", field: value}),
+    )
+    assert resp.status_code == 422, resp.text
+    assert await _policy_total(client, wallet_id) == 0
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("field", ["max_cost_per_action", "daily_spend_limit"])
+@pytest.mark.parametrize("value", UNSTORABLE_LIMITS, ids=UNSTORABLE_LIMIT_IDS)
+async def test_policy_patch_refuses_unstorable_limits(
+    client, clean_database, field, value
+):
+    wallet_id = await _wallet(client, "policy-unstorable-patch")
+    created = await client.post(
+        "/v1/policies",
+        json={
+            "wallet_id": wallet_id,
+            "name": "Patched",
+            "max_cost_per_action": 3,
+            "daily_spend_limit": 30,
+        },
+        headers=ADMIN,
+    )
+    assert created.status_code == 201
+    policy_id = created.json()["policy_id"]
+
+    resp = await client.patch(f"/v1/policies/{policy_id}", **_raw_json({field: value}))
+    assert resp.status_code == 422, resp.text
+    stored = await client.get(f"/v1/policies/{policy_id}", headers=ADMIN)
+    assert stored.json()["max_cost_per_action"] == 3.0
+    assert stored.json()["daily_spend_limit"] == 30.0
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"risk_tier": "HIGH"},
+        {"risk_tier": "med"},
+        {"risk_tier": "x" * 300},
+        {"name": "n" * 256},
+    ],
+    ids=["tier-uppercase", "tier-abbreviated", "tier-300-chars", "name-256-chars"],
+)
+async def test_policy_refuses_unknown_risk_tier_and_overlong_name(
+    client, clean_database, overrides
+):
+    """risk_tier is one of the planner's tiers (low/medium/high); anything
+    else never matched a requested tier, and over 20 characters it failed
+    the Postgres insert (500). name is String(255)."""
+    wallet_id = await _wallet(client, "policy-tier")
+    resp = await client.post(
+        "/v1/policies",
+        json={"wallet_id": wallet_id, "name": "Tiered", **overrides},
+        headers=ADMIN,
+    )
+    assert resp.status_code == 422, resp.text
+    assert await _policy_total(client, wallet_id) == 0
+
+    created = await client.post(
+        "/v1/policies",
+        json={"wallet_id": wallet_id, "name": "Tiered", "risk_tier": "low"},
+        headers=ADMIN,
+    )
+    assert created.status_code == 201
+    policy_id = created.json()["policy_id"]
+    patched = await client.patch(
+        f"/v1/policies/{policy_id}", json=overrides, headers=ADMIN
+    )
+    assert patched.status_code == 422, patched.text
+    stored = await client.get(f"/v1/policies/{policy_id}", headers=ADMIN)
+    assert stored.json()["risk_tier"] == "low"
+    assert stored.json()["name"] == "Tiered"
+
+
+@pytest.mark.anyio
+async def test_policy_fields_at_storage_limits_are_accepted(client, clean_database):
+    wallet_id = await _wallet(client, "policy-limits")
+    created = await client.post(
+        "/v1/policies",
+        json={
+            "wallet_id": wallet_id,
+            "name": "n" * 255,
+            "risk_tier": "high",
+            "max_cost_per_action": LARGEST_STORABLE_LIMIT,
+            "daily_spend_limit": 0,
+        },
+        headers=ADMIN,
+    )
+    assert created.status_code == 201, created.text
+    policy = created.json()
+    assert policy["name"] == "n" * 255
+    assert policy["risk_tier"] == "high"
+    assert policy["max_cost_per_action"] == LARGEST_STORABLE_LIMIT
+    assert policy["daily_spend_limit"] == 0.0
+
+    patched = await client.patch(
+        f"/v1/policies/{policy['policy_id']}",
+        json={
+            "risk_tier": "medium",
+            "daily_spend_limit": LARGEST_STORABLE_LIMIT,
+        },
+        headers=ADMIN,
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["risk_tier"] == "medium"
+    assert patched.json()["daily_spend_limit"] == LARGEST_STORABLE_LIMIT

@@ -154,8 +154,21 @@ class B2AClient:
         session_id: str,
         action: str,
         parameters: dict[str, Any],
+        *,
+        permit_id: str,
+        idempotency_key: str,
     ) -> dict[str, Any]:
-        """Execute a standardized AWI action."""
+        """Call the proof-only AWI route with its required governance headers.
+
+        Reuse the caller-owned idempotency key verbatim for one logical action.
+        The server remains responsible for authorization and accounting.
+        """
+        if not isinstance(permit_id, str) or not permit_id.strip():
+            raise ValueError("permit_id must not be blank")
+        if not isinstance(idempotency_key, str) or not idempotency_key.strip():
+            raise ValueError("idempotency_key must not be blank")
+        if len(idempotency_key) > 128:
+            raise ValueError("idempotency_key must be at most 128 characters")
         payload = {
             "session_id": session_id,
             "action": action,
@@ -163,7 +176,11 @@ class B2AClient:
         }
         response = await self._client.post(
             f"{self.config.api_url}/v1/awi/execute",
-            headers=self._headers(),
+            headers={
+                **self._headers(),
+                "X-Permit-Id": permit_id,
+                "Idempotency-Key": idempotency_key,
+            },
             json=payload,
         )
         response.raise_for_status()
@@ -183,21 +200,45 @@ class B2AClient:
         """Get the discovery manifest."""
         response = await self._client.get(
             f"{self.config.api_url}/v1/discover",
+            headers=self._headers(),
         )
         response.raise_for_status()
         return response.json()
 
-    async def charge(self, amount: float, description: str = "") -> dict[str, Any]:
-        """Deduct credits from wallet."""
-        payload = {
+    async def charge(
+        self,
+        service_category: str,
+        units: float = 1.0,
+        description: str = "",
+        *,
+        idempotency_key: str,
+        request_path: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Charge the configured wallet for metered usage.
+
+        Follows the ``POST /v1/billing/charge`` contract: the wallet, service
+        category and units travel as query parameters, and the server prices
+        the units (a caller cannot name an amount). ``idempotency_key`` is
+        required and caller-owned: retrying with the same key replays the
+        original outcome instead of debiting the wallet a second time.
+        """
+        # The server treats an empty Idempotency-Key as "no key", which would
+        # silently drop the double-charge protection, so refuse it here.
+        if not idempotency_key or not idempotency_key.strip():
+            raise ValueError("idempotency_key is required and must not be blank")
+        params: dict[str, str | float] = {
             "wallet_id": self.config.wallet_id,
-            "amount": amount,
-            "description": description,
+            "service": service_category,
+            "units": units,
         }
+        if description:
+            params["description"] = description
+        if request_path:
+            params["request_path"] = request_path
         response = await self._client.post(
             f"{self.config.api_url}/v1/billing/charge",
-            headers=self._headers(),
-            json=payload,
+            headers={**self._headers(), "Idempotency-Key": idempotency_key},
+            params=params,
         )
         response.raise_for_status()
         return response.json()

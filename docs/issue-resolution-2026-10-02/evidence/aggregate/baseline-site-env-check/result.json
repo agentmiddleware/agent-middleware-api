@@ -1,0 +1,35 @@
+{
+  "command": [
+    "/Users/sellers/Projects/agent-middleware-api/.venv/bin/python",
+    "-m",
+    "pytest",
+    "tests/test_site_agent_interface.py::test_site_build_blocks_missing_and_provisional_contacts",
+    "-x",
+    "-q",
+    "-ra",
+    "--basetemp=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/amw-aggregate-baseline-site-fjnoqn_r/pytest"
+  ],
+  "environment": {
+    "HOME": "/Users/sellers",
+    "USER": "sellers",
+    "LOGNAME": "sellers",
+    "TMPDIR": "/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/",
+    "LANG": "C.UTF-8",
+    "PATH": "/Users/sellers/Projects/agent-middleware-api/.venv/bin:/opt/homebrew/bin:/Library/Frameworks/Python.framework/Versions/3.12/bin:/usr/bin:/bin",
+    "ENVIRONMENT": "test",
+    "UV_OFFLINE": "1",
+    "UV_NO_SYNC": "1",
+    "PGPASSFILE": "/dev/null",
+    "PGSERVICEFILE": "/dev/null",
+    "PRE_COMMIT_HOME": "/Users/sellers/Documents/Codex/2026-10-01/task-4/precommit-cache",
+    "UV_CACHE_DIR": "/Users/sellers/Documents/Codex/2026-10-01/task-4/uv-cache",
+    "UV_PROJECT_ENVIRONMENT": "/Users/sellers/Projects/agent-middleware-api/.venv",
+    "DATABASE_URL": "sqlite+aiosqlite:////tmp/amw-all-issues-20261002/aggregate/baseline-site-env-check/targeted.db"
+  },
+  "workdir": "/Users/sellers/.openclaw/worktrees/amw-issues-20261002-aggregate",
+  "head_before": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+  "started_at": "2026-10-03T03:43:11.631463+00:00",
+  "exit_code": 0,
+  "finished_at": "2026-10-03T03:43:12.749543+00:00",
+  "head_after": "f82700f750862b6e51566a46dfc559e5b81e0a95"
+}

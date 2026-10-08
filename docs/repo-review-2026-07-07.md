@@ -1,5 +1,37 @@
 # Repo Review — 2026-07-07
 
+> **Status note (2026-10-01):** this review is a dated snapshot. Do not read
+> its ranked "Remaining risks" as open. Their state in current code:
+>
+> 1. **KYC IDOR — fixed.** All three handlers in `app/routers/kyc.py` call
+>    `auth.require_wallet_access`, and `tests/test_kyc.py` covers the
+>    cross-wallet cases (`test_db_key_cannot_*_other_wallet_*`). The KYC
+>    router is also dormant and unmounted in production (`app/main.py`).
+> 2. **Billing charge idempotency — opt-in only.** `POST /v1/billing/charge`
+>    accepts an `Idempotency-Key` header and replays the original outcome; a
+>    retry without the header still charges again. Legacy unpermitted MCP
+>    calls are off by default (`ALLOW_LEGACY_UNPERMITTED_MCP=false`).
+> 3. **Cross-transaction atomicity — replaced by crash recovery.**
+>    [`failure-semantics.md`](failure-semantics.md) defines the terminal
+>    outcome for each crash point. A local governed tool that crashes after
+>    its side effect is the documented exception: manual review, no receipt.
+> 4. **"Core depends only inward" — unchanged.** `tests/test_trust_boundary.py`
+>    still checks module-scope imports only.
+> 5. **Static analysis — fixed.** `ruff.toml` selects Pyflakes (`F`), and
+>    `mypy.ini` sets `check_untyped_defs = true` and disables no error codes.
+> 6. **Proof-surface sprawl — gated.** Proof-surface routers mount only with
+>    `ENABLE_PROOF_SURFACES=true`, which production-like environments refuse
+>    (`app/core/trust_mode.py`). `genesis.py`, `launch_sequence.py`, and
+>    `dashboard.py` are no longer in `app/`.
+>
+> Also since fixed: `app/core/tenant_validation.py` is deleted; the
+> `IdempotencyService.begin()` race is handled
+> (`test_concurrent_begin_with_same_key_never_raises_unhandled_error` in
+> `tests/test_idempotency.py`); the Dockerfile runs as `USER app`;
+> `docker-compose.prod.yml` and `.env.production` are retired
+> (`tests/test_onboarding_contract.py`); and API-key comparisons use
+> `hmac.compare_digest`.
+
 Scope: full-repo review against the framework in `AGENTS.md` (core trust loop,
 reality levels, security-critical areas) and the wedge defined in `WEDGE.md`
 and `README.md`. This is an analysis document, not a code change — no

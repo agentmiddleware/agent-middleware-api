@@ -1,0 +1,14 @@
+9:  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2016%2016'%20shape-rendering='crispEdges'%3E%3Crect%20width='16'%20height='16'%20fill='%230b1020'/%3E%3Cpath%20fill='%23e9edf8'%20d='M6%203h4v1H6zM5%204h1v1H5zm5%200h1v1h-1zM4%205h1v4H4zm7%200h1v4h-1zM5%209h6v1H5zM4%2010h1v3H4zm7%200h1v3h-1z'/%3E%3Crect%20x='12'%20y='2'%20width='2'%20height='2'%20fill='%23f0b43c'/%3E%3C/svg%3E">
+285:  <a class="skip-link" href="#main-content">Skip to content</a>
+287:    <a class="brand" href="https://www.thisisatest.tech/">Agent Middleware API</a>
+338:        <a href="https://www.thisisatest.tech/proof/">
+342:        <a href="https://api.thisisatest.tech/health/dependencies">
+346:        <a href="https://api.thisisatest.tech/.well-known/trust-keys.json">
+356:        <a href="https://api.thisisatest.tech/.well-known/agent.json">
+360:        <a href="https://api.thisisatest.tech/llms.txt">
+377:  "https://api.thisisatest.tech/v1/me/permits"
+381:  "https://api.thisisatest.tech/v1/me/receipts"
+385:  "https://api.thisisatest.tech/v1/me/audit/events"</code></pre>
+400:    <a href="https://www.thisisatest.tech/">Agent Middleware API</a>
+401:    <a href="https://www.thisisatest.tech/proof/">Proof</a>
+402:    <a href="https://api.thisisatest.tech/health/dependencies">Runtime truth</a>

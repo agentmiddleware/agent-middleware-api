@@ -11,6 +11,7 @@ from datetime import datetime
 
 class AspectRatio(str, Enum):
     """Target aspect ratios for reframing."""
+
     LANDSCAPE_16_9 = "16:9"
     PORTRAIT_9_16 = "9:16"
     SQUARE_1_1 = "1:1"
@@ -19,6 +20,7 @@ class AspectRatio(str, Enum):
 
 class Platform(str, Enum):
     """Supported distribution platforms."""
+
     YOUTUBE_SHORTS = "youtube_shorts"
     TIKTOK = "tiktok"
     INSTAGRAM_REELS = "instagram_reels"
@@ -28,6 +30,7 @@ class Platform(str, Enum):
 
 class CaptionStyle(str, Enum):
     """Animated caption styles (80% of social video is watched muted)."""
+
     WORD_BY_WORD = "word_by_word"
     SENTENCE_HIGHLIGHT = "sentence_highlight"
     KARAOKE = "karaoke"
@@ -36,6 +39,7 @@ class CaptionStyle(str, Enum):
 
 class VideoUploadRequest(BaseModel):
     """Initiate a video upload for processing."""
+
     source_url: str | None = Field(
         None,
         description="URL of the source video to fetch. Mutually exclusive with upload.",
@@ -57,6 +61,7 @@ class VideoUploadRequest(BaseModel):
 
 class VideoUploadResponse(BaseModel):
     """Response after initiating video upload."""
+
     video_id: str
     upload_url: str | None = Field(
         None,
@@ -70,6 +75,7 @@ class VideoUploadResponse(BaseModel):
 
 class ViralHook(BaseModel):
     """A detected high-engagement moment in the source video."""
+
     hook_id: str
     start_time_seconds: float
     end_time_seconds: float
@@ -94,6 +100,7 @@ class ViralHook(BaseModel):
 
 class ClipGenerationRequest(BaseModel):
     """Request to generate platform-ready clips from a processed video."""
+
     video_id: str
     hooks: list[str] | None = Field(
         None,
@@ -121,6 +128,7 @@ class ClipGenerationRequest(BaseModel):
 
 class GeneratedClip(BaseModel):
     """A single generated clip ready for distribution."""
+
     clip_id: str
     video_id: str
     hook_id: str
@@ -137,6 +145,7 @@ class GeneratedClip(BaseModel):
 
 class ClipGenerationResponse(BaseModel):
     """Result of clip generation."""
+
     video_id: str
     clips: list[GeneratedClip]
     total_generated: int
@@ -145,6 +154,7 @@ class ClipGenerationResponse(BaseModel):
 
 class DistributionRequest(BaseModel):
     """Push clips directly to social platforms via API."""
+
     clip_ids: list[str] = Field(
         ...,
         description="IDs of clips to distribute.",
@@ -168,14 +178,14 @@ class DistributionRequest(BaseModel):
     optimize_schedule: bool = Field(
         default=True,
         description=(
-            "Let the algorithm pick optimal posting windows based on "
-            "engagement data."
+            "Let the algorithm pick optimal posting windows based on engagement data."
         ),
     )
 
 
 class DistributionResult(BaseModel):
     """Result of a single platform distribution."""
+
     clip_id: str
     platform: Platform
     status: str
@@ -187,6 +197,7 @@ class DistributionResult(BaseModel):
 
 class DistributionResponse(BaseModel):
     """Aggregated distribution results."""
+
     results: list[DistributionResult]
     total_distributed: int
     total_failed: int

@@ -50,9 +50,7 @@ def upgrade() -> None:
             nullable=False,
             server_default="bold_impact",
         ),
-        sa.Column(
-            "aspect_ratio", sa.String(10), nullable=False, server_default="9:16"
-        ),
+        sa.Column("aspect_ratio", sa.String(10), nullable=False, server_default="9:16"),
         sa.Column(
             "created_at",
             sa.DateTime(),
@@ -99,7 +97,11 @@ def upgrade() -> None:
         sa.Column("hooks_json", sa.Text(), nullable=True),
         sa.Column("pipeline_ids_json", sa.Text(), nullable=True),
         sa.Column(
-            "status", sa.String(30), nullable=False, server_default="running", index=True
+            "status",
+            sa.String(30),
+            nullable=False,
+            server_default="running",
+            index=True,
         ),
         sa.Column(
             "owner_key", sa.String(255), nullable=False, server_default="", index=True

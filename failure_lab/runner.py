@@ -71,8 +71,16 @@ from typing import Any
 
 from failure_lab import TEST_DEFINITION_VERSION
 from failure_lab import __version__ as LAB_VERSION
-from failure_lab.claims import ClaimsManifest, build_claims_manifest, write_claims_manifest
-from failure_lab.configurations import ALL_CONFIGURATIONS, CONFIGURATION_LABELS, Configuration
+from failure_lab.claims import (
+    ClaimsManifest,
+    build_claims_manifest,
+    write_claims_manifest,
+)
+from failure_lab.configurations import (
+    ALL_CONFIGURATIONS,
+    CONFIGURATION_LABELS,
+    Configuration,
+)
 from failure_lab.evidence import (
     BundleResult,
     SecretLeakError,
@@ -404,7 +412,9 @@ def harvest_evidence(
             exported = extra.get(PORTABLE_RECEIPTS_KEY)
             if isinstance(exported, Mapping):
                 receipts.update({str(k): v for k, v in exported.items()})
-            elif isinstance(exported, Sequence) and not isinstance(exported, (str, bytes)):
+            elif isinstance(exported, Sequence) and not isinstance(
+                exported, (str, bytes)
+            ):
                 for index, bundle in enumerate(exported):
                     identifier = (
                         str(bundle.get("receipt_id"))
@@ -521,11 +531,17 @@ class LabRun:
                     "verdict": result.verdict.value,
                     "matches_expectation": result.matches_expectation,
                     "mismatches": [
-                        {"configuration": cfg, "expected": expected, "observed": observed}
+                        {
+                            "configuration": cfg,
+                            "expected": expected,
+                            "observed": observed,
+                        }
                         for cfg, expected, observed in result.mismatches()
                     ],
                     "conclusion_kind": (
-                        comparison.conclusion.kind.value if comparison else "inconclusive"
+                        comparison.conclusion.kind.value
+                        if comparison
+                        else "inconclusive"
                     ),
                 }
             )
@@ -567,7 +583,11 @@ class LabRun:
 
 
 def _reproduction_command(
-    *, test_ids: Sequence[str] | None, tier: str | None, seed: int, source: TrafficSource
+    *,
+    test_ids: Sequence[str] | None,
+    tier: str | None,
+    seed: int,
+    source: TrafficSource,
 ) -> str:
     parts = ["python -m failure_lab run"]
     if tier:
@@ -640,7 +660,9 @@ async def run_lab(
     random.seed(seed)
 
     options = dict(scenario_options or {})
-    scenarios = select_scenarios(list(test_ids) if test_ids else None, tier=tier, **options)
+    scenarios = select_scenarios(
+        list(test_ids) if test_ids else None, tier=tier, **options
+    )
     selected_ids = [scenario.test_id for scenario in scenarios]
     command = reproduction_command or _reproduction_command(
         test_ids=selected_ids, tier=tier, seed=seed, source=source
@@ -826,6 +848,7 @@ async def _execute(
         results,
         environment=environment_document,
         receipts=receipts,
+        trust_keys=key_document,
         verification_results=verifications,
         secret_values=[
             admin_api_key,
@@ -848,13 +871,9 @@ async def _execute(
         archive=archive,
     )
 
-    # After the bundle, not before it. build_evidence_bundle scans its own
-    # bytes for the run's secrets and raises without leaving a staging
-    # directory behind; writing this file first meant a leak that aborted the
-    # run still left a key document sitting in the caller's --output
-    # directory. Beside the bundle rather than inside it, because a file the
-    # manifest does not list makes verify_bundle_integrity report the bundle
-    # as tampered with -- `python -m failure_lab verify` looks for it here.
+    # Preserve the sibling for callers using its original location. The bundle
+    # now carries its own manifest-covered, leak-scanned copy for offline use.
+    # Write this only after the bundle's secret scan has succeeded.
     if key_document is not None:
         (directory / TRUST_KEYS_FILENAME).write_text(
             _json_text(redact(key_document)), encoding="utf-8"
@@ -903,9 +922,7 @@ async def _execute(
     )
 
     run_document_path = directory / RUN_DOCUMENT_FILENAME
-    run_document_path.write_text(
-        _json_text(run.redacted_document()), encoding="utf-8"
-    )
+    run_document_path.write_text(_json_text(run.redacted_document()), encoding="utf-8")
 
     _assert_siblings_are_clean(
         [
@@ -1043,7 +1060,9 @@ def summary_lines(run: LabRun) -> list[str]:
     """The short, factual stdout summary: what ran, what it concluded, where it went."""
     lines: list[str] = []
     rows = run.verdict_rows()
-    lines.append(f"run {run.run_id}  definitions {TEST_DEFINITION_VERSION}  seed {run.environment['seed']}")
+    lines.append(
+        f"run {run.run_id}  definitions {TEST_DEFINITION_VERSION}  seed {run.environment['seed']}"
+    )
     # Tri-state on purpose. ``dirty`` is None when git status could not be
     # run, and printing nothing for that case renders a tree nobody inspected
     # exactly like a clean one.
@@ -1057,16 +1076,22 @@ def summary_lines(run: LabRun) -> list[str]:
         f"gateway {run.environment['gateway_version']} "
         f"@ {str(run.environment['gateway_commit'])[:12]}{tree}"
     )
-    lines.append(f"traffic source {run.environment['traffic_source']} (not counted as a customer)"
-                 if run.environment["traffic_source"] != TrafficSource.HUMAN_CUSTOMER.value
-                 else "traffic source human_customer (declared explicitly by the caller)")
+    lines.append(
+        f"traffic source {run.environment['traffic_source']} (not counted as a customer)"
+        if run.environment["traffic_source"] != TrafficSource.HUMAN_CUSTOMER.value
+        else "traffic source human_customer (declared explicitly by the caller)"
+    )
     lines.append("")
     if not run.results:
         lines.append("NO SCENARIOS WERE SELECTED. This run establishes nothing.")
     else:
         lines.append(f"{'TEST':<6}{'VERDICT':<16}{'CONCLUSION':<34}TITLE")
         for row in rows:
-            flag = "" if row["matches_expectation"] else "  <- differs from documented expectation"
+            flag = (
+                ""
+                if row["matches_expectation"]
+                else "  <- differs from documented expectation"
+            )
             lines.append(
                 f"{row['test_id']:<6}{row['verdict']:<16}{row['conclusion_kind']:<34}"
                 f"{row['title']}{flag}"

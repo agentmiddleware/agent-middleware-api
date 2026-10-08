@@ -124,7 +124,9 @@ async def summarize_url(url: str, max_length: int = 200) -> dict:
     credits_per_unit=25.0,
     unit_name="image",
 )
-async def generate_image(prompt: str, style: str = "default", size: str = "512x512") -> dict:
+async def generate_image(
+    prompt: str, style: str = "default", size: str = "512x512"
+) -> dict:
     """
     Generate an image from a text prompt.
 
@@ -148,7 +150,9 @@ async def generate_image(prompt: str, style: str = "default", size: str = "512x5
 def on_registration(service_id: str, func, input_schema, output_schema):
     """Callback when a tool is registered."""
     print(f"Registered tool: {service_id}")
-    print(f"  Input schema: {json.dumps(input_schema, indent=2) if input_schema else 'None'}")
+    print(
+        f"  Input schema: {json.dumps(input_schema, indent=2) if input_schema else 'None'}"
+    )
 
 
 async def register_tools():
@@ -166,7 +170,9 @@ async def register_tools():
     print("\n  2. Call a tool via MCP:")
     print("     curl -X POST http://localhost:8000/mcp/messages \\")
     print("       -H 'Content-Type: application/json' \\")
-    print("       -d '{\"jsonrpc\": \"2.0\", \"method\": \"tools/call\", \"params\": {\"name\": \"data-processor\", \"arguments\": {\"operation\": \"uppercase\", \"data\": \"hello\"}}}'")
+    print(
+        '       -d \'{"jsonrpc": "2.0", "method": "tools/call", "params": {"name": "data-processor", "arguments": {"operation": "uppercase", "data": "hello"}}}\''
+    )
 
 
 async def main_list():
@@ -189,6 +195,7 @@ async def main_generate():
 async def main_serve():
     """Run standalone MCP server."""
     from b2a_sdk.mcp import serve
+
     serve(
         transport="stdio",
         api_url=os.getenv("B2A_API_URL", "http://localhost:8000"),
@@ -202,7 +209,9 @@ if __name__ == "__main__":
     parser.add_argument("--register", action="store_true", help="Register tools")
     parser.add_argument("--list", action="store_true", help="List available tools")
     parser.add_argument("--generate", action="store_true", help="Generate tools.json")
-    parser.add_argument("--serve", action="store_true", help="Run standalone MCP server")
+    parser.add_argument(
+        "--serve", action="store_true", help="Run standalone MCP server"
+    )
     args = parser.parse_args()
 
     if args.register:

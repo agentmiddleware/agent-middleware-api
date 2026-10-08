@@ -71,7 +71,9 @@ class SameKeyDifferentArguments(Scenario):
         "any changed field behaves the same way; only one is exercised here.",
     )
 
-    async def run_configuration(self, target: Target, log: EventLog) -> ConfigurationResult:
+    async def run_configuration(
+        self, target: Target, log: EventLog
+    ) -> ConfigurationResult:
         configuration = target.configuration
 
         def emit(step: str, message: str, **data: Any) -> None:
@@ -89,7 +91,9 @@ class SameKeyDifferentArguments(Scenario):
         conflict_operation_id, conflicting_refund = self.refund(
             "pay_t02", amount=_CONFLICTING_AMOUNT
         )
-        if conflict_operation_id != operation_id:  # pragma: no cover - guards the premise
+        if (
+            conflict_operation_id != operation_id
+        ):  # pragma: no cover - guards the premise
             raise RuntimeError(
                 "T02 premise broken: the two payloads must name the same business operation"
             )
@@ -477,6 +481,12 @@ def _deltas(
         return {}
     return {
         name: int(after[name]) - int(before[name])
-        for name in ("sent_attempts", "debits", "refunds", "net_debits", "receipts",
-                     "idempotency_records")
+        for name in (
+            "sent_attempts",
+            "debits",
+            "refunds",
+            "net_debits",
+            "receipts",
+            "idempotency_records",
+        )
     }

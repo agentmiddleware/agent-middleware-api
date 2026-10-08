@@ -1,0 +1,25 @@
+rg: app/api/routes/awi.py: No such file or directory (os error 2)
+README.md:266:releases. **It is not published to PyPI, and there is no TypeScript package** —
+awi_sdk/typescript/index.ts:2: * AWI TypeScript SDK — Phase 8
+awi_sdk/typescript/index.ts:3: * TypeScript client for Agentic Web Interface (AWI) services
+awi_sdk/typescript/index.ts:21:  max_steps: number;
+awi_sdk/typescript/index.ts:106: * AWI TypeScript Client
+awi_sdk/typescript/index.ts:135:      maxRedirects: 0,
+awi_sdk/typescript/index.ts:157:      max_steps: options?.maxSteps || 100,
+awi_sdk/typescript/index.ts:279:      priority: priority || 5,
+awi_sdk/typescript/package.json:2:  "name": "@agent-middleware/awi-sdk",
+awi_sdk/typescript/package.json:4:  "description": "TypeScript SDK for Agentic Web Interface (AWI)",
+awi_sdk/python/awi_sdk/client.py:96:        max_steps: int = 100,
+awi_sdk/python/awi_sdk/client.py:104:            max_steps: Maximum number of actions in this session
+awi_sdk/python/awi_sdk/client.py:114:                "max_steps": max_steps,
+awi_sdk/python/awi_sdk/client.py:272:        priority: int = 5,
+app/schemas/oracle.py:66:    priority: int = Field(
+awi_sdk/python/awi_sdk/models.py:96:    max_steps: int = 100
+awi_sdk/python/awi_sdk/models.py:132:    priority: int
+app/schemas/awi_enhanced.py:410:    max_steps: int = Field(default=100, ge=1, le=1000)
+app/schemas/awi.py:152:class AWISessionCreate(BaseModel):
+app/schemas/awi.py:157:    max_steps: int = Field(
+app/schemas/awi.py:183:    max_steps: int
+app/schemas/awi.py:266:class AWITaskCreate(BaseModel):
+app/schemas/awi.py:275:    priority: int = Field(
+app/schemas/awi.py:293:    priority: int

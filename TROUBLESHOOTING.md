@@ -21,16 +21,21 @@ You are running commands from outside the repo root. `cd` into `agent-middleware
 
 ## Local API startup fails
 
-### `ValueError: TRUST_SIGNING_PRIVATE_KEY_B64 must be a 32-byte Ed25519 seed`
-Generate a key and export it:
+### `SigningKeyError: trust_signing_private_key_required`
+Trust mode is on (the default) and `TRUST_SIGNING_PRIVATE_KEY_B64` is empty. A
+value that is not strict base64 of a 32-byte Ed25519 seed fails instead with
+`SigningKeyError: invalid_trust_signing_private_key`. Generate a key and export it:
 ```bash
 python3 -c 'import base64, secrets; print(base64.b64encode(secrets.token_bytes(32)).decode())'
 export TRUST_SIGNING_PRIVATE_KEY_B64='<output>'
 ```
 Save it in `.env` (gitignored) for reuse across restarts.
 
-### `RuntimeError: Production-like configuration requires durable state`
-You set `ENVIRONMENT=production` but used SQLite or left `STATE_BACKEND=sqlite`. Either:
+### `DurableStateConfigError: STATE_BACKEND=sqlite is not allowed in production-like environments`
+You set `ENVIRONMENT=production` (or another production-like value) with
+`STATE_BACKEND=sqlite`. `STATE_BACKEND=memory` fails the same way
+(`STATE_BACKEND=memory is not allowed in production-like environments`).
+Either:
 - Switch to `ENVIRONMENT=local` for local development, **or**
 - Set `STATE_BACKEND=postgres` and provide a `DATABASE_URL` with `postgresql+asyncpg://`.
 
@@ -43,7 +48,7 @@ debit a balance only one of them fits inside. Either:
 - Switch to `ENVIRONMENT=local` for local development, **or**
 - Point `DATABASE_URL` at PostgreSQL (`postgresql+asyncpg://...`).
 
-This is a different check from `STATE_BACKEND` below: that one governs the
+This is a different check from `STATE_BACKEND` above: that one governs the
 key/value state store, this one governs the ORM engine. Satisfying one does
 not satisfy the other.
 
@@ -52,7 +57,7 @@ Wallets, permits, receipts, and the ledger are relational. Without
 `DATABASE_URL` the engine is never created and the trust plane has nowhere
 durable to record what it authorized. Set it to your PostgreSQL DSN.
 
-### `RuntimeError: ENABLE_PROOF_SURFACES must be false in production`
+### `TrustModeGuardrailError: ENABLE_PROOF_SURFACES must be false in production-like environments`
 Set `ENABLE_PROOF_SURFACES=false`. Proof surfaces are for local demos only.
 
 ### `alembic.util.exc.CommandError: Can't locate revision identified by '...'`
@@ -76,17 +81,27 @@ Direct top-ups are disabled by design. Use `POST /v1/billing/top-up/prepare` to 
 - Check that `X-API-Key` header is present and matches a valid wallet-scoped or bootstrap key.
 - Bootstrap keys go in `VALID_API_KEYS` (comma-separated). Wallet keys are created via `POST /v1/api-keys`.
 - Wallet-scoped keys can only access their own wallet's permits and receipts.
+- On REST MCP invocation, a permit denial is a `403` whose `detail` carries the
+  reason (for example `permit_required`, `permit_not_found`, `permit_expired`,
+  `permit_revoked`, `permit_tool_not_allowed`); on `/mcp/messages` the same
+  reasons arrive as JSON-RPC error `-32003`. Verify the permit is valid, not
+  expired or revoked, and names the tool you are calling.
 
 ### `409 Conflict` on permit creation
 You reused an `Idempotency-Key` with different payload. Use a fresh UUID for each distinct request, or replay the exact same payload.
 
-### `422 Unprocessable Entity` on MCP invocation
-- Verify the permit is valid and not expired.
-- Check that the `idempotency_key` in `mcpContext` is unique per invocation (not the same as the permit's idempotency key).
-- Confirm the tool name exists in `/mcp/tools.json`.
+### Errors on MCP invocation
+`POST /mcp/messages` returns these as JSON-RPC errors in an HTTP `200`; the deprecated REST route (`POST /mcp/tools/{service_id}/invoke`) answers with the REST status shown.
+- `idempotency_key_reused` (`-32603`; REST `400`): the `idempotency_key` in `mcpContext` was already used for a different payload. Use a fresh key per distinct invocation (not the same as the permit's idempotency key).
+- `idempotency_key_required` (`-32003`; REST `400`): governed calls need an `idempotency_key` in `mcpContext`.
+- `Tool not found: <name>` (`-32001`; REST `404`): confirm the tool name exists in `/mcp/tools.json`.
+- `Missing wallet_id in mcpContext` (`-32602`): `wallet_id` must sit inside `params.mcpContext`.
+- REST `422 Unprocessable Entity`: the body failed schema validation (for example `name` is missing). The REST body spells the context `mcp_context`, not `mcpContext`.
 
 ### `delivery_uncertain` receipt
-The upstream MCP server accepted the request but the response was lost in transit. The charge stands. Do not retry automatically — inspect the upstream state manually. See [docs/partner-first-tool-runbook.md](docs/partner-first-tool-runbook.md).
+The gateway claimed a send but has no trustworthy terminal result. Delivery and the downstream effect may or may not have occurred; this receipt does not prove upstream acceptance or execution. Under the configured conservative policy, the charge stands and replaying the same key returns the uncertain outcome without redispatching. Do not retry automatically. Reconcile against authoritative downstream state before making a new attempt. See [docs/partner-first-tool-runbook.md](docs/partner-first-tool-runbook.md).
+
+On the standard `/mcp` endpoint this outcome arrives as a `tools/call` result with `isError: true` and `_meta["io.agentmiddleware/outcome"].status` set to `"unknown"`, with the do-not-resend instruction in its text, not as a JSON-RPC `-32005` error. `/mcp/messages` and the REST surface keep `-32005`.
 
 ---
 

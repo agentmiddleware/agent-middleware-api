@@ -19,11 +19,12 @@ import asyncio
 import json
 import os
 import re
+import time
 import uuid
 import logging
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 
 from sqlalchemy import select, func
 from sqlalchemy.sql.elements import ColumnElement
@@ -88,6 +89,15 @@ class TopicACLEngine:
         if not acl:
             return False  # Deny-by-default
 
+        # Denials apply across all matching rules, even when an allow is more
+        # specific or appeared first in the supplied mapping.
+        for pattern, permission in acl.items():
+            if permission == ACLPermission.DENY and (
+                pattern == topic
+                or re.match(TopicACLEngine._topic_to_regex(pattern), topic)
+            ):
+                return False
+
         matched_permission: ACLPermission | None = None
 
         # Check exact match first
@@ -110,10 +120,7 @@ class TopicACLEngine:
         if matched_permission is None or matched_permission == ACLPermission.DENY:
             return False
 
-        if required == ACLPermission.WRITE and matched_permission == ACLPermission.READ:
-            return False
-
-        return True
+        return matched_permission in (required, ACLPermission.READ_WRITE)
 
 
 # ---------------------------------------------------------------------------
@@ -134,6 +141,16 @@ class RegisteredDevice:
     registered_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     last_message_at: datetime | None = None
     message_count: int = 0
+    # Wallet that registered the device; None for bootstrap-admin registrations
+    # and rows that predate ownership (reachable by bootstrap admins only).
+    owner_wallet_id: str | None = None
+
+
+# The owning wallet rides in metadata_json under this reserved key so the
+# frozen iot_devices schema needs no new column. It is server-controlled:
+# _device_to_row always drops any client-supplied value before writing the
+# authenticated owner, and _row_to_device lifts it out of user metadata.
+_OWNER_METADATA_KEY = "__owner_wallet_id"
 
 
 def _device_to_row(device: RegisteredDevice) -> IoTDeviceModel:
@@ -141,12 +158,17 @@ def _device_to_row(device: RegisteredDevice) -> IoTDeviceModel:
         topic: (p.value if hasattr(p, "value") else str(p))
         for topic, p in device.topic_acl.items()
     }
+    stored_metadata = {
+        k: v for k, v in (device.metadata or {}).items() if k != _OWNER_METADATA_KEY
+    }
+    if device.owner_wallet_id is not None:
+        stored_metadata[_OWNER_METADATA_KEY] = device.owner_wallet_id
     return IoTDeviceModel(
         device_id=device.device_id,
         protocol=device.protocol.value,
         broker_url=device.broker_url,
         topic_acl_json=json.dumps(acl_json),
-        metadata_json=json.dumps(device.metadata or {}, default=str),
+        metadata_json=json.dumps(stored_metadata, default=str),
         status=device.status,
         registered_at=device.registered_at,
         last_message_at=device.last_message_at,
@@ -176,6 +198,7 @@ def _row_to_device(row: IoTDeviceModel) -> RegisteredDevice:
                 metadata = parsed
         except json.JSONDecodeError:
             pass
+    owner = metadata.pop(_OWNER_METADATA_KEY, None)
 
     try:
         protocol = ProtocolType(row.protocol)
@@ -192,6 +215,7 @@ def _row_to_device(row: IoTDeviceModel) -> RegisteredDevice:
         registered_at=row.registered_at,
         last_message_at=row.last_message_at,
         message_count=row.message_count,
+        owner_wallet_id=owner if isinstance(owner, str) else None,
     )
 
 
@@ -200,7 +224,15 @@ class _DeviceCache:
 
     Silently no-ops if REDIS_URL is unset or the connection fails — the
     registry stays functional, just hits PG on every read.
+
+    A failed invalidate is not silent: the key may still hold a deregistered
+    device or a superseded topic ACL, so cache reads are suspended
+    process-wide (every request builds its own bridge) until any such entry
+    has expired by TTL, and reads fall through to PG meanwhile.
     """
+
+    # Monotonic deadline shared by every instance in this process.
+    _reads_suspended_until: ClassVar[float] = 0.0
 
     def __init__(self, ttl_seconds: int = 300):
         self._ttl = ttl_seconds
@@ -231,6 +263,8 @@ class _DeviceCache:
         return self._client
 
     async def get(self, device_id: str) -> RegisteredDevice | None:
+        if time.monotonic() < _DeviceCache._reads_suspended_until:
+            return None
         client = await self._ensure_client()
         if client is None:
             return None
@@ -285,8 +319,15 @@ class _DeviceCache:
             return
         try:
             await client.delete(self._key(device_id))
-        except Exception:
-            pass
+        except Exception as exc:
+            _DeviceCache._reads_suspended_until = time.monotonic() + self._ttl
+            logger.warning(
+                "IoT device cache invalidate failed for %s; serving reads from "
+                "PG for %ss so a stale entry is not used: %s",
+                device_id,
+                self._ttl,
+                exc,
+            )
 
 
 class DeviceRegistry:
@@ -365,10 +406,31 @@ class DeviceRegistry:
         self,
         page: int = 1,
         per_page: int = 50,
+        *,
+        owner_wallet_id: str | None = None,
     ) -> tuple[list[RegisteredDevice], int]:
+        """Page through devices; ``owner_wallet_id`` limits it to one wallet's.
+
+        The owner lives inside metadata_json, so the scoped listing filters
+        after decoding rather than in SQL.
+        """
         self._require_db()
         factory = get_session_factory()
         offset = max(0, (page - 1) * per_page)
+        if owner_wallet_id is not None:
+            async with factory() as session:
+                result = await session.execute(
+                    select(IoTDeviceModel).order_by(
+                        cast(ColumnElement[Any], IoTDeviceModel.registered_at).asc()
+                    )
+                )
+                rows = list(result.scalars().all())
+            owned = [
+                d
+                for d in (_row_to_device(r) for r in rows)
+                if d.owner_wallet_id == owner_wallet_id
+            ]
+            return owned[offset : offset + per_page], len(owned)
         async with factory() as session:
             total = (
                 await session.scalar(select(func.count()).select_from(IoTDeviceModel))
@@ -634,11 +696,18 @@ class ProtocolBridge:
 
     async def subscribe(self, device_id: str, topic: str) -> dict:
         """Subscribe to device messages with ACL enforcement."""
+        require_simulation("iot_bridge")
         device = await self.registry.get(device_id)
         if not device:
             raise ValueError(f"Device '{device_id}' not found")
 
         if not self.acl_engine.check(device.topic_acl, topic, ACLPermission.READ):
+            await self.registry.record_event(
+                device_id,
+                "acl_violation",
+                topic=topic,
+                payload={"action": "read"},
+            )
             raise ACLViolation(device_id, topic, "read")
 
         subscription_id = await self.mqtt.subscribe(topic)

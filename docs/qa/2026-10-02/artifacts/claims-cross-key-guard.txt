@@ -1,0 +1,150 @@
+FILE app/services/mcp_dispatch_attempts.py
+707:                                "dispatch_prepare_already_advanced"
+708:                            )
+709:                        replay_access = await permits.validate_replay_access(
+710:                            permit_id=permit_id,
+711:                            wallet_id=wallet_id,
+712:                            tool_name=public_tool_id,
+713:                            key_id=key_id,
+714:                            session=session,
+715:                        )
+716:                        return replay_access, existing
+717:
+718:                    validation = await permits._validate_model_for_action(
+719:                        session=session,
+720:                        model=permit,
+721:                        wallet_id=wallet_id,
+722:                        tool_name=public_tool_id,
+723:                        estimated_credits=credits_authorized,
+724:                        key_id=key_id,
+725:                        arguments=arguments,
+726:                    )
+727:                    if not validation.allowed:
+728:                        return validation, None
+729:
+730:                    # Cross-key duplicate detection: check for prior attempts with the
+731:                    # same (permit_id, public_tool_id, request_hash) that are still
+732:                    # active or succeeded. This catches new-key retries with identical
+733:                    # arguments.
+734:                    settings = get_settings()
+735:                    duplicate_mode = settings.MCP_UPSTREAM_DUPLICATE_GUARD
+736:                    if (
+737:                        duplicate_mode != DuplicateGuardMode.OFF
+738:                        and not permit.allow_identical_repeats
+739:                    ):
+740:                        # Use permit-specific window if set, else global default
+741:                        window_seconds = (
+742:                            permit.repeat_window_seconds
+743:                            if permit.repeat_window_seconds is not None
+744:                            else settings.MCP_UPSTREAM_DUPLICATE_WINDOW_SECONDS
+745:                        )
+746:                        cutoff = utc_now() - timedelta(seconds=window_seconds)
+747:                        # States that could block a duplicate if the attempt was
+748:                        # effectful (actually dispatched). We check all matching attempts,
+749:                        # not just the newest, because an older effectful attempt should
+750:                        # block even if newer non-effectful attempts exist.
+751:                        blocking_states = {
+752:                            DISPATCH_PREPARED,
+753:                            *DISPATCH_SENT_STATES,
+754:                            *DISPATCH_TERMINAL_STATES,
+755:                        }
+756:                        priors = (
+757:                            (
+758:                                await session.execute(
+759:                                    select(McpDispatchAttemptModel)
+760:                                    .where(
+761:                                        cast(
+762:                                            ColumnElement[bool],
+763:                                            McpDispatchAttemptModel.permit_id
+764:                                            == permit_id,
+765:                                        ),
+766:                                        cast(
+767:                                            ColumnElement[bool],
+768:                                            McpDispatchAttemptModel.public_tool_id
+769:                                            == public_tool_id,
+770:                                        ),
+771:                                        cast(
+772:                                            ColumnElement[bool],
+773:                                            McpDispatchAttemptModel.request_hash
+774:                                            == request_hash,
+775:                                        ),
+776:                                        cast(
+777:                                            ColumnElement[bool],
+778:                                            McpDispatchAttemptModel.created_at
+779:                                            >= cutoff,
+780:                                        ),
+781:                                        cast(
+782:                                            ColumnElement[bool],
+783:                                            cast(
+784:                                                Any, McpDispatchAttemptModel.state
+785:                                            ).in_(blocking_states),
+786:                                        ),
+787:                                    )
+788:                                    .order_by(
+789:                                        cast(
+790:                                            Any, McpDispatchAttemptModel.created_at
+791:                                        ).desc()
+792:                                    )
+793:                                )
+794:                            )
+795:                            .scalars()
+796:                            .all()
+797:                        )
+798:
+799:                        # Check if ANY prior attempt in the window was effectful
+800:                        # (dispatched or terminal effectful state).
+801:                        blocking_prior = None
+802:                        blocks = False
+803:                        for prior in priors:
+804:                            # An attempt blocks if it's in an effectful state:
+805:                            # - prepared or dispatched/claimed (may still dispatch)
+806:                            # - succeeded or delivery_uncertain (known effectful)
+807:                            # - returned_error AFTER dispatch (was effectful)
+808:                            # Exclude returned_error that never dispatched (pre-dispatch failure).
+809:                            if (
+810:                                prior.state == "returned_error"
+811:                                and prior.dispatched_at is None
+812:                            ):
+813:                                continue  # Non-effectful, does not block
+814:                            # All other states in blocking_states are effectful
+815:                            blocking_prior = prior
+816:                            blocks = True
+817:                            break
+818:
+819:                        if blocks and blocking_prior is not None:
+820:                            msg = (
+821:                                f"Duplicate request detected: new idempotency key with "
+822:                                f"identical request hash (permit={permit_id}, "
+823:                                f"tool={public_tool_id}, request_hash={request_hash[:16]}..., "
+824:                                f"prior_attempt={blocking_prior.attempt_id}, "
+825:                                f"prior_state={blocking_prior.state})"
+826:                            )
+827:                            if duplicate_mode == DuplicateGuardMode.LOG:
+828:                                logger.warning(f"{msg} - allowing in observe mode")
+829:                                _duplicate_guard_metrics["log_mode_blocks"] += 1
+830:                            else:  # DuplicateGuardMode.ENFORCE
+831:                                logger.info(msg)
+832:                                _duplicate_guard_metrics["enforce_mode_blocks"] += 1
+833:                                return (
+834:                                    PermitValidation(
+835:                                        False,
+836:                                        "duplicate_request_new_key",
+837:                                        permit,
+838:                                        {
+839:                                            "prior_attempt_id": blocking_prior.attempt_id,
+840:                                            "prior_state": blocking_prior.state,
+841:                                            "request_hash": request_hash,
+842:                                        },
+843:                                    ),
+844:                                    None,
+845:                                )
+846:
+847:                    if unsupported_constraints:
+848:                        # aggregate_value_cap requires folding in-flight reservations,
+849:                        # which the atomic reservation does not yet support. Refuse
+850:                        # constrained permits before creating any attempt or moving budget.
+851:                        return (
+852:                            PermitValidation(
+853:                                False,
+854:                                "permit_constraint_unsupported_for_upstream",
+855:                                permit,

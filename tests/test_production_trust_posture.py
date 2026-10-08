@@ -176,6 +176,62 @@ print(json.dumps(paths))
     assert not any(path.startswith("/v1/awi/") for path in paths)
 
 
+@pytest.mark.parametrize(
+    "environment,proof_surfaces,upstream_enabled",
+    [
+        ("local", "false", "false"),
+        ("local", "true", "true"),
+        ("production", "false", "true"),
+    ],
+)
+def test_fresh_app_keeps_action_issuance_frozen(
+    environment, proof_surfaces, upstream_enabled
+):
+    """Neither startup flags nor an upstream config advertise unbound issuance."""
+    script = """
+import asyncio
+import json
+from httpx import ASGITransport, AsyncClient
+from app.main import app
+
+async def probe():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        responses = [await client.post("/v1/action-permits", json={}, headers=headers)
+                     for headers in ({}, {"X-API-Key": "test-key"})]
+    print(json.dumps({"paths": sorted(app.openapi()["paths"]),
+                      "status_codes": [response.status_code for response in responses]}))
+
+asyncio.run(probe())
+"""
+    env = {key: os.environ[key] for key in ("PATH", "HOME") if key in os.environ}
+    env.update(_PROD_TRUST_ENV)
+    env.update(
+        ENVIRONMENT=environment,
+        ENABLE_PROOF_SURFACES=proof_surfaces,
+        MCP_UPSTREAM_ENABLED=upstream_enabled,
+        MCP_UPSTREAM_URL="https://fixture.invalid/mcp",
+        MCP_UPSTREAM_TOOL_NAME="pay",
+        MCP_UPSTREAM_PUBLIC_TOOL_ID="partner.pay",
+        MCP_UPSTREAM_BEARER_TOKEN="synthetic-fixture-token",
+        STATE_BACKEND="memory",
+        VALID_API_KEYS="test-key",
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    observed = json.loads(result.stdout.strip().splitlines()[-1])
+    assert "/v1/permits" in observed["paths"]
+    assert "/v1/action-permits" not in observed["paths"]
+    assert observed["status_codes"] == [404, 404]
+
+
 @pytest.mark.production_trust
 @pytest.mark.anyio
 async def test_agent_json_reports_proof_surfaces_off(client, production_trust_flags):
@@ -288,9 +344,7 @@ async def test_public_mcp_is_404_in_production_even_if_flag_on(
 
 @pytest.mark.production_trust
 @pytest.mark.anyio
-async def test_receipt_keys_remain_public_in_production(
-    client, production_trust_flags
-):
+async def test_receipt_keys_remain_public_in_production(client, production_trust_flags):
     keys = await client.get("/.well-known/trust-keys.json")
     assert keys.status_code != 401
     assert keys.status_code != 403

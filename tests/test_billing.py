@@ -2506,3 +2506,78 @@ async def test_losing_an_operation_key_race_does_not_leave_velocity_overcounted(
 
     assert wallet_after_loser == wallet_after_winner
     assert [entry.entry_id for entry in operation_debits] == [winner.entry_id]
+
+
+@pytest.mark.anyio
+async def test_agent_wallet_provisioning_replays_on_idempotency_key(
+    client, api_headers, clean_database
+):
+    """A retried provisioning call with the same Idempotency-Key must not fund
+    a second wallet or debit the sponsor twice."""
+    sponsor_resp = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={
+            "sponsor_name": "Idem Sponsor",
+            "email": "i@s.com",
+            "initial_credits": 1000,
+        },
+        headers=api_headers,
+    )
+    assert sponsor_resp.status_code == 201
+    sponsor_id = sponsor_resp.json()["wallet_id"]
+
+    payload = {
+        "sponsor_wallet_id": sponsor_id,
+        "agent_id": "idem-bot",
+        "budget_credits": 300,
+    }
+    headers = {**api_headers, "Idempotency-Key": "provision-idem-bot-1"}
+    first = await client.post(
+        "/v1/billing/wallets/agent", json=payload, headers=headers
+    )
+    assert first.status_code == 201, first.text
+    second = await client.post(
+        "/v1/billing/wallets/agent", json=payload, headers=headers
+    )
+    assert second.status_code == 201, second.text
+    assert second.json()["wallet_id"] == first.json()["wallet_id"]
+
+    sponsor = await client.get(f"/v1/billing/wallets/{sponsor_id}", headers=api_headers)
+    assert sponsor.status_code == 200
+    assert sponsor.json()["balance"] == 700.0
+
+    # Same key, different ask: refused rather than silently replayed.
+    conflict = await client.post(
+        "/v1/billing/wallets/agent",
+        json={**payload, "budget_credits": 301},
+        headers=headers,
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["error"] == "idempotency_key_reused"
+
+
+@pytest.mark.anyio
+async def test_agent_wallet_provisioning_error_completes_idempotency_record(
+    client, api_headers, clean_database
+):
+    """A terminal error must close the key, not leave it in-progress.
+
+    Without completing the record on the 404 branch, a retry with the same
+    Idempotency-Key answered ``409 idempotency_in_progress`` until the stale
+    record sweep -- the caller could neither replay nor correct the request.
+    """
+    payload = {
+        "sponsor_wallet_id": "wlt-does-not-exist",
+        "agent_id": "orphan-bot",
+        "budget_credits": 10,
+    }
+    headers = {**api_headers, "Idempotency-Key": "provision-orphan-1"}
+    first = await client.post(
+        "/v1/billing/wallets/agent", json=payload, headers=headers
+    )
+    assert first.status_code == 404, first.text
+    replay = await client.post(
+        "/v1/billing/wallets/agent", json=payload, headers=headers
+    )
+    assert replay.status_code == 404, replay.text
+    assert replay.json() == first.json()

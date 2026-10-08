@@ -116,7 +116,15 @@ exactly-once side effects.
 4. Governed invoke via `POST /mcp/messages`. `mcpContext` carrying `wallet_id`,
    `permit_id`, and `idempotency_key` goes directly in `params` — not in
    `_meta`. A misplaced context returns `Missing wallet_id in mcpContext`.
-5. Show ledger debit + `GET /v1/receipts/verify`.
+5. Show ledger debit + `POST /v1/receipts/verify` with the receipt ID and the
+   authorized agent credential:
+
+   ```bash
+   curl -s -X POST "$API_URL/v1/receipts/verify" \
+     -H "X-API-Key: $AGENT_API_KEY" \
+     -H "Content-Type: application/json" \
+     -d "{\"receipt_id\": \"$RECEIPT_ID\"}"
+   ```
 6. Replay same idempotency key → same `receipt_id`, no second gateway dispatch
    or debit.
 7. Call the out-of-scope tool under the same permit → deny (`permit_tool_not_allowed`).
@@ -134,7 +142,7 @@ exactly-once side effects.
 
     # The verifier is not on PyPI. Install the wheel attached to the Python
     # SDK GitHub release, or run it from a copy of b2a_sdk/:
-    pip install ./b2a_sdk            # or: pip install b2a_sdk-<version>-py3-none-any.whl
+    pip install "./b2a_sdk[verify]"  # or: pip install "./b2a_sdk-<version>-py3-none-any.whl[verify]"
     python -m b2a_sdk.verify_cli --bundle receipt-bundle.json --keys trust-keys.json
     ```
 

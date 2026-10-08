@@ -1,0 +1,61 @@
+chromium launch blocked: browserType.launch: Target page, context or browser has been closed
+Browser logs:
+
+<launching> /private/tmp/amw-fix-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-UrMNpB --remote-debugging-pipe --no-startup-window
+<launched> pid=31308
+[pid=31308][err] [1002/204848.348458:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+[pid=31308][err] [1002/204848.352420:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+[pid=31308][err] [1002/204848.354262:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.31308: Permission denied (1100)
+Call log:
+  - <launching> /private/tmp/amw-fix-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-UrMNpB --remote-debugging-pipe --no-startup-window
+  - <launched> pid=31308
+  - [pid=31308][err] [1002/204848.348458:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+  - [pid=31308][err] [1002/204848.352420:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+  - [pid=31308][err] [1002/204848.354262:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.31308: Permission denied (1100)
+  - [pid=31308] <gracefully close start>
+  - [pid=31308] <kill>
+  - [pid=31308] <will force kill>
+  - [pid=31308] exception while trying to kill process: Error: kill EPERM
+  - [pid=31308] <process did exit: exitCode=null, signal=SIGTRAP>
+  - [pid=31308] starting temporary directories cleanup
+  - [pid=31308] finished temporary directories cleanup
+  - [pid=31308] <gracefully close end>
+
+firefox launch blocked: browserType.launch: Failed to launch the browser process.
+Browser logs:
+
+<launching> /private/tmp/amw-fix-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox -no-remote -headless -profile /var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_firefoxdev_profile-s4Viwh -juggler-pipe -silent
+<launched> pid=31318
+[pid=31318][err] *** You are running in headless mode.
+[pid=31318] <process did exit: exitCode=null, signal=SIGABRT>
+[pid=31318] starting temporary directories cleanup
+Call log:
+  - <launching> /private/tmp/amw-fix-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox -no-remote -headless -profile /var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_firefoxdev_profile-s4Viwh -juggler-pipe -silent
+  - <launched> pid=31318
+  - [pid=31318][err] *** You are running in headless mode.
+  - [pid=31318] <process did exit: exitCode=null, signal=SIGABRT>
+  - [pid=31318] starting temporary directories cleanup
+  - [pid=31318] <gracefully close start>
+  - [pid=31318] <kill>
+  - [pid=31318] <skipped force kill spawnedProcess.killed=false processClosed=true>
+  - [pid=31318] finished temporary directories cleanup
+  - [pid=31318] <gracefully close end>
+
+webkit launch blocked: browserType.launch: Target page, context or browser has been closed
+Browser logs:
+
+<launching> /private/tmp/amw-fix-browsers/webkit-2359/pw_run.sh --inspector-pipe --headless --no-startup-window
+<launched> pid=31327
+[pid=31327][err] /private/tmp/amw-fix-browsers/webkit-2359/pw_run.sh: line 7: 31333 Abort trap: 6              DYLD_FRAMEWORK_PATH="$DYLIB_PATH" DYLD_LIBRARY_PATH="$DYLIB_PATH" "$PLAYWRIGHT" "$@"
+Call log:
+  - <launching> /private/tmp/amw-fix-browsers/webkit-2359/pw_run.sh --inspector-pipe --headless --no-startup-window
+  - <launched> pid=31327
+  - [pid=31327][err] /private/tmp/amw-fix-browsers/webkit-2359/pw_run.sh: line 7: 31333 Abort trap: 6              DYLD_FRAMEWORK_PATH="$DYLIB_PATH" DYLD_LIBRARY_PATH="$DYLIB_PATH" "$PLAYWRIGHT" "$@"
+  - [pid=31327] <gracefully close start>
+  - [pid=31327] <kill>
+  - [pid=31327] <will force kill>
+  - [pid=31327] exception while trying to kill process: Error: kill EPERM
+  - [pid=31327] <process did exit: exitCode=134, signal=null>
+  - [pid=31327] starting temporary directories cleanup
+  - [pid=31327] finished temporary directories cleanup
+  - [pid=31327] <gracefully close end>

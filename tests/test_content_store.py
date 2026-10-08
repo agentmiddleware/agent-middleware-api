@@ -59,9 +59,7 @@ def _pipeline(pipeline_id: str = "p-1", owner: str = "tenant-a") -> ContentPipel
     )
 
 
-def _piece(
-    content_id: str = "c-1", pipeline_id: str = "p-1"
-) -> GeneratedContent:
+def _piece(content_id: str = "c-1", pipeline_id: str = "p-1") -> GeneratedContent:
     return GeneratedContent(
         content_id=content_id,
         pipeline_id=pipeline_id,

@@ -7,6 +7,7 @@ and network graph generation.
 import pytest
 from httpx import AsyncClient, ASGITransport
 from app.main import app
+from tests.test_trust_helpers import provision_agent_wallet
 
 
 @pytest.fixture
@@ -22,6 +23,7 @@ def api_headers():
 
 
 # --- Crawling ---
+
 
 @pytest.mark.anyio
 async def test_crawl_known_api(client, api_headers):
@@ -43,7 +45,12 @@ async def test_crawl_known_api(client, api_headers):
     assert len(data["capabilities"]) > 0
     assert data["compatibility_score"] >= 0
     assert data["compatibility_score"] <= 1.0
-    assert data["compatibility_tier"] in ["native", "compatible", "bridgeable", "incompatible"]
+    assert data["compatibility_tier"] in [
+        "native",
+        "compatible",
+        "bridgeable",
+        "incompatible",
+    ]
 
 
 @pytest.mark.anyio
@@ -98,6 +105,7 @@ async def test_batch_crawl(client, api_headers):
 
 
 # --- Index ---
+
 
 @pytest.mark.anyio
 async def test_list_indexed_empty(client, api_headers):
@@ -157,6 +165,7 @@ async def test_get_indexed_not_found(client, api_headers):
 
 # --- Registration ---
 
+
 @pytest.mark.anyio
 async def test_register_in_directories(client, api_headers):
     """Register our API in external directories."""
@@ -210,6 +219,7 @@ async def test_list_registrations(client, api_headers):
 
 # --- Visibility & Network ---
 
+
 @pytest.mark.anyio
 async def test_visibility_score(client, api_headers):
     """Visibility score should include recommendations."""
@@ -248,7 +258,10 @@ async def test_network_graph_with_data(client, api_headers):
         "/v1/oracle/register",
         json={
             "targets": [
-                {"directory_url": "https://agents.dev/register", "directory_type": "agent_registry"},
+                {
+                    "directory_url": "https://agents.dev/register",
+                    "directory_type": "agent_registry",
+                },
             ],
         },
         headers=api_headers,
@@ -272,6 +285,7 @@ async def test_record_discovery(client, api_headers):
 
 # --- Auth ---
 
+
 @pytest.mark.anyio
 async def test_oracle_requires_api_key(client):
     resp = await client.post(
@@ -285,3 +299,74 @@ async def test_oracle_requires_api_key(client):
 async def test_oracle_visibility_requires_api_key(client):
     resp = await client.get("/v1/oracle/visibility")
     assert resp.status_code == 401
+
+
+# --- Global-state writes ---
+
+
+@pytest.mark.proof
+@pytest.mark.anyio
+async def test_record_discovery_requires_bootstrap_admin(
+    client, api_headers, clean_database
+):
+    """A wallet-scoped key cannot inject inbound-discovery hits into the
+    shared visibility metrics; the bootstrap key still can."""
+    wallet = await provision_agent_wallet(client)
+
+    async def discovery_hits() -> int:
+        resp = await client.get("/v1/oracle/visibility", headers=api_headers)
+        assert resp.status_code == 200
+        return int(resp.json()["inbound_discovery_requests"])
+
+    before = await discovery_hits()
+    denied = await client.post(
+        "/v1/oracle/discovery?referrer=https://wallet-injected.example",
+        headers=wallet["agent_headers"],
+    )
+    assert denied.status_code == 403
+    assert denied.json()["detail"]["error"] == "admin_access_denied"
+    assert await discovery_hits() == before
+
+    allowed = await client.post(
+        "/v1/oracle/discovery?referrer=https://agentdirectory.com",
+        headers=api_headers,
+    )
+    assert allowed.status_code == 204
+    assert await discovery_hits() == before + 1
+
+
+@pytest.mark.proof
+@pytest.mark.anyio
+async def test_batch_crawl_rejects_oversized_batch(client, api_headers):
+    """An oversized batch is refused before any crawl row is written."""
+    urls = [f"https://api{i}.oversized-batch.example" for i in range(26)]
+    resp = await client.post("/v1/oracle/crawl/batch", json=urls, headers=api_headers)
+    assert resp.status_code == 422
+
+    rows = await client.get(
+        "/v1/oracle/index?domain=oversized-batch.example", headers=api_headers
+    )
+    assert rows.status_code == 200
+    assert rows.json()["total"] == 0
+
+
+@pytest.mark.proof
+@pytest.mark.anyio
+async def test_batch_crawl_accepts_batch_at_cap(client, api_headers, monkeypatch):
+    """A batch at the cap is forwarded whole. The crawler is stubbed: 25
+    concurrent crawls would overflow the shared SQLite pool, whose wait queue
+    then stays bound to this test's event loop and breaks later tests."""
+    from app.services.oracle import AgentOracle
+
+    forwarded: list[list[str]] = []
+
+    async def fake_batch_crawl(self, urls, audit_context=None):
+        forwarded.append(list(urls))
+        return []
+
+    monkeypatch.setattr(AgentOracle, "batch_crawl", fake_batch_crawl)
+    urls = [f"https://api{i}.capped-batch.example" for i in range(25)]
+    resp = await client.post("/v1/oracle/crawl/batch", json=urls, headers=api_headers)
+    assert resp.status_code == 202
+    assert resp.json()["submitted"] == 25
+    assert forwarded == [urls]

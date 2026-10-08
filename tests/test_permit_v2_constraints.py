@@ -243,9 +243,7 @@ async def test_aggregate_value_cap_denies_over_total(client, clean_database):
 
 
 @pytest.mark.anyio
-async def test_aggregate_value_cap_counts_in_flight_reservation(
-    client, clean_database
-):
+async def test_aggregate_value_cap_counts_in_flight_reservation(client, clean_database):
     """An in-flight reservation with no receipt yet still consumes the cap.
 
     Attack path from the call-count audit: the first invoke reserves budget
@@ -1078,7 +1076,9 @@ async def test_max_calls_fractional_limit_fails_closed(client, clean_database):
 
 
 @pytest.mark.anyio
-async def test_reconciler_constraints_snapshot_matches_live_path(client, clean_database):
+async def test_reconciler_constraints_snapshot_matches_live_path(
+    client, clean_database
+):
     """A crash-recovered receipt must sign byte-identical constraints.
 
     The live invoke path normalizes `aggregate_value_cap`
@@ -1143,3 +1143,102 @@ async def test_reconciler_constraints_snapshot_absent_permit_is_none(clean_datab
 
     reconciler = get_mcp_dispatch_reconciliation_service()
     assert await reconciler._permit_constraints_snapshot("permit-missing") is None
+
+
+def _v2_permit_body(wallet_id: str, key_id: str, **overrides: Any) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "issuer_wallet_id": wallet_id,
+        "subject_wallet_id": wallet_id,
+        "subject_key_id": key_id,
+        "allowed_tools": ["v2-bounds-tool"],
+        "scopes": ["tool:v2-bounds-tool:invoke", "billing:charge"],
+        "max_credits": 50,
+        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat(),
+    }
+    body.update(overrides)
+    return body
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"aggregate_value_cap": "-1"},
+        {"aggregate_value_cap": "0"},
+        {"aggregate_value_cap": "1.123456789"},
+        {"aggregate_value_cap": "1000000000000"},
+        {"max_calls_per_tool": {"v2-bounds-tool": -1}},
+        {"max_calls_per_tool": {"v2-bounds-tool": 0}},
+        {"max_calls_per_tool": {"v2-bounds-tool": True}},
+        {"max_calls_per_tool": {"v2-bounds-tool": 2.5}},
+    ],
+    ids=[
+        "cap-negative",
+        "cap-zero",
+        "cap-nine-decimals",
+        "cap-thirteen-digits",
+        "calls-negative",
+        "calls-zero",
+        "calls-bool",
+        "calls-fractional",
+    ],
+)
+async def test_permit_v2_bounds_outside_storage_or_meaning_are_refused(
+    client, clean_database, overrides
+):
+    """A cap that can never admit a call, or one the Numeric(20, 8) column
+    would round after signing, is a 422 rather than a signed dead permit.
+
+    Before: a negative cap or call limit minted a permit every verify of
+    which failed closed, and a 9-decimal cap was signed before the column
+    rounded it, so the permit's signature never verified. ``true`` coerced to
+    a one-call limit.
+    """
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+
+    resp = await client.post(
+        "/v1/permits",
+        json=_v2_permit_body(wallet_id, provisioned["key_id"], **overrides),
+        headers={**provisioned["agent_headers"], "Idempotency-Key": "v2-bounds-bad"},
+    )
+    assert resp.status_code == 422, resp.text
+    _, total = await get_permit_service().list_permits(wallet_id=wallet_id)
+    assert total == 0
+
+
+@pytest.mark.anyio
+async def test_permit_v2_bounds_at_storage_limits_mint_and_verify(
+    client, clean_database
+):
+    """The tightest accepted values: an 8-decimal cap and a one-call limit."""
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+
+    resp = await client.post(
+        "/v1/permits",
+        json=_v2_permit_body(
+            wallet_id,
+            provisioned["key_id"],
+            aggregate_value_cap="1.12345678",
+            max_calls_per_tool={"v2-bounds-tool": 1},
+        ),
+        headers={**provisioned["agent_headers"], "Idempotency-Key": "v2-bounds-ok"},
+    )
+    assert resp.status_code == 201, resp.text
+    permit = resp.json()
+    assert Decimal(str(permit["aggregate_value_cap"])) == Decimal("1.12345678")
+    assert permit["max_calls_per_tool"] == {"v2-bounds-tool": 1}
+
+    verify_resp = await client.post(
+        "/v1/permits/verify",
+        json={
+            "permit_id": permit["permit_id"],
+            "wallet_id": wallet_id,
+            "tool": "v2-bounds-tool",
+            "estimated_credits": "1",
+        },
+        headers=provisioned["agent_headers"],
+    )
+    assert verify_resp.status_code == 200
+    assert verify_resp.json()["valid"] is True, verify_resp.json()

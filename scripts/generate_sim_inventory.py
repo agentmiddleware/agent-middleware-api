@@ -56,9 +56,7 @@ def _inventory_payload() -> dict:
     gen = get_mcp_generator()
 
     async def _tools() -> list[dict]:
-        return (await gen.generate_tools_json_async(include_persistent=False))[
-            "tools"
-        ]
+        return (await gen.generate_tools_json_async(include_persistent=False))["tools"]
 
     tools = asyncio.run(_tools())
     tool_rows = []

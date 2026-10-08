@@ -1,0 +1,14 @@
+✔ Key Rotation seed 2 grants invulnerability after one hit (1.931333ms)
+✔ Key Rotation seed 3 grants invulnerability after one hit (1.309125ms)
+✔ Key Rotation seed 5 grants invulnerability after one hit (0.966ms)
+✔ Happy Path visible feet meet the ground before and after a jump (1.421084ms)
+✔ Happy Path uses the same visible origin on a platform landing (0.771708ms)
+✔ Tap Forge carries passive quota fractions across frame rates (0.470333ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 52.941709

@@ -7,7 +7,6 @@ registry directly: state persistence, audit event shape, list
 pagination, cache hit/miss behavior with a fake Redis.
 """
 
-
 import pytest
 import pytest_asyncio
 from sqlalchemy import delete
@@ -125,9 +124,7 @@ async def test_register_writes_register_event():
     await reg.register(_device())
 
     events = await reg.recent_events(limit=10)
-    assert any(
-        e["event"] == "register" and e["device_id"] == "dev-1" for e in events
-    )
+    assert any(e["event"] == "register" and e["device_id"] == "dev-1" for e in events)
 
 
 @pytest.mark.anyio
@@ -214,9 +211,7 @@ async def test_get_populates_cache_and_second_read_skips_db(monkeypatch):
     from app.services import iot_bridge as iot_mod
 
     def _boom():
-        raise AssertionError(
-            "session factory should not be called on cache hit"
-        )
+        raise AssertionError("session factory should not be called on cache hit")
 
     monkeypatch.setattr(iot_mod, "get_session_factory", _boom)
 
@@ -249,3 +244,99 @@ async def test_deregister_invalidates_cache():
 
     await reg.deregister("dev-1")
     assert "iot:device:dev-1" not in fake.store
+
+
+class _FailingDeleteRedis(_FakeRedis):
+    """Redis that serves reads but drops DEL (a transient outage)."""
+
+    async def delete(self, *keys):
+        raise ConnectionError("redis DEL failed")
+
+
+def _registry_on(fake) -> DeviceRegistry:
+    reg = DeviceRegistry()
+    reg._cache._client = fake
+    reg._cache._disabled = False
+    return reg
+
+
+@pytest.mark.anyio
+async def test_failed_invalidate_does_not_serve_stale_device(monkeypatch, caplog):
+    from app.services.iot_bridge import _DeviceCache
+
+    # Process-wide state: make sure it starts clear and is restored after.
+    monkeypatch.setattr(_DeviceCache, "_reads_suspended_until", 0.0, raising=False)
+    fake = _FailingDeleteRedis()
+    reg = _registry_on(fake)
+
+    await reg.register(_device())
+    await reg.get("dev-1")  # populates cache
+    assert "iot:device:dev-1" in fake.store
+
+    with caplog.at_level("WARNING", logger="app.services.iot_bridge"):
+        assert await reg.deregister("dev-1") is True
+
+    # DEL failed, so the deregistered device is still in Redis. Neither this
+    # registry nor a fresh one (each request builds its own bridge) may serve
+    # it from the cache: PG is the source of truth.
+    assert "iot:device:dev-1" in fake.store
+    assert await reg.get("dev-1") is None
+    assert await _registry_on(fake).get("dev-1") is None
+    # The failure is surfaced, not swallowed.
+    assert any("invalidate" in r.getMessage() for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# Ownership
+# ---------------------------------------------------------------------------
+
+
+def _owned(device_id: str, owner: str | None) -> RegisteredDevice:
+    device = _device(device_id)
+    device.owner_wallet_id = owner
+    return device
+
+
+@pytest.mark.anyio
+async def test_owner_round_trips_and_stays_out_of_metadata():
+    reg = DeviceRegistry()
+    await reg.register(_owned("dev-1", "wallet-a"))
+
+    got = await reg.get("dev-1")
+    assert got is not None
+    assert got.owner_wallet_id == "wallet-a"
+    assert got.metadata == {"tenant": "acme", "model": "sensor-v2"}
+
+
+@pytest.mark.anyio
+async def test_client_metadata_cannot_set_owner():
+    from app.services.iot_bridge import _OWNER_METADATA_KEY
+
+    reg = DeviceRegistry()
+    device = _owned("dev-1", None)
+    device.metadata = {**device.metadata, _OWNER_METADATA_KEY: "wallet-victim"}
+    await reg.register(device)
+
+    got = await reg.get("dev-1")
+    assert got is not None
+    assert got.owner_wallet_id is None
+    assert _OWNER_METADATA_KEY not in got.metadata
+
+
+@pytest.mark.anyio
+async def test_list_all_scoped_to_owner_paginates():
+    reg = DeviceRegistry()
+    for i in range(3):
+        await reg.register(_owned(f"a-{i}", "wallet-a"))
+    for i in range(2):
+        await reg.register(_owned(f"b-{i}", "wallet-b"))
+    await reg.register(_owned("ownerless", None))
+
+    page1, total = await reg.list_all(page=1, per_page=2, owner_wallet_id="wallet-a")
+    page2, total2 = await reg.list_all(page=2, per_page=2, owner_wallet_id="wallet-a")
+    assert total == total2 == 3
+    assert len(page1) == 2 and len(page2) == 1
+    assert {d.device_id for d in page1 + page2} == {"a-0", "a-1", "a-2"}
+
+    _, unscoped_total = await reg.list_all(page=1, per_page=50)
+    assert unscoped_total == 6
