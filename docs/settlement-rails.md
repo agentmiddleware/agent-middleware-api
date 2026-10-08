@@ -305,6 +305,34 @@ Only then does any public claim change — and it would change to something
 narrow, like "credits may be funded through a verified *rail*", never to
 "production settlement."
 
+## Top-up and refund operating limits
+
+What a buyer hears on a call, stated plainly so no demo surprises:
+
+- **USD only, sponsor wallets only.** `create_top_up_intent` rejects any
+  other currency (`unsupported_top_up_currency`) and any non-sponsor wallet
+  (`top_up_wallet_must_be_sponsor`). There is no timeline for other
+  currencies or wallet types. Say USD-only and sponsor-only in pricing and
+  onboarding before the first top-up attempt.
+- **Failed-charge refund retries are staff-only.** A wallet key can list
+  refunds owed to its own wallet (`GET /v1/receipts/reconciliation/refunds`),
+  but triggering the retry (`POST .../retry`) requires a bootstrap admin
+  because it moves money. Publish a target turnaround before selling; until
+  then the honest line is staff-only retry with no committed turnaround.
+- **Spent-then-refunded top-ups become a reviewed liability.** When a Stripe
+  refund exceeds the sponsor's remaining balance, the code keeps the negative
+  balance, freezes (or otherwise contains) the wallet, and raises a critical
+  billing alert. The review procedure is: confirm the refund in the Stripe
+  dashboard, confirm the ledger shows exactly one debit per settled refund
+  event, resolve what the sponsor owes off-ledger, then unfreeze. Do not
+  unfreeze on the alert alone.
+- **Disputes, chargebacks, and refund updates get manual review, not
+  automation.** Those events are acknowledged with an explicit warning log
+  (`MONEY_RELEVANT_UNHANDLED_EVENT_TYPES`) and change nothing on the ledger.
+  The operator procedure is the Stripe dashboard plus the ledger history for
+  the affected payment intent. Promise buyers a manual process with a named
+  owner, not automatic handling.
+
 ## Fixes worth doing regardless
 
 These are small, in-scope today, and reduce risk whether or not a second rail

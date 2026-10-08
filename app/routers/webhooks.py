@@ -2,7 +2,9 @@
 Stripe Webhook Router
 Receives and processes Stripe webhook events.
 
-Webhook URL for production: https://api.yourdomain.com/v1/webhooks/stripe
+Production URL: <PUBLIC_URL>/v1/webhooks/stripe, where PUBLIC_URL is the
+server's configured public origin (see app/core/config.py). There is no
+hardcoded production domain; register the URL above in the Stripe dashboard.
 Local development: stripe listen --forward-to localhost:8000/v1/webhooks/stripe
 """
 
@@ -36,6 +38,12 @@ async def handle_stripe_webhook(request: Request):
     - identity.verification_session.verified → Approve KYC
     - identity.verification_session.requires_input → Log
     - identity.verification_session.redacted → Expire verification
+
+    Events acknowledged for manual review (warning-logged, no ledger
+    change): charge disputes and chargebacks, charge.refund.updated, and
+    refund created/updated/failed. See MONEY_RELEVANT_UNHANDLED_EVENT_TYPES
+    in app/services/stripe_integration.py and the operating limits in
+    docs/settlement-rails.md.
     """
     payload = await request.body()
     sig_header = request.headers.get("stripe-signature", "")

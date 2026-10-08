@@ -48,6 +48,25 @@ stripe.default_http_client = stripe.new_default_http_client(
 
 SUPPORTED_TOP_UP_CURRENCY = "usd"
 
+# Stripe event types that move (or contest) real money but have no automated
+# handler in this service. They are acknowledged with an explicit warning so
+# an operator watching logs routes them to manual review. Disputes and
+# chargebacks never debit or credit automatically; neither do refund updates,
+# because the cumulative charge.refunded handler already owns that math.
+MONEY_RELEVANT_UNHANDLED_EVENT_TYPES = frozenset(
+    {
+        "charge.dispute.created",
+        "charge.dispute.updated",
+        "charge.dispute.closed",
+        "charge.dispute.funds_withdrawn",
+        "charge.dispute.funds_reinstated",
+        "charge.refund.updated",
+        "refund.created",
+        "refund.updated",
+        "refund.failed",
+    }
+)
+
 
 class StripeSettlementError(ValueError):
     """A verified Stripe event does not prove an acceptable top-up settlement."""
@@ -285,7 +304,10 @@ class StripeIntegration:
         Returns:
             True if processed successfully, False on signature failure
         Raises:
-            ValueError: For unhandled event types
+            StripeSettlementError: For verified events that do not prove an
+                acceptable settlement. Unknown event types never raise:
+                money-relevant ones warn for manual review, the rest log
+                at debug and are acknowledged.
         """
         try:
             event = stripe.Webhook.construct_event(
@@ -307,13 +329,22 @@ class StripeIntegration:
         event_type = self._stripe_value(event, "type")
         event_data = self._stripe_value(event, "data")
         event_object = self._stripe_value(event_data, "object")
+        stripe_event_id = self._stripe_value(event, "id")
         if event_type == "charge.refunded":
             await self._handle_refund(
                 event_object,
-                self._stripe_value(event, "id"),
+                stripe_event_id,
             )
         elif event_type in handler_map:
             await handler_map[event_type](event_object)
+        elif event_type in MONEY_RELEVANT_UNHANDLED_EVENT_TYPES:
+            logger.warning(
+                "Received money-relevant Stripe event with no automated "
+                "handler: type=%s event_id=%s. Manual operator review "
+                "required; no ledger change was made.",
+                event_type,
+                stripe_event_id,
+            )
         else:
             logger.debug(f"Ignoring unhandled event type: {event_type}")
 
@@ -395,23 +426,42 @@ class StripeIntegration:
 
         return payment_intent_id, wallet_id, credits
 
-    async def _handle_payment_failed(self, payment_intent: dict) -> None:
-        """Log payment failure and notify via Slack."""
+    async def _handle_payment_failed(self, payment_intent: Any) -> None:
+        """Log payment failure and notify via Slack.
+
+        Reads through the safe Stripe accessor like every other handler.
+        A malformed failure event (missing metadata, null error block)
+        logs a warning with the identifiers it does have instead of
+        raising out of the webhook and inviting a Stripe retry storm.
+        """
         from ..services.notifications import get_notification_service
 
-        wallet_id = payment_intent["metadata"].get("wallet_id")
-        error_msg = payment_intent.get("last_payment_error", {}).get(
-            "message", "Unknown error"
+        payment_intent_id = self._stripe_value(payment_intent, "id")
+        metadata = self._stripe_value(payment_intent, "metadata")
+        wallet_id = self._stripe_value(metadata, "wallet_id")
+        last_error = self._stripe_value(payment_intent, "last_payment_error")
+        error_msg = self._stripe_value(last_error, "message", "Unknown error")
+        if not isinstance(error_msg, str) or not error_msg:
+            error_msg = "Unknown error"
+
+        logger.warning(
+            "Payment failed for wallet %s: %s (payment_intent_id=%s)",
+            wallet_id,
+            error_msg,
+            payment_intent_id,
         )
 
-        logger.warning(f"Payment failed for wallet {wallet_id}: {error_msg}")
-
-        if wallet_id:
+        if (
+            isinstance(wallet_id, str)
+            and wallet_id
+            and isinstance(payment_intent_id, str)
+            and payment_intent_id
+        ):
             notifications = get_notification_service()
             await notifications.send_payment_failed_alert(
                 wallet_id=wallet_id,
                 error_message=error_msg,
-                payment_intent_id=payment_intent["id"],
+                payment_intent_id=payment_intent_id,
             )
 
     @staticmethod
@@ -456,6 +506,32 @@ class StripeIntegration:
             amount_refunded,
             normalized_charge_id,
         )
+
+    @staticmethod
+    def _refund_entry_matches(
+        entry: LedgerEntryModel,
+        *,
+        payment_intent_id: str,
+        legacy_description: str,
+    ) -> bool:
+        """Whether a refund ledger row belongs to this payment intent.
+
+        The structured reference is the payment intent id recorded in the
+        entry metadata at write time. The description comparison is only a
+        fallback for rows whose metadata is missing or unreadable.
+        Description text is display copy and must not be the primary link.
+        """
+        metadata_json = entry.metadata_json
+        if metadata_json:
+            try:
+                metadata = json.loads(metadata_json)
+            except (json.JSONDecodeError, TypeError, AttributeError):
+                metadata = None
+            if isinstance(metadata, dict):
+                recorded = metadata.get("payment_intent_id")
+                if isinstance(recorded, str) and recorded:
+                    return recorded == payment_intent_id
+        return entry.description == legacy_description
 
     async def _handle_refund(self, charge: Any, event_id: str | None = None) -> None:
         await run_with_write_conflict_retry(
@@ -508,10 +584,18 @@ class StripeIntegration:
                         select(LedgerEntryModel).where(
                             LedgerEntryModel.wallet_id == credit_entry.wallet_id,  # type: ignore[arg-type]
                             LedgerEntryModel.action == "refund",  # type: ignore[arg-type]
-                            LedgerEntryModel.description == description,  # type: ignore[arg-type]
                         )
                     )
-                    prior_refunds = prior_result.scalars().all()
+                    wallet_refunds = prior_result.scalars().all()
+                    prior_refunds = [
+                        entry
+                        for entry in wallet_refunds
+                        if self._refund_entry_matches(
+                            entry,
+                            payment_intent_id=payment_intent_id,
+                            legacy_description=description,
+                        )
+                    ]
                     already_refunded = sum(
                         (-entry.amount for entry in prior_refunds),
                         Decimal("0"),
@@ -544,6 +628,11 @@ class StripeIntegration:
                     # this delta only while the refund ledger still matches the
                     # snapshot used to calculate it; a loser restarts its whole
                     # transaction. Count rows rather than summing SQL floats.
+                    # The count covers every refund row on this wallet (not
+                    # just this payment intent), so a concurrent refund for a
+                    # different intent restarts this attempt instead of
+                    # slipping past the snapshot. The restart recomputes the
+                    # delta from the new snapshot, so it converges.
                     refund_count = (
                         select(func.count())
                         .select_from(LedgerEntryModel)
@@ -555,10 +644,6 @@ class StripeIntegration:
                             cast(
                                 ColumnElement[bool], LedgerEntryModel.action == "refund"
                             ),
-                            cast(
-                                ColumnElement[bool],
-                                LedgerEntryModel.description == description,
-                            ),
                         )
                         .scalar_subquery()
                     )
@@ -569,7 +654,7 @@ class StripeIntegration:
                                 ColumnElement[bool],
                                 WalletModel.wallet_id == credit_entry.wallet_id,
                             ),
-                            refund_count == len(prior_refunds),
+                            refund_count == len(wallet_refunds),
                         )
                         .values(
                             balance=WalletModel.balance - refund_delta,
