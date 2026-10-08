@@ -729,8 +729,20 @@ _standard_mcp_server = _build_standard_mcp_server()
 
 
 def _require_enabled() -> None:
+    # Authentication already ran (every route on this router depends on
+    # get_auth_context), so only an authenticated caller ever sees this
+    # body. Name the exact flag: a bare "Not Found" sends operators hunting.
     if not get_settings().ENABLE_STANDARD_MCP_ENDPOINT:
-        raise HTTPException(status_code=404, detail="Not Found")
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "standard_mcp_endpoint_disabled",
+                "remediation": (
+                    "Set ENABLE_STANDARD_MCP_ENDPOINT=true and restart the "
+                    "server, then call with a wallet-scoped API key."
+                ),
+            },
+        )
 
 
 def _validate_origin(request: Request) -> None:
@@ -741,7 +753,15 @@ def _validate_origin(request: Request) -> None:
     public_url = get_settings().PUBLIC_URL.rstrip("/")
     request_origin = f"{request.url.scheme}://{request.url.netloc}"
     if public_url and request.url.netloc != urlsplit(public_url).netloc:
-        raise HTTPException(status_code=421, detail={"error": "host_not_allowed"})
+        raise HTTPException(
+            status_code=421,
+            detail={
+                "error": "host_not_allowed",
+                "remediation": (
+                    "Set PUBLIC_URL to this deployment's public origin and retry."
+                ),
+            },
+        )
 
     origin = request.headers.get("origin")
     if not origin:
@@ -752,7 +772,16 @@ def _validate_origin(request: Request) -> None:
     # request-derived origin is a local/unconfigured fallback only.
     allowed = {public_url} if public_url else {request_origin}
     if origin.rstrip("/") not in allowed:
-        raise HTTPException(status_code=403, detail={"error": "origin_not_allowed"})
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "origin_not_allowed",
+                "remediation": (
+                    "Non-browser clients should omit Origin. Browser clients "
+                    "must call the configured PUBLIC_URL origin."
+                ),
+            },
+        )
 
 
 class _SdkTransportResponse(Response):
@@ -927,4 +956,15 @@ async def standard_mcp_no_stream(
 ) -> Response:
     """Stateless server: no server-initiated stream, no session to delete."""
     _require_enabled()
-    return Response(status_code=405, headers={"Allow": "POST"})
+    return JSONResponse(
+        {
+            "error": "method_not_allowed",
+            "detail": (
+                "This endpoint is stateless Streamable HTTP in JSON mode: "
+                "send MCP requests with POST. There is no stream to open "
+                "and no session to delete."
+            ),
+        },
+        status_code=405,
+        headers={"Allow": "POST"},
+    )

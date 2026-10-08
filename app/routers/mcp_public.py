@@ -41,7 +41,7 @@ from fastapi import APIRouter, HTTPException, Request
 from mcp.server.lowlevel import Server
 from mcp.shared.exceptions import McpError
 from sqlalchemy.exc import SQLAlchemyError
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 
 from app.core.config import get_settings, public_api_origin
 from app.core.trust_mode import is_production_like_environment
@@ -228,7 +228,7 @@ _TOOLS: list[mcp_types.Tool] = [
             "Use this when the user asks about this consequential-action "
             "transaction-integrity boundary, which Ed25519 keys it publishes "
             "for receipt verification, or where its public discovery and "
-            "verification endpoints live. The tool name is a legacy alias."
+            "verification endpoints live."
         ),
         inputSchema={
             "type": "object",
@@ -702,4 +702,15 @@ async def handle_public_mcp(request: Request) -> Response:
 async def public_mcp_no_stream() -> Response:
     """Stateless server: no server-initiated stream, no session to delete."""
     _require_enabled()
-    return Response(status_code=405, headers={"Allow": "POST"})
+    return JSONResponse(
+        {
+            "error": "method_not_allowed",
+            "detail": (
+                "This endpoint is stateless Streamable HTTP in JSON mode: "
+                "send MCP requests with POST. There is no stream to open "
+                "and no session to delete."
+            ),
+        },
+        status_code=405,
+        headers={"Allow": "POST"},
+    )

@@ -250,6 +250,15 @@ async def test_get_and_delete_are_rejected(client, public_mcp_enabled):
     assert (await client.delete(PUBLIC_PATH, headers=MCP_HEADERS)).status_code == 405
 
 
+@pytest.mark.anyio
+async def test_method_not_allowed_points_at_post(client, public_mcp_enabled):
+    resp = await client.get(PUBLIC_PATH, headers=MCP_HEADERS)
+    assert resp.status_code == 405
+    assert resp.headers["allow"] == "POST"
+    assert resp.json()["error"] == "method_not_allowed"
+    assert "POST" in resp.json()["detail"]
+
+
 def test_public_mcp_has_no_generated_sibling_routes():
     routes = [
         route

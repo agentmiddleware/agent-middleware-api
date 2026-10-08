@@ -107,11 +107,12 @@ GET /v1/receipts/{receipt_id}/portable
 `ENABLE_DOGFOOD_TOOL=false`; do not use that fixture as evidence of a partner
 integration.
 
-The default available governed transport is `POST /mcp/messages`, a
-project-specific legacy JSON-RPC endpoint that does not implement standard MCP
-initialization. An operator may enable the standards-compliant Streamable HTTP
-transport at `POST /mcp`; do not assume that endpoint is available unless the
-deployment's discovery manifest lists it.
+The recommended governed transport is the standards-compliant Streamable HTTP
+transport at `POST /mcp`, called with a wallet-scoped API key; do not assume
+that endpoint is available unless the deployment's discovery manifest lists it
+(the operator enables it with `ENABLE_STANDARD_MCP_ENDPOINT`). `POST
+/mcp/messages` remains as a project-specific legacy JSON-RPC endpoint that does
+not implement standard MCP initialization, kept for existing clients.
 
 ---
 
