@@ -12,6 +12,16 @@ acceptance test in
 For the concise route through local evaluation, integration, SDK, security, and
 pilot material, use the [documentation guide](docs/README.md).
 
+## Pilot scope (read first)
+
+The supported pilot is one vendor-managed Railway project per customer, with a
+single operator-configured MCP tool on the governed path. Data is synthetic or
+redacted low-sensitivity data only: PHI, PCI data, regulated production
+records, and sensitive tool arguments are out of scope. Shared SaaS,
+customer-VPC/BYOC, and customer-operated on-premises deployments are not
+supported in this pilot. Full limits:
+[`SECURITY_LIMITATIONS.md`](SECURITY_LIMITATIONS.md).
+
 ## Best-Fit Partner
 
 An AI platform, infrastructure, or security engineering team that already has

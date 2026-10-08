@@ -1,7 +1,10 @@
 # Demo Script: Concrete Trust-Plane Proof
 
-This is the design-partner demo for the current trust-plane proof. It shows one
-bounded agent tool call moving through the control plane:
+This is the design-partner demo for the current trust-plane proof.
+
+> Authorize one agent action. Charge it once. Prove what happened.
+
+It shows one bounded agent tool call moving through the control plane:
 
 ```text
 scoped signed permit -> governed MCP invoke -> wallet charge -> signed receipt

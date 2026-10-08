@@ -7,6 +7,8 @@
 
 > **Agents retry. Consequential tools should not execute or charge twice.**
 
+> Authorize one agent action. Charge it once. Prove what happened.
+
 Agent Middleware API puts an authorization and transaction boundary in front of
 MCP tools.
 
@@ -202,7 +204,8 @@ invariant it asserts — and to what it does not prove.
   the network send, so it records the authority to send — not that a send
   happened, and never that the tool acted.
 - **Not settlement or compliance.** An internal credit ledger, not merchant
-  settlement, dispute handling, or a certified compliance record.
+  settlement, dispute handling, or a certified compliance record. Buyer
+  wording: [docs/money-and-credits.md](docs/money-and-credits.md).
 - **Not an IAM replacement.** Wallet isolation is application-layer
   authorization and query scoping; PostgreSQL RLS and a public multi-tenant
   isolation guarantee are not implemented.
@@ -283,6 +286,11 @@ permit → meter → receipt path.
 An agent holding no authority can ask a human for it with
 `POST /v1/permit-requests`. Full HTTP sequence:
 [docs/golden-path.md](docs/golden-path.md).
+
+Human approval is an optional integration with an external approval service
+(Sentinel), configured per deployment with its own tenant and approvers. It is
+part of the governed permit loop, not a standalone product in this repository.
+Operator setup: [docs/human-approval-gate.md](docs/human-approval-gate.md).
 
 ### Put your own tool behind it
 
