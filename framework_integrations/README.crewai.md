@@ -32,6 +32,19 @@ python -m pip install -e wrappers/crewai-agent-middleware
 
 ## Quick Start
 
+In-folder bridge (no directory change needed):
+
+```python
+from framework_integrations import get_crewai_governed_tool
+
+b2a_tool = get_crewai_governed_tool(
+    api_key="your-api-key",
+    wallet_id="agent-001",
+)
+```
+
+Or use the wrapper directly:
+
 ```python
 from crewai import Agent
 from crewai_b2a import CrewAIB2ATool

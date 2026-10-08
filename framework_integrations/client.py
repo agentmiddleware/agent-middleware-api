@@ -39,18 +39,35 @@ class B2AClient:
         self._client = httpx.AsyncClient(timeout=config.timeout)
 
     def _headers(self) -> dict[str, str]:
+        if not self.config.api_key or not self.config.api_key.strip():
+            raise ValueError(
+                "B2AClient has no api_key configured: pass "
+                "api_key=... to B2AClient (see framework_integrations "
+                "README for how to mint a key). No request was sent."
+            )
         return {
             "X-API-Key": self.config.api_key,
             "Content-Type": "application/json",
         }
+
+    def _require_wallet(self) -> str:
+        wallet_id = self.config.wallet_id
+        if not wallet_id or not wallet_id.strip():
+            raise ValueError(
+                "B2AClient has no wallet_id configured: pass "
+                "wallet_id=... to B2AClient (the wallet the call is "
+                "metered against). No request was sent."
+            )
+        return wallet_id
 
     async def close(self):
         await self._client.aclose()
 
     async def get_balance(self) -> float:
         """Get current wallet balance."""
+        wallet_id = self._require_wallet()
         response = await self._client.get(
-            f"{self.config.api_url}/v1/billing/wallets/{self.config.wallet_id}",
+            f"{self.config.api_url}/v1/billing/wallets/{wallet_id}",
             headers=self._headers(),
         )
         response.raise_for_status()
@@ -65,7 +82,7 @@ class B2AClient:
         """Emit a telemetry event."""
         payload = {
             "event": event,
-            "agent_id": self.config.wallet_id,
+            "agent_id": self._require_wallet(),
             "properties": properties or {},
         }
         response = await self._client.post(
@@ -84,7 +101,7 @@ class B2AClient:
     ) -> dict[str, Any]:
         """Send a message to another agent."""
         payload = {
-            "from_agent_id": self.config.wallet_id,
+            "from_agent_id": self._require_wallet(),
             "to_agent_id": to_agent_id,
             "content": content,
             "priority": priority,
@@ -104,7 +121,7 @@ class B2AClient:
     ) -> str:
         """Make an AI-powered decision."""
         payload = {
-            "agent_id": self.config.wallet_id,
+            "agent_id": self._require_wallet(),
             "context": context,
             "options": options,
         }
@@ -227,7 +244,7 @@ class B2AClient:
         if not idempotency_key or not idempotency_key.strip():
             raise ValueError("idempotency_key is required and must not be blank")
         params: dict[str, str | float] = {
-            "wallet_id": self.config.wallet_id,
+            "wallet_id": self._require_wallet(),
             "service": service_category,
             "units": units,
         }

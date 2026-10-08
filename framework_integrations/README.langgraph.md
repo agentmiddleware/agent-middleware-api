@@ -2,6 +2,15 @@
 
 Use Agent Middleware API tools directly in LangGraph agents.
 
+## Recommended: governed tools
+
+Start with `framework_integrations.LangGraphGovernedTools` (see
+`README.pydantic_ai.md` for the same pattern in Pydantic AI shape): each call
+runs the permit plus idempotency key plus signed receipt loop. The
+`get_langgraph_tools` factory below is legacy and UNGOVERNED (no permit
+check, no receipt, emits `DeprecationWarning`); it stays for existing callers
+only.
+
 ## Installation
 
 No PyPI package is published. Work from a checkout of this repository:
