@@ -29,6 +29,7 @@ from app.db.models import (
 )
 from app.schemas.billing import AlertType
 from app.schemas.trust import ActionPermitFields, PermitCreateRequest, PermitResponse
+from app.services.audit_log import record_audit_event
 from app.services.signing_keys import get_signing_key_service, sha256_hex
 
 logger = logging.getLogger(__name__)
@@ -205,6 +206,78 @@ def _find_forbidden_field(arguments: Any, forbidden: set[str]) -> str | None:
         elif isinstance(node, (list, tuple)):
             stack.extend(node)
     return None
+
+
+def _require_permit_caller(
+    model: PermitModel,
+    *,
+    caller_wallet_id: str | None,
+    is_bootstrap_admin: bool,
+    is_system: bool = False,
+    issuer_only: bool = False,
+) -> None:
+    """Refuse a permit mutation the caller does not own.
+
+    The web route checks today, but every service function here enforces
+    ownership on its own so a future caller cannot revoke a permit or erase
+    its spending for anyone. ``is_system`` marks trusted internal
+    compensation for a reservation the system itself created (a failed tool
+    call handing budget back); it is explicit at each call site and named in
+    the audit entry, so review can tell it apart from a wallet caller.
+    """
+    if is_bootstrap_admin or is_system:
+        return
+    allowed = (
+        {model.issuer_wallet_id}
+        if issuer_only
+        else {model.issuer_wallet_id, model.subject_wallet_id}
+    )
+    if caller_wallet_id is not None and caller_wallet_id in allowed:
+        return
+    raise PermitError("permit_access_denied")
+
+
+async def _audit_budget_release(
+    *,
+    event: str,
+    permit_id: str,
+    amount: Decimal,
+    wallet_id: str | None,
+    caller_wallet_id: str | None,
+    is_bootstrap_admin: bool,
+    is_system: bool,
+    attempt_id: str | None = None,
+) -> None:
+    """Write one audit entry for a budget release. Never raises.
+
+    Releases run as compensation inside failure handlers, so an
+    observability write must not replace the caller's real answer when the
+    audit store itself is unavailable.
+    """
+    try:
+        metadata: dict[str, Any] = {
+            "permit_id": permit_id,
+            "amount": str(amount),
+            "actor": (
+                "system"
+                if is_system
+                else ("bootstrap_admin" if is_bootstrap_admin else "owner")
+            ),
+        }
+        if caller_wallet_id is not None:
+            metadata["caller_wallet_id"] = caller_wallet_id
+        if attempt_id is not None:
+            metadata["attempt_id"] = attempt_id
+        await record_audit_event(
+            event=event,
+            wallet_id=wallet_id,
+            metadata=metadata,
+        )
+    except Exception:
+        logger.exception(
+            "permit_budget_release_audit_failed",
+            extra={"permit_id": permit_id, "event": event},
+        )
 
 
 def permit_model_to_response(model: PermitModel) -> PermitResponse:
@@ -453,12 +526,27 @@ class PermitService:
             await session.refresh(model)
         return permit_model_to_response(model)
 
-    async def revoke_permit(self, permit_id: str) -> PermitResponse:
+    async def revoke_permit(
+        self,
+        permit_id: str,
+        *,
+        caller_wallet_id: str | None = None,
+        is_bootstrap_admin: bool = False,
+    ) -> PermitResponse:
         factory = get_session_factory()
         async with factory() as session:
             model = await session.get(PermitModel, permit_id)
             if not model:
                 raise PermitError("permit_not_found")
+            # Issuer-only, matching the route contract: revoking destroys
+            # authority funded by the issuer, so the subject alone cannot
+            # do it either.
+            _require_permit_caller(
+                model,
+                caller_wallet_id=caller_wallet_id,
+                is_bootstrap_admin=is_bootstrap_admin,
+                issuer_only=True,
+            )
             model.status = "revoked"
             model.revoked_at = utc_now()
             session.add(model)
@@ -1173,16 +1261,34 @@ class PermitService:
 
         await self._run_with_write_retry(_once)
 
-    async def release_budget(self, permit_id: str, amount: Decimal) -> None:
+    async def release_budget(
+        self,
+        permit_id: str,
+        amount: Decimal,
+        *,
+        caller_wallet_id: str | None = None,
+        is_bootstrap_admin: bool = False,
+        is_system: bool = False,
+    ) -> None:
         factory = get_session_factory()
 
-        async def _once() -> None:
+        async def _once() -> tuple[bool, str | None]:
             async with factory() as session:
                 async with session.begin():
+                    owner = await session.get(PermitModel, permit_id)
+                    if owner is None:
+                        # A missing permit is a no-op.
+                        return False, None
+                    _require_permit_caller(
+                        owner,
+                        caller_wallet_id=caller_wallet_id,
+                        is_bootstrap_admin=is_bootstrap_admin,
+                        is_system=is_system,
+                    )
                     # Atomic clamped decrement: a single UPDATE so a concurrent
                     # reservation on the same permit cannot be lost to a
-                    # read-modify-write refund. A missing permit is a no-op.
-                    await session.execute(
+                    # read-modify-write refund.
+                    result = await session.execute(
                         sa_update(PermitModel)
                         .where(
                             cast(
@@ -1206,8 +1312,21 @@ class PermitService:
                         )
                         .execution_options(synchronize_session=False)
                     )
+                    return (cast(Any, result).rowcount or 0) == 1, (
+                        owner.subject_wallet_id
+                    )
 
-        await self._run_with_write_retry(_once)
+        released, subject_wallet_id = await self._run_with_write_retry(_once)
+        if released:
+            await _audit_budget_release(
+                event="permit_budget_released",
+                permit_id=permit_id,
+                amount=amount,
+                wallet_id=subject_wallet_id,
+                caller_wallet_id=caller_wallet_id,
+                is_bootstrap_admin=is_bootstrap_admin,
+                is_system=is_system,
+            )
 
     async def record_absorbed_release_drift(
         self,
@@ -1285,7 +1404,15 @@ class PermitService:
             )
             return False
 
-    async def release_tool_call(self, permit_id: str, tool_name: str) -> None:
+    async def release_tool_call(
+        self,
+        permit_id: str,
+        tool_name: str,
+        *,
+        caller_wallet_id: str | None = None,
+        is_bootstrap_admin: bool = False,
+        is_system: bool = False,
+    ) -> None:
         """Give back one ``max_calls_per_tool`` use consumed by a reservation.
 
         Compensation partner to :meth:`release_budget`: ``authorize_and_reserve``
@@ -1302,6 +1429,7 @@ class PermitService:
         factory = get_session_factory()
 
         async def _once() -> None:
+            checked_owner = False
             for _ in range(5):
                 async with factory() as session:
                     async with session.begin():
@@ -1310,6 +1438,14 @@ class PermitService:
                         )
                         if model is None:
                             return
+                        if not checked_owner:
+                            _require_permit_caller(
+                                model,
+                                caller_wallet_id=caller_wallet_id,
+                                is_bootstrap_admin=is_bootstrap_admin,
+                                is_system=is_system,
+                            )
+                            checked_owner = True
                         original_counts_json = model.tool_call_counts_json
                         counts = _loads_dict(original_counts_json or "{}")
                         current = counts.get(tool_name, 0)
@@ -1357,7 +1493,14 @@ class PermitService:
 
         await self._run_with_write_retry(_once)
 
-    async def release_dispatch_budget_once(self, attempt_id: str) -> bool:
+    async def release_dispatch_budget_once(
+        self,
+        attempt_id: str,
+        *,
+        caller_wallet_id: str | None = None,
+        is_bootstrap_admin: bool = False,
+        is_system: bool = False,
+    ) -> bool:
         """Release one remote attempt's reservation exactly once.
 
         The permit mutation and attempt checkpoint share one transaction. This
@@ -1367,12 +1510,22 @@ class PermitService:
         """
         factory = get_session_factory()
 
-        async def _once() -> bool:
+        async def _once() -> tuple[bool, str, str | None, str | None]:
             async with factory() as session:
                 async with session.begin():
                     attempt = await session.get(McpDispatchAttemptModel, attempt_id)
                     if attempt is None:
                         raise PermitError("dispatch_attempt_not_found")
+                    if not is_system and not is_bootstrap_admin:
+                        owner = await session.get(PermitModel, attempt.permit_id)
+                        if owner is None:
+                            raise PermitError("permit_not_found")
+                        _require_permit_caller(
+                            owner,
+                            caller_wallet_id=caller_wallet_id,
+                            is_bootstrap_admin=is_bootstrap_admin,
+                            is_system=is_system,
+                        )
                     # Only a terminal returned_error attempt has a reservation
                     # to give back. Releasing budget for a prepared or
                     # dispatched attempt frees credits that attempt may still
@@ -1382,7 +1535,7 @@ class PermitService:
                     if attempt.state != "returned_error":
                         raise PermitError("dispatch_budget_release_state_invalid")
                     if attempt.budget_released_at is not None:
-                        return False
+                        return False, attempt.permit_id, None, None
                     now = utc_now()
                     # Claim the release atomically before touching the permit.
                     # The read above is guarded by a row lock, but SQLAlchemy
@@ -1412,7 +1565,7 @@ class PermitService:
                     if (cast(Any, claimed).rowcount or 0) != 1:
                         # Another caller claimed it first; its transaction owns
                         # the single decrement.
-                        return False
+                        return False, attempt.permit_id, None, None
                     # If this attempt holds a call slot, release it by decrementing
                     # the tool_call_counts_json counter. This happens in the same
                     # transaction as the budget release, so it's once-only.
@@ -1513,9 +1666,37 @@ class PermitService:
                     attempt.budget_released_at = now
                     attempt.updated_at = now
                     session.add(attempt)
-                return True
+                    audit_permit = await session.get(PermitModel, attempt.permit_id)
+                    audit_wallet_id = (
+                        audit_permit.subject_wallet_id
+                        if audit_permit is not None
+                        else None
+                    )
+                return (
+                    True,
+                    attempt.permit_id,
+                    str(attempt.credits_authorized),
+                    audit_wallet_id,
+                )
 
-        return await self._run_with_write_retry(_once)
+        (
+            released,
+            released_permit_id,
+            released_amount,
+            released_wallet_id,
+        ) = await self._run_with_write_retry(_once)
+        if released and released_amount is not None:
+            await _audit_budget_release(
+                event="permit_dispatch_budget_released",
+                permit_id=released_permit_id,
+                amount=Decimal(released_amount),
+                wallet_id=released_wallet_id,
+                caller_wallet_id=caller_wallet_id,
+                is_bootstrap_admin=is_bootstrap_admin,
+                is_system=is_system,
+                attempt_id=attempt_id,
+            )
+        return released
 
     async def _consumed_credits(self, session: Any, permit_id: str) -> Decimal:
         """Credits a permit's receipts prove it actually consumed.

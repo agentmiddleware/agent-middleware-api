@@ -542,7 +542,7 @@ class X402PaymentHandler:
                         shadow_session_id,
                     )
             try:
-                await permits.release_budget(permit_id, credits)
+                await permits.release_budget(permit_id, credits, is_system=True)
                 budget_released = True
             except Exception:
                 compensation_complete = False
@@ -552,7 +552,9 @@ class X402PaymentHandler:
             # one-call permit's legitimate retry is denied
             # permit_max_calls_exceeded with no receipt to show for it.
             try:
-                await permits.release_tool_call(permit_id, X402_TOOL_NAME)
+                await permits.release_tool_call(
+                    permit_id, X402_TOOL_NAME, is_system=True
+                )
                 tool_call_released = True
             except Exception:
                 compensation_complete = False

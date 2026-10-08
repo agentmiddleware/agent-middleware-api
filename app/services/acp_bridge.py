@@ -493,7 +493,9 @@ class ACPCommerceAdapter:
         # short-TTL permit; a wedged intent record has no such expiry).
         async def _rollback() -> None:
             try:
-                await get_permit_service().release_budget(permit.permit_id, credits)
+                await get_permit_service().release_budget(
+                    permit.permit_id, credits, is_system=True
+                )
             except Exception:
                 logger.exception(
                     "ACP rollback failed to release %s credits on permit %s "

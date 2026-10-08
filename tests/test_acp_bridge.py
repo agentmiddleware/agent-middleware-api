@@ -931,7 +931,7 @@ async def test_acp_rollback_release_failure_neither_masks_nor_skips_abandon(
 
     release_calls: list[str] = []
 
-    async def _broken_release(self, permit_id, amount):
+    async def _broken_release(self, permit_id, amount, **kwargs):
         release_calls.append(permit_id)
         raise RuntimeError("induced release failure")
 

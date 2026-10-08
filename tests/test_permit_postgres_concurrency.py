@@ -662,7 +662,9 @@ async def test_authorization_then_revocation_is_one_valid_serial_order(
 
     async def revoke() -> object:
         revocation_started.set()
-        return await service.revoke_permit(seeded_permit.permit_id)
+        return await service.revoke_permit(
+            seeded_permit.permit_id, is_bootstrap_admin=True
+        )
 
     revocation = asyncio.create_task(revoke())
     await asyncio.wait_for(revocation_started.wait(), timeout=5)

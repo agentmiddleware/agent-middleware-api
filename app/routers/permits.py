@@ -246,8 +246,14 @@ async def revoke_permit(
         raise HTTPException(status_code=404, detail="permit_not_found")
     auth.require_wallet_access(existing.issuer_wallet_id)
     try:
-        permit = await service.revoke_permit(permit_id)
+        permit = await service.revoke_permit(
+            permit_id,
+            caller_wallet_id=auth.wallet_id,
+            is_bootstrap_admin=auth.is_bootstrap_admin,
+        )
     except PermitError as exc:
+        if exc.reason == "permit_access_denied":
+            raise HTTPException(status_code=403, detail=exc.reason)
         raise HTTPException(status_code=404, detail=exc.reason)
     return permit
 
