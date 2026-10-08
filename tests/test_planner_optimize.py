@@ -58,7 +58,9 @@ def test_budget_latency_and_scope_constraints_hold():
         },
     ]
     out = optimize_action_set(req.state, candidates, req)
-    assert out["status"] in {"Optimal", "HeuristicFallback"}
+    # "Optimal" was never emitted (its MILP branch never ran), so the
+    # only success status the planner can return is the greedy heuristic.
+    assert out["status"] == "HeuristicFallback"
     ids = {x["id"] for x in out["selected_actions"]}
     assert "b" not in ids
     assert out["totals"]["cost"] <= req.state.remaining_budget

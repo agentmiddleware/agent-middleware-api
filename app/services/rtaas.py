@@ -387,7 +387,7 @@ class RTaaSEngine:
                             target_url=target.url,
                             title=f"Minor {cat.value.replace('_', ' ')} finding",
                             description=f"Low-risk {cat.value} observation",
-                            evidence="Informational finding from automated scan",
+                            evidence="Informational modeled finding, no scan was run",
                             cwe_id=self._cwe_for_category(cat),
                             remediation="Consider hardening as a best practice.",
                         )

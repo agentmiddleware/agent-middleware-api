@@ -1,15 +1,15 @@
 """
 Schemas for the Red Team Security Swarm.
 Defines attack vectors, vulnerability reports, and scan orchestration
-for autonomous penetration testing of all 33+ API paths.
-
-Philosophy: If your own agents can't break it, external agents won't either.
-But if they CAN break it, you find out before 7,000 vacuum cameras go live.
+for SIMULATED scan modeling. Nothing here contacts a target or sends
+traffic; every report carries simulated=True so it cannot be mistaken
+for live penetration testing.
 """
 
 from pydantic import BaseModel, Field
 from enum import Enum
 from datetime import datetime
+from typing import Literal
 
 
 class AttackCategory(str, Enum):
@@ -90,27 +90,30 @@ class VulnerabilityListResponse(BaseModel):
     total: int
     critical_count: int
     high_count: int
+    # Every finding here is modeled, no target was contacted. The flag is in
+    # the payload so an exported report cannot be mistaken for live testing.
+    simulated: Literal[True] = True
 
 
 # --- Scan ---
 
 
 class ScanRequest(BaseModel):
-    """Initiate a Red Team scan."""
+    """Initiate a simulated Red Team scan (modeled, no traffic is sent)."""
 
     target_services: list[str] = Field(
         default=["iot", "telemetry", "media", "comms", "factory"],
-        description="Which service pillars to attack. Default: all.",
+        description="Which service pillars to model. Default: all.",
     )
     attack_categories: list[AttackCategory] = Field(
         default=[c for c in AttackCategory],
-        description="Which attack vectors to deploy. Default: all.",
+        description="Which modeled attack categories to include. Default: all.",
     )
     intensity: str = Field(
         default="standard",
         description=(
-            "Scan intensity: 'quick' (surface-level), 'standard' (thorough), "
-            "'aggressive' (full fuzzing)."
+            "Simulation depth: 'quick' (surface-level), 'standard' "
+            "(thorough), 'aggressive' (full modeled coverage)."
         ),
     )
     auto_remediate: bool = Field(
@@ -132,11 +135,17 @@ class ScanResponse(BaseModel):
     intensity: str
     estimated_duration_seconds: int
     total_attack_vectors: int
+    # The scan is modeled, no traffic is sent.
+    simulated: Literal[True] = True
 
 
 class ScanReport(BaseModel):
     """Full scan report."""
 
+    # This report is modeled, no target was contacted and no traffic was
+    # sent. The flag is in the payload so an exported report cannot be
+    # mistaken for a live penetration test.
+    simulated: Literal[True] = True
     scan_id: str
     status: ScanStatus
     started_at: datetime

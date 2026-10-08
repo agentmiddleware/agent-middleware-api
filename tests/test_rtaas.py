@@ -45,6 +45,7 @@ async def test_create_rtaas_job(client):
     assert resp.status_code == 201
     data = resp.json()
     assert data["status"] == "completed"
+    assert data["simulated"] is True
     assert data["targets_count"] == 2
     assert data["total_tests_run"] > 0
     assert 0 <= data["security_score"] <= 100
@@ -93,6 +94,7 @@ async def test_rtaas_list_jobs(client):
     )
     assert resp.status_code == 200
     assert resp.json()["total"] >= 1
+    assert all(j["simulated"] is True for j in resp.json()["jobs"])
 
 
 @pytest.mark.anyio
@@ -111,6 +113,7 @@ async def test_rtaas_get_job_by_id(client):
     resp = await client.get(f"/v1/rtaas/jobs/{job_id}", headers=HEADERS)
     assert resp.status_code == 200
     assert resp.json()["job_id"] == job_id
+    assert resp.json()["simulated"] is True
 
 
 @pytest.mark.anyio
@@ -129,6 +132,7 @@ async def test_rtaas_get_vulnerabilities_endpoint(client):
     resp = await client.get(f"/v1/rtaas/jobs/{job_id}/vulnerabilities", headers=HEADERS)
     assert resp.status_code == 200
     assert "vulnerabilities" in resp.json()
+    assert resp.json()["simulated"] is True
 
 
 @pytest.mark.anyio

@@ -10,6 +10,7 @@ and refuses to run unless its simulation flag is explicitly enabled.
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from datetime import datetime
+from typing import Literal
 
 from ..core.auth import AuthContext, get_auth_context
 from ..core.dependencies import get_rtaas_engine
@@ -80,7 +81,7 @@ class CreateJobRequest(BaseModel):
     )
     attack_categories: list[AttackCategory] | None = Field(
         None,
-        description="Attack categories to run. None = all categories.",
+        description="Modeled attack categories to include. None = all categories.",
     )
     intensity: str = Field(
         default="standard",
@@ -103,6 +104,10 @@ class VulnerabilitySchema(BaseModel):
 class JobResponse(BaseModel):
     """RTaaS scanning job result."""
 
+    # Findings are deterministic modeled output, no target was contacted.
+    # The flag is in the payload so an exported job cannot be mistaken
+    # for a live penetration test.
+    simulated: Literal[True] = True
     job_id: str
     tenant_id: str
     status: str
@@ -187,6 +192,7 @@ async def list_jobs(
                 "job_id": j.job_id,
                 "tenant_id": j.tenant_id,
                 "status": j.status,
+                "simulated": True,
                 "targets_count": len(j.targets),
                 "vulnerabilities_found": len(j.vulnerabilities),
                 "security_score": j.security_score,
@@ -232,6 +238,7 @@ async def get_vulnerabilities(
 
     return {
         "job_id": job_id,
+        "simulated": True,
         "total": len(vulns),
         "vulnerabilities": [
             {
