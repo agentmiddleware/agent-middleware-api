@@ -175,9 +175,30 @@ class QuoteService:
         if model is None:
             return None
         if model.status == QUOTE_STATUS_ACTIVE and utc_now() >= model.expires_at:
-            # Report the truth to a reader without needing a sweeper; the
-            # authoritative expiry check is in the atomic consume.
-            model.status = QUOTE_STATUS_EXPIRED
+            # Persist the expiry so the stored row matches what readers see;
+            # the atomic consume remains the authority on the spend path.
+            # Guarded on still-active so a concurrent consume cannot be
+            # overwritten here.
+            factory = get_session_factory()
+            async with factory() as session:
+                result = await session.execute(
+                    update(QuoteModel)
+                    .where(
+                        cast(ColumnElement[bool], QuoteModel.quote_id == quote_id),
+                        cast(
+                            ColumnElement[bool],
+                            QuoteModel.status == QUOTE_STATUS_ACTIVE,
+                        ),
+                        cast(
+                            ColumnElement[bool],
+                            QuoteModel.expires_at <= utc_now(),
+                        ),
+                    )
+                    .values(status=QUOTE_STATUS_EXPIRED)
+                )
+                await session.commit()
+                if cast(Any, result).rowcount == 1:
+                    model.status = QUOTE_STATUS_EXPIRED
         return quote_model_to_response(model)
 
     async def _load(self, quote_id: str) -> QuoteModel | None:

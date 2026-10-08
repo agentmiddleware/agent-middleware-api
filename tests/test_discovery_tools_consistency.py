@@ -120,6 +120,46 @@ async def test_discover_and_tools_json_agree_when_proof_surfaces_off(
 
 
 @pytest.mark.anyio
+async def test_discover_marks_whether_each_tool_supports_quotes(
+    client, proof_surfaces_off, dogfood_on
+):
+    """Every discovery tool entry carries a quotable flag agents can check upfront.
+
+    A normally priced tool reads quotable true; a tool whose registered price
+    POST /v1/quotes would refuse (zero here) reads quotable false.
+    """
+    from app.schemas.billing import ServiceCategory
+    from app.services.service_registry import get_service_registry
+
+    registry = get_service_registry()
+
+    def broken_price() -> dict:
+        return {"ok": True}
+
+    registry.register_local(
+        service_id="discover-quotable-probe",
+        name="Quotable Probe",
+        description="Zero-price probe for the quotable flag",
+        category=ServiceCategory.AGENT_COMMS,
+        func=broken_price,
+        credits_per_unit=0.0,
+        unit_name="call",
+    )
+    try:
+        resp = await client.get("/v1/discover")
+        assert resp.status_code == 200
+        by_id = {tool["service_id"]: tool for tool in resp.json()["mcp_tools"]}
+
+        assert "partner.notes.write" in by_id
+        assert by_id["partner.notes.write"]["quotable"] is True
+
+        assert "discover-quotable-probe" in by_id
+        assert by_id["discover-quotable-probe"]["quotable"] is False
+    finally:
+        registry.unregister_local("discover-quotable-probe")
+
+
+@pytest.mark.anyio
 @pytest.mark.proof
 async def test_discover_and_tools_json_agree_when_proof_surfaces_on(client):
     """When proof surfaces are on, /v1/discover and /mcp/tools.json must agree.

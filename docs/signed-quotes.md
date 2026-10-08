@@ -48,10 +48,13 @@ price drift.
 
 `POST /v1/quotes` itself answers `400 tool_price_invalid` and signs nothing when
 the tool's registered price is not finite, positive, and losslessly storable
-in the shared eight-decimal credit format. Zero-price governed calls are currently
-unsupported: the billing layer requires positive charge units. The quote endpoint
-therefore refuses a zero price before issuing a commitment that cannot be honored.
-This does not add a free-execution billing path.
+in the shared eight-decimal credit format. The rule is plain: every quoted call
+costs a positive amount, so a free tool or free-trial call cannot use the quote
+path today. Zero-price governed calls are unsupported because the billing layer
+requires positive charge units. The quote endpoint therefore refuses a zero
+price before issuing a commitment that cannot be honored. A "first calls free"
+offer needs a different mechanism (for example a billing credit or an unquoted
+governed call); this path does not add a free-execution billing path.
 
 All of these deny the invoke (`403`, JSON-RPC `-32603`) rather than falling
 back to the live price. The caller asked to be charged a specific number;
@@ -85,6 +88,12 @@ spent quote to the invoke that spent it.
 
 Spending happens on the existing governed invoke — pass `quote_id` in
 `mcpContext` alongside `wallet_id`, `permit_id`, and `idempotency_key`.
+
+Agents can check upfront whether a tool supports quoted pricing: each entry in
+`GET /v1/discover` (`mcp_tools`) carries a `quotable` flag alongside
+`credits_per_call`. It is false only when the tool's registered price is not a
+finite, positive, storable amount, which is the same condition that makes
+`POST /v1/quotes` answer `400 tool_price_invalid`.
 
 ## Example
 
