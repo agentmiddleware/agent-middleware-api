@@ -399,6 +399,53 @@ class TestB2AClient:
             "amount_fiat": "50.0",
             "currency": "USD",
         }
+        key = seen[0].headers["idempotency-key"]
+        assert key.strip() != ""
+        assert len(key) <= 128
+
+    @pytest.mark.asyncio
+    async def test_prepare_top_up_forwards_caller_key(self):
+        """A caller-owned key is sent verbatim so a retry reuses the same PaymentIntent."""
+        client, seen = _recording_client(
+            {
+                ("POST", "/v1/billing/top-up/prepare"): httpx.Response(
+                    200, json={"client_secret": "pi_xxx_secret"}
+                )
+            }
+        )
+        async with client:
+            await client.prepare_top_up("wallet-123", 50.0, idempotency_key="topup-1")
+            await client.prepare_top_up("wallet-123", 50.0, idempotency_key="topup-1")
+
+        assert [r.headers["idempotency-key"] for r in seen] == ["topup-1", "topup-1"]
+
+    @pytest.mark.asyncio
+    async def test_prepare_top_up_mints_distinct_keys_per_call(self):
+        """Without a caller key each prepare_top_up() call gets its own fresh key."""
+        client, seen = _recording_client(
+            {
+                ("POST", "/v1/billing/top-up/prepare"): httpx.Response(
+                    200, json={"client_secret": "pi_xxx_secret"}
+                )
+            }
+        )
+        async with client:
+            await client.prepare_top_up("wallet-123", 50.0)
+            await client.prepare_top_up("wallet-123", 50.0)
+
+        keys = [r.headers["idempotency-key"] for r in seen]
+        assert len(set(keys)) == 2
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("bad_key", ["", "   ", "k" * 129])
+    async def test_prepare_top_up_rejects_bad_key_without_sending(self, bad_key):
+        """A blank or overlong caller key raises ValueError and nothing is sent."""
+        client, seen = _recording_client({})
+        async with client:
+            with pytest.raises(ValueError):
+                await client.prepare_top_up("wallet-123", 50.0, idempotency_key=bad_key)
+
+        assert seen == []
 
 
 class TestDecorators:
