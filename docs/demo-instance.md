@@ -123,3 +123,28 @@ uv run --with-requirements requirements.txt \
   --agent-id demo-agent \
   --budget-credits 1000
 ```
+
+## Reset and key hygiene on a shared demo host
+
+Demo state does not expire on its own. Permits, idempotency records, and
+spent budgets persist, so handing one long-lived host to prospect after
+prospect leaks prior runs into each new trial (a repeated call replays the
+old receipt instead of executing fresh). Between prospects, reset:
+
+1. Revoke every wallet-scoped key you issued: `DELETE
+   /v1/api-keys/{wallet_id}/{key_id}` revokes one key,
+   `POST /v1/api-keys/emergency-revoke` revokes every key on a wallet.
+2. Rotate the bootstrap key itself per [api-key-rotation.md](api-key-rotation.md).
+3. For a fully clean slate, rebuild the host from scratch (fresh database
+   plus fresh signing seed and bootstrap key) rather than reusing state.
+   The local equivalent is `make quickstart QUICKSTART_ARGS="--reset"`
+   (see [quickstart](quickstart.md#starting-over)). Until a rebuild is
+   automated, run steps 1 and 2 on a schedule (for example nightly) so a
+   stale wallet or spent permit never greets the next prospect.
+
+## Vocabulary note: "sandbox" is not the trial
+
+The `/v1/sandbox` API and `app/services/sandbox.py` are puzzle environments
+for testing agents (pattern, navigation, mock API, adversarial), not a
+trial environment for buyers. When talking to prospects, call the trial a
+demo instance or trial workspace, and leave "sandbox" for the puzzle API.
