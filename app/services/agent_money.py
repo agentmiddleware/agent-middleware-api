@@ -318,8 +318,19 @@ class AgentMoney:
     def get_pricing_table(self) -> list[ServicePricing]:
         return self._billing_engine.get_pricing_table()
 
-    async def get_alerts(self, wallet_id: str | None = None) -> list[BillingAlert]:
-        return await self._billing_engine.get_alerts(wallet_id)
+    async def get_alerts(
+        self,
+        wallet_id: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[BillingAlert]:
+        return await self._billing_engine.get_alerts(wallet_id, limit, offset)
+
+    async def count_alerts(self, wallet_id: str | None = None) -> int:
+        return await self._billing_engine.count_alerts(wallet_id)
+
+    async def count_unacknowledged_alerts(self, wallet_id: str | None = None) -> int:
+        return await self._billing_engine.count_unacknowledged_alerts(wallet_id)
 
     async def get_wallet(self, wallet_id: str) -> WalletResponse | None:
         return await self._wallet_engine.get_wallet(wallet_id)

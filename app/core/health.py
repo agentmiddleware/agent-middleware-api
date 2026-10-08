@@ -498,6 +498,23 @@ async def _check_sentinel(simulation_modes: dict[str, bool]) -> dict[str, Any]:
     return {"status": "up"}
 
 
+async def _check_notifications() -> dict[str, Any]:
+    # Advisory only: alerts never gate a request, so this check reports
+    # not_configured instead of down when no channel can deliver. Operators
+    # watching a pilot for freeze or payment-failure pages need to see that
+    # state here rather than discover it during a real incident.
+    from ..services.notifications import get_notification_service
+
+    channels = get_notification_service().channel_status()
+    if not channels["configured"]:
+        return {"status": "not_configured", "reason": "slack_and_email_unset"}
+    return {
+        "status": "up",
+        "slack_configured": channels["slack_configured"],
+        "email_configured": channels["email_configured"],
+    }
+
+
 async def gather_dependency_report() -> dict[str, Any]:
     """
     Run every dependency check in parallel and return a consolidated report.
@@ -518,6 +535,7 @@ async def gather_dependency_report() -> dict[str, Any]:
         upstream_mcp,
         signing_key,
         sentinel,
+        notifications,
     ) = await asyncio.gather(
         _run_check("postgres", _check_postgres),
         _run_check("redis", _check_redis),
@@ -527,6 +545,7 @@ async def gather_dependency_report() -> dict[str, Any]:
         _run_check("upstream_mcp", _check_upstream_mcp),
         _run_check("signing_key", _check_signing_key),
         _run_check("sentinel", lambda: _check_sentinel(sim_modes)),
+        _run_check("notifications", _check_notifications),
     )
 
     dependencies = {
@@ -538,6 +557,7 @@ async def gather_dependency_report() -> dict[str, Any]:
         "upstream_mcp": upstream_mcp,
         "signing_key": signing_key,
         "sentinel": sentinel,
+        "notifications": notifications,
     }
 
     unhealthy = [

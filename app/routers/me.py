@@ -38,7 +38,11 @@ def _require_wallet_key(auth: AuthContext) -> tuple[str, str | None]:
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
                 "error": "wallet_key_required",
-                "message": "This endpoint requires a DB-backed wallet API key.",
+                "message": (
+                    "This endpoint requires a wallet-scoped API key, not the "
+                    "bootstrap admin key. Mint a wallet key first, then retry "
+                    "with it."
+                ),
             },
         )
     return auth.wallet_id, auth.key_id
@@ -52,15 +56,11 @@ async def list_my_alerts(
 ) -> AlertListResponse:
     wallet_id, _ = _require_wallet_key(auth)
     money = get_agent_money()
-    alerts = await money.get_alerts(wallet_id)
-    # Apply pagination
-    total = len(alerts)
-    paginated = alerts[offset : offset + limit]
-    unacknowledged = sum(1 for a in alerts if not a.acknowledged)
+    alerts = await money.get_alerts(wallet_id, limit=limit, offset=offset)
     return AlertListResponse(
-        alerts=paginated,
-        total=total,
-        unacknowledged=unacknowledged,
+        alerts=alerts,
+        total=await money.count_alerts(wallet_id),
+        unacknowledged=await money.count_unacknowledged_alerts(wallet_id),
     )
 
 

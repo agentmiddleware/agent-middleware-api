@@ -40,6 +40,21 @@ class NotificationService:
         self._slack_webhook_url = settings.SLACK_WEBHOOK_URL
         self._from_email = settings.ALERT_FROM_EMAIL
         self._http = httpx.AsyncClient(timeout=30.0)
+        if not self._slack_webhook_url and not self._resend_api_key:
+            logger.warning(
+                "notifications_unconfigured: SLACK_WEBHOOK_URL and RESEND_API_KEY "
+                "are both empty, alerts will not reach anyone"
+            )
+
+    def channel_status(self) -> dict[str, bool]:
+        """Which alert channels can actually deliver right now."""
+        slack = bool(self._slack_webhook_url)
+        email = bool(self._resend_api_key)
+        return {
+            "slack_configured": slack,
+            "email_configured": email,
+            "configured": slack or email,
+        }
 
     async def send_wallet_frozen_alert(
         self,
@@ -137,6 +152,7 @@ Consider topping up to ensure uninterrupted agent operation.
         wallet_id: str,
         error_message: str,
         payment_intent_id: str,
+        sponsor_email: Optional[str] = None,
     ) -> None:
         """
         Notify when a fiat top-up payment fails.
@@ -145,16 +161,34 @@ Consider topping up to ensure uninterrupted agent operation.
             wallet_id: The wallet that attempted top-up
             error_message: Stripe error description
             payment_intent_id: The failed PaymentIntent ID
+            sponsor_email: Email to send alert to
         """
         subject = f"[B2A] Payment Failed for Wallet {wallet_id}"
+        message = f"Payment failed: {error_message}"
 
         if self._slack_webhook_url:
             await self._send_slack_alert(
                 title=subject,
-                message=f"Payment failed: {error_message}",
+                message=message,
                 wallet_id=wallet_id,
                 payment_intent_id=payment_intent_id,
                 urgency="high",
+            )
+
+        if sponsor_email and self._resend_api_key:
+            await self._send_email(
+                to=sponsor_email,
+                subject=subject,
+                body=f"""
+Your top-up payment for wallet {wallet_id} failed.
+
+Error: {error_message}
+PaymentIntent: {payment_intent_id}
+
+No credits were added. Please retry the payment or contact support.
+
+This is an automated alert from Agent Middleware API.
+                """.strip(),
             )
 
     async def send_kyc_approved_alert(
@@ -278,6 +312,7 @@ This is an automated notification from Agent Middleware API.
 
         urgency = fields.get("urgency", "medium")
         urgency_emoji = {
+            "critical": ":bangbang:",
             "high": ":rotating_light:",
             "medium": ":warning:",
             "low": ":information_source:",
@@ -389,6 +424,7 @@ This is an automated notification from Agent Middleware API.
         wallet_id: str,
         alert_type: str,
         message: str,
+        sponsor_email: Optional[str] = None,
     ) -> None:
         """
         Send security alerts for suspicious activity or key management events.
@@ -397,6 +433,7 @@ This is an automated notification from Agent Middleware API.
             wallet_id: The wallet affected
             alert_type: Type of security alert
             message: Alert message
+            sponsor_email: Email to send alert to
         """
         alert_title = alert_type.replace("_", " ").title()
         subject = f"[SECURITY] {alert_title} for Wallet {wallet_id}"
@@ -409,6 +446,22 @@ This is an automated notification from Agent Middleware API.
                 urgency=(
                     "critical" if alert_type == "emergency_key_revocation" else "high"
                 ),
+            )
+
+        if sponsor_email and self._resend_api_key:
+            await self._send_email(
+                to=sponsor_email,
+                subject=subject,
+                body=f"""
+A security event needs your attention for wallet {wallet_id}.
+
+Event: {alert_title}
+Detail: {message}
+
+If you did not expect this, rotate your keys and contact support.
+
+This is an automated alert from Agent Middleware API.
+                """.strip(),
             )
 
     async def close(self) -> None:

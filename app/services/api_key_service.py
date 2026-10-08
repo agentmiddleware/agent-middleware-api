@@ -723,8 +723,10 @@ class APIKeyService:
             wallet_result = await session.execute(
                 select(WalletModel).where(col(WalletModel.wallet_id) == wallet_id)
             )
-            if not wallet_result.scalar_one_or_none():
+            wallet = wallet_result.scalar_one_or_none()
+            if wallet is None:
                 raise WalletNotFoundError(wallet_id)
+            sponsor_email = wallet.email
 
             # FOR UPDATE so a concurrent validate_key cannot consume a use
             # between this snapshot and the revocation commit — the bounds
@@ -875,6 +877,7 @@ class APIKeyService:
             wallet_id=wallet_id,
             alert_type="emergency_key_revocation",
             message=f"All API keys revoked for wallet {wallet_id}. Reason: {reason}",
+            sponsor_email=sponsor_email,
         )
 
         return {
