@@ -7,7 +7,7 @@
 # catalogs behind the same credentials as invoke (#444), so there the catalog
 # routes must answer 401 and the /v1/discover comparison needs an operator key.
 
-set -u
+set -euo pipefail
 
 API_URL="${API_URL:-http://127.0.0.1:8000}"
 API_URL="${API_URL%/}"

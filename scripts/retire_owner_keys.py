@@ -12,6 +12,11 @@ The default command intentionally accepts only ``DATABASE_PUBLIC_URL`` for
 legacy off-platform use. ``--private-db`` instead requires the API container's
 Railway-private ``DATABASE_URL``. Neither mode falls back to the other URL or
 renders a URL or stored value.
+
+The command is dry-run by default: it only reports the rows it would change.
+Pass ``--apply`` to first write a 0600 JSON backup of those rows (at
+``--backup-path``, or a timestamped file in the working directory) and then
+perform the scrub.
 """
 
 from __future__ import annotations
@@ -19,9 +24,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import ipaddress
+import json
 import os
 import sys
 from collections.abc import Mapping
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -135,6 +142,111 @@ def _retirement_schema(sync_connection: Connection) -> dict[str, set[str]]:
     }
 
 
+async def preview_retirement(database_url: str) -> dict[str, int]:
+    """Count rows a scrub would change, without writing anything."""
+    engine = create_async_engine(
+        as_sqlalchemy_url(database_url),
+        poolclass=NullPool,
+    )
+    try:
+        async with engine.connect() as connection:
+            schema = await connection.run_sync(_retirement_schema)
+            missing = [
+                table
+                for table, required in _REQUIRED_COLUMNS.items()
+                if not required.issubset(schema[table])
+            ]
+            if missing:
+                raise OwnerKeyRetirementError(
+                    "expected post-drain retirement columns are missing"
+                )
+            preview: dict[str, int] = {}
+            for table in _LEGACY_TABLES:
+                count = await connection.scalar(
+                    text(
+                        f"SELECT COUNT(*) FROM {table} "
+                        "WHERE owner_key IS NULL OR owner_key <> ''"
+                    )
+                )
+                preview[table] = max(0, int(count or 0))
+            unbound = await connection.scalar(
+                text(
+                    "SELECT COUNT(*) FROM refresh_tokens "
+                    "WHERE key_id IS NULL AND revoked = :not_revoked"
+                ),
+                {"not_revoked": False},
+            )
+            preview["unbound_refresh_tokens"] = max(0, int(unbound or 0))
+            return preview
+    finally:
+        await engine.dispose()
+
+
+async def write_backup(database_url: str, backup_path: str | Path) -> dict[str, int]:
+    """Dump every row a scrub would change to a 0600 JSON file.
+
+    The backup holds only row identifiers and the values being cleared, so an
+    operator can verify or restore after the scrub. It never includes the
+    database URL.
+    """
+    path = Path(backup_path)
+    engine = create_async_engine(
+        as_sqlalchemy_url(database_url),
+        poolclass=NullPool,
+    )
+    try:
+        async with engine.connect() as connection:
+            schema = await connection.run_sync(_retirement_schema)
+            missing = [
+                table
+                for table, required in _REQUIRED_COLUMNS.items()
+                if not required.issubset(schema[table])
+            ]
+            if missing:
+                raise OwnerKeyRetirementError(
+                    "expected post-drain retirement columns are missing"
+                )
+            backup: dict[str, list[dict[str, object]]] = {}
+            id_column = {"wallets": "wallet_id", "service_registry": "service_id"}
+            for table in _LEGACY_TABLES:
+                rows = (
+                    await connection.execute(
+                        text(
+                            f"SELECT {id_column[table]}, owner_key FROM {table} "
+                            "WHERE owner_key IS NULL OR owner_key <> ''"
+                        )
+                    )
+                ).mappings()
+                backup[table] = [dict(row) for row in rows]
+            token_rows = (
+                await connection.execute(
+                    text(
+                        "SELECT jti, key_id, revoked FROM refresh_tokens "
+                        "WHERE key_id IS NULL AND revoked = :not_revoked"
+                    ),
+                    {"not_revoked": False},
+                )
+            ).mappings()
+            backup["unbound_refresh_tokens"] = [dict(row) for row in token_rows]
+    finally:
+        await engine.dispose()
+    payload = {
+        "taken_at": datetime.now(timezone.utc).isoformat(),
+        "tables": backup,
+    }
+    path.write_text(json.dumps(payload, indent=2, default=str) + "\n")
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+    return {table: len(rows) for table, rows in backup.items()}
+
+
+def default_backup_path() -> Path:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return Path(f"owner-key-retirement-backup-{stamp}.json")
+
+
 async def retire_owner_keys(database_url: str) -> dict[str, int]:
     """Scrub owner keys and revoke unbound refresh tokens transactionally."""
     engine = create_async_engine(
@@ -225,6 +337,22 @@ def main(argv: list[str] | None = None) -> int:
             "never fall back to $DATABASE_PUBLIC_URL"
         ),
     )
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help=(
+            "write a backup file, then perform the scrub; without this flag "
+            "the command only reports the rows it would change"
+        ),
+    )
+    parser.add_argument(
+        "--backup-path",
+        default=None,
+        help=(
+            "where to write the pre-scrub backup JSON in --apply mode "
+            "(default: ./owner-key-retirement-backup-<UTC timestamp>.json)"
+        ),
+    )
     args = parser.parse_args([] if argv is None else argv)
     connection_kind = "private" if args.private_db else "public"
     try:
@@ -233,6 +361,21 @@ def main(argv: list[str] | None = None) -> int:
             if args.private_db
             else load_public_database_url()
         )
+        if not args.apply:
+            preview = asyncio.run(preview_retirement(database_url))
+            owner_keys = sum(preview[table] for table in _LEGACY_TABLES)
+            refresh_tokens = preview["unbound_refresh_tokens"]
+            print(
+                f"[owner-key-retirement] DRY-RUN would scrub {owner_keys} "
+                f"compatibility value(s) and revoke {refresh_tokens} unbound "
+                "refresh token(s); re-run with --apply to write a backup "
+                "and perform the scrub"
+            )
+            return 0
+        backup_path = (
+            Path(args.backup_path) if args.backup_path else default_backup_path()
+        )
+        asyncio.run(write_backup(database_url, backup_path))
         scrubbed = asyncio.run(retire_owner_keys(database_url))
     except OwnerKeyRetirementError as exc:
         print(f"{BAD} {exc}", file=sys.stderr)
@@ -248,7 +391,8 @@ def main(argv: list[str] | None = None) -> int:
     refresh_tokens = scrubbed["unbound_refresh_tokens"]
     print(
         f"{OK} scrubbed {owner_keys} compatibility value(s), revoked "
-        f"{refresh_tokens} unbound refresh token(s); verified retirement state"
+        f"{refresh_tokens} unbound refresh token(s); verified retirement state; "
+        f"pre-scrub backup at {backup_path}"
     )
     return 0
 

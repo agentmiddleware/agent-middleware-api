@@ -6,7 +6,7 @@
 # Fail-closed: RUN_MIGRATIONS_ON_START=true with an empty DATABASE_URL exits
 # non-zero instead of starting uvicorn against an unmigrated database.
 
-set -e
+set -eu
 
 if [ "${RUN_MIGRATIONS_ON_START:-}" = "true" ]; then
   if [ -z "${DATABASE_URL:-}" ]; then
