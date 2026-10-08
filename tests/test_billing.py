@@ -1240,6 +1240,148 @@ async def test_transfer_retry_with_same_idempotency_key_does_not_double_spend(
 
 
 @pytest.mark.anyio
+async def test_transfer_rejects_blank_idempotency_key_without_moving_credits(
+    client, api_headers, clean_database
+):
+    """A whitespace-only key must be refused before any transfer runs."""
+    sponsor = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={
+            "sponsor_name": "Xfer Blank",
+            "email": "xfer-blank@t.com",
+            "initial_credits": 10000,
+        },
+        headers=api_headers,
+    )
+    src = sponsor.json()["wallet_id"]
+    agent_a = await client.post(
+        "/v1/billing/wallets/agent",
+        json={
+            "sponsor_wallet_id": src,
+            "agent_id": "xfer-blank-a",
+            "budget_credits": 5000,
+        },
+        headers=api_headers,
+    )
+    agent_b = await client.post(
+        "/v1/billing/wallets/agent",
+        json={
+            "sponsor_wallet_id": src,
+            "agent_id": "xfer-blank-b",
+            "budget_credits": 100,
+        },
+        headers=api_headers,
+    )
+    a = agent_a.json()["wallet_id"]
+    b = agent_b.json()["wallet_id"]
+
+    resp = await client.post(
+        f"/v1/billing/transfer?from_wallet_id={a}&to_wallet_id={b}&amount=100",
+        headers={**api_headers, "Idempotency-Key": "   "},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["error"] == "invalid_idempotency_key"
+
+    wallet_a = await client.get(f"/v1/billing/wallets/{a}", headers=api_headers)
+    wallet_b = await client.get(f"/v1/billing/wallets/{b}", headers=api_headers)
+    assert wallet_a.json()["balance"] == 5000.0
+    assert wallet_b.json()["balance"] == 100.0
+
+
+@pytest.mark.anyio
+async def test_transfer_rejects_overlong_idempotency_key(
+    client, api_headers, clean_database
+):
+    """A key wider than the 128-char store column is refused, not stored."""
+    sponsor = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={
+            "sponsor_name": "Xfer Long",
+            "email": "xfer-long@t.com",
+            "initial_credits": 10000,
+        },
+        headers=api_headers,
+    )
+    src = sponsor.json()["wallet_id"]
+    agent_a = await client.post(
+        "/v1/billing/wallets/agent",
+        json={
+            "sponsor_wallet_id": src,
+            "agent_id": "xfer-long-a",
+            "budget_credits": 5000,
+        },
+        headers=api_headers,
+    )
+    agent_b = await client.post(
+        "/v1/billing/wallets/agent",
+        json={
+            "sponsor_wallet_id": src,
+            "agent_id": "xfer-long-b",
+            "budget_credits": 100,
+        },
+        headers=api_headers,
+    )
+    a = agent_a.json()["wallet_id"]
+    b = agent_b.json()["wallet_id"]
+
+    resp = await client.post(
+        f"/v1/billing/transfer?from_wallet_id={a}&to_wallet_id={b}&amount=100",
+        headers={**api_headers, "Idempotency-Key": "k" * 200},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["error"] == "invalid_idempotency_key"
+
+    wallet_a = await client.get(f"/v1/billing/wallets/{a}", headers=api_headers)
+    assert wallet_a.json()["balance"] == 5000.0
+
+
+@pytest.mark.anyio
+async def test_charge_rejects_unusable_idempotency_key_without_billing(
+    client, api_headers, clean_database
+):
+    """The charge route validates keys too: blank and overlong keys are
+    refused with 400 and the wallet is never debited."""
+    sponsor_resp = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={
+            "sponsor_name": "Charge Key Check",
+            "email": "charge-key@t.com",
+            "initial_credits": 10000,
+        },
+        headers=api_headers,
+    )
+    sponsor_id = sponsor_resp.json()["wallet_id"]
+    agent_resp = await client.post(
+        "/v1/billing/wallets/agent",
+        json={
+            "sponsor_wallet_id": sponsor_id,
+            "agent_id": "charge-key-bot",
+            "budget_credits": 5000,
+        },
+        headers=api_headers,
+    )
+    agent_wallet_id = agent_resp.json()["wallet_id"]
+    url = f"/v1/billing/charge?wallet_id={agent_wallet_id}&service=iot_bridge&units=10"
+
+    for bad_key in ("   ", "k" * 200, "bad\x01key"):
+        resp = await client.post(
+            url, headers={**api_headers, "Idempotency-Key": bad_key}
+        )
+        assert resp.status_code == 400, (bad_key, resp.status_code, resp.text[:200])
+        assert resp.json()["detail"]["error"] == "invalid_idempotency_key"
+
+    wallet = await client.get(
+        f"/v1/billing/wallets/{agent_wallet_id}", headers=api_headers
+    )
+    assert wallet.json()["balance"] == 5000.0
+    ledger_resp = await client.get(
+        f"/v1/billing/ledger/{agent_wallet_id}", headers=api_headers
+    )
+    debit_entries = [e for e in ledger_resp.json()["entries"] if e["action"] == "debit"]
+    assert debit_entries == []
+
+
+@pytest.mark.anyio
 async def test_rejected_charge_does_not_inflate_velocity_counters(
     client, api_headers, clean_database
 ):

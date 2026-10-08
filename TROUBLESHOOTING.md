@@ -90,6 +90,17 @@ Direct top-ups are disabled by design. Use `POST /v1/billing/top-up/prepare` to 
 ### `409 Conflict` on permit creation
 You reused an `Idempotency-Key` with different payload. Use a fresh UUID for each distinct request, or replay the exact same payload.
 
+### `409` or `400` on billing money calls (`/v1/billing/charge`, `/v1/billing/transfer`, wallet provisioning)
+Money-moving billing routes accept an opt-in `Idempotency-Key` header with the same rules as the governed MCP surfaces:
+- Send one key per money intent: a non-blank string, at most 128 characters, no control characters. A present-but-unusable key is refused with `400 invalid_idempotency_key` before anything is charged.
+- Retry with the same key and the same payload after a timeout or an unclear outcome. The retry replays the original response instead of charging again.
+- `409 idempotency_in_progress` means the first attempt is still running. Wait, then retry the same key to collect the original result.
+- `409 idempotency_key_reused` means the key was already used for a different payload. Never reuse a key for a different amount or destination; mint a fresh key per new intent.
+- No key at all means no replay protection: a retried request runs again.
+
+### Stuck idempotency records and the `needs_review` queue
+The server runs a periodic cleanup task that calls `reconcile_stuck_records` (records idle 300s or more). It completes records whose receipt was written but whose replay row was never finalized, so a retry replays cleanly. Records for a charge that succeeded with no receipt and no reconstructable response are left untouched and counted as `needs_review`: the money movement stands, the outcome cannot be rebuilt automatically, and an operator must reconcile against the ledger before the key can be reused. Watch for the `cleanup_completed` log line with `idempotency_records_needing_review` greater than zero and investigate those wallet and key coordinates in the ledger.
+
 ### Errors on MCP invocation
 `POST /mcp/messages` returns these as JSON-RPC errors in an HTTP `200`; the deprecated REST route (`POST /mcp/tools/{service_id}/invoke`) answers with the REST status shown.
 - `idempotency_key_reused` (`-32603`; REST `400`): the `idempotency_key` in `mcpContext` was already used for a different payload. Use a fresh key per distinct invocation (not the same as the permit's idempotency key).
