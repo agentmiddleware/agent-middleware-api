@@ -3774,6 +3774,7 @@
             "required": false,
             "schema": {
               "type": "string",
+              "maxLength": 255,
               "default": "user_request",
               "title": "Reason"
             }
@@ -6324,6 +6325,8 @@
         "properties": {
           "wallet_id": {
             "type": "string",
+            "maxLength": 50,
+            "minLength": 1,
             "title": "Wallet Id",
             "description": "Wallet ID to create key for."
           },
@@ -6338,6 +6341,7 @@
             "anyOf": [
               {
                 "type": "integer",
+                "maximum": 2000000.0,
                 "exclusiveMinimum": 0.0
               },
               {
@@ -6351,6 +6355,7 @@
             "anyOf": [
               {
                 "type": "integer",
+                "maximum": 2147483647.0,
                 "exclusiveMinimum": 0.0
               },
               {
@@ -6372,11 +6377,15 @@
         "properties": {
           "sponsor_wallet_id": {
             "type": "string",
+            "maxLength": 50,
+            "minLength": 1,
             "title": "Sponsor Wallet Id",
             "description": "ID of the sponsor wallet funding this agent."
           },
           "agent_id": {
             "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
             "title": "Agent Id",
             "description": "Agent ID from the comms registry."
           },
@@ -6447,6 +6456,7 @@
           },
           "email": {
             "type": "string",
+            "maxLength": 255,
             "title": "Email",
             "description": "Contact email for billing alerts and top-up requests.",
             "examples": [
@@ -6612,14 +6622,16 @@
         "properties": {
           "wallet_id": {
             "type": "string",
+            "maxLength": 50,
+            "minLength": 1,
             "title": "Wallet Id",
             "description": "Wallet ID to revoke keys for."
           },
           "reason": {
             "type": "string",
-            "maxLength": 255,
+            "maxLength": 244,
             "title": "Reason",
-            "description": "Reason for emergency revocation.",
+            "description": "Reason for emergency revocation. Stored with an EMERGENCY prefix, so the caller text itself must leave room for that prefix.",
             "default": "security_incident"
           },
           "create_new_key": {
@@ -7263,16 +7275,22 @@
           },
           "issuer_wallet_id": {
             "type": "string",
+            "maxLength": 50,
+            "minLength": 1,
             "title": "Issuer Wallet Id"
           },
           "subject_wallet_id": {
             "type": "string",
+            "maxLength": 50,
+            "minLength": 1,
             "title": "Subject Wallet Id"
           },
           "subject_key_id": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 50,
+                "minLength": 1
               },
               {
                 "type": "null"
@@ -7289,7 +7307,9 @@
           },
           "allowed_tools": {
             "items": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 128,
+              "minLength": 1
             },
             "type": "array",
             "title": "Allowed Tools"
@@ -7355,7 +7375,9 @@
           },
           "forbidden_fields": {
             "items": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1
             },
             "type": "array",
             "title": "Forbidden Fields"
@@ -7363,7 +7385,8 @@
           "recipient_domain": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 255
               },
               {
                 "type": "null"
@@ -7450,15 +7473,21 @@
         "properties": {
           "issuer_wallet_id": {
             "type": "string",
+            "maxLength": 50,
+            "minLength": 1,
             "title": "Issuer Wallet Id"
           },
           "subject_wallet_id": {
             "type": "string",
+            "maxLength": 50,
+            "minLength": 1,
             "title": "Subject Wallet Id"
           },
           "allowed_tools": {
             "items": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 128,
+              "minLength": 1
             },
             "type": "array",
             "minItems": 1,
@@ -8660,10 +8689,14 @@
         "properties": {
           "wallet_id": {
             "type": "string",
+            "maxLength": 50,
+            "minLength": 1,
             "title": "Wallet Id"
           },
           "tool": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
             "title": "Tool"
           }
         },
@@ -9390,13 +9423,17 @@
         "properties": {
           "wallet_id": {
             "type": "string",
+            "maxLength": 50,
+            "minLength": 1,
             "title": "Wallet Id",
             "description": "Wallet ID owning the key."
           },
           "key_id": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 50,
+                "minLength": 1
               },
               {
                 "type": "null"

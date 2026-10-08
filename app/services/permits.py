@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import unicodedata
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -194,14 +195,22 @@ def _find_forbidden_field(arguments: Any, forbidden: set[str]) -> str | None:
     Walks nested dicts and lists so a forbidden key cannot be smuggled past
     the check by nesting it below the top level. Comparison is against dict
     keys only (a forbidden name appearing as a string *value* is not a match).
+
+    Names are compared after NFKC normalization, so a composed character, a
+    decomposed character, or a fullwidth letter cannot spell a forbidden
+    name in a form the exact string misses. Letters from another script
+    (a Greek omicron standing in for a Latin o) are left alone.
     """
+    normalized = {unicodedata.normalize("NFKC", name) for name in forbidden}
     stack: list[Any] = [arguments]
     while stack:
         node = stack.pop()
         if isinstance(node, dict):
             for key, child in node.items():
-                if key in forbidden:
-                    return str(key)
+                if isinstance(key, str) and (
+                    unicodedata.normalize("NFKC", key) in normalized
+                ):
+                    return key
                 stack.append(child)
         elif isinstance(node, (list, tuple)):
             stack.extend(node)
@@ -223,15 +232,19 @@ def recipient_binding_matches(recipient_domain: str | None, target: str) -> bool
     """Check one recipient value against a permit's recipient constraint.
 
     An unset constraint allows everything. Otherwise the target is reduced
-    with extract_recipient_identity and must equal the bound value
-    exactly. x402 callers pass the demand's pay_to address: x402 demands
-    name no resource host, so the payee address is the only recipient the
-    demand names, and a permit that binds x402 spending must carry that
-    address exactly as the demand presents it.
+    with extract_recipient_identity and must equal the bound value.
+    Both sides are compared in NFC, so the same host written with composed
+    or decomposed characters matches. Lookalike letters are not folded.
+    x402 callers pass the demand's pay_to address: x402 demands name no
+    resource host, so the payee address is the only recipient the demand
+    names, and a permit that binds x402 spending must carry that address
+    as the demand presents it.
     """
     if not recipient_domain:
         return True
-    return extract_recipient_identity(target) == recipient_domain
+    bound = unicodedata.normalize("NFC", recipient_domain)
+    identity = unicodedata.normalize("NFC", extract_recipient_identity(target))
+    return identity == bound
 
 
 def permit_model_to_response(model: PermitModel) -> PermitResponse:

@@ -4,16 +4,18 @@ API Key Management Router
 Handles API key creation, rotation, and revocation for wallet security.
 """
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 
 from ..core.dependencies import get_agent_money
 
 from ..core.auth import AuthContext, get_auth_context
+from ..schemas.request_bounds import REVOKE_REASON_MAX_LENGTH
 from ..services.api_key_service import (
     get_api_key_service,
     InvalidRotationRequestError,
     KeyNotFoundError,
     WalletNotFoundError,
+    stored_revoke_reason,
 )
 from .http_idempotency import begin_http_idempotency
 from ..schemas.billing import (
@@ -46,6 +48,17 @@ def _not_found(error: str, message: str) -> dict:
 def _invalid_request(error: str, message: str) -> dict:
     """Standardized 422 error payload."""
     return {"error": error, "message": message}
+
+
+def _reject_unstorable_revoke_reason(reason: str) -> str:
+    """Refuse a revoke reason that the revoke_reason column cannot store."""
+    try:
+        return stored_revoke_reason(reason)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=_invalid_request(str(exc), "Revoke reason is not storable."),
+        ) from exc
 
 
 def _refuse_jwt_minter(auth: AuthContext) -> None:
@@ -326,11 +339,15 @@ async def rotate_api_key(
 async def revoke_api_key(
     wallet_id: str,
     key_id: str,
-    reason: str = "user_request",
+    reason: str = Query(
+        default="user_request",
+        max_length=REVOKE_REASON_MAX_LENGTH,
+    ),
     auth: AuthContext = Depends(get_auth_context),
 ):
     """Revoke an API key immediately."""
     auth.require_wallet_access(wallet_id)
+    reason = _reject_unstorable_revoke_reason(reason)
     service = get_api_key_service()
 
     try:
