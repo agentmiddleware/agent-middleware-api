@@ -33,6 +33,10 @@ logical action -> authorize -> reserve allowance -> debit -> claim dispatch
 
 Read `agent_first.positioning` on `GET /.well-known/agent.json` for the
 versioned product category, transaction semantics, and claim boundary.
+That manifest, served by the API origin you are calling, is the canonical
+one. The marketing-site pointer carries the same positioning under top-level
+`positioning` (no `agent_first` wrapper) and only points back here, so do
+not treat the two files as interchangeable.
 
 Supporting infrastructure:
 - **Identity & authority** — Wallet-scoped agents, API keys, and scoped permits
@@ -56,6 +60,13 @@ GET /openapi.json
 ```
 
 On production-like boots, GET /mcp/tools.json requires an operator-issued key and returns 401 without one. Local quickstart stays anonymous. GET /.well-known/agent.json, GET /llms.txt, and GET /openapi.json stay unauthenticated.
+
+Keyless fallback when /mcp/tools.json returns 401: continue anonymously with
+`GET /health/dependencies` (read the JSON body, which names what is actually
+ready), `GET /.well-known/trust-keys.json` (current issuer keys), and
+`GET /openapi.json` (the full contract). The worked portable-receipt proof at
+`https://www.thisisatest.tech/proof/` plus its offline verify command shows
+what a governed outcome looks like before you hold a key.
 
 `GET /llm.txt` remains available as a backward-compatible alias.
 

@@ -157,6 +157,12 @@ def get_agent_first_metadata() -> dict[str, Any]:
         "primary_audience": "autonomous_agents",
         "design_principle": "agent_first",
         "positioning": get_product_positioning(),
+        "canonical_manifest": (
+            "This origin's /.well-known/agent.json is authoritative. "
+            "The marketing-site pointer carries the same positioning "
+            "under top-level `positioning` (no `agent_first` wrapper) "
+            "and only points back here."
+        ),
         # Compatibility-only v1 fields. ``positioning`` is canonical.
         "product_wedge": LEGACY_PRODUCT_WEDGE,
         "product_loop": list(LEGACY_PRODUCT_LOOP),
