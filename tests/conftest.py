@@ -74,6 +74,7 @@ DORMANT_SURFACE_TEST_MODULES = frozenset(
         "test_api_keys",
         "test_audit_routes",
         "test_billing",
+        "test_billing_require_idempotency_key",
         "test_discovery_drift",
         "test_golden_path",
         "test_kyc",

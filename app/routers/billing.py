@@ -11,7 +11,6 @@ This is how the API generates revenue autonomously.
 from decimal import Decimal
 from typing import ClassVar, cast
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from ..core.auth import AuthContext, get_auth_context, verify_api_key
@@ -19,6 +18,7 @@ from ..core.config import get_settings
 from ..core.dependencies import get_agent_money
 from .http_idempotency import (
     begin_http_idempotency as _begin_idempotency,
+    billing_idempotency_required,
 )
 from ..services.agent_money import (
     AgentMoney,
@@ -27,11 +27,6 @@ from ..services.agent_money import (
     WalletNotFoundError,
 )
 from ..services.governance import record_governed_action
-from ..services.idempotency import (
-    IdempotencyConflictError,
-    IdempotencyInProgressError,
-    get_idempotency_service,
-)
 from ..services.policies import evaluate_wallet_policy
 from ..services.velocity_monitor import WalletFrozenError
 from ..services.wallet_engine import WalletExpiredError
@@ -248,6 +243,12 @@ async def create_sponsor_wallet(
     # credits — the billing system would not be an economic control. Restrict to
     # bootstrap/admin credentials, which are the identities that operate the
     # fiat -> credit conversion this endpoint represents.
+    #
+    # Deliberately outside the REQUIRE_IDEMPOTENCY_KEY gate: replay records
+    # are scoped to an existing wallet (foreign key), and this operator-only
+    # route runs as a wallet-less bootstrap admin with no wallet to scope to.
+    # Operators retrying a timed-out create must list wallets first and reuse
+    # the created sponsor instead of re-posting.
     auth.require_bootstrap_admin()
     initial = (
         Decimal(str(request.initial_credits))
@@ -293,15 +294,17 @@ async def create_agent_wallet(
             status_code=404,
             detail=str(WalletNotFoundError(request.sponsor_wallet_id)),
         )
-    # Opt-in idempotency, keyed on the sponsor (the debited side): a client
+    # Replay protection, keyed on the sponsor (the debited side): a client
     # whose provisioning call timed out after the sponsor was debited retries
     # with the same Idempotency-Key and gets the original wallet back instead
-    # of funding a second one and paying twice.
+    # of funding a second one and paying twice. Keyless when the operator
+    # leaves REQUIRE_IDEMPOTENCY_KEY off; refused when it is on.
     guard, replay = await _begin_idempotency(
         idempotency_key=idempotency_key,
         wallet_id=request.sponsor_wallet_id,
         endpoint="/v1/billing/wallets/agent",
         request_payload=request.model_dump(mode="json"),
+        require_key=billing_idempotency_required(),
     )
     if replay is not None:
         return replay
@@ -377,10 +380,34 @@ async def create_agent_wallet(
 )
 async def create_child_wallet(
     request: CreateChildWalletRequest,
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     auth: AuthContext = Depends(get_auth_context),
     money: AgentMoney = Depends(get_agent_money),
 ):
     _require_wallet_access(auth, request.parent_wallet_id)
+    # Resolve the parent before opening an idempotency record: the record's
+    # wallet_id references wallets, so beginning one for an unknown parent
+    # would fail the foreign key and answer 500 where the unkeyed path
+    # answers 404. Same message as the engine's WalletNotFoundError so keyed
+    # and unkeyed callers see one body.
+    if await money.get_wallet(request.parent_wallet_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail=str(WalletNotFoundError(request.parent_wallet_id)),
+        )
+    # Replay protection, keyed on the parent (the debited side): a retried
+    # create with the same Idempotency-Key replays the original child wallet
+    # instead of debiting the parent a second time. Keyless when the
+    # operator leaves REQUIRE_IDEMPOTENCY_KEY off; refused when it is on.
+    guard, replay = await _begin_idempotency(
+        idempotency_key=idempotency_key,
+        wallet_id=request.parent_wallet_id,
+        endpoint="/v1/billing/wallets/child",
+        request_payload=request.model_dump(mode="json"),
+        require_key=billing_idempotency_required(),
+    )
+    if replay is not None:
+        return replay
     try:
         response = await money.create_child_wallet(
             parent_wallet_id=request.parent_wallet_id,
@@ -391,7 +418,7 @@ async def create_child_wallet(
             ttl_seconds=request.ttl_seconds,
             auto_reclaim=request.auto_reclaim,
         )
-        return ChildWalletResponse(
+        body = ChildWalletResponse(
             wallet_id=response.wallet_id,
             wallet_type=response.wallet_type,
             parent_wallet_id=response.sponsor_wallet_id,
@@ -405,33 +432,44 @@ async def create_child_wallet(
             status=response.status,
             created_at=response.created_at,
         )
+        await guard.complete(
+            body.model_dump(mode="json"), 201, response_reference=body.wallet_id
+        )
+        return body
     except WalletNotFoundError as e:
+        await guard.complete({"detail": str(e)}, 404)
         raise HTTPException(status_code=404, detail=str(e))
     except InsufficientFundsError as e:
+        insufficient_detail = {
+            "error": "insufficient_funds",
+            "wallet_id": e.wallet_id,
+            "current_balance": str(e.current_balance),
+            "required_amount": str(e.required_amount),
+            "shortfall": str(e.shortfall),
+        }
+        await guard.complete({"detail": insufficient_detail}, 400)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "error": "insufficient_funds",
-                "wallet_id": e.wallet_id,
-                "current_balance": str(e.current_balance),
-                "required_amount": str(e.required_amount),
-                "shortfall": str(e.shortfall),
-            },
+            detail=insufficient_detail,
         )
     except WalletExpiredError as e:
+        expired_detail = {
+            "error": "wallet_expired",
+            "wallet_id": e.wallet_id,
+            "expires_at": e.expires_at.isoformat(),
+            "message": str(e),
+        }
+        await guard.complete({"detail": expired_detail}, 403)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "error": "wallet_expired",
-                "wallet_id": e.wallet_id,
-                "expires_at": e.expires_at.isoformat(),
-                "message": str(e),
-            },
+            detail=expired_detail,
         )
     except ValueError as e:
+        child_error = {"error": "child_wallet_error", "message": str(e)}
+        await guard.complete({"detail": child_error}, 400)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "child_wallet_error", "message": str(e)},
+            detail=child_error,
         )
 
 
@@ -446,25 +484,58 @@ async def create_child_wallet(
 )
 async def reclaim_child_wallet(
     wallet_id: str,
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     auth: AuthContext = Depends(get_auth_context),
     money: AgentMoney = Depends(get_agent_money),
 ):
     _require_wallet_access(auth, wallet_id)
+    # Resolve the child before opening an idempotency record: the record's
+    # wallet_id references wallets, so beginning one for an unknown wallet
+    # would fail the foreign key and answer 500 where the unkeyed path
+    # answers 404. Same message as the engine's WalletNotFoundError so keyed
+    # and unkeyed callers see one body.
+    if await money.get_wallet(wallet_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail=str(WalletNotFoundError(wallet_id)),
+        )
+    # Replay protection: a retried reclaim with the same Idempotency-Key
+    # replays the original result instead of crediting the parent twice.
+    # Keyless when the operator leaves REQUIRE_IDEMPOTENCY_KEY off; refused
+    # when it is on.
+    guard, replay = await _begin_idempotency(
+        idempotency_key=idempotency_key,
+        wallet_id=wallet_id,
+        endpoint="/v1/billing/wallets/{wallet_id}/reclaim",
+        request_payload={"wallet_id": wallet_id},
+        require_key=billing_idempotency_required(),
+    )
+    if replay is not None:
+        return replay
     try:
         result = await money.reclaim_child_wallet(wallet_id)
-        return ReclaimResponse(
+        body = ReclaimResponse(
             child_wallet_id=result["child_wallet_id"],
             parent_wallet_id=result["parent_wallet_id"],
             credits_reclaimed=result["credits_reclaimed"],
             parent_balance_after=result["parent_balance_after"],
             child_status=result["child_status"],
         )
+        await guard.complete(
+            body.model_dump(mode="json"),
+            200,
+            response_reference=result["child_wallet_id"],
+        )
+        return body
     except WalletNotFoundError as e:
+        await guard.complete({"detail": str(e)}, 404)
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:
+        reclaim_error = {"error": "reclaim_error", "message": str(e)}
+        await guard.complete({"detail": reclaim_error}, 400)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "reclaim_error", "message": str(e)},
+            detail=reclaim_error,
         )
 
 
@@ -639,52 +710,33 @@ async def charge_wallet(
             },
         )
 
-    # Idempotency is opt-in via the Idempotency-Key header: a client that
+    # Replay protection via the Idempotency-Key header: a client that
     # retries a charge (e.g. after a timeout) with the same key gets the
-    # original outcome replayed instead of being billed twice.
-    idem = None
-    idem_key: str | None = None
-    if idempotency_key:
-        idem = get_idempotency_service()
-        idem_key = idempotency_key
-        try:
-            replay = await idem.begin(
-                wallet_id=wallet_id,
-                endpoint=endpoint,
-                idempotency_key=idem_key,
-                request_payload={
-                    "wallet_id": wallet_id,
-                    "service_category": category.value,
-                    "units": units,
-                    "request_path": request_path,
-                    "description": description,
-                },
-            )
-        except IdempotencyConflictError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={"error": "idempotency_key_reused", "message": str(exc)},
-            ) from exc
-        except IdempotencyInProgressError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={"error": "idempotency_in_progress", "message": str(exc)},
-            ) from exc
-        if replay is not None:
-            return JSONResponse(
-                status_code=replay.status_code, content=replay.response_json
-            )
+    # original outcome replayed instead of being billed twice. Keyless when
+    # the operator leaves REQUIRE_IDEMPOTENCY_KEY off; refused when it is
+    # on. The shared helper also validates a supplied key, so a blank or
+    # over-long value is refused instead of running unprotected.
+    guard, replay = await _begin_idempotency(
+        idempotency_key=idempotency_key,
+        wallet_id=wallet_id,
+        endpoint=endpoint,
+        request_payload={
+            "wallet_id": wallet_id,
+            "service_category": category.value,
+            "units": units,
+            "request_path": request_path,
+            "description": description,
+        },
+        require_key=billing_idempotency_required(),
+    )
+    if replay is not None:
+        return replay
 
     async def _complete_idempotency(response_json: dict, status_code: int) -> None:
-        if not idem or not idem_key:
-            return
-        await idem.complete(
-            wallet_id=wallet_id,
-            endpoint=endpoint,
-            idempotency_key=idem_key,
+        await guard.complete(
+            response_json,
+            status_code,
             response_reference=response_json.get("entry_id"),
-            response_json=response_json,
-            status_code=status_code,
         )
 
     try:
@@ -928,7 +980,9 @@ async def prepare_top_up(
         description="Amount in fiat currency (USD)",
     ),
     currency: str = Query("USD", description="Fiat currency code"),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     auth: AuthContext = Depends(get_auth_context),
+    money: AgentMoney = Depends(get_agent_money),
 ):
     _require_wallet_access(auth, wallet_id)
     """
@@ -975,19 +1029,53 @@ async def prepare_top_up(
 
     stripe_integration = get_stripe_integration()
 
+    # Resolve the wallet before opening an idempotency record: the record's
+    # wallet_id references wallets, so beginning one for an unknown wallet
+    # would fail the foreign key and answer 500 where the unkeyed path
+    # answers 404. Same message as the engine's WalletNotFoundError so keyed
+    # and unkeyed callers see one body.
+    if await money.get_wallet(wallet_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail=str(WalletNotFoundError(wallet_id)),
+        )
+    # Replay protection: each prepare creates a live Stripe PaymentIntent, so
+    # a retried prepare with the same Idempotency-Key replays the first
+    # intent instead of opening a second chargeable intent at Stripe.
+    # Keyless when the operator leaves REQUIRE_IDEMPOTENCY_KEY off; refused
+    # when it is on.
+    guard, replay = await _begin_idempotency(
+        idempotency_key=idempotency_key,
+        wallet_id=wallet_id,
+        endpoint="/v1/billing/top-up/prepare",
+        request_payload={
+            "wallet_id": wallet_id,
+            "amount_fiat": str(amount_fiat),
+            "currency": currency,
+        },
+        require_key=billing_idempotency_required(),
+    )
+    if replay is not None:
+        return replay
     try:
         result = await stripe_integration.create_top_up_intent(
             wallet_id=wallet_id,
             amount_fiat=Decimal(str(amount_fiat)),
             currency=currency,
         )
+        await guard.complete(
+            result, 200, response_reference=result.get("payment_intent_id")
+        )
         return result
     except WalletNotFoundError as e:
+        await guard.complete({"detail": str(e)}, 404)
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
+        prepare_error = {"error": "topup_prepare_error", "message": str(e)}
+        await guard.complete({"detail": prepare_error}, 400)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "topup_prepare_error", "message": str(e)},
+            detail=prepare_error,
         )
 
 
@@ -1030,9 +1118,20 @@ async def transfer_wallets(
     """
     _require_wallet_access(auth, from_wallet_id)
     endpoint = "/v1/billing/transfer"
-    # Opt-in idempotency: a retried transfer with the same Idempotency-Key
+    # Resolve the source before opening an idempotency record: the record's
+    # wallet_id references wallets, so beginning one for an unknown source
+    # would fail the foreign key and answer 500 where the unkeyed path
+    # answers 404. Same message as the engine's WalletNotFoundError so keyed
+    # and unkeyed callers see one body.
+    if await money.get_wallet(from_wallet_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail=str(WalletNotFoundError(from_wallet_id)),
+        )
+    # Replay protection: a retried transfer with the same Idempotency-Key
     # replays the original result instead of moving credits twice. Keyed on
-    # the source wallet (the debited side).
+    # the source wallet (the debited side). Keyless when the operator leaves
+    # REQUIRE_IDEMPOTENCY_KEY off; refused when it is on.
     guard, replay = await _begin_idempotency(
         idempotency_key=idempotency_key,
         wallet_id=from_wallet_id,
@@ -1043,6 +1142,7 @@ async def transfer_wallets(
             "amount": str(amount),
             "description": description,
         },
+        require_key=billing_idempotency_required(),
     )
     if replay is not None:
         return replay
@@ -1223,6 +1323,10 @@ async def acp_checkout(
             },
         )
     endpoint = "/v1/billing/acp/checkout"
+    # This route sits outside the REQUIRE_IDEMPOTENCY_KEY header gate on
+    # purpose: ``intent_id`` in the body is already the required replay
+    # identity (a repeated intent replays, a reused intent with a different
+    # body 409s), so a second key would add nothing.
     # Governance metadata below must never include the spt_token: it is
     # persisted into the signed audit trail. The request_id is derived from
     # the SAME acp-{intent_id} order key the bridge indexes its settlement
@@ -1647,6 +1751,7 @@ async def end_dry_run_session(
 )
 async def commit_dry_run_session(
     session_id: str,
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     auth: AuthContext = Depends(get_auth_context),
     money: AgentMoney = Depends(get_agent_money),
 ):
@@ -1657,7 +1762,23 @@ async def commit_dry_run_session(
     The session is ended after committing.
     """
     shadow_ledger = get_shadow_ledger()
-    await _load_owned_dry_run_session(shadow_ledger, session_id, auth)
+    session = await _load_owned_dry_run_session(shadow_ledger, session_id, auth)
+    # Replay protection, keyed on the session wallet: commit replays charges
+    # one by one with possible partial success, so a retried commit with the
+    # same Idempotency-Key replays the first outcome instead of debiting the
+    # wallet a second time. The endpoint names the session, so one key never
+    # aliases two sessions. Keyless when the operator leaves
+    # REQUIRE_IDEMPOTENCY_KEY off; refused when it is on.
+    endpoint = f"/v1/billing/dry-run/session/{session_id}/commit"
+    guard, replay = await _begin_idempotency(
+        idempotency_key=idempotency_key,
+        wallet_id=session.wallet_id,
+        endpoint=endpoint,
+        request_payload={"session_id": session_id},
+        require_key=billing_idempotency_required(),
+    )
+    if replay is not None:
+        return replay
     result = await shadow_ledger.commit_session(session_id, money)
     if not result.wallet_id:
         # The session was there for the ownership check above and gone by the
@@ -1671,9 +1792,14 @@ async def commit_dry_run_session(
         # themselves fail (insufficient funds, say). That is a real answer
         # about a real session and must stay a 200 — 404-ing it would claim
         # the session never existed.
+        #
+        # Every terminal branch completes the idempotency record, or the key
+        # stays in-progress and a retry answers 409 until the stale-record
+        # sweep.
+        await guard.complete({"detail": f"Session {session_id} not found"}, 404)
         raise _session_not_found(session_id)
 
-    return {
+    body = {
         "session_id": result.session_id,
         "wallet_id": result.wallet_id,
         "committed_charges": result.committed_charges,
@@ -1684,6 +1810,8 @@ async def commit_dry_run_session(
         "success": result.success,
         "message": result.message,
     }
+    await guard.complete(body, 200, response_reference=result.wallet_id)
+    return body
 
 
 @expansion_router.post(
