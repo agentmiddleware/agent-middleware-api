@@ -66,10 +66,14 @@ async def test_dry_run_never_dispatches_browser_commands(monkeypatch):
             dry_run=True,
         )
     )
-    assert response.error == "dry_run_unsupported"
+    assert response.status == "dry_run"
+    assert response.error is None
     assert response.effect_status == "not_dispatched"
+    assert response.result["dry_run"] is True
+    assert response.result["would_execute"] is True
     dispatched.assert_not_awaited()
     assert session.step_count == 0
+    assert session.action_history == []
 
 
 @pytest.mark.proof

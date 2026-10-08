@@ -85,6 +85,9 @@ class AWISessionManager:
                 "title": request.target_url,
                 "url": request.target_url,
                 "elements": [],
+                # No browser has loaded this page. Representations built
+                # from it must say so instead of describing it as browsed.
+                "simulated": True,
             },
         }
 
@@ -159,15 +162,7 @@ class AWISessionManager:
             request.action, request.parameters
         )
         if request.dry_run:
-            return AWIExecutionResponse(
-                execution_id=f"exec-{uuid.uuid4().hex[:12]}",
-                session_id=request.session_id,
-                action=request.action,
-                status="error",
-                parameters=response_parameters,
-                effect_status="not_dispatched",
-                error="dry_run_unsupported",
-            )
+            return await self._preview_action(request, response_parameters)
         session = await self._load_session(request.session_id)
         if not session:
             return AWIExecutionResponse(
@@ -303,6 +298,9 @@ class AWISessionManager:
             result = await self._execute_action_logic(
                 request.action, request.parameters, state
             )
+            # No browser ran. Mark the payload so a mock success can never
+            # be mistaken for live browsing.
+            result["simulated"] = True
 
         session.action_history.append(
             {
@@ -348,6 +346,116 @@ class AWISessionManager:
             duration_ms=duration_ms,
         )
 
+    async def _preview_action(
+        self, request: AWIExecutionRequest, response_parameters: dict[str, Any]
+    ) -> AWIExecutionResponse:
+        """Preview an action without executing it or mutating session state.
+
+        Runs the same validation, precondition, and passkey gates as the
+        execute path, then reports what would happen. Nothing is dispatched
+        to a browser, no mock result is produced, and the session is left
+        untouched (no step increment, no history append).
+        """
+        execution_id = f"awi-exec-{uuid.uuid4().hex[:12]}"
+        session = await self._load_session(request.session_id)
+        if not session:
+            return AWIExecutionResponse(
+                execution_id=execution_id,
+                session_id=request.session_id,
+                action=request.action,
+                status="error",
+                parameters=response_parameters,
+                effect_status="not_dispatched",
+                error=f"Session not found: {request.session_id}",
+            )
+
+        if session.status == AWISessionStatus.PAUSED and session.paused_by_human:
+            return AWIExecutionResponse(
+                execution_id=execution_id,
+                session_id=request.session_id,
+                action=request.action,
+                status="paused",
+                parameters=response_parameters,
+                effect_status="not_dispatched",
+                error="Session is paused by human intervention",
+            )
+
+        if session.step_count >= session.max_steps:
+            return AWIExecutionResponse(
+                execution_id=execution_id,
+                session_id=request.session_id,
+                action=request.action,
+                status="max_steps_reached",
+                parameters=response_parameters,
+                effect_status="not_dispatched",
+                error="Maximum steps reached",
+            )
+
+        is_valid, error = self._vocabulary.validate_parameters(
+            request.action, request.parameters
+        )
+        if not is_valid:
+            return AWIExecutionResponse(
+                execution_id=execution_id,
+                session_id=request.session_id,
+                action=request.action,
+                status="error",
+                parameters=response_parameters,
+                effect_status="not_dispatched",
+                error=error,
+            )
+
+        state = self._session_state.get(request.session_id, {})
+        preconditions_met, unmet = self._vocabulary.check_preconditions(
+            request.action, state
+        )
+        if not preconditions_met:
+            return AWIExecutionResponse(
+                execution_id=execution_id,
+                session_id=request.session_id,
+                action=request.action,
+                status="error",
+                parameters=response_parameters,
+                effect_status="not_dispatched",
+                error=f"Preconditions not met: {unmet}",
+            )
+
+        from .webauthn_provider import get_webauthn_provider
+
+        webauthn = get_webauthn_provider()
+        if await webauthn.requires_passkey(request.session_id, request.action.value):
+            if not await webauthn.is_action_verified(
+                request.session_id, request.action.value
+            ):
+                return AWIExecutionResponse(
+                    execution_id=execution_id,
+                    session_id=request.session_id,
+                    action=request.action,
+                    status="passkey_required",
+                    parameters=response_parameters,
+                    effect_status="not_dispatched",
+                    error="This action requires biometric verification. "
+                    "Call POST /v1/awi/passkey/challenge first.",
+                )
+
+        via = "dom_bridge" if self._dom_sessions.get(request.session_id) else "mock"
+        result: dict[str, Any] = {
+            "dry_run": True,
+            "would_execute": True,
+            "via": via,
+        }
+        if via == "mock":
+            result["simulated"] = True
+        return AWIExecutionResponse(
+            execution_id=execution_id,
+            session_id=request.session_id,
+            action=request.action,
+            status="dry_run",
+            parameters=response_parameters,
+            result=result,
+            effect_status="not_dispatched",
+        )
+
     async def _execute_action_logic(
         self, action: AWIStandardAction, params: dict[str, Any], state: dict[str, Any]
     ) -> dict[str, Any]:
@@ -356,6 +464,12 @@ class AWISessionManager:
             new_url = params.get("url", state.get("current_url"))
             state["current_url"] = new_url
             state["capabilities"].append("page_loaded")
+            page_state = state.get("page_state")
+            if isinstance(page_state, dict):
+                page_state["url"] = new_url
+                page_state["title"] = new_url
+                # Still no browser load; keep the simulated marker.
+                page_state["simulated"] = True
             return {"success": True, "new_url": new_url}
 
         elif action == AWIStandardAction.SEARCH_AND_SORT:
@@ -607,6 +721,12 @@ class AWISessionManager:
             include_elements=True,
         )
 
+        # An attached bridge without a real browser page is still mock
+        # mode (Playwright missing or setup failed). Say so plainly.
+        live_browser = dom_session._page is not None
+        if not live_browser:
+            representation["simulated"] = True
+
         state["page_state"] = representation
         state["current_url"] = url
         session.updated_at = datetime.now(timezone.utc)
@@ -619,6 +739,7 @@ class AWISessionManager:
         return {
             "status": "attached",
             "session_id": session_id,
+            "live_browser": live_browser,
             "dom_session_id": dom_session.session_id,
             "elements_count": len(representation.get("interactive_elements", [])),
             "page_type": representation.get("page_type", "unknown"),
@@ -673,6 +794,7 @@ class AWISessionManager:
             "session_id": session_id,
             "dom_session_id": dom_session_id,
             "current_url": dom_session.current_url,
+            "live_browser": dom_session._page is not None,
         }
 
     async def _execute_via_dom_bridge(
