@@ -91,6 +91,9 @@ class BroadcastTarget:
     status: str = "pending"  # pending, sent, confirmed, failed
     response_code: int | None = None
     registered_at: datetime | None = None
+    # Always true: per-directory status comes from a hash sample, not from
+    # contacting any directory. Serialized into API responses via asdict().
+    simulated: bool = True
 
 
 @dataclass
@@ -102,6 +105,9 @@ class DiscoveryMetrics:
     integrations: int = 0  # Times another agent called the API
     last_lookup_at: datetime | None = None
     referral_sources: dict[str, int] = field(default_factory=dict)
+    # Always true: metrics are seeded from a hash formula and move only on
+    # manually posted sample events. Serialized into API responses via asdict().
+    simulated: bool = True
 
 
 @dataclass

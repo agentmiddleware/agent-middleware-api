@@ -52,12 +52,13 @@ MAX_BATCH_CRAWL_URLS = 25
     "/crawl",
     response_model=IndexedAPI,
     status_code=status.HTTP_202_ACCEPTED,
-    summary="Crawl and index an external API",
+    summary="Crawl and index an external API (simulated)",
     description=(
-        "Submit a URL for the Oracle to crawl. It will attempt to discover "
-        "the API's capabilities via /.well-known/agent.json, /llm.txt, or "
-        "OpenAPI specs, then compute a compatibility score indicating how "
-        "well it fits this control plane."
+        "SIMULATED: no live HTTP crawl is performed. Results come from a "
+        "hardcoded directory list, or synthetic metadata for unknown URLs. "
+        "The response carries simulated=true. Submit a URL for the Oracle "
+        "to index, with a compatibility score indicating how well it fits "
+        "this control plane."
     ),
 )
 async def crawl_target(
@@ -91,8 +92,11 @@ async def crawl_target(
 @router.post(
     "/crawl/batch",
     status_code=status.HTTP_202_ACCEPTED,
-    summary="Batch crawl multiple URLs",
-    description="Submit multiple URLs for concurrent crawling and indexing.",
+    summary="Batch crawl multiple URLs (simulated)",
+    description=(
+        "SIMULATED: no live HTTP crawl is performed; results are sample "
+        "data. Submit multiple URLs for concurrent indexing."
+    ),
 )
 async def batch_crawl(
     urls: list[str] = Body(..., max_length=MAX_BATCH_CRAWL_URLS),
@@ -256,12 +260,11 @@ async def get_indexed_api(
     "/register",
     response_model=RegistrationResponse,
     status_code=status.HTTP_202_ACCEPTED,
-    summary="Register in external agent directories",
+    summary="Register in external agent directories (simulated)",
     description=(
-        "Push our API profile into external agent directories and registries. "
-        "This is how agents find us — by being listed in the directories they "
-        "already crawl. Supports /.well-known, MCP server listings, plugin stores, "
-        "and centralized agent registries."
+        "SIMULATED: no HTTP registration with an external directory is "
+        "performed; all registrations report success locally. The response "
+        "carries simulated=true."
     ),
 )
 async def register_in_directories(
@@ -295,8 +298,11 @@ async def register_in_directories(
 
 @router.get(
     "/registrations",
-    summary="List all registrations",
-    description="View all directories where our API has been registered.",
+    summary="List all registrations (simulated)",
+    description=(
+        "SIMULATED: lists locally recorded sample registrations only. "
+        "No external directory was contacted."
+    ),
 )
 async def list_registrations(
     api_key: str = Depends(verify_api_key),

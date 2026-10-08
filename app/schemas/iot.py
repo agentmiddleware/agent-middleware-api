@@ -172,6 +172,13 @@ class BridgeMessage(BaseModel):
 class BridgeMessageResponse(BaseModel):
     """Confirmation of a bridged message."""
 
+    simulated: bool = Field(
+        default=True,
+        description=(
+            "Always true: no message reaches a real device. MQTT publish "
+            "only logs, CoAP returns canned responses."
+        ),
+    )
     message_id: str
     device_id: str
     topic: str

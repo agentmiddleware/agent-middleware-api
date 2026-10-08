@@ -72,6 +72,10 @@ async def create_permit_request(
     its own spend. The issuer must be that wallet or one above it in the
     sponsor -> agent -> child hierarchy, mirroring ``POST /v1/permits``: an
     agent may ask its funder for authority, never an unrelated wallet.
+
+    When Sentinel is not configured, local/dev installs auto-approve with
+    ``simulated=true``, ``decided_by="simulation"``. Treat such approvals as
+    demo flow only: no human decided.
     """
     auth.require_wallet_access(request.subject_wallet_id)
     if not auth.is_bootstrap_admin and not await money.is_wallet_or_descendant(

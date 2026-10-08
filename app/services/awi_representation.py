@@ -79,6 +79,12 @@ class ProgressiveRepresentationEngine:
             "session_id": session_id,
             "representation_type": representation_type.value,
             "content": content,
+            # Propagates the content-level flag (mock embedding and
+            # placeholder screenshot set it); other types render stored
+            # page state and report False.
+            "simulated": bool(
+                isinstance(content, dict) and content.get("simulated", False)
+            ),
             "metadata": {
                 "generated_at": datetime.now(timezone.utc).isoformat(),
                 "generation_time_ms": int(generation_time * 1000),
@@ -170,6 +176,7 @@ class ProgressiveRepresentationEngine:
         return {
             "type": "low_res_screenshot",
             "format": "base64_png",
+            "simulated": True,
             "quality": quality,
             "max_width": max_width,
             "placeholder": "[Screenshot data - base64 encoded]",

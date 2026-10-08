@@ -103,7 +103,12 @@ async def upload_video(
 @router.get(
     "/videos/{video_id}",
     summary="Get video processing status",
-    description="Check the current status of a video in the processing pipeline.",
+    description=(
+        "Check the current status of a video in the processing pipeline. "
+        "Note: transcription is a placeholder string with a fixed duration, "
+        "so hook timestamps derived from it are simulated (see the hooks "
+        "endpoint)."
+    ),
 )
 async def get_video_status(
     video_id: str,
@@ -134,12 +139,12 @@ async def get_video_status(
 @router.get(
     "/videos/{video_id}/hooks",
     response_model=list[ViralHook],
-    summary="Get detected viral hooks",
+    summary="Get detected viral hooks (simulated)",
     description=(
-        "Retrieve the viral hooks detected in a processed video. "
-        "Hooks are ranked by confidence_score. Each hook identifies "
-        "a high-engagement moment based on speech patterns, emotional "
-        "peaks, visual surprises, or audience retention signals."
+        "SIMULATED: hooks are synthetic placeholders with random "
+        "timestamps and confidence scores, not ML output from the actual "
+        "video. Each entry carries simulated=true. Hooks are ranked by "
+        "confidence_score."
     ),
 )
 async def get_viral_hooks(
@@ -167,12 +172,11 @@ async def get_viral_hooks(
     "/videos/{video_id}/clips",
     response_model=ClipGenerationResponse,
     status_code=status.HTTP_202_ACCEPTED,
-    summary="Generate platform-ready clips",
+    summary="Generate platform-ready clips (simulated)",
     description=(
-        "Generate reframed, captioned clips from detected viral hooks. "
-        "Clips are automatically reframed to the target aspect ratio(s) "
-        "and overlaid with animated captions in the chosen style. "
-        "80%% of social video is consumed muted — captions are not optional."
+        "SIMULATED: clips are metadata only (no video bytes are rendered), "
+        "and the download and thumbnail URLs are placeholders with no "
+        "routes behind them. The response carries simulated=true."
     ),
 )
 async def generate_clips(
@@ -255,8 +259,11 @@ async def distribute_clips(
 @router.get(
     "/clips/{clip_id}",
     response_model=GeneratedClip,
-    summary="Get clip details",
-    description="Retrieve metadata and download URL for a generated clip.",
+    summary="Get clip details (simulated)",
+    description=(
+        "Retrieve metadata for a generated clip. SIMULATED: metadata only, "
+        "no rendered video; the download URL is a placeholder."
+    ),
 )
 async def get_clip(
     clip_id: str,

@@ -76,6 +76,13 @@ class VideoUploadResponse(BaseModel):
 class ViralHook(BaseModel):
     """A detected high-engagement moment in the source video."""
 
+    simulated: bool = Field(
+        default=True,
+        description=(
+            "Always true: hooks are synthetic placeholders, not ML output "
+            "from the actual video."
+        ),
+    )
     hook_id: str
     start_time_seconds: float
     end_time_seconds: float
@@ -129,6 +136,14 @@ class ClipGenerationRequest(BaseModel):
 class GeneratedClip(BaseModel):
     """A single generated clip ready for distribution."""
 
+    simulated: bool = Field(
+        default=True,
+        description=(
+            "Always true: metadata only, no rendered video bytes. The "
+            "download and thumbnail URLs are placeholders with no routes "
+            "behind them."
+        ),
+    )
     clip_id: str
     video_id: str
     hook_id: str
@@ -146,6 +161,10 @@ class GeneratedClip(BaseModel):
 class ClipGenerationResponse(BaseModel):
     """Result of clip generation."""
 
+    simulated: bool = Field(
+        default=True,
+        description="Always true: clips are metadata only, never rendered video.",
+    )
     video_id: str
     clips: list[GeneratedClip]
     total_generated: int
@@ -186,6 +205,10 @@ class DistributionRequest(BaseModel):
 class DistributionResult(BaseModel):
     """Result of a single platform distribution."""
 
+    simulated: bool = Field(
+        default=True,
+        description="Always true: nothing is posted to any platform.",
+    )
     clip_id: str
     platform: Platform
     status: str
@@ -198,6 +221,10 @@ class DistributionResult(BaseModel):
 class DistributionResponse(BaseModel):
     """Aggregated distribution results."""
 
+    simulated: bool = Field(
+        default=True,
+        description="Always true: nothing is posted to any platform.",
+    )
     results: list[DistributionResult]
     total_distributed: int
     total_failed: int

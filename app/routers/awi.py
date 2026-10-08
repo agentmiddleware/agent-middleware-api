@@ -142,7 +142,10 @@ async def destroy_session(
     summary="Execute AWI action",
     description=(
         "Execute a standardized AWI action within a session. "
-        "Governed: requires X-Permit-Id and Idempotency-Key."
+        "Governed: requires X-Permit-Id and Idempotency-Key. "
+        "The response carries simulated=true unless a live Playwright DOM "
+        "bridge is attached to the session; unattached sessions return "
+        "mock success with zero real browser effects."
     ),
 )
 async def execute_action(
@@ -224,7 +227,11 @@ async def execute_action(
     "/represent",
     response_model=AWIRepresentationResponse,
     summary="Request representation",
-    description="Request a specific representation of the current session state.",
+    description=(
+        "Request a specific representation of the current session state. "
+        "Embedding and screenshot representations are synthesized locally "
+        "and carry simulated=true; they are not captured from a live browser."
+    ),
 )
 async def request_representation(
     request: AWIRepresentationRequest,

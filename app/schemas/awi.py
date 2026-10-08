@@ -222,6 +222,13 @@ class AWIExecutionResponse(BaseModel):
     action: AWIStandardAction
     status: str
     parameters: dict[str, Any]
+    simulated: bool = Field(
+        default=False,
+        description=(
+            "True when the result came from the mock fallback (no live "
+            "browser attached) rather than a real browser action."
+        ),
+    )
     result: dict[str, Any] | None = None
     effect_status: str | None = Field(
         default=None,
@@ -253,6 +260,14 @@ class AWIRepresentationResponse(BaseModel):
     representation_type: AWIRepresentationType
     content: Any
     metadata: dict[str, Any]
+    simulated: bool = Field(
+        default=False,
+        description=(
+            "True when the representation is synthesized locally (mock "
+            "embedding, placeholder screenshot) rather than captured from "
+            "a live browser."
+        ),
+    )
     generated_at: datetime
 
 
