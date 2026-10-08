@@ -143,10 +143,12 @@ class DiscoveryEventRequest(BaseModel):
     "",
     response_model=BroadcastJobResponse,
     status_code=201,
-    summary="Broadcast API to Agent Directories",
+    summary="Broadcast API to Agent Directories (simulated)",
     description=(
-        "Pushes discovery artifacts (llm.txt, OpenAPI, agent.json) "
-        "to all registered agent directories. The network effects engine."
+        "Simulated broadcast: no directory is contacted. Per-directory "
+        "confirmed/failed status is derived from a hash, not from delivery, "
+        "and discovery metrics are seeded sample data, not measured traction. "
+        "Accepts discovery artifacts (llm.txt, OpenAPI, agent.json)."
     ),
 )
 async def broadcast_api(
@@ -247,8 +249,12 @@ async def get_job(
 @router.get(
     "/jobs/{job_id}/metrics",
     response_model=DiscoveryMetricsResponse,
-    summary="Get Discovery Metrics",
-    description="Real-time discovery tracking: impressions, lookups, integrations.",
+    summary="Get Discovery Metrics (simulated sample data)",
+    description=(
+        "Sample discovery counters: impressions, lookups, integrations. "
+        "Values are seeded from a hash at job creation and only move when "
+        "the caller posts simulated events. Not measured traction."
+    ),
 )
 async def get_metrics(
     job_id: str,

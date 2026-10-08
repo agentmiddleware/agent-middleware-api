@@ -6,10 +6,9 @@ Secure, topic-ACL-enforced protocol bridging for IoT devices.
 Wired to ProtocolBridge service via FastAPI dependency injection.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from ..core.auth import AuthContext, get_auth_context
-from ..core.config import public_api_origin
 from ..core.dependencies import get_iot_bridge
 from ..services.iot_bridge import ProtocolBridge, ACLViolation, RegisteredDevice
 from ..schemas.iot import (
@@ -62,16 +61,6 @@ async def _load_owned_device(
     ):
         raise _device_not_found(device_id)
     return device
-
-
-def _websocket_origin(request: Request) -> str:
-    """ws(s):// origin from PUBLIC_URL, else from the origin the caller used."""
-    origin = public_api_origin() or str(request.base_url).rstrip("/")
-    if origin.startswith("https://"):
-        return "wss://" + origin[len("https://") :]
-    if origin.startswith("http://"):
-        return "ws://" + origin[len("http://") :]
-    return origin
 
 
 def _device_to_response(device: RegisteredDevice) -> DeviceResponse:
@@ -198,11 +187,14 @@ async def deregister_device(
 @router.post(
     "/devices/{device_id}/messages",
     response_model=BridgeMessageResponse,
-    summary="Send a message to a device",
+    summary="Send a message to a device (simulated delivery)",
     description=(
         "Send a message through the protocol bridge to the device's native protocol. "
         "The topic must match an allowed ACL pattern. Messages to denied topics "
-        "(e.g., camera feeds) will be rejected with a 403."
+        "(e.g., camera feeds) will be rejected with a 403. "
+        "Simulated delivery: no message reaches a real device. MQTT publish "
+        "is logged only, CoAP returns canned responses, and other protocols "
+        "return a simulated response."
     ),
 )
 async def send_message(
@@ -243,17 +235,19 @@ async def send_message(
 
 @router.post(
     "/devices/{device_id}/subscribe",
-    summary="Subscribe to device messages",
+    summary="Subscribe to device messages (simulated)",
     description=(
-        "Subscribe to messages from a device topic. Returns a webhook URL "
-        "or WebSocket endpoint that agents can poll for incoming data. "
-        "Topic must have READ permission in the device's ACL."
+        "Record a simulated subscription for messages from a device topic. "
+        "Topic must have READ permission in the device's ACL. No live feed "
+        "exists behind a subscription: there is no poll or websocket route "
+        "for subscriptions and no broker traffic flows, so no webhook or "
+        "websocket URL is returned. Read device state via "
+        "GET /v1/iot/devices/{device_id}."
     ),
 )
 async def subscribe_to_device(
     device_id: str,
     topic: str,
-    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     bridge: ProtocolBridge = Depends(get_iot_bridge),
 ):
@@ -271,9 +265,10 @@ async def subscribe_to_device(
             detail={"error": "acl_denied", "message": str(e)},
         )
 
-    subscription_path = f"/v1/iot/subscriptions/{result['subscription_id']}"
     return {
         **result,
-        "webhook_url": f"{subscription_path}/poll",
-        "websocket_url": f"{_websocket_origin(request)}{subscription_path}/ws",
+        "note": (
+            "Simulated subscription: no live broker feed, no poll endpoint, "
+            "and no websocket endpoint exist for this subscription id."
+        ),
     }

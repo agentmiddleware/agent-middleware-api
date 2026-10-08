@@ -117,11 +117,12 @@ class PipelineListResponse(BaseModel):
     "/pipelines",
     response_model=PipelineResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Create a telemetry pipeline",
+    summary="Create a telemetry pipeline (in-memory proof surface)",
     description=(
         "Create an isolated telemetry pipeline for monitoring an agent-built tool. "
         "Events ingested into this pipeline are analyzed independently, with "
-        "per-tenant anomaly detection and optional auto-PR generation."
+        "per-tenant anomaly detection and optional simulated auto-PR generation. "
+        "Pipelines live in process memory and reset on restart."
     ),
 )
 async def create_pipeline(
@@ -182,10 +183,11 @@ async def get_anomalies(
 
 @router.post(
     "/pipelines/{pipeline_id}/auto-pr",
-    summary="Generate auto-fix PR",
+    summary="Generate auto-fix PR (simulated)",
     description=(
-        "Auto-generate a pull request to fix a detected anomaly. "
-        "Targets the git repo configured on the pipeline."
+        "Simulated auto-fix: returns a draft record only, never opens a pull "
+        "request. Without a repo URL configured on the pipeline the status "
+        "is simulated. Targets the git repo configured on the pipeline."
     ),
 )
 async def generate_auto_pr(

@@ -54,7 +54,11 @@ class AgentRegistrationRequest(BaseModel):
     )
     webhook_url: str | None = Field(
         None,
-        description="URL for push-based message delivery. If null, agent must poll.",
+        description=(
+            "URL for push-based message delivery (simulated: logged only, "
+            "never fetched). If null, agent must poll. Polling the inbox "
+            "is the real delivery path."
+        ),
         examples=["https://my-agent.example.com/webhook/messages"],
     )
 
@@ -266,13 +270,13 @@ async def list_agents(
     "/messages",
     response_model=MessageResponse,
     status_code=status.HTTP_202_ACCEPTED,
-    summary="Send a message to another agent",
+    summary="Send a message to another agent (poll inbox; push simulated)",
     description=(
         "Send a structured message to a registered agent. "
-        "Messages are routed based on priority: critical messages "
-        "are delivered immediately with aggressive retry, low priority "
-        "messages are batched. If the recipient has a webhook, delivery "
-        "is push-based; otherwise the recipient must poll."
+        "Messages land in the recipient's inbox and the recipient polls "
+        "GET /v1/comms/messages/{agent_id}/inbox. Push delivery to the "
+        "recipient webhook is simulated (logged, nothing sent over the "
+        "network), so treat the inbox poll as the real delivery path."
     ),
 )
 async def send_message(
