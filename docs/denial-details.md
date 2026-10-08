@@ -47,6 +47,29 @@ read as "this permit is not yours" to the permit's own subject. Reasons that do
 not depend on the missing context (`permit_not_found`, `permit_expired`,
 `permit_revoked`) are still reported as themselves.
 
+### Which layer enforces which constraint
+
+Core validation (`validate_for_action`, surfaced at `POST /v1/permits/verify`)
+checks status, expiry, wallet and key binding, tool allowlist, scopes, budget,
+per-tool call caps, aggregate value cap, forbidden fields, and signature. The
+remaining constraints are enforced downstream, so a passing core verdict does
+not prove them:
+
+| Constraint | Enforced by |
+|------------|-------------|
+| `recipient_domain` | Dispatch router, upstream backend only. Local registered tools do not check it. |
+| Repeat window and identical repeats | Dispatch-attempt layer, gated by `MCP_UPSTREAM_DUPLICATE_GUARD` (log-only by default). |
+| `requires_human_approval` | Creation gate plus the human approval gate at invoke time. |
+
+Single-use action permits go further: they reject every combined v2
+constraint as `unsupported_action_constraints` (see the catalog row) and only
+admit exact tool, schema, wallet, and argument binding. Use the standard
+permit path for constrained one-shot actions.
+
+This section mirrors `PERMIT_CONSTRAINT_COVERAGE` in
+`app/services/permits.py`. If they disagree, the code map wins and this page
+needs an update.
+
 ## Reason-code and remediation catalog
 
 This is the authoritative catalog for the `reason_code` values emitted by the
@@ -78,6 +101,7 @@ revocation case.
 | `permit_wallet_mismatch` / `permit_key_mismatch` | `bound_to` only — no values | Authenticate as the permit subject or request a permit bound to the current wallet and key. |
 | `permit_recipient_domain_mismatch` | No diagnostic values in the portable receipt | Use the permit's bound upstream domain or request a permit bound to the intended recipient. |
 | `permit_denied` | No stable diagnostic details | Inspect the adjacent audit event and replace the permit; this is the fail-closed fallback when validation supplies no narrower reason. |
+| `unsupported_action_constraints` | `unsupported_constraints`, `remedy` | Use the standard permit invoke path for the constrained one-shot action, or drop the listed constraints and re-mint a binding-only action permit. |
 
 Credit amounts are exact decimal strings, not floats. Timestamps are explicit
 UTC (`...Z`).
@@ -87,6 +111,21 @@ For forbidden-field denials, the API response reason may be
 value to the signed, stable `permit_forbidden_field` reason code because field
 names are not constrained to the receipt's safe machine-code grammar. The
 adjacent `details.field` value identifies the rejected field.
+
+### Stranded budget on a live permit
+
+A `permit_budget_exceeded` denial can be wrong. When a post-execution refund
+loses a write race, the permit keeps the refunded amount reserved and
+`spent_credits` stays inflated. The repair loop deliberately never resets a
+live permit (a downward reset could let a concurrent call overspend), so the
+inflation clears only at expiry.
+
+Operators: check `GET /v1/billing/alerts` for a `permit_release_contended`
+alert naming the permit. The alert amount is the stranded reservation. Either
+reissue a replacement permit (the five-minute fix) or wait out the expiry,
+which lets the repair loop reclaim it. The background loop runs every five
+minutes and only repairs permits idle past the quiet period, so a recently
+crashed or busy permit shows stale spend until the loop reaches it.
 
 ### Wallet and standing policy
 

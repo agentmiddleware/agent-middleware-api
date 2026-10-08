@@ -102,6 +102,31 @@ class PermitValidation:
     details: dict[str, Any] | None = None
 
 
+#: Where each permit constraint is actually enforced.
+#:
+#: The core validator checks the "core" rows. The remaining rows are enforced
+#: downstream, so a passing verdict from ``validate_for_action`` alone does
+#: not prove them. Kept next to the code so the map is reviewed whenever an
+#: enforcement point moves (see tests/test_permit_constraint_coverage.py).
+PERMIT_CONSTRAINT_COVERAGE: dict[str, str] = {
+    "status, expiry, wallet and key binding": "core: _validate_model_for_action",
+    "allowed_tools and scopes": "core: _validate_model_for_action",
+    "max_credits budget": "core: _validate_model_for_action plus authorize_and_reserve",
+    "max_calls_per_tool": "core: _validate_model_for_action plus authorize_and_reserve",
+    "aggregate_value_cap": "core: _validate_model_for_action plus authorize_and_reserve",
+    "forbidden_fields": "core: _validate_model_for_action",
+    "signature": "core: _validate_model_for_action",
+    "recipient_domain": "dispatch router (app/routers/mcp.py), upstream backend only",
+    "repeat window and identical repeats": (
+        "dispatch-attempt layer (app/services/mcp_dispatch_attempts.py)"
+    ),
+    "requires_human_approval": (
+        "mint: creation refused unless approval is available; "
+        "invoke: human approval gate"
+    ),
+}
+
+
 def _num(value: Decimal | None) -> str | None:
     """Render a credit amount as an exact decimal string for a JSON payload."""
     return None if value is None else str(value)
@@ -476,6 +501,16 @@ class PermitService:
         key_id: str | None = None,
         arguments: dict[str, Any] | None = None,
     ) -> PermitValidation:
+        """Check the core constraints for one governed action.
+
+        Covers status, expiry, wallet and key binding, tool allowlist,
+        scopes, budget, per-tool call caps, aggregate value cap, forbidden
+        fields, and signature. It does not check ``recipient_domain``
+        (enforced in the dispatch router for the upstream backend) or
+        repeat-window and identical-repeat rules (enforced in the
+        dispatch-attempt layer). See ``PERMIT_CONSTRAINT_COVERAGE`` for
+        the full map of which layer enforces what.
+        """
         factory = get_session_factory()
         async with factory() as session:
             model = await session.get(PermitModel, permit_id)
