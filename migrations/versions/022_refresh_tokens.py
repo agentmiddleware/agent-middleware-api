@@ -23,7 +23,7 @@ def upgrade() -> None:
         "refresh_tokens",
         sa.Column("jti", sa.String(length=64), nullable=False),
         sa.Column("wallet_id", sa.String(length=50), nullable=False),
-        sa.Column("revoked", sa.Boolean(), nullable=False, server_default="false"),
+        sa.Column("revoked", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("expires_at", sa.DateTime(), nullable=False),
         sa.ForeignKeyConstraint(["wallet_id"], ["wallets.wallet_id"]),

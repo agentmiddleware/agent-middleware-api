@@ -48,8 +48,10 @@ def downgrade():
                 "LOCK TABLE permits, receipts, idempotency_records IN ACCESS EXCLUSIVE MODE"
             )
         )
-    elif connection.dialect.name == "sqlite":
-        connection.execute(sa.text("BEGIN IMMEDIATE"))
+    # SQLite and other dialects run inside the migration transaction, so there
+    # is nothing to acquire here. Never issue BEGIN from a migration: it nests
+    # and fails inside a runner that already holds a transaction, and otherwise
+    # the opened transaction is never committed by the migration itself.
     for table in ("permits", "receipts"):
         predicate = " OR ".join(f"{name} IS NOT NULL" for name in _FIELDS)
         if connection.execute(

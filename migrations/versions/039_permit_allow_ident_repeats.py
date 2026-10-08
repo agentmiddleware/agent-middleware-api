@@ -28,7 +28,10 @@ def upgrade() -> None:
     op.add_column(
         "permits",
         sa.Column(
-            "allow_identical_repeats", sa.Boolean(), nullable=False, server_default="0"
+            "allow_identical_repeats",
+            sa.Boolean(),
+            nullable=False,
+            server_default=sa.false(),
         ),
     )
 
