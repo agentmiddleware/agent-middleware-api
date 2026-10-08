@@ -213,6 +213,9 @@ out-of-scope tool itself remains replayable.
 
 ### Cross-key duplicate detection (remote tools only)
 
+Sales and pilot guidance (which mode to recommend and its limits) lives in
+[`duplicate-guard-guidance.md`](duplicate-guard-guidance.md).
+
 For upstream (`upstream_mcp`) tools, an optional duplicate guard detects when a
 **new** idempotency key carries the same request body as a prior effectful call
 on the same permit and tool. Same-key retries are never blocked — they replay

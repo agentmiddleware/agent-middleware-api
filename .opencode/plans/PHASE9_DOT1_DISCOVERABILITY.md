@@ -1,5 +1,10 @@
 # Phase 9.1: Agent Discoverability Sprint — Implementation Plan
 
+> Status: implemented in tree. The Phase 9 capabilities (passkey,
+> dom_bridge, rag_memory) are present in `app/routers/discover.py`, and the
+> passkey and RAG routes are listed there. Verified against checkout
+> a1c4b0b (2026-10-07).
+
 **Goal**: Make the entire platform (MCP + AWI + Phase 9 features) instantly discoverable by autonomous agents.
 
 **Status of Existing Discovery Surfaces**:
