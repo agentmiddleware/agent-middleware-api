@@ -8,7 +8,10 @@ of preferring deletion of unused scaffolding over growing it.
 
 Dropping a table is destructive, so the downgrade recreates it exactly as 013
 did, columns and indexes alike. Any rows are unrecoverable, which is acceptable
-only because there is no writer that could have produced one.
+only because there is no writer that could have produced one. As a backstop,
+the upgrade counts rows first and refuses to drop a non-empty table: if the
+no-writer claim is ever wrong for a database, the migration aborts and keeps
+both the rows and the 032 stamp instead of deleting customer data.
 
 Revision ID: 033_drop_optimizer_telemetry
 Revises: 032_receipt_reason_code
@@ -27,6 +30,17 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    remaining = (
+        op.get_bind()
+        .execute(sa.text("SELECT COUNT(*) FROM optimizer_telemetry"))
+        .scalar()
+    )
+    if remaining:
+        raise RuntimeError(
+            "optimizer_telemetry_refuses_drop: table holds %d row(s); "
+            "this drop assumed nothing ever wrote here. Inspect the rows "
+            "and migrate them before retrying." % remaining
+        )
     op.drop_index("ix_optimizer_telemetry_agent_id", table_name="optimizer_telemetry")
     op.drop_index("ix_optimizer_telemetry_wallet_id", table_name="optimizer_telemetry")
     op.drop_index("ix_optimizer_telemetry_ts", table_name="optimizer_telemetry")
