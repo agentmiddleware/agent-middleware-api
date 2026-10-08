@@ -683,6 +683,33 @@ jobs:
             --tool "$CI_SMOKE_TOOL" \
             --tool-args "$TOOL_ARGS"
 
+  # Buyer-facing trial path: runs the exact documented one-command trial
+  # (docs/trial.md) against throwaway state. tests/test_trial_run.py covers
+  # the same script with assertions; this job proves the literal command a
+  # prospect types works on a fresh checkout.
+  trial_run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e ./b2a_sdk
+          pip install httpx
+
+      - name: Run the one-command trial
+        run: python scripts/trial_run.py
+
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 15

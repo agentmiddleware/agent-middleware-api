@@ -49,6 +49,7 @@ data/demo_trust_plane.db*
 data/failure-lab/
 data/quickstart/
 data/live-loop-proof/
+data/trial-run/
 # live_loop_proof.py --output-dir target used for the 2026-08-25 rerun
 data/validation-run/
 
