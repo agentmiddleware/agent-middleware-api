@@ -214,3 +214,15 @@ uv build b2a_sdk
 python -m pytest b2a_sdk/tests
 ruff check b2a_sdk/src b2a_sdk/tests
 ```
+
+Clean-room install check (builds the wheel and sdist, installs each into a
+fresh virtualenv, checks the import, the version, and the
+`b2a-verify-receipt` entry point):
+
+```bash
+scripts/sdk_install_smoke.sh
+```
+
+The release version lives in `b2a_sdk/pyproject.toml` only.
+`b2a_sdk.__version__` reads the installed distribution metadata and falls
+back to that same version when running from a source checkout.

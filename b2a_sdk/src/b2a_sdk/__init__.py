@@ -41,7 +41,26 @@ from .receipt_verifier import (
     verify_bundle,
 )
 
-__version__ = "0.5.0"
+# The release version lives in exactly one place: ``pyproject.toml``.
+# ``__version__`` reads the installed distribution metadata first, so a wheel
+# or sdist install always reports what pip installed. The fallback covers
+# running straight from a source checkout with no install step; it must match
+# ``pyproject.toml`` (checked by ``tests/test_packaging.py``).
+_FALLBACK_VERSION = "0.5.0"
+
+
+def _resolve_version() -> str:
+    try:
+        from importlib.metadata import PackageNotFoundError, version
+    except ImportError:  # pragma: no cover - stdlib since Python 3.8
+        return _FALLBACK_VERSION
+    try:
+        return version("b2a-sdk")
+    except PackageNotFoundError:
+        return _FALLBACK_VERSION
+
+
+__version__ = _resolve_version()
 
 # The HTTP client surface (client, edge_client, and the decorators that wrap it)
 # pulls in httpx. Load those names lazily via PEP 562 so importing the package —
