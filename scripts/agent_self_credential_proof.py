@@ -38,6 +38,16 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+
+if __package__:
+    from .script_outcome import (
+        EXIT_FAILED,
+        EXIT_INCOMPLETE,
+        EXIT_OK,
+        EXIT_SETUP,
+    )
+else:
+    from script_outcome import EXIT_FAILED, EXIT_INCOMPLETE, EXIT_OK, EXIT_SETUP
 import json
 import sys
 from datetime import datetime, timedelta, timezone
@@ -136,7 +146,7 @@ async def run(base_url: str) -> int:
                 "  self-provision is disabled; start the server with "
                 "ENABLE_DEV_KEY_SELF_PROVISION=true (local only)."
             )
-            return 2
+            return EXIT_SETUP
         r.raise_for_status()
         creds = r.json()
         wallet, key_id = creds["wallet_id"], creds["key_id"]
@@ -271,14 +281,14 @@ async def run(base_url: str) -> int:
 
     if failures:
         print(f"\nFAILED: {', '.join(failures)}")
-        return 1
+        return EXIT_FAILED
     if skipped:
         print(
             f"\nSKIPPED: {', '.join(skipped)} (no failures, but not every invariant ran)"
         )
-        return 3
+        return EXIT_INCOMPLETE
     print("\nALL INVARIANTS HELD")
-    return 0
+    return EXIT_OK
 
 
 def main() -> int:
@@ -289,7 +299,7 @@ def main() -> int:
         return asyncio.run(run(args.base_url))
     except httpx.HTTPError as exc:
         print(f"transport error against {args.base_url}: {exc}")
-        return 2
+        return EXIT_SETUP
 
 
 if __name__ == "__main__":

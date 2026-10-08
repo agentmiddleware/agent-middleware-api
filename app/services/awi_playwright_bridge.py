@@ -121,6 +121,10 @@ class BrowserSessionLimitExceeded(RuntimeError):
     """Raised when DOM bridge session capacity is exhausted."""
 
 
+class BridgeSetupError(RuntimeError):
+    """Raised when a DOM bridge session cannot open a live browser page."""
+
+
 class TranslationMode(str, Enum):
     """Browser automation mode."""
 
@@ -460,6 +464,11 @@ class AWIPlaywrightBridge:
 
         Returns:
             BridgeSession with session_id and initial state.
+
+        Raises:
+            BridgeSetupError: If the browser context cannot be created or no
+                live page results. The partial session is destroyed, never
+                returned as if it were usable.
         """
         block_reason = await check_outbound_url(target_url)
         if block_reason:
@@ -500,8 +509,19 @@ class AWIPlaywrightBridge:
         try:
             await self._create_browser_context(session, headless, viewport)
             await self._navigate_to(session, target_url)
-        except Exception as e:
-            logger.warning(f"Browser setup for session {session_id}: {e}")
+        except Exception as exc:
+            await self.destroy_session(session_id)
+            raise BridgeSetupError(
+                f"browser setup failed for session {session_id}: {exc}"
+            ) from exc
+        if session._page is None:
+            # Without a live page the helpers above only warn (Playwright
+            # missing, browser launch failed). Returning the session would
+            # report a live browser session that was never opened.
+            await self.destroy_session(session_id)
+            raise BridgeSetupError(
+                f"browser setup failed for session {session_id}: no live page"
+            )
 
         logger.info(f"Created DOM bridge session {session_id} for {target_url}")
 
