@@ -219,10 +219,12 @@ async def _register_subscribable(client, api_headers) -> tuple[str, str]:
 
 
 @pytest.mark.anyio
-async def test_subscribe_websocket_url_derived_from_request(
-    client, api_headers, monkeypatch
-):
-    monkeypatch.setattr(get_settings(), "PUBLIC_URL", "")
+async def test_subscribe_returns_no_dead_urls(client, api_headers):
+    """Subscribe must not return poll/websocket URLs: no such routes exist.
+
+    Regression test for the buyer-facing dead URLs
+    (/v1/iot/subscriptions/{id}/poll and .../ws were never mounted).
+    """
     device_id, topic = await _register_subscribable(client, api_headers)
     resp = await client.post(
         f"/v1/iot/devices/{device_id}/subscribe",
@@ -231,17 +233,19 @@ async def test_subscribe_websocket_url_derived_from_request(
     )
     assert resp.status_code == 200
     body = resp.json()
-    assert "yourdomain" not in resp.text
-    assert body["websocket_url"] == (
-        f"ws://test/v1/iot/subscriptions/{body['subscription_id']}/ws"
-    )
+    assert "webhook_url" not in body
+    assert "websocket_url" not in body
+    assert "/v1/iot/subscriptions/" not in resp.text
+    assert "websocket" in body["note"].lower()
+    assert body["subscription_id"]
+    assert body["device_id"] == device_id
+    assert body["topic"] == topic
+    assert body["status"] == "active"
 
 
 @pytest.mark.anyio
-async def test_subscribe_websocket_url_derived_from_public_url(
-    client, api_headers, monkeypatch
-):
-    monkeypatch.setattr(get_settings(), "PUBLIC_URL", "https://api.example.com/")
+async def test_subscribe_note_labels_simulated(client, api_headers):
+    """The subscribe response says plainly that no live feed exists."""
     device_id, topic = await _register_subscribable(client, api_headers)
     resp = await client.post(
         f"/v1/iot/devices/{device_id}/subscribe",
@@ -249,10 +253,9 @@ async def test_subscribe_websocket_url_derived_from_public_url(
         headers=api_headers,
     )
     assert resp.status_code == 200
-    body = resp.json()
-    assert body["websocket_url"] == (
-        f"wss://api.example.com/v1/iot/subscriptions/{body['subscription_id']}/ws"
-    )
+    note = resp.json()["note"].lower()
+    assert "simulat" in note
+    assert "no live" in note or "no poll" in note
 
 
 @pytest.mark.anyio

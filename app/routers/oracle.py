@@ -52,12 +52,12 @@ MAX_BATCH_CRAWL_URLS = 25
     "/crawl",
     response_model=IndexedAPI,
     status_code=status.HTTP_202_ACCEPTED,
-    summary="Crawl and index an external API",
+    summary="Crawl and index an external API (simulated)",
     description=(
-        "Submit a URL for the Oracle to crawl. It will attempt to discover "
-        "the API's capabilities via /.well-known/agent.json, /llm.txt, or "
-        "OpenAPI specs, then compute a compatibility score indicating how "
-        "well it fits this control plane."
+        "Submit a URL for the Oracle to crawl. Simulated discovery: results "
+        "come from a hardcoded sample directory, not live HTTP crawling, so "
+        "any URL outside that list gets synthetic metadata. A compatibility "
+        "score indicates how well the entry fits this control plane."
     ),
 )
 async def crawl_target(
@@ -91,8 +91,11 @@ async def crawl_target(
 @router.post(
     "/crawl/batch",
     status_code=status.HTTP_202_ACCEPTED,
-    summary="Batch crawl multiple URLs",
-    description="Submit multiple URLs for concurrent crawling and indexing.",
+    summary="Batch crawl multiple URLs (simulated)",
+    description=(
+        "Submit multiple URLs for concurrent simulated crawling and indexing. "
+        "Same sample-directory behavior as the single crawl endpoint."
+    ),
 )
 async def batch_crawl(
     urls: list[str] = Body(..., max_length=MAX_BATCH_CRAWL_URLS),
@@ -256,12 +259,12 @@ async def get_indexed_api(
     "/register",
     response_model=RegistrationResponse,
     status_code=status.HTTP_202_ACCEPTED,
-    summary="Register in external agent directories",
+    summary="Register in external agent directories (simulated)",
     description=(
-        "Push our API profile into external agent directories and registries. "
-        "This is how agents find us — by being listed in the directories they "
-        "already crawl. Supports /.well-known, MCP server listings, plugin stores, "
-        "and centralized agent registries."
+        "Simulated registration: no HTTP request reaches an external "
+        "directory. The result is recorded locally only, formatted like a "
+        "listing in the directories agents crawl (/.well-known, MCP server "
+        "listings, plugin stores, centralized agent registries)."
     ),
 )
 async def register_in_directories(

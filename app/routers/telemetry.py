@@ -142,7 +142,8 @@ async def ingest_single_event(
     description=(
         "Retrieve anomalies the Autonomous PM detected in the caller's "
         "telemetry. Anomalies are classified by severity and category, with "
-        "optional LLM-generated fix suggestions and auto-PR links."
+        "rule-based fix suggestions and links to the simulated auto-PR "
+        "preview (which never opens a real pull request)."
     ),
 )
 async def list_anomalies(
@@ -186,11 +187,12 @@ async def get_anomaly(
 @router.post(
     "/anomalies/{anomaly_id}/auto-pr",
     response_model=AutoPRResponse,
-    summary="Generate an autonomous pull request",
+    summary="Generate a simulated fix preview (never opens a PR)",
     description=(
-        "Instruct the Autonomous PM to generate a code fix for the given anomaly "
-        "and optionally push it as a pull request. Use dry_run=true to preview "
-        "the proposed diff without committing."
+        "Simulated auto-fix: returns a placeholder diff for the given anomaly. "
+        "No pull request is opened (pr_url is always null) and no tests run "
+        "(tests_passed is always null). Use dry_run=true to preview the "
+        "proposed diff without committing."
     ),
 )
 async def generate_auto_pr(
