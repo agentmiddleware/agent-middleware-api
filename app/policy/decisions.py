@@ -31,6 +31,17 @@ def evaluate_tool_invocation(
     estimated_cost: float | None,
     request_id: str | None,
 ) -> PolicyDecision:
+    """Check wallet ownership only, not tool, cost, or risk policy.
+
+    An ``allowed`` verdict here means the caller owns ``wallet_id`` (or is a
+    bootstrap admin). It says nothing about whether the tool is permitted,
+    affordable, or safe. Real enforcement lives in
+    ``app/services/permits.py`` (permit validation: revocation, expiry,
+    allowlist, scopes, budget, signature) and
+    ``app/services/policies.py`` (``evaluate_wallet_policy`` over the
+    wallet's policy bundles). See ``docs/POLICY_ENFORCEMENT.md`` for the full
+    gate order. Never present this helper's verdict as a policy decision.
+    """
     if auth.is_bootstrap_admin or auth.wallet_id == wallet_id:
         return PolicyDecision(
             decision_id=f"pol-{uuid.uuid4().hex[:16]}",
@@ -68,7 +79,14 @@ def evaluate_governed_action(
     allowed: bool | None = None,
     reason: str | None = None,
 ) -> PolicyDecision:
-    """Create the shared policy-shaped decision used by governed actions."""
+    """Create the shared policy-shaped decision used by governed actions.
+
+    This records a verdict the caller already reached through real
+    enforcement (permit validation plus ``evaluate_wallet_policy``); it does
+    not evaluate tools, costs, or risk itself. When ``allowed`` is omitted it
+    falls back to the same wallet-ownership check as
+    ``evaluate_tool_invocation``. See ``docs/POLICY_ENFORCEMENT.md``.
+    """
     auth_source = (
         "bootstrap"
         if auth and auth.is_bootstrap_admin

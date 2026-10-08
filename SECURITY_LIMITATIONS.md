@@ -77,6 +77,12 @@ Keep these out of the wedge until a design partner requires them:
 - Audit chains are wallet-scoped, but database administrators can still delete
   rows unless append-only storage or external anchoring is added.
 - Multi-protocol governed adapters beyond MCP are not implemented (MCP only).
+- Enterprise IGA runtime caps (`max_uses`, velocity windows in
+  `app/core/oidc_iga.py`) are counted in process memory per instance: they
+  reset on restart and are not shared across replicas. They bound abuse on a
+  single instance only. Do not promise fleet-wide caps until a shared counter
+  store ships; size single-instance deployments (or sticky routing) so one
+  instance sees each principal's calls.
 - A timeout or disconnect after the durable dispatch checkpoint is inherently
   ambiguous. The gateway retains the debit, signs `delivery_uncertain`, never
   redispatches automatically, and requires operator/upstream reconciliation.

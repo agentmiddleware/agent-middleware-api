@@ -17,12 +17,23 @@ async def record_governed_action(
     request_id: str | None = None,
     estimated_cost: float | None = None,
     committed_cost: float | None = None,
-    allowed: bool = True,
+    allowed: bool = False,
     reason: str | None = None,
     ok: bool = True,
     error: str | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> PolicyDecision:
+    """Record an audit event for a governed action, without authorizing it.
+
+    ``allowed`` must be the outcome the caller already decided through real
+    enforcement (wallet ownership, permit validation,
+    ``evaluate_wallet_policy``). This function only writes that verdict into
+    the audit trail; it performs no policy check of its own. The default is
+    fail-closed (``allowed=False``), so a caller that forgets to pass its
+    verdict records a denial, never an allow.
+    """
+    if reason is None:
+        reason = "allowed" if allowed else "denied"
     decision = evaluate_governed_action(
         auth=auth,
         wallet_id=wallet_id,
