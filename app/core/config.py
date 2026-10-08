@@ -247,6 +247,15 @@ class Settings(BaseSettings):
             raise ValueError("EXCHANGE_RATE must be a positive decimal")
         return value
 
+    # --- Error tracking (Sentry or compatible) ---
+    # Empty (the default) disables reporting: unhandled exceptions land only
+    # in stderr and the API boots identically with or without sentry-sdk
+    # installed. Set to a DSN to report unhandled exceptions and failed
+    # startups. See docs/observability-runbook.md.
+    SENTRY_DSN: str = ""
+    # Fraction of requests traced for performance data (0.0 = errors only).
+    SENTRY_TRACES_SAMPLE_RATE: float = 0.0
+
     # --- Notification Service ---
     RESEND_API_KEY: str = ""
     SLACK_WEBHOOK_URL: str = ""

@@ -21,7 +21,7 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
 from .core.auth import AuthContext, get_auth_context
 from .core.build_metadata import get_build_commit_sha, get_build_provenance
@@ -44,10 +44,14 @@ from .core.product_positioning import (
     POSITIONING_DESCRIPTION,
     POSITIONING_TAGLINE,
 )
+from .core.error_tracking import capture_exception, init_error_tracking
+from .core.observability_metrics import render_prometheus_text
 from .core.rate_limiter import RateLimitMiddleware, rate_limit_discovery
 from .core.runtime_mode import get_simulation_modes
 from .middleware.head_method import HeadMethodMiddleware
 from .middleware.request_body_limit import RequestBodyLimitMiddleware
+from .middleware.request_id import RequestIDMiddleware
+from .middleware.request_metrics import RequestMetricsMiddleware
 from .middleware.security_headers import SecurityHeadersMiddleware
 from .core.trust_mode import (
     is_production_like_environment,
@@ -169,6 +173,12 @@ _SIGNING_KEY_REMEDIATION = {
 async def lifespan(app: FastAPI):
     validate_trust_mode_guardrails(settings)
     warn_if_trust_mode_permissive(settings)
+    error_tracking_on = init_error_tracking(
+        dsn=settings.SENTRY_DSN,
+        environment=settings.ENVIRONMENT,
+        release=settings.APP_VERSION,
+        traces_sample_rate=settings.SENTRY_TRACES_SAMPLE_RATE,
+    )
     # Operator-facing posture record. The unauthenticated /health/dependencies
     # payload no longer publishes per-service simulation modes when proof
     # surfaces are unmounted, so this startup line is where that truth lives
@@ -177,6 +187,7 @@ async def lifespan(app: FastAPI):
         "app_startup",
         phase="runtime_posture",
         environment=settings.ENVIRONMENT,
+        error_tracking_enabled=error_tracking_on,
         production_like=is_production_like_environment(settings.ENVIRONMENT),
         enable_proof_surfaces=bool(settings.ENABLE_PROOF_SURFACES),
         enable_dogfood_tool=bool(settings.ENABLE_DOGFOOD_TOOL),
@@ -211,6 +222,7 @@ async def lifespan(app: FastAPI):
                 str(exc), _SIGNING_KEY_REMEDIATION_DEFAULT
             ),
         )
+        capture_exception(exc)
         raise
     logger.info(
         "app_startup",
@@ -399,6 +411,7 @@ async def lifespan(app: FastAPI):
                     phase="database_init_failed",
                     error=str(e),
                 )
+                capture_exception(e)
                 raise
             logger.warning("app_startup", phase="database_init_failed", error=str(e))
 
@@ -433,8 +446,9 @@ async def lifespan(app: FastAPI):
             enabled=state_report.get("enabled"),
             startup_time_s=time.monotonic() - startup_time,
         )
-    except DurableStateConfigError:
+    except DurableStateConfigError as e:
         logger.error("app_startup", phase="durable_state_failed")
+        capture_exception(e)
         raise
 
     startup_time = time.monotonic()
@@ -610,12 +624,24 @@ if "*" in cors_origins:
 # and stamping rate-limit 429s and CORS preflights too is the point.
 app.add_middleware(SecurityHeadersMiddleware)
 
-# HEAD → GET translation, outermost. FastAPI's APIRoute does not auto-register
+# HEAD → GET translation. Starlette builds the stack in reverse registration
+# order, so the two observability layers registered below wrap it: every
+# response, including translated HEADs and refused bodies, carries a request
+# ID and is counted in /metrics. FastAPI's APIRoute does not auto-register
 # HEAD for GET routes (plain Starlette routes like /openapi.json do), which
-# made HEAD answer 405 on most public GETs. Outermost placement means every
-# layer below — routing included — sees a GET, and the response leaves with
+# made HEAD answer 405 on most public GETs. This layer means every layer
+# below — routing included — sees a GET, and the response leaves with
 # the GET's status and headers but no body, per RFC 9110 §9.3.2.
 app.add_middleware(HeadMethodMiddleware)
+
+# Request latency and status counters for /metrics. Inside the request-ID
+# layer so the ID is already bound when a slow request is logged below.
+app.add_middleware(RequestMetricsMiddleware)
+
+# Request ID propagation, outermost. Registered last so it wraps everything:
+# no inner layer can answer without a request ID in the response header and
+# in the structlog context of any log line it emits.
+app.add_middleware(RequestIDMiddleware)
 
 
 def _json_safe_numbers(value: Any) -> Any:
@@ -1291,3 +1317,23 @@ async def health_duplicate_guard(
 ):
     auth.require_bootstrap_admin()
     return await get_duplicate_guard_metrics()
+
+
+@app.get(
+    "/metrics",
+    tags=["Discovery"],
+    summary="Operational metrics in Prometheus text format",
+    description=(
+        "Request counts by route and status plus average latency by route, "
+        "scraped by Prometheus or any plain-text collector. "
+        "Process-local counters that reset on restart (each series says so "
+        "in its HELP text): do not graph them across deploys as continuous "
+        "history. Carries no request contents, keys, or tenant data, so it "
+        "needs no authentication, like /health."
+    ),
+    response_class=PlainTextResponse,
+)
+async def operational_metrics():
+    return PlainTextResponse(
+        render_prometheus_text(), media_type="text/plain; version=0.0.4"
+    )
