@@ -1,10 +1,11 @@
-# Wedge: Replay-safe MCP permits and exactly-once debits
+# Wedge: Replay-safe MCP permits and at-most-one debits
 
 Agent Middleware API should not initially sell itself as a full platform for
 autonomous economic actors. The credible wedge is narrower:
 
-> Exactly-once gateway authorization, debit, and receipt finalization for
-> metered MCP calls.
+> Gateway authorization, debit, and receipt finalization for metered MCP
+> calls: one accepted idempotency key yields at most one gateway dispatch to
+> the configured upstream tool and at most one ledger debit.
 
 Or in one line:
 
@@ -44,10 +45,12 @@ mints an ordinary signed permit, and the quote is honored by the ordinary
 metered charge. Neither adds a second way to authorize or to spend.
 
 Category language (“MCP trust plane,” “governance gateway”) is occupied. The
-differentiating primitive is exactly-once economic authorization at the
-gateway boundary: one idempotency key returns the original receipt without a
-second gateway dispatch or debit. A remote tool's own side effect is exactly
-once only when that tool also honors the forwarded idempotency key.
+differentiating primitive is at-most-one economic authorization at the
+gateway boundary: one accepted idempotency key yields at most one gateway
+dispatch to the configured upstream tool and at most one ledger debit, and a
+finalized replay returns the original receipt. A remote tool's own side
+effect happens only once when that tool also honors the forwarded
+idempotency key; this gateway does not promise that on the tool's behalf.
 
 ## Positioning vs nearby products
 
