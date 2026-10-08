@@ -11,6 +11,7 @@ build/
 # Virtual environments
 venv/
 .venv/
+.venv-local/
 env/
 
 # uv — requirements.txt is the single source of truth (see CONTRIBUTING).
