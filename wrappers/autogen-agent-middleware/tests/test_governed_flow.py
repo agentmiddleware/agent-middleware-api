@@ -106,7 +106,7 @@ async def test_call_mcp_tool_requires_idempotency_key():
     assert result["receipt_id"] == "receipt-success"
     assert result["signature"] == "sig-success"
 
-    with pytest.raises(ValueError, match="must not be blank"):
+    with pytest.raises(ValueError, match="must be a non-blank string"):
         await tool.call_mcp_tool(
             tool_name="partner.search",
             idempotency_key="   ",
@@ -297,7 +297,7 @@ async def test_missing_idempotency_key_rejected():
     tool = B2AFunctionTool(api_key="test-key", wallet_id="wallet-1")
     tool.client = base_client
 
-    with pytest.raises(ValueError, match="required"):
+    with pytest.raises(ValueError, match="non-blank"):
         await tool.call_mcp_tool(
             tool_name="partner.search",
             idempotency_key="",
