@@ -1222,3 +1222,30 @@ async def test_malformed_sentinel_create_never_logs_the_approval_url(
     assert "approval_url" in caplog.text
     assert token not in caplog.text
     assert "sentinel.test" not in caplog.text
+
+
+def test_sentinel_risk_level_rejects_unknown_value_at_boot():
+    """A typo in SENTINEL_RISK_LEVEL must fail at boot, not as a terminal
+    denial on the first approval-gated invoke (Sentinel answers unknown
+    risk levels with 4xx, which the gate treats as unretryable)."""
+    from pydantic import ValidationError
+
+    from app.core.config import Settings
+
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(VALID_API_KEYS="test-key", SENTINEL_RISK_LEVEL="extreme")
+    assert "SENTINEL_RISK_LEVEL" in str(exc_info.value)
+
+
+def test_sentinel_risk_level_accepts_supported_values():
+    """Every documented risk level still boots; the default stays high."""
+    from app.core.config import Settings, get_settings
+
+    assert get_settings().SENTINEL_RISK_LEVEL == "high"
+    for level in ("low", "medium", "high", "critical"):
+        assert (
+            Settings(
+                VALID_API_KEYS="test-key", SENTINEL_RISK_LEVEL=level
+            ).SENTINEL_RISK_LEVEL
+            == level
+        )

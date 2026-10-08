@@ -23,7 +23,7 @@ literal values rather than CSS variables, because mail clients drop
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from html import escape
 from urllib.parse import urlsplit
@@ -105,6 +105,39 @@ def _stamp(value: datetime) -> str:
     return value.strftime("%Y-%m-%d %H:%M:%SZ")
 
 
+def _naive_utc(value: datetime) -> datetime:
+    """Drop tzinfo after converting to UTC; the card works in naive UTC."""
+    if value.tzinfo is not None:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
+def _countdown_suffix(decide_by: datetime, now: datetime) -> str:
+    """Human-readable countdown for a still-pending card.
+
+    A static render cannot tick, but naming the remaining window next to the
+    absolute deadline tells the approver whether this needs them now or can
+    wait, and states plainly when the window already elapsed (a late
+    decision is discarded by the local expiry, so the agent must re-page).
+    """
+    remaining = (_naive_utc(decide_by) - _naive_utc(now)).total_seconds()
+    if remaining <= 0:
+        return " (decision window elapsed)"
+    if remaining < 60:
+        return " (less than a minute remaining)"
+    minutes, _ = divmod(int(remaining), 60)
+    days, minutes = divmod(minutes, 1440)
+    hours, minutes = divmod(minutes, 60)
+    parts = []
+    if days:
+        parts.append(f"{days} day{'s' if days != 1 else ''}")
+    if hours:
+        parts.append(f"{hours} hour{'s' if hours != 1 else ''}")
+    if minutes and len(parts) < 2:
+        parts.append(f"{minutes} minute{'s' if minutes != 1 else ''}")
+    return f" ({' '.join(parts[:2])} remaining)"
+
+
 def _row(label: str, value: str, *, mono: bool = True) -> str:
     """Render one label/value row of the card's terms table."""
     value_font = _MONO if mono else _BODY
@@ -129,8 +162,13 @@ def _banner(text: str, *, tone: str) -> str:
     )
 
 
-def card_fragment_html(view: ApprovalCardView) -> str:
-    """The card itself: identical markup in the email and on the page."""
+def card_fragment_html(view: ApprovalCardView, *, now: datetime | None = None) -> str:
+    """The card itself: identical markup in the email and on the page.
+
+    ``now`` is the reference time for the pending card's decide-by
+    countdown (naive UTC assumed); it defaults to the current time and
+    exists so tests can pin the countdown.
+    """
     tools = (
         "".join(
             f'<div style="padding:2px 0;">{escape(tool)}</div>'
@@ -151,6 +189,15 @@ def card_fragment_html(view: ApprovalCardView) -> str:
     for note in view.extra_notes:
         banners += _banner(note, tone="muted")
 
+    reference = (
+        _naive_utc(now) if now is not None else _naive_utc(datetime.now(timezone.utc))
+    )
+    decide_by_value = escape(_stamp(view.decide_by))
+    if view.status == "pending":
+        # Countdown only while the decision is still open; a decided card
+        # keeps the plain deadline as history.
+        decide_by_value += escape(_countdown_suffix(view.decide_by, reference))
+
     rows = [
         _row("Agent wallet", escape(view.subject_wallet_id)),
         _row("Issuer wallet", escape(view.issuer_wallet_id)),
@@ -170,7 +217,7 @@ def card_fragment_html(view: ApprovalCardView) -> str:
             "required" if view.requires_human_approval else "not required",
         ),
         _row("Requested", _stamp(view.requested_at)),
-        _row("Decide by", _stamp(view.decide_by)),
+        _row("Decide by", decide_by_value),
         _row("Request id", escape(view.request_id)),
     ]
     if view.permit_id:
@@ -223,21 +270,21 @@ def card_fragment_html(view: ApprovalCardView) -> str:
     )
 
 
-def render_email_html(view: ApprovalCardView) -> str:
+def render_email_html(view: ApprovalCardView, *, now: datetime | None = None) -> str:
     """Mail-client-safe shell around the shared card."""
     return (
         '<!doctype html><html><body style="margin:0;padding:24px 12px;'
         f'background:{_PAPER};">'
         '<table role="presentation" cellpadding="0" cellspacing="0" border="0" '
         'style="width:100%;border-collapse:collapse;"><tr><td align="center">'
-        f"{card_fragment_html(view)}"
+        f"{card_fragment_html(view, now=now)}"
         f'<p style="margin:18px 0 0;font-family:{_MONO};font-size:11px;'
         f'color:{_INK_FAINT};">Agent Middleware API — trust plane</p>'
         "</td></tr></table></body></html>"
     )
 
 
-def render_page_html(view: ApprovalCardView) -> str:
+def render_page_html(view: ApprovalCardView, *, now: datetime | None = None) -> str:
     """Full document served at the request's card URL."""
     return (
         '<!doctype html><html lang="en"><head><meta charset="utf-8">'
@@ -248,13 +295,19 @@ def render_page_html(view: ApprovalCardView) -> str:
         f"a:focus-visible{{outline:2px solid {_BRASS_DARK};outline-offset:3px;}}"
         "</style>"
         "</head><body>"
-        f"{card_fragment_html(view)}"
+        f"{card_fragment_html(view, now=now)}"
         "</body></html>"
     )
 
 
-def render_text_summary(view: ApprovalCardView) -> str:
+def render_text_summary(view: ApprovalCardView, *, now: datetime | None = None) -> str:
     """Plain-text fallback carrying the same terms as the card."""
+    reference = (
+        _naive_utc(now) if now is not None else _naive_utc(datetime.now(timezone.utc))
+    )
+    decide_by_line = f"Decide by:       {_stamp(view.decide_by)}"
+    if view.status == "pending":
+        decide_by_line += _countdown_suffix(view.decide_by, reference)
     lines = [
         "Permit request — an agent is asking for authority",
         "",
@@ -266,7 +319,7 @@ def render_text_summary(view: ApprovalCardView) -> str:
         f"Tools:           {', '.join(view.allowed_tools) or '(none)'}",
         f"Scopes:          {', '.join(view.scopes) or '(none)'}",
         f"Permit expires:  {_stamp(view.permit_expires_at)}",
-        f"Decide by:       {_stamp(view.decide_by)}",
+        decide_by_line,
         f"Request id:      {view.request_id}",
     ]
     if view.simulated:

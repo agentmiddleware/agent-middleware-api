@@ -3,11 +3,16 @@ Pre-Flight Readiness Check
 ===========================
 Validates that the system is production-ready before the Day 1 launch.
 
-Four validation domains:
+Five validation domains:
 1. KEYS    — API keys and payment tokens aren't test/placeholder values
 2. DOMAIN  — BASE_URL is a real domain; manifests resolve correctly
-3. ORACLE  — Agent directory URLs are reachable
-4. ASSETS  — Content source URLs are serving media
+3. ORACLE  — Agent directory URLs are shaped correctly (shape only,
+              reachability is not probed)
+4. ASSETS  — Content source URLs are non-placeholder values (shape only,
+              serving is not probed)
+5. APPROVAL — Human-approval (Sentinel) configuration is present when the
+              deployment means to sell a human in the loop (config only,
+              Sentinel is never contacted)
 
 Returns a PreflightReport with per-check pass/fail and an overall GO/NO-GO.
 """
@@ -142,6 +147,9 @@ class PreflightEngine:
 
         # Phase 4: Content Factory Asset Check
         checks.extend(self._check_content_assets(config))
+
+        # Phase 5: Human-Approval (Sentinel) Readiness
+        checks.extend(self._check_sentinel_approval())
 
         # Tally
         report = self._build_report(checks)
@@ -393,7 +401,13 @@ class PreflightEngine:
     # --- Phase 3: Oracle Targets ---
 
     def _check_oracle_targets(self, config: dict) -> list[CheckResult]:
-        """Validate that agent directory registration URLs look reachable."""
+        """Validate the shape of agent directory registration URLs.
+
+        Structural only: a passing check means the URL is well-formed and
+        non-placeholder, not that the directory was contacted. Preflight
+        never probes the network, so a GO verdict does not mean the targets
+        are reachable.
+        """
         results = []
 
         directories = [
@@ -447,7 +461,13 @@ class PreflightEngine:
                         name=f"oracle_directory_{dir_entry['directory_type']}",
                         passed=True,
                         severity="info",
-                        message=f"Directory configured: {url}",
+                        message=f"Directory URL shaped correctly: {url}",
+                        detail=(
+                            "Shape only: the URL is well-formed and "
+                            "non-placeholder. Preflight does not contact "
+                            "the directory, so this does not mean it is "
+                            "reachable."
+                        ),
                     )
                 )
 
@@ -456,10 +476,11 @@ class PreflightEngine:
                 name="oracle_directories_total",
                 passed=reachable >= 2,
                 severity="warning" if reachable < 2 else "info",
-                message=f"{reachable}/{len(directories)} directory targets validated.",
+                message=f"{reachable}/{len(directories)} directory URLs shaped correctly.",
                 detail=(
-                    "Recommend at least 2 reachable directories "
-                    "for meaningful visibility."
+                    "Recommend at least 2 well-formed directory URLs "
+                    "for meaningful visibility. Reachability is not "
+                    "checked: verify the targets respond before launch."
                 ),
             )
         )
@@ -493,6 +514,11 @@ class PreflightEngine:
                     passed=True,
                     severity="info",
                     message=f"Campaign source: {source_url}",
+                    detail=(
+                        "Shape only: the URL is non-placeholder. Preflight "
+                        "does not fetch it, so this does not mean the "
+                        "asset is serving."
+                    ),
                 )
             )
 
@@ -513,11 +539,132 @@ class PreflightEngine:
                 severity="warning" if external_count < 3 else "info",
                 message=(
                     f"{external_count}/{len(crawl_targets)} crawl targets "
-                    "are real external APIs."
+                    "are non-placeholder external URLs."
+                ),
+                detail=(
+                    "Shape only: preflight does not fetch these endpoints, "
+                    "so this does not mean they are serving."
                 ),
             )
         )
 
+        return results
+
+    # --- Phase 5: Human-Approval (Sentinel) Readiness ---
+
+    def _check_sentinel_approval(self) -> list[CheckResult]:
+        """Check whether this deployment can honor human-approval gates.
+
+        Config only: Sentinel is never contacted, so a passing check means
+        the URL and key settings are present and well-formed, not that
+        Sentinel is up or that approvers answer. Approval is an optional
+        integration, so misconfiguration is a warning, never a launch
+        blocker. Key material and approver addresses are never echoed.
+        """
+        # Local import: the gate owns Sentinel config semantics
+        # (human_approval_available) and this keeps preflight's import
+        # surface to config plus shapes.
+        from app.services.human_approval import (
+            approval_window_seconds,
+            human_approval_available,
+        )
+        from app.core.runtime_mode import is_simulation
+
+        results = []
+
+        if is_simulation("human_approval"):
+            results.append(
+                CheckResult(
+                    name="sentinel_simulation_mode",
+                    passed=False,
+                    severity="warning",
+                    message="Human approvals auto-approve: simulation is ON.",
+                    detail=(
+                        "Demos run on a self-approved loop with no human in "
+                        "it. Before selling a human in the loop, set "
+                        "SIMULATION_MODE_HUMAN_APPROVAL=false with "
+                        "SENTINEL_API_URL, SENTINEL_API_KEY, and approvers "
+                        "from your Sentinel tenant."
+                    ),
+                )
+            )
+            return results
+
+        available, _reason = human_approval_available()
+        if not available:
+            results.append(
+                CheckResult(
+                    name="sentinel_configured",
+                    passed=False,
+                    severity="warning",
+                    message=(
+                        "Human approval is not configured: approval-gated "
+                        "permits fail closed."
+                    ),
+                    detail=(
+                        "Real mode needs both SENTINEL_API_URL (root HTTPS "
+                        "origin) and SENTINEL_API_KEY. Until both are set, "
+                        "creating a requires_human_approval permit is "
+                        "rejected and gated invokes are denied."
+                    ),
+                )
+            )
+            return results
+
+        settings = get_settings()
+        origin = (settings.SENTINEL_API_URL or "").strip()
+        approvers = [
+            entry.strip()
+            for entry in (settings.SENTINEL_APPROVERS or "").split(",")
+            if entry.strip()
+        ]
+        results.append(
+            CheckResult(
+                name="sentinel_configured",
+                passed=True,
+                severity="info",
+                message=f"Sentinel approval origin configured: {origin}",
+                detail=(
+                    "Config only: the URL and key settings are present and "
+                    "well-formed. Sentinel was not contacted, so this does "
+                    "not mean it is up or that approvers answer."
+                ),
+            )
+        )
+        if approvers:
+            results.append(
+                CheckResult(
+                    name="sentinel_approvers",
+                    passed=True,
+                    severity="info",
+                    message=f"{len(approvers)} approver(s) configured.",
+                )
+            )
+        else:
+            results.append(
+                CheckResult(
+                    name="sentinel_approvers",
+                    passed=True,
+                    severity="info",
+                    message="No approvers listed: paging defers to the Sentinel tenant defaults.",
+                    detail=(
+                        "Confirm the tenant has default approvers who "
+                        "answer inside the decision window, or list them "
+                        "in SENTINEL_APPROVERS."
+                    ),
+                )
+            )
+        results.append(
+            CheckResult(
+                name="sentinel_decision_window",
+                passed=True,
+                severity="info",
+                message=(
+                    f"Human decision window is {approval_window_seconds()}s "
+                    "(enforced locally; Sentinel never expires approvals)."
+                ),
+            )
+        )
         return results
 
     # --- Report Builder ---

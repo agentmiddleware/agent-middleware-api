@@ -69,7 +69,7 @@ arrives after the window is not honored.
 | `SENTINEL_APPROVAL_TIMEOUT_SECONDS` | `300` | Local expiry; forwarded as Sentinel `timeout_seconds` (1..86400) |
 | `SENTINEL_WAIT_SECONDS` | `0` | >0: long-poll Sentinel on first invoke for an instant decision (max 300) |
 | `SENTINEL_APPROVERS` | empty | Comma-separated (`email`, `mailto:`, `sms:+E164`); empty defers to Sentinel tenant defaults |
-| `SENTINEL_RISK_LEVEL` | `high` | `low\|medium\|high\|critical` |
+| `SENTINEL_RISK_LEVEL` | `high` | `low\|medium\|high\|critical`, one global value for every request (no per-tool or per-call override); anything else fails the boot |
 
 Use the canonical Sentinel origin unless a customer has a reviewed custom
 deployment. Application validation blocks unsafe URL shapes, internal names,

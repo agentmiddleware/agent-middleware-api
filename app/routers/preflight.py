@@ -2,7 +2,8 @@
 Pre-Flight Readiness Check — Router
 =====================================
 Validates that the system is production-ready: real API keys, a real
-BASE_URL, reachable agent directories, and non-placeholder content assets.
+BASE_URL, well-formed agent directory and content asset URLs (shape only,
+never probed), and human-approval (Sentinel) config readiness.
 
 Endpoints:
 - POST /v1/launch/preflight — Run the readiness sweep, get a GO/NO-GO verdict
@@ -84,8 +85,9 @@ class PreflightResponse(BaseModel):
         "Runs a comprehensive validation sweep before production launch:\n\n"
         "1. **KEYS** — Reject test-key/placeholder API keys, validate Stripe tokens\n"
         "2. **DOMAIN** — Verify BASE_URL is a real domain, manifests will resolve\n"
-        "3. **ORACLE** — Validate agent directory registration URLs\n"
-        "4. **ASSETS** — Check content source URLs and crawl targets\n\n"
+        "3. **ORACLE** — Validate agent directory URL shapes (never probed)\n"
+        "4. **ASSETS** — Check content source URL shapes (never fetched)\n"
+        "5. **APPROVAL** — Check Sentinel config readiness (never contacted)\n\n"
         "Returns a GO/NO-GO verdict with per-check details. "
         "Requires bootstrap admin authentication."
     ),
