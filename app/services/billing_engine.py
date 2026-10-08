@@ -1318,18 +1318,28 @@ class BillingEngine:
         own credits_per_unit remains the authoritative per-tool price via
         /v1/quotes and /mcp/tools.json.
         """
-        show_proof_surfaces = get_settings().ENABLE_PROOF_SURFACES
-        return [
-            ServicePricing(
-                service_category=cat,
-                unit=unit,
-                credits_per_unit=float(price),
-                credits_per_unit_exact=str(price),
-                description=desc,
-            )
-            for cat, (unit, price, desc) in self._default_pricing.items()
-            if show_proof_surfaces or cat not in PROOF_SURFACE_CATEGORIES
-        ]
+        settings = get_settings()
+        show_proof_surfaces = settings.ENABLE_PROOF_SURFACES
+        # Fiat equivalent of each price at the advertised conversion rate, so
+        # buyers read dollars alongside credits. Computed from Decimals and
+        # passed as both forms, matching the credits_per_unit convention.
+        exchange_rate = settings.EXCHANGE_RATE
+        table: list[ServicePricing] = []
+        for cat, (unit, price, desc) in self._default_pricing.items():
+            if show_proof_surfaces or cat not in PROOF_SURFACE_CATEGORIES:
+                usd = price / exchange_rate
+                table.append(
+                    ServicePricing(
+                        service_category=cat,
+                        unit=unit,
+                        credits_per_unit=float(price),
+                        credits_per_unit_exact=str(price),
+                        usd_per_unit=float(usd),
+                        usd_per_unit_exact=str(usd),
+                        description=desc,
+                    )
+                )
+        return table
 
     # --- Alerts ---
 

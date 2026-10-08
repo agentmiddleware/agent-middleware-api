@@ -551,16 +551,25 @@ class InsufficientFundsResponse(ExactDecimalFieldsMixin):
 
 
 class ServicePricing(ExactDecimalFieldsMixin):
-    """Per-action pricing for a service category."""
+    """Per-action pricing for a service category.
+
+    ``usd_per_unit`` is the fiat equivalent of ``credits_per_unit`` at the
+    advertised ``exchange_rate`` (credits per $1 USD), so a buyer can read the
+    price list in dollars without doing the conversion. It is informational:
+    the charge path bills in credits.
+    """
 
     _decimal_exact_fields: ClassVar[dict[str, str]] = {
         "credits_per_unit": "credits_per_unit_exact",
+        "usd_per_unit": "usd_per_unit_exact",
     }
 
     service_category: ServiceCategory
     unit: str
     credits_per_unit: float
     credits_per_unit_exact: str | None = None
+    usd_per_unit: float = 0.0
+    usd_per_unit_exact: str | None = None
     description: str = ""
 
 
@@ -575,6 +584,11 @@ class PricingTableResponse(ExactDecimalFieldsMixin):
     exchange_rate: float
     exchange_rate_exact: str | None = None
     last_updated: datetime
+    # Card top-up is only usable when a Stripe key is configured AND the
+    # top-up routes are mounted. When false, no demo or client should imply
+    # card payments work; wallets are funded by the operator instead.
+    card_top_up_available: bool = False
+    card_top_up_message: str = ""
 
 
 # ---------------------------------------------------------------------------

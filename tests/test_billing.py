@@ -2581,3 +2581,101 @@ async def test_agent_wallet_provisioning_error_completes_idempotency_record(
     )
     assert replay.status_code == 404, replay.text
     assert replay.json() == first.json()
+
+
+# --- Pricing fiat equivalents and card top-up availability ---
+
+
+@pytest.mark.anyio
+async def test_pricing_entries_carry_fiat_equivalents(client, api_headers):
+    """Each advertised price must carry its dollar equivalent.
+
+    Buyers read dollars, the charge path bills credits. At the default
+    1000 credits to $1, the 0.1-credit platform fee is $0.0001 and the
+    5-credit swarm delegation is $0.005. The exact strings must carry the
+    Decimal value, not binary-float noise.
+    """
+    resp = await client.get("/v1/billing/pricing", headers=api_headers)
+    assert resp.status_code == 200
+    by_category = {entry["service_category"]: entry for entry in resp.json()["pricing"]}
+    fee = by_category["platform_fee"]
+    assert fee["usd_per_unit"] == pytest.approx(0.0001)
+    assert fee["usd_per_unit_exact"] == "0.0001"
+    swarm = by_category["swarm_delegation"]
+    assert swarm["usd_per_unit"] == pytest.approx(0.005)
+    assert swarm["usd_per_unit_exact"] == "0.005"
+
+
+@pytest.mark.anyio
+async def test_pricing_fiat_follows_configured_exchange_rate(
+    client, api_headers, monkeypatch
+):
+    """Fiat equivalents must move with settings.EXCHANGE_RATE, not a constant."""
+    monkeypatch.setenv("EXCHANGE_RATE", "500")
+    get_settings.cache_clear()
+    try:
+        resp = await client.get("/v1/billing/pricing", headers=api_headers)
+        assert resp.status_code == 200
+        by_category = {
+            entry["service_category"]: entry for entry in resp.json()["pricing"]
+        }
+        fee = by_category["platform_fee"]
+        assert fee["usd_per_unit"] == pytest.approx(0.0002)
+        assert fee["usd_per_unit_exact"] == "0.0002"
+    finally:
+        monkeypatch.delenv("EXCHANGE_RATE", raising=False)
+        get_settings.cache_clear()
+
+
+@pytest.mark.anyio
+async def test_pricing_reports_card_top_up_unavailable_by_default(client, api_headers):
+    """Without Stripe keys, pricing must say card top-up is unavailable.
+
+    The suite never configures Stripe, matching a default deployment. A demo
+    reading this endpoint must learn card payments cannot work here instead
+    of implying otherwise.
+    """
+    resp = await client.get("/v1/billing/pricing", headers=api_headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["card_top_up_available"] is False
+    assert "operator" in data["card_top_up_message"]
+
+
+@pytest.mark.anyio
+async def test_pricing_reports_card_top_up_available_when_configured(
+    client, api_headers, monkeypatch
+):
+    """A Stripe key plus mounted top-up routes flips the availability flag."""
+
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_fake_key_for_testing")
+    get_settings.cache_clear()
+    cfg = get_settings()
+    previous_proof_surfaces = cfg.ENABLE_PROOF_SURFACES
+    cfg.ENABLE_PROOF_SURFACES = True
+    try:
+        resp = await client.get("/v1/billing/pricing", headers=api_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["card_top_up_available"] is True
+        assert "/v1/billing/top-up/prepare" in data["card_top_up_message"]
+    finally:
+        cfg.ENABLE_PROOF_SURFACES = previous_proof_surfaces
+        monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
+        get_settings.cache_clear()
+
+
+def test_billing_header_states_plain_cost_plus_margin():
+    """The router header must not read as autonomous revenue-taking.
+
+    "Generates revenue autonomously" and "silently books margin" describe an
+    agent skimming profit. The header now states the plain version: charges
+    are cost plus a stated margin recorded on the ledger.
+    """
+    import app.routers.billing as billing_mod
+
+    header = billing_mod.__doc__ or ""
+    assert "autonomous" not in header
+    assert "silently" not in header
+    assert "cost plus" in header
+    assert "margin" in header
