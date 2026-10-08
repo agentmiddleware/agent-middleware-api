@@ -15,6 +15,7 @@ from typing import Any, Optional
 import httpx
 
 from ..core.config import get_settings
+from ..core.url_guard import safe_fetch
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -39,7 +40,6 @@ class NotificationService:
         self._resend_api_key = settings.RESEND_API_KEY
         self._slack_webhook_url = settings.SLACK_WEBHOOK_URL
         self._from_email = settings.ALERT_FROM_EMAIL
-        self._http = httpx.AsyncClient(timeout=30.0)
 
     async def send_wallet_frozen_alert(
         self,
@@ -315,9 +315,14 @@ This is an automated notification from Agent Middleware API.
             )
 
         try:
-            resp = await self._http.post(
+            # The webhook URL is operator configuration, but it is still
+            # fetched through the shared helper so a mispointed or hijacked
+            # value cannot reach intranet targets or return an unbounded body.
+            resp = await safe_fetch(
                 self._slack_webhook_url,
-                json=payload,
+                method="POST",
+                json_body=payload,
+                timeout=30.0,
             )
             resp.raise_for_status()
             logger.info(f"Slack alert sent: {title}")
@@ -366,13 +371,15 @@ This is an automated notification from Agent Middleware API.
             payload["html"] = html
 
         try:
-            resp = await self._http.post(
+            resp = await safe_fetch(
                 "https://api.resend.com/emails",
+                method="POST",
                 headers={
                     "Authorization": f"Bearer {self._resend_api_key}",
                     "Content-Type": "application/json",
                 },
-                json=payload,
+                json_body=payload,
+                timeout=30.0,
             )
             resp.raise_for_status()
             logger.info(f"Alert email sent to {to}")
@@ -412,8 +419,8 @@ This is an automated notification from Agent Middleware API.
             )
 
     async def close(self) -> None:
-        """Close HTTP client on shutdown."""
-        await self._http.aclose()
+        """Close on shutdown (no persistent client; kept for callers)."""
+        return None
 
 
 _notification_service: Optional[NotificationService] = None

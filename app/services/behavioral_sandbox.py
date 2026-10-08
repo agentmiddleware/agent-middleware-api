@@ -29,7 +29,7 @@ import redis.asyncio as redis
 from ..core.config import get_settings
 from ..core.durable_state import get_durable_state
 from ..core.trust_mode import UNSAFE_HOST_SANDBOX_BACKENDS
-from ..core.url_guard import check_outbound_url
+from ..core.url_guard import SafeFetchError, safe_fetch
 from ..schemas.sandbox_behavioral import (
     ExecutionStatus,
     SandboxEnvironment,
@@ -621,51 +621,37 @@ print(json.dumps(result))
             }
 
         # The environment's network_access flag (default False) gates every
-        # real request, and the URL guard blocks SSRF targets (loopback,
-        # RFC1918, link-local metadata, non-http schemes) even when it's on.
+        # real request. The shared safe_fetch helper then validates the URL,
+        # pins the resolved IP, revalidates each redirect hop and caps the
+        # body, so a malicious URL cannot reach intranet targets or exhaust
+        # memory even when network access is on.
         if not network_access:
             return {
                 "success": False,
                 "error": "network_access is disabled for this environment",
             }
-        block_reason = await check_outbound_url(url)
-        if block_reason:
-            return {
-                "success": False,
-                "error": f"request blocked ({block_reason}): {url}",
-            }
 
         try:
-            import aiohttp
-
-            async with aiohttp.ClientSession() as session:
-                # Don't follow redirects: the URL guard only vetted the
-                # original target, so a 3xx to a loopback/metadata address
-                # would otherwise slip past it.
-                async with session.request(
-                    method,
-                    url,
-                    timeout=aiohttp.ClientTimeout(total=timeout_seconds),
-                    allow_redirects=False,
-                ) as resp:
-                    return {
-                        "success": True,
-                        "output": {
-                            "sandboxed": True,
-                            "status_code": resp.status,
-                            "url": str(resp.url),
-                        },
-                    }
-        except ImportError:
+            fetched = await safe_fetch(
+                url,
+                method=str(method or "GET").upper(),
+                timeout=float(timeout_seconds),
+            )
             return {
                 "success": True,
                 "output": {
                     "sandboxed": True,
-                    "mode": "http_proxy_mock",
-                    "url": url,
-                    "method": method,
+                    "status_code": fetched.status_code,
+                    "url": fetched.url,
                 },
             }
+        except SafeFetchError as exc:
+            if exc.reason.startswith("blocked:"):
+                return {
+                    "success": False,
+                    "error": f"request blocked ({exc.reason}): {url}",
+                }
+            return {"success": False, "error": f"request failed ({exc.reason})"}
         except Exception as e:
             return {"success": False, "error": str(e)}
 

@@ -2028,9 +2028,30 @@ class AWIPlaywrightBridge:
                 url, wait_until="networkidle", timeout=self._default_timeout_ms
             )
             navigated_url = session._page.url
+            # The entry URL was guard-checked before navigation, but server
+            # redirects and client-side hops resolve inside the browser, so
+            # recheck where it actually landed. A headless browser cannot pin
+            # DNS the way safe_fetch does; this check plus network-level
+            # egress policy is the remaining defense, not a full fix for
+            # rebinding of page subresources.
+            landed_block_reason = await check_outbound_url(navigated_url)
+            if landed_block_reason:
+                logger.warning(
+                    f"Navigation for {session.session_id} landed on blocked target"
+                )
+                try:
+                    await session._page.close()
+                except Exception:
+                    pass
+                session._page = None
+                raise ValueError(
+                    f"navigation landed on blocked target ({landed_block_reason})"
+                )
             session.current_url = url if navigated_url == f"{url}/" else navigated_url
             session.page_title = await session._page.title()
             logger.info(f"Navigated to {url} for session {session.session_id}")
+        except ValueError:
+            raise
         except Exception as e:
             logger.error(f"Navigation failed for {session.session_id}: {e}")
             session.current_url = url
