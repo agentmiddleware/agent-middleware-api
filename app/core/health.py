@@ -498,6 +498,33 @@ async def _check_sentinel(simulation_modes: dict[str, bool]) -> dict[str, Any]:
     return {"status": "up"}
 
 
+def conditional_route_state() -> dict[str, bool]:
+    """Mounted state of every conditionally-mounted HTTP surface.
+
+    These routes are silently present or absent depending on env flags (see
+    ``app/main.py`` mount block: ``CORE_TRUST_ROUTERS`` always mount, the
+    webhooks router mounts only with a Stripe key or proof surfaces, the
+    dev-keys router always mounts but only advertises with its local flag,
+    and dormant trust plus proof surfaces mount only with
+    ``ENABLE_PROOF_SURFACES``). Booleans only, so both the full report and
+    the unauthenticated public projection can carry them.
+    """
+    settings = get_settings()
+    proof_surfaces = bool(settings.ENABLE_PROOF_SURFACES)
+    return {
+        # Same truth as the ``if settings.STRIPE_SECRET_KEY or ...`` mount
+        # gate in app/main.py: without a key there is no webhook route at all.
+        "stripe_webhooks_mounted": bool(settings.STRIPE_SECRET_KEY or proof_surfaces),
+        # dev_keys.router is always included; only its OpenAPI advertisement
+        # is flag-gated, and production refuses that flag at boot.
+        "dev_keys_mounted": True,
+        "dev_keys_advertised": bool(settings.ENABLE_DEV_KEY_SELF_PROVISION),
+        # auth, kyc, planner, pods, x402 plus billing.expansion_router.
+        "dormant_trust_mounted": proof_surfaces,
+        "proof_surfaces_mounted": proof_surfaces,
+    }
+
+
 async def gather_dependency_report() -> dict[str, Any]:
     """
     Run every dependency check in parallel and return a consolidated report.
@@ -569,6 +596,10 @@ async def gather_dependency_report() -> dict[str, Any]:
         "dependencies": dependencies,
         "simulation_modes": sim_modes,
         "enable_proof_surfaces": bool(settings.ENABLE_PROOF_SURFACES),
+        # Deploy-time mount truth: which conditional routes this boot serves.
+        # Mirrors the startup runtime_posture log so operators and callers
+        # read the same values.
+        "conditional_routes": conditional_route_state(),
         "enable_dogfood_tool": bool(settings.ENABLE_DOGFOOD_TOOL),
         "enable_dogfood_second_tool": bool(settings.ENABLE_DOGFOOD_SECOND_TOOL),
         "runtime_degradation": runtime_degradation,
@@ -595,8 +626,10 @@ def build_public_dependency_report(full_report: dict[str, Any]) -> dict[str, Any
     (``ENABLE_PROOF_SURFACES=false``, the required production posture) none of
     those services are reachable, so their flags describe nothing a caller can
     exercise. This projection reports only what the wedge runs on: postgres,
-    redis, the signing key, the upstream MCP tool, version + commit SHA, and
-    the resolved environment posture. The overall verdict and ``unhealthy``
+    redis, the signing key, the upstream MCP tool, version + commit SHA, the
+    resolved environment posture, and the conditional-route mount state
+    (webhook / dev-key / dormant-trust booleans, which carry no secrets).
+    The overall verdict and ``unhealthy``
     list are recomputed from the projected set so a hidden proof-surface
     dependency can never flip the public status.
 
@@ -630,6 +663,10 @@ def build_public_dependency_report(full_report: dict[str, Any]) -> dict[str, Any
         "production_like": full_report["production_like"],
         "dependencies": dependencies,
         "enable_proof_surfaces": full_report["enable_proof_surfaces"],
+        # Mount-state booleans carry no secrets, so the public projection
+        # keeps them: a deploy without Stripe has no webhook route, and
+        # self-serve dev keys never advertise in production.
+        "conditional_routes": full_report["conditional_routes"],
         "runtime_degradation": runtime_degradation,
         "metric_scopes": _METRIC_SCOPES,
         "unhealthy": unhealthy,

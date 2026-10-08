@@ -22,6 +22,8 @@ from app.core.health import (
     _OK_STATUSES,
     _check_upstream_mcp,
     _run_check,
+    build_public_dependency_report,
+    conditional_route_state,
     gather_dependency_report,
 )
 from app.core.runtime_degradation import reset_runtime_degradation
@@ -671,3 +673,93 @@ async def test_health_dependencies_is_public_no_auth_required(client):
     like Kubernetes liveness probes don't carry authentication."""
     resp = await client.get("/health/dependencies")
     assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Conditional-route mount state (webhooks, dev keys, dormant trust)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_conditional_routes_default_state():
+    """Default test boot mounts no webhooks, no dormant trust, and dev keys
+    mounted but unadvertised — the required production posture."""
+    assert get_settings().ENABLE_PROOF_SURFACES is False
+
+    state = conditional_route_state()
+
+    assert state == {
+        "stripe_webhooks_mounted": False,
+        "dev_keys_mounted": True,
+        "dev_keys_advertised": False,
+        "dormant_trust_mounted": False,
+        "proof_surfaces_mounted": False,
+    }
+
+    report = await gather_dependency_report()
+    assert report["conditional_routes"] == state
+
+
+@pytest.mark.anyio
+async def test_stripe_key_mounts_webhooks_without_leaking_key():
+    """A configured Stripe key flips the webhook mount bit, and the key
+    itself never appears in the report payload."""
+    settings = get_settings()
+    sentinel_key = "sk_test_mounts_webhooks_sentinel"
+    settings.STRIPE_SECRET_KEY = sentinel_key
+
+    report = await gather_dependency_report()
+
+    assert report["conditional_routes"]["stripe_webhooks_mounted"] is True
+    assert sentinel_key not in json.dumps(report)
+
+
+@pytest.mark.anyio
+async def test_proof_surfaces_mount_dormant_trust_and_webhooks(monkeypatch):
+    """Proof-enabled boots mount dormant trust (auth, kyc, planner, pods,
+    x402, billing expansion) and the webhook router with them."""
+    monkeypatch.setattr(get_settings(), "ENABLE_PROOF_SURFACES", True)
+
+    state = conditional_route_state()
+
+    assert state["dormant_trust_mounted"] is True
+    assert state["proof_surfaces_mounted"] is True
+    assert state["stripe_webhooks_mounted"] is True
+
+
+@pytest.mark.anyio
+async def test_dev_key_advertisement_follows_local_flag(monkeypatch):
+    """The dev-keys route stays mounted, but only advertises in OpenAPI
+    when the local self-provision flag is on (production refuses the flag)."""
+    monkeypatch.setattr(get_settings(), "ENABLE_DEV_KEY_SELF_PROVISION", True)
+
+    state = conditional_route_state()
+
+    assert state["dev_keys_mounted"] is True
+    assert state["dev_keys_advertised"] is True
+
+
+@pytest.mark.anyio
+async def test_public_projection_keeps_conditional_routes(client):
+    """The unauthenticated wedge projection strips secret-adjacent detail
+    but keeps mount-state booleans, so a deploy without Stripe visibly has
+    no webhook route."""
+    assert get_settings().ENABLE_PROOF_SURFACES is False
+
+    report = await gather_dependency_report()
+    projected = build_public_dependency_report(report)
+
+    assert projected["conditional_routes"] == {
+        "stripe_webhooks_mounted": False,
+        "dev_keys_mounted": True,
+        "dev_keys_advertised": False,
+        "dormant_trust_mounted": False,
+        "proof_surfaces_mounted": False,
+    }
+
+    resp = await client.get("/health/dependencies")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["conditional_routes"]["stripe_webhooks_mounted"] is False
+    assert body["conditional_routes"]["dev_keys_mounted"] is True
+    assert body["conditional_routes"]["dormant_trust_mounted"] is False

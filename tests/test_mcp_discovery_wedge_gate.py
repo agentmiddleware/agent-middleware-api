@@ -119,6 +119,17 @@ async def test_root_and_discover_hide_unmounted_proof_services(
     root_data = root.json()
     assert set(root_data["services"].keys()) == {"agent_billing", "mcp_server"}
     assert root_data["surface_boundaries"]["proof_surfaces_mounted"] is False
+    # The dormant-trust contract names every DORMANT_TRUST_ROUTERS member plus
+    # the proof-gated billing expansion router, so discovery never understates
+    # the frozen-but-unmounted surface.
+    assert set(root_data["surface_boundaries"]["dormant_trust"]) == {
+        "auth_jwt",
+        "kyc",
+        "planner",
+        "pods",
+        "x402",
+        "billing_expansion",
+    }
     assert "/.well-known/awi.json" not in root_data["agent_first"]["bootstrap_sequence"]
 
     # The surviving agent_billing service entry must list only routes the

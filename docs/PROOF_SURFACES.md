@@ -102,8 +102,10 @@ named customer needs them (see AGENTS.md, "Current Company Phase").
 |-----------------|---------|
 | `app.routers.auth` (dormant) | JWT exchange (`/v1/auth/*`) — second auth story; wedge contract is `X-API-Key` |
 | `app.routers.kyc` (dormant) | Stripe Identity KYC |
-| `app.routers.planner` (dormant) | Budget optimizer |
-| `app.routers.billing.expansion_router` (dormant) | Child/swarm wallets, transfers, top-ups, marketplace, velocity status, dry-run sandbox |
+| `app.routers.planner` (dormant) | Budget optimizer (shapes in `app/schemas/optimizer.py`) |
+| `app.routers.pods` (dormant) | Named groups of agent API keys under one shared budget (`/v1/pods/*`) |
+| `app.routers.x402` (dormant) | Settlement facilitation: permit-governed 402 payment authorization with signed receipts; never writes real ledger entries (see `docs/settlement-rails.md`) |
+| `app.routers.billing.expansion_router` (dormant) | Child/swarm wallets, transfers, top-ups, marketplace, velocity status, dry-run sandbox, ACP checkout (`/v1/billing/acp/checkout`, shapes in `app/schemas/acp.py`) |
 
 They mount via `app.main.mount_dormant_trust_surfaces` when
 `ENABLE_PROOF_SURFACES=true`. Unlike proof surfaces they are not demo
