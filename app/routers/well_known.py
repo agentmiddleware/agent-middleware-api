@@ -220,6 +220,23 @@ def _authentication_manifest() -> dict[str, Any]:
             "key (VALID_API_KEYS) provisions wallets and DB-scoped agent keys. "
             "Agents must use a wallet-scoped key — see bootstrap_docs."
         ),
+        "trial_path": {
+            "public_self_serve": False,
+            "local_proof": "make prove-trust-plane",
+            "local_proof_note": (
+                "No credential needed: runs the real permit, invoke, charge, "
+                "receipt, replay, and offline-verify loop against a throwaway "
+                "local database. The source repository is private; clone "
+                "access is granted separately."
+            ),
+            "partner_guide": "/DESIGN_PARTNER_GUIDE.md",
+            "note": (
+                "No public trial key. Evaluate the loop locally with "
+                "local_proof, then ask for a design-partner pilot in the "
+                "partner guide. An unauthenticated agent is not dead-ended: "
+                "the proof runs without any key."
+            ),
+        },
     }
 
     cfg = get_settings()
@@ -349,6 +366,13 @@ class AgentPluginManifest(BaseModel):
         description=(
             "Absolute public API origin from PUBLIC_URL. Empty when unset — "
             "do not invent localhost as the canonical base."
+        ),
+    )
+    canonical_api_note: str = Field(
+        default="",
+        description=(
+            "Operator guidance when canonical_api is empty (PUBLIC_URL "
+            "unset). Empty when a canonical origin is configured."
         ),
     )
     provider: dict = Field(default_factory=lambda: {"status": "contact_not_configured"})
@@ -504,11 +528,24 @@ def _build_agent_manifest() -> AgentPluginManifest:
             "transaction-integrity boundary."
         )
 
+    canonical_api = public_api_origin()
+    canonical_api_note = (
+        ""
+        if canonical_api
+        else (
+            "PUBLIC_URL is not set on this deployment, so no absolute base "
+            "URL is advertised rather than guessing localhost. Relative "
+            "paths in endpoints and documentation are authoritative; set "
+            "PUBLIC_URL to publish a canonical origin."
+        )
+    )
+
     return AgentPluginManifest(
         name="agent-middleware-api",
         description=description,
         version=cfg.APP_VERSION,
-        canonical_api=public_api_origin(),
+        canonical_api=canonical_api,
+        canonical_api_note=canonical_api_note,
         provider=_provider_manifest(cfg),
         capabilities=list(PRODUCT_CAPABILITIES),
         proof_surfaces=proof_surfaces,

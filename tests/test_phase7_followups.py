@@ -52,6 +52,41 @@ def test_canonical_api_empty_when_public_url_unset(monkeypatch):
         get_settings.cache_clear()
 
 
+def test_canonical_api_empty_includes_operator_note(monkeypatch):
+    """An unset PUBLIC_URL leaves canonical_api empty but says why."""
+    monkeypatch.setenv("PUBLIC_URL", "")
+    get_settings.cache_clear()
+    try:
+        built = _build_agent_manifest().model_dump(mode="json")
+        assert built["canonical_api"] == ""
+        assert "PUBLIC_URL" in built["canonical_api_note"]
+    finally:
+        get_settings.cache_clear()
+
+
+def test_canonical_api_note_empty_when_public_url_set(monkeypatch):
+    """A configured PUBLIC_URL needs no warning."""
+    monkeypatch.setenv("PUBLIC_URL", "https://api.thisisatest.tech")
+    get_settings.cache_clear()
+    try:
+        built = _build_agent_manifest().model_dump(mode="json")
+        assert built["canonical_api"] == "https://api.thisisatest.tech"
+        assert built["canonical_api_note"] == ""
+    finally:
+        get_settings.cache_clear()
+
+
+@pytest.mark.anyio
+async def test_agent_json_links_trial_path(client):
+    """Unauthenticated agents get a trial path, not a dead end."""
+    resp = await client.get("/.well-known/agent.json")
+    assert resp.status_code == 200
+    trial = resp.json()["authentication"]["trial_path"]
+    assert trial["public_self_serve"] is False
+    assert "DESIGN_PARTNER_GUIDE" in trial["partner_guide"]
+    assert "prove-trust-plane" in trial["local_proof"]
+
+
 @pytest.mark.anyio
 async def test_partner_api_key_bootstrap_doc_is_served(client):
     resp = await client.get("/docs/partner-api-key-bootstrap.md")

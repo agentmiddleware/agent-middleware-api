@@ -174,6 +174,144 @@ async def test_generation_not_found(client):
     assert resp.status_code == 404
 
 
+PARAM_CODE = """
+from fastapi import APIRouter
+from pydantic import BaseModel
+router = APIRouter()
+
+class Widget(BaseModel):
+    name: str
+    size: int = 0
+
+@router.get("/api/v1/widgets/{widget_id}", summary="Get widget")
+async def get_widget(widget_id: str, verbose: bool = False):
+    return {}
+
+@router.post("/api/v1/widgets", summary="Create widget")
+async def create_widget(widget: Widget):
+    return {"id": "w1"}
+
+@router.patch("/api/v1/widgets/{widget_id}", summary="Update widget")
+async def update_widget(widget_id: str, widget: Widget):
+    return {}
+"""
+
+NON_PYTHON_CODE = '@router.get("/things", summary="Things")\ndef broken(:\n'
+
+
+@pytest.mark.anyio
+async def test_openapi_parameters_come_from_signature(client):
+    """Path params, query params, and their types come from the handler."""
+    resp = await client.post(
+        "/v1/protocol/generate",
+        json={
+            "source_code": PARAM_CODE,
+            "service_name": "param-api",
+        },
+        headers=HEADERS,
+    )
+    assert resp.status_code == 201
+    params = resp.json()["openapi_spec"]["paths"]["/api/v1/widgets/{widget_id}"][
+        "get"
+    ].get("parameters", [])
+    by_name = {p["name"]: p for p in params}
+    assert by_name["widget_id"]["in"] == "path"
+    assert by_name["widget_id"]["required"] is True
+    assert by_name["verbose"]["in"] == "query"
+    assert by_name["verbose"]["required"] is False
+
+
+@pytest.mark.anyio
+async def test_openapi_request_body_comes_from_model(client):
+    """A handler argument typed as a locally defined model becomes a body."""
+    resp = await client.post(
+        "/v1/protocol/generate",
+        json={
+            "source_code": PARAM_CODE,
+            "service_name": "body-api",
+        },
+        headers=HEADERS,
+    )
+    assert resp.status_code == 201
+    spec = resp.json()["openapi_spec"]
+    body = spec["paths"]["/api/v1/widgets"]["post"].get("requestBody")
+    assert body is not None
+    props = body["content"]["application/json"]["schema"]["properties"]
+    assert "name" in props
+
+
+@pytest.mark.anyio
+async def test_patch_method_parsed_with_body(client):
+    """PATCH endpoints parse with their request body, not just the route."""
+    resp = await client.post(
+        "/v1/protocol/generate",
+        json={
+            "source_code": PARAM_CODE,
+            "service_name": "patch-api",
+        },
+        headers=HEADERS,
+    )
+    assert resp.status_code == 201
+    spec = resp.json()["openapi_spec"]
+    patch_op = spec["paths"]["/api/v1/widgets/{widget_id}"].get("patch")
+    assert patch_op is not None
+    assert "requestBody" in patch_op
+
+
+@pytest.mark.anyio
+async def test_non_python_source_warns_draft_quality(client):
+    """Source that is not parseable Python keeps regex hits but says so."""
+    resp = await client.post(
+        "/v1/protocol/generate",
+        json={
+            "source_code": NON_PYTHON_CODE,
+            "service_name": "rough-api",
+        },
+        headers=HEADERS,
+    )
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["endpoints_parsed"] == 1
+    assert any("raft" in w for w in data["warnings"])
+
+
+@pytest.mark.anyio
+async def test_llm_txt_omits_undeclared_rate_limit_and_auth(client):
+    """Generated llm.txt must not invent rate limits or auth requirements."""
+    resp = await client.post(
+        "/v1/protocol/generate",
+        json={
+            "source_code": SAMPLE_CODE,
+            "service_name": "honest-api",
+        },
+        headers=HEADERS,
+    )
+    assert resp.status_code == 201
+    llm_txt = resp.json()["llm_txt"]
+    assert "120 requests per minute" not in llm_txt
+    assert "All endpoints require" not in llm_txt
+    assert "not specified" in llm_txt
+
+
+@pytest.mark.anyio
+async def test_llm_txt_uses_submitted_auth_and_rate_limit(client):
+    """Submitter-declared auth and rate limits appear instead of defaults."""
+    resp = await client.post(
+        "/v1/protocol/generate",
+        json={
+            "source_code": SAMPLE_CODE,
+            "service_name": "declared-api",
+            "auth_method": "api token in the Authorization header",
+            "rate_limit": "60 requests per minute per API key",
+        },
+        headers=HEADERS,
+    )
+    assert resp.status_code == 201
+    llm_txt = resp.json()["llm_txt"]
+    assert "api token in the Authorization header" in llm_txt
+    assert "60 requests per minute per API key" in llm_txt
+
+
 @pytest.mark.anyio
 async def test_protocol_requires_api_key(client):
     resp = await client.post(

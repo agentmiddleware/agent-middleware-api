@@ -2,7 +2,9 @@
 Protocol Generation Engine — Code-to-Discovery Pipeline (Pillar 11)
 =====================================================================
 When an agent builds a new tool, it needs instant discoverability.
-This engine takes raw API code and auto-generates:
+This engine takes raw API code and auto-generates a draft-quality
+starting point (strongest on Python/FastAPI; everything else is
+labeled as a fallback in the generation warnings):
 
 1. llm.txt — LLM-optimized plaintext documentation
 2. OpenAPI 3.1 specification (JSON)
@@ -18,6 +20,7 @@ Production wiring:
 - Agent Oracle integration for instant GTM
 """
 
+import ast
 import uuid
 import logging
 import re
@@ -36,7 +39,7 @@ logger = logging.getLogger(__name__)
 class ParsedEndpoint:
     """An endpoint extracted from source code."""
 
-    method: str  # GET, POST, PUT, DELETE
+    method: str  # GET, POST, PUT, DELETE, PATCH
     path: str  # /v1/widgets
     summary: str = ""
     description: str = ""
@@ -70,9 +73,16 @@ class GenerationResult:
 
 
 class CodeParser:
-    """Extract API endpoint definitions from source code."""
+    """Extract API endpoint definitions from source code.
 
-    # Pattern to match FastAPI-style decorators
+    Best effort for Python/FastAPI code: an AST pass reads handler
+    signatures (path/query parameters, request-body models) and a
+    decorator-pattern fallback covers anything the AST pass misses.
+    Anything the AST pass cannot follow is draft quality and is labeled
+    as such in the generation warnings.
+    """
+
+    # Pattern to match FastAPI-style decorators (fallback only)
     DECORATOR_RE = re.compile(
         r'@\w+\.(get|post|put|delete|patch)\(\s*["\']([^"\']+)["\']', re.IGNORECASE
     )
@@ -81,12 +91,197 @@ class CodeParser:
     RESPONSE_RE = re.compile(r"response_model\s*=\s*(\w+)")
     FUNC_RE = re.compile(r"(?:async\s+)?def\s+(\w+)\s*\(")
 
+    HTTP_METHODS = {"get", "post", "put", "delete", "patch"}
+
+    # Framework-injected handler arguments that are not API parameters.
+    _INJECTED_ARGS = {"self", "cls", "request"}
+
+    FALLBACK_WARNING = (
+        "Draft quality: the source did not parse as structured Python, "
+        "so endpoints were extracted with a decorator-pattern fallback. "
+        "Parameters and request bodies may be incomplete; verify the "
+        "generated specs against the real service."
+    )
+
     def parse(
         self,
         source_code: str,
         service_name: str = "unknown",
     ) -> list[ParsedEndpoint]:
         """Parse FastAPI-style source code and extract endpoint definitions."""
+        endpoints, _ = self.parse_with_notes(source_code, service_name)
+        return endpoints
+
+    def parse_with_notes(
+        self,
+        source_code: str,
+        service_name: str = "unknown",
+    ) -> tuple[list[ParsedEndpoint], list[str]]:
+        """Parse endpoints, returning (endpoints, generation notes)."""
+        try:
+            tree = ast.parse(source_code)
+        except (SyntaxError, ValueError):
+            endpoints = self._parse_regex(source_code, service_name)
+            notes = [self.FALLBACK_WARNING] if endpoints else []
+            return endpoints, notes
+        endpoints = self._parse_ast(tree, service_name)
+        if endpoints:
+            return endpoints, []
+        endpoints = self._parse_regex(source_code, service_name)
+        if endpoints:
+            return endpoints, [self.FALLBACK_WARNING]
+        return [], []
+
+    def _parse_ast(self, tree: ast.Module, service_name: str) -> list[ParsedEndpoint]:
+        """Extract endpoints from a parsed Python module.
+
+        Reads @router.<method>("path", ...) decorators on functions,
+        handler argument names and annotations for parameters, and locally
+        defined model classes for request bodies.
+        """
+        models: dict[str, dict[str, str]] = {}
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef):
+                fields = {}
+                for stmt in node.body:
+                    if isinstance(stmt, ast.AnnAssign) and isinstance(
+                        stmt.target, ast.Name
+                    ):
+                        fields[stmt.target.id] = self._type_name(stmt.annotation)
+                if fields:
+                    models[node.name] = fields
+
+        endpoints = []
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for decorator in node.decorator_list:
+                endpoint = self._endpoint_from_decorator(
+                    decorator, node, models, service_name
+                )
+                if endpoint is not None:
+                    endpoints.append(endpoint)
+                    break
+        return endpoints
+
+    def _endpoint_from_decorator(
+        self,
+        decorator: ast.expr,
+        func: ast.FunctionDef | ast.AsyncFunctionDef,
+        models: dict[str, dict[str, str]],
+        service_name: str,
+    ) -> ParsedEndpoint | None:
+        if not isinstance(decorator, ast.Call):
+            return None
+        target = decorator.func
+        if not (
+            isinstance(target, ast.Attribute)
+            and target.attr.lower() in self.HTTP_METHODS
+        ):
+            return None
+        if (
+            not decorator.args
+            or not isinstance(decorator.args[0], ast.Constant)
+            or not isinstance(decorator.args[0].value, str)
+        ):
+            return None
+        method = target.attr.upper()
+        path = decorator.args[0].value
+        keywords = {kw.arg: kw.value for kw in decorator.keywords if kw.arg}
+        response_node = keywords.get("response_model")
+        if isinstance(response_node, ast.Name):
+            response_model = response_node.id
+        elif isinstance(response_node, ast.Attribute):
+            response_model = response_node.attr
+        else:
+            response_model = ""
+
+        parameters: list[dict] = []
+        request_body: dict | None = None
+        positional = list(func.args.args)
+        pos_defaults: list = [None] * (
+            len(positional) - len(func.args.defaults)
+        ) + list(func.args.defaults)
+        argued = list(zip(positional, pos_defaults)) + list(
+            zip(func.args.kwonlyargs, func.args.kw_defaults)
+        )
+        for arg, default in argued:
+            if arg.arg in self._INJECTED_ARGS:
+                continue
+            annotation = (
+                self._type_name(arg.annotation)
+                if arg.annotation is not None
+                else "string"
+            )
+            if annotation in models and request_body is None:
+                request_body = {
+                    "type": "object",
+                    "title": annotation,
+                    "properties": {
+                        name: {"type": field_type}
+                        for name, field_type in models[annotation].items()
+                    },
+                }
+                continue
+            in_path = "{" + arg.arg + "}" in path
+            parameters.append(
+                {
+                    "name": arg.arg,
+                    "in": "path" if in_path else "query",
+                    "type": annotation,
+                    "required": in_path or default is None,
+                }
+            )
+
+        return ParsedEndpoint(
+            method=method,
+            path=path,
+            summary=self._const_str(keywords.get("summary")),
+            description=self._const_str(keywords.get("description")),
+            parameters=parameters,
+            request_body=request_body,
+            response_model=response_model,
+            tags=[service_name],
+        )
+
+    @staticmethod
+    def _type_name(node: ast.expr | None) -> str:
+        if isinstance(node, ast.Name):
+            return {
+                "str": "string",
+                "int": "integer",
+                "float": "number",
+                "bool": "boolean",
+            }.get(node.id, node.id)
+        if isinstance(node, ast.Attribute):
+            return node.attr
+        if isinstance(node, ast.Subscript):
+            value = node.value
+            if isinstance(value, ast.Name) and value.id in ("Optional", "Union"):
+                return CodeParser._type_name(node.slice)
+            if isinstance(value, ast.Name) and value.id in (
+                "List",
+                "list",
+                "Sequence",
+            ):
+                return "array"
+            return CodeParser._type_name(value)
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+            return CodeParser._type_name(node.left)
+        return "string"
+
+    @staticmethod
+    def _const_str(node: ast.expr | None) -> str:
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return node.value
+        return ""
+
+    def _parse_regex(
+        self,
+        source_code: str,
+        service_name: str = "unknown",
+    ) -> list[ParsedEndpoint]:
+        """Decorator-pattern fallback for code the AST pass cannot follow."""
         endpoints = []
         lines = source_code.split("\n")
 
@@ -133,12 +328,20 @@ class LlmTxtGenerator:
         service_version: str,
         base_url: str,
         endpoints: list[ParsedEndpoint],
-        auth_method: str = "api_key",
+        auth_method: str | None = None,
+        rate_limit: str | None = None,
     ) -> str:
+        # Auth and rate limits are stated only when the submitter declares
+        # them. The generator cannot see the running service, so inventing
+        # defaults here would put false claims into buyer-facing docs.
+        if auth_method:
+            auth_line = f"# Auth: {auth_method}"
+        else:
+            auth_line = "# Auth: not specified in submission"
         lines = [
             f"# {service_name} API v{service_version}",
             f"# Base URL: {base_url}",
-            f"# Auth: {auth_method} via X-API-Key header",
+            auth_line,
             f"# Endpoints: {len(endpoints)}",
             "",
             "## Endpoints",
@@ -160,10 +363,21 @@ class LlmTxtGenerator:
             lines.append("")
 
         lines.append("## Authentication")
-        lines.append("All endpoints require an API key in the X-API-Key header.")
+        if auth_method:
+            lines.append(f"Authentication as declared by the submitter: {auth_method}.")
+            lines.append("Confirm with the service operator before calling.")
+        else:
+            lines.append("Authentication: not specified in the submitted source.")
+            lines.append(
+                "Confirm required credentials with the service operator before calling."
+            )
         lines.append("")
         lines.append("## Rate Limits")
-        lines.append("120 requests per minute per API key.")
+        if rate_limit:
+            lines.append(f"Rate limits as declared by the submitter: {rate_limit}.")
+        else:
+            lines.append("Rate limits: not specified in the submitted source.")
+            lines.append("Confirm with the service operator before calling.")
         lines.append("")
         lines.append(
             f"# Generated by Protocol Engine at "
@@ -315,13 +529,16 @@ class ProtocolEngine:
         register_in_oracle: bool = False,
         oracle_instance=None,
         owner_wallet_id: str | None = None,
+        auth_method: str | None = None,
+        rate_limit: str | None = None,
     ) -> GenerationResult:
         """Run the full code-to-discovery pipeline."""
         gen_id = f"gen-{uuid.uuid4().hex[:12]}"
         warnings = []
 
         # Step 1: Parse endpoints from code
-        endpoints = self.parser.parse(source_code, service_name)
+        endpoints, parse_notes = self.parser.parse_with_notes(source_code, service_name)
+        warnings.extend(parse_notes)
         if not endpoints:
             warnings.append(
                 "No endpoints detected in source code. Check decorator format."
@@ -333,6 +550,8 @@ class ProtocolEngine:
             service_version=service_version,
             base_url=base_url,
             endpoints=endpoints,
+            auth_method=auth_method,
+            rate_limit=rate_limit,
         )
 
         # Step 3: Generate OpenAPI spec

@@ -43,7 +43,12 @@ class GenerateRequest(BaseModel):
     source_code: str = Field(
         ...,
         min_length=10,
-        description="Raw API source code (Python/FastAPI style).",
+        description=(
+            "Raw API source code. Best parsed as Python/FastAPI: routes, "
+            "handler signatures, and locally defined models are read "
+            "directly, anything else falls back to decorator-pattern "
+            "matching and is labeled draft quality."
+        ),
     )
     service_name: str = Field(
         ...,
@@ -64,6 +69,24 @@ class GenerateRequest(BaseModel):
         default=False,
         description=(
             "Auto-register the generated service in the Agent Oracle directories."
+        ),
+    )
+    auth_method: str | None = Field(
+        default=None,
+        max_length=256,
+        description=(
+            "How callers authenticate, in the submitter's own words. Quoted "
+            "verbatim in the generated llm.txt. Omit when unknown: the "
+            "generator states it is not specified rather than inventing one."
+        ),
+    )
+    rate_limit: str | None = Field(
+        default=None,
+        max_length=256,
+        description=(
+            "Rate limit policy, in the submitter's own words. Omit when "
+            "unknown: the generator states it is not specified rather than "
+            "inventing one."
         ),
     )
 
@@ -105,7 +128,10 @@ class GenerationListResponse(BaseModel):
         "2. **OpenAPI 3.1 spec** — Machine-readable API schema\n"
         "3. **agent.json** — Agent discovery manifest\n"
         "4. **Oracle registration** — (optional) Push to agent directories\n\n"
-        "The instant go-to-market engine for any tool an agent builds."
+        "Draft-quality discovery starter, strongest on Python/FastAPI "
+        "services. Auth and rate limits appear only as the submitter "
+        "declares them; verify the generated specs with the service "
+        "operator before relying on them."
     ),
 )
 async def generate_protocol(
@@ -126,6 +152,8 @@ async def generate_protocol(
         register_in_oracle=request.register_in_oracle,
         oracle_instance=oracle if request.register_in_oracle else None,
         owner_wallet_id=auth.wallet_id,
+        auth_method=request.auth_method,
+        rate_limit=request.rate_limit,
     )
     return GenerateResponse(
         generation_id=result.generation_id,
