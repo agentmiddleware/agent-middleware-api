@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -28,10 +28,12 @@ from app.services.audit_chain import verify_audit_chain
 from app.services.audit_log import record_audit_event
 from app.services.idempotency import (
     GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+    IdempotencyInProgressError,
     get_idempotency_service,
 )
 from app.services.mcp_dispatch_attempts import (
     DISPATCH_CLAIMED,
+    DispatchAttemptError,
     DispatchClaimUnavailableError,
     DispatchAttemptContext,
     McpDispatchAttemptService,
@@ -217,6 +219,39 @@ async def _make_stale(attempt_id: str) -> None:
             assert attempt is not None
             attempt.updated_at = utc_now() - timedelta(minutes=10)
             session.add(attempt)
+
+
+async def _set_attempt_clock(
+    attempt_id: str,
+    *,
+    updated_at: datetime | None = None,
+    completed_at: datetime | None = None,
+) -> None:
+    factory = get_session_factory()
+    async with factory() as session:
+        async with session.begin():
+            attempt = await session.get(McpDispatchAttemptModel, attempt_id)
+            assert attempt is not None
+            if updated_at is not None:
+                attempt.updated_at = updated_at
+            if completed_at is not None:
+                attempt.completed_at = completed_at
+            session.add(attempt)
+
+
+def _install_frozen_dispatch_clock(
+    monkeypatch: pytest.MonkeyPatch,
+    now: datetime,
+) -> dict[str, datetime]:
+    """Pin the clocks the reconciler and the attempt store both imported."""
+    clock = {"now": now}
+
+    def _now() -> datetime:
+        return clock["now"]
+
+    monkeypatch.setattr("app.services.mcp_dispatch_attempts.utc_now", _now)
+    monkeypatch.setattr("app.services.mcp_dispatch_reconciliation.utc_now", _now)
+    return clock
 
 
 async def _attempt(attempt_id: str) -> McpDispatchAttemptModel:
@@ -1572,3 +1607,425 @@ async def test_a_failed_refund_does_not_hand_back_the_reservation(
     assert await _ledger_counts(seed.wallet_id) == (1, 0)
     permit = await get_permit_service().get_permit(seed.permit_id)
     assert permit is not None and permit.spent_credits == CREDITS
+
+
+def _future_stamp_was_cleared(updated_at: datetime, future: datetime) -> bool:
+    return updated_at < future - timedelta(days=1)
+
+
+@pytest.mark.anyio
+async def test_future_updated_at_does_not_strand_an_in_flight_attempt(
+    client: AsyncClient,
+    clean_database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A prepared attempt dated days ahead must not stay invisible forever.
+
+    The first sweep only pulls an unbelievable activity time back to the
+    observer clock. It must leave the row prepared: the owner may still be
+    inside a live call. A later sweep, after a full idle window from that
+    observation, refunds the debit and releases the reservation.
+    """
+    seed = await _seed_attempt(
+        client,
+        suffix="future-prepared",
+        state="prepared",
+    )
+    base = utc_now()
+    future = base + timedelta(days=30)
+    await _set_attempt_clock(seed.attempt_id, updated_at=future)
+    clock = _install_frozen_dispatch_clock(monkeypatch, base)
+    service = get_mcp_dispatch_reconciliation_service()
+
+    first = await service.reconcile(idle_seconds=300)
+
+    assert first.prepared_finalized == 0
+    assert first.failed_attempt_ids == ()
+    held = await _attempt(seed.attempt_id)
+    assert held.state == "prepared"
+    assert _future_stamp_was_cleared(held.updated_at, future), (
+        "future updated_at was left in place, so later sweeps never select it"
+    )
+    assert await _ledger_counts(seed.wallet_id) == (1, 0)
+
+    # Clamped stamp is the first sweep's clock. Move past a full idle window
+    # before expecting the row to be treated as abandoned.
+    clock["now"] = base + timedelta(seconds=660)
+    second = await service.reconcile(idle_seconds=300)
+
+    assert second.prepared_finalized == 1
+    assert second.failed_attempt_ids == ()
+    finished = await _attempt(seed.attempt_id)
+    assert finished.state == "returned_error"
+    assert await _ledger_counts(seed.wallet_id) == (1, 1)
+    permit = await get_permit_service().get_permit(seed.permit_id)
+    assert permit is not None and permit.spent_credits == Decimal("0")
+
+    clock["now"] = clock["now"] + timedelta(seconds=301)
+    third = await service.reconcile(idle_seconds=300)
+    assert third.repaired == 0
+    assert await _ledger_counts(seed.wallet_id) == (1, 1)
+
+
+@pytest.mark.anyio
+async def test_future_updated_at_on_a_claimed_attempt_waits_out_the_idle_window(
+    client: AsyncClient,
+    clean_database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A claimed attempt with a future activity time is in flight, not idle.
+
+    The first sweep must not mark it delivery-uncertain. After the idle window
+    that starts when the bad timestamp is noticed, the charge stays and one
+    receipt is written.
+    """
+    seed = await _seed_attempt(
+        client,
+        suffix="future-claimed",
+        state="dispatched",
+    )
+    assert (await _attempt(seed.attempt_id)).state == DISPATCH_CLAIMED
+    base = utc_now()
+    future = base + timedelta(days=30)
+    await _set_attempt_clock(seed.attempt_id, updated_at=future)
+    clock = _install_frozen_dispatch_clock(monkeypatch, base)
+    service = get_mcp_dispatch_reconciliation_service()
+
+    first = await service.reconcile(idle_seconds=300)
+
+    assert first.dispatched_uncertain == 0
+    assert first.repaired == 0
+    held = await _attempt(seed.attempt_id)
+    assert held.state == DISPATCH_CLAIMED
+    assert _future_stamp_was_cleared(held.updated_at, future), (
+        "future updated_at was left in place, so the claim stays orphaned"
+    )
+
+    clock["now"] = base + timedelta(seconds=660)
+    second = await service.reconcile(idle_seconds=300)
+
+    assert second.dispatched_uncertain == 1
+    assert second.failed_attempt_ids == ()
+    finished = await _attempt(seed.attempt_id)
+    assert finished.state == "delivery_uncertain"
+    assert await _ledger_counts(seed.wallet_id) == (1, 0)
+    permit = await get_permit_service().get_permit(seed.permit_id)
+    assert permit is not None and permit.spent_credits == CREDITS
+    receipt = await get_receipt_service().get_receipt_by_idempotency_record_id(
+        finished.idempotency_record_id
+    )
+    assert receipt is not None and receipt.outcome == "delivery_uncertain"
+
+    clock["now"] = clock["now"] + timedelta(seconds=301)
+    third = await service.reconcile(idle_seconds=300)
+    assert third.repaired == 0
+    assert await _ledger_counts(seed.wallet_id) == (1, 0)
+
+
+@pytest.mark.anyio
+async def test_future_updated_at_on_terminal_attempt_still_finalizes(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    """A finished attempt has no live owner, so a future stamp cannot delay it."""
+    seed = await _seed_attempt(
+        client,
+        suffix="future-terminal",
+        state="returned_error",
+        result_payload={"error": "confirmed"},
+        error_code="upstream_returned_error",
+    )
+    future = utc_now() + timedelta(days=30)
+    await _set_attempt_clock(seed.attempt_id, updated_at=future)
+    service = get_mcp_dispatch_attempt_service()
+    metrics = await service.summarize(idle_seconds=300)
+    assert metrics.unfinalized_terminal == 1
+    assert metrics.stale_active == 0
+
+    result = await get_mcp_dispatch_reconciliation_service().reconcile(idle_seconds=300)
+
+    assert result.terminal_recovered == 1
+    assert result.failed_attempt_ids == ()
+    attempt = await _attempt(seed.attempt_id)
+    assert attempt.debit_refunded_at is not None
+    assert attempt.budget_released_at is not None
+    assert await _ledger_counts(seed.wallet_id) == (1, 1)
+    receipt = await get_receipt_service().get_receipt_by_idempotency_record_id(
+        attempt.idempotency_record_id
+    )
+    assert receipt is not None and receipt.outcome == "failed_refunded"
+    after = await service.summarize(idle_seconds=300)
+    assert after.unfinalized_terminal == 0
+    assert after.reconciliation_backlog == 0
+
+
+@pytest.mark.anyio
+async def test_future_completed_at_is_not_the_signed_audit_time(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    """A completion time days ahead must not become the signed audit timestamp."""
+    seed = await _seed_attempt(
+        client,
+        suffix="future-audit-time",
+        state="returned_error",
+        result_payload={"error": "confirmed"},
+        error_code="upstream_returned_error",
+    )
+    future = utc_now() + timedelta(days=30)
+    await _set_attempt_clock(seed.attempt_id, completed_at=future)
+
+    result = await get_mcp_dispatch_reconciliation_service().reconcile(idle_seconds=300)
+
+    assert result.terminal_recovered == 1
+    factory = get_session_factory()
+    async with factory() as session:
+        audit = (
+            await session.execute(
+                select(ControlPlaneAuditEventModel).where(
+                    ControlPlaneAuditEventModel.request_id == seed.attempt_id
+                )
+            )
+        ).scalar_one()
+    assert audit.created_at < future - timedelta(days=1)
+    assert audit.created_at <= utc_now() + timedelta(seconds=300)
+    assert (await verify_audit_chain(wallet_id=seed.wallet_id)).valid is True
+
+
+@pytest.mark.anyio
+async def test_small_clock_skew_does_not_reap_or_rewrite_a_fresh_attempt(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    """A writer a few seconds fast is still a live attempt."""
+    seed = await _seed_attempt(
+        client,
+        suffix="small-skew",
+        state="prepared",
+    )
+    stamp = utc_now() + timedelta(seconds=30)
+    await _set_attempt_clock(seed.attempt_id, updated_at=stamp)
+
+    result = await get_mcp_dispatch_reconciliation_service().reconcile(idle_seconds=300)
+
+    assert result.repaired == 0
+    attempt = await _attempt(seed.attempt_id)
+    assert attempt.state == "prepared"
+    assert abs((attempt.updated_at - stamp).total_seconds()) < 2
+    assert await _ledger_counts(seed.wallet_id) == (1, 0)
+
+
+@pytest.mark.anyio
+async def test_reconcile_twice_refunds_once(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    """A second sweep of an already repaired prepared attempt moves no money."""
+    seed = await _seed_attempt(
+        client,
+        suffix="reconcile-twice",
+        state="prepared",
+    )
+    service = get_mcp_dispatch_reconciliation_service()
+
+    first = await service.reconcile(idle_seconds=300)
+    assert first.prepared_finalized == 1
+    assert await _ledger_counts(seed.wallet_id) == (1, 1)
+    permit = await get_permit_service().get_permit(seed.permit_id)
+    assert permit is not None and permit.spent_credits == Decimal("0")
+
+    second = await service.reconcile(idle_seconds=0)
+    assert second.repaired == 0
+    assert second.failed_attempt_ids == ()
+    assert await _ledger_counts(seed.wallet_id) == (1, 1)
+    permit = await get_permit_service().get_permit(seed.permit_id)
+    assert permit is not None and permit.spent_credits == Decimal("0")
+    factory = get_session_factory()
+    async with factory() as session:
+        receipt_count = await session.scalar(
+            select(func.count()).select_from(ReceiptModel)
+        )
+    assert int(receipt_count or 0) == 1
+
+
+@pytest.mark.anyio
+async def test_reconcile_adopts_an_existing_failed_refunded_receipt(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    """A receipt written before the crash is kept, and the refund happens once."""
+    upstream_result = {
+        "content": [{"type": "text", "text": "partner rejected"}],
+        "isError": True,
+    }
+    seed = await _seed_attempt(
+        client,
+        suffix="receipt-already",
+        state="returned_error",
+        result_payload=upstream_result,
+        error_code="upstream_returned_error",
+    )
+    attempt = await _attempt(seed.attempt_id)
+    audit = await record_audit_event(
+        event="mcp.invoke",
+        wallet_id=seed.wallet_id,
+        tool=seed.tool_name,
+        endpoint=ENDPOINT,
+        auth_source="governed_dispatch",
+        key_id=seed.key_id,
+        request_id=seed.attempt_id,
+        ok=False,
+        metadata={
+            "permit_id": seed.permit_id,
+            "request_hash": attempt.request_hash,
+            "ledger_entry_id": seed.ledger_entry_id,
+            "dispatch_attempt_id": seed.attempt_id,
+            "dispatch_state": "returned_error",
+            "dispatch_response_hash": attempt.response_hash,
+            "upstream_tool_name": attempt.upstream_tool_name,
+            "upstream_origin": attempt.upstream_origin,
+        },
+    )
+    receipt = await get_receipt_service().create_receipt(
+        idempotency_record_id=attempt.idempotency_record_id,
+        dispatch_attempt_id=seed.attempt_id,
+        permit_id=seed.permit_id,
+        wallet_id=seed.wallet_id,
+        key_id=seed.key_id,
+        tool=seed.tool_name,
+        request_payload=None,
+        request_hash=attempt.request_hash,
+        response_payload=upstream_result,
+        ledger_entry_id=seed.ledger_entry_id,
+        credits_authorized=CREDITS,
+        credits_charged=Decimal("0"),
+        outcome="failed_refunded",
+        audit_event_id=audit.event_id,
+        reason_code="upstream_returned_error",
+    )
+    service = get_mcp_dispatch_reconciliation_service()
+
+    first = await service.reconcile(idle_seconds=300)
+
+    assert first.failed_attempt_ids == ()
+    assert first.idempotency_recovered == 1
+    assert await _ledger_counts(seed.wallet_id) == (1, 1)
+    replay, status = await _replay(seed)
+    assert status == 502
+    assert replay["receipt"]["receipt_id"] == receipt.receipt_id
+    factory = get_session_factory()
+    async with factory() as session:
+        receipt_count = await session.scalar(
+            select(func.count()).select_from(ReceiptModel)
+        )
+    assert int(receipt_count or 0) == 1
+
+    second = await service.reconcile(idle_seconds=0)
+    assert second.repaired == 0
+    assert await _ledger_counts(seed.wallet_id) == (1, 1)
+    async with factory() as session:
+        receipt_count = await session.scalar(
+            select(func.count()).select_from(ReceiptModel)
+        )
+    assert int(receipt_count or 0) == 1
+
+
+@pytest.mark.anyio
+async def test_success_receipt_on_returned_error_is_not_refunded(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    """A signed success receipt disagrees with returned_error. Leave the money."""
+    seed = await _seed_attempt(
+        client,
+        suffix="receipt-contradicts",
+        state="returned_error",
+        result_payload={"error": "confirmed"},
+        error_code="upstream_returned_error",
+    )
+    attempt = await _attempt(seed.attempt_id)
+    audit = await record_audit_event(
+        event="mcp.invoke",
+        wallet_id=seed.wallet_id,
+        tool=seed.tool_name,
+        endpoint=ENDPOINT,
+        auth_source="governed_dispatch",
+        key_id=seed.key_id,
+        request_id=seed.attempt_id,
+        ok=True,
+    )
+    await get_receipt_service().create_receipt(
+        idempotency_record_id=attempt.idempotency_record_id,
+        dispatch_attempt_id=seed.attempt_id,
+        permit_id=seed.permit_id,
+        wallet_id=seed.wallet_id,
+        key_id=seed.key_id,
+        tool=seed.tool_name,
+        request_payload=None,
+        request_hash=attempt.request_hash,
+        response_payload={"content": [], "isError": False},
+        ledger_entry_id=seed.ledger_entry_id,
+        credits_authorized=CREDITS,
+        credits_charged=CREDITS,
+        outcome="success",
+        audit_event_id=audit.event_id,
+    )
+
+    result = await get_mcp_dispatch_reconciliation_service().reconcile(idle_seconds=300)
+
+    assert seed.attempt_id in result.failed_attempt_ids
+    assert await _ledger_counts(seed.wallet_id) == (1, 0)
+    permit = await get_permit_service().get_permit(seed.permit_id)
+    assert permit is not None and permit.spent_credits == CREDITS
+    attempt = await _attempt(seed.attempt_id)
+    assert attempt.debit_refunded_at is None
+    assert attempt.budget_released_at is None
+    factory = get_session_factory()
+    async with factory() as session:
+        receipt_count = await session.scalar(
+            select(func.count()).select_from(ReceiptModel)
+        )
+    assert int(receipt_count or 0) == 1
+
+
+@pytest.mark.anyio
+async def test_reconcile_missing_attempt_is_refused(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    """An unknown attempt id is not a row the sweep can invent."""
+    with pytest.raises(DispatchAttemptError, match="dispatch_attempt_not_found"):
+        await get_mcp_dispatch_reconciliation_service().reconcile_attempt(
+            "att-does-not-exist"
+        )
+
+
+@pytest.mark.anyio
+async def test_retry_of_a_future_dated_attempt_clamps_without_finalizing(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    """A caller retry notices an unbelievable activity time and does not reap it."""
+    seed = await _seed_attempt(
+        client,
+        suffix="retry-future",
+        state="prepared",
+    )
+    future = utc_now() + timedelta(days=30)
+    await _set_attempt_clock(seed.attempt_id, updated_at=future)
+
+    with pytest.raises(IdempotencyInProgressError):
+        await get_idempotency_service().begin_with_record(
+            wallet_id=seed.wallet_id,
+            endpoint=seed.idempotency_endpoint,
+            idempotency_key=seed.idempotency_key,
+            request_payload=seed.request_payload,
+            wait_timeout_seconds=0,
+        )
+
+    attempt = await _attempt(seed.attempt_id)
+    assert attempt.state == "prepared"
+    assert _future_stamp_was_cleared(attempt.updated_at, future), (
+        "retry left the future activity time in place"
+    )
+    assert await _ledger_counts(seed.wallet_id) == (1, 0)

@@ -15,7 +15,7 @@ from decimal import Decimal
 from typing import Any, cast
 from urllib.parse import urlsplit
 
-from sqlalchemy import func, select, update as sa_update
+from sqlalchemy import func, or_, select, update as sa_update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
@@ -175,6 +175,11 @@ DISPATCH_TERMINAL_STATES = frozenset(
 )
 DISPATCH_SENT_STATES = frozenset({DISPATCH_LEGACY_DISPATCHED, DISPATCH_CLAIMED})
 DISPATCH_ACTIVE_STATES = frozenset({DISPATCH_PREPARED, *DISPATCH_SENT_STATES})
+# A writer a few minutes fast only delays reconciliation. A timestamp further
+# ahead than this is not a live call. Active rows are pulled back to the
+# observer clock without a state change, and the idle window starts then.
+# Terminal rows have no live owner, so the same bound selects them at once.
+DISPATCH_CLOCK_SKEW_ALLOWANCE_SECONDS = 300
 _MIN_DISPATCH_IDLE_SECONDS = 300
 _DISPATCH_CLEANUP_MARGIN_SECONDS = 30
 # These maxima are a rolling-deployment safety contract. Reconciliation uses
@@ -237,6 +242,53 @@ def dispatch_reconciliation_idle_seconds(
     ):
         raise ValueError("dispatch_timeout_exceeds_supported_maximum")
     return _DISPATCH_RECONCILIATION_IDLE_SECONDS
+
+
+def dispatch_activity_is_incredible(
+    value: datetime | None,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    """True when a stored activity time is past the clock-skew allowance."""
+    if value is None:
+        return False
+    current = to_naive_utc(now if now is not None else utc_now())
+    limit = current + timedelta(seconds=DISPATCH_CLOCK_SKEW_ALLOWANCE_SECONDS)
+    return to_naive_utc(value) > limit
+
+
+def capped_dispatch_audit_timestamp(
+    attempt: McpDispatchAttemptModel,
+    *,
+    now: datetime | None = None,
+) -> datetime:
+    """Audit time for a terminal attempt, never an unbelievable future instant.
+
+    Replicas that all see the same incredible completion time sign the attempt
+    created_at when that one is still believable, so the signed intent matches.
+    """
+    current = to_naive_utc(now if now is not None else utc_now())
+    recorded = attempt.completed_at or attempt.updated_at
+    if not dispatch_activity_is_incredible(recorded, now=current):
+        if recorded is None:
+            return current
+        return to_naive_utc(recorded)
+    if not dispatch_activity_is_incredible(attempt.created_at, now=current):
+        return to_naive_utc(attempt.created_at)
+    return current
+
+
+def _terminal_activity_due(
+    cutoff: datetime,
+    incredible_after: datetime,
+) -> ColumnElement[bool]:
+    """Terminal rows due for repair: idle, or an unbelievable future stamp."""
+    idle = cast(ColumnElement[bool], McpDispatchAttemptModel.updated_at < cutoff)
+    future = cast(
+        ColumnElement[bool],
+        McpDispatchAttemptModel.updated_at > incredible_after,
+    )
+    return or_(idle, future)
 
 
 @dataclass(frozen=True)
@@ -2048,6 +2100,62 @@ class McpDispatchAttemptService:
                 idempotency_key=record.idempotency_key,
             )
 
+    async def clamp_future_activity_timestamps(
+        self,
+        *,
+        attempt_id: str | None = None,
+    ) -> int:
+        """Pull active rows with an unbelievable updated_at back to now.
+
+        Stale selection is updated_at < now - idle, so a future stamp is never
+        chosen and the idempotency key stays held. Clamping does not change
+        state and does not make the row stale in this same statement: the next
+        sweep can reap it only after a full idle window from this observation.
+        Terminal rows are not touched. Their list queries already include an
+        unbelievable stamp so they finalize immediately.
+        """
+        now = utc_now()
+        incredible_after = now + timedelta(
+            seconds=DISPATCH_CLOCK_SKEW_ALLOWANCE_SECONDS
+        )
+        filters: list[ColumnElement[bool]] = [
+            cast(
+                ColumnElement[bool],
+                cast(Any, McpDispatchAttemptModel.state).in_(DISPATCH_ACTIVE_STATES),
+            ),
+            cast(
+                ColumnElement[bool],
+                McpDispatchAttemptModel.updated_at > incredible_after,
+            ),
+        ]
+        if attempt_id is not None:
+            filters.append(
+                cast(
+                    ColumnElement[bool],
+                    McpDispatchAttemptModel.attempt_id == attempt_id,
+                )
+            )
+        factory = get_session_factory()
+        # Read first. A write here, even one that matches nothing, takes the
+        # SQLite writer lock and will sit behind a charge that still holds its
+        # transaction. The common sweep has nothing to clamp.
+        async with factory() as session:
+            found = await session.scalar(
+                select(func.count())
+                .select_from(McpDispatchAttemptModel)
+                .where(*filters)
+            )
+        if not int(found or 0):
+            return 0
+        async with factory() as session:
+            async with session.begin():
+                result = await session.execute(
+                    sa_update(McpDispatchAttemptModel)
+                    .where(*filters)
+                    .values(updated_at=now)
+                )
+                return int(cast(Any, result).rowcount or 0)
+
     async def list_stale_contexts(
         self,
         *,
@@ -2106,7 +2214,11 @@ class McpDispatchAttemptService:
         """Return terminal attempts whose signed receipt was never persisted."""
         if idle_seconds < 0 or not 1 <= limit <= 500:
             raise DispatchAttemptError("dispatch_reconciliation_query_invalid")
-        cutoff = utc_now() - timedelta(seconds=idle_seconds)
+        now = utc_now()
+        cutoff = now - timedelta(seconds=idle_seconds)
+        incredible_after = now + timedelta(
+            seconds=DISPATCH_CLOCK_SKEW_ALLOWANCE_SECONDS
+        )
         factory = get_session_factory()
         async with factory() as session:
             rows = (
@@ -2135,10 +2247,7 @@ class McpDispatchAttemptService:
                                 DISPATCH_TERMINAL_STATES
                             ),
                         ),
-                        cast(
-                            ColumnElement[bool],
-                            McpDispatchAttemptModel.updated_at < cutoff,
-                        ),
+                        _terminal_activity_due(cutoff, incredible_after),
                         cast(
                             ColumnElement[bool],
                             cast(Any, ReceiptModel.receipt_id).is_(None),
@@ -2168,7 +2277,11 @@ class McpDispatchAttemptService:
         """Return receipted terminal attempts missing replay completion."""
         if idle_seconds < 0 or not 1 <= limit <= 500:
             raise DispatchAttemptError("dispatch_reconciliation_query_invalid")
-        cutoff = utc_now() - timedelta(seconds=idle_seconds)
+        now = utc_now()
+        cutoff = now - timedelta(seconds=idle_seconds)
+        incredible_after = now + timedelta(
+            seconds=DISPATCH_CLOCK_SKEW_ALLOWANCE_SECONDS
+        )
         factory = get_session_factory()
         async with factory() as session:
             rows = (
@@ -2197,10 +2310,7 @@ class McpDispatchAttemptService:
                                 DISPATCH_TERMINAL_STATES
                             ),
                         ),
-                        cast(
-                            ColumnElement[bool],
-                            McpDispatchAttemptModel.updated_at < cutoff,
-                        ),
+                        _terminal_activity_due(cutoff, incredible_after),
                         cast(
                             ColumnElement[bool],
                             cast(Any, IdempotencyRecordModel.response_json).is_(None),
@@ -2256,7 +2366,11 @@ class McpDispatchAttemptService:
         """
         if idle_seconds < 0 or not 1 <= limit <= 500:
             raise DispatchAttemptError("dispatch_reconciliation_query_invalid")
-        cutoff = utc_now() - timedelta(seconds=idle_seconds)
+        now = utc_now()
+        cutoff = now - timedelta(seconds=idle_seconds)
+        incredible_after = now + timedelta(
+            seconds=DISPATCH_CLOCK_SKEW_ALLOWANCE_SECONDS
+        )
         factory = get_session_factory()
         async with factory() as session:
             return list(
@@ -2274,10 +2388,7 @@ class McpDispatchAttemptService:
                                     Any, McpDispatchAttemptModel.budget_released_at
                                 ).is_(None),
                             ),
-                            cast(
-                                ColumnElement[bool],
-                                McpDispatchAttemptModel.updated_at < cutoff,
-                            ),
+                            _terminal_activity_due(cutoff, incredible_after),
                         )
                         .order_by(
                             cast(
@@ -2304,8 +2415,12 @@ class McpDispatchAttemptService:
         )
         if idle_seconds < 0 or terminal_idle < 0:
             raise DispatchAttemptError("dispatch_reconciliation_query_invalid")
-        active_cutoff = utc_now() - timedelta(seconds=idle_seconds)
-        terminal_cutoff = utc_now() - timedelta(seconds=terminal_idle)
+        now = utc_now()
+        active_cutoff = now - timedelta(seconds=idle_seconds)
+        terminal_cutoff = now - timedelta(seconds=terminal_idle)
+        incredible_after = now + timedelta(
+            seconds=DISPATCH_CLOCK_SKEW_ALLOWANCE_SECONDS
+        )
         factory = get_session_factory()
         async with factory() as session:
             state_rows = (
@@ -2350,10 +2465,7 @@ class McpDispatchAttemptService:
                             DISPATCH_TERMINAL_STATES
                         ),
                     ),
-                    cast(
-                        ColumnElement[bool],
-                        McpDispatchAttemptModel.updated_at < terminal_cutoff,
-                    ),
+                    _terminal_activity_due(terminal_cutoff, incredible_after),
                     cast(
                         ColumnElement[bool],
                         cast(Any, ReceiptModel.receipt_id).is_(None),
@@ -2386,10 +2498,7 @@ class McpDispatchAttemptService:
                             DISPATCH_TERMINAL_STATES
                         ),
                     ),
-                    cast(
-                        ColumnElement[bool],
-                        McpDispatchAttemptModel.updated_at < terminal_cutoff,
-                    ),
+                    _terminal_activity_due(terminal_cutoff, incredible_after),
                     cast(
                         ColumnElement[bool],
                         cast(Any, IdempotencyRecordModel.response_json).is_(None),

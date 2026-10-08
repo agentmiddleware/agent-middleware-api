@@ -344,6 +344,7 @@ class IdempotencyService:
         if dispatch_attempt is not None:
             # Import here to avoid circular dependency
             from app.services.mcp_dispatch_attempts import (
+                DISPATCH_CLOCK_SKEW_ALLOWANCE_SECONDS,
                 DISPATCH_TERMINAL_STATES,
                 dispatch_reconciliation_idle_seconds,
             )
@@ -369,7 +370,10 @@ class IdempotencyService:
             # same globally conservative idle window as the periodic sweep.
             # Live attempts with active owners must wait, not be stolen.
             # Check staleness using updated_at (last state change), matching
-            # list_stale_contexts logic in mcp_dispatch_attempts.py
+            # list_stale_contexts logic in mcp_dispatch_attempts.py.
+            # An unbelievable future stamp is not fresh progress either, but
+            # reconcile_attempt still applies the idle window, so this call
+            # only starts the clock clamp and does not take the live owner.
             if (
                 dispatch_attempt.state not in DISPATCH_TERMINAL_STATES
                 and dispatch_attempt.updated_at is not None
@@ -383,13 +387,13 @@ class IdempotencyService:
                 )
                 cutoff = to_naive_utc(utc_now() - timedelta(seconds=stale_idle_seconds))
                 updated_naive = to_naive_utc(dispatch_attempt.updated_at)
+                incredible_after = to_naive_utc(
+                    utc_now() + timedelta(seconds=DISPATCH_CLOCK_SKEW_ALLOWANCE_SECONDS)
+                )
                 is_stale = updated_naive < cutoff
-
-                if is_stale:
-                    # Attempt exceeded the configured live-call window.
+                if is_stale or updated_naive > incredible_after:
                     should_reconcile = True
                     reconcile_idle_seconds = stale_idle_seconds
-                # else: fresh update, assume live owner, wait
 
             if should_reconcile:
                 reconciler = get_mcp_dispatch_reconciliation_service()
