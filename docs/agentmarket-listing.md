@@ -10,9 +10,11 @@ telemetry, or media as the product.
 
 **"Authorize one agent action. Charge it once. Prove what happened."**
 
-Credible wedge: exactly-once gateway debit, dispatch checkpoint, and receipt
-finalization for metered MCP calls. Remote side effects are exactly once only
-when the upstream independently honors the forwarded idempotency key.
+Credible wedge: at most one gateway debit and at most one gateway dispatch
+per accepted idempotency key, with receipt finalization for metered MCP calls.
+A retry returns the original receipt instead of charging again. A remote side
+effect is covered only when the upstream independently honors the forwarded
+idempotency key.
 
 Canonical loop:
 
