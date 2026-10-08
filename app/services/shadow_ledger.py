@@ -20,6 +20,7 @@ Security:
 import asyncio
 import json
 import logging
+import math
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -314,6 +315,20 @@ class ShadowLedger:
         Returns:
             SimulatedChargeResult with virtual balance impact
         """
+        # Same guard as BillingEngine.charge: the HTTP router refuses these
+        # at the boundary, but direct service callers reach this method
+        # without passing the router or the engine. A negative amount would
+        # otherwise raise the virtual balance instead of lowering it, and a
+        # non-finite one breaks the balance comparison below.
+        if (
+            isinstance(units, bool)
+            or not isinstance(units, (int, float))
+            or not math.isfinite(units)
+            or units <= 0
+        ):
+            raise ValueError(
+                f"units must be a finite number greater than zero, got {units}"
+            )
         session = await self.get_session(session_id)
         if not session:
             raise ValueError(f"Session not found: {session_id}")
