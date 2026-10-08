@@ -265,6 +265,30 @@ def resolve_client_idempotency_key(
     return first_key
 
 
+def resolve_idempotency_header(
+    value: str | Sequence[str] | None,
+) -> str | None:
+    """Return the one Idempotency-Key, or None when the header is absent.
+
+    A present value that is blank, longer than the store column, not UTF-8,
+    contains a control character, or is repeated with a different value raises
+    InvalidIdempotencyKeyError. The key is not stripped or truncated. Opt-in
+    money routes must call this before treating a missing header as an un-keyed
+    call, because an empty string is present.
+    """
+    if value is None:
+        return None
+    lines: Sequence[str] = (value,) if isinstance(value, str) else value
+    if len(lines) == 0:
+        return None
+    return resolve_client_idempotency_key(
+        [
+            (IDEMPOTENCY_KEY_HEADER_SOURCE, decode_idempotency_key_header(line))
+            for line in lines
+        ]
+    )
+
+
 @dataclass(frozen=True)
 class IdempotencyReplay:
     response_reference: str | None

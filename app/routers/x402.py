@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from app.core.auth import AuthContext, get_auth_context
 from app.core.time import utc_now
+from app.routers.http_idempotency import resolve_http_idempotency_header
 from app.services.x402_engine import (
     X402Error,
     X402SettlementUncertainError,
@@ -149,16 +150,25 @@ async def _refuse_in_progress_settle(
 @router.post("/settle", response_model=X402SettleResponse)
 async def settle_payment_required(
     request: X402SettleRequest,
-    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    idempotency_key_lines: list[str] = Header(..., alias="Idempotency-Key"),
     auth: AuthContext = Depends(get_auth_context),
 ) -> X402SettleResponse:
     """Authorize a 402 demand against a permit and record the settlement.
 
     Facilitation only: budget is reserved on the permit, the settlement is
-    metered in the shadow ledger, and a signed receipt is emitted — no real
+    metered in the shadow ledger, and a signed receipt is emitted. No real
     ledger entry is written and no credits are minted (settlement freeze,
     docs/settlement-rails.md).
     """
+    idempotency_key = resolve_http_idempotency_header(idempotency_key_lines)
+    if idempotency_key is None:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "idempotency_key_required",
+                "message": "x402 settlement requires an Idempotency-Key header.",
+            },
+        )
     handler = get_x402_handler()
     try:
         requirement = handler.build_requirement(

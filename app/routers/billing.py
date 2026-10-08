@@ -11,6 +11,7 @@ This is how the API generates revenue autonomously.
 from decimal import Decimal
 from typing import ClassVar, cast
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -19,6 +20,7 @@ from ..core.config import get_settings
 from ..core.dependencies import get_agent_money
 from .http_idempotency import (
     begin_http_idempotency as _begin_idempotency,
+    resolve_http_idempotency_header,
 )
 from ..services.agent_money import (
     AgentMoney,
@@ -278,7 +280,7 @@ async def create_sponsor_wallet(
 )
 async def create_agent_wallet(
     request: CreateAgentWalletRequest,
-    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    idempotency_key: list[str] | None = Header(None, alias="Idempotency-Key"),
     auth: AuthContext = Depends(get_auth_context),
     money: AgentMoney = Depends(get_agent_money),
 ):
@@ -600,7 +602,7 @@ async def charge_wallet(
     ),
     request_path: str | None = None,
     description: str | None = None,
-    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    idempotency_key: list[str] | None = Header(None, alias="Idempotency-Key"),
     auth: AuthContext = Depends(get_auth_context),
     money: AgentMoney = Depends(get_agent_money),
 ):
@@ -614,6 +616,10 @@ async def charge_wallet(
                 "message": "service_category is required",
             },
         )
+    # A missing header is an un-keyed charge. A present header must name one
+    # usable key. Check it before the wallet read and before any debit, so a
+    # blank, oversized, or conflicting key is not treated as absent.
+    idem_key = resolve_http_idempotency_header(idempotency_key)
     request_id = request.headers.get("X-Request-ID")
     endpoint = "/v1/billing/charge"
 
@@ -643,10 +649,8 @@ async def charge_wallet(
     # retries a charge (e.g. after a timeout) with the same key gets the
     # original outcome replayed instead of being billed twice.
     idem = None
-    idem_key: str | None = None
-    if idempotency_key:
+    if idem_key is not None:
         idem = get_idempotency_service()
-        idem_key = idempotency_key
         try:
             replay = await idem.begin(
                 wallet_id=wallet_id,
@@ -1018,7 +1022,7 @@ async def transfer_wallets(
         None,
         description="Optional ID to link related transfers",
     ),
-    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    idempotency_key: list[str] | None = Header(None, alias="Idempotency-Key"),
     auth: AuthContext = Depends(get_auth_context),
     money: AgentMoney = Depends(get_agent_money),
 ):
@@ -1042,6 +1046,7 @@ async def transfer_wallets(
             "to_wallet_id": to_wallet_id,
             "amount": str(amount),
             "description": description,
+            "correlation_id": correlation_id,
         },
     )
     if replay is not None:
@@ -1070,8 +1075,12 @@ async def transfer_wallets(
                 "description": description,
             },
         )
-        await guard.complete(result, 200, response_reference=result.get("transfer_id"))
-        return result
+        # Store the JSON the first caller receives. The engine returns
+        # Decimals, and json.dumps would keep those as strings while the
+        # live response encodes them as numbers.
+        body = jsonable_encoder(result)
+        await guard.complete(body, 200, response_reference=result.get("transfer_id"))
+        return body
     except WalletNotFoundError as e:
         await _record_billing_governance(
             event="billing.transfer",
