@@ -274,7 +274,8 @@ async def _check_mqtt(simulation_modes: dict[str, bool]) -> dict[str, Any]:
 
 async def _check_stripe() -> dict[str, Any]:
     settings = get_settings()
-    if not settings.STRIPE_SECRET_KEY:
+    stripe_secret = settings.STRIPE_SECRET_KEY.get_secret_value()
+    if not stripe_secret:
         return {"status": "not_configured"}
 
     import stripe
@@ -282,12 +283,12 @@ async def _check_stripe() -> dict[str, Any]:
     # Stripe SDK is synchronous; run in the default executor so we don't
     # block the event loop.
     def _retrieve():
-        stripe.api_key = settings.STRIPE_SECRET_KEY
+        stripe.api_key = stripe_secret
         return stripe.Balance.retrieve()
 
     loop = asyncio.get_running_loop()
     balance = await loop.run_in_executor(None, _retrieve)
-    mode = "live" if settings.STRIPE_SECRET_KEY.startswith("sk_live_") else "test"
+    mode = "live" if stripe_secret.startswith("sk_live_") else "test"
     return {
         "status": "up",
         "mode": mode,
@@ -301,7 +302,7 @@ async def _check_llm(simulation_modes: dict[str, bool]) -> dict[str, Any]:
     settings = get_settings()
     provider = settings.LLM_PROVIDER.lower().strip()
 
-    if not settings.LLM_API_KEY and provider != "ollama":
+    if not settings.LLM_API_KEY.get_secret_value() and provider != "ollama":
         return {"status": "not_configured", "provider": provider}
 
     if simulation_modes.get("telemetry_pm", True):
@@ -317,7 +318,7 @@ async def _check_llm(simulation_modes: dict[str, bool]) -> dict[str, Any]:
         from openai import AsyncOpenAI
 
         client = AsyncOpenAI(
-            api_key=settings.LLM_API_KEY,
+            api_key=settings.LLM_API_KEY.get_secret_value(),
             base_url=settings.LLM_BASE_URL or None,
         )
         models = await client.models.list()
@@ -466,7 +467,7 @@ async def _check_sentinel(simulation_modes: dict[str, bool]) -> dict[str, Any]:
 
     settings = get_settings()
     raw_url = settings.SENTINEL_API_URL or ""
-    raw_key = settings.SENTINEL_API_KEY or ""
+    raw_key = settings.SENTINEL_API_KEY.get_secret_value() or ""
     if not raw_url.strip() and not raw_key.strip():
         return {"status": "not_configured"}
     if not sentinel_api_key_is_valid(raw_key):
