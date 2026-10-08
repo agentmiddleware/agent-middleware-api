@@ -85,6 +85,33 @@ def _encode_list(value: list[str] | None) -> str | None:
     return json.dumps(value) if value is not None else None
 
 
+def _open_bundle_warnings(model: PolicyBundleModel) -> list[str]:
+    """Warn when a stored bundle restricts nothing.
+
+    A bundle with no tool allowlist, no category allowlist, no cost caps, no
+    daily spend cap, no real-effects demand, and no human-approval demand
+    permits every action up to its risk tier. That is the documented NULL
+    semantics (see ``evaluate_wallet_policy``), but it is usually a
+    misconfiguration rather than intent, so every read surface carries the
+    warning and creation/patch log it.
+    """
+    if (
+        model.allowed_tools_json is None
+        and model.allowed_service_categories_json is None
+        and model.max_cost_per_action is None
+        and model.daily_spend_limit is None
+        and not model.require_real_effects
+        and not model.human_approval_required
+    ):
+        return [
+            "policy_bundle_unrestricted: this bundle sets no tool, category, "
+            "cost, daily-spend, real-effects, or human-approval constraint, "
+            "so it permits every action up to its risk tier. Start from the "
+            "default-deny template in docs/POLICY_ENFORCEMENT.md."
+        ]
+    return []
+
+
 def _to_response(model: PolicyBundleModel) -> PolicyBundleResponse:
     return PolicyBundleResponse(
         policy_id=model.policy_id,
@@ -116,6 +143,7 @@ def _to_response(model: PolicyBundleModel) -> PolicyBundleResponse:
         is_active=model.is_active,
         created_at=model.created_at,
         updated_at=model.updated_at,
+        warnings=_open_bundle_warnings(model),
     )
 
 
@@ -148,7 +176,14 @@ async def create_policy_bundle(request: PolicyBundleCreate) -> PolicyBundleRespo
         session.add(model)
         await session.commit()
         await session.refresh(model)
-    return _to_response(model)
+    response = _to_response(model)
+    if response.warnings:
+        logger.warning(
+            "policy_bundle_unrestricted policy_id=%s wallet_id=%s",
+            response.policy_id,
+            response.wallet_id,
+        )
+    return response
 
 
 async def list_policy_bundles(
@@ -196,7 +231,14 @@ async def patch_policy_bundle(
         session.add(row)
         await session.commit()
         await session.refresh(row)
-    return _to_response(row)
+    response = _to_response(row)
+    if response.warnings:
+        logger.warning(
+            "policy_bundle_unrestricted policy_id=%s wallet_id=%s",
+            response.policy_id,
+            response.wallet_id,
+        )
+    return response
 
 
 async def wallet_human_approval_required(wallet_id: str) -> bool:

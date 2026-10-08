@@ -67,6 +67,7 @@ async def create_environment(
             target="sandbox",
             endpoint="/v1/sandbox/behavioral/environments",
             request_id=http_request.headers.get("X-Request-ID"),
+            allowed=True,
             ok=True,
             metadata={
                 "env_id": env.env_id,
@@ -206,6 +207,7 @@ async def execute_tool(
             endpoint="/v1/sandbox/behavioral/execute",
             request_id=http_request.headers.get("X-Request-ID"),
             estimated_cost=result.cost_estimate,
+            allowed=result.error is None,
             ok=result.error is None,
             error=result.error,
             metadata={

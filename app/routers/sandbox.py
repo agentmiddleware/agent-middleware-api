@@ -175,6 +175,7 @@ async def create_environment(
             target="sandbox",
             endpoint="/v1/sandbox/environments",
             request_id=http_request.headers.get("X-Request-ID"),
+            allowed=True,
             ok=True,
             metadata={
                 "env_id": response.env_id,
@@ -225,6 +226,7 @@ async def submit_action(
             target="sandbox",
             endpoint=f"/v1/sandbox/environments/{env_id}/actions",
             request_id=http_request.headers.get("X-Request-ID"),
+            allowed=True,
             ok=True,
             metadata={
                 "env_id": env_id,
@@ -270,6 +272,7 @@ async def evaluate_environment(
             target="sandbox",
             endpoint=f"/v1/sandbox/environments/{env_id}/evaluate",
             request_id=http_request.headers.get("X-Request-ID"),
+            allowed=True,
             ok=True,
             metadata={
                 "env_id": env_id,

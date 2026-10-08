@@ -136,6 +136,28 @@ per-delegation capability issued to one agent for one job; policy bundles are
 standing wallet-level guardrails that apply to **every** call regardless of
 which permit is presented.
 
+A wallet with **no** bundles evaluates to allow, and inside a bundle an empty
+(`NULL`) allow-list means unrestricted on that dimension, so a missing or
+half-built policy reads as permissive. Bundle creation and patch log
+`policy_bundle_unrestricted` and return it in the response `warnings` when a
+bundle restricts nothing. Start from a default-deny bundle and open only what
+the job needs:
+
+```json
+POST /v1/policies
+{
+  "wallet_id": "<wallet>",
+  "name": "default-deny",
+  "allowed_tools": ["<the one tool this job needs>"],
+  "allowed_service_categories": ["<its category>"],
+  "max_cost_per_action": 10,
+  "daily_spend_limit": 100,
+  "require_real_effects": true,
+  "risk_tier": "low",
+  "human_approval_required": false
+}
+```
+
 ---
 
 ## 6. Layer D — Human approval
