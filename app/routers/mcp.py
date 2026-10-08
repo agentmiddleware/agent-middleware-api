@@ -104,6 +104,7 @@ from ..trust import (
     HumanApprovalUnavailableError,
     IdempotencyBegin,
     IdempotencyConflictError,
+    IdempotencyCreationDisabledError,
     IdempotencyInProgressError,
     InvalidIdempotencyKeyError,
     decode_idempotency_key_header,
@@ -817,6 +818,7 @@ async def _begin_governed_mcp_idempotency(
     legacy_request_payload: dict[str, Any] | None,
     operation_kind: str,
     wait_timeout_seconds: float = 0.0,
+    allow_new_record: bool = True,
 ) -> IdempotencyBegin:
     """Adopt a completed pre-canonical replay without creating a new identity.
 
@@ -847,6 +849,7 @@ async def _begin_governed_mcp_idempotency(
                 request_payload=logical_request_payload,
                 operation_kind=operation_kind,
                 wait_timeout_seconds=wait_timeout_seconds,
+                allow_new_record=allow_new_record,
             )
 
         for candidate_endpoint in _legacy_mcp_idempotency_endpoints(
@@ -871,6 +874,7 @@ async def _begin_governed_mcp_idempotency(
                 request_payload=historical_payload,
                 operation_kind=operation_kind,
                 wait_timeout_seconds=wait_timeout_seconds,
+                allow_new_record=allow_new_record,
             )
         return None
 
@@ -886,6 +890,7 @@ async def _begin_governed_mcp_idempotency(
             request_payload=logical_request_payload,
             operation_kind=operation_kind,
             wait_timeout_seconds=wait_timeout_seconds,
+            allow_new_record=allow_new_record,
         )
     except IntegrityError:
         # The normalized unique index can reject this insert because a legacy
@@ -1412,13 +1417,29 @@ async def _execute_registered_tool_inner(
     # the live price it may have drifted from. Nothing is spent here; the
     # single-use consume happens immediately before the charge.
     quoted = None
+    quote_replay_only = False
     if quote_id:
         quoted = await get_quote_service().validate_for_action(
             quote_id=quote_id,
             wallet_id=wallet_id,
             tool_name=tool_name,
         )
-        if not quoted.allowed or quoted.quote is None:
+        if (
+            governed_call
+            and idempotency_key
+            and quoted.reason == QUOTE_REASON_CONSUMED
+            and quoted.quote is not None
+            and quoted.quote.consumed_by_idempotency_key == idempotency_key
+        ):
+            # Retrieving a completed result does not spend its quote again.
+            # Keep the normal request-hash and replay-access checks below,
+            # but forbid creating an owner if this completed row disappears.
+            completed = await idem.get_governed_mcp_record(
+                wallet_id=wallet_id,
+                idempotency_key=idempotency_key,
+            )
+            quote_replay_only = completed is not None and bool(completed.response_json)
+        if (not quoted.allowed and not quote_replay_only) or quoted.quote is None:
             reason = quoted.reason or "quote_invalid"
             await _audit_mcp_invocation(
                 effects_committed=False,
@@ -1563,9 +1584,10 @@ async def _execute_registered_tool_inner(
                     operation_kind=execution_backend,
                     wait_timeout_seconds=(
                         idempotency_wait_seconds
-                        if execution_backend == "upstream_mcp"
+                        if execution_backend == "upstream_mcp" and not quote_replay_only
                         else 0.0
                     ),
+                    allow_new_record=not quote_replay_only,
                 )
             replay = idem_begin.replay
             idem_started = True
@@ -1574,6 +1596,10 @@ async def _execute_registered_tool_inner(
                 if action_identity is not None:
                     owned_record["endpoint"] = action_identity.endpoint
                     owned_record["key"] = action_identity.idempotency_key
+        except IdempotencyCreationDisabledError as exc:
+            # The consumed quote permits cached recovery only, never a new
+            # execution even if retention removed the row after our probe.
+            raise PermissionError(QUOTE_REASON_CONSUMED) from exc
         except (IdempotencyConflictError, IdempotencyInProgressError) as exc:
             await _audit_mcp_invocation(
                 effects_committed=False,
@@ -1613,6 +1639,11 @@ async def _execute_registered_tool_inner(
             )
             await _raise_replayed_error(replay)
             return replay.response_json
+
+    if quote_replay_only:
+        # An empty or unavailable cached response must not fall through to
+        # fresh admission under an already consumed quote.
+        raise PermissionError(QUOTE_REASON_CONSUMED)
 
     permit_model = None
     if governed_call:
