@@ -2,17 +2,40 @@
 Framework-Specific Tool Adapters
 ===============================
 Convert B2A tools to framework-specific formats.
+
+LEGACY, UNGOVERNED: every factory in this module skips permits, idempotency
+keys, and signed receipts. New code should use the governed wrappers first:
+``framework_integrations.LangGraphGovernedTools``,
+``framework_integrations.PydanticAIGovernedTools``,
+``framework_integrations.bridges.get_crewai_governed_tool``, or
+``framework_integrations.bridges.get_openai_governed_runner``. The factories
+below stay for existing callers and emit ``DeprecationWarning`` at call time.
 """
 
+import warnings
 from typing import Any, TypeVar
 from .client import B2AClient
 
 T = TypeVar("T")
 
 
+def _warn_legacy(factory_name: str, governed_alternative: str) -> None:
+    warnings.warn(
+        f"{factory_name} is legacy and UNGOVERNED: it performs no permit "
+        f"check and returns no signed receipt. Use {governed_alternative} "
+        "for the permit plus receipt path.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+
+
 def get_langgraph_tools(client: B2AClient) -> list[Any]:
     """
     Get LangGraph-compatible tools from B2A client.
+
+    LEGACY, UNGOVERNED: these tools call the API with no permit check and
+    no signed receipt. Prefer ``framework_integrations.LangGraphGovernedTools``
+    (permit plus idempotency key plus signed receipt per call).
 
     Usage:
     ```python
@@ -31,6 +54,7 @@ def get_langgraph_tools(client: B2AClient) -> list[Any]:
     ``ainvoke``; LangChain refuses a sync ``invoke`` of an async-only tool
     rather than returning an un-awaited coroutine.
     """
+    _warn_legacy("get_langgraph_tools", "LangGraphGovernedTools")
     try:
         from langchain_core.tools import tool
     except ImportError:
@@ -151,6 +175,14 @@ def get_autogen_tools(client: B2AClient) -> list[Any]:
     """
     Get AutoGen-compatible tools from B2A client.
 
+    LEGACY, UNGOVERNED: this function map calls the API with no permit
+    check and no signed receipt. Prefer the governed wrappers
+    (``framework_integrations.LangGraphGovernedTools`` or
+    ``framework_integrations.bridges.get_openai_governed_runner`` for an
+    analogous governed runner). The entries are raw async client methods:
+    call them from async code and await the results; a sync caller that
+    drops the coroutine sends no request.
+
     Usage:
     ```python
     import autogen
@@ -168,6 +200,7 @@ def get_autogen_tools(client: B2AClient) -> list[Any]:
 
     Returns a dict mapping function names to functions for AutoGen.
     """
+    _warn_legacy("get_autogen_tools", "LangGraphGovernedTools")
     return {
         "emit_telemetry": client.emit_telemetry,
         "get_balance": client.get_balance,
@@ -181,6 +214,10 @@ def get_autogen_tools(client: B2AClient) -> list[Any]:
 def get_llamaindex_tools(client: B2AClient) -> list[Any]:
     """
     Get LlamaIndex-compatible tools from B2A client.
+
+    LEGACY, UNGOVERNED: these tools call the API with no permit check and
+    no signed receipt. Prefer ``framework_integrations.LangGraphGovernedTools``
+    (permit plus idempotency key plus signed receipt per call).
 
     Usage:
     ```python
@@ -199,6 +236,7 @@ def get_llamaindex_tools(client: B2AClient) -> list[Any]:
     functions (``B2AClient`` is an async client), so ``acall`` awaits the
     request in the caller's event loop.
     """
+    _warn_legacy("get_llamaindex_tools", "LangGraphGovernedTools")
     try:
         from llama_index.core.tools import FunctionTool
     except ImportError:

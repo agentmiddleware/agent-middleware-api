@@ -2,42 +2,54 @@
 Agent Middleware API — Framework Integrations
 ================================================
 
-Integration packages for popular agent frameworks:
-- LangGraph
-- CrewAI
-- AutoGen
-- LlamaIndex
+Start with the governed wrappers: every call runs the permit plus
+idempotency key plus signed receipt loop.
+
+- LangGraph: ``LangGraphGovernedTools`` (this folder)
+- Pydantic AI: ``PydanticAIGovernedTools`` (this folder)
+- CrewAI: ``bridges.get_crewai_governed_tool`` (wraps
+  ``wrappers/crewai-agent-middleware``)
+- OpenAI: ``bridges.get_openai_governed_runner`` (wraps
+  ``wrappers/openai-agent-middleware``)
 
 ## Installation
 
 No PyPI package is published; import this module from a checkout of the
 repository after `python -m pip install -r requirements.txt`.
 
-## Quick Start
+## Quick Start (governed)
 
 ```python
-from framework_integrations import B2AClient, get_langgraph_tools, get_llamaindex_tools
+from b2a_sdk.edge_client import GovernedEdgeSession
+from framework_integrations import LangGraphGovernedTools
 
-# Initialize client
-client = B2AClient(
-    api_url="http://localhost:8000",
-    api_key="your-api-key",
-    wallet_id="your-wallet-id"
-)
+session = await GovernedEdgeSession.open(sdk, permit_id="...", wallet_id="...")
+tools = LangGraphGovernedTools(session)
 
-# Get tools for your framework (async tools: drive them with ainvoke / acall)
-langgraph_tools = get_langgraph_tools(client)
-llamaindex_tools = get_llamaindex_tools(client)
+@tools.wrap
+async def notes_write(note: str = "") -> dict:
+    "Client-side stub; the registered tool runs through the governed loop."
+    raise AssertionError("stub body never runs locally")
+
+result = await notes_write(note="hello", idempotency_key="run-1-notes-1")
+receipt = notes_write.last_receipt  # typed Receipt for this call
 ```
+
+## Legacy factories (UNGOVERNED)
+
+`get_langgraph_tools`, `get_llamaindex_tools`, and `get_autogen_tools`
+skip permits and receipts and emit `DeprecationWarning`. They stay for
+existing callers only.
 
 `get_crewai_tools` raises `NotImplementedError`: CrewAI runs each async tool
 on a fresh event loop, which the async `B2AClient` cannot survive between
-calls. Use the governed `CrewAIB2ATool` in `wrappers/crewai-agent-middleware`.
+calls. Use the governed `bridges.get_crewai_governed_tool` instead.
 
 ## Framework-Specific Guides
 
 See individual README files for each framework:
 - README.langgraph.md
+- README.pydantic_ai.md
 - README.crewai.md
 - README.autogen.md
 - README.llamaindex.md
@@ -45,6 +57,7 @@ See individual README files for each framework:
 
 __version__ = "0.4.1"
 
+from .bridges import get_crewai_governed_tool, get_openai_governed_runner
 from .client import B2AClient, B2AConfig
 from .tools import (
     get_langgraph_tools,
@@ -82,6 +95,8 @@ __all__ = [
     "B2AConfig",
     "LangGraphGovernedTools",
     "PydanticAIGovernedTools",
+    "get_crewai_governed_tool",
+    "get_openai_governed_runner",
     "get_langgraph_tools",
     "get_crewai_tools",
     "get_autogen_tools",

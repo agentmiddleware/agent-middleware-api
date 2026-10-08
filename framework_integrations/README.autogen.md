@@ -2,6 +2,16 @@
 
 Use Agent Middleware API tools with Microsoft AutoGen agents.
 
+## Recommended: governed tools
+
+Start with the governed wrappers (`framework_integrations.LangGraphGovernedTools`
+or `PydanticAIGovernedTools`, see `README.pydantic_ai.md`): each call runs
+the permit plus idempotency key plus signed receipt loop. The
+`get_autogen_tools` function map below is legacy and UNGOVERNED (no permit
+check, no receipt, emits `DeprecationWarning`); its entries are raw async
+client methods, so call them from async code and await the results. It stays
+for existing callers only.
+
 ## Installation
 
 No PyPI package is published. Work from a checkout of this repository:
