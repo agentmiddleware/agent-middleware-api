@@ -76,3 +76,7 @@ Thumbs.db
 # Agent tooling scratch: throwaway git worktrees used to run checks in
 # isolation. Full repo copies and coverage artifacts — never commit these.
 .claude/worktrees/
+
+# JavaScript tooling: installed dependencies stay local, lockfiles stay
+# committed so installs reproduce.
+node_modules/

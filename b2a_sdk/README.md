@@ -207,10 +207,19 @@ instead of debiting twice. A key reused for a different charge raises
 `capture_traceback=True` to also send the exception message and traceback,
 which can contain secrets.
 
+## TypeScript gateway client
+
+JavaScript buyers use `typescript/`, a minimal typed client for the same
+permit, call and receipt loop (`discoverTools`, `createPermit`,
+`invokeTool`, `getReceipt`, `verifyReceipt`) with typed errors. It has no
+runtime dependencies and its tests run against stubbed fetch. See
+[`typescript/README.md`](typescript/README.md).
+
 ## Build and test
 
 ```bash
 uv build b2a_sdk
 python -m pytest b2a_sdk/tests
 ruff check b2a_sdk/src b2a_sdk/tests
+cd b2a_sdk/typescript && npm test
 ```
