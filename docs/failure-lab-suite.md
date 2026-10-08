@@ -8,15 +8,15 @@ make failure-lab-suite      # the fast tier
 make failure-lab-all        # every scenario, including the crash and concurrency tests
 ```
 
-> **There are two failure labs in this repository and they are not the
-> same thing.** [`failure-lab.md`](failure-lab.md) documents
-> `scripts/failure_lab.py`, which measures one workflow under one injected
-> fault and is what `make failure-lab` runs. This document describes the
-> `failure_lab/` package: fourteen scenarios, an evidence bundle, a claims
-> manifest, an independent verifier and a self-serve diagnostic. The two
-> overlap on the lost-response scenario and reach the same conclusion
-> there, which is the only cross-check either of them gets. Consolidating
-> them is an open decision, not an oversight.
+> **Two harnesses, one recommended entry point.** [`failure-lab.md`](failure-lab.md)
+> documents `scripts/failure_lab.py`, the original single-scenario run kept
+> for CI cross-check (what `make failure-lab` runs). This document describes
+> the `failure_lab/` package: fourteen scenarios, an evidence bundle, a claims
+> manifest, an independent verifier and a self-serve diagnostic. When in
+> doubt, run the package (`make failure-lab-suite`): it covers the
+> single-scenario run's lost-response case too and reaches the same conclusion
+> there, which is the only cross-check either of them gets. Consolidating them
+> into one entry point is an open decision, not an oversight.
 
 This document describes the **Agent Gateway Failure Lab** (`failure_lab/`): a
 harness that drives the Agent Middleware API under realistic failure
@@ -390,6 +390,12 @@ not own.
   and signing seed in a temporary directory.
 - No external network requests. Any external-target mode requires an explicit
   opt-in that is off by default.
+- No prospect systems, ever, from this harness. No adapter ships that points
+  failure traffic at an outside system: field proof runs against the sample
+  refund tool in the sandbox. Whether a supervised external adapter will ever
+  exist is an open product decision. Until it is made, "run it against yours"
+  means the clean-room judge (`make failure-lab-integration-check`), where the
+  prospect brings an adapter to us.
 - Deterministic cleanup: run directories are removed on exit, including on
   failure.
 - Secrets are redacted from everything written to disk or served over HTTP.
@@ -418,6 +424,21 @@ The suite's exit status is non-zero when any scenario errors, **or** when an
 observed verdict differs from the expectation the product documents. An
 undocumented improvement fails the build too, because it means the tests and
 the documentation disagree and one of them needs changing.
+
+### The five minute version
+
+For a live call, run one scenario at a time with the full result document.
+T03 is the headline failure; T10 shows which receipt fields the signature
+covers and which it does not:
+
+```bash
+python -m failure_lab.dev_run T03 --full     # the lost response, start to finish
+python -m failure_lab.dev_run T10 --full     # the tampering matrix
+```
+
+The slow tier (crash, concurrency, revocation races) does not fit a live
+call. Generate its evidence ahead of time with `make failure-lab-evidence`
+and bring the bundle instead.
 
 ---
 

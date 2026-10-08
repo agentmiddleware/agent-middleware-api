@@ -10,7 +10,8 @@ make failure-lab-check    # the same run, JSON summary only (what CI asserts)
 > `failure_lab/` package, which runs fourteen scenarios and produces a
 > signed evidence bundle. It covers this document's scenario too, and
 > reaches the same conclusion on it. This document describes the single
-> focused run that `make failure-lab` still executes.
+> focused run that `make failure-lab` still executes. New readers should
+> start with the suite document; this script stays as the CI cross-check.
 
 One consequential workflow (a vendor payout), one injected fault (the
 downstream executes, then its response is lost on the wire), measured across

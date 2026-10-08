@@ -34,6 +34,11 @@ Run::
 
     make failure-lab                 # transcript + report
     make failure-lab-check           # JSON summary only, same assertions
+
+Note: this is the original single-scenario script, kept as the CI
+cross-check. The fourteen-scenario package (``failure_lab/``,
+``make failure-lab-suite``, ``docs/failure-lab-suite.md``) covers this
+scenario too; run that when in doubt.
 """
 
 from __future__ import annotations

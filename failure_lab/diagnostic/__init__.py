@@ -1,4 +1,4 @@
-"""The self-serve diagnostic: **Agent Action Safety Check**.
+"""The self-serve diagnostic: **Lost-response failure check**.
 
 A developer opens one page on their own machine, presses one button, and the
 harness runs a real failure against a disposable sandbox: an agent calls a
