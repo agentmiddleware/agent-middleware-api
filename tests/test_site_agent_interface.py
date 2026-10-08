@@ -368,6 +368,115 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
         assert suffix not in page
 
 
+def test_landing_descriptions_lead_with_plain_language(tmp_path) -> None:
+    """Search and social summaries must read plain first, jargon later.
+
+    gtm-41: a non-technical budget owner stalls on the technical meta
+    description, so the indexed and shared summaries open with the refund
+    story and leave the scoped technical wording for the page body.
+    """
+
+    output = tmp_path / "site"
+    result = _render_site(output, VALID_TEST_CONTACTS)
+    assert result.returncode == 0, result.stderr
+
+    page = (output / "index.html").read_text(encoding="utf-8")
+    heads = re.findall(r"<meta\s[^>]*>", page)
+    descriptions = [
+        tag
+        for tag in heads
+        if 'name="description"' in tag
+        or 'property="og:description"' in tag
+        or 'name="twitter:description"' in tag
+    ]
+    assert len(descriptions) == 3, (
+        f"expected meta, og, and twitter descriptions, found {len(descriptions)}"
+    )
+    for tag in descriptions:
+        content = re.search(r'content="([^"]+)"', tag).group(1)
+        assert content.startswith("An agent retries a timed-out refund"), (
+            f"description no longer leads with the plain refund story: {content!r}"
+        )
+        for term in (
+            "upstream-MCP",
+            "idempotency key",
+            "Ed25519",
+            "at-most-one gateway dispatch",
+        ):
+            assert term not in content, (
+                f"description leads with jargon again ({term}): {content!r}"
+            )
+        assert "Paid pilot" in content
+
+    webpage = next(
+        node
+        for node in _json_ld_graph(page, "index.html")
+        if node.get("@type") == "WebPage"
+    )
+    assert webpage["description"].startswith("An agent retries a timed-out refund")
+
+
+def test_landing_offers_a_copyable_template_without_a_mail_app(tmp_path) -> None:
+    """The intake must work for a buyer with no desktop mail app.
+
+    gtm-41: every primary button opens a mail app, so the email-only build
+    (no booking link) carries a static copyable address plus the whole
+    intake template beside the hero button. Static markup, so it works
+    with JavaScript off.
+    """
+
+    output = tmp_path / "site"
+    result = _render_site(output, EMAIL_ONLY_TEST_CONTACTS)
+    assert result.returncode == 0, result.stderr
+
+    page = (output / "index.html").read_text(encoding="utf-8")
+    text = _page_text(page)
+    assert "No mail app? Copy this address and template instead" in text
+    assert '<details class="email-template">' in page
+    assert "One-tool paid pilot enquiry" in text
+    assert "Who owns the budget and the target decision date." in text
+    assert "never production secrets" in text.casefold()
+    assert "@@PUBLIC_" not in page
+
+
+def test_limitations_point_at_what_to_do_instead(tmp_path) -> None:
+    """The honest limitations list must route each needy reader onward.
+
+    gtm-41: keep the limitations, but add one line pointing each limitation
+    at what to do instead, so payments and compliance seekers do not bounce.
+    """
+
+    output = tmp_path / "site"
+    result = _render_site(output, VALID_TEST_CONTACTS)
+    assert result.returncode == 0, result.stderr
+
+    page = (output / "index.html").read_text(encoding="utf-8")
+    text = _page_text(page)
+    assert "What to do instead" in text
+    assert "payment rails or settlement" in text
+    assert 'href="#pilot"' in page
+    assert 'href="/compare/"' in page
+
+
+def test_arcade_note_is_one_line(tmp_path) -> None:
+    """The waiting-room note must stay a one-line aside, not a second pitch.
+
+    gtm-41: a long game note beside trust copy confuses a risk buyer, so the
+    launcher keeps a single short line that still says nothing is billed.
+    """
+
+    output = tmp_path / "site"
+    result = _render_site(output, VALID_TEST_CONTACTS)
+    assert result.returncode == 0, result.stderr
+
+    page = (output / "index.html").read_text(encoding="utf-8")
+    match = re.search(r'<p class="footer-arcade-note">(.*?)</p>', page, re.DOTALL)
+    assert match, "arcade note is missing"
+    note = " ".join(match.group(1).split())
+    assert "Nothing in there is billed, metered, or real." in note
+    assert len(note) <= 140, f"arcade note grew back into a paragraph: {note!r}"
+
+
 @pytest.mark.parametrize(
     "booking_url",
     [
