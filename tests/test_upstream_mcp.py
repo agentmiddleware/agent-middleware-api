@@ -1604,3 +1604,47 @@ async def test_disabled_startup_helper_unregisters_previous_upstream() -> None:
     )
     assert result is None
     assert registry.get_local("partner.notes.write") is None
+
+
+@pytest.mark.anyio
+async def test_injected_http_client_with_wrong_token_is_rejected() -> None:
+    injected = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda _request: httpx.Response(204)),
+        headers={"Authorization": "Bearer wrong-token"},
+        follow_redirects=False,
+    )
+    adapter = UpstreamMcpAdapter(_configuration(), http_client=injected)
+    try:
+        with pytest.raises(UpstreamMcpConfigurationError):
+            async with adapter._http_client():
+                pass
+    finally:
+        await injected.aclose()
+
+
+@pytest.mark.anyio
+async def test_injected_http_client_token_uses_constant_time_compare(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import hmac as hmac_module
+
+    seen: list[tuple[str, str]] = []
+    real_compare_digest = hmac_module.compare_digest
+
+    def spy(first: str, second: str) -> bool:
+        seen.append((first, second))
+        return real_compare_digest(first, second)
+
+    monkeypatch.setattr(upstream_mcp_module.hmac, "compare_digest", spy)
+    injected = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda _request: httpx.Response(204)),
+        headers={"Authorization": "Bearer secret-partner-token"},
+        follow_redirects=False,
+    )
+    adapter = UpstreamMcpAdapter(_configuration(), http_client=injected)
+    try:
+        async with adapter._http_client():
+            pass
+    finally:
+        await injected.aclose()
+    assert seen == [("Bearer secret-partner-token", "Bearer secret-partner-token")]

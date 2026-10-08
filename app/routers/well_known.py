@@ -165,8 +165,10 @@ def get_agent_first_metadata() -> dict[str, Any]:
         "proof_surfaces_enabled": bool(cfg.ENABLE_PROOF_SURFACES),
         "human_observability": {
             "human_dashboard_url": "/dashboard",
-            "interactive_docs_url": "/docs",
-            "redoc_url": "/redoc",
+            # Null when ENABLE_API_DOCS=false so the manifest never
+            # advertises docs routes that answer 404.
+            "interactive_docs_url": "/docs" if cfg.ENABLE_API_DOCS else None,
+            "redoc_url": "/redoc" if cfg.ENABLE_API_DOCS else None,
             "note": (
                 "The /dashboard is a status and evidence index. "
                 "Authenticated tenant inspection remains API-only. "

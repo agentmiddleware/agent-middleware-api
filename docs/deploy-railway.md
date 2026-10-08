@@ -333,6 +333,7 @@ in committed defaults.
 | `DEBUG` | `false` | Empty-key auth bootstrap is forbidden in prod-like |
 | `ENABLE_PROOF_SURFACES` | `false` | Mount only core trust routers + MCP |
 | `ENABLE_PUBLIC_MCP_ENDPOINT` | `false` | Anonymous MCP discovery is local-only. Production-like boots **refuse to start** if this is true. Live `api.thisisatest.tech` historically had it on; set it false **before** deploying the Narrow lockdown commit or the new image will not boot. Receipt verification stays on `/.well-known/trust-keys.json`. |
+| `ENABLE_API_DOCS` | `false` | Unmounts unauthenticated `/docs`, `/redoc`, and `/openapi.json` from the public origin for customer pilots. |
 | `ENABLE_STANDARD_MCP_ENDPOINT` | `false` or unset | Auto-minted permits on `POST /mcp`. Do not turn this on. |
 | `ENABLE_DOGFOOD_TOOL` | `false` | The simulated `partner.notes.write` tool is local proof infrastructure, not a production integration. The public health projection does not publish this flag and production tool catalogs require a key, so it is not publicly observable: the private in-container `--runtime-posture` check fails unless it (and `ENABLE_DOGFOOD_SECOND_TOOL`) resolves to false, and the live gate fails if a published value is anything but `false`. |
 | `TRUST_MODE_ENABLED` | `true` | Shipped default; keep it |
@@ -360,6 +361,17 @@ route takes header credentials, and a wildcard disables credentialed CORS (see
 [`SECURITY_LIMITATIONS.md`](../SECURITY_LIMITATIONS.md), "CORS Posture"). Set
 an explicit origin list, without `*`, only when a browser app must send
 credentials.
+
+### Network egress allowlist (required, not optional)
+
+The in-app outbound URL guard (scheme, loopback, private-range, and DNS
+resolution checks in `app/core/url_guard.py`) is one layer, not the whole
+story: it does not try to defeat DNS rebinding, and it is one setting away
+from off. Every customer pilot must also enforce a network-layer egress
+allowlist or proxy limited to the single configured upstream origin
+(`MCP_UPSTREAM_URL`), so the gateway host cannot reach cloud metadata
+endpoints or internal services even if the app guard is misconfigured (see
+[`SECURITY_LIMITATIONS.md`](../SECURITY_LIMITATIONS.md), egress note).
 
 Committed `.railway/railway.ts` contains the complete API variable-name set but
 no values: every name, including `VALID_API_KEYS`, signing material, and

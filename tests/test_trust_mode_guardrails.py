@@ -8,10 +8,12 @@ import pytest
 from app.core.config import Settings
 from app.core.trust_mode import (
     TrustModeGuardrailError,
+    describe_debug_open_mode,
     describe_permissive_trust_mode,
     is_production_like_environment,
     validate_trust_mode_config,
     validate_trust_mode_guardrails,
+    warn_if_debug_open_mode,
     warn_if_trust_mode_permissive,
 )
 
@@ -653,3 +655,44 @@ class TestExplicitEnvironmentOnHostedRuntime:
         monkeypatch.setenv("RAILWAY_ENVIRONMENT_ID", "env-123")
         settings = Settings(_env_file=None, ENVIRONMENT="dev")
         validate_trust_mode_guardrails(settings)
+
+
+@pytest.mark.parametrize(
+    ("debug", "valid_api_keys", "static_dev_api_keys", "expected_open"),
+    [
+        (False, "", "", False),
+        (False, "", "unused", False),
+        (True, "operator-key-abc", "", False),
+        (True, "", "amw_dev_test", False),
+        (True, "", "", True),
+        (True, " , ,", "", True),
+    ],
+)
+def test_describe_debug_open_mode(
+    debug: bool,
+    valid_api_keys: str,
+    static_dev_api_keys: str,
+    expected_open: bool,
+):
+    description = describe_debug_open_mode(
+        debug=debug,
+        valid_api_keys=valid_api_keys,
+        static_dev_api_keys=static_dev_api_keys,
+    )
+    assert (description is not None) == expected_open
+    if expected_open:
+        assert "bootstrap admin" in description
+
+
+def test_warn_if_debug_open_mode_logs_warning_when_open():
+    settings = Settings(DEBUG=True, VALID_API_KEYS="", STATIC_DEV_API_KEYS="")
+    records = _capture_trust_mode_warnings(lambda: warn_if_debug_open_mode(settings))
+    assert any("debug_open_mode" in record.getMessage() for record in records), records
+
+
+def test_warn_if_debug_open_mode_silent_with_keys():
+    settings = Settings(DEBUG=True, VALID_API_KEYS="operator-key-abc")
+    records = _capture_trust_mode_warnings(lambda: warn_if_debug_open_mode(settings))
+    assert all("debug_open_mode" not in record.getMessage() for record in records), (
+        records
+    )

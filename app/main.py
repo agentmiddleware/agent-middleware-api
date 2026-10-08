@@ -52,6 +52,7 @@ from .middleware.security_headers import SecurityHeadersMiddleware
 from .core.trust_mode import (
     is_production_like_environment,
     validate_trust_mode_guardrails,
+    warn_if_debug_open_mode,
     warn_if_trust_mode_permissive,
 )
 from .db.database import SchemaInitError, init_db, close_db
@@ -169,6 +170,7 @@ _SIGNING_KEY_REMEDIATION = {
 async def lifespan(app: FastAPI):
     validate_trust_mode_guardrails(settings)
     warn_if_trust_mode_permissive(settings)
+    warn_if_debug_open_mode(settings)
     # Operator-facing posture record. The unauthenticated /health/dependencies
     # payload no longer publishes per-service simulation modes when proof
     # surfaces are unmounted, so this startup line is where that truth lives
@@ -530,9 +532,11 @@ app = FastAPI(
         "Start at `/.well-known/agent.json`, then `/llms.txt` and "
         "`/mcp/tools.json`. Prefer `PUBLIC_URL` over any localhost server entry."
     ),
-    docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_url="/openapi.json",
+    # ENABLE_API_DOCS=false unmounts the interactive docs and the schema
+    # from the public origin for customer pilots (smaller recon surface).
+    docs_url="/docs" if settings.ENABLE_API_DOCS else None,
+    redoc_url="/redoc" if settings.ENABLE_API_DOCS else None,
+    openapi_url="/openapi.json" if settings.ENABLE_API_DOCS else None,
     # Omit contact metadata until an accountable, monitored identity is set.
     # This avoids presenting placeholder support details as a real escalation path.
     contact=public_contact or None,

@@ -44,6 +44,13 @@ class Settings(BaseSettings):
     # instances so receipts and manifests never claim the hosted issuer.
     PUBLIC_URL: str = ""
 
+    # --- Interactive API docs ---
+    # Swagger UI (/docs), ReDoc (/redoc), and the OpenAPI schema
+    # (/openapi.json) are mounted unauthenticated on the same origin as the
+    # API. Keep them on for local development; set false on customer pilots
+    # and any internet-reachable deployment to shrink the recon surface.
+    ENABLE_API_DOCS: bool = True
+
     # --- Public operator identity ---
     # OpenAPI contact metadata is omitted until real, monitored values are set.
     # Never ship placeholder names or addresses on a public deployment.
