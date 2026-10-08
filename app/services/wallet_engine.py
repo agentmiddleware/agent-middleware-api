@@ -343,6 +343,13 @@ class WalletEngine:
 
         No BEGIN/COMMIT here — the caller's transaction owns those.
         """
+        if not initial_credits.is_finite() or initial_credits < Decimal("0"):
+            # The HTTP schema already refuses these, but composed service
+            # callers reach this path directly. A negative opening writes a
+            # liability wallet with no ledger trace, and a non-finite one
+            # persists inf/nan into the balance or fails deep in the driver
+            # with an IntegrityError instead of a plain ValueError.
+            raise ValueError("initial_credits must be a finite, non-negative amount")
         wallet_id = f"spn-{uuid.uuid4().hex[:12]}"
 
         wallet = WalletModel(
@@ -862,9 +869,14 @@ class WalletEngine:
         Raises:
             WalletNotFoundError: If either wallet doesn't exist
             InsufficientFundsError: If source has insufficient balance
-            ValueError: If amount <= 0 or same wallet IDs
+            ValueError: If amount is not a positive finite number, both IDs
+            match, or either side is not in a spendable status
         """
-        if amount <= Decimal("0"):
+        if not amount.is_finite() or amount <= Decimal("0"):
+            # Non-finite amounts never reach the guarded debit intact: NaN
+            # blows up in decimal arithmetic with InvalidOperation and
+            # Infinity only fails later as a confusing insufficient-funds
+            # error. Refuse both up front like charge() refuses bad units.
             raise ValueError("Transfer amount must be positive")
 
         if from_wallet_id == to_wallet_id:
@@ -890,6 +902,14 @@ class WalletEngine:
                 if source.status not in SPENDABLE_WALLET_STATUSES:
                     raise ValueError(
                         f"Source wallet is {source.status} and cannot transfer credits"
+                    )
+                if dest.status not in SPENDABLE_WALLET_STATUSES:
+                    # Credits parked in a frozen, suspended, or closed wallet
+                    # can neither be spent nor (for non-child wallets)
+                    # reclaimed, so refuse before the source is debited.
+                    raise ValueError(
+                        f"Destination wallet is {dest.status} "
+                        "and cannot receive credits"
                     )
                 await self.ensure_wallet_not_expired(session, source)
                 if (
@@ -929,15 +949,31 @@ class WalletEngine:
                     )
                 # The debit is already applied in this transaction, so a credit
                 # that matches no row would leave the transfer reporting success
-                # with the credits on neither side. Only ``wallet_id`` guards
-                # this write, so a miss means the destination row is gone --
-                # abort rather than commit half a transfer.
+                # with the credits on neither side. Spendability travels with
+                # this write too, so a freeze landing between the check above
+                # and this statement cannot park credits in a wallet that just
+                # became unspendable -- the miss handler re-reads the row
+                # (``_apply_balance_delta`` refreshes on a miss) and reports
+                # the freeze instead of a disappearance.
                 if not await self._apply_balance_delta(
                     session,
                     dest,
                     balance_delta=amount,
                     lifetime_credits_delta=amount,
+                    require_spendable=True,
                 ):
+                    # Re-read rather than touching ``dest`` attributes: when
+                    # the miss means the row is gone, the instance is deleted
+                    # and attribute access would raise before the real answer.
+                    current = await session.get(WalletModel, to_wallet_id)
+                    if (
+                        current is not None
+                        and current.status not in SPENDABLE_WALLET_STATUSES
+                    ):
+                        raise ValueError(
+                            f"Destination wallet is {current.status} "
+                            "and cannot receive credits"
+                        )
                     raise self._wallet_not_found_error(to_wallet_id)
 
                 # Create ledger entries on both sides
