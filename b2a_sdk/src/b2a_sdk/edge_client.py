@@ -174,11 +174,16 @@ class B2AEdgeClient:
         permit = permit_id.strip() if isinstance(permit_id, str) else ""
         if not permit:
             raise ValueError("permit_id must not be blank")
-        key = idempotency_key.strip() if isinstance(idempotency_key, str) else ""
-        if not key:
+        if any(ord(char) < 32 or ord(char) == 127 for char in permit):
+            raise ValueError("permit_id must not contain control characters")
+        if not isinstance(idempotency_key, str):
             raise ValueError("idempotency_key must not be blank")
-        if len(key) > 128:
-            raise ValueError("idempotency_key must be at most 128 characters")
+        # Same strip, length, and control-character rules as
+        # AgentMiddlewareClient._validate_idempotency_key. Imported here so
+        # loading LocalPermitValidator does not import the full client.
+        from .client import AgentMiddlewareClient
+
+        key = AgentMiddlewareClient._validate_idempotency_key(idempotency_key)
         payload = {
             "session_id": session_id,
             "action": action,

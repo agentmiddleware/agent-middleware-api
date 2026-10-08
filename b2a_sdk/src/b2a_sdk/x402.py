@@ -25,8 +25,10 @@ from .errors import (
     AuthenticationError,
     AuthorizationError,
     IdempotencyConflictError,
+    InsufficientFundsError,
     PermitDeniedError,
     TransportError,
+    _coerce_shortfall,
 )
 
 _AMOUNT_HEADER = "x-402-amount"
@@ -240,13 +242,32 @@ class X402Client:
             detail = _error_detail(payload, f"HTTP {response.status_code}")
             if response.status_code == 401:
                 raise AuthenticationError(detail, status_code=401, payload=payload)
-            # Deliberate divergence from client.py's _raise_http_error, which
-            # maps permit_* details to PermitDeniedError only on 403: the x402
-            # settle endpoint returns permit denials as 400 (denied reason) or
-            # 404 (permit_not_found), so any permit_* detail is surfaced as
-            # the typed permit error regardless of status.
+            if detail == "insufficient_funds":
+                body_detail = payload.get("detail")
+                detail_payload = body_detail if isinstance(body_detail, dict) else {}
+                raw_top_up = detail_payload.get("top_up_url")
+                top_up_url = (
+                    raw_top_up if isinstance(raw_top_up, str) and raw_top_up.strip() else None
+                )
+                raise InsufficientFundsError(
+                    wallet_id=wallet_id,
+                    shortfall=_coerce_shortfall(detail_payload.get("shortfall", "unknown")),
+                    top_up_url=top_up_url,
+                    payload=payload,
+                )
+            # permit_write_contended is HTTP 503. The server abandons that
+            # record and the same idempotency key should be retried. Reporting
+            # it as PermitDeniedError with a hardcoded 403 makes callers stop.
+            # Other permit_* details are real denials (400, or 404 for
+            # permit_not_found) and keep the status the server sent.
+            if detail == "permit_write_contended" or response.status_code == 503:
+                raise APIError(detail, status_code=response.status_code, payload=payload)
             if detail.startswith("permit_"):
-                raise PermitDeniedError(detail, payload=payload)
+                raise PermitDeniedError(
+                    detail,
+                    payload=payload,
+                    status_code=response.status_code,
+                )
             if response.status_code == 403:
                 raise AuthorizationError(detail, status_code=403, payload=payload)
             if response.status_code == 409:

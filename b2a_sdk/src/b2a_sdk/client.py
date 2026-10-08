@@ -24,6 +24,7 @@ from .errors import (
     InsufficientFundsError,
     PermitDeniedError,
     TransportError,
+    _coerce_shortfall,
 )
 from .models import (
     ACPCheckoutRequest,
@@ -188,6 +189,10 @@ class AgentMiddlewareClient:
             raise ValueError("idempotency_key must not be blank")
         if len(key) > 128:
             raise ValueError("idempotency_key must be at most 128 characters")
+        # C0 and DEL. The trust plane rejects these, and a newline or return
+        # inside a header is not a stable ledger key.
+        if any(ord(char) < 32 or ord(char) == 127 for char in key):
+            raise ValueError("idempotency_key must not contain control characters")
         return key
 
     @staticmethod
@@ -221,10 +226,12 @@ class AgentMiddlewareClient:
         if status_code == 402:
             body_detail = payload.get("detail")
             detail_payload = body_detail if isinstance(body_detail, dict) else {}
+            raw_top_up = detail_payload.get("top_up_url")
+            top_up_url = raw_top_up if isinstance(raw_top_up, str) and raw_top_up.strip() else None
             raise InsufficientFundsError(
                 wallet_id=wallet_id or "unknown",
-                shortfall=detail_payload.get("shortfall"),
-                top_up_url=detail_payload.get("top_up_url"),
+                shortfall=_coerce_shortfall(detail_payload.get("shortfall", "unknown")),
+                top_up_url=top_up_url,
                 payload=payload,
             )
         if status_code == 403:
@@ -520,8 +527,10 @@ class AgentMiddlewareClient:
             units: Number of units consumed (default: 1.0)
             request_path: Optional API path for tracking
             description: Optional description of the charge
-            idempotency_key: Optional key sent as ``Idempotency-Key``; must be
-                nonblank and at most 128 characters
+            idempotency_key: Optional key sent as ``Idempotency-Key``.
+                Surrounding whitespace is removed. Blank, longer than 128
+                characters, or containing a control character: refused
+                before anything is sent.
 
         Returns:
             Ledger entry with action, amount, balance_after
@@ -530,8 +539,8 @@ class AgentMiddlewareClient:
             InsufficientFundsError: If wallet has insufficient balance
             IdempotencyConflictError: If ``idempotency_key`` was already used
                 for a different charge, or that charge is still in progress
-            ValueError: If ``idempotency_key`` is blank or too long (nothing
-                is sent)
+            ValueError: If ``idempotency_key`` is blank, too long, or contains
+                a control character (nothing is sent)
         """
         headers: dict[str, str] | None = None
         if idempotency_key is not None:
@@ -550,11 +559,28 @@ class AgentMiddlewareClient:
         response = await self._client.post("/v1/billing/charge", params=params, headers=headers)
 
         if response.status_code == 402:
-            data = response.json().get("detail", {})
+            try:
+                body = response.json()
+            except ValueError:
+                body = None
+            if not isinstance(body, dict):
+                body = {}
+            detail = body.get("detail")
+            detail_payload = detail if isinstance(detail, dict) else {}
+            raw_top_up = detail_payload.get("top_up_url")
+            if isinstance(raw_top_up, str) and raw_top_up.strip():
+                top_up_url = raw_top_up.strip()
+                # A server path is joined onto this client's base URL.
+                # A protocol-relative value is left alone.
+                if top_up_url.startswith("/") and not top_up_url.startswith("//"):
+                    top_up_url = f"{self.base_url}{top_up_url}"
+            else:
+                top_up_url = f"{self.base_url}/dashboard/top-up?wallet={wallet_id}"
             raise InsufficientFundsError(
                 wallet_id=wallet_id,
-                shortfall=data.get("shortfall", "unknown"),
-                top_up_url=f"{self.base_url}/dashboard/top-up?wallet={wallet_id}",
+                shortfall=_coerce_shortfall(detail_payload.get("shortfall", "unknown")),
+                top_up_url=top_up_url,
+                payload=body,
             )
         # A 409 is an idempotency conflict only when a key was sent; unkeyed
         # calls keep the legacy httpx.HTTPStatusError for any non-402 error.

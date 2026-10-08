@@ -38,7 +38,13 @@ class AuthorizationError(APIError):
 
 
 class PermitDeniedError(AuthorizationError):
-    """A governed invocation was denied by its permit."""
+    """A governed invocation was denied by its permit.
+
+    ``status_code`` defaults to 403, which is what the governed invoke path
+    uses. Callers that saw a different HTTP status (x402 settle returns 400
+    or 404 for a real permit denial) pass that status through so a retry
+    decision can tell a denial from a transient failure.
+    """
 
     def __init__(
         self,
@@ -46,10 +52,33 @@ class PermitDeniedError(AuthorizationError):
         *,
         receipt_id: str | None = None,
         payload: dict[str, Any] | None = None,
+        status_code: int = 403,
     ) -> None:
         self.reason = reason
         self.receipt_id = receipt_id
-        super().__init__(reason, status_code=403, payload=payload)
+        super().__init__(reason, status_code=status_code, payload=payload)
+
+
+def _coerce_shortfall(value: Any) -> float | None:
+    """Return a finite shortfall, or None when the server value is unusable.
+
+    Booleans are rejected on purpose: ``True`` is an ``int``, and
+    ``float(True)`` would report a one-credit shortfall the server did not send.
+    """
+    if isinstance(value, bool) or value is None or value == "unknown":
+        return None
+    if isinstance(value, int | float):
+        number = float(value)
+    elif isinstance(value, str):
+        try:
+            number = float(value)
+        except ValueError:
+            return None
+    else:
+        return None
+    if number != number or number in (float("inf"), float("-inf")):
+        return None
+    return number
 
 
 class IdempotencyConflictError(APIError):
