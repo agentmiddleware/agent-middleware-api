@@ -7,9 +7,12 @@ Agents pass credentials via:
 """
 
 import hmac
+import logging
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from typing import Annotated
+
+logger = logging.getLogger(__name__)
 
 from fastapi import Depends, Header, HTTPException, Request, Security, status
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
@@ -300,6 +303,26 @@ async def _resolve_auth_context(
             headers=dict(_CREDENTIAL_REJECTED),
         )
 
+    # DEBUG open mode: with DEBUG on and no keys configured, any key-shaped
+    # string used to authenticate as bootstrap admin. That stays available
+    # only behind DEBUG_ALLOW_OPEN_ADMIN (an explicit local opt-in); by
+    # default an unknown key fails closed here too, so a demo or shared box
+    # booted with DEBUG and empty key lists cannot hand out admin.
+    if not settings.DEBUG_ALLOW_OPEN_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "invalid_api_key",
+                "message": "The provided API key is not authorized.",
+            },
+            headers=dict(_CREDENTIAL_REJECTED),
+        )
+
+    logger.warning(
+        "debug_open_admin_auth: unknown key accepted as bootstrap admin "
+        "(DEBUG with no keys configured and DEBUG_ALLOW_OPEN_ADMIN=true). "
+        "Never enable this on a shared or hosted instance."
+    )
     return AuthContext(
         source="env",
         raw_key=stripped,

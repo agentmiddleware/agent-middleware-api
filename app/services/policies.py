@@ -10,6 +10,7 @@ import uuid
 
 from sqlalchemy import select
 
+from app.core.config import get_settings
 from app.db.database import get_session_factory
 from app.db.models import PolicyBundleModel
 from app.schemas.policies import (
@@ -261,12 +262,20 @@ async def evaluate_wallet_policy(
     async with factory() as session:
         models = (await session.execute(stmt)).scalars().all()
     if not models:
+        # A wallet with no bundles has no guardrails at all. Historically
+        # that meant "allowed"; POLICY_DENY_EMPTY_BUNDLES (default on) fails
+        # closed instead, so an unconfigured wallet cannot spend unguarded.
+        if get_settings().POLICY_DENY_EMPTY_BUNDLES:
+            return PolicyEvaluation(
+                False, "policy_no_bundles", None, {"policy_count": 0}
+            )
         return PolicyEvaluation(True, "allowed", None, {"policy_count": 0})
 
     # Money comparisons are done in Decimal end-to-end; thresholds are stored as
     # Decimal and the incoming cost is normalized rather than compared as float.
     est = _as_decimal(estimated_cost)
     daily = _as_decimal(daily_spend_used)
+    deny_unknown_cost = get_settings().POLICY_DENY_UNKNOWN_COST
 
     evaluated: list[dict[str, Any]] = []
     for policy in models:
@@ -338,17 +347,24 @@ async def evaluate_wallet_policy(
                 policy.policy_id,
                 {"evaluated": evaluated},
             )
-        if (
-            policy.max_cost_per_action is not None
-            and est is not None
-            and est > policy.max_cost_per_action
-        ):
-            return PolicyEvaluation(
-                False,
-                "max_cost_per_action_exceeded",
-                policy.policy_id,
-                {"evaluated": evaluated},
-            )
+        if policy.max_cost_per_action is not None:
+            if est is None:
+                # No price estimate, so the per-action cap cannot be shown
+                # to hold. Fail closed instead of skipping the check.
+                if deny_unknown_cost:
+                    return PolicyEvaluation(
+                        False,
+                        "max_cost_estimate_unknown",
+                        policy.policy_id,
+                        {"evaluated": evaluated},
+                    )
+            elif est > policy.max_cost_per_action:
+                return PolicyEvaluation(
+                    False,
+                    "max_cost_per_action_exceeded",
+                    policy.policy_id,
+                    {"evaluated": evaluated},
+                )
         if policy.daily_spend_limit is not None:
             if daily is None:
                 # Past spending is unknown, so the cap cannot be shown to
@@ -359,7 +375,17 @@ async def evaluate_wallet_policy(
                     policy.policy_id,
                     {"evaluated": evaluated},
                 )
-            if est is not None and daily + est > policy.daily_spend_limit:
+            if est is None:
+                # Same for the incoming cost: without it, staying under the
+                # daily cap cannot be shown.
+                if deny_unknown_cost:
+                    return PolicyEvaluation(
+                        False,
+                        "daily_spend_estimate_unknown",
+                        policy.policy_id,
+                        {"evaluated": evaluated},
+                    )
+            elif daily + est > policy.daily_spend_limit:
                 return PolicyEvaluation(
                     False,
                     "daily_spend_limit_exceeded",
