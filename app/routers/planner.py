@@ -29,6 +29,13 @@ async def optimize_endpoint(
     policy_rejected: list[dict] = []
     policy_ids: set[str] = set()
     allowed_candidates: list[dict] = []
+    # The task tier is caller-supplied and used as the risk ceiling check, so
+    # an unstated tier must not read as "nothing to compare": assume the
+    # highest tier instead. Non-string values still fail closed inside
+    # evaluate_wallet_policy, which only recognizes low/medium/high.
+    requested_tier = req.state.task_context.get("tier")
+    if requested_tier is None:
+        requested_tier = "high"
     for action in candidates:
         service = action.get("service")
         service_key = service if isinstance(service, str) else ""
@@ -39,7 +46,7 @@ async def optimize_endpoint(
             estimated_cost=action.get("credit_cost"),
             daily_spend_used=req.state.daily_spend_used,
             simulation=req.state.simulation_flags.get(service_key, False),
-            risk_tier=req.state.task_context.get("tier"),
+            risk_tier=requested_tier,
         )
         if evaluation.policy_id:
             policy_ids.add(evaluation.policy_id)

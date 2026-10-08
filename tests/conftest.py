@@ -82,6 +82,7 @@ DORMANT_SURFACE_TEST_MODULES = frozenset(
         "test_planner_constraints",
         "test_pods",
         "test_policy_bundles",
+        "test_policy_governance_breaks",
         "test_revocation_containment",
         "test_secret_persistence",
         "test_stripe_integration",
@@ -212,7 +213,7 @@ def interleaving_factory(real_factory, hook, state, *, fire_on: int = 1):
         async def __aexit__(self, *exc):
             return await self._cm.__aexit__(*exc)
 
-    return lambda: (lambda: _CM(real_factory()))
+    return lambda: lambda: _CM(real_factory())
 
 
 def running_on_sqlite() -> bool:
