@@ -3,6 +3,8 @@ AWI SDK Models — Phase 8
 =========================
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -84,6 +86,42 @@ class AWIActionDefinition:
         self.status = AWIActionStatus(self.status)
         self.risk_level = AWIActionRiskLevel(self.risk_level)
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> AWIActionDefinition:
+        """Build a definition from a ``GET /v1/awi/vocabulary`` entry.
+
+        Unknown or missing fields fall back to safe defaults so a newer
+        server vocabulary cannot break older SDK installs.
+        """
+        if not isinstance(data, dict):
+            raise ValueError("action definition must be a dict")
+        try:
+            tier = AWIActionTier(data.get("tier", AWIActionTier.SEMANTIC))
+        except ValueError:
+            tier = AWIActionTier.SEMANTIC
+        try:
+            status = AWIActionStatus(data.get("status", AWIActionStatus.STABLE))
+        except ValueError:
+            status = AWIActionStatus.STABLE
+        try:
+            risk = AWIActionRiskLevel(data.get("risk_level", AWIActionRiskLevel.LOW))
+        except ValueError:
+            risk = AWIActionRiskLevel.LOW
+        parameters = data.get("parameters")
+        return cls(
+            action=str(data.get("action", "")),
+            category=str(data.get("category", "")),
+            description=str(data.get("description", "")),
+            parameters=parameters if isinstance(parameters, dict) else {},
+            required_preconditions=list(data.get("required_preconditions") or []),
+            postconditions=list(data.get("postconditions") or []),
+            estimated_cost=float(data.get("estimated_cost", 0.0) or 0.0),
+            tier=tier,
+            status=status,
+            risk_level=risk,
+            sensitive_parameters=list(data.get("sensitive_parameters") or []),
+        )
+
 
 @dataclass
 class AWISession:
@@ -110,6 +148,30 @@ class AWIExecutionResponse:
     representation: dict[str, Any] | None = None
     duration_ms: int | None = None
     cost_estimate: float | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> AWIExecutionResponse:
+        """Build a response from a ``POST /v1/awi/execute`` body.
+
+        The receipt envelope and any extra server fields stay out of the
+        typed view; callers that need them keep using ``execute`` raw dicts.
+        """
+        if not isinstance(data, dict):
+            raise ValueError("execution response must be a dict")
+        result = data.get("result")
+        representation = data.get("representation")
+        error = data.get("error")
+        return cls(
+            execution_id=str(data.get("execution_id", "")),
+            session_id=str(data.get("session_id", "")),
+            action=str(data.get("action", "")),
+            status=str(data.get("status", "")),
+            result=result if isinstance(result, dict) else None,
+            error=error if isinstance(error, str) else None,
+            representation=(representation if isinstance(representation, dict) else None),
+            duration_ms=data.get("duration_ms"),
+            cost_estimate=data.get("cost_estimate"),
+        )
 
 
 @dataclass
