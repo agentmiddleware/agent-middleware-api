@@ -268,3 +268,58 @@ class TestVelocityFreezeStatusGuard:
 
         assert result.should_freeze is True
         assert await self._status(wallet_id) == "frozen"
+
+
+class TestVelocityTunables:
+    """The tunable surface is hourly/daily limits plus the freeze count.
+
+    VELOCITY_ALERT_THRESHOLD used to exist as a setting that no check read,
+    which made alert tuning look possible when it was not. It is removed;
+    this locks the removal and the real defaults in place.
+    """
+
+    def test_dead_alert_threshold_knob_is_gone(self):
+        from app.core.config import get_settings
+
+        assert not hasattr(get_settings(), "VELOCITY_ALERT_THRESHOLD")
+        assert not hasattr(VelocityMonitor(), "_alert_threshold")
+
+    def test_real_tunables_keep_their_defaults(self):
+        from app.core.config import get_settings
+
+        settings = get_settings()
+        assert settings.VELOCITY_HOURLY_LIMIT == Decimal("1000.0")
+        assert settings.VELOCITY_DAILY_LIMIT == Decimal("10000.0")
+        assert settings.VELOCITY_FREEZE_THRESHOLD == 3
+        monitor = VelocityMonitor()
+        assert monitor._freeze_threshold == 3
+
+    def test_per_wallet_limits_apply_without_touching_globals(self):
+        """Starter tiers are per-wallet limits: a 100/hr trial wallet trips
+        where the 1000/hr default does not, on the same charge pattern."""
+        from app.core.config import get_settings
+
+        monitor = VelocityMonitor()
+        assert monitor._default_hourly_limit == get_settings().VELOCITY_HOURLY_LIMIT
+
+        trial_wallet = MagicMock()
+        trial_wallet.wallet_id = "trial-wallet"
+        trial_wallet.hourly_spent = Decimal("150")
+        trial_wallet.daily_spent = Decimal("150")
+        trial_wallet.velocity_alerts_triggered = 0
+
+        trial = monitor._check_limits(
+            wallet=trial_wallet,
+            hourly_limit=Decimal("100"),
+            daily_limit=Decimal("1000"),
+            charge_amount=Decimal("10"),
+        )
+        assert trial.alert_triggered is True
+
+        default = monitor._check_limits(
+            wallet=trial_wallet,
+            hourly_limit=Decimal("1000"),
+            daily_limit=Decimal("10000"),
+            charge_amount=Decimal("10"),
+        )
+        assert default.alert_triggered is False

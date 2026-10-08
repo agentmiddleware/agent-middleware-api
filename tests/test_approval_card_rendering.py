@@ -144,3 +144,36 @@ def test_non_https_approval_url_is_left_out_of_the_text_summary(view, url):
 def test_https_approval_url_is_the_text_summary_action(view):
     text = render_text_summary(view)
     assert f"Review & decide: {view.approval_url}" in text
+
+
+@pytest.mark.parametrize("render", [render_email_html, render_page_html])
+def test_pending_card_shows_decide_by_countdown(view, render):
+    """A pending card names the remaining window next to the deadline, so
+    an approver who ignores the request sees the urgency, not just a stamp."""
+    html = render(view, now=datetime(2026, 9, 10, 12, 13))
+    assert "2026-09-10 13:00:00Z" in html
+    assert "47 minutes remaining" in html
+
+
+@pytest.mark.parametrize("render", [render_email_html, render_page_html])
+def test_pending_card_states_elapsed_window(view, render):
+    """Once the window passes, the card says so: a late decision is
+    discarded by the local expiry, so the agent must re-page the human."""
+    html = render(view, now=datetime(2026, 9, 10, 14, 0))
+    assert "decision window elapsed" in html
+
+
+def test_decided_card_shows_no_countdown(view):
+    """A decided card keeps the plain deadline as history, with no
+    countdown implying action is still possible."""
+    decided = replace(view, status="approved", decided_by="approver@example.com")
+    html = render_page_html(decided, now=datetime(2026, 9, 10, 12, 13))
+    assert "2026-09-10 13:00:00Z" in html
+    assert "remaining" not in html
+    assert "elapsed" not in html
+
+
+def test_text_summary_carries_the_same_countdown(view):
+    """The plain-text fallback carries the same urgency as the card."""
+    text = render_text_summary(view, now=datetime(2026, 9, 10, 12, 13))
+    assert "47 minutes remaining" in text

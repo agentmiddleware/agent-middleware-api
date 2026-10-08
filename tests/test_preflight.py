@@ -299,3 +299,120 @@ async def test_preflight_math_consistency(client):
 
     assert data["passed"] + data["failed"] == data["total_checks"]
     assert data["total_checks"] == len(data["checks"])
+
+
+# ---------------------------------------------------------------------------
+# Sentinel approval readiness (Phase 5) and shape-only honesty
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_preflight_flags_simulation_approval_mode(client):
+    """Default simulation mode must show a self-approval warning, so a demo
+    never reads as a real human in the loop."""
+    resp = await client.post("/v1/launch/preflight", json={}, headers=HEADERS)
+    assert resp.status_code == 200
+    data = resp.json()
+
+    sim = [c for c in data["checks"] if c["name"] == "sentinel_simulation_mode"]
+    assert len(sim) == 1
+    assert sim[0]["passed"] is False
+    assert sim[0]["severity"] == "warning"
+    assert "auto-approve" in sim[0]["message"]
+
+
+@pytest.mark.anyio
+async def test_preflight_warns_when_sentinel_unconfigured(client, monkeypatch):
+    """Real mode without URL/key must warn that approval-gated permits fail
+    closed, without blocking launch (approval is optional)."""
+    settings = get_settings()
+    monkeypatch.setattr(settings, "SIMULATION_MODE_HUMAN_APPROVAL", False)
+    monkeypatch.setattr(settings, "SENTINEL_API_URL", "")
+    monkeypatch.setattr(settings, "SENTINEL_API_KEY", "")
+
+    resp = await client.post("/v1/launch/preflight", json={}, headers=HEADERS)
+    assert resp.status_code == 200
+    data = resp.json()
+
+    cfg = [c for c in data["checks"] if c["name"] == "sentinel_configured"]
+    assert len(cfg) == 1
+    assert cfg[0]["passed"] is False
+    assert cfg[0]["severity"] == "warning"
+    assert "fail closed" in cfg[0]["message"]
+
+
+@pytest.mark.anyio
+async def test_preflight_reports_sentinel_ready_without_echoing_secrets(
+    client, monkeypatch
+):
+    """A configured deployment reports readiness by origin only: no key
+    material or approver addresses may leak into the report."""
+    settings = get_settings()
+    monkeypatch.setattr(settings, "SIMULATION_MODE_HUMAN_APPROVAL", False)
+    monkeypatch.setattr(settings, "SENTINEL_API_URL", "https://api.pauseapi.app")
+    monkeypatch.setattr(settings, "SENTINEL_API_KEY", "sk_live_probe_only_key_9f8c")
+    monkeypatch.setattr(
+        settings, "SENTINEL_APPROVERS", "approver@example.com,sms:+15551234567"
+    )
+
+    resp = await client.post("/v1/launch/preflight", json={}, headers=HEADERS)
+    assert resp.status_code == 200
+    data = resp.json()
+
+    cfg = [c for c in data["checks"] if c["name"] == "sentinel_configured"]
+    assert len(cfg) == 1
+    assert cfg[0]["passed"] is True
+    assert "api.pauseapi.app" in cfg[0]["message"]
+    assert "not contacted" in cfg[0]["detail"]
+
+    approvers = [c for c in data["checks"] if c["name"] == "sentinel_approvers"]
+    assert len(approvers) == 1
+    assert "2 approver(s)" in approvers[0]["message"]
+
+    window = [c for c in data["checks"] if c["name"] == "sentinel_decision_window"]
+    assert len(window) == 1
+    assert window[0]["passed"] is True
+
+    for secret in (
+        "sk_live_probe_only_key_9f8c",
+        "approver@example.com",
+        "+15551234567",
+    ):
+        assert secret not in resp.text
+
+
+@pytest.mark.anyio
+async def test_preflight_oracle_checks_state_shape_only(client):
+    """Passing oracle/asset checks must say they never probed the network,
+    so a GO verdict cannot be misread as reachability."""
+    resp = await client.post(
+        "/v1/launch/preflight",
+        json={
+            "base_url": "https://api.myrealdomain.com",
+            "campaign_source_url": "https://cdn.myrealdomain.com/launch-video.mp4",
+        },
+        headers=HEADERS,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+
+    oracle = [c for c in data["checks"] if c["name"] == "oracle_directories_total"]
+    assert len(oracle) == 1
+    assert "not checked" in oracle[0]["detail"] or "Reachability" in oracle[0]["detail"]
+
+    shaped = [
+        c
+        for c in data["checks"]
+        if c["name"].startswith("oracle_directory_")
+        and c["name"] != "oracle_directories_total"
+        and c["passed"]
+    ]
+    assert shaped
+    for check in shaped:
+        assert "shaped correctly" in check["message"]
+        assert "does not contact" in check["detail"]
+
+    content = [c for c in data["checks"] if c["name"] == "content_source_url"]
+    assert len(content) == 1
+    assert content[0]["passed"] is True
+    assert "does not fetch" in content[0]["detail"]

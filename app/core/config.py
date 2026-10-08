@@ -270,8 +270,29 @@ class Settings(BaseSettings):
     # Comma-separated approver list (email, mailto:, or sms:+E164). Empty defers
     # to the Sentinel tenant's default approvers.
     SENTINEL_APPROVERS: str = ""
-    # Sentinel risk_level attached to approval requests: low|medium|high|critical.
+    # Sentinel risk_level attached to approval requests. One global value per
+    # deployment: every approval request carries it, so low-risk and critical
+    # calls look the same in the approver queue. There is no per-tool or
+    # per-call override today.
     SENTINEL_RISK_LEVEL: str = "high"
+
+    @field_validator("SENTINEL_RISK_LEVEL")
+    @classmethod
+    def _validate_sentinel_risk_level(cls, value: str) -> str:
+        """Refuse a risk level Sentinel would reject at invoke time.
+
+        An unknown value is forwarded verbatim and comes back as a Sentinel
+        4xx, which the gate treats as terminal (retrying cannot succeed
+        without an operator fix). Fail at boot instead, when the fix is a
+        one-line config change.
+        """
+        allowed = {"low", "medium", "high", "critical"}
+        if value not in allowed:
+            raise ValueError(
+                f"SENTINEL_RISK_LEVEL must be one of {sorted(allowed)}, got {value!r}"
+            )
+        return value
+
     # --- Signed quotes ---
     # How long a signed price quote stays valid. A quote locks the price for
     # exactly one invoke inside this window; long enough for a human hop,
@@ -285,11 +306,18 @@ class Settings(BaseSettings):
     PERMIT_REQUEST_TIMEOUT_SECONDS: int = 3600
 
     # --- Velocity Monitoring ---
+    # Defaults apply to wallets without their own limits; set per-wallet
+    # hourly_limit / daily_limit for anything else. Starter tiers that have
+    # worked for pilots: solo trial 100/hr and 1,000/day, single-tool pilot
+    # 1,000/hr (the default) and 10,000/day (the default), multi-agent team
+    # 5,000/hr and 50,000/day. A wallet that legitimately bursts past its
+    # tier should move up a tier, not widen the globals.
     VELOCITY_HOURLY_LIMIT: Decimal = Decimal("1000.0")
     VELOCITY_DAILY_LIMIT: Decimal = Decimal("10000.0")
-    # Reserved: read into VelocityMonitor but used by no check today (there is
-    # no standard-deviation detection). Changing it has no effect.
-    VELOCITY_ALERT_THRESHOLD: int = 2
+    # Over-limit charges that freeze a wallet (lifetime total per wallet,
+    # not a rolling window). Every over-limit charge already raises an
+    # alert; once a wallet's alert count reaches this number, its next
+    # over-limit charge freezes it.
     VELOCITY_FREEZE_THRESHOLD: int = 3
 
     # --- IoT Protocol Bridge ---
