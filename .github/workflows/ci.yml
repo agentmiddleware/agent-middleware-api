@@ -504,6 +504,88 @@ jobs:
           pytest tests/test_duplicate_guard_postgres_concurrency.py -v --tb=short
           pytest tests/test_permit_repeat_window_rollout.py tests/test_repeat_window_compatibility.py -v --tb=short -o asyncio_default_fixture_loop_scope=session -o asyncio_default_test_loop_scope=session
 
+  # Production parity: the only job that combines strict production trust
+  # flags with a real PostgreSQL backend. postgres_trust proves Postgres
+  # with permissive flags; production_trust proves strict flags on SQLite.
+  # Neither proves the combination buyers run, where SELECT ... FOR UPDATE
+  # is honored AND unpermitted calls are denied. ENVIRONMENT stays "test"
+  # (not "production") because the Postgres-gated action tests refuse any
+  # other value (see tests/support/action_database_guard.py); every other
+  # guardrail flag matches validate_trust_mode_config. Scope is the trust
+  # core on purpose: the full suite assumes permissive defaults by design
+  # (see tests/conftest.py), so only the files that must hold under the
+  # production posture run here. Extending this job to the Postgres
+  # concurrency files under strict flags is open follow-up work, not
+  # silently claimed coverage: those files run on Postgres with permissive
+  # flags in postgres_permit_concurrency today.
+  production_parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: parity_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/parity_ci
+      STATE_BACKEND: postgres
+      ENVIRONMENT: test
+      TRUST_MODE_ENABLED: "true"
+      ALLOW_LEGACY_UNPERMITTED_MCP: "false"
+      ENABLE_PROOF_SURFACES: "false"
+      DEBUG: "false"
+      WEBAUTHN_ALLOW_MOCK: "false"
+      # Non-secret test material so prod-like guardrails can validate.
+      TRUST_SIGNING_PRIVATE_KEY_B64: dGVzdC1zaWduaW5nLWtleS1tYXRlcmlhbC0zMmJ5dGU=
+      PUBLIC_URL: https://api.thisisatest.tech
+      VALID_API_KEYS: test-key
+      REQUIRE_POSTGRES_TESTS: "1"
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio anyio httpx
+
+      - name: Apply PostgreSQL parity migrations
+        run: alembic upgrade head
+
+      - name: Run trust primitives under strict flags on Postgres
+        # Same session-scoped loop options as postgres_trust: keep asyncpg's
+        # connection pool on one event loop across this suite.
+        run: |
+          pytest -p no:anyio \
+            -o asyncio_default_fixture_loop_scope=session \
+            -o asyncio_default_test_loop_scope=session \
+            tests/test_permits.py \
+            tests/test_receipts.py \
+            tests/test_mcp_trust.py \
+            tests/test_audit_chain.py \
+            tests/test_key_management.py \
+            tests/test_idempotency.py \
+            tests/test_security_fuzz_battery.py::test_rapid_fire_invokes_all_accounted \
+            -v --tb=short
+
   # Blocks credentials from being committed. A live production API key reached
   # main through scripts/stress_test_live.py because nothing scanned for this.
   secret_scan:

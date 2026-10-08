@@ -39,6 +39,7 @@ reports.
 | `postgres_trust` | `postgres_trust` | Trust loop failed against real PostgreSQL/asyncpg |
 | `production_trust` | `production_trust` | Production-like trust flags failed to boot fail-closed |
 | `postgres_permit_concurrency` | `postgres_permit_concurrency` | Two-process exactly-once / permit row-lock concurrency regressed |
+| `production_parity` | `production_parity` | Strict production flags on real PostgreSQL regressed |
 | `secret_scan` | `secret_scan` | A credential-shaped literal reached the working tree |
 | `lint` | `lint` | `ruff` or `mypy app/` failed |
 
@@ -83,6 +84,7 @@ curl -sS -X PUT \
         "test (3.11)", "test (3.12)",
         "python_sdk (3.10)", "python_sdk (3.11)", "python_sdk (3.12)",
         "postgres_trust", "production_trust", "postgres_permit_concurrency",
+        "production_parity",
         "secret_scan", "lint"
       ]
     },
