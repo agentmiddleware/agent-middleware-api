@@ -13,6 +13,7 @@ consequential MCP tool behind a governed boundary. Start with the
 | Configure one real upstream MCP tool | [Partner first-tool runbook](partner-first-tool-runbook.md) |
 | Use the typed Python SDK and offline verifier | [Python SDK](../b2a_sdk/README.md) |
 | Understand retry, debit, and crash outcomes | [Failure semantics](failure-semantics.md) |
+| Learn the permit lifecycle, status codes, and polling rules | [Permit lifecycle](permit-lifecycle.md) |
 | Measure the lost-response fault against a correctly used native idempotency key | [Failure lab](failure-lab.md) |
 | Run fourteen injected failures and get a signed evidence bundle | [Failure lab suite](failure-lab-suite.md) |
 | Review security claims and limits | [Security limitations](../SECURITY_LIMITATIONS.md) and [security review kit](security-review-kit.md) |
