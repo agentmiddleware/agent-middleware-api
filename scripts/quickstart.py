@@ -174,11 +174,41 @@ def print_banner(port: int, state_dir: Path) -> None:
     )
 
 
+def resolve_state_dir_for_reset(raw_state_dir: Path) -> Path:
+    """Resolve ``--state-dir`` for a ``--reset`` deletion and refuse anything
+    outside the repo's expected data directory.
+
+    ``--reset`` runs ``shutil.rmtree`` on this path, so a typo, a symlink,
+    or a ``..`` escape must never reach the deletion. Only a directory
+    strictly inside ``<repo>/data`` (the default is ``data/quickstart``) is
+    accepted; ``/``, the home directory, the repo root, the data directory
+    itself, and anything outside it raise ``ValueError`` before anything is
+    removed.
+    """
+    base = (ROOT / "data").resolve()
+    candidate = Path(raw_state_dir).expanduser()
+    if not candidate.is_absolute():
+        candidate = ROOT / candidate
+    resolved = candidate.resolve()
+    if resolved == base or base not in resolved.parents:
+        raise ValueError(
+            f"[quickstart] Refusing --reset outside the expected data "
+            f"directory: {raw_state_dir} (resolves to {resolved}; "
+            f"expected something inside {base})"
+        )
+    return resolved
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     state_dir: Path = args.state_dir
 
     if args.reset:
+        try:
+            state_dir = resolve_state_dir_for_reset(state_dir)
+        except ValueError as exc:
+            print(exc, file=sys.stderr)
+            return 2
         if state_dir.exists():
             shutil.rmtree(state_dir)
             print(f"[quickstart] Reset: removed {state_dir}")
