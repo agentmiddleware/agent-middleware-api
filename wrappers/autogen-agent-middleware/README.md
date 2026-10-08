@@ -80,6 +80,44 @@ async def main():
 asyncio.run(main())
 ```
 
+## Tool Allowlist
+
+By default the wrapper accepts any `tool_name` string the model passes. For a
+demo or pilot, register the tools the agent may call so anything else is
+refused before any permit or charge:
+
+```python
+tool = B2AFunctionTool(
+    api_key="...",
+    wallet_id="agent-001",
+    allowed_tools=["partner.search"],
+)
+tool.register_tool("partner.index")
+```
+
+An unlisted name raises `ValueError` before any network call. Idempotency keys
+are validated the same way as the OpenAI wrapper: printable ASCII, no
+surrounding whitespace, at most 128 characters.
+
+## Durable Permit Store
+
+By default the permit-id cache lives in process memory. Pass
+`key_store_path` to persist it to a JSON file (rewritten atomically on every
+update), so a crashed and resumed process reuses the recorded permit ids and
+resends byte-identical permit bodies instead of minting fresh timestamps
+under the same keys:
+
+```python
+tool = B2AFunctionTool(
+    api_key="...",
+    wallet_id="agent-001",
+    allowed_tools=["partner.search"],
+    key_store_path="./data/autogen-keys.json",
+)
+```
+
+Use the same path when resuming the same agent run.
+
 ## Direct Tool Usage (Governed Flow)
 
 ```python
