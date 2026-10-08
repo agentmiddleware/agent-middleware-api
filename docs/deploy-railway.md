@@ -331,6 +331,7 @@ in committed defaults.
 |----------|----------------|-------|
 | `ENVIRONMENT` | `production` (or other production-like) | Engages trust guardrails. Must be set explicitly: on Railway (detected via the injected `RAILWAY_*` variables) an empty `ENVIRONMENT` refuses to boot rather than silently running with local-compatible defaults |
 | `DEBUG` | `false` | Empty-key auth bootstrap is forbidden in prod-like |
+| `ALLOW_DEBUG_OPEN_AUTH` | `false` or unset | Local-dev-only opt-in for the DEBUG empty-key bootstrap admin (`app/core/auth.py`). Refused at boot in prod-like. Never set on a demo, trial, shared, or production box: with it on and no keys configured, any key-shaped string authenticates as bootstrap admin |
 | `ENABLE_PROOF_SURFACES` | `false` | Mount only core trust routers + MCP |
 | `ENABLE_PUBLIC_MCP_ENDPOINT` | `false` | Anonymous MCP discovery is local-only. Production-like boots **refuse to start** if this is true. Live `api.thisisatest.tech` historically had it on; set it false **before** deploying the Narrow lockdown commit or the new image will not boot. Receipt verification stays on `/.well-known/trust-keys.json`. |
 | `ENABLE_STANDARD_MCP_ENDPOINT` | `false` or unset | Auto-minted permits on `POST /mcp`. Do not turn this on. |

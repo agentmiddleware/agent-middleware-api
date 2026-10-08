@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from ..core.auth import AuthContext, get_auth_context, verify_api_key
 from ..core.config import get_settings
 from ..core.dependencies import get_agent_money
+from ..core.scopes import require_scope
 from .http_idempotency import (
     begin_http_idempotency as _begin_idempotency,
 )
@@ -577,6 +578,7 @@ async def get_ledger(
         },
     },
 )
+@require_scope("billing:charge")
 async def charge_wallet(
     request: Request,
     wallet_id: str,

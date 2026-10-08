@@ -290,6 +290,24 @@ async def _resolve_auth_context(
             headers=dict(_CREDENTIAL_REJECTED),
         )
 
+    # DEBUG open mode is an explicit local-only opt-in. With DEBUG on and no
+    # keys configured, any unknown key used to authenticate as a full
+    # bootstrap admin, which is a safe convenience on a loopback-local box
+    # and a full bypass on any demo, trial, or shared box that runs this
+    # way. The operator must set ALLOW_DEBUG_OPEN_AUTH=true to keep the
+    # open behavior (docker-compose does); every other posture fails closed
+    # here, including production-like environments (which also refuse to
+    # boot with DEBUG on at all).
+    if not settings.ALLOW_DEBUG_OPEN_AUTH:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "invalid_api_key",
+                "message": "The provided API key is not authorized.",
+            },
+            headers=dict(_CREDENTIAL_REJECTED),
+        )
+
     if is_production_like_environment(settings.ENVIRONMENT):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

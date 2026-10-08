@@ -1,10 +1,15 @@
 """Scope enforcement decorator for FastAPI routes.
 
 Usage:
-    @router.post("/v1/permits")
+    @router.post("/v1/billing/charge")
     @require_scope("billing:charge")
-    async def create_permit(...):
+    async def charge_wallet(...):
         ...
+
+Enforced today on POST /v1/billing/charge ("billing:charge"). API key
+callers (source "db", "env", "static-dev") bypass scope checks; JWT callers
+must carry one of the required scopes. Extending this to permit issuance
+and tool invoke routes needs a wider scope vocabulary first.
 """
 
 from __future__ import annotations

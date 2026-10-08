@@ -69,6 +69,25 @@ Same steps as [`golden-path.md`](golden-path.md) §2–4:
 2. Stop — do not invent keys or hit random mint endpoints.  
 3. Ask the human operator for a wallet-scoped key (this doc).
 
+## 401 versus 403: how to read a refused key
+
+The gateway splits credential problems from permission problems, which
+differs from the convention many HTTP clients expect (bad credentials
+usually mean 401):
+
+- `401 missing_credentials` — no credential was sent at all. Send
+  `X-API-Key` or `Authorization: Bearer <token>`.
+- `401 invalid_token` (and related `invalid_refresh_token`,
+  `no_active_api_key`, `unbound_access_token`) — the Bearer token is
+  malformed, expired, or its issuing API key was revoked.
+- `403 invalid_api_key` — a well-formed API key was sent, but it is not
+  a live credential. Treat this exactly like a 401: do not retry with
+  the same key, do not escalate it to a permission problem, and ask the
+  operator for a fresh key. SDK retry logic must never loop on this.
+- `403 wallet_access_denied`, `403 admin_access_denied`, `403
+  insufficient_scope` — the credential is valid but not allowed to do
+  this. A different key or a wider scope is needed, not a retry.
+
 ## Related
 
 - [`DESIGN_PARTNER_GUIDE.md`](../DESIGN_PARTNER_GUIDE.md)
