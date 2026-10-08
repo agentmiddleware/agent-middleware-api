@@ -10,17 +10,20 @@ This file shows:
 3. Invoking it via the MCP protocol
 
 Usage:
-    # Register tools (typically done at app startup)
+    # Show locally defined tools (local decorator metadata only; nothing is
+    # enrolled on any server)
     python examples/mcp_tool_example.py --register
 
-    # List available tools
+    # List available tools from a running API
     python examples/mcp_tool_example.py --list
 
-    # Generate tools.json
+    # Generate tools.json from a running API
     python examples/mcp_tool_example.py --generate
 
-    # Run standalone MCP server
-    python examples/mcp_tool_example.py --serve
+Standalone serving (--serve) is retired. To invoke a tool through the
+governed permit to receipt loop, follow docs/quickstart.md and POST to /mcp
+with a wallet-scoped key. To expose one real upstream tool, follow
+docs/partner-first-tool-runbook.md.
 """
 
 import asyncio
@@ -156,15 +159,24 @@ def on_registration(service_id: str, func, input_schema, output_schema):
 
 
 async def register_tools():
-    """Register all tools with the backend."""
+    """Show the tools defined locally via @mcp_tool.
+
+    Local decorator metadata only: nothing is enrolled on any server by this
+    command. To expose one real upstream tool through the governed gateway,
+    follow docs/partner-first-tool-runbook.md.
+    """
     register_mcp_tool_callback(on_registration)
 
-    print("Tools registered:")
+    print("Locally defined tools (not enrolled on any server):")
     print(f"  - {process_data._b2a_mcp_metadata}")
     print(f"  - {summarize_url._b2a_mcp_metadata}")
     print(f"  - {generate_image._b2a_mcp_metadata}")
+    print(
+        "\nTo expose one real upstream tool through the governed gateway, "
+        "follow docs/partner-first-tool-runbook.md."
+    )
 
-    print("\nTo invoke these tools:")
+    print("\nTo invoke a governed tool:")
     print("  1. Fetch the MCP manifest:")
     print("     curl http://localhost:8000/mcp/tools.json")
     print("\n  2. Call a tool via MCP:")
@@ -192,25 +204,19 @@ async def main_generate():
     print(f"Generated tools.json with {len(manifest.get('tools', []))} tools")
 
 
-async def main_serve():
-    """Run standalone MCP server."""
-    from b2a_sdk.mcp import serve
-
-    serve(
-        transport="stdio",
-        api_url=os.getenv("B2A_API_URL", "http://localhost:8000"),
-    )
-
-
 if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="B2A MCP Tool Example")
-    parser.add_argument("--register", action="store_true", help="Register tools")
+    parser.add_argument(
+        "--register",
+        action="store_true",
+        help="Show locally defined tools (local metadata only)",
+    )
     parser.add_argument("--list", action="store_true", help="List available tools")
     parser.add_argument("--generate", action="store_true", help="Generate tools.json")
     parser.add_argument(
-        "--serve", action="store_true", help="Run standalone MCP server"
+        "--serve", action="store_true", help="Retired: exits with guidance"
     )
     args = parser.parse_args()
 
@@ -221,11 +227,16 @@ if __name__ == "__main__":
     elif args.generate:
         asyncio.run(main_generate())
     elif args.serve:
-        asyncio.run(main_serve())
+        parser.error(
+            "--serve is retired: standalone serving never implemented the "
+            "permit to receipt loop and its invoke path targets a route the "
+            "gateway does not expose. Follow docs/quickstart.md for the "
+            "governed POST /mcp flow, or docs/partner-first-tool-runbook.md "
+            "to expose one real upstream tool."
+        )
     else:
         parser.print_help()
         print("\nExample usage:")
-        print("  python examples/mcp_tool_example.py --register  # Register tools")
+        print("  python examples/mcp_tool_example.py --register  # Show local tools")
         print("  python examples/mcp_tool_example.py --list     # List tools")
         print("  python examples/mcp_tool_example.py --generate # Generate tools.json")
-        print("  python examples/mcp_tool_example.py --serve   # Run MCP server")
