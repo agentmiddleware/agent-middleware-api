@@ -124,18 +124,21 @@ This is the property that closes the gap in `SECURITY_LIMITATIONS.md` between
 ## Rotation Flow Under KMS
 
 > **Target state, not implemented.** This flow is the design for after the
-> KMS integration ships. `POST /v1/admin/signing-keys/rotate` does not exist:
-> the only signing-key routes today are the read-only
-> `GET /v1/signing-keys/active` and `GET /v1/signing-keys/{key_id}`
-> (`app/routers/keys.py`). For what rotation means now, see [Status](#status).
+> KMS integration ships. The operator routes exist today
+> (`POST /v1/signing-keys/rotate` and
+> `POST /v1/signing-keys/{key_id}/retire`, bootstrap admin only,
+> `app/routers/keys.py`), but they rotate key-id metadata, not key
+> material: the new id is published with this plane's current public key.
+> A new KMS key version per rotation is still future work.
+> For what rotation means now, see [Status](#status).
 
 Rotation under KMS is metadata + key-version change, not a redeploy:
 
 1. Operator creates a new key version in the KMS (`aws kms
    create-key` for a new key, or version rotation on an existing key).
-2. Operator calls a new admin route (proposed:
-   `POST /v1/admin/signing-keys/rotate`) with the new key reference and a new
-   `kid`.
+2. Operator calls the admin route
+   (`POST /v1/signing-keys/rotate`, bootstrap admin only) with the new key
+   reference and a new `kid`.
 3. `rotate_active_key_metadata` marks the prior metadata row `retired`
    (retains it for verification of pre-rotation receipts), inserts the new
    metadata row, and flips the active `kid`.
@@ -185,13 +188,14 @@ Until the KMS integration ships, the production posture is:
   shipped defaults; nothing extra to configure
 - `TRUST_SIGNING_PRIVATE_KEY_B64` injected at deploy time from the hosting
   platform secret manager
-- Rotation by redeploy only: a new `TRUST_SIGNING_PRIVATE_KEY_B64` paired with
-  a new `TRUST_SIGNING_KEY_ID`. The redeploy activates the new `kid` but does
-  not retire the old one (`SigningKeyService.ensure_active_key`), so both stay
-  `active`. Retiring the old metadata has no route or script yet:
-  `retire_key_metadata` and `rotate_active_key_metadata` are service methods
-  only, and no `POST /v1/admin/signing-keys/rotate` route exists. The
-  post-rotation steps are in [`deploy-railway.md`](deploy-railway.md).
+- Rotation by redeploy plus operator routes: a new `TRUST_SIGNING_PRIVATE_KEY_B64`
+  paired with a new `TRUST_SIGNING_KEY_ID`, then `POST
+  /v1/signing-keys/rotate` (bootstrap admin only) to publish the new `kid`
+  as active and retire the old one, which stays published so old receipts
+  verify. To retire an already-superseded id without rotating, `POST
+  /v1/signing-keys/{key_id}/retire` (it refuses the currently active id:
+  rotate first). The post-rotation steps are in
+  [`deploy-railway.md`](deploy-railway.md).
 
 This is documented as a known limitation in `SECURITY_LIMITATIONS.md` and
 should be the default answer to "where do the private keys live?" until the

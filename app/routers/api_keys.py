@@ -194,7 +194,12 @@ async def create_api_key(
     "/{wallet_id}",
     response_model=APIKeyListResponse,
     summary="List API keys for a wallet",
-    description="Get all API keys for a wallet. Keys are masked for security.",
+    description=(
+        "Get all API keys for a wallet. Keys are masked for security. "
+        "Stored status is never swept, so check is_live per key: false "
+        "means the key cannot authenticate (expired or exhausted) even "
+        "when status still reads active."
+    ),
 )
 async def list_api_keys(
     wallet_id: str,
@@ -321,7 +326,11 @@ async def rotate_api_key(
     "/{wallet_id}/{key_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Revoke an API key",
-    description="Immediately revoke an API key. This action cannot be undone.",
+    description=(
+        "Immediately revoke an API key. This action cannot be undone. "
+        "Refresh tokens derived from the key are revoked with it, and the "
+        "revoke is written to the wallet's rotation audit log."
+    ),
 )
 async def revoke_api_key(
     wallet_id: str,
@@ -329,7 +338,7 @@ async def revoke_api_key(
     reason: str = "user_request",
     auth: AuthContext = Depends(get_auth_context),
 ):
-    """Revoke an API key immediately."""
+    """Revoke an API key immediately, with its derived sessions."""
     auth.require_wallet_access(wallet_id)
     service = get_api_key_service()
 

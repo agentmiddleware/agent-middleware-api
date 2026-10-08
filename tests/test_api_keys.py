@@ -107,6 +107,7 @@ async def test_list_api_keys(client, api_headers, sponsor_wallet):
     assert data["wallet_id"] == sponsor_wallet["wallet_id"]
     assert len(data["keys"]) == 1
     assert data["total_active"] == 1
+    assert data["keys"][0]["is_live"] is True
 
 
 @pytest.mark.anyio
@@ -295,6 +296,115 @@ async def test_revoke_api_key(client, api_headers, sponsor_wallet):
     )
     assert list_resp.json()["total_active"] == 0
     assert list_resp.json()["total_revoked"] == 1
+
+
+@pytest.mark.anyio
+async def test_revoke_api_key_writes_revocation_audit_log(
+    client, api_headers, sponsor_wallet
+):
+    """A plain revoke must show up in the rotation audit log.
+
+    Before the fix, revoke_key wrote no log entry, so the most common
+    containment action was invisible to auditors.
+    """
+    create_resp = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": sponsor_wallet["wallet_id"]},
+        headers=api_headers,
+    )
+    key = create_resp.json()
+
+    resp = await client.delete(
+        f"/v1/api-keys/{sponsor_wallet['wallet_id']}/{key['key_id']}",
+        params={"reason": "test_revocation"},
+        headers=api_headers,
+    )
+    assert resp.status_code == 204
+
+    logs_resp = await client.get(
+        f"/v1/api-keys/{sponsor_wallet['wallet_id']}/logs",
+        headers=api_headers,
+    )
+    assert logs_resp.status_code == 200
+    logs = logs_resp.json()
+    assert len(logs) == 1
+    entry = logs[0]
+    assert entry["rotation_type"] == "revocation"
+    assert entry["key_id"] == key["key_id"]
+    assert entry["old_key_id"] == key["key_id"]
+    assert entry["new_key_id"] is None
+    assert entry["trigger_reason"] == "test_revocation"
+    assert entry["triggered_by"] == "user"
+
+
+@pytest.mark.anyio
+async def test_list_marks_expired_key_not_live(client, api_headers, sponsor_wallet):
+    """An expired key keeps stored status active but must read is_live false."""
+    from datetime import timedelta
+
+    from app.core.time import utc_now
+
+    create_resp = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": sponsor_wallet["wallet_id"]},
+        headers=api_headers,
+    )
+    key = create_resp.json()
+
+    factory = get_session_factory()
+    async with factory() as session:
+        row = await session.get(APIKeyModel, key["key_id"])
+        assert row is not None
+        row.expires_at = utc_now() - timedelta(minutes=5)
+        session.add(row)
+        await session.commit()
+
+    list_resp = await client.get(
+        f"/v1/api-keys/{sponsor_wallet['wallet_id']}",
+        headers=api_headers,
+    )
+    assert list_resp.status_code == 200
+    data = list_resp.json()
+    assert len(data["keys"]) == 1
+    # Nothing sweeps stored status, so it still reads active...
+    assert data["keys"][0]["status"] == "active"
+    # ...but the list marks the key as unable to authenticate.
+    assert data["keys"][0]["is_live"] is False
+    assert data["total_active"] == 0
+
+
+@pytest.mark.anyio
+async def test_list_marks_exhausted_key_not_live(client, api_headers, sponsor_wallet):
+    """A key that spent its use budget must read is_live false."""
+    create_resp = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": sponsor_wallet["wallet_id"], "max_uses": 1},
+        headers=api_headers,
+    )
+    key = create_resp.json()
+
+    first = await client.get(
+        f"/v1/billing/wallets/{sponsor_wallet['wallet_id']}",
+        headers={"X-API-Key": key["api_key"]},
+    )
+    assert first.status_code == 200
+
+    list_resp = await client.get(
+        f"/v1/api-keys/{sponsor_wallet['wallet_id']}",
+        headers=api_headers,
+    )
+    assert list_resp.status_code == 200
+    data = list_resp.json()
+    assert data["keys"][0]["use_count"] == 1
+    assert data["keys"][0]["is_live"] is False
+    assert data["total_active"] == 0
+
+    # The label tells the truth: the budget really is spent.
+    second = await client.get(
+        f"/v1/billing/wallets/{sponsor_wallet['wallet_id']}",
+        headers={"X-API-Key": key["api_key"]},
+    )
+    assert second.status_code == 403
 
 
 @pytest.mark.anyio
