@@ -74,7 +74,53 @@ arrives after the window is not honored.
 Use the canonical Sentinel origin unless a customer has a reviewed custom
 deployment. Application validation blocks unsafe URL shapes, internal names,
 and non-global address literals, but it does not pin DNS resolution. Custom
-hostnames therefore still require trusted DNS and network-level egress policy.
+hostnames therefore still require trusted DNS and network-level egress policy
+(see the checklist below).
+
+## Pilot prerequisites
+
+A live human approval pilot needs all of the following before selling it:
+
+- A Sentinel tenant at pauseapi.app with its own subscription. Agent
+  Middleware does not include, resell, or pay for Sentinel; the operator
+  brings the tenant and the key, and the commercial question of who pays
+  for pauseapi.app in a bundled offer is still open.
+- `SENTINEL_API_URL`, `SENTINEL_API_KEY`, at least one approver in
+  `SENTINEL_APPROVERS` or in the tenant defaults, and
+  `SIMULATION_MODE_HUMAN_APPROVAL=false`.
+- A human who answers inside `SENTINEL_APPROVAL_TIMEOUT_SECONDS`
+  (default 300). Sentinel never expires the approval on its side, so a
+  decision that arrives after the local window is thrown away and the
+  agent must start over.
+- A staffing plan for Sentinel outages: pending calls stay retryable and
+  nothing is charged, but there is no fallback approver and no queued
+  approvals view, so pages simply wait until Sentinel recovers.
+- Every demo on simulation must show the simulated label. Simulated
+  approvals are refused in production-like environments, so a pilot that
+  was rehearsed on auto approve will deny instead of paging anyone.
+
+At boot the server logs one `phase="human_approval_posture"` line naming
+the active mode (`simulated`, `simulated_blocked`, `live`, or
+`unconfigured`) and which Sentinel settings are still missing. Check
+that line first when an approval gated permit fails with
+`human_approval_not_configured`.
+
+## Custom origin DNS and egress checklist
+
+Only needed when pointing at a non-default Sentinel origin. The
+application guard rejects literal private addresses but cannot stop a
+public DNS name from later resolving to a private address, so the
+network has to own that boundary:
+
+- Resolve and approve the hostname from a trusted DNS resolver, and
+  re-check the resolution on a schedule. Treat an unexpected change in
+  the resolved address as an incident.
+- Egress-allowlist HTTPS (port 443) to the approved Sentinel addresses
+  only, from the hosts that run the gateway. Deny other outbound paths
+  from those hosts where policy allows it.
+- Keep the canonical `https://api.pauseapi.app` origin unless the
+  customer has a reviewed reason to move. Record the custom origin, who
+  approved it, and the date in the pilot notes.
 
 The full dependency report returned when `ENABLE_PROOF_SURFACES=true` includes
 a `sentinel` entry: `not_used` while simulated, `not_configured` when

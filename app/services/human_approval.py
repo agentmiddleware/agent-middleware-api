@@ -211,6 +211,54 @@ def human_approval_available() -> tuple[bool, str | None]:
     return True, None
 
 
+def describe_human_approval_posture() -> dict[str, Any]:
+    """Summarize the human approval mode for the startup log.
+
+    Tells the operator which approval path is active and what is missing,
+    without exposing key material. Only presence and shape flags are
+    reported, never the URL or key values. Modes:
+
+    - ``simulated``: local/dev auto approve, records marked simulated.
+    - ``simulated_blocked``: simulation on in a production-like
+      environment, so approval gated permits and invokes fail closed.
+    - ``live``: real Sentinel calls are possible with current settings.
+    - ``unconfigured``: real mode without a usable URL and key, so
+      approval gated permits and invokes fail closed.
+    """
+    settings = get_settings()
+    simulated = is_simulation("human_approval")
+    production_like = is_production_like_environment(settings.ENVIRONMENT)
+    url_present = bool((settings.SENTINEL_API_URL or "").strip())
+    key_present = bool((settings.SENTINEL_API_KEY or "").strip())
+    origin_valid = False
+    if url_present:
+        try:
+            normalize_sentinel_origin(
+                settings.SENTINEL_API_URL or "",
+                allow_loopback=not production_like,
+            )
+            origin_valid = True
+        except SentinelTargetError:
+            origin_valid = False
+    available, reason = human_approval_available()
+    if simulated:
+        mode = "simulated" if not production_like else "simulated_blocked"
+    elif available:
+        mode = "live"
+    else:
+        mode = "unconfigured"
+    return {
+        "mode": mode,
+        "simulation": simulated,
+        "production_like": production_like,
+        "sentinel_url_configured": url_present,
+        "sentinel_key_configured": key_present,
+        "sentinel_origin_valid": origin_valid,
+        "approval_timeout_seconds": approval_window_seconds(),
+        "failure_reason": reason,
+    }
+
+
 def _decode_json(resp: httpx.Response) -> dict[str, Any]:
     """Parse a Sentinel 2xx body, treating a non-JSON payload as an outage.
 
