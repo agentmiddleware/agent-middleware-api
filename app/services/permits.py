@@ -835,6 +835,19 @@ class PermitService:
         arguments: dict[str, Any] | None = None,
     ) -> PermitValidation:
         now = utc_now()
+        # A negative estimate would pass every cap below and then deflate
+        # spent_credits in the guarded UPDATE, minting budget from nothing
+        # while still consuming a max_calls_per_tool use. The upstream
+        # reservation already refuses negative amounts; refuse them here so
+        # every reserve path shares the same floor. Zero stays allowed: a
+        # zero-cost tool reserves nothing but still holds its call slot.
+        if not estimated_credits.is_finite() or estimated_credits < 0:
+            return PermitValidation(
+                False,
+                "permit_credits_invalid",
+                model,
+                {"estimated_credits": _num(estimated_credits)},
+            )
         if model.status != "active":
             return PermitValidation(
                 False,
@@ -1075,6 +1088,10 @@ class PermitService:
             return Decimal(str(total)) if total is not None else Decimal("0")
 
     async def reserve_budget(self, permit_id: str, amount: Decimal) -> None:
+        # Same floor as authorize_and_reserve: a negative amount would pass
+        # the cap predicate and deflate spent_credits in the guarded UPDATE.
+        if not amount.is_finite() or amount < 0:
+            raise PermitError("permit_credits_invalid")
         factory = get_session_factory()
 
         async def _once() -> None:

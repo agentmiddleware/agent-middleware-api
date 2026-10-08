@@ -3767,12 +3767,11 @@ async def _release_local_permit_reservation(
     ``PermitService.release_tool_call`` is the documented compensation partner
     and is a no-op on a permit that configures no cap for this tool.
 
-    Local reservations only. The upstream path reserves credits alone --
-    ``authorize_reserve_and_prepare`` never touches the counter -- and a permit
-    that configures ``max_calls_per_tool`` is refused that backend outright as
-    ``permit_constraint_unsupported_for_upstream``, so no remote reservation
-    can ever hold a per-tool use to give back. Remote budget goes back through
-    ``release_dispatch_budget_once`` instead, which is attempt-keyed.
+    Local reservations only. A remote reservation may also hold a per-tool
+    use (``authorize_reserve_and_prepare`` reserves the counter and marks
+    ``call_slot_reserved``), but that use must never be handed back here.
+    Remote budget and slots go back through ``release_dispatch_budget_once``
+    instead, which is attempt-keyed and once-only.
 
     Each half is guarded on its own. Compensation runs on paths whose real
     answer to the caller is a denial or a failure, and a release that loses its
