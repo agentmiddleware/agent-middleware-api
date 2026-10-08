@@ -64,6 +64,7 @@ revocation case.
 
 | Reason code | Details | Remediation |
 |-------------|---------|-------------|
+| `permit_amount_invalid` | `constraint` (`storable_non_negative_credit`) | The estimated price was negative, not finite, or could not be stored as a credit amount. Send a finite price of zero or more with at most eight decimal places. Zero is allowed when the caller is only asking whether the permit is otherwise open. |
 | `permit_budget_exceeded` | `required_credits`, `remaining_credits`, `spent_credits`, `max_credits` | Request a permit with enough remaining credits, then retry with a new idempotency key. |
 | `permit_aggregate_value_cap_exceeded` | `required_credits`, `reserved_credits`, `aggregate_value_cap`; `charged_to_date` when the denial came from the read-time check | Request a higher aggregate cap or a replacement permit. `reserved_credits` includes in-flight reservations that have not yet produced a receipt, floored to the permit's receipt total so it is never below `charged_to_date`. |
 | `permit_max_calls_exceeded` | `tool`, `limit`, `calls_made` | Request a replacement permit with a higher per-tool call limit, then retry with a new idempotency key. Replaying the denied key returns the stored denial receipt. |
