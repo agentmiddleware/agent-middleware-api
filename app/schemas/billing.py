@@ -20,6 +20,17 @@ from enum import Enum
 from datetime import datetime
 import re
 
+from app.schemas.request_bounds import (
+    EMERGENCY_REASON_MAX_LENGTH,
+    MAX_API_KEY_EXPIRES_IN_DAYS,
+    MAX_API_KEY_USES,
+    WALLET_ID_MAX_LENGTH,
+    reject_bool_number,
+    reject_nul,
+    reject_nul_optional,
+    require_storable_amount,
+)
+
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -136,6 +147,66 @@ SAFE_WALLET_ID = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$")
 MAX_STORABLE_AMOUNT = 1e12
 
 
+class _BoundedMoneyRequest(BaseModel):
+    """Shared guards for money and text that later land in fixed columns."""
+
+    @field_validator(
+        "initial_credits",
+        "budget_credits",
+        "daily_limit",
+        "auto_refill_threshold",
+        "auto_refill_amount",
+        "max_spend",
+        "amount_fiat",
+        "credits_per_unit",
+        mode="before",
+        check_fields=False,
+    )
+    @classmethod
+    def _reject_bool_money(cls, value: Any) -> Any:
+        return reject_bool_number(value)
+
+    @field_validator(
+        "initial_credits",
+        "budget_credits",
+        "daily_limit",
+        "auto_refill_threshold",
+        "auto_refill_amount",
+        "max_spend",
+        "amount_fiat",
+        "credits_per_unit",
+        check_fields=False,
+    )
+    @classmethod
+    def _require_storable_money(cls, value: float | None) -> float | None:
+        return require_storable_amount(value)
+
+    @field_validator(
+        "sponsor_name",
+        "email",
+        "sponsor_wallet_id",
+        "agent_id",
+        "parent_wallet_id",
+        "child_agent_id",
+        "task_description",
+        "wallet_id",
+        "key_name",
+        "reason",
+        "name",
+        "description",
+        "unit_name",
+        check_fields=False,
+    )
+    @classmethod
+    def _reject_nul_text(cls, value: str) -> str:
+        return reject_nul(value)
+
+    @field_validator("key_id", check_fields=False)
+    @classmethod
+    def _reject_nul_key_id(cls, value: str | None) -> str | None:
+        return reject_nul_optional(value)
+
+
 def _exact_decimal(value: Any) -> str | None:
     """Return a JSON-safe exact decimal string without binary float math."""
     if value is None:
@@ -174,7 +245,7 @@ class ExactDecimalFieldsMixin(BaseModel):
         return payload
 
 
-class CreateSponsorWalletRequest(BaseModel):
+class CreateSponsorWalletRequest(_BoundedMoneyRequest):
     """Create a human sponsor (liability sink) root account."""
 
     sponsor_name: str = Field(
@@ -186,6 +257,7 @@ class CreateSponsorWalletRequest(BaseModel):
     )
     email: str = Field(
         ...,
+        max_length=255,
         description="Contact email for billing alerts and top-up requests.",
         examples=["billing@acme.com"],
     )
@@ -213,15 +285,19 @@ class CreateSponsorWalletRequest(BaseModel):
     )
 
 
-class CreateAgentWalletRequest(BaseModel):
+class CreateAgentWalletRequest(_BoundedMoneyRequest):
     """Provision a pre-paid agent wallet under a sponsor."""
 
     sponsor_wallet_id: str = Field(
         ...,
+        min_length=1,
+        max_length=WALLET_ID_MAX_LENGTH,
         description="ID of the sponsor wallet funding this agent.",
     )
     agent_id: str = Field(
         ...,
+        min_length=1,
+        max_length=100,
         description="Agent ID from the comms registry.",
     )
     budget_credits: float = Field(
@@ -258,15 +334,19 @@ class CreateAgentWalletRequest(BaseModel):
     )
 
 
-class CreateChildWalletRequest(BaseModel):
+class CreateChildWalletRequest(_BoundedMoneyRequest):
     """Spawn a sub-agent child wallet from an agent wallet."""
 
     parent_wallet_id: str = Field(
         ...,
+        min_length=1,
+        max_length=WALLET_ID_MAX_LENGTH,
         description="ID of the parent agent wallet funding this child.",
     )
     child_agent_id: str = Field(
         ...,
+        min_length=1,
+        max_length=100,
         description="Identifier for the child sub-agent.",
     )
     budget_credits: float = Field(
@@ -285,6 +365,7 @@ class CreateChildWalletRequest(BaseModel):
     )
     task_description: str = Field(
         default="",
+        max_length=500,
         description="What this child agent is supposed to accomplish.",
     )
     ttl_seconds: int | None = Field(
@@ -488,10 +569,15 @@ class LedgerResponse(ExactDecimalFieldsMixin):
 # ---------------------------------------------------------------------------
 
 
-class TopUpRequest(BaseModel):
+class TopUpRequest(_BoundedMoneyRequest):
     """Request to add credits to a sponsor wallet via fiat payment."""
 
-    wallet_id: str = Field(..., description="Sponsor wallet to top up.")
+    wallet_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=WALLET_ID_MAX_LENGTH,
+        description="Sponsor wallet to top up.",
+    )
     amount_fiat: float = Field(
         ...,
         gt=0,
@@ -637,7 +723,7 @@ class AlertListResponse(BaseModel):
     unacknowledged: int
 
 
-class RegisterServiceRequest(BaseModel):
+class RegisterServiceRequest(_BoundedMoneyRequest):
     """Register a new billable service in the marketplace."""
 
     name: str = Field(..., min_length=1, max_length=255)
@@ -777,10 +863,15 @@ class KYCVerificationDetails(BaseModel):
     updated_at: datetime
 
 
-class CreateAPIKeyRequest(BaseModel):
+class CreateAPIKeyRequest(_BoundedMoneyRequest):
     """Request to create a new API key for a wallet."""
 
-    wallet_id: str = Field(..., description="Wallet ID to create key for.")
+    wallet_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=WALLET_ID_MAX_LENGTH,
+        description="Wallet ID to create key for.",
+    )
     key_name: str = Field(
         default="default",
         max_length=50,
@@ -789,13 +880,24 @@ class CreateAPIKeyRequest(BaseModel):
     expires_in_days: int | None = Field(
         default=None,
         gt=0,
+        le=MAX_API_KEY_EXPIRES_IN_DAYS,
         description="Optional expiration in days. None = no expiration.",
     )
     max_uses: int | None = Field(
         default=None,
         gt=0,
+        le=MAX_API_KEY_USES,
         description="Optional max uses. None = unlimited.",
     )
+
+    @field_validator("expires_in_days", "max_uses", mode="before")
+    @classmethod
+    def _reject_bool_limits(cls, value: Any) -> Any:
+        # bool is an int subclass, so lax coercion would turn true into a
+        # one-day expiry or a one-use cap before the range check sees it.
+        if isinstance(value, bool):
+            raise ValueError("must be an integer, not a boolean")
+        return value
 
 
 class APIKeyResponse(BaseModel):
@@ -830,12 +932,19 @@ class APIKeyWithSecret(BaseModel):
     warning: str = "Store this key securely. It will not be shown again."
 
 
-class RotateAPIKeyRequest(BaseModel):
+class RotateAPIKeyRequest(_BoundedMoneyRequest):
     """Request to rotate an API key."""
 
-    wallet_id: str = Field(..., description="Wallet ID owning the key.")
+    wallet_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=WALLET_ID_MAX_LENGTH,
+        description="Wallet ID owning the key.",
+    )
     key_id: str | None = Field(
         default=None,
+        min_length=1,
+        max_length=WALLET_ID_MAX_LENGTH,
         description="Specific key ID to rotate. None = create new key only.",
     )
     revoke_old: bool = Field(
@@ -884,14 +993,22 @@ class KeyRotationLogEntry(BaseModel):
     created_at: datetime
 
 
-class EmergencyKeyRevocationRequest(BaseModel):
+class EmergencyKeyRevocationRequest(_BoundedMoneyRequest):
     """Request to immediately revoke all keys for a wallet."""
 
-    wallet_id: str = Field(..., description="Wallet ID to revoke keys for.")
+    wallet_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=WALLET_ID_MAX_LENGTH,
+        description="Wallet ID to revoke keys for.",
+    )
     reason: str = Field(
         default="security_incident",
-        max_length=255,
-        description="Reason for emergency revocation.",
+        max_length=EMERGENCY_REASON_MAX_LENGTH,
+        description=(
+            "Reason for emergency revocation. Stored with an EMERGENCY prefix, "
+            "so the caller text itself must leave room for that prefix."
+        ),
     )
     create_new_key: bool = Field(
         default=True,

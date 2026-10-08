@@ -32,14 +32,16 @@ loop cannot mint an absurd balance. See docs/static-dev-api-keys.md.
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import Any
 from urllib.parse import urlsplit
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from ..core.config import get_settings
 from ..core.trust_mode import is_production_like_environment
+from ..schemas.request_bounds import reject_bool_number, require_storable_amount
 from ..services.agent_money import get_agent_money
 from ..services.api_key_service import get_api_key_service
 
@@ -67,6 +69,19 @@ class SelfProvisionRequest(BaseModel):
         le=float(MAX_BUDGET_CREDITS),
         description="Synthetic dev credits granted to the agent wallet.",
     )
+
+    @field_validator("budget_credits", mode="before")
+    @classmethod
+    def _reject_bool_budget(cls, value: Any) -> Any:
+        return reject_bool_number(value)
+
+    @field_validator("budget_credits")
+    @classmethod
+    def _storable_budget(cls, value: float) -> float:
+        checked = require_storable_amount(value)
+        if checked is None:
+            raise ValueError("amount_not_storable")
+        return checked
 
 
 class SelfProvisionResponse(BaseModel):

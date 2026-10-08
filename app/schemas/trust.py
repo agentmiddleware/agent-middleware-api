@@ -15,6 +15,12 @@ from pydantic import (
 
 from app.core.credits import credit_amount_fits_storage
 from app.schemas.policies import PolicyBundleResponse
+from app.schemas.request_bounds import (
+    TOOL_NAME_MAX_LENGTH,
+    WALLET_ID_MAX_LENGTH,
+    reject_deep_json,
+    reject_nul,
+)
 
 # Permit and permit-request credit columns are Numeric(20, 8). A permit is
 # signed before it is persisted, so a value the column would round (a ninth
@@ -36,6 +42,31 @@ _PositiveStoredCredit = Annotated[
     Decimal,
     Field(gt=0, max_digits=_CREDIT_DIGITS, decimal_places=_CREDIT_DECIMAL_PLACES),
     AfterValidator(_require_storable_credit),
+]
+_WalletId = Annotated[
+    str,
+    Field(min_length=1, max_length=WALLET_ID_MAX_LENGTH),
+    AfterValidator(reject_nul),
+]
+_OptionalKeyId = Annotated[
+    str,
+    Field(min_length=1, max_length=WALLET_ID_MAX_LENGTH),
+    AfterValidator(reject_nul),
+]
+_ToolName = Annotated[
+    str,
+    Field(min_length=1, max_length=TOOL_NAME_MAX_LENGTH),
+    AfterValidator(reject_nul),
+]
+_ForbiddenName = Annotated[
+    str,
+    Field(min_length=1, max_length=256),
+    AfterValidator(reject_nul),
+]
+_RecipientDomain = Annotated[
+    str,
+    Field(max_length=255),
+    AfterValidator(reject_nul),
 ]
 
 
@@ -63,11 +94,11 @@ class ActionPermitFields(BaseModel):
 
 
 class PermitCreateRequest(ActionPermitFields):
-    issuer_wallet_id: str
-    subject_wallet_id: str
-    subject_key_id: str | None = None
+    issuer_wallet_id: _WalletId
+    subject_wallet_id: _WalletId
+    subject_key_id: _OptionalKeyId | None = None
     scopes: list[str] = Field(default_factory=list)
-    allowed_tools: list[str] = Field(default_factory=list)
+    allowed_tools: list[_ToolName] = Field(default_factory=list)
     max_credits: _PositiveStoredCredit
     expires_at: datetime
     # permits.nonce is String(64).
@@ -82,8 +113,8 @@ class PermitCreateRequest(ActionPermitFields):
         default_factory=dict
     )
     aggregate_value_cap: _PositiveStoredCredit | None = None
-    forbidden_fields: list[str] = Field(default_factory=list)
-    recipient_domain: str | None = None
+    forbidden_fields: list[_ForbiddenName] = Field(default_factory=list)
+    recipient_domain: _RecipientDomain | None = None
     # Opt-out from cross-key duplicate detection. When true, identical requests
     # under different idempotency keys are allowed (for tools that legitimately
     # repeat identical calls, e.g. repeated purchases of the same item).
@@ -107,14 +138,19 @@ class ActionPermitCreateRequest(BaseModel):
     """Trusted issuer selects one action; signed binding is server-derived."""
 
     model_config = {"extra": "forbid"}
-    issuer_wallet_id: str
-    subject_wallet_id: str
-    subject_key_id: str | None = None
+    issuer_wallet_id: _WalletId
+    subject_wallet_id: _WalletId
+    subject_key_id: _OptionalKeyId | None = None
     max_credits: _PositiveStoredCredit
     expires_at: datetime
     nonce: str | None = Field(default=None, max_length=64)
-    tool_name: str = Field(min_length=1)
+    tool_name: _ToolName
     arguments: dict[str, Any]
+
+    @field_validator("arguments")
+    @classmethod
+    def _limit_argument_depth(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return reject_deep_json(value)
 
 
 class PermitResponse(ActionPermitFields):
@@ -146,8 +182,8 @@ class PermitResponse(ActionPermitFields):
 class QuoteCreateRequest(BaseModel):
     """Ask what one call of a tool will cost this wallet."""
 
-    wallet_id: str
-    tool: str
+    wallet_id: _WalletId
+    tool: _ToolName
 
 
 class QuoteResponse(BaseModel):
@@ -177,16 +213,20 @@ class QuoteListResponse(BaseModel):
 class PermitRequestCreate(BaseModel):
     """An agent asking a human for authority it cannot mint itself."""
 
-    issuer_wallet_id: str
-    subject_wallet_id: str
-    allowed_tools: list[str] = Field(min_length=1)
+    issuer_wallet_id: _WalletId
+    subject_wallet_id: _WalletId
+    allowed_tools: list[_ToolName] = Field(min_length=1)
     scopes: list[str] = Field(default_factory=list)
     # Hashed for the human at request time and stored as Numeric(20, 8), so
     # a value the column would round fails its own integrity check at mint.
     max_credits: _PositiveStoredCredit
     expires_at: datetime
     # Shown to the human approver: why the agent needs this authority.
-    justification: str = Field(min_length=1, max_length=2000)
+    justification: Annotated[
+        str,
+        Field(min_length=1, max_length=2000),
+        AfterValidator(reject_nul),
+    ]
     # Carried onto the minted permit: invokes under it pause for a human too.
     requires_human_approval: bool = False
 
@@ -271,6 +311,17 @@ class PermitVerifyRequest(BaseModel):
     wallet_id: str | None = None
     tool: str | None = None
     estimated_credits: Decimal | None = None
+
+    @field_validator("estimated_credits")
+    @classmethod
+    def _estimated_credits_fit_storage(cls, value: Decimal | None) -> Decimal | None:
+        # Zero is a real estimate. A negative, a ninth decimal, or any other
+        # amount that Numeric(20, 8) cannot store unchanged is not.
+        if value is None:
+            return None
+        if not credit_amount_fits_storage(value):
+            raise ValueError("credit_amount_not_storable")
+        return value
 
 
 class PermitVerifyResponse(BaseModel):

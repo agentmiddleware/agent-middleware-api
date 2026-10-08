@@ -36,11 +36,59 @@ from ..schemas.billing import (
     APIKeyStatus,
     RotationType,
 )
+from ..schemas.request_bounds import (
+    EMERGENCY_REVOKE_REASON_PREFIX,
+    MAX_API_KEY_EXPIRES_IN_DAYS,
+    MAX_API_KEY_USES,
+    REVOKE_REASON_MAX_LENGTH,
+)
 
 logger = logging.getLogger(__name__)
 
 API_KEY_LENGTH = 32
 API_KEY_PREFIX_LENGTH = 8
+
+
+def validate_api_key_limits(
+    expires_in_days: int | None,
+    max_uses: int | None,
+) -> None:
+    """Reject limits that are not real integers or cannot be stored.
+
+    bool is an int subclass, so a true value would otherwise become a
+    one-day key or a one-use key. expires_in_days must also stay inside
+    the range timedelta can add to the current time, and max_uses must
+    stay inside a signed 32-bit integer column.
+    """
+    if expires_in_days is not None and (
+        type(expires_in_days) is not int
+        or expires_in_days < 1
+        or expires_in_days > MAX_API_KEY_EXPIRES_IN_DAYS
+    ):
+        raise ValueError(
+            "expires_in_days must be an integer from 1 to "
+            f"{MAX_API_KEY_EXPIRES_IN_DAYS}"
+        )
+    if max_uses is not None and (
+        type(max_uses) is not int or max_uses < 1 or max_uses > MAX_API_KEY_USES
+    ):
+        raise ValueError(f"max_uses must be an integer from 1 to {MAX_API_KEY_USES}")
+
+
+def stored_revoke_reason(reason: str, *, emergency: bool = False) -> str:
+    """Return the revoke_reason column value, or refuse it.
+
+    Emergency revocation stores the prefix EMERGENCY: plus the caller
+    reason. Call this before opening a database session so a too-long or
+    NUL reason cannot roll the revocation back.
+    """
+    if not isinstance(reason, str) or "\x00" in reason:
+        raise ValueError("revoke_reason_invalid")
+    prefix = EMERGENCY_REVOKE_REASON_PREFIX if emergency else ""
+    stored = f"{prefix}{reason}"
+    if len(stored) > REVOKE_REASON_MAX_LENGTH:
+        raise ValueError("revoke_reason_too_long")
+    return stored
 
 
 class APIKeyError(Exception):
@@ -157,6 +205,12 @@ class APIKeyService:
                 commits, and closes its own session for the lookup and for
                 the insert.
 
+        Raises:
+            ValueError: expires_in_days or max_uses is a boolean, out of
+                range, or otherwise not a storable integer. Raised before
+                any wallet lookup so the caller gets a validation error
+                instead of a timedelta or integer overflow.
+
         Returns:
             {
                 "key_id": str,
@@ -170,6 +224,7 @@ class APIKeyService:
                 "max_uses": int | None,
             }
         """
+        validate_api_key_limits(expires_in_days, max_uses)
         if session is not None:
             result = await session.execute(
                 select(WalletModel).where(col(WalletModel.wallet_id) == wallet_id)
@@ -493,6 +548,7 @@ class APIKeyService:
             raise InvalidRotationRequestError(
                 "key_id is required when revoke_old is true"
             )
+        reason = stored_revoke_reason(reason)
 
         old_key_id = None
         now = utc_now()
@@ -667,6 +723,7 @@ class APIKeyService:
         Returns:
             True if revoked successfully
         """
+        reason = stored_revoke_reason(reason)
         async with self._session_factory()() as session:
             result = await session.execute(
                 select(APIKeyModel).where(
@@ -716,6 +773,7 @@ class APIKeyService:
                 "created_at": datetime,
             }
         """
+        stored_reason = stored_revoke_reason(reason, emergency=True)
         now = utc_now()
         persisted_now = to_naive_utc(now)
 
@@ -744,7 +802,7 @@ class APIKeyService:
             for key in active_keys:
                 key.status = APIKeyStatus.REVOKED.value
                 key.revoked_at = persisted_now
-                key.revoke_reason = f"EMERGENCY: {reason}"
+                key.revoke_reason = stored_reason
                 session.add(key)
                 revoked_key_ids.append(key.key_id)
 

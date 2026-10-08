@@ -15,6 +15,7 @@ from app.services.permits import PermitValidation
 
 from app.core.auth import AuthContext
 from app.db.models import PermitModel
+from app.schemas.request_bounds import reject_deep_json
 from app.schemas.trust import ActionPermitCreateRequest, PermitResponse
 
 
@@ -80,6 +81,8 @@ class ActionExecutionIdentity:
 
 
 def _strict_json(value: Any) -> None:
+    # Stop a deep tree before the recursive walk below can raise RecursionError.
+    reject_deep_json(value)
     if value is None or type(value) in (str, bool, int):
         return
     if type(value) is float and math.isfinite(value):
