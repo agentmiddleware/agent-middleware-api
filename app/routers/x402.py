@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from app.core.auth import AuthContext, get_auth_context
 from app.core.time import utc_now
 from app.services.x402_engine import (
+    X402_HONESTY_NOTE,
     X402Error,
     X402SettlementUncertainError,
     get_x402_handler,
@@ -22,7 +23,7 @@ from app.trust import (
     get_receipt_service,
 )
 
-router = APIRouter(prefix="/v1/x402", tags=["X402 Settlement"])
+router = APIRouter(prefix="/v1/x402", tags=["X402 Facilitation"])
 
 _SETTLE_ENDPOINT = "/v1/x402/settle"
 
@@ -47,6 +48,8 @@ class X402RequirementResponse(BaseModel):
     pay_to: str
     network: str
     asset: str
+    # Approved honesty sentence, repeated on every x402 response body.
+    notice: str = Field(default=X402_HONESTY_NOTE)
 
 
 class X402SettleRequest(BaseModel):
@@ -87,9 +90,15 @@ class X402SettleResponse(BaseModel):
     shadow_session_id: str
     shadow_charge_id: str | None = None
     audit_event_id: str | None = None
+    # Approved honesty sentence, repeated on every x402 response body.
+    notice: str = Field(default=X402_HONESTY_NOTE)
 
 
-@router.post("/parse", response_model=X402RequirementResponse)
+@router.post(
+    "/parse",
+    response_model=X402RequirementResponse,
+    description=X402_HONESTY_NOTE,
+)
 async def parse_payment_required(
     request: X402ParseRequest,
     auth: AuthContext = Depends(get_auth_context),
@@ -146,7 +155,11 @@ async def _refuse_in_progress_settle(
     raise HTTPException(status_code=409, detail="x402_settlement_needs_review")
 
 
-@router.post("/settle", response_model=X402SettleResponse)
+@router.post(
+    "/settle",
+    response_model=X402SettleResponse,
+    description=X402_HONESTY_NOTE,
+)
 async def settle_payment_required(
     request: X402SettleRequest,
     idempotency_key: str = Header(..., alias="Idempotency-Key"),

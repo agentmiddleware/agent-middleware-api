@@ -205,7 +205,9 @@ strings, along with USDC and stablecoin, appeared **zero times**.
 > never mints credits, never writes real ledger entries, and has no custody or
 > on-chain execution. It is **not** a settlement rail: Stripe is still the only
 > one, and the freeze holds. Payman and `stablecoin` still appear nowhere in
-> code. The full statement is in
+> code. The approved x402 sentence, used verbatim on every x402 surface, is:
+> x402 authorizes and records a payment demand but does not move money. The
+> full statement is in
 > [`settlement-rails.md`](settlement-rails.md#facilitation-surfaces-under-the-freeze-x402-acp).
 
 Existing `blockchain` references are an optional, unimplemented proposal to

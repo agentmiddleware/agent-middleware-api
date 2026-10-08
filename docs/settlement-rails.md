@@ -182,6 +182,11 @@ If a reviewer reads either surface as "settlement is implemented", this
 section is the correction: the freeze holds, and the refusal copy stays
 untouched on every surface listed above.
 
+Approved x402 sentence, used verbatim on every x402 endpoint, SDK helper,
+and response body (`X402_HONESTY_NOTE` in code):
+
+> x402 authorizes and records a payment demand but does not move money.
+
 **x402** (`app/services/x402_engine.py`, `app/routers/x402.py`). Parses HTTP
 402 payment demands strictly (per-header failure reasons, network and asset
 allowlists, address-shape checks), authorizes the demand against a PermitV2

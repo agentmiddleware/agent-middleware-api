@@ -7,6 +7,10 @@ transfer-authorization payload the *payer wallet* must sign — this SDK holds
 no on-chain keys and signs nothing itself; the middleware's role is
 facilitation (permit budget authorization, shadow-ledger metering, signed
 receipt), never on-chain settlement.
+
+Approved honesty sentence, kept identical to the server's X402_HONESTY_NOTE:
+
+x402 authorizes and records a payment demand but does not move money.
 """
 
 from __future__ import annotations
@@ -37,6 +41,11 @@ _NETWORK_HEADER = "x-402-network"
 # client.py is the single source of truth for both behaviors.
 _error_detail = AgentMiddlewareClient._error_detail
 _validate_idempotency_key = AgentMiddlewareClient._validate_idempotency_key
+
+# Approved honesty sentence for every x402 surface. The literal must stay
+# identical to app/services/x402_engine.py X402_HONESTY_NOTE (asserted under
+# test); the SDK keeps its own copy so the offline path stays dependency-free.
+X402_HONESTY_NOTE = "x402 authorizes and records a payment demand but does not move money."
 
 
 def parse_402_response(response: Any) -> dict[str, Any] | None:
@@ -194,7 +203,9 @@ class X402Client:
         the payer wallet's on-chain address — required by the server for EVM
         networks so the attested EIP-712 message binds the real ``from``. The
         server response includes the transfer authorization for the payer
-        wallet to sign plus the settlement receipt id.
+        wallet to sign plus the settlement receipt id. The returned dict
+        carries a ``notice`` field with the approved honesty sentence:
+        ``x402 authorizes and records a payment demand but does not move money.``
         """
         key = _validate_idempotency_key(idempotency_key)
         # ``amount_usd`` is the canonical server field and wins; ``amount`` is

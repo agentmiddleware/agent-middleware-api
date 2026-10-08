@@ -10,7 +10,8 @@ the EIP-712 payload for EVM USDC; Solana's native Ed25519 for Solana). What
 this module signs is an Ed25519 *facilitator attestation*: evidence that the
 trust plane authorized and metered the payment, never the secp256k1 on-chain
 authorization itself. There is no keccak and no EVM key anywhere in this repo,
-by design.
+by design. The approved one-sentence version of this posture is
+X402_HONESTY_NOTE.
 """
 
 from __future__ import annotations
@@ -52,6 +53,13 @@ class X402SettlementUncertainError(X402Error):
 # permit must list it in allowed_tools (scopes "tool:x402.payment:invoke" +
 # "billing:charge") before any settlement can reserve budget.
 X402_TOOL_NAME = "x402.payment"
+
+# Approved honesty sentence for every x402 surface, doc, and response. It
+# states the facilitation-only posture in one fixed wording so no endpoint,
+# SDK helper, doc, or payload can drift into selling a transfer.
+X402_HONESTY_NOTE = (
+    "x402 authorizes and records a payment demand but does not move money."
+)
 
 # USDC is a 6-decimal token on every supported network; amounts with more
 # precision cannot be represented on-chain and are rejected rather than
