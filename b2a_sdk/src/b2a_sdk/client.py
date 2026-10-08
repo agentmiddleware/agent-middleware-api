@@ -758,20 +758,40 @@ class AgentMiddlewareClient:
         wallet_id: str,
         amount_fiat: float,
         currency: str = "USD",
+        *,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """
         Prepare a fiat top-up via Stripe.
 
         Returns a client_secret for Stripe Elements.
 
+        Every prepare carries an ``Idempotency-Key``. Pass a caller-owned key
+        and reuse it for every retry of the same logical top-up; the server
+        then returns the original PaymentIntent instead of creating a second
+        one. When no key is passed the SDK mints one for this call.
+
         Args:
             wallet_id: Wallet to credit
             amount_fiat: Amount in fiat currency
             currency: Currency code (default: USD)
+            idempotency_key: Optional caller-owned key sent as
+                ``Idempotency-Key``; must be nonblank and at most 128
+                characters. When omitted the SDK mints one fresh key for
+                this call (see :func:`new_idempotency_key`).
 
         Returns:
             Stripe PaymentIntent details including client_secret
+
+        Raises:
+            ValueError: If ``idempotency_key`` is blank or too long (nothing
+                is sent)
         """
+        key = (
+            self._validate_idempotency_key(idempotency_key)
+            if idempotency_key is not None
+            else new_idempotency_key()
+        )
         response = await self._client.post(
             "/v1/billing/top-up/prepare",
             params={
@@ -779,6 +799,7 @@ class AgentMiddlewareClient:
                 "amount_fiat": amount_fiat,
                 "currency": currency,
             },
+            headers={"Idempotency-Key": key},
         )
         response.raise_for_status()
         return response.json()
