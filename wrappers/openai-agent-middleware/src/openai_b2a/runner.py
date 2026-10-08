@@ -235,6 +235,8 @@ class JsonFileOperationKeyStore:
             raise TypeError(f"{self._path}: operation key store must be a JSON object")
         data.setdefault("operations", {})
         data.setdefault("permits", {})
+        if not isinstance(data["operations"], dict) or not isinstance(data["permits"], dict):
+            raise TypeError(f"{self._path}: operation key store sections must be JSON objects")
         return data
 
     def _save(self, data: dict[str, dict[str, Any]]) -> None:

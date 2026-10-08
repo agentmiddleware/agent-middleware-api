@@ -129,10 +129,13 @@ class CrewAIB2ATool(BaseTool):
                 permit_idempotency_key = kwargs.get("permit_idempotency_key")
                 arguments = kwargs.get("arguments", {})
 
-                if not idempotency_key or not idempotency_key.strip():
+                if not isinstance(idempotency_key, str) or not idempotency_key.strip():
                     return "Error: idempotency_key is required and must not be blank"
 
-                if not permit_idempotency_key or not permit_idempotency_key.strip():
+                if (
+                    not isinstance(permit_idempotency_key, str)
+                    or not permit_idempotency_key.strip()
+                ):
                     return "Error: permit_idempotency_key is required and must not be blank"
 
                 request = self._permit_request(tool_name, permit_idempotency_key)
@@ -200,10 +203,13 @@ class CrewAIB2ATool(BaseTool):
                 permit_idempotency_key = kwargs.get("permit_idempotency_key")
                 arguments = kwargs.get("arguments", {})
 
-                if not idempotency_key or not idempotency_key.strip():
+                if not isinstance(idempotency_key, str) or not idempotency_key.strip():
                     return "Error: idempotency_key is required and must not be blank"
 
-                if not permit_idempotency_key or not permit_idempotency_key.strip():
+                if (
+                    not isinstance(permit_idempotency_key, str)
+                    or not permit_idempotency_key.strip()
+                ):
                     return "Error: permit_idempotency_key is required and must not be blank"
 
                 request = self._permit_request(tool_name, permit_idempotency_key)
