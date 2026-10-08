@@ -9,6 +9,28 @@ For the step before this one — an agent with no authority asking a human for a
 permit — see [`permit-requests.md`](permit-requests.md). Both gates page the
 same Sentinel tenant.
 
+## Pilot prerequisites
+
+A live pilot of this gate needs all four; anything less stays simulated or
+denied:
+
+1. A Sentinel tenant at `https://api.pauseapi.app` (or a reviewed custom
+   deployment), with `SENTINEL_API_URL` and `SENTINEL_API_KEY` set and
+   `SIMULATION_MODE_HUMAN_APPROVAL=false`.
+2. A named payer for that Sentinel tenant (the pauseapi.app subscription is
+   separate from this product and is billed by its vendor).
+3. At least one configured approver (`SENTINEL_APPROVERS`, or tenant
+   defaults) who answers inside `SENTINEL_APPROVAL_TIMEOUT_SECONDS`
+   (default 300 seconds).
+4. A fallback plan for when Sentinel is down: gated calls return retryable
+   `human_approval_unavailable`, nothing executes and nothing is charged, so
+   the agent retries the same idempotency key later. There is no fallback
+   approver or queued-approvals view; plan operator coverage for the
+   evaluation window.
+
+Without item 1, local/dev runs auto-approve instantly with the record marked
+simulated, and production-like environments deny gated permits outright.
+
 ## What it does
 
 A permit created with `requires_human_approval: true` makes every governed

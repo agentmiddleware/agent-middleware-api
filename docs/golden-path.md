@@ -11,13 +11,12 @@ DB-created key scoped to its own wallet.
 > yourself with no operator-issued key, start with
 > [docs/quickstart.md](quickstart.md) (`make quickstart`) instead.
 >
-> **About the tool name:** the examples below invoke `golden-path-echo`,
-> which exists only where an operator (or the test/battery harness) has
-> registered it. On a stock local server, set `ENABLE_DOGFOOD_TOOL=true`
-> and substitute `partner.notes.write` (2 credits/call) everywhere
-> `golden-path-echo` appears. Also replace the echo arguments
-> `{"message": "hello"}` with `{"text": "hello"}` in both the first invoke and its replay.
-> Keep the same permit and invocation idempotency keys when replaying.
+> **Runs verbatim on a stock server.** The examples below invoke
+> `partner.notes.write` (2 credits/call, takes `{"text": "..."}`), which a
+> stock local server registers when started with `ENABLE_DOGFOOD_TOOL=true`
+> (see Prerequisites). The denial step invokes `partner.notes.count`, which
+> needs `ENABLE_DOGFOOD_SECOND_TOOL=true`. Keep the same permit and
+> invocation idempotency keys when replaying.
 
 ## Prerequisites
 
@@ -38,8 +37,15 @@ export VALID_API_KEYS=dev-bootstrap-key
 export DATABASE_URL=sqlite+aiosqlite:///./test.db
 export TRUST_SIGNING_KEY_ID=local-dev-ed25519
 export TRUST_SIGNING_PRIVATE_KEY_B64='<paste-the-saved-seed>'
+export ENABLE_DOGFOOD_TOOL=true
+export ENABLE_DOGFOOD_SECOND_TOOL=true
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
+
+`ENABLE_DOGFOOD_TOOL=true` registers `partner.notes.write`, the tool every
+invoke below calls. `ENABLE_DOGFOOD_SECOND_TOOL=true` registers
+`partner.notes.count`, the second tool the denial step calls to prove the
+permit allows only the first tool.
 
 Keep the seed in the gitignored `.env` or another local secret store. If you
 lose it, delete `./test.db` and start from a fresh database. Do not reuse local
@@ -135,8 +141,8 @@ export PERMIT_JSON=$(
       \"issuer_wallet_id\": \"$AGENT_WALLET_ID\",
       \"subject_wallet_id\": \"$AGENT_WALLET_ID\",
       \"subject_key_id\": \"$AGENT_KEY_ID\",
-      \"allowed_tools\": [\"golden-path-echo\"],
-      \"scopes\": [\"tool:golden-path-echo:invoke\", \"billing:charge\"],
+      \"allowed_tools\": [\"partner.notes.write\"],
+      \"scopes\": [\"tool:partner.notes.write:invoke\", \"billing:charge\"],
       \"max_credits\": 50,
       \"expires_at\": \"$(date -u -d '+30 minutes' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v+30M +%Y-%m-%dT%H:%M:%SZ)\"
     }"
@@ -193,7 +199,7 @@ curl -X POST "$API_URL/v1/billing/dry-run/charge" \
   }"
 ```
 
-## 6a. Optional: Attach A Wallet Policy
+## 8. Optional: Attach A Wallet Policy
 
 Operators can constrain the agent wallet before execution:
 
@@ -213,7 +219,7 @@ If an MCP invocation, billing charge, or planner action violates the active
 wallet policy, it is denied before execution or charge and the audit event
 includes the `policy_id` and evaluated constraints.
 
-## 7. Invoke Or Discover Tools
+## 9. Invoke Or Discover Tools
 
 Fetch the MCP manifest:
 
@@ -235,8 +241,8 @@ INVOKE_JSON=$(
     \"id\": \"golden-call-1\",
     \"method\": \"tools/call\",
     \"params\": {
-      \"name\": \"golden-path-echo\",
-      \"arguments\": {\"message\": \"hello\"},
+      \"name\": \"partner.notes.write\",
+      \"arguments\": {\"text\": \"hello\"},
       \"mcpContext\": {
         \"wallet_id\": \"$AGENT_WALLET_ID\",
         \"permit_id\": \"$PERMIT_ID\",
@@ -250,8 +256,6 @@ export RECEIPT_ID=$(echo "$INVOKE_JSON" | jq -r '.result.receipt.receipt_id')
 echo "$RECEIPT_ID"
 ```
 
-Replace `golden-path-echo` with a tool from `/mcp/tools.json`.
-
 Replay the exact same request and confirm the receipt ID is unchanged:
 
 ```bash
@@ -264,8 +268,8 @@ REPLAY_JSON=$(
     \"id\": \"golden-call-1\",
     \"method\": \"tools/call\",
     \"params\": {
-      \"name\": \"golden-path-echo\",
-      \"arguments\": {\"message\": \"hello\"},
+      \"name\": \"partner.notes.write\",
+      \"arguments\": {\"text\": \"hello\"},
       \"mcpContext\": {
         \"wallet_id\": \"$AGENT_WALLET_ID\",
         \"permit_id\": \"$PERMIT_ID\",
@@ -278,8 +282,9 @@ REPLAY_JSON=$(
 echo "$REPLAY_JSON" | jq -r '.result.receipt.receipt_id'
 ```
 
-Try a different registered tool under the same permit and confirm the response
-is denied with a signed denial receipt:
+Try the second registered tool under the same permit and confirm the response
+is denied with a signed denial receipt (the permit allows only
+`partner.notes.write`):
 
 ```bash
 curl -s -X POST "$API_URL/mcp/messages" \
@@ -290,7 +295,7 @@ curl -s -X POST "$API_URL/mcp/messages" \
     \"id\": \"golden-denial-1\",
     \"method\": \"tools/call\",
     \"params\": {
-      \"name\": \"another-registered-tool\",
+      \"name\": \"partner.notes.count\",
       \"arguments\": {},
       \"mcpContext\": {
         \"wallet_id\": \"$AGENT_WALLET_ID\",
@@ -301,7 +306,7 @@ curl -s -X POST "$API_URL/mcp/messages" \
   }" | jq '.error'
 ```
 
-## 8. Inspect The Operation Record
+## 10. Inspect The Operation Record
 
 After a scoped agent invokes a tool, operators can inspect the control-plane record:
 
@@ -362,7 +367,7 @@ curl -X POST "$API_URL/v1/audit/verify-chain" \
   -d "{\"wallet_id\": \"$AGENT_WALLET_ID\"}"
 ```
 
-## 9. Inspect Ledger And Velocity
+## 11. Inspect Ledger And Velocity
 
 ```bash
 curl "$API_URL/v1/billing/ledger/$AGENT_WALLET_ID" \
@@ -380,7 +385,8 @@ curl "$API_URL/v1/billing/wallets/$AGENT_WALLET_ID/velocity" \
 - Sponsor and agent wallets are created.
 - Agent API key authenticates.
 - Agent API key can access only its own wallet.
-- Dry-run simulation returns a cost estimate.
+- Dry-run simulation returns a cost estimate (only with
+  `ENABLE_PROOF_SURFACES=true`; skip step 7 otherwise).
 - MCP manifest is available.
 - Signed permit creation binds wallet, key, tool, budget, and expiry.
 - Governed MCP invocation returns a signed receipt.
@@ -391,4 +397,5 @@ curl "$API_URL/v1/billing/wallets/$AGENT_WALLET_ID/velocity" \
 - Control-plane audit records are inspectable with the bootstrap key.
 - Operators can inspect the policy decision, audit event, ledger entry, and
   request/correlation ID for the scoped tool call.
-- Ledger and velocity endpoints are inspectable with the agent key.
+- Ledger endpoint is inspectable with the agent key; the velocity endpoint
+  only exists with `ENABLE_PROOF_SURFACES=true` (skip it otherwise).
