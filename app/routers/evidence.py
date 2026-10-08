@@ -32,6 +32,13 @@ async def get_evidence_bundle(
     receipt = await get_receipt_service().get_receipt(receipt_id)
     if not receipt:
         raise HTTPException(status_code=404, detail="receipt_not_found")
-    await authorize_receipt_access(auth=auth, receipt=receipt)
+    try:
+        await authorize_receipt_access(auth=auth, receipt=receipt)
+    except HTTPException as exc:
+        # Same 404 as a missing receipt: a 403 here would confirm the id
+        # is real to any authenticated caller.
+        if exc.status_code == 403:
+            raise HTTPException(status_code=404, detail="receipt_not_found") from None
+        raise
     evidence = await build_receipt_evidence(receipt=receipt, auth=auth)
     return build_evidence_bundle(evidence)

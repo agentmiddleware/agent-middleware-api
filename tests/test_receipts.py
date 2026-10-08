@@ -408,8 +408,10 @@ async def test_receipt_evidence_denies_cross_wallet_access(
     finally:
         registry.unregister_local(tool_name)
 
-    assert response.status_code == 403
-    assert response.json()["detail"]["error"] == "wallet_access_denied"
+    # Same 404 as an unknown receipt: a 403 here would confirm the
+    # receipt id is real to any authenticated caller.
+    assert response.status_code == 404
+    assert response.json() == {"detail": "receipt_not_found"}
 
 
 @pytest.mark.anyio
