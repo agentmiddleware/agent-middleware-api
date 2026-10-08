@@ -60,7 +60,9 @@ def validated_public_contact(config: Any) -> dict[str, str] | None:
     if _reserved_contact_hostname(parsed_url.hostname):
         raise ValueError("PUBLIC_CONTACT_URL must use a routable public domain")
     if parsed_url.hostname.casefold() in _BLOCKED_BOOKING_HOSTS:
-        raise ValueError("PUBLIC_CONTACT_URL must point to a booking service")
+        raise ValueError(
+            "PUBLIC_CONTACT_URL must not use a test or placeholder booking host"
+        )
 
     normalized = " ".join(values.values()).casefold()
     if (
