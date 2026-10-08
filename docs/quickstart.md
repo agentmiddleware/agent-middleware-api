@@ -91,6 +91,18 @@ export KEY_ID=$(echo "$PROVISION_JSON" | python3 -c 'import json,sys; print(json
 echo "wallet: $WALLET_ID  key: $KEY_ID"
 ```
 
+Prefer one command with a readable error over shell parsing:
+
+```bash
+eval $(python3 scripts/first_credential.py provision \
+  --api-url "$API_URL" --agent-id quickstart-stranger)
+echo "wallet: $WALLET_ID  key: $KEY_ID"
+```
+
+Either form prints the same three values. The script fails with exit
+code 2 and one plain-English line when the server is unreachable or
+self-provisioning is disabled, instead of empty exports.
+
 You now hold a **wallet-scoped** key (never bootstrap-admin) bound to an
 agent wallet holding 1000 synthetic dev credits. The key is shown once. This
 route exists only in local environments: it answers 404 unless the server
@@ -130,6 +142,15 @@ export PERMIT_ID=$(echo "$PERMIT_JSON" | python3 -c 'import json,sys; print(json
 echo "permit: $PERMIT_ID"
 ```
 
+Or skip the hand-built JSON (the script computes `expires_at` itself):
+
+```bash
+eval $(python3 scripts/first_credential.py permit \
+  --api-url "$API_URL" --api-key "$AGENT_API_KEY" \
+  --wallet-id "$WALLET_ID" --key-id "$KEY_ID")
+echo "permit: $PERMIT_ID"
+```
+
 Note who issued this: **you did, to yourself**. A wallet-scoped key may only
 permit wallets it has authority over — its own, or wallets it funds. Try
 putting someone else's wallet in `subject_wallet_id` and you get a 403.
@@ -158,6 +179,17 @@ INVOKE_JSON=$(
 export RECEIPT_ID=$(echo "$INVOKE_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["receipt"]["receipt_id"])')
 echo "$INVOKE_JSON" | python3 -m json.tool
 ```
+
+> Repeating this walkthrough? Idempotency is forever: re-running the
+> call above against old state replays the *original* receipt instead of
+> executing again. That is the replay working, not a hang. For a fresh
+> run first reset with `make quickstart QUICKSTART_ARGS="--reset"` (see
+> [Starting over](#starting-over)).
+
+The same call through the Python SDK (`client.invoke_tool` with the same
+wallet, permit, and idempotency key) returns the same receipt shape; the
+raw curl above exists so you can see each moving part. SDK form:
+[b2a_sdk README](../b2a_sdk/README.md#governed-tool-call).
 
 The result carries a signed receipt: `outcome: success`,
 `credits_charged: 2.00000000`, a `ledger_entry_id` tying it to the debit,
