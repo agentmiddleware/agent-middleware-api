@@ -467,3 +467,24 @@ class SigningKeyMetadataResponse(BaseModel):
 
 
 SigningKeyResponse = SigningKeyMetadataResponse
+
+
+# Key ids double as the receipt `kid` and the SigningKeyModel primary key
+# (max 64 chars). The pattern keeps ids URL-safe and shell-safe so they can
+# travel in paths, filenames, and operator commands without quoting.
+_SIGNING_KEY_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+
+
+class SigningKeyRotateRequest(BaseModel):
+    new_key_id: str = Field(
+        min_length=1, max_length=64, pattern=_SIGNING_KEY_ID_PATTERN
+    )
+
+
+class SigningKeyRetireRequest(BaseModel):
+    key_id: str = Field(min_length=1, max_length=64, pattern=_SIGNING_KEY_ID_PATTERN)
+
+
+class SigningKeyListResponse(BaseModel):
+    keys: list[SigningKeyMetadataResponse]
+    total: int
