@@ -1,0 +1,1 @@
+Promoted six BE-003 literal cases and added six mixed-DNS cases; product source unchanged for negative control.

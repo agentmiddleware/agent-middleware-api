@@ -1,5 +1,17 @@
 # Quote-Locked Pricing Implementation — Final Summary
 
+> **Status (2026-10-01): historical PR artifact, not maintained.** This is the
+> agent task report for PR #331, written against commit `254a4ad`. Its line
+> numbers no longer match the source: the quote validation, consumption, and
+> release-on-failure steps all live in `_execute_registered_tool_inner`
+> (`app/routers/mcp.py`), calling `QuoteService.validate_for_action`,
+> `consume`, and `release` in `app/services/quotes.py`. Its "production-ready"
+> and "Remaining risks: None identified" verdicts are not current claims;
+> [`WEDGE.md`](WEDGE.md) lists production-ready payments or settlement under
+> "What Not To Claim Yet". The maintained record is
+> [`docs/signed-quotes.md`](docs/signed-quotes.md) plus
+> `tests/test_signed_quotes.py` and `tests/test_quote_vertical_slice.py`.
+
 ## Task Outcome: ✅ ALREADY COMPLETE ON MAIN
 
 The requested vertical slice for quote-locked pricing is **fully implemented** on the current main branch (commit `254a4ad`). No implementation changes were required.

@@ -175,7 +175,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     verify = sub.add_parser(
-        "verify", help="Re-hash a bundle and re-run the independent receipt verification."
+        "verify",
+        help="Re-hash a bundle and re-run the independent receipt verification.",
     )
     verify.add_argument("--bundle", type=Path, required=True, metavar="DIR")
     verify.add_argument(
@@ -316,7 +317,9 @@ def command_run(args: argparse.Namespace) -> int:
     # is right to say nothing about results it was not given; refusing the
     # question is this layer's job.
     try:
-        selected = select_scenarios(args.tests or None, tier=args.tier, **_options(args.option))
+        selected = select_scenarios(
+            args.tests or None, tier=args.tier, **_options(args.option)
+        )
     except KeyError as exc:
         sys.stderr.write(f"{exc.args[0] if exc.args else exc}\n")
         return EXIT_USAGE
@@ -659,7 +662,9 @@ def command_claims(args: argparse.Namespace) -> int:
     ]
     for record in manifest.records:
         supports = "yes" if record.supports_a_public_claim else "no"
-        lines.append(f"{record.test_id:<6}{record.status:<10}{supports:<10}{record.claim}")
+        lines.append(
+            f"{record.test_id:<6}{record.status:<10}{supports:<10}{record.claim}"
+        )
     lines.append("")
     lines.append(
         f"{len(manifest.supported())} of {len(manifest)} claim(s) are supported "

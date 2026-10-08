@@ -1,0 +1,5 @@
+35:      --focus-ring: 2px solid var(--brass);
+250:    :focus-visible {
+251:      outline: var(--focus-ring);
+252:      outline-offset: 3px;
+267:    .skip-link:focus { left: 0; color: var(--ink); }

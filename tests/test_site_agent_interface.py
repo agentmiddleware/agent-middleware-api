@@ -525,10 +525,9 @@ def test_marketing_manifest_points_to_custom_origins_and_local_proof() -> None:
     assert manifest["product_wedge"] == "governed_mcp_trust_plane"
     assert manifest["product_loop"] == get_agent_first_metadata()["product_loop"]
     assert manifest["try_it"] == _local_try_it_manifest()
-    # The repository is public, so agents can follow the clone instructions
-    # without a misleading access-request detour.
-    assert manifest["try_it"]["repository_access"] == "public"
-    assert manifest["github_access"] == "public"
+    # Public proof downloads do not imply access to the private source.
+    assert manifest["try_it"]["repository_access"] == "private"
+    assert manifest["github_access"] == "private"
     assert manifest["discovery"]["llms_txt"] == f"{CANONICAL_API}/llms.txt"
     assert f"{CANONICAL_API}/llms.txt" in manifest["bootstrap_sequence"]
     assert "transaction-integrity boundary" in manifest["description"]
@@ -547,7 +546,7 @@ def test_machine_pointer_copies_match_and_state_live_access_boundary() -> None:
     assert "Transaction integrity" in llm_txt
     assert "delivery_uncertain" in llm_txt
     assert "at most one gateway dispatch and debit" in " ".join(llm_txt.split())
-    assert "The source repository is public." in llm_txt
+    assert "The source repository is private" in llm_txt
     assert "make prove-trust-plane" in llm_txt
     assert "operator-issued" in llm_txt
     assert "no public self-serve key mint" in llm_txt
@@ -596,14 +595,13 @@ def test_customer_facing_outputs_do_not_publish_provider_origins(tmp_path) -> No
 REPO_URL = "https://github.com/PetrefiedThunder/agent-middleware-api"
 
 
-def test_public_surfaces_link_to_public_repo_without_stale_private_copy(
+def test_public_surfaces_separate_public_proof_from_private_source_access(
     tmp_path,
 ) -> None:
-    """Public-facing copy must not leave agents expecting a private repository.
+    """Repository visibility was verified private on 2026-10-02.
 
-    The repository became public on 2026-08-27. Its human and machine discovery
-    surfaces may link directly to the source of record, but cannot retain a
-    stale access-request warning.
+    These local tests enforce copy consistency, not live GitHub availability.
+    Public proof downloads remain distinct from source access.
     """
     output = tmp_path / "site"
     result = _render_site(output, VALID_TEST_CONTACTS)
@@ -622,15 +620,10 @@ def test_public_surfaces_link_to_public_repo_without_stale_private_copy(
     )
     for path in public_paths:
         content = path.read_text(encoding="utf-8").casefold()
-        assert "source repository is private" not in content, (
-            f"{path} still marks the public repository as private"
-        )
-        assert "private —" not in content, (
-            f"{path} still marks the public repository as private"
-        )
-        assert "source access on request" not in content, (
-            f"{path} still asks for access to the public repository"
-        )
+        normalized = " ".join(content.split())
+        assert "source repository is public" not in normalized, path
+        assert "public source repository" not in normalized, path
+        assert "source repository is private" in normalized, path
 
     source_reference_paths = (
         output / "index.html",
@@ -645,7 +638,7 @@ def test_public_surfaces_link_to_public_repo_without_stale_private_copy(
     for path in source_reference_paths:
         content = path.read_text(encoding="utf-8").casefold()
         assert REPO_URL.casefold() in content, (
-            f"{path} does not link to the public source repository"
+            f"{path} does not link to the source repository"
         )
 
 
@@ -769,7 +762,7 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
         assert "/_vercel/insights/script.js" not in page
         assert "/va-init.js" not in page
         assert "@@VERCEL_ANALYTICS_SCRIPTS@@" not in page
-        assert '<script defer src="/analytics.js?v=gateway-18"></script>' in page
+        assert '<script defer src="/analytics.js?v=gateway-19"></script>' in page
 
     enabled_output = tmp_path / "enabled"
     enabled_contacts = dict(VALID_TEST_CONTACTS)
@@ -779,7 +772,7 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
     for relative_path in pages:
         page = (enabled_output / relative_path).read_text(encoding="utf-8")
         assert '<script defer src="/_vercel/insights/script.js"></script>' in page
-        assert '<script src="/va-init.js?v=gateway-18"></script>' in page
+        assert '<script src="/va-init.js?v=gateway-19"></script>' in page
         assert (
             page.index("/va-init.js?")
             < page.index("/_vercel/insights/script.js")
@@ -1184,10 +1177,30 @@ def test_faq_structured_data_is_generated_from_the_visible_answers(tmp_path) -> 
     )
     canonical_boundary = (
         "At our boundary: one accepted idempotency key maps to at most one "
-        "gateway dispatch and debit plus one terminal receipt."
+        "gateway dispatch and debit, and to one terminal receipt on the "
+        "upstream path and every reconcilable outcome."
     )
     assert canonical_boundary in text
     assert canonical_boundary in exactly_once_answer
+    # A local governed tool that crashes after its side effect leaves one debit
+    # and no receipt (TRUST_MODEL.md; test_mcp_postgres_multiprocess asserts
+    # receipt_ids == ()), so neither the FAQ nor the CONTEXT.md vocabulary it
+    # is drawn from may promise a receipt unconditionally.
+    local_crash_exception = (
+        "The exception is a local governed tool that crashes after its side "
+        "effect: that leaves one execution and one debit with no receipt, "
+        "pending manual review."
+    )
+    assert local_crash_exception in exactly_once_answer
+    context = " ".join((ROOT / "CONTEXT.md").read_text(encoding="utf-8").split())
+    unqualified_receipt_claim = "gateway dispatch and debit plus one terminal receipt"
+    assert unqualified_receipt_claim not in text
+    assert unqualified_receipt_claim not in context
+    assert (
+        "at most one gateway dispatch and debit, and to one terminal receipt on "
+        "the upstream path and every reconcilable outcome" in context
+    )
+    assert "a local governed tool that crashes after its side effect" in context
     assert "produces one dispatch, one debit, one receipt" not in text
     assert "produces one dispatch, one debit, one receipt" not in exactly_once_answer
 

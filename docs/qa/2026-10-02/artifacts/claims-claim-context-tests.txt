@@ -1,0 +1,316 @@
+FILE docs/agent-self-credentialing.md
+82:Two behaviors worth knowing before you read the output as a bug:
+83:
+84:- Under true concurrency the losing callers get **400**, not a replayed 200.
+85:  The gateway fails closed while the first call is in flight; the cached
+86:  receipt is served on retry once the winner settles.
+87:- A denial still mints a **signed receipt** with `credits_charged` 0. Denials
+88:  are evidence, not silence.
+89:
+90:## 4. What this proves — and what it does not
+91:
+92:Proven against this code: exactly-once gateway authorization, debit, and
+93:receipt finalization under replay, concurrency, conflict, and denial; and
+94:that receipts are tamper-evident under the published key.
+95:
+96:Not proven by this harness, and not claimed:
+97:
+98:- **Production behavior.** Same code, different infrastructure (Postgres,
+99:  Redis, a real upstream MCP server). A local pass is strong evidence about
+100:  the logic, not a measurement of the production deployment.
+101:- **Remote exactly-once.** The gateway guarantees one authorization, one
+102:  debit, one finalized receipt. A remote side effect is exactly-once only if
+103:  the upstream honors the forwarded idempotency key — the OpenAPI contract
+104:  narrows the claim to exactly that, correctly.
+105:- **The local tool is simulated.** `partner.notes.write` appends to a local
+106:  JSONL file and is labeled `simulation: true` in discovery. Production's
+107:  `partner.echo` is a real upstream call. The governance path is identical;
+108:  the work at the end of it is not.
+109:
+110:To reproduce the invariants against production, an operator must issue a
+111:wallet-scoped key and funded permit out of band. No agent should manufacture
+112:production credentials, and this surface cannot: production-like
+113:environments refuse to boot with `ENABLE_DEV_KEY_SELF_PROVISION` set, and
+114:the handler independently returns 403 there.
+FILE docs/tool-interface-authority.md
+1:# The Tool Interface Is the Product Surface
+2:
+3:Design goal: an agent discovers a normal MCP tool, calls it normally, and
+4:governance happens automatically because that is the only executable path.
+5:The agent should not have to understand "Agent Middleware" as a product
+6:category, learn `/v1/permits`, or construct `mcpContext`.
+7:
+8:The permit remains the cryptographically verifiable authorization object —
+9:it is just an **implementation primitive, not a UX primitive**. On the
+10:standard `/mcp` surface the middleware materializes the appropriate permit
+11:from wallet policy at call time.
+12:
+13:The design for generalizing this — one `authority_required` envelope for
+14:every insufficient-authority outcome, an explicit resume contract in the
+15:remediation payload, and remediation that carries a live approval handle —
+16:lives in [`authority-required-flow.md`](authority-required-flow.md).
+17:
+18:## The decision an invoke gets
+19:
+20:Every `tools/call` on the standard surface resolves to one of three
+21:outcomes, decided server-side:
+22:
+23:```text
+24:ALLOW             policy satisfied -> auto-permit -> execute -> signed receipt
+25:REQUIRE_APPROVAL  policy demands a human -> approval-gated auto-permit ->
+26:                  retryable pending_human_approval -> approve -> same call,
+27:                  same Idempotency-Key -> execute -> signed receipt
+28:DENY              constraint violated -> machine-actionable denial
+29:                  (reason code + details + remediation), receipted where a
+30:                  permit exists
+31:```
+32:
+33:### ALLOW
+34:
+35:Unchanged: the server mints a bounded, signed, single-tool, short-lived
+36:permit from the caller's wallet and runs the full
+37:permit → meter → exactly-once dispatch → signed receipt pipeline.
+38:
+39:### REQUIRE_APPROVAL
+40:
+41:When any active policy bundle for the caller's wallet sets
+42:`human_approval_required`, the auto-minted permit carries
+43:`requires_human_approval=true`, so the existing invoke-time approval gate
+44:(Sentinel-backed, fail-closed) pauses the call:
+45:
+46:```json
+47:{
+48:  "code": -32005,
+49:  "message": "human_approval_pending",
+50:  "data": {
+51:    "error": "authority_required",
+52:    "status": "pending_human_approval",
+53:    "approval_id": "appr-…",
+54:    "expires_at": "…",
+55:    "remediation": {
+56:      "type": "await_human_decision",
+57:      "detail": "Nothing was charged. Retry the identical tools/call with the same Idempotency-Key once the approval is decided; the same permit and approval are reused."
+58:    }
+59:  }
+60:}
+61:```
+62:
+63:Nothing is charged, no receipt exists, and the idempotency key is released —
+64:the retry that polls the decision resolves to the *same* permit and the
+65:*same* approval instead of paging a human again. Because that retry loop
+FILE docs/PROOF_MATRIX.md
+8:maps to a target in the [`Makefile`](../Makefile) or a job in
+9:[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) that exists today.
+10:
+11:For the product thesis these proofs defend, see [`WEDGE.md`](../WEDGE.md). For
+12:the claims the project deliberately does not make, see
+13:[`SECURITY_LIMITATIONS.md`](../SECURITY_LIMITATIONS.md).
+14:
+15:## Local proofs (no credentials, no external services)
+16:
+17:| Command | Proves | Backend |
+18:|---|---|---|
+19:| `make prove-trust-plane` | The full trust loop plus replay and tamper detection — see the breakdown below | Throwaway SQLite |
+20:| `make prove-trust-plane-postgres` | Alias for the guarded process/crash proof below | Dedicated, migrated PostgreSQL |
+21:| `make red-team-trust-plane` | Ten distinct attacks are each denied with a specific reason code and none produces a debit | Throwaway SQLite |
+22:| `make dogfood-trust-plane` | Exactly-once against a **real durable side effect** (a file on disk), not just a ledger row | Throwaway SQLite |
+23:| `make failure-lab` | The lost-response fault (downstream executed, response lost) measured across the existing integration, a **correctly used native idempotency baseline**, and the gateway at both hops, through the real upstream adapter against an in-process MCP server: effects counted by an independent record, one dispatch and one debit per key, `delivery_uncertain` receipted and never redispatched, the baseline's own success reported, and the agent-restart limitation every configuration shares — see [failure-lab.md](failure-lab.md) | Throwaway SQLite, in-process MCP server |
+24:| `make agent-ops-war-room` | The operator narrative: discovery, provisioning, invoke, replay, self-inspection, denial | Temp SQLite |
+25:
+26:### PostgreSQL proof selection
+27:
+28:`make prove-trust-plane-postgres` runs `make prove-crash-recovery`: the
+29:multi-process harness below, against a dedicated, empty PostgreSQL database.
+237:
+238:## What is not proven
+239:
+240:Being explicit about the boundary is what makes the proofs worth anything.
+241:
+242:- **Exactly-once is gateway-scoped.** A remote tool's side effect is exactly
+243:  once only if that tool honors the forwarded idempotency key. A missing
+244:  trustworthy result after the durable send claim is signed
+245:  `delivery_uncertain`, stays charged, and is never
+246:  automatically retried or refunded. The gateway-scoped half of that — no
+247:  redispatch after ambiguity, charge retained, evidence verifiable — is covered
+248:  by the process-kill suite, including the `dispatch_claimed` boundaries. The
+249:  downstream half remains the tool's responsibility and is not proved here.
+250:- **A durable claim is not downstream-effect proof.** `dispatch_claimed`
+251:  establishes that one gateway activation owns the one-shot send boundary. It
+FILE docs/POLICY_ENFORCEMENT.md
+207:revocation, and remaining budget were already enforced when the receipt was
+208:signed, and a settled outcome must not disappear if they later change. **Stable
+209:identity constraints still apply**: wallet and key must still match. Tool scope
+210:is intentionally not re-checked either, so that a signed *denial* for an
+211:out-of-scope tool itself remains replayable.
+212:
+213:### Cross-key duplicate detection (remote tools only)
+214:
+215:For upstream (`upstream_mcp`) tools, an optional duplicate guard detects when a
+216:**new** idempotency key carries the same request body as a prior effectful call
+217:on the same permit and tool. Same-key retries are never blocked — they replay
+218:the stored receipt as always. The guard checks `(permit_id, tool,
+219:SHA-256(arguments), created_at ≥ window)` and ignores only pre-dispatch failures
+220:that never reached the upstream (attempts with `dispatched_at IS NULL` and state
+221:`returned_error`). Any older succeeded, delivery-uncertain, or sent attempt
+222:blocks the new key.
+223:
+224:The guard runs in **watch-only mode** by default (`MCP_UPSTREAM_DUPLICATE_GUARD=log`):
+225:duplicate new-key retries are **allowed** and dispatched, but logged as
+226:warnings. Operators can enable enforcement (`MCP_UPSTREAM_DUPLICATE_GUARD=enforce`)
+227:to deny duplicates with `duplicate_request_new_key`, or disable detection
+228:entirely (`MCP_UPSTREAM_DUPLICATE_GUARD=off`). Invalid mode values (e.g.,
+229:"enforced") are rejected at startup. Individual permits can opt out with
+230:`allow_identical_repeats=true` regardless of the global setting. Per-permit
+231:windows can be configured via `repeat_window_seconds` to override the global
+232:`MCP_UPSTREAM_DUPLICATE_WINDOW_SECONDS` (default 24 hours).
+FILE tests/test_upstream_retry_cap_enforcement.py
+450:                wallet_id=wallet_id,
+451:                permit_id=permit_id,
+452:                idempotency_key="dup-key-2",
+453:                message="duplicate-me",
+454:            ),
+455:            headers=agent_headers,
+456:        )
+457:        assert r2.status_code == 200
+458:        body2 = r2.json()
+459:        assert "error" in body2
+460:        assert body2["error"]["message"] == "duplicate_request_new_key"
+461:        assert executor.dispatch_count == 1  # No second dispatch
+462:
+463:        # The refusal is a denial receipt, so the durable count on the admin
+528:            json=_call_body(
+529:                tool_name=tool_name,
+530:                wallet_id=wallet_id,
+531:                permit_id=permit_id,
+532:                idempotency_key="log-key-2",
+533:                message="log-me",
+534:            ),
+535:            headers=agent_headers,
+536:        )
+537:        assert r2.status_code == 200
+538:        body2 = r2.json()
+539:        assert body2["result"]["receipt"]["outcome"] == "success"
+540:        assert executor.dispatch_count == 2  # Both dispatched in log mode
+541:    finally:
+542:        get_service_registry().unregister_local(tool_name)
+543:
+544:
+545:@pytest.mark.anyio
+546:async def test_duplicate_detection_opt_out(client, clean_database, monkeypatch):
+547:    """Permit with allow_identical_repeats=true bypasses duplicate detection."""
+548:    settings = get_settings()
+549:    monkeypatch.setattr(settings, "MCP_UPSTREAM_DUPLICATE_GUARD", "enforce")
+550:    
+551:    provisioned = await provision_agent_wallet(client)
+552:    wallet_id = provisioned["agent_wallet_id"]
+553:    key_id = provisioned["key_id"]
+554:    agent_headers = provisioned["agent_headers"]
+555:    tool_name = "test.dup.optout"
+556:    
+557:    executor = FakeUpstreamExecutor("success")
+558:    _register_upstream(tool_name, executor)
+559:    
+560:    try:
+561:        # Permit with opt-out enabled
+562:        permit_resp = await client.post(
+563:            "/v1/permits",
+564:            json={
+565:                "issuer_wallet_id": wallet_id,
+566:                "subject_wallet_id": wallet_id,
+567:                "subject_key_id": key_id,
+568:                "allowed_tools": [tool_name],
+569:                "scopes": [f"tool:{tool_name}:invoke", "billing:charge"],
+570:                "max_credits": 100,
+571:                "allow_identical_repeats": True,
+572:                "expires_at": (utc_now() + timedelta(hours=1)).isoformat(),
+573:            },
+574:            headers={**BOOTSTRAP_HEADERS, "Idempotency-Key": "permit-opt-out"},
+575:        )
+576:        assert permit_resp.status_code == 201
+577:        permit_id = permit_resp.json()["permit_id"]
+578:        
+579:        # First call
+580:        r1 = await client.post(
+581:            "/mcp/messages",
+582:            json=_call_body(
+583:                tool_name=tool_name,
+584:                wallet_id=wallet_id,
+585:                permit_id=permit_id,
+586:                idempotency_key="opt-out-1",
+587:                message="repeat-me",
+588:            ),
+589:            headers=agent_headers,
+590:        )
+591:        assert r1.status_code == 200
+592:        assert executor.dispatch_count == 1
+593:        
+594:        # Duplicate should succeed because opt-out is enabled
+595:        r2 = await client.post(
+596:            "/mcp/messages",
+597:            json=_call_body(
+598:                tool_name=tool_name,
+599:                wallet_id=wallet_id,
+600:                permit_id=permit_id,
+601:                idempotency_key="opt-out-2",
+FILE app/routers/mcp.py
+218:    non-retryable, and this type is what carries that: it is not a subclass of
+219:    ``AuditChainContendedError`` or ``ReceiptWriteContendedError``, so neither
+220:    the routers' ``-32005`` handlers nor the idempotency unwind in
+221:    ``_execute_registered_tool`` can catch it and hand a charged caller a
+222:    "retry".
+223:
+224:    It exists because ``-32603``/``internal_error`` was the wrong answer, not
+225:    because the outcome is knowable. ``-32603`` is this pipeline's *unclassified*
+226:    channel -- `docs/failure-semantics.md` defines it as "a failure the pipeline
+227:    did not classify" -- and these two sites are the opposite of unclassified:
+228:    each caught a typed contention error, asked whether effects were committed,
+229:    and chose non-retryability on purpose. Reporting a deliberated state through
+230:    the unclassified channel left operators unable to separate it from a genuine
+231:    bug without grepping correlation ids, and left a client free to read
+232:    "internal error" as "try again", which with a *fresh* idempotency key runs
+233:    and charges the call a second time.
+234:
+235:    What the name claims is only the situation, never the outcome: effects are
+236:    committed, no receipt exists, the record is counted for manual review, and
+237:    the caller must not retry. Whether the tool's effect landed downstream stays
+238:    exactly as unknowable as it was. This is therefore not wedge #2 -- that wedge
+239:    turns an ambiguous outcome into a distinct *receipted* state, and the
+240:    defining feature here is that no receipt could be written at all. It is the
+241:    honest name for falling out of the receipted state machine.
+242:    """
+243:
+244:    jsonrpc_code = -32007
+245:    status_code = 500
+246:
+247:    def __init__(self, reason: str) -> None:
+248:        super().__init__(reason)
+249:        self.reason = reason
+250:
+251:
+252:def _terminal_record_contended_data(reason: str) -> dict[str, Any]:
+253:    """The machine-actionable body for a ``-32007``, shared by every surface.
+254:
+255:    Shaped like the other remediation-carrying errors on this path so a client
+256:    reads one convention: what went wrong, the specific reason code, and the
+257:    one action that is correct.
+258:    """
+259:    return {
+260:        "error": "manual_review_required",
+261:        "reason_code": reason,
+262:        "remediation": {
+263:            "type": "reconcile_out_of_band",
+264:            "detail": (
+265:                "The call's effects are committed and no receipt was written. "
+266:                "Do not retry with a new idempotency key: that would run and "
+267:                "charge the call a second time. A governed record, where one "
+268:                "was opened, stays held by the invocation that ran and answers "
+269:                "idempotency_in_progress until an operator resolves it. This "
+270:                "record is counted for manual review; reconcile from the "
+271:                "ledger entry and the audit chain."
+272:            ),
+273:        },
+274:    }
+275:
+276:
+277:def _header_idempotency_key_sources(request: Request) -> list[tuple[str, object]]:
+278:    """Every ``Idempotency-Key`` header the caller sent, in wire order.

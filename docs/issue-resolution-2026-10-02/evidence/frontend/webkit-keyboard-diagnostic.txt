@@ -1,0 +1,60 @@
+ArrowRight {
+  x: 164,
+  y: 0,
+  focus: true,
+  rect: {
+    x: 20,
+    y: 310.53125,
+    width: 350,
+    height: 357.53125,
+    top: 310.53125,
+    right: 370,
+    bottom: 668.0625,
+    left: 20
+  }
+}
+ArrowDown {
+  x: 164,
+  y: 0,
+  focus: true,
+  rect: {
+    x: 20,
+    y: -175.46875,
+    width: 350,
+    height: 357.53125,
+    top: -175.46875,
+    right: 370,
+    bottom: 182.0625,
+    left: 20
+  }
+}
+ArrowLeft {
+  x: 0,
+  y: 0,
+  focus: true,
+  rect: {
+    x: 20,
+    y: -175.46875,
+    width: 350,
+    height: 357.53125,
+    top: -175.46875,
+    right: 370,
+    bottom: 182.0625,
+    left: 20
+  }
+}
+ArrowRight {
+  x: 164,
+  y: 0,
+  focus: true,
+  rect: {
+    x: 20,
+    y: -175.46875,
+    width: 350,
+    height: 357.53125,
+    top: -175.46875,
+    right: 370,
+    bottom: 182.0625,
+    left: 20
+  }
+}

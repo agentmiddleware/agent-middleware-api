@@ -1,0 +1,14 @@
+{
+  "version": "3.1.0",
+  "paths": 73,
+  "operations": 76,
+  "duplicates": [],
+  "securitySchemes": {
+    "APIKeyHeader": {
+      "type": "apiKey",
+      "description": "API key for agent authentication. Pass in the X-API-Key header.",
+      "in": "header",
+      "name": "X-API-Key"
+    }
+  }
+}

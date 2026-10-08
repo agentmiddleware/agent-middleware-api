@@ -1,0 +1,1252 @@
+{
+  "config": {
+    "argv": [
+      "/opt/homebrew/Cellar/node/26.7.0/bin/node",
+      "/private/tmp/amw-fix-node/node_modules/@playwright/test/cli.js",
+      "test",
+      "--config",
+      "/tmp/amw-release-frontend-20261003/final-playwright.config.cjs"
+    ],
+    "configFile": "/tmp/amw-release-frontend-20261003/final-playwright.config.cjs",
+    "rootDir": "/tmp/amw-release-frontend-20261003/final-qa-tests",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/tmp/amw-release-frontend-20261003/final-playwright-artifacts",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "chromium",
+        "name": "chromium",
+        "testDir": "/tmp/amw-release-frontend-20261003/final-qa-tests",
+        "testIgnore": [],
+        "testMatch": [
+          "frontend.spec.cjs",
+          "ux-regressions.spec.cjs"
+        ],
+        "timeout": 30000
+      },
+      {
+        "outputDir": "/tmp/amw-release-frontend-20261003/final-playwright-artifacts",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "firefox",
+        "name": "firefox",
+        "testDir": "/tmp/amw-release-frontend-20261003/final-qa-tests",
+        "testIgnore": [],
+        "testMatch": [
+          "frontend.spec.cjs",
+          "ux-regressions.spec.cjs"
+        ],
+        "timeout": 30000
+      },
+      {
+        "outputDir": "/tmp/amw-release-frontend-20261003/final-playwright-artifacts",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "webkit",
+        "name": "webkit",
+        "testDir": "/tmp/amw-release-frontend-20261003/final-qa-tests",
+        "testIgnore": [],
+        "testMatch": [
+          "frontend.spec.cjs",
+          "ux-regressions.spec.cjs"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list",
+        null
+      ],
+      [
+        "json",
+        {
+          "outputFile": "/tmp/amw-release-frontend-20261003/final-playwright-results.json"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.63.0",
+    "workers": 1,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "frontend.spec.cjs",
+      "file": "frontend.spec.cjs",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "main public pages load without browser or resource errors",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3013,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-04T01:59:46.184Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-0c54c00d0bd18734b72e",
+          "file": "../../../private/tmp/amw-release-frontend-20261003/final-qa-tests/frontend.spec.cjs",
+          "line": 9,
+          "column": 1
+        },
+        {
+          "title": "calculator valid, boundary, invalid and cleared states stay local",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1065,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-04T01:59:49.282Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-27cbb056d39c5ec5bdc2",
+          "file": "../../../private/tmp/amw-release-frontend-20261003/final-qa-tests/frontend.spec.cjs",
+          "line": 21,
+          "column": 1
+        },
+        {
+          "title": "receipt evidence loads without claiming cryptographic verification",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 87,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-04T01:59:50.352Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-2032e5cbf7c1bb4f378c",
+          "file": "../../../private/tmp/amw-release-frontend-20261003/final-qa-tests/frontend.spec.cjs",
+          "line": 48,
+          "column": 1
+        },
+        {
+          "title": "receipt load failure removes published data and verification claims",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 118,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-04T01:59:50.446Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-29e0bda360dfe2197a23",
+          "file": "../../../private/tmp/amw-release-frontend-20261003/final-qa-tests/frontend.spec.cjs",
+          "line": 54,
+          "column": 1
+        },
+        {
+          "title": "malformed receipt payload fails closed",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 86,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-04T01:59:50.568Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-7eadad4c864ed9674ba6",
+          "file": "../../../private/tmp/amw-release-frontend-20261003/final-qa-tests/frontend.spec.cjs",
+          "line": 62,
+          "column": 1
+        },
+        {
+          "title": "mobile pages do not overflow",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2953,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-04T01:59:50.660Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-d7d375bb599ed2306e8b",
+          "file": "../../../private/tmp/amw-release-frontend-20261003/final-qa-tests/frontend.spec.cjs",
+          "line": 68,
+          "column": 1
+        },
+        {
+          "title": "operator index is static and does not ask for credentials",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 85,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-04T01:59:53.618Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-b227e6aeb69733a99592",
+          "file": "../../../private/tmp/amw-release-frontend-20261003/final-qa-tests/frontend.spec.cjs",
+          "line": 77,
+          "column": 1
+        },
+        {
+          "title": "no JavaScript retains the pilot and proof entry path",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 136,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-04T01:59:53.707Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-555c64b9cb4662e07e56",
+          "file": "../../../private/tmp/amw-release-frontend-20261003/final-qa-tests/frontend.spec.cjs",
+          "line": 84,
+          "column": 1
+        },
+        {
+          "title": "main public pages load without browser or resource errors",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3385,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-04T01:59:54.503Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-a4ce00f6a3251474301d",
+          "file": "../../../private/tmp/amw-release-frontend-20261003/final-qa-tests/frontend.spec.cjs",
+          "line": 9,
+          "column": 1
+        },
+        {
+          "title": "calculator valid, boundary, invalid and cleared states stay local",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 813,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-04T01:59:58.247Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-1db6cdfa42c29c53baff",
+          "file": "../../../private/tmp/amw-release-frontend-20261003/final-qa-tests/frontend.spec.cjs",
+          "line": 21,
+          "column": 1
+        },
+        {
+          "title": "receipt evidence loads without claiming cryptographic verification",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 189,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-04T01:59:59.064Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-e80428eb7568a1884abb",
+          "file": "../../../private/tmp/amw-release-frontend-20261003/final-qa-tests/frontend.spec.cjs",
+          "line": 48,
+          "column": 1
+        },
+        {
+          "title": "receipt load failure removes published data and verification claims",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 183,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-04T01:59:59.258Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-2220ad01a9e802083bfa",
+          "file": "../../../private/tmp/amw-release-frontend-20261003/final-qa-tests/frontend.spec.cjs",
+          "line": 54,
+          "column": 1
+        },
+        {
+          "title": "malformed receipt payload fails closed",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 182,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-04T01:59:59.447Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-68c8b5bd43f4fc793a2f",
+          "file": "../../../private/tmp/amw-release-frontend-20261003/final-qa-tests/frontend.spec.cjs",
+          "line": 62,
+          "column": 1
+        },
+        {
+          "title": "mobile pages do not overflow",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2907,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-04T01:59:59.634Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-2b9a46a4e20c4cffde41",
+          "file": "../../../private/tmp/amw-release-frontend-20261003/final-qa-tests/frontend.spec.cjs",
+          "line": 68,
+          "column": 1
+        },
+        {
+          "title": "operator index is static and does not ask for credentials",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 157,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-04T02:00:02.545Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-127e726e61aaa5007d53",
+          "file": "../../../private/tmp/amw-release-frontend-20261003/final-qa-tests/frontend.spec.cjs",
+          "line": 77,
+          "column": 1
+        },
+        {
+          "title": "no JavaScript retains the pilot and proof entry path",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 226,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-04T02:00:02.706Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-5d58a37e3cecdb939f22",
+          "file": "../../../private/tmp/amw-release-frontend-20261003/final-qa-tests/frontend.spec.cjs",
+          "line": 84,
+          "column": 1
+        },
+        {
+          "title": "main public pages load without browser or resource errors",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 2,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3031,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-04T02:00:04.313Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-6a21f14bcdbc8f865cc5",
+          "file": "../../../private/tmp/amw-release-frontend-20261003/final-qa-tests/frontend.spec.cjs",
+          "line": 9,
+          "column": 1
+        },
+        {
+          "title": "calculator valid, boundary, invalid and cleared states stay local",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 2,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 850,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-04T02:00:07.491Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-df97b96c319501f354a8",
+          "file": "../../../private/tmp/amw-release-frontend-20261003/final-qa-tests/frontend.spec.cjs",
+          "line": 21,
+          "column": 1
+        },
+        {
+          "title": "receipt evidence loads without claiming cryptographic verification",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 2,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 190,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-04T02:00:08.347Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-82200e3f2e166ce0adb5",
+          "file": "../../../private/tmp/amw-release-frontend-20261003/final-qa-tests/frontend.spec.cjs",
+          "line": 48,
+          "column": 1
+        },
+        {
+          "title": "receipt load failure removes published data and verification claims",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 2,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 200,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-04T02:00:08.541Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-1590a5288c782ed46c7b",
+          "file": "../../../private/tmp/amw-release-frontend-20261003/final-qa-tests/frontend.spec.cjs",
+          "line": 54,
+          "column": 1
+        },
+        {
+          "title": "malformed receipt payload fails closed",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 2,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 192,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-04T02:00:08.746Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-3ea4c77a6b0c77953725",
+          "file": "../../../private/tmp/amw-release-frontend-20261003/final-qa-tests/frontend.spec.cjs",
+          "line": 62,
+          "column": 1
+        },
+        {
+          "title": "mobile pages do not overflow",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 2,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2827,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-04T02:00:08.942Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-369fbbd6f586883919a2",
+          "file": "../../../private/tmp/amw-release-frontend-20261003/final-qa-tests/frontend.spec.cjs",
+          "line": 68,
+          "column": 1
+        },
+        {
+          "title": "operator index is static and does not ask for credentials",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 2,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 170,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-04T02:00:11.773Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-8f59ec664c8ed0793185",
+          "file": "../../../private/tmp/amw-release-frontend-20261003/final-qa-tests/frontend.spec.cjs",
+          "line": 77,
+          "column": 1
+        },
+        {
+          "title": "no JavaScript retains the pilot and proof entry path",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 2,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 238,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-04T02:00:11.948Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4d418e7659f76c0fccdf-2436b34e5b25e2046b88",
+          "file": "../../../private/tmp/amw-release-frontend-20261003/final-qa-tests/frontend.spec.cjs",
+          "line": 84,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "ux-regressions.spec.cjs",
+      "file": "ux-regressions.spec.cjs",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "UX-001: comparison fit text meets minimum contrast",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 159,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-04T01:59:53.865Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9f4e50e9645c543619a5-468b062b07a91190dd34",
+          "file": "../../../private/tmp/amw-release-frontend-20261003/final-qa-tests/ux-regressions.spec.cjs",
+          "line": 15,
+          "column": 1
+        },
+        {
+          "title": "UX-002: dashboard scrollable commands have explicit keyboard access",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 193,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-04T01:59:54.029Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9f4e50e9645c543619a5-058c1616a89d83d5d7d3",
+          "file": "../../../private/tmp/amw-release-frontend-20261003/final-qa-tests/ux-regressions.spec.cjs",
+          "line": 27,
+          "column": 1
+        },
+        {
+          "title": "UX-003: operator runtime links remain on the served origin",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 92,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-04T01:59:54.226Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9f4e50e9645c543619a5-e26c7deb5e9918d3f66f",
+          "file": "../../../private/tmp/amw-release-frontend-20261003/final-qa-tests/ux-regressions.spec.cjs",
+          "line": 50,
+          "column": 1
+        },
+        {
+          "title": "UX-001: comparison fit text meets minimum contrast",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 581,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-04T02:00:02.955Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9f4e50e9645c543619a5-a01f16e63a6f67c2da3b",
+          "file": "../../../private/tmp/amw-release-frontend-20261003/final-qa-tests/ux-regressions.spec.cjs",
+          "line": 15,
+          "column": 1
+        },
+        {
+          "title": "UX-002: dashboard scrollable commands have explicit keyboard access",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 285,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-04T02:00:03.540Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9f4e50e9645c543619a5-7f23a4661a2901974e3e",
+          "file": "../../../private/tmp/amw-release-frontend-20261003/final-qa-tests/ux-regressions.spec.cjs",
+          "line": 27,
+          "column": 1
+        },
+        {
+          "title": "UX-003: operator runtime links remain on the served origin",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 175,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-04T02:00:03.831Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9f4e50e9645c543619a5-8c42fabd072a69a61ed1",
+          "file": "../../../private/tmp/amw-release-frontend-20261003/final-qa-tests/ux-regressions.spec.cjs",
+          "line": 50,
+          "column": 1
+        },
+        {
+          "title": "UX-001: comparison fit text meets minimum contrast",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 2,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 243,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-04T02:00:12.212Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9f4e50e9645c543619a5-31b31a88bae625de39d2",
+          "file": "../../../private/tmp/amw-release-frontend-20261003/final-qa-tests/ux-regressions.spec.cjs",
+          "line": 15,
+          "column": 1
+        },
+        {
+          "title": "UX-002: dashboard scrollable commands have explicit keyboard access",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 2,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 279,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-04T02:00:12.461Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9f4e50e9645c543619a5-8fc971df99e51848dec7",
+          "file": "../../../private/tmp/amw-release-frontend-20261003/final-qa-tests/ux-regressions.spec.cjs",
+          "line": 27,
+          "column": 1
+        },
+        {
+          "title": "UX-003: operator runtime links remain on the served origin",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 2,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 171,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-04T02:00:12.745Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9f4e50e9645c543619a5-235fd87a094d2e1938c5",
+          "file": "../../../private/tmp/amw-release-frontend-20261003/final-qa-tests/ux-regressions.spec.cjs",
+          "line": 50,
+          "column": 1
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-10-04T01:59:45.971Z",
+    "duration": 26967.114999999998,
+    "expected": 33,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

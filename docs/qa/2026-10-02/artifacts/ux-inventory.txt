@@ -1,0 +1,426 @@
+BOOTSTRAP: initial pwd/git status/branch/remote/worktree + COORDINATION-SESSION.md/run_logged.py reads preceded harness read; success.
+/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api d45754e [qa/2026-10-02-sweep]
+
+qa/2026-10-02-sweep
+
+https://github.com/PetrefiedThunder/agent-middleware-api.git
+
+FILE AGENTS.md
+# AGENTS.md
+
+## Project Mission
+
+This repo is being evaluated as possible trust infrastructure for autonomous agents.
+Do not treat it as a generic agent app backend.
+
+The strongest thesis:
+
+> A control layer for agent-to-tool actions where every autonomous action is scoped, authorized, metered, signed, receipted, auditable, and governable.
+
+The weaker thesis to avoid:
+
+> An agent backend with lots of features.
+
+## Core Loop
+
+Judge the product against this loop:
+
+discover → authenticate → authorize → invoke → meter → receipt → audit → govern
+
+Every major feature should support this loop. If a feature does not support this loop, question whether it should be frozen, deleted, or moved out of the main wedge.
+
+## Current Company Phase: Customer Validation
+
+The active company milestone is the 30-day customer-validation sprint in
+`docs/30-day-customer-validation.md`, not another core release.
+
+Apply this business invariant:
+
+> No new core capability without documented evidence from a named prospective
+> customer.
+
+Work may proceed without new customer evidence only when it is:
+
+- a security or correctness fix
+- a reliability fix in the existing one-tool loop
+- a documentation or integration fix required to complete an active pilot
+- maintenance required to keep existing release gates green
+
+Before unfreezing a capability, require one named active prospect, one concrete
+consequential tool, a documented current-workflow blocker, a committed owner and
+date, and the smallest vertical slice that clears the blocker. Demo enthusiasm,
+generic competitor parity, and speculative roadmap requests are not evidence.
+
+Judge external validation against the partner-owned milestone: one partner
+agent, one partner staging tool, one partner engineer, and one receipt that
+engineer verifies independently. Do not count local demos, self-issued public
+proof, or the stranger test as customer validation.
+
+## Product Wedge Candidates
+
+When making product or architecture recommendations, evaluate these wedges.
+**They are not peers — the ordering is the point.** The 2026-08 competitive
+sweep ([`docs/market-research-2026-08.md`](docs/market-research-2026-08.md), and
+§9 for the 2026-08-25 re-test) established that signed, offline-verifiable
+receipts are **table stakes**, not a wedge: they ship in Microsoft's
+`agent-governance-toolkit`, Pipelock, and protect-mcp/ScopeBlind. Lead with the
+debit, cite the signature as supporting evidence, never as the differentiator.
+See [`WEDGE.md`](WEDGE.md) §"Signed receipts are table stakes now".
+
+1. **exactly-once economic authorization at the gateway boundary** — one
+   accepted idempotency key yields at most one gateway dispatch **to the
+   configured upstream MCP tool** and at most one ledger debit, linked by a
+   single persisted chain, with a receipt on every path that finalizes or
+   reconciles. (Local governed tools have no dispatch state machine.) This is the wedge. ("Exactly-once" is the
+   deduplication term of art: never a duplicate charge, not always a charge.)
+2. **crash-semantics accounting** — **for the configured upstream MCP tool**, a
+   genuinely ambiguous post-dispatch outcome becomes a distinct receipted state
+   rather than a silent redispatch. Local governed tools fail closed into manual
+   review; they have no dispatch state machine.
+3. agent authorization gateway
+4. usage metering layer for agent tools
+5. MCP governance proxy
+6. secure delegated tool execution API
+7. **signed receipt ledger for agent actions — demoted 2026-08.** Real here and
+   worth saying, but no longer differentiating. Do not build or pitch around it
+   as the wedge.
+8. **agent audit log platform — demoted 2026-08**, same reason.
+
+Do not recommend "full agent middleware platform" unless the narrower wedges are already credible.
+
+## Engineering Priorities
+
+Prioritize:
+
+- delegated authority
+- permit lifecycle
+- scoped authorization
+- idempotency
+- replay protection
+- billing/accounting integrity under crash
+- usage metering
+- signed receipts
+- tenant isolation
+- tool execution safety
+- auditability
+- revocation
+- governance policy
+- billing/accounting integrity
+- developer SDK/demo path
+
+## Security-Critical Areas
+
+Treat these as security-critical:
+
+- auth
+- authorization
+- tenants
+- permits
+- delegations
+- receipts
+- billing/metering
+- audit logs
+- tool execution
+- secrets
+- CI/CD
+- deployment
+- migrations
+
+For changes in these areas, include tests for invalid input, unauthorized access, and relevant negative paths.
+
+## Agent-Specific Risks
+
+Always consider:
+
+- prompt injection
+- tool injection
+- agentic workflow injection
+- confused deputy attacks
+- replay attacks
+- permit misuse
+- over-budget invocation
+- billing double-charge
+- unsafe tool execution
+- unverifiable receipts
+- weak key management
+- cross-tenant data leakage
+
+## Analysis Rules
+
+When analyzing the repo:
+
+- cite specific files and functions
+- separate README claims from code evidence
+- separate real flows from stubs or demos
+- identify overbuilt or unfocused areas
+- recommend what to freeze/delete, not only what to build
+
+Use reality levels:
+
+- verified
+- partially verified
+- not verified
+- stubbed
+- demo-only
+- misleading
+- contradicted
+- too early to tell
+
+## Implementation Rules
+
+Prefer vertical slices over broad skeletons.
+
+A good change usually includes:
+
+- one focused behavior
+- one clear model/service/route change
+- tests proving the behavior
+- negative-path tests where relevant
+- minimal public API disruption
+
+Do not introduce new dependencies unless necessary and justified.
+
+## Local Credentials for Agents
+
+When you need an API key against a local instance, provision your own —
+do not ask for production secrets and never hardcode keys:
+
+- **Admin-shaped local testing**: run
+  `python scripts/generate_static_dev_keys.py`, put the printed value in
+  `.env` as `STATIC_DEV_API_KEYS=...`, and restart the server. Static
+  `amw_dev_` keys are bootstrap admins in local-compatible environments
+  only and are deliberately never rotated.
+- **Wallet-scoped keys with no restart** (server already running with
+  `ENABLE_DEV_KEY_SELF_PROVISION=true`): `POST /v1/dev-keys/self-provision`
+  mints a sponsor wallet, agent wallet, and wallet-scoped key with no
+  pre-shared secret. Use this to exercise the real permit → invoke →
+  receipt loop as a non-admin caller.
+
+Both surfaces are refused by production-like deployments at boot. Details:
+`docs/static-dev-api-keys.md`.
+
+## Final Summary Format
+
+End every task with:
+
+- Files changed
+- What changed
+- Tests run
+- What passed
+- What was not tested
+- Remaining risks
+- Recommended next step
+
+## Cursor Cloud specific instructions
+
+The startup update script installs `uv` (to `~/.local/bin`, already on PATH) and
+prepares a `.venv` (gitignored) at the repo root with everything in
+`requirements.txt` plus `ruff`. So all dev tools are directly runnable without
+re-resolving: `.venv/bin/{pytest,ruff,mypy,uvicorn,alembic,python}`. Activate
+with `source .venv/bin/activate` or call binaries by path.
+
+- Runtime deps live in `requirements.txt`, NOT `pyproject.toml` `[project.dependencies]`. `ruff` is not pinned in `requirements.txt`; the update script installs it alongside.
+- Lint / type-check: `ruff check .` and `mypy app` (both must pass; CI runs them).
+- Tests: `.venv/bin/pytest tests/ -q -m "not proof"` for the fast product loop (equivalent to `make test`); `make test-all` runs the full suite including proof surfaces. Canonical `make` targets exist for everything (see `Makefile`).
+- Run the app (dev): `make quickstart` is the golden path — it boots the real strict-trust server on `http://127.0.0.1:8000` (loopback ONLY), auto-generates and persists an Ed25519 signing seed under `data/quickstart/`, enables self-serve key minting + one governed dogfood tool (`partner.notes.write`), and follows `docs/quickstart.md`. `QUICKSTART_ARGS="--reset"` wipes state.
+- Non-obvious boot requirement: the raw server (`uvicorn app.main:app`) refuses to start in default strict-trust mode without `TRUST_SIGNING_PRIVATE_KEY_B64` (base64 of 32 random bytes) — it fails with `SigningKeyError: trust_signing_private_key_required`. `make quickstart` handles this for you; only set it manually if launching uvicorn directly.
+- Local storage: SQLite is the intended local default for both the ORM DB (`DATABASE_URL=sqlite+aiosqlite://...`) and durable state (`STATE_BACKEND=sqlite`). No Postgres or Redis is needed for the core loop, tests, or `make quickstart`. Postgres is only required for the crash-recovery proof (`make prove-crash-recovery`).
+- Gotcha: `make quickstart`, `make test`, and the other `make`/proof targets invoke `uv run --with-requirements requirements.txt ...`, which builds an ephemeral uv environment and IGNORES the prepared `.venv`. That is fine and self-contained, but for fast iteration prefer the prebuilt `.venv` directly (e.g. `.venv/bin/pytest ...`, `.venv/bin/python scripts/quickstart.py`).
+- Do not ask for production secrets. For a governed caller against a local instance, use `POST /v1/dev-keys/self-provision` on the quickstart server (see "Local Credentials for Agents" above and `docs/quickstart.md`).
+
+FILE /Users/sellers/.codex/skills/playwright/SKILL.md
+---
+name: "playwright"
+description: "Use when the task requires automating a real browser from the terminal (navigation, form filling, snapshots, screenshots, data extraction, UI-flow debugging) via `playwright-cli` or the bundled wrapper script."
+---
+
+
+# Playwright CLI Skill
+
+Drive a real browser from the terminal using `playwright-cli`. Prefer the bundled wrapper script so the CLI works even when it is not globally installed.
+Treat this skill as CLI-first automation. Do not pivot to `@playwright/test` unless the user explicitly asks for test files.
+
+## Prerequisite check (required)
+
+Before proposing commands, check whether `npx` is available (the wrapper depends on it):
+
+```bash
+command -v npx >/dev/null 2>&1
+```
+
+If it is not available, pause and ask the user to install Node.js/npm (which provides `npx`). Provide these steps verbatim:
+
+```bash
+# Verify Node/npm are installed
+node --version
+npm --version
+
+# If missing, install Node.js/npm, then:
+npm install -g @playwright/cli@latest
+playwright-cli --help
+```
+
+Once `npx` is present, proceed with the wrapper script. A global install of `playwright-cli` is optional.
+
+## Skill path (set once)
+
+```bash
+export CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
+export PWCLI="$CODEX_HOME/skills/playwright/scripts/playwright_cli.sh"
+```
+
+User-scoped skills install under `$CODEX_HOME/skills` (default: `~/.codex/skills`).
+
+## Quick start
+
+Use the wrapper script:
+
+```bash
+"$PWCLI" open https://playwright.dev --headed
+"$PWCLI" snapshot
+"$PWCLI" click e15
+"$PWCLI" type "Playwright"
+"$PWCLI" press Enter
+"$PWCLI" screenshot
+```
+
+If the user prefers a global install, this is also valid:
+
+```bash
+npm install -g @playwright/cli@latest
+playwright-cli --help
+```
+
+## Core workflow
+
+1. Open the page.
+2. Snapshot to get stable element refs.
+3. Interact using refs from the latest snapshot.
+4. Re-snapshot after navigation or significant DOM changes.
+5. Capture artifacts (screenshot, pdf, traces) when useful.
+
+Minimal loop:
+
+```bash
+"$PWCLI" open https://example.com
+"$PWCLI" snapshot
+"$PWCLI" click e3
+"$PWCLI" snapshot
+```
+
+## When to snapshot again
+
+Snapshot again after:
+
+- navigation
+- clicking elements that change the UI substantially
+- opening/closing modals or menus
+- tab switches
+
+Refs can go stale. When a command fails due to a missing ref, snapshot again.
+
+## Recommended patterns
+
+### Form fill and submit
+
+```bash
+"$PWCLI" open https://example.com/form
+"$PWCLI" snapshot
+"$PWCLI" fill e1 "user@example.com"
+"$PWCLI" fill e2 "password123"
+"$PWCLI" click e3
+"$PWCLI" snapshot
+```
+
+### Debug a UI flow with traces
+
+```bash
+"$PWCLI" open https://example.com --headed
+"$PWCLI" tracing-start
+# ...interactions...
+"$PWCLI" tracing-stop
+```
+
+### Multi-tab work
+
+```bash
+"$PWCLI" tab-new https://example.com
+"$PWCLI" tab-list
+"$PWCLI" tab-select 0
+"$PWCLI" snapshot
+```
+
+## Wrapper script
+
+The wrapper script uses `npx --package @playwright/cli playwright-cli` so the CLI can run without a global install:
+
+```bash
+"$PWCLI" --help
+```
+
+Prefer the wrapper unless the repository already standardizes on a global install.
+
+## References
+
+Open only what you need:
+
+- CLI command reference: `references/cli.md`
+- Practical workflows and troubleshooting: `references/workflows.md`
+
+## Guardrails
+
+- Always snapshot before referencing element ids like `e12`.
+- Re-snapshot when refs seem stale.
+- Prefer explicit commands over `eval` and `run-code` unless needed.
+- When you do not have a fresh snapshot, use placeholder refs like `eX` and say why; do not bypass refs with `run-code`.
+- Use `--headed` when a visual check will help.
+- When capturing artifacts in this repo, use `output/playwright/` and avoid introducing new top-level artifact folders.
+- Default to CLI commands and workflows, not Playwright test specs.
+
+instruction_files []
+qa_files [PosixPath('docs/qa/2026-10-02/artifacts'), PosixPath('docs/qa/2026-10-02/FRONTEND-SESSION.md'), PosixPath('docs/qa/2026-10-02/UX-SESSION.md'), PosixPath('docs/qa/2026-10-02/COORDINATION-SESSION.md'), PosixPath('docs/qa/2026-10-02/CLAIMS-SESSION.md'), PosixPath('docs/qa/2026-10-02/run_logged.py'), PosixPath('docs/qa/2026-10-02/BACKEND-SESSION.md'), PosixPath('docs/qa/2026-10-02/artifacts/backend-install-python-qa.txt'), PosixPath('docs/qa/2026-10-02/artifacts/coordination-inventory.txt'), PosixPath('docs/qa/2026-10-02/artifacts/frontend-surface-map.txt'), PosixPath('docs/qa/2026-10-02/artifacts/backend-resume-identity.txt'), PosixPath('docs/qa/2026-10-02/artifacts/backend-suite-safety-map.txt'), PosixPath('docs/qa/2026-10-02/artifacts/coordination-resume-map.txt'), PosixPath('docs/qa/2026-10-02/artifacts/claims-identity-memory-skills.txt'), PosixPath('docs/qa/2026-10-02/artifacts/backend-concise-config.txt'), PosixPath('docs/qa/2026-10-02/artifacts/backend-install-runtime-test-deps.txt'), PosixPath('docs/qa/2026-10-02/artifacts/coordination-config-read.txt'), PosixPath('docs/qa/2026-10-02/artifacts/frontend-inventory.txt')]
+memory matches
+1: # Task Group: agent-middleware-api dead rate-limiter removal and PR closeout
+4: applies_to: cwd=/Users/sellers/Projects/agent-middleware-api/.claude/worktrees/clever-euler-104499; reuse_rule=reuse code-location and test-environment guidance in compatible AMW checkouts; re-check current main and PR state before acting.
+10: - rollout_summaries/2026-10-01T15-39-09-kDFR-remove_unused_token_bucket_rate_limiter_pr_494.md (cwd=/Users/sellers/Projects/agent-middleware-api/.claude/worktrees/clever-euler-104499, rollout_path=/Users/sellers/.codex/sessions/2026/10/01/rollout-2026-10-01T08-39-09-01a0f81e-9673-7d91-9f9d-8265af8f638f.jsonl, updated_at=2026-10-01T07:54:25+00:00, thread_id=01a0f81e-9673-7d91-9f9d-8265af8f638f, partial; local cleanup validated, PR merge pending)
+121: scope: Route broad backlogs to verified repositories, run isolated local validation, and close with explicit authorization boundaries across agent-middleware-api, RegEngine, Notion, outreach, and operations.
+132: - 700743, codex-backlog-2026-09-27.md, team-worktree, git remote get-url origin, agent-middleware-api, RegEngine, Dollarloop, test.db, SQLite, one pytest per worktree
+162: - Correct repositories were AMW `/Users/sellers/Projects/agent-middleware-api`, RegEngine `/Users/sellers/Projects/RegEngine/repo`, and Dollarloop `/Users/sellers/Projects/dollarloop`; `/workspace/notion-sync` was absent, leaving provider-side Engineering Source of Truth as the authoritative data surface. `/Users/sellers/bin/team-worktree` is hard-coded to RegEngine and must not be used for other repositories. [Task 1][Task 3]
+403: # Task Group: agent-middleware-api trust-plane retries and billing-alert enum repairs
+405: scope: Implement and validate narrowly scoped trust-plane recovery and persisted billing-alert schema repairs in agent-middleware-api worktrees.
+406: applies_to: cwd=/Users/sellers/Projects/agent-middleware-api/.claude/worktrees/*; reuse_rule=reuse code-path and test guidance in this project only; branches, PRs, commits, and merge state require current remote verification.
+412: - rollout_summaries/2026-09-21T18-47-43-1QhA-fix_permit_budget_threshold_alerts.md (cwd=/Users/sellers/Projects/agent-middleware-api/.claude/worktrees/lucid-euler-5f5120, rollout_path=/Users/sellers/.codex/sessions/2026/09/21/rollout-2026-09-21T11-47-43-01a0c54b-a339-7413-86a5-ef431eda1e3a.jsonl, updated_at=2026-09-21T09:02:42+00:00, thread_id=01a0c54b-a339-7413-86a5-ef431eda1e3a, success; PR #475 merged as `457cd45`)
+422: - rollout_summaries/2026-09-21T18-47-43-Qe18-in_attempt_signing_key_rotation_retry.md (cwd=/Users/sellers/Projects/agent-middleware-api/.claude/worktrees/confident-shamir-71ab3c, rollout_path=/Users/sellers/.codex/sessions/2026/09/21/rollout-2026-09-21T11-47-43-01a0c54b-a335-7943-93f3-1ce71a4886ae.jsonl, updated_at=2026-09-21T02:47:38+00:00, thread_id=01a0c54b-a335-7943-93f3-1ce71a4886ae, success; stacked PR #472)
+608: - Current failure triage: regenerate the Python lock with `pip-compile --allow-unsafe --generate-hashes --output-file=requirements.lock requirements.in`; synchronize `package.json` and `frontend/package-lock.json` before `npm ci`; investigate FDA export schema parity (`result` vs `passed`), unauthorized MinIO pull, and `function similarity(text, unknown) does not exist`. The event-level verdict migration `20260923_22a278f6dc78_v125_event_level_evaluation_verdict.py` with `services/shared/rules/verdict.py` is intended to fail closed. [Task 2]
+758: # Task Group: agent-middleware-api paid-pilot site qualification and partner monitoring
+761: applies_to: cwd=/Users/sellers/Documents/GitHub/agent-middleware-api; reuse_rule=reuse site paths, test procedure, and customer-validation boundaries in this checkout; PR, deployment, mailbox, automation, and prospect status are time-specific.
+767: - rollout_summaries/2026-09-06T03-04-47-DMbe-site_pilot_qualification_merge_and_andre_monitoring.md (cwd=/Users/sellers/Documents/GitHub/agent-middleware-api, rollout_path=/Users/sellers/.codex/sessions/2026/09/05/rollout-2026-09-05T20-04-47-01a074ac-f74e-7e40-9428-de4c39d02350.jsonl, updated_at=2026-09-12T23:34:22+00:00, thread_id=01a074ac-f74e-7e40-9428-de4c39d02350, success; site qualification implemented and browser-verified)
+771: - site audit, thisisatest-site-audit.md, paid one-tool pilot, economic-fit calculator, pilot-fit.js, /pilot, Vercel redirects, PUBLIC_DISPLAY_NAME, PUBLIC_CONTACT_EMAIL, tests/test_site_pilot_fit.mjs
+777: - rollout_summaries/2026-09-06T03-04-47-DMbe-site_pilot_qualification_merge_and_andre_monitoring.md (cwd=/Users/sellers/Documents/GitHub/agent-middleware-api, rollout_path=/Users/sellers/.codex/sessions/2026/09/05/rollout-2026-09-05T20-04-47-01a074ac-f74e-7e40-9428-de4c39d02350.jsonl, updated_at=2026-09-12T23:34:22+00:00, thread_id=01a074ac-f74e-7e40-9428-de4c39d02350, success; PR #408 merged and local main synchronized)
+787: - rollout_summaries/2026-09-06T03-04-47-DMbe-site_pilot_qualification_merge_and_andre_monitoring.md (cwd=/Users/sellers/Documents/GitHub/agent-middleware-api, rollout_path=/Users/sellers/.codex/sessions/2026/09/05/rollout-2026-09-05T20-04-47-01a074ac-f74e-7e40-9428-de4c39d02350.jsonl, updated_at=2026-09-12T23:34:22+00:00, thread_id=01a074ac-f74e-7e40-9428-de4c39d02350, partial; monitor active, no substantive inbound reply)
+803: - `site/pilot-fit.js` calculates actions × duplicate rate × loss × expected reduction, can compare optional total monthly cost, handles invalid/zero/too-large input, and never persists or transmits visitor assumptions. Its `$35` example is conditional, not pricing or a universal threshold; self-issued proof and signed receipts are not customer evidence or downstream-effect proof. [Task 1]
+814: # Task Group: agent-middleware-api frontend/site consistency and merge confirmation
+817: applies_to: cwd=/Users/sellers/Projects/agent-middleware-api; reuse_rule=reuse the `site/` build and shared-chrome procedure in the actual checkout; PR #425, deployed state, and untracked research status are time-specific.
+823: - rollout_summaries/2026-09-10T20-07-49-8FJV-ui_consistency_and_merge_confirmation.md (cwd=/Users/sellers/Documents/GitHub/agent-middleware-api, rollout_path=/Users/sellers/.codex/sessions/2026/09/10/rollout-2026-09-10T13-07-49-01a08cef-04b6-7903-ad54-3304c1014033.jsonl, updated_at=2026-09-10T23:20:40+00:00, thread_id=01a08cef-04b6-7903-ad54-3304c1014033, success; shared chrome deployed and browser-verified)
+833: - rollout_summaries/2026-09-10T20-07-49-8FJV-ui_consistency_and_merge_confirmation.md (cwd=/Users/sellers/Documents/GitHub/agent-middleware-api, rollout_path=/Users/sellers/.codex/sessions/2026/09/10/rollout-2026-09-10T13-07-49-01a08cef-04b6-7903-ad54-3304c1014033.jsonl, updated_at=2026-09-10T23:20:40+00:00, thread_id=01a08cef-04b6-7903-ad54-3304c1014033, success; PR #425 already merged)
+846: - Resolve the actual checkout before running commands: `/Users/sellers/Documents/GitHub/agent-middleware-api` was stale/nonexistent; work was in `/Users/sellers/Projects/agent-middleware-api`. [Task 1]
+857: # Task Group: agent-middleware-api audit, unit economics, and customer-validation priority
+860: applies_to: cwd=/Users/sellers/Documents/GitHub/agent-middleware-api; reuse_rule=reuse audited paths, commands, and evidence distinctions in this checkout; deployments, provider usage, commit identity, pricing, and customer evidence are time-specific.
+866: - rollout_summaries/2026-08-27T09-20-16-ybNu-agent_middleware_audit_customer_validation_repo_sync.md (cwd=/Users/sellers/Documents/GitHub/agent-middleware-api, rollout_path=/Users/sellers/.codex/sessions/2026/08/27/rollout-2026-08-27T02-20-16-01a04285-223e-7a31-ac23-96729c605928.jsonl, updated_at=2026-09-10T22:28:59+00:00, thread_id=01a04285-223e-7a31-ac23-96729c605928, partial; technical proof verified, outreach de-duplicated, PR #425 synchronized)
+876: - rollout_summaries/2026-09-06T02-13-47-47HC-agent_middleware_unit_economics_and_release_followup.md (cwd=/Users/sellers/Documents/GitHub/agent-middleware-api, rollout_path=/Users/sellers/.codex/sessions/2026/09/05/rollout-2026-09-05T19-13-47-01a0747e-4398-7570-9f3e-c3afde012f4c.jsonl, updated_at=2026-09-10T06:28:47+00:00, thread_id=01a0747e-4398-7570-9f3e-c3afde012f4c, success; 26-check scenario model, actual economics unknown)
+886: - rollout_summaries/2026-09-06T02-13-47-47HC-agent_middleware_unit_economics_and_release_followup.md (cwd=/Users/sellers/Documents/GitHub/agent-middleware-api, rollout_path=/Users/sellers/.codex/sessions/2026/09/05/rollout-2026-09-05T19-13-47-01a0747e-4398-7570-9f3e-c3afde012f4c.jsonl, updated_at=2026-09-10T06:28:47+00:00, thread_id=01a0747e-4398-7570-9f3e-c3afde012f4c, partial; disposable validation passed, production remains held)
+917: - Bare `python` was unavailable for receipt verification; use `.venv/bin/python` with `PYTHONPATH=b2a_sdk/src`. Check actual checkout identity and PR state before syncing or creating work: PR #425 was already merged, and the current checkout was `/Users/sellers/Projects/agent-middleware-api`. [Task 1]
+1055: - Canonical public surfaces are `/proof`, `/verify`, `/proof/recall-drill`. `frontend/public/sdk/verify_chain.py` accepted valid bundle and rejected tampered fixture; API GET 405 confirms POST-only, not workflow execution. [Task 2]
+1062: - Frontend partner tiers are `$499/$649/$749` monthly, but `services/ingestion/app/stripe_billing/plans.py` defines Growth `$999` and Scale `$1,999`; older pilot documentation also describes free pilot/free-year terms. Economic viability is UNKNOWN without measured workload, invoices, and settled customer pricing. The meaningful units include paying organization-month, onboarding, accepted CTE event, retained evidence-year, and completed operator outcome—not event count alone. [Task 5]
+1130: # Task Group: agent-middleware-api AWI, MCP, and framework-wrapper delivery
+1133: applies_to: cwd=/Users/sellers/Documents/GitHub/agent-middleware-api/.claude/worktrees/*; reuse_rule=reuse code-path and verification guidance in agent-middleware-api; PR, branch, CI, and merge status are time-specific.
+1139: - rollout_summaries/2026-09-05T11-23-50-FlKw-awi_idempotency_contract_merged_pr_401.md (cwd=/Users/sellers/Documents/GitHub/agent-middleware-api/.claude/worktrees/jovial-mirzakhani-bea1d3, rollout_path=/Users/sellers/.codex/sessions/2026/09/05/rollout-2026-09-05T04-23-50-01a0714f-7dea-7d61-b24d-9f5ad5b9df70.jsonl, updated_at=2026-09-05T06:44:57+00:00, thread_id=01a0714f-7dea-7d61-b24d-9f5ad5b9df70, merged PR #401)
+1140: - rollout_summaries/2026-09-05T11-23-50-0WLO-awi_idempotency_header_parity_merged.md (cwd=/Users/sellers/Documents/GitHub/agent-middleware-api/.claude/worktrees/relaxed-greider-89aae0, rollout_path=/Users/sellers/.codex/sessions/2026/09/05/rollout-2026-09-05T04-23-50-01a0714f-7dac-7901-9db7-d2c6ddf5a23c.jsonl, updated_at=2026-09-05T06:46:13+00:00, thread_id=01a0714f-7dac-7901-9db7-d2c6ddf5a23c, merged PR #401)
+1141: - rollout_summaries/2026-09-05T11-23-50-jRwv-fix_awi_unkeyed_debit_assertion_and_merge.md (cwd=/Users/sellers/Documents/GitHub/agent-middleware-api/.claude/worktrees/strange-lalande-c78df0, rollout_path=/Users/sellers/.codex/sessions/2026/09/05/rollout-2026-09-05T04-23-50-01a0714f-7de5-7a83-ab30-f7df8fd7ae4b.jsonl, updated_at=2026-09-05T06:03:02+00:00, thread_id=01a0714f-7de5-7a83-ab30-f7df8fd7ae4b, merged PR #399)
+1151: - rollout_summaries/2026-09-05T11-23-50-1OKj-mcp_exception_disclosure_hardening_pr_402.md (cwd=/Users/sellers/Documents/GitHub/agent-middleware-api/.claude/worktrees/angry-sanderson-57ccbe, rollout_path=/Users/sellers/.codex/sessions/2026/09/05/rollout-2026-09-05T04-23-50-01a0714f-7daf-70a3-99b6-5792eb2ed5a7.jsonl, updated_at=2026-09-05T07:50:35+00:00, thread_id=01a0714f-7daf-70a3-99b6-5792eb2ed5a7, partial; final-head CI pending)
+1152: - rollout_summaries/2026-09-05T11-23-50-V6Pp-fix_and_ship_framework_wrapper_installation_tests.md (cwd=/Users/sellers/Documents/GitHub/agent-middleware-api/.claude/worktrees/relaxed-greider-89aae0, rollout_path=/Users/sellers/.codex/sessions/2026/09/05/rollout-2026-09-05T04-23-50-01a0714f-7da7-7172-b704-7596474534c3.jsonl, updated_at=2026-09-05T07:51:53+00:00, thread_id=01a0714f-7da7-7172-b704-7596474534c3, ready-to-merge PR #404)
+1268: # Task Group: agent-middleware-api governance, transaction integrity, and partner-validation gates
+1271: applies_to: cwd=/Users/sellers/Documents/GitHub/agent-middleware-api; reuse_rule=project-specific; re-verify branches, manifests, deployment, partner evidence, and database state.
+1277: - rollout_summaries/2026-08-31T08-39-14-oAHw-adaptive_ai_organization_and_transaction_integrity_readiness.md (cwd=/Users/sellers/Documents/GitHub/agent-middleware-api, rollout_path=/Users/sellers/.codex/sessions/2026/08/31/rollout-2026-08-31T01-39-14-01a056f9-01e8-7912-9ea3-12b71d69e86a.jsonl, updated_at=2026-09-02T23:42:57+00:00, thread_id=01a056f9-01e8-7912-9ea3-12b71d69e86a, success)
+1278: - rollout_summaries/2026-08-27T09-20-16-ybNu-agent_middleware_audit_customer_validation_repo_sync.md (cwd=/Users/sellers/Documents/GitHub/agent-middleware-api, rollout_path=/Users/sellers/.codex/sessions/2026/08/27/rollout-2026-08-27T02-20-16-01a04285-223e-7a31-ac23-96729c605928.jsonl, updated_at=2026-09-10T22:28:59+00:00, thread_id=01a04285-223e-7a31-ac23-96729c605928, partial; audit/customer-validation and repository-sync replacement)
+1279: - rollout_summaries/2026-08-31T08-54-46-R0kS-agent_middleware_market_validation_partner_pilot.md (cwd=/Users/sellers/Documents/GitHub/agent-middleware-api, rollout_path=/Users/sellers/.codex/sessions/2026/08/31/rollout-2026-08-31T01-54-46-01a05707-3b49-7b43-96b2-ace3f2f4bb96.jsonl, updated_at=2026-09-01T05:25:57+00:00, thread_id=01a05707-3b49-7b43-96b2-ace3f2f4bb96, partial)

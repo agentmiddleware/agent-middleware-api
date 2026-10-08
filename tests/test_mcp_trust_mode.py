@@ -11,14 +11,16 @@ from cryptography.hazmat.primitives.serialization import (
     PrivateFormat,
 )
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import func, select
 
 from app.core.time import utc_now
 from app.db.database import get_session_factory
-from app.db.models import WalletModel
+from app.db.models import IdempotencyRecordModel, WalletModel
 from app.main import app
 from app.routers import mcp as mcp_router
 from app.schemas.billing import ServiceCategory
 from app.services.audit_log import list_audit_events
+from app.services.idempotency import GOVERNED_MCP_IDEMPOTENCY_ENDPOINT
 from app.services.signing_keys import get_signing_key_service
 from app.services.service_registry import get_service_registry
 from tests.test_trust_helpers import (
@@ -142,6 +144,48 @@ async def _assert_no_tool_debits(
     assert debits == []
 
 
+async def _tool_debit_count(
+    *,
+    client: AsyncClient,
+    wallet_id: str,
+    headers: dict[str, str],
+    tool_name: str,
+) -> int:
+    ledger_resp = await client.get(
+        f"/v1/billing/ledger/{wallet_id}",
+        headers=headers,
+    )
+    assert ledger_resp.status_code == 200
+    return len(
+        [
+            entry
+            for entry in ledger_resp.json()["entries"]
+            if entry["service_category"] == "agent_comms"
+            and entry["action"] == "debit"
+            and tool_name in entry["description"]
+        ]
+    )
+
+
+async def _governed_idempotency_record_count(
+    *,
+    wallet_id: str,
+    idempotency_key: str,
+) -> int:
+    factory = get_session_factory()
+    async with factory() as session:
+        count = await session.scalar(
+            select(func.count())
+            .select_from(IdempotencyRecordModel)
+            .where(
+                IdempotencyRecordModel.wallet_id == wallet_id,
+                IdempotencyRecordModel.endpoint == GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+                IdempotencyRecordModel.idempotency_key == idempotency_key,
+            )
+        )
+    return int(count or 0)
+
+
 @pytest.mark.anyio
 async def test_strict_mode_denies_unpermitted_mcp_invoke_and_audits(
     client,
@@ -175,12 +219,23 @@ async def test_strict_mode_denies_unpermitted_mcp_invoke_and_audits(
 
 
 @pytest.mark.anyio
-async def test_strict_mode_replays_missing_permit_denial_with_idempotency_key(
+async def test_strict_mode_missing_permit_denial_leaves_no_idempotency_record(
     client,
     clean_database,
     strict_trust_mode,
 ):
+    """``permit_required`` on a resolved tool records nothing (D2, pinned).
+
+    The governed idempotency record is begun only after the permit check, so
+    the denial's completion call is a no-op: a same-key retry repeats the
+    denial while nothing changed, and executes exactly once after the caller
+    mints a permit. docs/failure-semantics.md and
+    docs/authority-required-flow.md (D2) state this; change all three
+    together.
+    """
     provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    idempotency_key = "strict-missing-permit-replay-idem"
     tool_name = "strict-replay-missing-permit-tool"
     calls = {"count": 0}
     registry = get_service_registry()
@@ -200,9 +255,9 @@ async def test_strict_mode_replays_missing_permit_denial_with_idempotency_key(
     )
     body = _jsonrpc_body(
         tool_name=tool_name,
-        wallet_id=provisioned["agent_wallet_id"],
+        wallet_id=wallet_id,
         request_id="strict-missing-permit-replay-call",
-        idempotency_key="strict-missing-permit-replay-idem",
+        idempotency_key=idempotency_key,
     )
     try:
         first = await client.post(
@@ -215,20 +270,64 @@ async def test_strict_mode_replays_missing_permit_denial_with_idempotency_key(
             json=body,
             headers=provisioned["agent_headers"],
         )
+
+        assert first.status_code == 200
+        assert first.json()["error"]["message"] == "permit_required"
+        assert replay.status_code == 200
+        assert replay.json()["error"]["message"] == "permit_required"
+        assert calls["count"] == 0
+        await _assert_no_tool_debits(
+            client=client,
+            wallet_id=wallet_id,
+            headers=provisioned["agent_headers"],
+            tool_name=tool_name,
+        )
+        assert (
+            await _governed_idempotency_record_count(
+                wallet_id=wallet_id, idempotency_key=idempotency_key
+            )
+            == 0
+        )
+
+        permit = await create_tool_permit(
+            client,
+            wallet_id=wallet_id,
+            key_id=provisioned["key_id"],
+            tool_name=tool_name,
+        )
+        granted = await client.post(
+            "/mcp/messages",
+            json=_jsonrpc_body(
+                tool_name=tool_name,
+                wallet_id=wallet_id,
+                request_id="strict-missing-permit-resume-call",
+                permit_id=permit["permit_id"],
+                idempotency_key=idempotency_key,
+            ),
+            headers=provisioned["agent_headers"],
+        )
     finally:
         registry.unregister_local(tool_name)
 
-    assert first.status_code == 200
-    assert first.json()["error"]["message"] == "permit_required"
-    assert replay.status_code == 200
-    assert replay.json()["error"]["message"] == "permit_required"
-    assert replay.json()["error"]["message"] != "idempotency_in_progress"
-    assert calls["count"] == 0
-    await _assert_no_tool_debits(
-        client=client,
-        wallet_id=provisioned["agent_wallet_id"],
-        headers=provisioned["agent_headers"],
-        tool_name=tool_name,
+    assert granted.status_code == 200
+    granted_payload = granted.json()
+    assert "error" not in granted_payload, granted_payload
+    assert granted_payload["result"]["isError"] is False
+    assert calls["count"] == 1
+    assert (
+        await _tool_debit_count(
+            client=client,
+            wallet_id=wallet_id,
+            headers=provisioned["agent_headers"],
+            tool_name=tool_name,
+        )
+        == 1
+    )
+    assert (
+        await _governed_idempotency_record_count(
+            wallet_id=wallet_id, idempotency_key=idempotency_key
+        )
+        == 1
     )
 
 
@@ -283,6 +382,14 @@ async def test_strict_mode_replays_unknown_permit_denial_with_idempotency_key(
     assert replay.json()["error"]["message"] == "permit_not_found"
     assert replay.json()["error"]["message"] != "idempotency_in_progress"
     assert calls["count"] == 0
+    # docs/failure-semantics.md: permit_not_found completes a terminal record.
+    assert (
+        await _governed_idempotency_record_count(
+            wallet_id=provisioned["agent_wallet_id"],
+            idempotency_key="strict-unknown-permit-replay-idem",
+        )
+        == 1
+    )
     await _assert_no_tool_debits(
         client=client,
         wallet_id=provisioned["agent_wallet_id"],
@@ -324,6 +431,14 @@ async def test_strict_mode_replays_missing_tool_lookup_error_with_idempotency_ke
     assert replay.json()["error"]["code"] == -32001
     assert replay.json()["error"]["message"] == f"Tool not found: {tool_name}"
     assert replay.json()["error"]["message"] != "idempotency_in_progress"
+    # docs/failure-semantics.md: an unknown tool completes a terminal record.
+    assert (
+        await _governed_idempotency_record_count(
+            wallet_id=provisioned["agent_wallet_id"],
+            idempotency_key="strict-missing-lookup-idem",
+        )
+        == 1
+    )
     await _assert_no_tool_debits(
         client=client,
         wallet_id=provisioned["agent_wallet_id"],
@@ -373,6 +488,15 @@ async def test_strict_mode_replays_non_executable_tool_error_with_idempotency_ke
     assert replay.json()["error"]["code"] == -32002
     assert replay.json()["error"]["message"] == f"Tool not executable: {tool_name}"
     assert replay.json()["error"]["message"] != "idempotency_in_progress"
+    # docs/failure-semantics.md: a resolved but non-executable tool is
+    # rejected before the governed record is begun, so nothing is recorded.
+    assert (
+        await _governed_idempotency_record_count(
+            wallet_id=provisioned["agent_wallet_id"],
+            idempotency_key="strict-non-executable-lookup-idem",
+        )
+        == 0
+    )
     await _assert_no_tool_debits(
         client=client,
         wallet_id=provisioned["agent_wallet_id"],

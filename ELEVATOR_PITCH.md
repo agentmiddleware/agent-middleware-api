@@ -19,7 +19,7 @@ the [documentation guide](docs/README.md).
 > One agent action, at most one debit — no matter how many times the agent
 > retries under the same accepted key. Verify the receipt without us.
 
-("At most one" is deliberate and matches `CONTEXT.md` and `docs/ip/04-claim-sets.md`:
+("At most one" is deliberate and matches `CONTEXT.md`:
 a crash before dispatch refunds, and a denied call never charges. The guarantee is
 never a duplicate charge, not always a charge.)
 
@@ -33,8 +33,10 @@ superlative.
 
 Your agent invokes a costly tool and the request times out. Agent Middleware
 puts one scoped, budgeted boundary in front of the call: replaying the same
-request and accepted idempotency key cannot create another gateway dispatch or
-debit, and the terminal gateway outcome gets a signed receipt.
+request and accepted idempotency key cannot create another debit or, for the
+configured upstream MCP tool, another gateway dispatch. Finalized or reconciled
+outcomes carry signed receipts; unresolved effects can require manual review
+without one.
 
 ## Thirty seconds
 
@@ -45,8 +47,9 @@ show the economic consequence afterward?
 Agent Middleware API is a transaction boundary for metered MCP calls. An agent
 uses a wallet-scoped key and an Ed25519-signed permit bound to tool, scope,
 budget, and expiry. The gateway records one accepted request key, returns the
-original result and signed receipt on an identical replay, and rejects changed
-input under that key. Out-of-scope and over-budget calls fail before a debit.
+original result and signed receipt on an identical replay after finalization,
+and rejects changed input under that key. Out-of-scope and over-budget calls
+fail before a debit.
 
 Run the [executable proof](README.md#see-it-in-sixty-seconds) locally,
 then evaluate the supported vendor-managed, single-tenant pilot with one real
@@ -75,17 +78,22 @@ scoped signed permit -> governed MCP invoke -> wallet charge -> signed receipt
 - **Budgets that bind.** Decimal wallet balances with row-locked debits. Final
   permit checks and budget reservation happen while the permit row is locked,
   so competing invokes and revoke-versus-invoke races resolve correctly.
-- **Charge-once under failure.** A repeated idempotency key returns the original
-  result and receipt with no second gateway dispatch and no second debit. One
-  persisted chain links the idempotency record, permit reservation, ledger
-  debit, dispatch attempt, receipt, and audit event.
-- **Honest failure accounting.** Confirmed pre-dispatch failures and
-  upstream-returned errors are refunded and receipted. Genuinely ambiguous
-  post-dispatch outcomes are marked `delivery_uncertain` and routed to
-  fail-closed manual review — never silently redispatched.
-- **Portable gateway evidence.** Signed receipts for success, denial, failure,
-  *and* `delivery_uncertain`, linked to permits, a verifiable per-wallet hash
-  chain, and — where a
+- **Same-key replay and charge deduplication.** A repeated accepted
+  idempotency identity cannot create a second debit. For the configured upstream MCP tool, it
+  cannot create a second gateway dispatch either. Once finalized, replay
+  returns the recorded outcome and receipt. One persisted upstream chain links
+  the idempotency record, permit reservation, ledger debit, dispatch attempt,
+  receipt, and audit event; local tools have no dispatch state machine.
+- **Honest failure accounting.** For the configured upstream tool, finalized
+  or reconciled pre-dispatch failures and upstream-returned errors are refunded
+  and receipted. Ambiguous post-dispatch outcomes become `delivery_uncertain`
+  when finalization or reconciliation succeeds. A local crash or exhausted
+  receipt/audit write after committed effects can leave no receipt and require
+  manual review. Do not retry an unresolved action with a new key; that can
+  execute and charge again.
+- **Portable gateway evidence.** Signed receipts on paths that finalize or
+  reconcile success, denial, failure, and `delivery_uncertain`, linked to
+  permits, a verifiable per-wallet hash chain, and — where a
   ledger record exists for that outcome — the ledger entry. A pre-dispatch
   denial has no debit to link. This is not a compliance-grade ledger or proof of
   physical work.
@@ -112,7 +120,7 @@ restore an unacceptable risk. If it does not earn a commercial next step, stop.
 |---|---|---|
 | MCP trust gateways | Policy and evidence | Wallet debit plus economic idempotency |
 | MCP monetization / pay-per-tool | Payment rails | Internal budgets, no settlement claim |
-| Enterprise authz for MCP | Who may call | Meter, receipt, and charge exactly once |
+| Enterprise authz for MCP | Who may call | Same-key debit deduplication and receipts for finalized outcomes |
 | Agent reliability libraries | Retry safety inside the caller | A boundary the agent cannot route around, and evidence a third party can check |
 | Agent audit / compliance layers | Regulatory mapping and exports | The economic consequence, not just the record of the call |
 
@@ -145,8 +153,9 @@ this does not pay for itself, and the first conversation should end there.
 
 **"Isn't this just an API gateway?"** A gateway answers whether a call is
 allowed. This binds the authorization to an internal credit budget and signed
-receipt, and prevents an identical replay under the same accepted key from
-creating another gateway dispatch or debit. The debit and receipt are the
+receipt when finalized, and prevents an identical replay under the same
+accepted key from creating another debit or, for the configured upstream MCP
+tool, another gateway dispatch. The debit and receipt are the
 product; the policy check is table stakes.
 
 **"We already have IAM."** Keep it. This is not an IAM replacement and does not
@@ -159,11 +168,17 @@ signed and chained, so tampering is *evident*. (Evident, not impossible — a
 database administrator who can alter both the data and its chain metadata is
 inside the trust boundary, and we say so.)
 
-**"Does exactly-once really hold across the network?"** For one accepted
-idempotency key at our boundary: one gateway dispatch, one debit, one receipt.
-A *remote* tool's own side effect is exactly once only if that tool also honors
-the forwarded key. Anything broader would overstate the distributed-systems
-guarantee.
+**"What happens when the call is retried?"** For the configured upstream MCP
+tool, identical retries under the same accepted idempotency key allow at most
+one gateway dispatch and at most one debit. This does not guarantee delivery or
+a downstream effect; downstream replay safety also requires the upstream to
+honor the forwarded key. Local governed tools have no dispatch state machine
+and interrupted calls fail closed into manual review.
+
+A call can commit effects or a debit but return `manual_review_required` with
+no receipt if an audit or receipt write fails. Do not retry with a new idempotency key:
+that can execute and charge the call again. Reconcile from the ledger and audit
+chain as described in [failure semantics](docs/failure-semantics.md).
 
 **"Why not just use an open-source library?"** If your problem is reliability,
 do. A decorator library gives you idempotency, timeouts, and budget caps for
@@ -177,8 +192,9 @@ Otherwise the library is the correct answer and we will say so.
 least one verifies offline without calling its issuer. We do not claim to be
 alone here. What no project we surveyed *documents* is binding the debit to the
 idempotency record:
-one accepted key, one dispatch, one ledger debit, one receipt, in a single
-persisted chain. (One *debit* — a refunded failure correctly writes a second,
+for the configured upstream tool, one accepted identity permits at most one
+dispatch and one ledger debit, linked to a receipt when finalized or reconciled.
+(At most one *debit* — a refunded failure correctly writes a second,
 compensating ledger entry against that debit.) Several of them enforce budgets
 and several dedupe replays; whether any binds the two is unresolved, and we say
 so rather than claiming the cell outright. The signature proves what happened;

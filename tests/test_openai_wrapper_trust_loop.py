@@ -30,12 +30,16 @@ def _tool_call(call_id: str, text: str = "hi"):
     return SimpleNamespace(
         id=call_id,
         type="function",
-        function=SimpleNamespace(name=function_name_for(TOOL), arguments=f'{{"text": "{text}"}}'),
+        function=SimpleNamespace(
+            name=function_name_for(TOOL), arguments=f'{{"text": "{text}"}}'
+        ),
     )
 
 
 @pytest.mark.anyio
-async def test_openai_tool_call_retry_is_one_governed_action(clean_database, tmp_path) -> None:
+async def test_openai_tool_call_retry_is_one_governed_action(
+    clean_database, tmp_path
+) -> None:
     registry = get_service_registry()
     calls: list[str] = []
 
@@ -53,14 +57,20 @@ async def test_openai_tool_call_retry_is_one_governed_action(clean_database, tmp
         unit_name="call",
     )
     try:
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as raw:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as raw:
             provisioned = await provision_agent_wallet(raw)
             wallet_id = provisioned["agent_wallet_id"]
             api_key = provisioned["agent_headers"]["X-API-Key"]
             store = tmp_path / "operations.json"
 
             def runner() -> GovernedToolRunner:
-                client = B2AClient(api_key=api_key, base_url="http://test", transport=ASGITransport(app=app))
+                client = B2AClient(
+                    api_key=api_key,
+                    base_url="http://test",
+                    transport=ASGITransport(app=app),
+                )
                 r = GovernedToolRunner(
                     client,
                     wallet_id=wallet_id,
@@ -72,7 +82,10 @@ async def test_openai_tool_call_retry_is_one_governed_action(clean_database, tmp
                 return r
 
             async def balance() -> Decimal:
-                resp = await raw.get(f"/v1/billing/wallets/{wallet_id}", headers=provisioned["agent_headers"])
+                resp = await raw.get(
+                    f"/v1/billing/wallets/{wallet_id}",
+                    headers=provisioned["agent_headers"],
+                )
                 return Decimal(str(resp.json()["balance"]))
 
             before = await balance()
@@ -97,10 +110,14 @@ async def test_openai_tool_call_retry_is_one_governed_action(clean_database, tmp
             assert second.receipt.receipt_id != first.receipt.receipt_id
             assert second.receipt.permit_id == first.receipt.permit_id
 
-            assert calls == ["hi", "again"], "each distinct tool call executed exactly once"
+            assert calls == ["hi", "again"], (
+                "each distinct tool call executed exactly once"
+            )
             assert before - await balance() == Decimal("4")
 
-            ledger = await raw.get(f"/v1/billing/ledger/{wallet_id}", headers=provisioned["agent_headers"])
+            ledger = await raw.get(
+                f"/v1/billing/ledger/{wallet_id}", headers=provisioned["agent_headers"]
+            )
             debits = [e for e in ledger.json()["entries"] if TOOL in e["description"]]
             assert len(debits) == 2
 

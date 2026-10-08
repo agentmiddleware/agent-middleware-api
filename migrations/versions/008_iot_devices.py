@@ -43,9 +43,7 @@ def upgrade() -> None:
             index=True,
         ),
         sa.Column("last_message_at", sa.DateTime(), nullable=True),
-        sa.Column(
-            "message_count", sa.Integer(), nullable=False, server_default="0"
-        ),
+        sa.Column("message_count", sa.Integer(), nullable=False, server_default="0"),
     )
 
     op.create_table(

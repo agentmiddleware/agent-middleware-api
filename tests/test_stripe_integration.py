@@ -1028,3 +1028,80 @@ class TestNotificationService:
             wallet_id="test-wallet",
             reason="anomalous_spend",
         )
+
+    @staticmethod
+    def _service_with_transport(handler):
+        import httpx
+
+        from app.services.notifications import NotificationService
+
+        service = NotificationService()
+        service._http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        service._slack_webhook_url = ""
+        service._resend_api_key = ""
+        return service
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize("failure", ["status_404", "status_500", "transport"])
+    async def test_failed_slack_alert_never_logs_the_webhook_url(self, caplog, failure):
+        """The Slack webhook URL is the credential; a failed send must not log it."""
+        import logging
+
+        import httpx
+
+        secret = "T0SENTINEL/B0SENTINEL/sentinelwebhooktoken"
+        webhook = f"https://hooks.slack.com/services/{secret}"
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if failure == "transport":
+                # Transport errors are free to embed the request URL too.
+                raise httpx.ConnectError(f"connect to {request.url} failed")
+            return httpx.Response(int(failure.split("_")[1]), text="no_service")
+
+        service = self._service_with_transport(handler)
+        service._slack_webhook_url = webhook
+        try:
+            with caplog.at_level(logging.DEBUG, logger="app.services.notifications"):
+                await service.send_wallet_frozen_alert(
+                    wallet_id="test-wallet", reason="anomalous_spend"
+                )
+        finally:
+            await service.close()
+
+        failures = [r for r in caplog.records if r.levelno >= logging.ERROR]
+        assert failures, "the failed send should still be logged"
+        assert "slack_alert_failed" in failures[0].getMessage()
+        assert secret not in caplog.text
+        assert "hooks.slack.com" not in caplog.text
+        for record in caplog.records:
+            assert secret not in record.getMessage()
+            assert record.exc_info is None
+
+    @pytest.mark.anyio
+    async def test_failed_email_logs_status_not_exception_text(self, caplog):
+        """A failed Resend call logs the status, never the HTTP stack's text."""
+        import logging
+
+        import httpx
+
+        api_key = "re_sentinel_api_key_value"
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            assert request.headers["authorization"] == f"Bearer {api_key}"
+            return httpx.Response(401, text="unauthorized")
+
+        service = self._service_with_transport(handler)
+        service._resend_api_key = api_key
+        try:
+            with caplog.at_level(logging.DEBUG, logger="app.services.notifications"):
+                await service.send_email(
+                    to="sponsor@example.com", subject="s", body="b"
+                )
+        finally:
+            await service.close()
+
+        failures = [r for r in caplog.records if r.levelno >= logging.ERROR]
+        assert failures, "the failed send should still be logged"
+        assert "status=401" in failures[0].getMessage()
+        assert "api.resend.com" not in caplog.text
+        assert api_key not in caplog.text

@@ -1,0 +1,418 @@
+57:     main, footer {
+58:       width: 100%;
+59:       max-width: var(--page-max);
+60:       margin-inline: auto;
+61:     }
+62: 
+63:     header {
+64:       position: sticky;
+65:       top: 0;
+66:       z-index: 40;
+67:       display: flex;
+68:       justify-content: space-between;
+69:       align-items: center;
+70:       gap: 1rem;
+71:       padding: 0.85rem max(var(--pad-x), calc((100% - var(--page-max)) / 2 + var(--pad-x)));
+72:       background: rgba(11, 16, 32, 0.86);
+73:       backdrop-filter: blur(14px);
+74:       -webkit-backdrop-filter: blur(14px);
+75:       border-bottom: 1px solid var(--line);
+76:     }
+77: 
+78:     .brand {
+79:       display: inline-flex;
+80:       align-items: center;
+81:       gap: 0.6rem;
+82:       color: var(--text);
+83:       min-height: 44px;
+84:       font-family: var(--font-mono);
+85:       font-size: 0.92rem;
+86:       font-weight: 600;
+87:       letter-spacing: 0.02em;
+88:       text-decoration: none;
+89:     }
+90: 
+91:     .brand:hover { text-decoration: none; }
+92: 
+93:     .brand::before {
+94:       content: "";
+95:       width: 9px;
+96:       height: 9px;
+97:       border-radius: 2px;
+98:       background: var(--brass);
+99:       flex: none;
+100:     }
+101: 
+102:     .label {
+103:       display: inline-flex;
+104:       align-items: center;
+105:       border: 1px solid var(--line-strong);
+106:       border-radius: 999px;
+107:       padding: 0.3rem 0.75rem;
+108:       color: var(--text-dim);
+109:       font-family: var(--font-mono);
+110:       font-size: 0.75rem;
+111:       font-weight: 500;
+112:       letter-spacing: 0.12em;
+113:       text-transform: uppercase;
+114:     }
+115: 
+116:     main { padding: clamp(3.5rem, 8vw, 6rem) var(--pad-x); }
+117: 
+118:     h1, h2 {
+119:       font-family: var(--font-display);
+120:       font-weight: 400;
+121:       letter-spacing: -0.012em;
+122:       line-height: 1.06;
+123:       text-wrap: balance;
+124:     }
+125:     h1 {
+126:       max-width: 22ch;
+127:       margin: 1rem 0 1.25rem;
+128:       font-size: clamp(2.5rem, 5.2vw, 3.9rem);
+129:     }
+130:     h2 { margin: 0 0 1.25rem; font-size: clamp(1.9rem, 3.2vw, 2.7rem); }
+131:     h3 {
+132:       margin: 0 0 1rem;
+133:       font-family: var(--font-title);
+134:       font-size: clamp(1.05rem, 1.5vw, 1.2rem);
+135:       font-weight: 700;
+136:       letter-spacing: -0.01em;
+137:       line-height: 1.25;
+138:       text-wrap: balance;
+139:     }
+140: 
+141:     p { margin: 0; max-width: var(--measure); }
+142:     .lede { color: var(--text-dim); font-size: 1.1rem; }
+143: 
+144:     .notice {
+145:       margin-top: 1.5rem;
+146:       padding: 1rem 1.15rem;
+147:       border: 1px solid var(--brass);
+148:       border-radius: var(--radius-sm);
+149:       background: rgba(240, 180, 60, 0.08);
+150:       color: var(--brass);
+151:     }
+152: 
+153:     section { margin-top: clamp(3.5rem, 8vw, 6rem); }
+154: 
+155:     .grid {
+156:       display: grid;
+157:       grid-template-columns: repeat(2, minmax(0, 1fr));
+158:       gap: 1rem;
+159:       margin-top: 1.25rem;
+160:     }
+161: 
+162:     .card {
+163:       min-width: 0;
+164:       padding: 1.25rem;
+165:       border: 1px solid var(--line);
+166:       border-radius: var(--radius);
+167:       background: var(--panel);
+168:     }
+169: 
+170:     .card p, .section-copy, li { color: var(--text-dim); }
+171:     .card .scope {
+172:       margin-top: 0.9rem;
+173:       padding-top: 0.75rem;
+174:       border-top: 1px solid var(--line);
+175:       color: var(--text-dim);
+176:       font: 0.8rem/1.6 var(--font-mono);
+177:       overflow-wrap: anywhere;
+178:     }
+179: 
+180:     .links {
+181:       display: grid;
+182:       grid-template-columns: repeat(3, minmax(0, 1fr));
+183:       gap: 0.75rem;
+184:       margin-top: 1.25rem;
+185:     }
+186: 
+187:     .links a {
+188:       display: block;
+189:       min-height: 100%;
+190:       padding: 1rem;
+191:       border: 1px solid var(--line);
+192:       border-radius: var(--radius);
+193:       background: var(--panel);
+194:       text-decoration: none;
+195:       transition: border-color 140ms ease, background 140ms ease;
+196:     }
+197: 
+198:     .links a:hover {
+199:       border-color: var(--line-strong);
+200:       background: var(--rule-soft);
+201:       text-decoration: none;
+202:     }
+203: 
+204:     .links strong {
+205:       display: block;
+206:       margin-bottom: 0.3rem;
+207:       color: var(--text);
+208:       font-family: var(--font-title);
+209:       font-size: 1rem;
+210:       font-weight: 700;
+211:     }
+212:     .links span { color: var(--text-dim); font-size: 0.88rem; }
+213: 
+214:     pre {
+215:       overflow-x: auto;
+216:       margin: 1rem 0 0;
+217:       padding: 1rem 1.15rem;
+218:       border: 1px solid var(--line);
+219:       border-radius: var(--radius);
+220:       background: var(--panel);
+221:       color: var(--text);
+222:       font: 0.85rem/1.7 var(--font-mono);
+223:     }
+224: 
+225:     code {
+226:       font-family: var(--font-mono);
+227:       font-size: 0.9em;
+228:       background: var(--panel);
+229:       border: 1px solid var(--line);
+230:       border-radius: var(--radius-xs);
+231:       padding: 0.1em 0.4em;
+232:       overflow-wrap: anywhere;
+233:     }
+234:     pre code { font-size: inherit; border: 0; padding: 0; overflow-wrap: normal; }
+235:     ul { margin: 1rem 0 0; padding-left: 1.25rem; }
+236:     li + li { margin-top: 0.5rem; }
+237: 
+238:     footer {
+239:       display: flex;
+240:       flex-wrap: wrap;
+241:       gap: 0.5rem 1rem;
+242:       padding: 1.5rem var(--pad-x) 2.5rem;
+243:       border-top: 1px solid var(--line);
+244:       color: var(--text-dim);
+245:       font-size: 0.9rem;
+246:     }
+247: 
+248:     footer a { display: inline-flex; align-items: center; min-height: 44px; }
+249: 
+250:     :focus-visible {
+251:       outline: var(--focus-ring);
+252:       outline-offset: 3px;
+253:     }
+254: 
+255:     .skip-link {
+256:       position: absolute;
+257:       left: -9999px;
+258:       top: 0;
+259:       z-index: 100;
+260:       padding: 0.75rem 1.25rem;
+261:       border-radius: 0 0 var(--radius-sm) 0;
+262:       background: var(--brass);
+263:       color: var(--ink);
+264:       font-size: 0.9rem;
+265:       font-weight: 600;
+266:     }
+267:     .skip-link:focus { left: 0; color: var(--ink); }
+268: 
+269:     @media (prefers-reduced-motion: reduce) {
+270:       *, *::before, *::after { transition: none !important; }
+271:     }
+272: 
+273:     @media (max-width: 760px) {
+274:       .grid, .links { grid-template-columns: 1fr; }
+275:     }
+276: 
+277:     @media (max-width: 560px) {
+278:       html { scroll-padding-top: 8.5rem; }
+279:       header { flex-wrap: wrap; row-gap: 0.25rem; }
+280:       .brand { font-size: 0.85rem; letter-spacing: 0; }
+281:     }
+282:   </style>
+283: </head>
+284: <body>
+285:   <a class="skip-link" href="#main-content">Skip to content</a>
+286:   <header>
+287:     <a class="brand" href="https://www.thisisatest.tech/">Agent Middleware API</a>
+288:     <span class="label">Private experiment</span>
+289:   </header>
+290: 
+291:   <main id="main-content" tabindex="-1">
+292:     <div class="label">Operator index</div>
+293:     <h1>Inspect the trust plane without invented telemetry.</h1>
+294:     <p class="lede">
+295:       This origin is a private experiment, not a public product. Tool catalogs
+296:       and invoke require an operator-issued key. This page only points at
+297:       runtime posture and portable verification keys.
+298:     </p>
+299:     <p class="notice">
+300:       No tenant records or aggregate customer counts are rendered here. This page
+301:       does not request API keys, make authenticated calls, or store credentials in
+302:       the browser.
+303:     </p>
+304: 
+305:     <section aria-labelledby="posture-heading">
+306:       <h2 id="posture-heading">Core contract</h2>
+307:       <p class="section-copy">The governed path is intentionally narrow.</p>
+308:       <div class="grid">
+309:         <article class="card">
+310:           <h3>Scoped authorization</h3>
+311:           <p>Signed permits bind a subject, tool scope, budget, expiry, and nonce.</p>
+312:           <div class="scope">discover → authenticate → authorize</div>
+313:         </article>
+314:         <article class="card">
+315:           <h3>Idempotent metering</h3>
+316:           <p>Retries reuse the same operation boundary so one accepted action is charged once.</p>
+317:           <div class="scope">invoke → meter</div>
+318:         </article>
+319:         <article class="card">
+320:           <h3>Portable receipts</h3>
+321:           <p>Governed outcomes can be exported with the issuer key material required for offline verification.</p>
+322:           <div class="scope">receipt → verify</div>
+323:         </article>
+324:         <article class="card">
+325:           <h3>Durable evidence</h3>
+326:           <p>Dispatch state and account audit events are persisted for authenticated operator inspection.</p>
+327:           <div class="scope">audit → govern</div>
+328:         </article>
+329:       </div>
+330:     </section>
+331: 
+332:     <section aria-labelledby="evidence-heading">
+333:       <h2 id="evidence-heading">Status and evidence</h2>
+334:       <p class="section-copy">
+335:         The proof is self-issued live gateway proof, not customer traction.
+336:       </p>
+337:       <div class="links">
+338:         <a href="https://www.thisisatest.tech/proof/">
+339:           <strong>Portable receipt proof</strong>
+340:           <span>Artifact, matching key snapshot, and offline verification command.</span>
+341:         </a>
+342:         <a href="https://api.thisisatest.tech/health/dependencies">
+343:           <strong>Runtime truth</strong>
+344:           <span>Dependency posture, feature flags, build SHA, and metric scope metadata.</span>
+345:         </a>
+346:         <a href="https://api.thisisatest.tech/.well-known/trust-keys.json">
+347:           <strong>Current trust keys</strong>
+348:           <span>Public issuer keys exposed by the live API.</span>
+349:         </a>
+350:       </div>
+351:     </section>
+352: 
+353:     <section aria-labelledby="discovery-heading">
+354:       <h2 id="discovery-heading">Machine discovery</h2>
+355:       <div class="links">
+356:         <a href="https://api.thisisatest.tech/.well-known/agent.json">
+357:           <strong>Agent manifest</strong>
+358:           <span>Bootstrap metadata. Tool lists on this origin require a key.</span>
+359:         </a>
+360:         <a href="https://api.thisisatest.tech/llms.txt">
+361:           <strong>llms.txt</strong>
+362:           <span>Machine-readable integration guidance.</span>
+363:         </a>
+364:       </div>
+365:     </section>
+366: 
+367:     <section aria-labelledby="inspection-heading">
+368:       <h2 id="inspection-heading">Authenticated inspection</h2>
+369:       <p class="section-copy">
+370:         Inspect your own permits, receipts, and audit events from a trusted terminal.
+371:         Keep the key in your environment; do not paste it into a public web page.
+372:       </p>
+373:       <pre><code>export AGENT_MIDDLEWARE_API_KEY=[REDACTED]
+374: 
+375: curl --fail-with-body \
+376:   -H "X-API-Key: [REDACTED] \
+377:   "https://api.thisisatest.tech/v1/me/permits"
+378: 
+379: curl --fail-with-body \
+380:   -H "X-API-Key: [REDACTED] \
+381:   "https://api.thisisatest.tech/v1/me/receipts"
+382: 
+383: curl --fail-with-body \
+384:   -H "X-API-Key: [REDACTED] \
+385:   "https://api.thisisatest.tech/v1/me/audit/events"</code></pre>
+386:     </section>
+387: 
+388:     <section aria-labelledby="limits-heading">
+389:       <h2 id="limits-heading">How to read the runtime data</h2>
+390:       <ul>
+391:         <li><code>upstream_mcp.call_metrics</code> are process-local and reset on restart.</li>
+392:         <li><code>upstream_mcp.dispatch_metrics</code> summarize durable dispatch records.</li>
+393:         <li>A healthy dependency report is operational posture, not evidence of customer usage.</li>
+394:         <li>The public proof demonstrates one gateway-controlled action, not end-to-end exactly-once behavior for arbitrary upstream side effects.</li>
+395:       </ul>
+396:     </section>
+397:   </main>
+398: 
+399:   <footer>
+400:     <a href="https://www.thisisatest.tech/">Agent Middleware API</a>
+401:     <a href="https://www.thisisatest.tech/proof/">Proof</a>
+402:     <a href="https://api.thisisatest.tech/health/dependencies">Runtime truth</a>
+403:   </footer>
+404: </body>
+405: </html>
+1: (function () {
+2:   "use strict";
+3: 
+4:   const fieldNodes = Array.from(document.querySelectorAll("[data-proof-field]"));
+5:   if (fieldNodes.length === 0) return;
+6: 
+7:   const statusNodes = document.querySelectorAll("[data-proof-status]");
+8:   const messageNodes = document.querySelectorAll("[data-proof-message]");
+9: 
+10:   function setStatus(status, message) {
+11:     statusNodes.forEach(function (node) {
+12:       node.textContent = status;
+13:     });
+14:     messageNodes.forEach(function (node) {
+15:       node.textContent = message;
+16:     });
+17:   }
+18: 
+19:   function setMissing() {
+20:     fieldNodes.forEach(function (node) {
+21:       node.textContent = "not published";
+22:     });
+23:     setStatus(
+24:       "not published",
+25:       "The live artifact is not published. No verification claim is being made."
+26:     );
+27:   }
+28: 
+29:   function displayValue(field, claims, bundle) {
+30:     if (field === "kid") return bundle.kid;
+31:     return claims[field];
+32:   }
+33: 
+34:   Promise.all([
+35:     fetch("/proof/receipt.json", { credentials: "omit" }).then(function (response) {
+36:       if (!response.ok) throw new Error("receipt unavailable");
+37:       return response.json();
+38:     }),
+39:     fetch("/proof/trust-keys.json", { credentials: "omit" }).then(function (response) {
+40:       if (!response.ok) throw new Error("key snapshot unavailable");
+41:       return response.json();
+42:     }),
+43:   ])
+44:     .then(function (artifacts) {
+45:       const bundle = artifacts[0];
+46:       const keyDocument = artifacts[1];
+47:       if (typeof bundle.signing_input !== "string") {
+48:         throw new Error("missing signed payload");
+49:       }
+50:       const claims = JSON.parse(bundle.signing_input);
+51:       const matchingKey = Array.isArray(keyDocument.keys)
+52:         ? keyDocument.keys.some(function (key) {
+53:             return (key.kid || key.key_id) === bundle.kid;
+54:           })
+55:         : false;
+56:       if (!matchingKey) throw new Error("matching key absent");
+57: 
+58:       fieldNodes.forEach(function (node) {
+59:         const value = displayValue(node.dataset.proofField, claims, bundle);
+60:         node.textContent = value === undefined || value === null ? "not signed" : String(value);
+61:       });
+62:       setStatus(
+63:         "artifacts loaded",
+64:         "The receipt and matching key snapshot loaded. Run the offline verifier for a cryptographic verdict."
+65:       );
+66:     })
+67:     .catch(setMissing);
+68: })();
+ts tests []

@@ -1,0 +1,10 @@
+port 8765 exit 0
+COMMAND   PID    USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME
+Python  21117 sellers    3u  IPv4 0xccba7389ce6daa31      0t0  TCP 127.0.0.1:8765 (LISTEN)
+
+
+port 8766 exit 0
+COMMAND   PID    USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME
+Python  21160 sellers    3u  IPv4 0xedb47e8095520779      0t0  TCP 127.0.0.1:8766 (LISTEN)
+
+

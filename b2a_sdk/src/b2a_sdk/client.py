@@ -152,7 +152,9 @@ class AgentMiddlewareClient:
         Raises:
             ValueError: if bearer_token is supplied but blank.
         """
-        self.api_key = api_key
+        # The key is held only in the transport's default headers (see the
+        # ``api_key`` property), not duplicated as instance state, so debug
+        # dumps of ``vars(client)`` do not carry the secret.
         self.base_url = base_url.rstrip("/")
         headers = {
             "X-API-Key": api_key,
@@ -163,8 +165,7 @@ class AgentMiddlewareClient:
             token = bearer_token.strip()
             if not token:
                 raise ValueError(
-                    "bearer_token must not be blank; omit it to send no "
-                    "Authorization header"
+                    "bearer_token must not be blank; omit it to send no Authorization header"
                 )
             headers["Authorization"] = f"Bearer {token}"
         self._client = httpx.AsyncClient(
@@ -174,6 +175,11 @@ class AgentMiddlewareClient:
             transport=transport,
             follow_redirects=False,
         )
+
+    @property
+    def api_key(self) -> str:
+        """The API key this client sends as ``X-API-Key`` (read-only)."""
+        return self._client.headers["X-API-Key"]
 
     @staticmethod
     def _validate_idempotency_key(idempotency_key: str) -> str:
@@ -496,9 +502,17 @@ class AgentMiddlewareClient:
         units: float = 1.0,
         request_path: str | None = None,
         description: str | None = None,
+        *,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """
         Charge a wallet for API usage (micro-metering).
+
+        Without ``idempotency_key`` a charge is not replay-safe: retrying one
+        whose response was lost (a timeout, a dropped connection) bills the
+        wallet again. Pass a caller-owned key and reuse it for every retry of
+        the same logical charge; the server then replays the original outcome
+        instead of debiting twice.
 
         Args:
             wallet_id: The wallet to charge
@@ -506,13 +520,23 @@ class AgentMiddlewareClient:
             units: Number of units consumed (default: 1.0)
             request_path: Optional API path for tracking
             description: Optional description of the charge
+            idempotency_key: Optional key sent as ``Idempotency-Key``; must be
+                nonblank and at most 128 characters
 
         Returns:
             Ledger entry with action, amount, balance_after
 
         Raises:
             InsufficientFundsError: If wallet has insufficient balance
+            IdempotencyConflictError: If ``idempotency_key`` was already used
+                for a different charge, or that charge is still in progress
+            ValueError: If ``idempotency_key`` is blank or too long (nothing
+                is sent)
         """
+        headers: dict[str, str] | None = None
+        if idempotency_key is not None:
+            headers = {"Idempotency-Key": self._validate_idempotency_key(idempotency_key)}
+
         params: dict[str, str | float] = {
             "wallet_id": wallet_id,
             "service": service_category,
@@ -523,7 +547,7 @@ class AgentMiddlewareClient:
         if description:
             params["description"] = description
 
-        response = await self._client.post("/v1/billing/charge", params=params)
+        response = await self._client.post("/v1/billing/charge", params=params, headers=headers)
 
         if response.status_code == 402:
             data = response.json().get("detail", {})
@@ -531,6 +555,20 @@ class AgentMiddlewareClient:
                 wallet_id=wallet_id,
                 shortfall=data.get("shortfall", "unknown"),
                 top_up_url=f"{self.base_url}/dashboard/top-up?wallet={wallet_id}",
+            )
+        # A 409 is an idempotency conflict only when a key was sent; unkeyed
+        # calls keep the legacy httpx.HTTPStatusError for any non-402 error.
+        if response.status_code == 409 and headers is not None:
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = None
+            if not isinstance(payload, dict):
+                payload = {}
+            raise IdempotencyConflictError(
+                self._error_detail(payload, "HTTP 409"),
+                status_code=409,
+                payload=payload,
             )
 
         response.raise_for_status()
@@ -620,7 +658,8 @@ class AgentMiddlewareClient:
             sponsor_wallet_id: ID of the sponsoring wallet
             agent_id: Unique identifier for the agent
             budget_credits: Credits to provision
-            daily_limit: Optional daily spending limit
+            daily_limit: Optional daily spending limit; 0 means "spend nothing",
+                None means no cap
 
         Returns:
             Created agent wallet details
@@ -630,7 +669,9 @@ class AgentMiddlewareClient:
             "agent_id": agent_id,
             "budget_credits": budget_credits,
         }
-        if daily_limit:
+        # `is not None`: a truthiness test dropped 0, and the server reads an
+        # absent daily_limit as "no cap at all" -- the opposite of 0.
+        if daily_limit is not None:
             payload["daily_limit"] = daily_limit
 
         response = await self._client.post(

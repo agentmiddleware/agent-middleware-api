@@ -162,17 +162,17 @@
     <!-- Blocking on purpose: saved accessibility preferences must apply before
          first paint. Kept in a file rather than inline so the Content-Security-
          Policy can be script-src 'self' with no 'unsafe-inline'. -->
-    <script src="/a11y-preload.js?v=gateway-18"></script>
+    <script src="/a11y-preload.js?v=gateway-19"></script>
     @@VERCEL_ANALYTICS_SCRIPTS@@
-    <script defer src="/wave.js?v=gateway-18"></script>
+    <script defer src="/wave.js?v=gateway-19"></script>
     <!-- The arcade is fetched on demand by this bootstrap (on PRESS START,
          on hover/focus, or on a ?arcade= deep link); /arcade.js and
          /arcade.css are named on the launcher below, not loaded here. -->
-    <script defer src="/arcade-boot.js?v=gateway-18"></script>
-    <script defer src="/analytics.js?v=gateway-18"></script>
-    <script defer src="/proof/proof.js?v=gateway-18"></script>
+    <script defer src="/arcade-boot.js?v=gateway-19"></script>
+    <script defer src="/analytics.js?v=gateway-19"></script>
+    <script defer src="/proof/proof.js?v=gateway-19"></script>
     <script defer src="/pilot-fit.js?v=pilot-2"></script>
-    <script defer src="/a11y.js?v=gateway-18"></script>
+    <script defer src="/a11y.js?v=gateway-19"></script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -562,8 +562,8 @@
           <p class="constraint-line">
             One tool · one operator · one action. Email first; a call is
             available only when a scenario needs one. The source repository is
-            public; run <code>make prove-trust-plane</code> from a clone to
-            assert the whole loop locally. No API credentials, no signup.
+            private; clone access must be granted separately. Authorized clones
+            can run <code>make prove-trust-plane</code> locally without live API credentials.
           </p>
           <div class="pilot-links">
             <a
@@ -739,8 +739,8 @@
             <h2 id="provenance-title">Built and run by one accountable operator.</h2>
             <p>
               Agent Middleware API is built and run by
-              @@PUBLIC_DISPLAY_NAME@@. The source repository is public; the
-              product boundary and security limitations are also published from
+              @@PUBLIC_DISPLAY_NAME@@. The source repository is private; access
+              must be granted separately. The product boundary and security limitations are published from
               the API origin below.
             </p>
             <p>
@@ -815,8 +815,8 @@
             type="button"
             id="arcade-launch"
             class="arcade-launch"
-            data-arcade-script="/arcade.js?v=gateway-18"
-            data-arcade-style="/arcade.css?v=gateway-18"
+            data-arcade-script="/arcade.js?v=gateway-19"
+            data-arcade-style="/arcade.css?v=gateway-19"
             hidden
           >
             <span aria-hidden="true">▶</span> HUMANS: PRESS START

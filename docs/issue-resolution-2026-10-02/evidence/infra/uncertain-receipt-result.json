@@ -1,0 +1,10 @@
+{
+  "command": [
+    "/Users/sellers/Projects/agent-middleware-api/.venv/bin/python",
+    "-m",
+    "pytest",
+    "-x",
+    "tests/test_mcp_dispatch_reconciliation.py::test_stale_dispatched_becomes_charged_delivery_uncertain_without_retry"
+  ],
+  "exit_code": 0
+}

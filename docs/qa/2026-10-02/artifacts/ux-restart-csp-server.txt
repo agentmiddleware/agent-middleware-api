@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import os,signal,subprocess; pids=subprocess.check_output(["lsof","-tiTCP:8767","-sTCP:LISTEN"],text=True).split(); print("Stopping QA-owned CSP server listeners",pids); [(os.kill(int(pid),signal.SIGTERM)) for pid in pids]
+                                                                                                                                                                                ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+PermissionError: [Errno 1] Operation not permitted
+Stopping QA-owned CSP server listeners ['25950']

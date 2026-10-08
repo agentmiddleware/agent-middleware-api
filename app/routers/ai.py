@@ -10,15 +10,30 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from datetime import datetime
 
-from ..core.auth import verify_api_key
+from ..core.auth import AuthContext, get_auth_context
 from ..services.agent_intelligence import get_agent_intelligence
 
 
 router = APIRouter(
     prefix="/v1/ai",
     tags=["Agent Intelligence"],
-    dependencies=[Depends(verify_api_key)],
+    dependencies=[Depends(get_auth_context)],
 )
+
+
+def _owner_wallet(auth: AuthContext) -> str | None:
+    """Namespace that confines the caller's agent data and heals.
+
+    ``agent_id`` is caller-asserted, so decisions and memory are stored under
+    the caller's wallet: two tenants using the same agent id never share
+    state. Bootstrap admins (``None``) keep the legacy shared namespace.
+    """
+    if auth.is_bootstrap_admin:
+        return None
+    # A non-admin caller always carries a concrete wallet; refuse rather than
+    # fall into the shared admin namespace if that invariant ever breaks.
+    auth.require_wallet_access(auth.wallet_id)
+    return auth.wallet_id
 
 
 # --- Request/Response Models ---
@@ -117,7 +132,10 @@ class LearnResponse(BaseModel):
 
 
 @router.post("/decide", response_model=DecisionResponse)
-async def make_decision(request: DecisionRequest):
+async def make_decision(
+    request: DecisionRequest,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """
     Make an autonomous decision based on context.
 
@@ -130,6 +148,7 @@ async def make_decision(request: DecisionRequest):
         agent_id=request.agent_id,
         context=request.context,
         options=request.options,
+        owner_wallet_id=_owner_wallet(auth),
     )
 
     return DecisionResponse(
@@ -143,10 +162,15 @@ async def make_decision(request: DecisionRequest):
 
 
 @router.get("/decisions/{agent_id}", response_model=list[DecisionResponse])
-async def get_decisions(agent_id: str, limit: int = 20):
+async def get_decisions(
+    agent_id: str,
+    limit: int = 20,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """Get recent decisions for an agent."""
     ai = get_agent_intelligence()
-    decisions = ai.get_decisions(agent_id, limit)
+    await ai.initialize()
+    decisions = ai.get_decisions(agent_id, limit, owner_wallet_id=_owner_wallet(auth))
 
     return [
         DecisionResponse(
@@ -162,7 +186,10 @@ async def get_decisions(agent_id: str, limit: int = 20):
 
 
 @router.post("/heal", response_model=HealResponse)
-async def diagnose_and_heal(request: HealRequest):
+async def diagnose_and_heal(
+    request: HealRequest,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """
     Automatically diagnose and suggest a fix for an issue.
 
@@ -175,6 +202,7 @@ async def diagnose_and_heal(request: HealRequest):
     result = await ai.diagnose_and_heal(
         issue=request.issue,
         context=request.context,
+        owner_wallet_id=_owner_wallet(auth),
     )
 
     return HealResponse(
@@ -189,12 +217,15 @@ async def diagnose_and_heal(request: HealRequest):
 
 
 @router.get("/heal/{heal_id}", response_model=HealResponse)
-async def get_heal(heal_id: str):
+async def get_heal(heal_id: str, auth: AuthContext = Depends(get_auth_context)):
     """Get a specific self-heal result."""
     ai = get_agent_intelligence()
+    await ai.initialize()
     result = ai.get_heal(heal_id)
+    owner = _owner_wallet(auth)
 
-    if not result:
+    # A foreign heal answers exactly like a missing one: no existence oracle.
+    if not result or (owner is not None and result.owner_wallet_id != owner):
         raise HTTPException(status_code=404, detail="Heal not found")
 
     return HealResponse(
@@ -227,7 +258,10 @@ async def query_natural_language(request: QueryRequest):
 
 
 @router.post("/memory", status_code=201)
-async def store_memory(request: RememberRequest):
+async def store_memory(
+    request: RememberRequest,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """Store a memory for an agent."""
     ai = get_agent_intelligence()
     await ai.initialize()
@@ -236,13 +270,17 @@ async def store_memory(request: RememberRequest):
         agent_id=request.agent_id,
         key=request.key,
         value=request.value,
+        owner_wallet_id=_owner_wallet(auth),
     )
 
     return {"status": "stored", "agent_id": request.agent_id, "key": request.key}
 
 
 @router.post("/memory/recall", response_model=MemoryResponse)
-async def recall_memories(request: RecallRequest):
+async def recall_memories(
+    request: RecallRequest,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """Recall memories for an agent."""
     ai = get_agent_intelligence()
     await ai.initialize()
@@ -251,13 +289,17 @@ async def recall_memories(request: RecallRequest):
         agent_id=request.agent_id,
         key=request.key,
         limit=request.limit,
+        owner_wallet_id=_owner_wallet(auth),
     )
 
     return MemoryResponse(memories=memories)
 
 
 @router.post("/learn", response_model=LearnResponse)
-async def learn_from_experience(request: LearnRequest):
+async def learn_from_experience(
+    request: LearnRequest,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """
     Learn from an experience.
 
@@ -269,6 +311,7 @@ async def learn_from_experience(request: LearnRequest):
     insight = await ai.learn(
         agent_id=request.agent_id,
         experience=request.experience,
+        owner_wallet_id=_owner_wallet(auth),
     )
 
     return LearnResponse(insight=insight)

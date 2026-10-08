@@ -1,0 +1,12 @@
+{
+  "command": [
+    "/Users/sellers/Projects/agent-middleware-api/.venv/bin/python",
+    "scripts/generate_sim_inventory.py",
+    "--check"
+  ],
+  "head": "0db19631f8a2de879e77d9b57246c41fb261c243",
+  "mode": "inventory",
+  "exit_code": 0,
+  "started": "2026-10-03T03:43:44.338376+00:00",
+  "finished": "2026-10-03T03:43:44.757697+00:00"
+}

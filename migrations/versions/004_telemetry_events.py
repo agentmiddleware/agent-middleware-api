@@ -53,9 +53,7 @@ def upgrade() -> None:
     dialect = bind.dialect.name
     if dialect == "postgresql":
         extension = bind.execute(
-            sa.text(
-                "SELECT 1 FROM pg_extension WHERE extname = 'timescaledb'"
-            )
+            sa.text("SELECT 1 FROM pg_extension WHERE extname = 'timescaledb'")
         ).scalar()
         if extension:
             bind.execute(

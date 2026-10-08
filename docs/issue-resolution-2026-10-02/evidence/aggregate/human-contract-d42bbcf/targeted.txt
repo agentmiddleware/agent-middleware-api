@@ -1,0 +1,106 @@
+...FF...                                                                 [100%]
+=================================== FAILURES ===================================
+_ test_public_operator_index_has_no_fake_data_or_browser_key_handling[/dashboard-headers0] _
+
+client = <httpx.AsyncClient object at 0x10eb94920>, path = '/dashboard'
+headers = {}
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        "path,headers", [("/dashboard", {}), ("/", {"Accept": "text/html"})]
+    )
+    async def test_public_operator_index_has_no_fake_data_or_browser_key_handling(
+        client, path, headers
+    ):
+        resp = await client.get(path, headers=headers)
+        assert resp.status_code == 200
+        page = resp.text
+
+        fabricated_markers = (
+            "agent_synth_01",
+            "agent_finance_bot",
+            "rcpt_99a8b7",
+            "pmt_8f9a2c",
+            "1,428",
+            "metric-permits",
+            'verification_status: "VALID"',
+            "Verify Ed25519 Signature",
+            "Load Sample",
+            "Control Plane Active",
+            "INTACT",
+        )
+        for marker in fabricated_markers:
+            assert marker not in page
+
+        browser_secret_markers = (
+            "localStorage",
+            "sessionStorage",
+            'type="password"',
+            "fetch('/v1/permits",
+            'fetch("/v1/permits',
+        )
+        for marker in browser_secret_markers:
+            assert marker not in page
+
+        assert "<script" not in page
+        assert "railway.app" not in page
+        assert "vercel.app" not in page
+        assert "https://www.thisisatest.tech/proof/" in page
+>       assert "https://api.thisisatest.tech/health/dependencies" in page
+E       assert 'https://api.thisisatest.tech/health/dependencies' in '<!doctype html>\n<html lang="en">\n<head>\n  <meta charset="utf-8">\n  <meta name="viewport" content="width=device-wi...t.tech/proof/">Hosted proof</a>\n    <a href="/health/dependencies">Runtime truth</a>\n  </footer>\n</body>\n</html>\n'
+
+tests/test_human_accessibility.py:97: AssertionError
+_ test_public_operator_index_has_no_fake_data_or_browser_key_handling[/-headers1] _
+
+client = <httpx.AsyncClient object at 0x10eb3f950>, path = '/'
+headers = {'Accept': 'text/html'}
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        "path,headers", [("/dashboard", {}), ("/", {"Accept": "text/html"})]
+    )
+    async def test_public_operator_index_has_no_fake_data_or_browser_key_handling(
+        client, path, headers
+    ):
+        resp = await client.get(path, headers=headers)
+        assert resp.status_code == 200
+        page = resp.text
+
+        fabricated_markers = (
+            "agent_synth_01",
+            "agent_finance_bot",
+            "rcpt_99a8b7",
+            "pmt_8f9a2c",
+            "1,428",
+            "metric-permits",
+            'verification_status: "VALID"',
+            "Verify Ed25519 Signature",
+            "Load Sample",
+            "Control Plane Active",
+            "INTACT",
+        )
+        for marker in fabricated_markers:
+            assert marker not in page
+
+        browser_secret_markers = (
+            "localStorage",
+            "sessionStorage",
+            'type="password"',
+            "fetch('/v1/permits",
+            'fetch("/v1/permits',
+        )
+        for marker in browser_secret_markers:
+            assert marker not in page
+
+        assert "<script" not in page
+        assert "railway.app" not in page
+        assert "vercel.app" not in page
+        assert "https://www.thisisatest.tech/proof/" in page
+>       assert "https://api.thisisatest.tech/health/dependencies" in page
+E       assert 'https://api.thisisatest.tech/health/dependencies' in '<!doctype html>\n<html lang="en">\n<head>\n  <meta charset="utf-8">\n  <meta name="viewport" content="width=device-wi...t.tech/proof/">Hosted proof</a>\n    <a href="/health/dependencies">Runtime truth</a>\n  </footer>\n</body>\n</html>\n'
+
+tests/test_human_accessibility.py:97: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_human_accessibility.py::test_public_operator_index_has_no_fake_data_or_browser_key_handling[/dashboard-headers0]
+FAILED tests/test_human_accessibility.py::test_public_operator_index_has_no_fake_data_or_browser_key_handling[/-headers1]
+2 failed, 6 passed in 0.94s

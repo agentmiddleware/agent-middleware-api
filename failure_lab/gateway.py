@@ -223,14 +223,21 @@ class GatewaySnapshot:
         }
 
 
-def _classify(message: str | None, code: int | None, receipt: dict[str, Any] | None) -> str:
+def _classify(
+    message: str | None, code: int | None, receipt: dict[str, Any] | None
+) -> str:
     if receipt and isinstance(receipt.get("outcome"), str):
         return str(receipt["outcome"])
     if message == "idempotency_in_progress":
         return "in_progress"
     if message == "idempotency_key_reused":
         return "key_conflict"
-    if message in ("delivery_uncertain", "failed_refunded", "response_rejected", "failed_unrefunded"):
+    if message in (
+        "delivery_uncertain",
+        "failed_refunded",
+        "response_rejected",
+        "failed_unrefunded",
+    ):
         return message
     if code == -32005:
         return "in_progress"
@@ -259,7 +266,9 @@ def _decimal_text(value: Any) -> str | None:
     return str(value)
 
 
-def boot_standalone_environment(run_dir: Path, *, admin_api_key: str | None = None) -> str:
+def boot_standalone_environment(
+    run_dir: Path, *, admin_api_key: str | None = None
+) -> str:
     """Pin a sandbox posture into the environment before the app is imported.
 
     Returns the admin API key. Refuses to run if the application is already
@@ -268,7 +277,9 @@ def boot_standalone_environment(run_dir: Path, *, admin_api_key: str | None = No
     import sys
 
     if "app.main" in sys.modules:
-        raise RuntimeError("boot_standalone_environment must run before app.main is imported")
+        raise RuntimeError(
+            "boot_standalone_environment must run before app.main is imported"
+        )
     run_dir.mkdir(parents=True, exist_ok=True)
     key = admin_api_key or ("lab-admin-" + secrets.token_urlsafe(24))
     seed = base64.b64encode(secrets.token_bytes(32)).decode()
@@ -469,7 +480,10 @@ class GatewayUnderTest:
         return await self._post(
             "/v1/permits",
             json=body,
-            headers={**self.admin_headers, "Idempotency-Key": f"permit-{uuid.uuid4().hex}"},
+            headers={
+                **self.admin_headers,
+                "Idempotency-Key": f"permit-{uuid.uuid4().hex}",
+            },
             expected=201,
         )
 
@@ -482,7 +496,9 @@ class GatewayUnderTest:
         )
 
     async def get_permit(self, tenant: Tenant, permit_id: str) -> dict[str, Any]:
-        response = await self.client.get(f"/v1/permits/{permit_id}", headers=tenant.headers)
+        response = await self.client.get(
+            f"/v1/permits/{permit_id}", headers=tenant.headers
+        )
         response.raise_for_status()
         return response.json()
 
@@ -520,11 +536,17 @@ class GatewayUnderTest:
         tool: str = GATEWAY_TOOL_ID,
     ) -> GatewayOutcome:
         body = self.jsonrpc_body(
-            tenant, permit_id=permit_id, identity=identity, arguments=arguments, tool=tool
+            tenant,
+            permit_id=permit_id,
+            identity=identity,
+            arguments=arguments,
+            tool=tool,
         )
         started = time.perf_counter()
         try:
-            response = await self.client.post("/mcp/messages", json=body, headers=tenant.headers)
+            response = await self.client.post(
+                "/mcp/messages", json=body, headers=tenant.headers
+            )
         except BaseException as exc:  # noqa: BLE001 - a simulated death is a BaseException
             if is_process_death(exc):
                 return GatewayOutcome(
@@ -600,7 +622,11 @@ class GatewayUnderTest:
         receipt = error_data.get("receipt") if isinstance(error_data, dict) else None
         message = error.get("message")
         code = error.get("code")
-        details = {k: v for k, v in error_data.items() if k != "receipt"} if isinstance(error_data, dict) else {}
+        details = (
+            {k: v for k, v in error_data.items() if k != "receipt"}
+            if isinstance(error_data, dict)
+            else {}
+        )
         return GatewayOutcome(
             status=_classify(message, code, receipt),
             http_status=200,
@@ -657,7 +683,9 @@ class GatewayUnderTest:
             receipt = None
             reason = str(detail)
         return GatewayOutcome(
-            status=_classify(reason, None, receipt) if receipt else _rest_status(response.status_code, reason),
+            status=_classify(reason, None, receipt)
+            if receipt
+            else _rest_status(response.status_code, reason),
             http_status=response.status_code,
             jsonrpc_code=None,
             reason=reason,
@@ -690,41 +718,64 @@ class GatewayUnderTest:
         factory = get_session_factory()
         async with factory() as session:
             attempts = (
-                await session.execute(
-                    select(McpDispatchAttemptModel)
-                    .where(McpDispatchAttemptModel.wallet_id == tenant.wallet_id)
-                    .order_by(McpDispatchAttemptModel.created_at)
-                )
-            ).scalars().all()
-            receipts = (
-                await session.execute(
-                    select(ReceiptModel)
-                    .where(ReceiptModel.wallet_id == tenant.wallet_id)
-                    .order_by(ReceiptModel.created_at)
-                )
-            ).scalars().all()
-            entries = (
-                await session.execute(
-                    select(LedgerEntryModel)
-                    .where(LedgerEntryModel.wallet_id == tenant.wallet_id)
-                    .order_by(LedgerEntryModel.timestamp)
-                )
-            ).scalars().all()
-            records = (
-                await session.execute(
-                    select(IdempotencyRecordModel)
-                    .where(
-                        IdempotencyRecordModel.wallet_id == tenant.wallet_id,
-                        IdempotencyRecordModel.endpoint == GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+                (
+                    await session.execute(
+                        select(McpDispatchAttemptModel)
+                        .where(McpDispatchAttemptModel.wallet_id == tenant.wallet_id)
+                        .order_by(McpDispatchAttemptModel.created_at)
                     )
-                    .order_by(IdempotencyRecordModel.created_at)
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
+            receipts = (
+                (
+                    await session.execute(
+                        select(ReceiptModel)
+                        .where(ReceiptModel.wallet_id == tenant.wallet_id)
+                        .order_by(ReceiptModel.created_at)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            entries = (
+                (
+                    await session.execute(
+                        select(LedgerEntryModel)
+                        .where(LedgerEntryModel.wallet_id == tenant.wallet_id)
+                        .order_by(LedgerEntryModel.timestamp)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            records = (
+                (
+                    await session.execute(
+                        select(IdempotencyRecordModel)
+                        .where(
+                            IdempotencyRecordModel.wallet_id == tenant.wallet_id,
+                            IdempotencyRecordModel.endpoint
+                            == GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+                        )
+                        .order_by(IdempotencyRecordModel.created_at)
+                    )
+                )
+                .scalars()
+                .all()
+            )
             permits = (
-                await session.execute(
-                    select(PermitModel).where(PermitModel.subject_wallet_id == tenant.wallet_id)
+                (
+                    await session.execute(
+                        select(PermitModel).where(
+                            PermitModel.subject_wallet_id == tenant.wallet_id
+                        )
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             wallet = await session.get(WalletModel, tenant.wallet_id)
 
         sent_states = set(DISPATCH_SENT_STATES) | set(DISPATCH_TERMINAL_STATES)
@@ -763,7 +814,9 @@ class GatewayUnderTest:
             }
             if entry.amount is not None and entry.amount < 0:
                 debit_rows.append(row)
-            elif str(entry.action).lower() == "refund" or str(entry.entry_id).startswith("refund-"):
+            elif str(entry.action).lower() == "refund" or str(
+                entry.entry_id
+            ).startswith("refund-"):
                 refund_rows.append(row)
         receipt_rows = [
             {
@@ -813,7 +866,9 @@ class GatewayUnderTest:
             receipts=receipt_rows,
             idempotency_records=record_rows,
             permits=permit_rows,
-            wallet_balance=_decimal_text(wallet.balance) if wallet is not None else None,
+            wallet_balance=_decimal_text(wallet.balance)
+            if wallet is not None
+            else None,
         )
 
     async def reconcile(self, *, idle_seconds: int = 0) -> dict[str, Any]:
@@ -828,10 +883,15 @@ class GatewayUnderTest:
             idle_seconds=idle_seconds,
             terminal_idle_seconds=idle_seconds,
         )
-        repaired, needs_review = await get_idempotency_service().reconcile_stuck_records(
+        (
+            repaired,
+            needs_review,
+        ) = await get_idempotency_service().reconcile_stuck_records(
             idle_seconds=idle_seconds
         )
-        budgets = await get_permit_service().reconcile_budgets(idle_seconds=idle_seconds)
+        budgets = await get_permit_service().reconcile_budgets(
+            idle_seconds=idle_seconds
+        )
         return {
             "dispatch_prepared_finalized": dispatch.prepared_finalized,
             "dispatch_uncertain": dispatch.dispatched_uncertain,
@@ -1156,7 +1216,9 @@ class GatewayUnderTest:
     ) -> dict[str, Any]:
         response = await self.client.post(path, json=json, headers=headers)
         if response.status_code != expected:
-            raise RuntimeError(f"POST {path} -> {response.status_code}: {response.text[:300]}")
+            raise RuntimeError(
+                f"POST {path} -> {response.status_code}: {response.text[:300]}"
+            )
         return response.json()
 
 

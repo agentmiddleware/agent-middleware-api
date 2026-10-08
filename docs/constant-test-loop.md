@@ -71,27 +71,19 @@ Set `CI_SMOKE_AGENT_KEY` for a pre-provisioned agent credential. Optionally prov
 # Provision an agent key once (using bootstrap key) and extract credentials in one pipeline
 export BOOTSTRAP_KEY="amw_live_..."
 
-# Extract and set as CI secrets directly from the JSON output (no persistent file)
-export CI_SMOKE_AGENT_KEY="$(python scripts/partner_api_key_bootstrap.py \
+# Provision once; keep every identity field from the same response.
+# Disable shell tracing while handling credentials. Do not print this JSON.
+set +x
+PROVISION_JSON="$(python scripts/partner_api_key_bootstrap.py \
   --api-url https://api.thisisatest.tech \
   --agent-id ci-smoke-agent \
   --key-name constant-test-loop \
   --budget-credits 5000 \
-  --key-only)"   # or --json | jq -r .api_key
-
-export CI_SMOKE_WALLET_ID="$(python scripts/partner_api_key_bootstrap.py \
-  --api-url https://api.thisisatest.tech \
-  --agent-id ci-smoke-agent \
-  --key-name constant-test-loop \
-  --budget-credits 5000 \
-  --json | jq -r .wallet_id)"
-
-export CI_SMOKE_KEY_ID="$(python scripts/partner_api_key_bootstrap.py \
-  --api-url https://api.thisisatest.tech \
-  --agent-id ci-smoke-agent \
-  --key-name constant-test-loop \
-  --budget-credits 5000 \
-  --json | jq -r .key_id)"
+  --json)"
+export CI_SMOKE_AGENT_KEY="$(printf '%s' "$PROVISION_JSON" | jq -er .api_key)"
+export CI_SMOKE_WALLET_ID="$(printf '%s' "$PROVISION_JSON" | jq -er .wallet_id)"
+export CI_SMOKE_KEY_ID="$(printf '%s' "$PROVISION_JSON" | jq -er .key_id)"
+unset PROVISION_JSON
 
 # Or use a restrictive temporary file if needed
 KEY_FILE="$(mktemp)"

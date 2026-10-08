@@ -6,9 +6,10 @@ Secure, topic-ACL-enforced protocol bridging for IoT devices.
 Wired to ProtocolBridge service via FastAPI dependency injection.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
-from ..core.auth import verify_api_key
+from ..core.auth import AuthContext, get_auth_context
+from ..core.config import public_api_origin
 from ..core.dependencies import get_iot_bridge
 from ..services.iot_bridge import ProtocolBridge, ACLViolation, RegisteredDevice
 from ..schemas.iot import (
@@ -22,12 +23,55 @@ from ..schemas.iot import (
 router = APIRouter(
     prefix="/v1/iot",
     tags=["IoT Protocol Bridge"],
-    dependencies=[Depends(verify_api_key)],
+    # Router-level so no route can skip authentication; handlers take the same
+    # (request-cached) AuthContext to enforce device ownership.
+    dependencies=[Depends(get_auth_context)],
     responses={
         401: {"description": "Missing API key"},
         403: {"description": "Invalid API key or topic ACL violation"},
     },
 )
+
+
+def _device_not_found(device_id: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail={
+            "error": "device_not_found",
+            "message": f"Device '{device_id}' not found.",
+        },
+    )
+
+
+async def _load_owned_device(
+    device_id: str,
+    bridge: ProtocolBridge,
+    auth: AuthContext,
+) -> RegisteredDevice:
+    """Fetch a device the caller may act on, else the not-found 404.
+
+    Devices belong to the wallet that registered them. Another wallet's device
+    is reported exactly like a missing one (no existence oracle, owner never
+    echoed). Bootstrap admins may reach every device, including ownerless ones.
+    """
+    device = await bridge.registry.get(device_id)
+    if device is None:
+        raise _device_not_found(device_id)
+    if not auth.is_bootstrap_admin and (
+        auth.wallet_id is None or device.owner_wallet_id != auth.wallet_id
+    ):
+        raise _device_not_found(device_id)
+    return device
+
+
+def _websocket_origin(request: Request) -> str:
+    """ws(s):// origin from PUBLIC_URL, else from the origin the caller used."""
+    origin = public_api_origin() or str(request.base_url).rstrip("/")
+    if origin.startswith("https://"):
+        return "wss://" + origin[len("https://") :]
+    if origin.startswith("http://"):
+        return "ws://" + origin[len("http://") :]
+    return origin
 
 
 def _device_to_response(device: RegisteredDevice) -> DeviceResponse:
@@ -56,8 +100,11 @@ def _device_to_response(device: RegisteredDevice) -> DeviceResponse:
 )
 async def register_device(
     device: DeviceRegistration,
+    auth: AuthContext = Depends(get_auth_context),
     bridge: ProtocolBridge = Depends(get_iot_bridge),
 ):
+    # device_id is globally unique, so a taken id is a 409 for any caller; the
+    # response never names the existing owner.
     existing = await bridge.registry.get(device.device_id)
     if existing:
         raise HTTPException(
@@ -75,6 +122,8 @@ async def register_device(
             broker_url=device.broker_url,
             topic_acl=device.topic_acl,
             metadata=device.metadata,
+            # Owner comes from the authenticated key, never the request body.
+            owner_wallet_id=auth.wallet_id,
         )
     )
     return _device_to_response(registered)
@@ -89,9 +138,19 @@ async def register_device(
 async def list_devices(
     page: int = Query(1, ge=1, description="Page number"),
     per_page: int = Query(50, ge=1, le=200, description="Items per page"),
+    auth: AuthContext = Depends(get_auth_context),
     bridge: ProtocolBridge = Depends(get_iot_bridge),
 ):
-    devices, total = await bridge.registry.list_all(page, per_page)
+    # A wallet-scoped key only ever sees its own wallet's devices; bootstrap
+    # admins see every device.
+    if auth.is_bootstrap_admin:
+        devices, total = await bridge.registry.list_all(page, per_page)
+    elif auth.wallet_id is None:
+        devices, total = [], 0
+    else:
+        devices, total = await bridge.registry.list_all(
+            page, per_page, owner_wallet_id=auth.wallet_id
+        )
     return DeviceListResponse(
         devices=[_device_to_response(d) for d in devices],
         total=total,
@@ -110,17 +169,10 @@ async def list_devices(
 )
 async def get_device(
     device_id: str,
+    auth: AuthContext = Depends(get_auth_context),
     bridge: ProtocolBridge = Depends(get_iot_bridge),
 ):
-    device = await bridge.registry.get(device_id)
-    if not device:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "error": "device_not_found",
-                "message": f"Device '{device_id}' not found.",
-            },
-        )
+    device = await _load_owned_device(device_id, bridge, auth)
     return _device_to_response(device)
 
 
@@ -134,17 +186,13 @@ async def get_device(
 )
 async def deregister_device(
     device_id: str,
+    auth: AuthContext = Depends(get_auth_context),
     bridge: ProtocolBridge = Depends(get_iot_bridge),
 ):
+    await _load_owned_device(device_id, bridge, auth)
     removed = await bridge.registry.deregister(device_id)
     if not removed:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "error": "device_not_found",
-                "message": f"Device '{device_id}' not found.",
-            },
-        )
+        raise _device_not_found(device_id)
 
 
 @router.post(
@@ -160,8 +208,10 @@ async def deregister_device(
 async def send_message(
     device_id: str,
     message: BridgeMessage,
+    auth: AuthContext = Depends(get_auth_context),
     bridge: ProtocolBridge = Depends(get_iot_bridge),
 ):
+    await _load_owned_device(device_id, bridge, auth)
     try:
         result = await bridge.send_message(
             device_id=device_id,
@@ -203,8 +253,11 @@ async def send_message(
 async def subscribe_to_device(
     device_id: str,
     topic: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
     bridge: ProtocolBridge = Depends(get_iot_bridge),
 ):
+    await _load_owned_device(device_id, bridge, auth)
     try:
         result = await bridge.subscribe(device_id, topic)
     except ValueError as e:
@@ -218,8 +271,9 @@ async def subscribe_to_device(
             detail={"error": "acl_denied", "message": str(e)},
         )
 
+    subscription_path = f"/v1/iot/subscriptions/{result['subscription_id']}"
     return {
         **result,
-        "webhook_url": f"/v1/iot/subscriptions/{result['subscription_id']}/poll",
-        "websocket_url": f"ws://api.yourdomain.com/v1/iot/subscriptions/{result['subscription_id']}/ws",
+        "webhook_url": f"{subscription_path}/poll",
+        "websocket_url": f"{_websocket_origin(request)}{subscription_path}/ws",
     }

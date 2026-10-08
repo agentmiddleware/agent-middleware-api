@@ -10,11 +10,14 @@ networks, and the host filesystem.
 ``check_outbound_url`` returns ``None`` when the URL is safe to fetch and a
 short machine-readable reason string when it must be blocked. Scheme and
 literal-address checks are unconditional; hostname checks resolve DNS and
-block names that resolve to non-global addresses. Resolution failure is
-treated as allow (the subsequent connection will fail identically, and it
-keeps offline test runs deterministic) — this is a pre-flight guard, not a
-substitute for network-level egress policy, and it intentionally does not
-try to defeat DNS rebinding.
+block names that resolve to non-global addresses. Resolution failure fails
+closed (``dns_resolution_failed``): the guard cannot vouch for a name it
+could not resolve, and the fetching client (a headless browser with its own
+resolver, or a later retry) may well resolve it — possibly to an intranet
+address. This matches the upstream MCP URL guard. Tests that exercise
+public hostnames pin ``_resolve_host`` instead of relying on live DNS. This
+is a pre-flight guard, not a substitute for network-level egress policy,
+and it intentionally does not try to defeat DNS rebinding.
 
 Setting ``ALLOW_PRIVATE_NETWORK_TARGETS=true`` (local development against
 mock servers) skips only the private-address checks; non-http(s) schemes
@@ -41,9 +44,9 @@ def _address_blocked(address: str) -> bool:
     except ValueError:
         return False
     # is_global is False for loopback, RFC1918/ULA, link-local (including
-    # 169.254.169.254 metadata), CGNAT shared space, multicast, reserved,
-    # and unspecified addresses.
-    return not ip.is_global
+    # 169.254.169.254 metadata), CGNAT shared space, reserved, and unspecified
+    # addresses. Multicast needs an explicit check: it can be classified global.
+    return ip.is_multicast or not ip.is_global
 
 
 async def _resolve_host(host: str):
@@ -85,8 +88,10 @@ async def check_outbound_url(url: str) -> str | None:
         # resolved address to be globally routable.
         try:
             infos = await _resolve_host(host)
-        except socket.gaierror:
-            return None
+        except (OSError, UnicodeError):
+            # socket.gaierror is an OSError; UnicodeError covers names the
+            # IDNA codec rejects (e.g. an over-long label). Fail closed.
+            return "dns_resolution_failed"
         for info in infos:
             if _address_blocked(str(info[4][0])):
                 return "private_address_blocked"

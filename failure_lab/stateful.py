@@ -66,7 +66,13 @@ from failure_lab.faults import FaultMode, FaultPlan
 from failure_lab.gateway import CRASH_BOUNDARIES, GatewayUnderTest, Tenant
 from failure_lab.identity import KeyPolicy, OperationIdentity
 from failure_lab.refund_tool import RefundRequest
-from failure_lab.verifier import ClaimStatus, KeySource, parse_key_document, tamper, verify
+from failure_lab.verifier import (
+    ClaimStatus,
+    KeySource,
+    parse_key_document,
+    tamper,
+    verify,
+)
 
 #: The configuration this harness drives. The naive downstream is deliberate:
 #: it has no idempotency of its own, so every guarantee observed here is the
@@ -216,7 +222,9 @@ def redact(value: Any) -> Any:
         for key, item in value.items():
             normalized = str(key).lower()
             safe_key = _scrub_text(key) if isinstance(key, str) else key
-            if normalized in _SENSITIVE_FIELDS or normalized.endswith(_SENSITIVE_SUFFIXES):
+            if normalized in _SENSITIVE_FIELDS or normalized.endswith(
+                _SENSITIVE_SUFFIXES
+            ):
                 out[safe_key] = "<redacted>"
             else:
                 out[safe_key] = redact(item)
@@ -346,12 +354,16 @@ class Command:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Command:
-        return cls(kind=CommandKind(data["kind"]), params=dict(data.get("params") or {}))
+        return cls(
+            kind=CommandKind(data["kind"]), params=dict(data.get("params") or {})
+        )
 
     def render(self) -> str:
         if not self.params:
             return self.kind.value
-        args = ", ".join(f"{name}={value!r}" for name, value in sorted(self.params.items()))
+        args = ", ".join(
+            f"{name}={value!r}" for name, value in sorted(self.params.items())
+        )
         return f"{self.kind.value}({args})"
 
 
@@ -586,9 +598,7 @@ class Violation:
             "sequence_seed": self.sequence_seed,
             "sequence_index": self.sequence_index,
             "sequence": [dict(c) for c in self.sequence],
-            "sequence_rendered": [
-                Command.from_dict(c).render() for c in self.sequence
-            ],
+            "sequence_rendered": [Command.from_dict(c).render() for c in self.sequence],
             "minimized_sequence": [dict(c) for c in self.minimized_sequence],
             "minimized_sequence_rendered": [
                 Command.from_dict(c).render() for c in self.minimized_sequence
@@ -649,7 +659,9 @@ class RejectionHasNoEffect(Invariant):
                         "statuses": [
                             attempt.get("status")
                             for attempt in observation.attempts
-                            if (attempt.get("identity") or {}).get("business_operation_id")
+                            if (attempt.get("identity") or {}).get(
+                                "business_operation_id"
+                            )
                             == operation_id
                         ],
                     },
@@ -668,7 +680,9 @@ class ReceiptsDoNotOutrunEvidence(Invariant):
 
     def check(self, observation: Observation) -> Violation | None:
         success_receipts = [
-            outcome for outcome in observation.receipt_outcomes() if outcome == "success"
+            outcome
+            for outcome in observation.receipt_outcomes()
+            if outcome == "success"
         ]
         evidenced = observation.evidenced_crossings()
         if len(success_receipts) > len(evidenced):
@@ -679,7 +693,9 @@ class ReceiptsDoNotOutrunEvidence(Invariant):
                 {
                     "success_receipts": len(success_receipts),
                     "evidenced_dispatches": len(evidenced),
-                    "crossing_faults": [row.get("fault") for row in observation.crossings],
+                    "crossing_faults": [
+                        row.get("fault") for row in observation.crossings
+                    ],
                     "receipt_outcomes": observation.receipt_outcomes(),
                 },
                 source="gateway-reported receipts vs fault-layer observation",
@@ -704,8 +720,12 @@ class AtMostOneDispatchPerKey(Invariant):
                     {
                         "idempotency_key": key,
                         "dispatches": count,
-                        "fault_layer_crossings": observation.crossings_by_key().get(key, 0),
-                        "downstream_executions": observation.executions_by_key().get(key, 0),
+                        "fault_layer_crossings": observation.crossings_by_key().get(
+                            key, 0
+                        ),
+                        "downstream_executions": observation.executions_by_key().get(
+                            key, 0
+                        ),
                         "crossings": [
                             row
                             for row in observation.crossings
@@ -1120,9 +1140,13 @@ class _SequenceRunner:
         )
 
     def _identity_for(self, operation_id: str) -> OperationIdentity:
-        return OperationIdentity.first_attempt(operation_id, key_policy=KeyPolicy.BUSINESS)
+        return OperationIdentity.first_attempt(
+            operation_id, key_policy=KeyPolicy.BUSINESS
+        )
 
-    def _record_attempt(self, outcome: AttemptOutcome, *, permit_id: str | None) -> None:
+    def _record_attempt(
+        self, outcome: AttemptOutcome, *, permit_id: str | None
+    ) -> None:
         self.attempts.append(outcome)
         identity = outcome.identity
         operation_id = str(identity.get("business_operation_id"))
@@ -1151,7 +1175,9 @@ class _SequenceRunner:
     def _advance(self, operation_id: str, outcome: AttemptOutcome) -> OperationState:
         state = _STATUS_STATES.get(outcome.status, OperationState.OUTCOME_UNKNOWN)
         if outcome.status == "gateway_process_died" and self.pending_crash is not None:
-            state = _CRASH_STATES.get(self.pending_crash, OperationState.OUTCOME_UNKNOWN)
+            state = _CRASH_STATES.get(
+                self.pending_crash, OperationState.OUTCOME_UNKNOWN
+            )
         self.states[operation_id] = state
         return state
 
@@ -1167,7 +1193,9 @@ class _SequenceRunner:
         with contextlib.ExitStack() as stack:
             crash_state: dict[str, Any] | None = None
             if self.pending_crash is not None:
-                crash_state = stack.enter_context(self.gateway.crash_at(self.pending_crash))
+                crash_state = stack.enter_context(
+                    self.gateway.crash_at(self.pending_crash)
+                )
             outcome = await agent.submit(identity, self._refund(operation_id), **kwargs)
         if crash_state is not None and crash_state.get("fired"):
             self.gateway_crashed = True
@@ -1216,7 +1244,9 @@ class _SequenceRunner:
         }
         return None, {"permit_id": self.permit_id, "max_credits": str(max_credits)}
 
-    async def _do_authorize(self, params: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
+    async def _do_authorize(
+        self, params: dict[str, Any]
+    ) -> tuple[str | None, dict[str, Any]]:
         if not self.permit_active:
             return "no active permit to authorize against", {}
         if self.state not in (OperationState.CREATED, OperationState.REVOKED):
@@ -1225,7 +1255,9 @@ class _SequenceRunner:
         self.states[self.primary_operation] = self.state
         return None, {"permit_id": self.permit_id}
 
-    async def _do_invoke(self, params: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
+    async def _do_invoke(
+        self, params: dict[str, Any]
+    ) -> tuple[str | None, dict[str, Any]]:
         if self.state is not OperationState.AUTHORIZED:
             return f"operation is {self.state.value}, not AUTHORIZED", {}
         if self.identity is not None:
@@ -1234,7 +1266,10 @@ class _SequenceRunner:
         outcome = await self._submit(self.identity, self.primary_operation)
         self.state = self._advance(self.primary_operation, outcome)
         self.pending_crash = None
-        return None, {"status": outcome.status, "client_visible": outcome.client_visible_state}
+        return None, {
+            "status": outcome.status,
+            "client_visible": outcome.client_visible_state,
+        }
 
     async def _do_concurrent_same_key(
         self, params: dict[str, Any]
@@ -1307,7 +1342,9 @@ class _SequenceRunner:
     async def _do_inject_lost_response(
         self, params: dict[str, Any]
     ) -> tuple[str | None, dict[str, Any]]:
-        mode = FaultMode(str(params.get("mode", FaultMode.RESPONSE_LOST_AFTER_EXECUTION.value)))
+        mode = FaultMode(
+            str(params.get("mode", FaultMode.RESPONSE_LOST_AFTER_EXECUTION.value))
+        )
         plan = self.target.injector.arm(
             FaultPlan(
                 mode=mode,
@@ -1335,7 +1372,9 @@ class _SequenceRunner:
         )
         return None, {"mode": plan.mode.value}
 
-    async def _do_time_out(self, params: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
+    async def _do_time_out(
+        self, params: dict[str, Any]
+    ) -> tuple[str | None, dict[str, Any]]:
         if self.identity is not None:
             return "already invoked; use a retry command", {}
         if self.state is not OperationState.AUTHORIZED:
@@ -1377,7 +1416,9 @@ class _SequenceRunner:
             self.states[self.primary_operation] = self.state
         return None, {"permit_id": self.permit_id, "status": result.get("status")}
 
-    async def _do_crash_at(self, params: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
+    async def _do_crash_at(
+        self, params: dict[str, Any]
+    ) -> tuple[str | None, dict[str, Any]]:
         if self.pending_crash is not None:
             return f"a crash at {self.pending_crash} is already armed", {}
         boundary = str(params.get("boundary", "after_claim"))
@@ -1386,7 +1427,9 @@ class _SequenceRunner:
         self.pending_crash = boundary
         return None, {"boundary": boundary, "simulated": True}
 
-    async def _do_restart(self, params: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
+    async def _do_restart(
+        self, params: dict[str, Any]
+    ) -> tuple[str | None, dict[str, Any]]:
         """Bring back whatever died, and drop the process's pooled state.
 
         The downstream comes back up. The gateway's connection pool is
@@ -1396,7 +1439,11 @@ class _SequenceRunner:
         that is reconciliation's job, and a separate command.
         """
         downstream_down = self.target.injector.crashed
-        if not downstream_down and not self.gateway_crashed and self.pending_crash is None:
+        if (
+            not downstream_down
+            and not self.gateway_crashed
+            and self.pending_crash is None
+        ):
             return "nothing has crashed; there is nothing to restart", {}
         self.target.injector.restart()
         self.pending_crash = None
@@ -1445,7 +1492,9 @@ class _SequenceRunner:
         self.pending_crash = None
         return None, {"status": outcome.status, "new_key_ordinal": self.new_key_ordinal}
 
-    async def _do_reconcile(self, params: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
+    async def _do_reconcile(
+        self, params: dict[str, Any]
+    ) -> tuple[str | None, dict[str, Any]]:
         # The idle window is set to zero rather than waited out, and the
         # attempt rows are deliberately NOT backdated: ageing them writes a
         # `dispatched_at` onto attempts that never dispatched, which is a row
@@ -1491,7 +1540,11 @@ def _dominant(outcomes: Sequence[AttemptOutcome]) -> AttemptOutcome:
 
 
 async def _collect_signature_checks(
-    gateway: GatewayUnderTest, tenant: Tenant, receipts: Sequence[dict[str, Any]], *, limit: int
+    gateway: GatewayUnderTest,
+    tenant: Tenant,
+    receipts: Sequence[dict[str, Any]],
+    *,
+    limit: int,
 ) -> list[dict[str, Any]]:
     """Verify each receipt as issued, then verify it again once edited.
 
@@ -1511,7 +1564,9 @@ async def _collect_signature_checks(
         try:
             bundle = await gateway.portable_receipt(tenant, receipt_id)
         except Exception as exc:  # noqa: BLE001
-            checks.append({"receipt_id": receipt_id, "error": f"{type(exc).__name__}: {exc}"})
+            checks.append(
+                {"receipt_id": receipt_id, "error": f"{type(exc).__name__}: {exc}"}
+            )
             continue
         pristine = verify(bundle, keys, key_source=KeySource.ISSUER_ORIGIN)
         original_outcome = str(row.get("outcome"))
@@ -1962,7 +2017,9 @@ async def explore(
             if not item.applied and "error" not in item.detail
         )
         failed += sum(
-            1 for item in observation.commands if not item.applied and "error" in item.detail
+            1
+            for item in observation.commands
+            if not item.applied and "error" in item.detail
         )
         if observation.error:
             errors.append(f"sequence {index}: {observation.error}")
@@ -1973,7 +2030,8 @@ async def explore(
             if "error" in item.detail
         )
         errors.extend(
-            f"sequence {index}: {message}" for message in observation.signature_check_errors()
+            f"sequence {index}: {message}"
+            for message in observation.signature_check_errors()
         )
         violation = first_violation(observation, checks)
         if violation is None:
@@ -2074,7 +2132,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--full", action="store_true", help="Print the whole result document."
     )
     parser.add_argument(
-        "--keep", action="store_true", help="Keep the run directory instead of deleting it."
+        "--keep",
+        action="store_true",
+        help="Keep the run directory instead of deleting it.",
     )
     parser.add_argument(
         "--verbose", action="store_true", help="Leave application logging switched on."

@@ -98,8 +98,7 @@ async def test_constant_loop_verifies_receipt_permit_linkage(
 
     # This is the check the constant loop does
     assert receipt["permit_id"] == permit_id, (
-        f"receipt permit_id {receipt.get('permit_id')} != "
-        f"used permit {permit_id}"
+        f"receipt permit_id {receipt.get('permit_id')} != used permit {permit_id}"
     )
     print(f"✓ Receipt permit_id matches: {receipt['permit_id']}")
 
@@ -270,10 +269,6 @@ async def test_receipt_permit_linkage_across_multiple_permits(
     )
 
     # Verify receipts don't cross-link
-    assert receipt1["permit_id"] != permit2_id, (
-        "Receipt 1 should not link to permit 2"
-    )
-    assert receipt2["permit_id"] != permit1_id, (
-        "Receipt 2 should not link to permit 1"
-    )
+    assert receipt1["permit_id"] != permit2_id, "Receipt 1 should not link to permit 2"
+    assert receipt2["permit_id"] != permit1_id, "Receipt 2 should not link to permit 1"
     print(f"✓ No cross-permit leakage: receipt1→{permit1_id}, receipt2→{permit2_id}")

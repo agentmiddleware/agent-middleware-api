@@ -58,11 +58,7 @@ async def optimize_endpoint(
     if policy_rejected:
         plan["rejected_actions"] = policy_rejected + plan["rejected_actions"]
         plan["policy_reasons"].update(
-            {
-                item["id"]: item["reason"]
-                for item in policy_rejected
-                if item.get("id")
-            }
+            {item["id"]: item["reason"] for item in policy_rejected if item.get("id")}
         )
     request_id = request.headers.get("X-Request-ID") or req.state.request_id
     decision = evaluate_governed_action(

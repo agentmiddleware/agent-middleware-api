@@ -12,9 +12,9 @@ with 9:16 vertical rendering and animated captions.
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from ..core.auth import verify_api_key
+from ..core.auth import AuthContext, get_auth_context, verify_api_key
 from ..core.dependencies import get_content_factory
-from ..services.content_factory import ContentFactory
+from ..services.content_factory import ContentFactory, ContentPipeline, LiveCampaign
 from ..schemas.content_factory import (
     ContentPipelineRequest,
     ContentPipelineResponse,
@@ -38,6 +38,64 @@ router = APIRouter(
 )
 
 
+# --- Ownership ---
+#
+# Pipelines and campaigns record their owner in ``owner_key``. That column used
+# to hold the caller's raw API key -- a live credential persisted in plaintext
+# -- and no read ever compared it, so any authenticated caller could read every
+# tenant's pipelines, content pieces, and campaigns, and list all campaigns.
+# It now holds the owning wallet id: non-secret, shared by every key of that
+# wallet, and the identity ``AuthContext.require_wallet_access`` enforces.
+# Records written by a bootstrap admin (no wallet) are ownerless ("") and so
+# visible only to bootstrap admins, as are legacy rows still holding a raw key.
+
+
+def _owner_wallet_id(auth: AuthContext) -> str:
+    """Return the non-secret owner identity to record for the caller."""
+    return auth.wallet_id or ""
+
+
+def _caller_owns(owner_wallet_id: str, auth: AuthContext) -> bool:
+    try:
+        auth.require_wallet_access(owner_wallet_id or None)
+    except HTTPException:
+        return False
+    return True
+
+
+def _not_found(error: str) -> HTTPException:
+    # A record the caller may not see answers exactly like a missing one: no
+    # existence oracle, and the owner's wallet id is never echoed back.
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail={"error": error},
+    )
+
+
+async def _load_owned_pipeline(
+    pipeline_id: str,
+    factory: ContentFactory,
+    auth: AuthContext,
+    *,
+    error: str = "pipeline_not_found",
+) -> ContentPipeline:
+    pipeline = await factory.store.get_pipeline(pipeline_id)
+    if not pipeline or not _caller_owns(pipeline.owner_key, auth):
+        raise _not_found(error)
+    return pipeline
+
+
+async def _load_owned_campaign(
+    campaign_id: str,
+    factory: ContentFactory,
+    auth: AuthContext,
+) -> LiveCampaign:
+    campaign = await factory.store.get_campaign(campaign_id)
+    if not campaign or not _caller_owns(campaign.owner_key, auth):
+        raise _not_found("campaign_not_found")
+    return campaign
+
+
 # --- Content Pipeline ---
 
 
@@ -55,7 +113,7 @@ router = APIRouter(
 )
 async def create_pipeline(
     request: ContentPipelineRequest,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     factory: ContentFactory = Depends(get_content_factory),
 ):
     pipeline = await factory.create_pipeline(
@@ -66,7 +124,7 @@ async def create_pipeline(
         brand_config=request.brand_config,
         language=request.language,
         auto_schedule=request.auto_schedule,
-        owner_key=api_key,
+        owner_key=_owner_wallet_id(auth),
     )
 
     return ContentPipelineResponse(
@@ -92,15 +150,10 @@ async def create_pipeline(
 )
 async def get_pipeline(
     pipeline_id: str,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     factory: ContentFactory = Depends(get_content_factory),
 ):
-    pipeline = await factory.store.get_pipeline(pipeline_id)
-    if not pipeline:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "pipeline_not_found"},
-        )
+    pipeline = await _load_owned_pipeline(pipeline_id, factory, auth)
     return {
         "pipeline_id": pipeline.pipeline_id,
         "title": pipeline.title,
@@ -119,15 +172,10 @@ async def get_pipeline(
 )
 async def list_pipeline_content(
     pipeline_id: str,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     factory: ContentFactory = Depends(get_content_factory),
 ):
-    pipeline = await factory.store.get_pipeline(pipeline_id)
-    if not pipeline:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "pipeline_not_found"},
-        )
+    await _load_owned_pipeline(pipeline_id, factory, auth)
 
     content = await factory.list_pipeline_content(pipeline_id)
     return ContentListResponse(
@@ -145,15 +193,16 @@ async def list_pipeline_content(
 )
 async def get_content(
     content_id: str,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     factory: ContentFactory = Depends(get_content_factory),
 ):
     content = await factory.get_content(content_id)
     if not content:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "content_not_found"},
-        )
+        raise _not_found("content_not_found")
+    # A piece carries no owner of its own; it belongs to its pipeline's owner.
+    await _load_owned_pipeline(
+        content.pipeline_id, factory, auth, error="content_not_found"
+    )
     return content
 
 
@@ -178,7 +227,7 @@ async def get_content(
 )
 async def launch_campaign(
     request: LiveCampaignRequest,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     factory: ContentFactory = Depends(get_content_factory),
 ):
     result = await factory.launch_campaign(
@@ -192,7 +241,7 @@ async def launch_campaign(
         max_posts_per_day=request.max_posts_per_day,
         language=request.language,
         auto_schedule=request.auto_schedule,
-        owner_key=api_key,
+        owner_key=_owner_wallet_id(auth),
     )
     return result
 
@@ -204,15 +253,10 @@ async def launch_campaign(
 )
 async def get_campaign(
     campaign_id: str,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     factory: ContentFactory = Depends(get_content_factory),
 ):
-    campaign = await factory.store.get_campaign(campaign_id)
-    if not campaign:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "campaign_not_found"},
-        )
+    campaign = await _load_owned_campaign(campaign_id, factory, auth)
     return {
         "campaign_id": campaign.campaign_id,
         "campaign_title": campaign.campaign_title,
@@ -230,10 +274,18 @@ async def get_campaign(
     description="Retrieve all live content campaigns.",
 )
 async def list_campaigns(
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     factory: ContentFactory = Depends(get_content_factory),
 ):
-    campaigns = await factory.store.list_campaigns()
+    # A wallet-scoped caller only ever lists its own wallet's campaigns;
+    # bootstrap admins keep the unfiltered view. A non-admin without a wallet
+    # owns nothing (and must not match the ownerless "" admin records).
+    if auth.is_bootstrap_admin:
+        campaigns = await factory.store.list_campaigns()
+    elif auth.wallet_id:
+        campaigns = await factory.store.list_campaigns(owner_key=auth.wallet_id)
+    else:
+        campaigns = []
     return {
         "campaigns": [
             {

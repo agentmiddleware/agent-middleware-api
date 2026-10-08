@@ -1,0 +1,3 @@
+PASS: test_be100_self_credentialing_scopes_retry_guarantees
+PASS: test_be100_tool_interface_scopes_retry_guarantees
+PASS: test_be100_pitch_scopes_retry_guarantees

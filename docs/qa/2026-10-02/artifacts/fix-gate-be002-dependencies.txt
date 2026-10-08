@@ -1,0 +1,120 @@
+1: """
+2: API Key + JWT Bearer [REDACTED] for agent consumers.
+3:
+4: Agents pass credentials via:
+5: - X-API-Key header (legacy, long-lived keys)
+6: - Authorization: Bearer <jwt> header (modern, short-lived tokens)
+7: """
+8:
+9: import hmac
+10: from contextvars import ContextVar
+11: from dataclasses import dataclass, replace
+12: from typing import Annotated
+13:
+14: from fastapi import Depends, Header, HTTPException, Request, Security, status
+15: from fastapi.security import APIKeyHeader
+16: from .config import get_settings
+17: from .oidc_iga import EnterprisePrincipal, IGADecision, IGAError, is_iga_issuer_token
+18: from .trust_mode import is_production_like_environment
+19:
+20: settings = get_settings()
+21:
+22: # Static development/training keys (STATIC_DEV_API_KEYS) must carry this
+23: # prefix. It keeps dev keys greppable/scannable and means a rotated
+24: # amw_live_ bootstrap key pasted into the wrong variable never
+25: # authenticates through the static-dev path.
+26: STATIC_DEV_KEY_PREFIX = "amw_dev_"
+27:
+28: api_key_header = APIKeyHeader(
+29:     name=settings.API_KEY_HEADER,
+30:     auto_error=False,
+31:     description="API key for agent authentication. Pass in the X-API-Key header.",
+32: )
+33:
+34:
+35: @dataclass(frozen=True)
+115: # than request state because get_auth_context is also called without a
+116: # Request; a mutable holder rather than a flag because call_next runs the app
+117: # in a child task whose context is a copy, so only a shared object carries the
+118: # answer back out.
+119: CREDENTIAL_ACCEPTANCE: ContextVar[CredentialAcceptance | None] = ContextVar(
+120:     "credential_acceptance", default=None
+121: )
+122:
+123:
+124: async def get_auth_context(
+125:     api_key: [REDACTED] | None = Security(api_key_header),
+126:     authorization: Annotated[str | None, Header()] = None,
+127: ) -> AuthContext:
+128:     """
+129:     Validate credentials and return caller context.
+130:
+131:     Checks in order:
+132:     1. Authorization: Bearer <jwt> (modern, short-lived)
+133:     2. X-API-Key header (legacy, long-lived keys)
+134:
+135:     Settings are read per call, not from the module-level singleton: tests and
+136:     the Postgres CI job rebind VALID_API_KEYS and clear the settings cache after
+# AGENTS.md — Tests
+
+Tests should verify business-critical behavior, not just happy paths.
+
+Prefer:
+
+- negative-path tests
+- authorization failure tests
+- tenant isolation tests
+- billing/idempotency tests
+- receipt verification tests
+- replay prevention tests
+- malformed input tests
+
+Do not remove tests unless replacing them with equal or better coverage.
+
+# AGENTS.md — Services (trust-critical core)
+
+This directory holds the trust-critical service code: billing/metering, permits, receipts, signing keys, idempotency, audit, governance, auth, and KYC. Treat everything here as both integrity-critical and security-critical.
+
+## Billing / Metering Integrity
+
+Never change billing, metering, budget, usage, or charge logic without checking:
+
+- idempotency
+- retry behavior
+- double-charge risk
+- tenant isolation
+- budget limits
+- over-budget behavior
+- audit trail
+- receipt linkage
+
+Required tests for billing changes:
+
+- retry does not double-charge
+- over-budget invocation fails
+- invalid tenant cannot access billing records
+- idempotency key prevents duplicate charge
+- usage event links to correct permit/tool/action
+
+## Security
+
+Check:
+
+- authentication
+- authorization
+- tenant isolation
+- delegation scope
+- permit lifecycle
+- revocation
+- replay prevention
+- key handling
+- secret exposure
+- logging of sensitive data
+
+Required tests for security changes:
+
+- unauthorized request fails
+- expired/revoked credential fails
+- permit cannot exceed delegation scope
+- Tenant A cannot access Tenant B data
+- malicious input is rejected

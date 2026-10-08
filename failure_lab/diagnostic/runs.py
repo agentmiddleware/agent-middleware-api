@@ -143,7 +143,9 @@ def assert_not_production_like(environment: str | None = None) -> None:
         )
 
 
-def select_web_scenarios(requested: Any, *, allowed: tuple[str, ...] = PUBLIC_SCENARIOS) -> list[str]:
+def select_web_scenarios(
+    requested: Any, *, allowed: tuple[str, ...] = PUBLIC_SCENARIOS
+) -> list[str]:
     """Validate a requested selection against the public allowlist."""
     if requested in (None, "", []):
         return _refuse_empty(
@@ -501,18 +503,24 @@ async def execute(
     ledger_dir.mkdir(parents=True)
 
     stream = StepStream()
-    record.append(stream.push({
-        "step": "diagnostic.start",
-        "message": (
-            "Booting a disposable sandbox: a simulated refund tool with its own "
-            "ledger, a fault-injection layer in front of it, and the gateway in "
-            "front of that."
-        ),
-        "at": started_at,
-    }))
+    record.append(
+        stream.push(
+            {
+                "step": "diagnostic.start",
+                "message": (
+                    "Booting a disposable sandbox: a simulated refund tool with its own "
+                    "ledger, a fault-injection layer in front of it, and the gateway in "
+                    "front of that."
+                ),
+                "at": started_at,
+            }
+        )
+    )
 
     random.seed(record.seed)
-    scenarios: list[Scenario] = select_scenarios(record.scenarios, **(scenario_options or {}))
+    scenarios: list[Scenario] = select_scenarios(
+        record.scenarios, **(scenario_options or {})
+    )
     log = _StreamingLog(lambda event: record.append(stream.push(event)))
     results: list[ScenarioResult] = []
 
@@ -589,7 +597,7 @@ async def execute(
             render_run_html(record.comparisons, environment=redacted_environment)
         )
 
-        receipts, verifications, _keys = harvest_evidence(results)
+        receipts, verifications, key_document = harvest_evidence(results)
         bundle = build_evidence_bundle(
             run_dir / "evidence",
             results,
@@ -599,6 +607,7 @@ async def execute(
             scenarios=scenarios,
             event_log=log.events,
             receipts=receipts,
+            trust_keys=key_document,
             verification_results=verifications,
             random_seed=record.seed,
             test_configuration={"surface": "web", "scenarios": list(record.scenarios)},

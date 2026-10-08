@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class AuditEventResponse(BaseModel):
@@ -43,3 +43,12 @@ class AuditSummaryResponse(BaseModel):
     by_outcome: dict[str, int]
     by_wallet: dict[str, int]
     by_policy_reason: dict[str, int]
+    by_policy_reason_truncated: bool = Field(
+        default=False,
+        description=(
+            "True when by_policy_reason was tallied from only the newest "
+            "events (a row cap applies to that bucket alone), so its counts "
+            "are a lower bound. total, by_event, by_outcome and by_wallet "
+            "always cover every matching event."
+        ),
+    )

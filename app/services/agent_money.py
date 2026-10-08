@@ -24,6 +24,7 @@ from ..schemas.billing import (
     WalletResponse,
 )
 from .billing_engine import BillingEngine
+
 # DEFAULT_PRICING lives in .pricing so the governed price path, this facade,
 # and the dry-run shadow ledger all read one table. Re-exported here because
 # callers already import it from this module.

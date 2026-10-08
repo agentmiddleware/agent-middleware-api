@@ -420,7 +420,5 @@ async def test_signing_key_by_id_requires_authentication(
     # Auth is enforced before the key lookup: an unknown key_id with no valid
     # credential is a credential failure (401/403), never a 404 that would
     # confirm or deny the id's existence to an anonymous caller.
-    resp = await client.get(
-        "/v1/signing-keys/key-does-not-exist", headers=headers
-    )
+    resp = await client.get("/v1/signing-keys/key-does-not-exist", headers=headers)
     assert resp.status_code == expected_status, resp.text

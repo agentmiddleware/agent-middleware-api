@@ -1,0 +1,140 @@
+site/styles.css
+
+   This system replaced the full arcade-cabinet treatment. The 8-bit idea was
+   fun, and it survives in exactly two places: the footer's PRESS START
+   control and the waiting room it opens (/arcade.css). Everything the buyer
+   reads is set in a sans and a mono, on hairlines and soft corners, with no
+   scanlines, no hard-offset shadows, and no pixel upscaling.
+   ========================================================================== */
+
+:root {
+  --ink: #0b1020;
+  --panel: #121a30;
+  --rule: #34457a;
+  --rule-soft: #1f2b4a;
+  --paper: #f6f3e9;
+  --paper-shade: #e8e3d2;
+  --paper-ink: #121629;
+  --paper-dim: #4c526b;
+  --text: #e9edf8;
+  --text-dim: #9ca8cb;
+  --brass: #f0b43c;
+  --brass-bright: #ffd166;
+  --verify: #4ade80;
+  --danger: #ff7b6b;
+  /* --danger holds 4.5:1 only on the dark grounds; this is its resolution
+     for paper surfaces (the approval card resolves it as a literal because
+     mail clients cannot read var()). */
+  --danger-on-paper: #b0281a;
+  /* Arcade trim. Decorative only, and only inside the waiting room. */
+  --arcade-cyan: #47e0ff;
+  --arcade-magenta: #ff5cc8;
+  /* One step below --ink. The arcade drops its hard shadows onto it; the
+     page uses it as the darkest end of a soft shadow. */
+  --shadow-ink: #05070f;
+
+  /* Hairlines are the text-dim hue at low alpha, so they sit inside the
+     palette on every ground rather than reading as a third purple. */
+  --line: rgba(156, 168, 203, 0.18);
+  --line-strong: rgba(156, 168, 203, 0.34);
+  --paper-line: rgba(18, 22, 41, 0.17);
+
+  --font-display: "Instrument Serif", Georgia, "Times New Roman", serif;
+  --font-title: "Libre Franklin", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "Public Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  /* The pixel face. Spent on the footer's PRESS START control and inside
+     the arcade, and nowhere else on the page. */
+  --font-pixel: "Press Start 2P", "Courier New", ui-monospace, monospace;
+
+  --radius: 10px;
+  --radius-sm: 6px;
+  --radius-xs: 3px;
+  --shadow-soft: 0 24px 48px -24px rgba(0, 0, 0, 0.7);
+  --shadow-lift: 0 12px 32px -16px rgba(0, 0, 0, 0.8);
+
+  --measure: 62ch;
+  --page-max: 1120px;
+  --pad-x: clamp(1.25rem, 4vw, 2.5rem);
+  --focus-ring: 2px solid var(--brass);
+}
+
+/* Accessibility panel overrides ------------------------------------------ */
+
+html {
+  font-size: calc(100% * var(--a11y-scale, 1));
+  /* keep in-page anchor targets clear of the sticky nav */
+  scroll-padding-top: 7rem;
+}
+
+html[data-a11y-contrast="high"] {
+  --ink: #000000;
+  --panel: #0b0b12;
+  --rule: #8f86d6;
+  --rule-soft: #5b53a0;
+  --paper: #ffffff;
+  --paper-shade: #f1f1f1;
+  --paper-ink: #000000;
+  --paper-dim: #26292f;
+  --text: #ffffff;
+  --text-dim: #ddd9ff;
+  --brass: #ffd24d;
+  --brass-bright: #ffe680;
+  --verify: #6cff9f;
+  --danger: #ff8f85;
+  --arcade-cyan: #8beeff;
+  --arcade-magenta: #ff9ade;
+  --shadow-ink: #000000;
+  --line: rgba(255, 255, 255, 0.45);
+  --line-strong: rgba(255, 255, 255, 0.7);
+  --paper-line: rgba(0, 0, 0, 0.5);
+}
+
+html[data-a11y-spacing="wide"] body {
+  line-height: 1.85;
+  letter-spacing: 0.015em;
+  word-spacing: 0.06em;
+site/styles.css
+/* dark info card variant (right column of proof, downloads, etc.) */
+.proof-col.replay {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  box-shadow: none;
+}
+
+.proof-col.replay::after {
+  display: none;
+}
+
+.proof-col.replay p {
+  color: var(--text-dim);
+}
+
+.proof-col.replay .proof-label {
+  color: var(--text-dim);
+  border-bottom-color: var(--line);
+}
+
+.proof-col.replay .badge {
+  background: var(--rule-soft);
+  color: var(--text);
+}
+
+static/dashboard.html
+    }
+
+    footer a { display: inline-flex; align-items: center; min-height: 44px; }
+
+    :focus-visible {
+      outline: var(--focus-ring);
+      outline-offset: 3px;
+    }
+
+    .skip-link {
+      position: absolute;
+      left: -9999px;
+      top: 0;
+      z-index: 100;
+      padding: 0.75rem 1.25rem;
+      border-radius: 0 0 var(--radius-sm) 0;

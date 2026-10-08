@@ -1,0 +1,47 @@
+Using CPython 3.13.14
+Creating virtual environment at: .venv
+============================= test session starts ==============================
+platform darwin -- Python 3.13.14, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/sellers/.openclaw/worktrees/amw-issues-20261002-gate
+configfile: pyproject.toml
+plugins: cov-7.1.0, asyncio-1.4.0, anyio-4.15.1
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 576 items
+
+tests/test_jwt_authority.py .................                            [  2%]
+tests/test_jwt_auth.py ...........................                       [  7%]
+tests/test_api_keys.py ................................................. [ 16%]
+....                                                                     [ 16%]
+tests/test_readiness_fail_closed.py ......                               [ 17%]
+tests/test_iga_compensation_identity.py ..                               [ 18%]
+tests/test_iga_policy.py ............................................... [ 26%]
+.....                                                                    [ 27%]
+tests/test_audit_snapshot.py ..                                          [ 27%]
+tests/test_permit_numeric_storage.py ................................... [ 33%]
+...............................                                          [ 39%]
+tests/test_permit_request_flow.py ...................................... [ 45%]
+.....                                                                    [ 46%]
+tests/test_permit_issuance_retry.py ..........................           [ 51%]
+tests/test_action_verification_sessions.py ......                        [ 52%]
+tests/test_local_permit_counter_contention.py .....                      [ 52%]
+tests/test_action_preacceptance.py ..................................... [ 59%]
+.....                                                                    [ 60%]
+tests/test_awi_admission_ordering.py ................................... [ 66%]
+........                                                                 [ 67%]
+tests/test_awi_admission_process.py ...                                  [ 68%]
+tests/test_awi_execution_boundaries.py ....                              [ 68%]
+tests/test_awi_http_governance.py .....................                  [ 72%]
+tests/test_awi_request_authority.py .........                            [ 74%]
+tests/test_ai_durable_state.py ....                                      [ 74%]
+tests/test_llm_endpoint.py ....                                          [ 75%]
+tests/test_iot_acl.py .............                                      [ 77%]
+tests/test_factory_campaign_persistence.py ..                            [ 78%]
+tests/test_behavioral_runner_results.py ............                     [ 80%]
+tests/test_rtaas_input_validation.py ...........                         [ 82%]
+tests/test_awi_rag_lifecycle.py ....................                     [ 85%]
+tests/test_mcp_generator.py .......................................      [ 92%]
+tests/test_standard_mcp_endpoint.py ..........................           [ 96%]
+tests/test_trust_negative_security.py ........                           [ 98%]
+tests/test_tenant_isolation_hardening.py ..........                      [100%]
+
+============================= 576 passed in 31.09s =============================

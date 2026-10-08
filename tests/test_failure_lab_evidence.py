@@ -132,6 +132,7 @@ class TestConversionMetrics:
         assert not counts_toward_conversion("HUMAN_CUSTOMER_TYPO")
         assert not counts_toward_conversion("")
 
+
 def _result_document(observation: str) -> dict:
     """A ScenarioResult-shaped document carrying text in a free-form field."""
     return {
@@ -203,7 +204,9 @@ class TestTheBundleRefusesToLeak:
         ],
         ids=["ordinary-words", "hostname"],
     )
-    def test_the_backstop_fires_on_what_redaction_cannot_recognise(self, tmp_path, secret):
+    def test_the_backstop_fires_on_what_redaction_cannot_recognise(
+        self, tmp_path, secret
+    ):
         """A secret that does not look like one still must not reach disk."""
         document = _result_document(f"the run used {secret} here")
 

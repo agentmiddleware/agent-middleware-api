@@ -1,0 +1,584 @@
+[
+  {
+    "engine": "chromium",
+    "state": "baseline",
+    "contrast": [
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(246, 243, 233)",
+        "ratio": 2.1308380960960003
+      },
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(246, 243, 233)",
+        "ratio": 2.1308380960960003
+      },
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(246, 243, 233)",
+        "ratio": 2.1308380960960003
+      },
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(246, 243, 233)",
+        "ratio": 2.1308380960960003
+      },
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(18, 26, 48)",
+        "ratio": 7.299215824514885
+      },
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(18, 26, 48)",
+        "ratio": 7.299215824514885
+      },
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(18, 26, 48)",
+        "ratio": 7.299215824514885
+      },
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(18, 26, 48)",
+        "ratio": 7.299215824514885
+      }
+    ],
+    "compareAxe": [
+      {
+        "id": "color-contrast",
+        "targets": [
+          [
+            "article:nth-child(1) > ul > li:nth-child(1)"
+          ],
+          [
+            "article:nth-child(1) > ul > li:nth-child(2)"
+          ],
+          [
+            "article:nth-child(1) > ul > li:nth-child(3)"
+          ],
+          [
+            "article:nth-child(1) > ul > li:nth-child(4)"
+          ]
+        ]
+      }
+    ],
+    "dashboardAxe": [
+      {
+        "id": "scrollable-region-focusable",
+        "targets": [
+          [
+            "pre"
+          ]
+        ]
+      }
+    ],
+    "keyboard": {
+      "tabIndex": -1,
+      "role": null,
+      "width": 348,
+      "scrollWidth": 510,
+      "after": 40,
+      "outline": "solid",
+      "outlineWidth": "2px",
+      "reached": true,
+      "before": 0
+    },
+    "targets": [
+      {
+        "text": "Runtime truth\n          Dependency posture, feature flags, build SHA, and metric scope metadata.",
+        "href": "https://api.thisisatest.tech/health/dependencies"
+      },
+      {
+        "text": "Current trust keys\n          Public issuer keys exposed by the live API.",
+        "href": "https://api.thisisatest.tech/.well-known/trust-keys.json"
+      },
+      {
+        "text": "Agent manifest\n          Bootstrap metadata. Tool lists on this origin require a key.",
+        "href": "https://api.thisisatest.tech/.well-known/agent.json"
+      },
+      {
+        "text": "llms.txt\n          Machine-readable integration guidance.",
+        "href": "https://api.thisisatest.tech/llms.txt"
+      },
+      {
+        "text": "Runtime truth",
+        "href": "https://api.thisisatest.tech/health/dependencies"
+      }
+    ],
+    "hosted": 0,
+    "examplesUseAPIURL": false
+  },
+  {
+    "engine": "chromium",
+    "state": "fixed",
+    "contrast": [
+      {
+        "color": "rgb(76, 82, 107)",
+        "background": "rgb(246, 243, 233)",
+        "ratio": 6.937564858801505
+      },
+      {
+        "color": "rgb(76, 82, 107)",
+        "background": "rgb(246, 243, 233)",
+        "ratio": 6.937564858801505
+      },
+      {
+        "color": "rgb(76, 82, 107)",
+        "background": "rgb(246, 243, 233)",
+        "ratio": 6.937564858801505
+      },
+      {
+        "color": "rgb(76, 82, 107)",
+        "background": "rgb(246, 243, 233)",
+        "ratio": 6.937564858801505
+      },
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(18, 26, 48)",
+        "ratio": 7.299215824514885
+      },
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(18, 26, 48)",
+        "ratio": 7.299215824514885
+      },
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(18, 26, 48)",
+        "ratio": 7.299215824514885
+      },
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(18, 26, 48)",
+        "ratio": 7.299215824514885
+      }
+    ],
+    "compareAxe": [],
+    "dashboardAxe": [],
+    "keyboard": {
+      "tabIndex": 0,
+      "role": "region",
+      "label": "Authenticated inspection",
+      "width": 348,
+      "scrollWidth": 510,
+      "after": 40,
+      "outline": "solid",
+      "outlineWidth": "2px",
+      "reached": true,
+      "before": 0
+    },
+    "targets": [
+      {
+        "text": "Runtime truth\n          Dependency posture, feature flags, build SHA, and metric scope metadata.",
+        "href": "http://127.0.0.1:18866/health/dependencies"
+      },
+      {
+        "text": "Current trust keys\n          Public issuer keys exposed by this API.",
+        "href": "http://127.0.0.1:18866/.well-known/trust-keys.json"
+      },
+      {
+        "text": "Agent manifest\n          Bootstrap metadata. Tool lists on this origin require a key.",
+        "href": "http://127.0.0.1:18866/.well-known/agent.json"
+      },
+      {
+        "text": "llms.txt\n          Machine-readable integration guidance.",
+        "href": "http://127.0.0.1:18866/llms.txt"
+      },
+      {
+        "text": "Runtime truth",
+        "href": "http://127.0.0.1:18866/health/dependencies"
+      }
+    ],
+    "hosted": 1,
+    "examplesUseAPIURL": true
+  },
+  {
+    "engine": "firefox",
+    "state": "baseline",
+    "contrast": [
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(246, 243, 233)",
+        "ratio": 2.1308380960960003
+      },
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(246, 243, 233)",
+        "ratio": 2.1308380960960003
+      },
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(246, 243, 233)",
+        "ratio": 2.1308380960960003
+      },
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(246, 243, 233)",
+        "ratio": 2.1308380960960003
+      },
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(18, 26, 48)",
+        "ratio": 7.299215824514885
+      },
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(18, 26, 48)",
+        "ratio": 7.299215824514885
+      },
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(18, 26, 48)",
+        "ratio": 7.299215824514885
+      },
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(18, 26, 48)",
+        "ratio": 7.299215824514885
+      }
+    ],
+    "compareAxe": [
+      {
+        "id": "color-contrast",
+        "targets": [
+          [
+            "article:nth-child(1) > ul > li:nth-child(1)"
+          ],
+          [
+            "article:nth-child(1) > ul > li:nth-child(2)"
+          ],
+          [
+            "article:nth-child(1) > ul > li:nth-child(3)"
+          ],
+          [
+            "article:nth-child(1) > ul > li:nth-child(4)"
+          ]
+        ]
+      }
+    ],
+    "dashboardAxe": [
+      {
+        "id": "scrollable-region-focusable",
+        "targets": [
+          [
+            "pre"
+          ]
+        ]
+      }
+    ],
+    "keyboard": {
+      "tabIndex": -1,
+      "role": null,
+      "width": 348,
+      "scrollWidth": 511,
+      "after": 41,
+      "outline": "solid",
+      "outlineWidth": "2px",
+      "reached": true,
+      "before": 0
+    },
+    "targets": [
+      {
+        "text": "Runtime truth\n          Dependency posture, feature flags, build SHA, and metric scope metadata.",
+        "href": "https://api.thisisatest.tech/health/dependencies"
+      },
+      {
+        "text": "Current trust keys\n          Public issuer keys exposed by the live API.",
+        "href": "https://api.thisisatest.tech/.well-known/trust-keys.json"
+      },
+      {
+        "text": "Agent manifest\n          Bootstrap metadata. Tool lists on this origin require a key.",
+        "href": "https://api.thisisatest.tech/.well-known/agent.json"
+      },
+      {
+        "text": "llms.txt\n          Machine-readable integration guidance.",
+        "href": "https://api.thisisatest.tech/llms.txt"
+      },
+      {
+        "text": "Runtime truth",
+        "href": "https://api.thisisatest.tech/health/dependencies"
+      }
+    ],
+    "hosted": 0,
+    "examplesUseAPIURL": false
+  },
+  {
+    "engine": "firefox",
+    "state": "fixed",
+    "contrast": [
+      {
+        "color": "rgb(76, 82, 107)",
+        "background": "rgb(246, 243, 233)",
+        "ratio": 6.937564858801505
+      },
+      {
+        "color": "rgb(76, 82, 107)",
+        "background": "rgb(246, 243, 233)",
+        "ratio": 6.937564858801505
+      },
+      {
+        "color": "rgb(76, 82, 107)",
+        "background": "rgb(246, 243, 233)",
+        "ratio": 6.937564858801505
+      },
+      {
+        "color": "rgb(76, 82, 107)",
+        "background": "rgb(246, 243, 233)",
+        "ratio": 6.937564858801505
+      },
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(18, 26, 48)",
+        "ratio": 7.299215824514885
+      },
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(18, 26, 48)",
+        "ratio": 7.299215824514885
+      },
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(18, 26, 48)",
+        "ratio": 7.299215824514885
+      },
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(18, 26, 48)",
+        "ratio": 7.299215824514885
+      }
+    ],
+    "compareAxe": [],
+    "dashboardAxe": [],
+    "keyboard": {
+      "tabIndex": 0,
+      "role": "region",
+      "label": "Authenticated inspection",
+      "width": 348,
+      "scrollWidth": 511,
+      "after": 41,
+      "outline": "solid",
+      "outlineWidth": "2px",
+      "reached": true,
+      "before": 0
+    },
+    "targets": [
+      {
+        "text": "Runtime truth\n          Dependency posture, feature flags, build SHA, and metric scope metadata.",
+        "href": "http://127.0.0.1:18866/health/dependencies"
+      },
+      {
+        "text": "Current trust keys\n          Public issuer keys exposed by this API.",
+        "href": "http://127.0.0.1:18866/.well-known/trust-keys.json"
+      },
+      {
+        "text": "Agent manifest\n          Bootstrap metadata. Tool lists on this origin require a key.",
+        "href": "http://127.0.0.1:18866/.well-known/agent.json"
+      },
+      {
+        "text": "llms.txt\n          Machine-readable integration guidance.",
+        "href": "http://127.0.0.1:18866/llms.txt"
+      },
+      {
+        "text": "Runtime truth",
+        "href": "http://127.0.0.1:18866/health/dependencies"
+      }
+    ],
+    "hosted": 1,
+    "examplesUseAPIURL": true
+  },
+  {
+    "engine": "webkit",
+    "state": "baseline",
+    "contrast": [
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(246, 243, 233)",
+        "ratio": 2.1308380960960003
+      },
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(246, 243, 233)",
+        "ratio": 2.1308380960960003
+      },
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(246, 243, 233)",
+        "ratio": 2.1308380960960003
+      },
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(246, 243, 233)",
+        "ratio": 2.1308380960960003
+      },
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(18, 26, 48)",
+        "ratio": 7.299215824514885
+      },
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(18, 26, 48)",
+        "ratio": 7.299215824514885
+      },
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(18, 26, 48)",
+        "ratio": 7.299215824514885
+      },
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(18, 26, 48)",
+        "ratio": 7.299215824514885
+      }
+    ],
+    "compareAxe": [
+      {
+        "id": "color-contrast",
+        "targets": [
+          [
+            "article:nth-child(1) > ul > li:nth-child(1)"
+          ],
+          [
+            "article:nth-child(1) > ul > li:nth-child(2)"
+          ],
+          [
+            "article:nth-child(1) > ul > li:nth-child(3)"
+          ],
+          [
+            "article:nth-child(1) > ul > li:nth-child(4)"
+          ]
+        ]
+      }
+    ],
+    "dashboardAxe": [
+      {
+        "id": "scrollable-region-focusable",
+        "targets": [
+          [
+            "pre"
+          ]
+        ]
+      }
+    ],
+    "keyboard": {
+      "tabIndex": -1,
+      "role": null,
+      "width": 348,
+      "scrollWidth": 512,
+      "after": 0,
+      "outline": "none",
+      "outlineWidth": "3px",
+      "reached": false,
+      "before": 0
+    },
+    "targets": [
+      {
+        "text": "Runtime truth\n          Dependency posture, feature flags, build SHA, and metric scope metadata.",
+        "href": "https://api.thisisatest.tech/health/dependencies"
+      },
+      {
+        "text": "Current trust keys\n          Public issuer keys exposed by the live API.",
+        "href": "https://api.thisisatest.tech/.well-known/trust-keys.json"
+      },
+      {
+        "text": "Agent manifest\n          Bootstrap metadata. Tool lists on this origin require a key.",
+        "href": "https://api.thisisatest.tech/.well-known/agent.json"
+      },
+      {
+        "text": "llms.txt\n          Machine-readable integration guidance.",
+        "href": "https://api.thisisatest.tech/llms.txt"
+      },
+      {
+        "text": "Runtime truth",
+        "href": "https://api.thisisatest.tech/health/dependencies"
+      }
+    ],
+    "hosted": 0,
+    "examplesUseAPIURL": false
+  },
+  {
+    "engine": "webkit",
+    "state": "fixed",
+    "contrast": [
+      {
+        "color": "rgb(76, 82, 107)",
+        "background": "rgb(246, 243, 233)",
+        "ratio": 6.937564858801505
+      },
+      {
+        "color": "rgb(76, 82, 107)",
+        "background": "rgb(246, 243, 233)",
+        "ratio": 6.937564858801505
+      },
+      {
+        "color": "rgb(76, 82, 107)",
+        "background": "rgb(246, 243, 233)",
+        "ratio": 6.937564858801505
+      },
+      {
+        "color": "rgb(76, 82, 107)",
+        "background": "rgb(246, 243, 233)",
+        "ratio": 6.937564858801505
+      },
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(18, 26, 48)",
+        "ratio": 7.299215824514885
+      },
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(18, 26, 48)",
+        "ratio": 7.299215824514885
+      },
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(18, 26, 48)",
+        "ratio": 7.299215824514885
+      },
+      {
+        "color": "rgb(156, 168, 203)",
+        "background": "rgb(18, 26, 48)",
+        "ratio": 7.299215824514885
+      }
+    ],
+    "compareAxe": [],
+    "dashboardAxe": [],
+    "keyboard": {
+      "tabIndex": 0,
+      "role": "region",
+      "label": "Authenticated inspection",
+      "width": 348,
+      "scrollWidth": 512,
+      "after": 164,
+      "outline": "solid",
+      "outlineWidth": "2px",
+      "reached": true,
+      "before": 0
+    },
+    "targets": [
+      {
+        "text": "Runtime truth\n          Dependency posture, feature flags, build SHA, and metric scope metadata.",
+        "href": "http://127.0.0.1:18866/health/dependencies"
+      },
+      {
+        "text": "Current trust keys\n          Public issuer keys exposed by this API.",
+        "href": "http://127.0.0.1:18866/.well-known/trust-keys.json"
+      },
+      {
+        "text": "Agent manifest\n          Bootstrap metadata. Tool lists on this origin require a key.",
+        "href": "http://127.0.0.1:18866/.well-known/agent.json"
+      },
+      {
+        "text": "llms.txt\n          Machine-readable integration guidance.",
+        "href": "http://127.0.0.1:18866/llms.txt"
+      },
+      {
+        "text": "Runtime truth",
+        "href": "http://127.0.0.1:18866/health/dependencies"
+      }
+    ],
+    "hosted": 1,
+    "examplesUseAPIURL": true
+  }
+]

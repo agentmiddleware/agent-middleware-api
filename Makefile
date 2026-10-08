@@ -67,14 +67,16 @@ prove-trust-plane-postgres: prove-crash-recovery
 # (never an automatic redispatch).
 #
 # Requires DATABASE_URL=postgresql+asyncpg://... pointing at a DEDICATED,
-# EMPTY database. The harness refuses to run otherwise: it fails closed on a
+# EMPTY database already migrated to head, STATE_BACKEND=postgres, a local/test
+# ENVIRONMENT, and explicit MCP_STRESS_DB_ISOLATED=1 acknowledgment. Provision
+# and migrate only the disposable database before invoking this target; this
+# target never migrates or overrides the caller's isolation settings.
+# The harness refuses to run otherwise: it fails closed on a
 # non-PostgreSQL URL, a production-like ENVIRONMENT, a stale Alembic revision,
 # or any application table that already holds rows, and it takes an advisory
 # lock so two runs cannot overlap. This is the same proof CI runs.
 prove-crash-recovery:
-	alembic upgrade head
-	RUN_MCP_MULTIPROCESS_TESTS=1 MCP_STRESS_DB_ISOLATED=1 \
-	STATE_BACKEND=postgres ENVIRONMENT=test \
+	RUN_MCP_MULTIPROCESS_TESTS=1 \
 	uv run --with-requirements requirements.txt \
 	  pytest tests/test_mcp_postgres_multiprocess.py -v --tb=short
 
@@ -157,11 +159,14 @@ trust-conformance-live:
 # adversarial-battery-live probes a deployment you operate for wallet
 # isolation, invalid keys, forged receipts, permit key binding, expired
 # permits, revoked keys, and replay idempotency, then revokes every key it
-# minted. Requires API_URL (no default, by design) and BOOTSTRAP_KEY.
-# MCP-invocation checks report SKIP when no invokable golden-path-echo tool is
-# exposed; over-spend containment is not exercised.
+# minted. Requires BOOTSTRAP_KEY plus either API_URL (no default, by design) or
+# `ADVERSARIAL_BATTERY_ARGS="--api-url ..."`. Remote targets must use HTTPS,
+# and the canonical production origin also requires `--confirm-production` in
+# ADVERSARIAL_BATTERY_ARGS. MCP-invocation checks report SKIP when no
+# invokable golden-path-echo tool is exposed; over-spend containment is not
+# exercised.
 adversarial-battery-live:
-	uv run --with-requirements requirements.txt python scripts/adversarial_battery.py
+	uv run --with-requirements requirements.txt python scripts/adversarial_battery.py $(ADVERSARIAL_BATTERY_ARGS)
 
 # Railway deploy gate. Run under `railway run` (or with DATABASE_URL +
 # PUBLIC_URL exported) to check migration parity and live posture together.

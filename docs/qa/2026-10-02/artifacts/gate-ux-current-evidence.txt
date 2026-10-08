@@ -1,0 +1,18 @@
+IMAGES ['ux-cua-proof-mobile.jpg', 'ux-cua-concept-mobile.jpg', 'ux-cua-dashboard-mobile.jpg', 'ux-cua-dashboard-scroll-region.jpg', 'ux-cua-home-mobile.jpg', 'ux-cua-home-enlarged-320.jpg', 'ux-cua-calculator-invalid-retake.jpg', 'ux-cua-404-mobile.jpg', 'ux-cua-calculator-valid.jpg', 'ux-cua-compare-low-contrast.jpg', 'ux-cua-accessibility-panel.jpg', 'ux-cua-compare-mobile.jpg', 'ux-cua-calculator-invalid.jpg', 'ux-cua-home-desktop.jpg']
+# UX QA report — 2026-10-02
+
+Resumed an interrupted sweep; existing logs/artifacts retained. Local-only browser pass, no credentials or authenticated production calls.
+
+## Written exploratory charters
+
+1. **Accessibility and keyboard (15 minutes):** Public overview/proof/compare/404 and operator index; axe WCAG 2.2 A/AA; landmark/headings/accessible names; skip link, tab order, accessibility options, calculator labels and status announcements. Goal: a keyboard or screen-reader user can discover the pilot and interpret evidence without hidden information.
+2. **Responsive and state behavior (10 minutes):** 1440px desktop, 390px mobile, 320px reflow; calculator empty/invalid/valid states; reduced motion; default and enlarged text; screenshot important states. Goal: no clipped controls, trapped focus, or ambiguous recovery.
+3. **Nielsen/developer experience (10 minutes):** Review ten heuristics against public pages and README/quickstart using code-backed evidence; inspect error recovery, user control, consistency, documentation accuracy, and stated limits. Goal: a new integrator can identify a safe local path and understand operational boundaries.
+
+Axe is a sampled automated check, not WCAG certification. Screen-reader semantics are inspected from the accessibility tree; no physical assistive-technology speech session. Browser outbound requests are blocked except loopback, and public API calls are mocked or blocked.
+
+## Results
+
+Pending browser tooling and local server readiness.
+
+SERVERS ['docs/qa/2026-10-02/ux_csp_server.py', 'docs/qa/2026-10-02/artifacts/ux-restart-csp-server.txt', 'docs/qa/2026-10-02/artifacts/gate-safety-and-server-read.txt', 'docs/qa/2026-10-02/artifacts/frontend-confirm-server-session-interrupt.txt', 'docs/qa/2026-10-02/artifacts/frontend-stop-loopback-servers.txt', 'docs/qa/2026-10-02/artifacts/ux-csp-axe-server.txt']

@@ -8,9 +8,11 @@ headers as governed MCP tools, then meter and receipt the attempt.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import re
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
@@ -18,11 +20,10 @@ from fastapi import Header, HTTPException, status
 
 from app.core.auth import AuthContext
 from app.db.models import PermitModel
-from app.schemas.billing import ServiceCategory
-from app.services.agent_money import AgentMoney, get_agent_money
+from app.schemas.billing import LedgerEntry, ServiceCategory
+from app.services.agent_money import get_agent_money
 from app.services.billing_engine import LedgerWriteContendedError
 from app.services.governed_metering import (
-    ChargeCreditMismatchError,
     aligned_credits_charged,
 )
 from app.services.idempotency import (
@@ -68,10 +69,28 @@ class AwiHttpGovernedContext:
     record_id: str | None = None
     replay_response: dict[str, Any] | None = None
     replay_status_code: int | None = None
+    request_payload: dict[str, Any] = field(default_factory=dict)
+    ledger_entry_id: str | None = None
+    credits_charged: Decimal = Decimal("0")
+    dispatch_started: bool = False
+    finalization_started: bool = False
+    finalized: bool = False
 
 
 def _credits_for(tool_name: str) -> Decimal:
     return AWI_HTTP_TOOL_CREDITS.get(tool_name, Decimal("1"))
+
+
+def _request_identity(
+    wallet_id: str, permit_id: str, tool_name: str, arguments: dict[str, Any] | None
+) -> dict[str, Any]:
+    """Bind authority and full normalized semantics; stores retain only the hash."""
+    return {
+        "wallet_id": wallet_id,
+        "permit_id": permit_id,
+        "tool_name": tool_name,
+        "arguments": arguments or {},
+    }
 
 
 def consume_awi_http_replay(ctx: AwiHttpGovernedContext) -> dict[str, Any] | None:
@@ -196,11 +215,10 @@ async def begin_awi_http_governed(
         )
 
     credits = _credits_for(tool_name)
-    validation = await get_permit_service().validate_for_action(
+    validation = await get_permit_service().validate_replay_access(
         permit_id=permit_id.strip(),
         wallet_id=wallet_id,
         tool_name=tool_name,
-        estimated_credits=credits,
         key_id=auth.key_id,
     )
     if not validation.allowed or validation.permit is None:
@@ -222,12 +240,10 @@ async def begin_awi_http_governed(
             wallet_id=wallet_id,
             endpoint=endpoint,
             idempotency_key=idempotency_key,
-            request_payload=request_payload
-            or {
-                "tool_name": tool_name,
-                "wallet_id": wallet_id,
-                "permit_id": permit_id.strip(),
-            },
+            request_payload=_request_identity(
+                wallet_id, permit_id.strip(), tool_name, request_payload
+            ),
+            operation_kind="awi_http",
         )
         replay = begun.replay
         record_id = begun.record_id
@@ -251,7 +267,7 @@ async def begin_awi_http_governed(
             replay=replay,
         )
 
-    return _context_from_validation(
+    ctx = _context_from_validation(
         auth=auth,
         wallet_id=wallet_id,
         permit_id=permit_id.strip(),
@@ -263,299 +279,269 @@ async def begin_awi_http_governed(
         record_id=record_id,
     )
 
+    ctx.request_payload = request_payload or {}
+    validation = await get_permit_service().validate_for_action(
+        permit_id=ctx.permit_id,
+        wallet_id=wallet_id,
+        tool_name=tool_name,
+        estimated_credits=credits,
+        key_id=auth.key_id,
+        arguments=request_payload,
+    )
+    if not validation.allowed:
+        await raise_awi_http_error(
+            ctx,
+            status_code=403,
+            detail={"error": validation.reason or "permit_denied", "tool": tool_name},
+        )
+    # Preserve the frozen surface's refusal of unsupported call-limited authority.
+    call_limits = json.loads(ctx.permit.max_calls_per_tool_json or "{}")
+    if tool_name in call_limits:
+        await raise_awi_http_error(
+            ctx,
+            status_code=403,
+            detail={"error": "awi_call_limit_unsupported", "tool": tool_name},
+        )
+    await _admit_awi_http_governed(ctx)
+    return ctx
+
+
+def _stable_awi_failure_reason(action_status: str, error: Any) -> str:
+    """Collapse a typed failure to a receipt-safe reason code.
+
+    A status of "error" whose error text reads "dom_bridge_failed: <detail>"
+    yields the reason code dom_bridge_failed (the prefix before the first
+    colon); other statuses (passkey_required, paused, ...) name themselves.
+    The result is sanitized to the receipt service's reason-code pattern
+    rather than raising on adversarial detail text.
+    """
+    candidate = action_status
+    if action_status == "error" and isinstance(error, str) and error:
+        candidate = error.split(":", 1)[0]
+    cleaned = re.sub(r"[^a-z0-9_.:-]", "_", candidate.strip().lower())
+    if not cleaned or not cleaned[0].isalpha():
+        cleaned = f"awi_{cleaned}" if cleaned else "awi_failed"
+    return cleaned[:128]
+
+
+async def _admit_awi_http_governed(ctx: AwiHttpGovernedContext) -> None:
+    """Reserve and checkpoint the debit before a caller can enter its callback.
+
+    Unknown commits keep their owner and reservation for operator review. Only
+    a definitive, effect-free contention can release the key for another try.
+    """
+    from app.services.agent_money import DEFAULT_PRICING, InsufficientFundsResponse
+
+    permits = get_permit_service()
+    idem = get_idempotency_service()
+    try:
+        await permits.reserve_budget(ctx.permit_id, ctx.credits)
+    except PermitError as exc:
+        detail = {"error": exc.reason, "tool": ctx.tool_name}
+        if exc.reason == "permit_write_contended":
+            await idem.abandon(
+                wallet_id=ctx.wallet_id,
+                endpoint=ctx.endpoint,
+                idempotency_key=ctx.idempotency_key,
+                expected_record_id=ctx.record_id,
+            )
+            raise HTTPException(status_code=503, detail=detail) from exc
+        await raise_awi_http_error(ctx, status_code=403, detail=detail)
+    except Exception as exc:
+        # A lost reservation acknowledgment may already have consumed budget.
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "awi_admission_incomplete", "tool": ctx.tool_name},
+        ) from exc
+
+    unit_price = DEFAULT_PRICING[ServiceCategory.AGENT_COMMS][1]
+    try:
+        charge = await get_agent_money().charge(
+            wallet_id=ctx.wallet_id,
+            service_category=ServiceCategory.AGENT_COMMS,
+            units=ctx.credits / unit_price,
+            request_path=ctx.endpoint,
+            description=f"AWI HTTP {ctx.tool_name}",
+            operation_key=ctx.record_id,
+        )
+    except LedgerWriteContendedError as exc:
+        # Billing's contract proves every attempt rolled back (including its
+        # final operation-key lookup). No callback has started yet.
+        if await _release_reservation(permits, ctx):
+            await idem.abandon(
+                wallet_id=ctx.wallet_id,
+                endpoint=ctx.endpoint,
+                idempotency_key=ctx.idempotency_key,
+                expected_record_id=ctx.record_id,
+            )
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "ledger_write_contended", "tool": ctx.tool_name},
+        ) from exc
+    except Exception as exc:
+        # Commit/acknowledgment loss is not evidence that money did not move.
+        # Preserve the operation-key link; never release or redispatch here.
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "awi_admission_incomplete", "tool": ctx.tool_name},
+        ) from exc
+
+    if isinstance(charge, InsufficientFundsResponse):
+        await _release_reservation(permits, ctx)
+        await raise_awi_http_error(
+            ctx,
+            status_code=402,
+            detail={"error": "insufficient_funds", "tool": ctx.tool_name},
+        )
+        return
+
+    # Require an actual debit and persist its ownership before any effect.
+    # Even a mismatch keeps the reservation and key; it requires review.
+    try:
+        if not isinstance(charge, LedgerEntry) or not charge.entry_id:
+            raise ValueError("awi_debit_required")
+        ctx.ledger_entry_id = charge.entry_id
+        await idem.mark_charged(
+            wallet_id=ctx.wallet_id,
+            endpoint=ctx.endpoint,
+            idempotency_key=ctx.idempotency_key,
+            ledger_entry_id=ctx.ledger_entry_id,
+        )
+        ctx.credits_charged = aligned_credits_charged(
+            ledger_amount=charge.amount,
+            authorized_credits=ctx.credits,
+            context=f"awi_http:{ctx.tool_name}",
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "awi_admission_incomplete", "tool": ctx.tool_name},
+        ) from exc
+
+
+async def _finalize_awi_http(
+    ctx: AwiHttpGovernedContext,
+    *,
+    response_payload: dict[str, Any],
+    status_code: int,
+    outcome: str,
+    reason_code: str | None,
+) -> dict[str, Any]:
+    """Retry receipt/completion writes without ever retrying the callback."""
+    ctx.finalization_started = True
+    for attempt in range(3):
+        try:
+            receipt = await get_receipt_service().create_receipt(
+                permit_id=ctx.permit_id,
+                wallet_id=ctx.wallet_id,
+                key_id=ctx.auth.key_id,
+                tool=ctx.tool_name,
+                request_payload=_request_identity(
+                    ctx.wallet_id, ctx.permit_id, ctx.tool_name, ctx.request_payload
+                ),
+                response_payload=response_payload,
+                ledger_entry_id=ctx.ledger_entry_id,
+                credits_authorized=ctx.credits,
+                credits_charged=ctx.credits_charged,
+                outcome=outcome,
+                reason_code=reason_code,
+                audit_event_id=None,
+                idempotency_record_id=ctx.record_id,
+            )
+            body = {
+                **response_payload,
+                "receipt": {
+                    "receipt_id": receipt.receipt_id,
+                    "permit_id": receipt.permit_id,
+                    "ledger_entry_id": receipt.ledger_entry_id,
+                    "outcome": receipt.outcome,
+                    "signature": receipt.signature,
+                },
+            }
+            await get_idempotency_service().complete(
+                wallet_id=ctx.wallet_id,
+                endpoint=ctx.endpoint,
+                idempotency_key=ctx.idempotency_key,
+                response_reference=receipt.receipt_id,
+                response_json={"detail": body} if status_code >= 400 else body,
+                status_code=status_code,
+            )
+            ctx.finalized = True
+            return body
+        except Exception:
+            if attempt == 2:
+                # Do not overwrite a committed receipt with a different error
+                # outcome. The charged owner remains held for reconciliation.
+                raise HTTPException(
+                    status_code=503, detail={"error": "awi_finalization_incomplete"}
+                ) from None
+            await asyncio.sleep(0.05 * (attempt + 1))
+    raise AssertionError("unreachable")
+
+
+async def _refund_undispatched(ctx: AwiHttpGovernedContext) -> None:
+    """Compensate only a trusted, explicit proof that no action was dispatched."""
+    if ctx.ledger_entry_id is None:
+        return
+    # Set before compensation: an uncertain refund/release must never fall into
+    # a second abort that repeats release_budget against another invocation.
+    ctx.finalization_started = True
+    await get_agent_money().refund_charge(
+        wallet_id=ctx.wallet_id,
+        charge_entry_id=ctx.ledger_entry_id,
+        description=f"AWI HTTP {ctx.tool_name}: not dispatched",
+    )
+    ctx.credits_charged = Decimal("0")
+    await _release_reservation(get_permit_service(), ctx)
+
 
 async def complete_awi_http_governed(
     ctx: AwiHttpGovernedContext,
     *,
     request_payload: dict[str, Any],
     response_payload: dict[str, Any],
-    money: AgentMoney | None = None,
 ) -> dict[str, Any]:
-    """Reserve permit budget, charge wallet, write receipt, complete idempotency.
-
-    The order is load-bearing and is stated here in the order the code runs.
-    The reservation is taken **first**, so a later failure compensates by
-    releasing it — with one deliberate exception: on ``ChargeCreditMismatchError``
-    the wallet has already been debited, so the reservation is *retained* rather
-    than released. Releasing it there would free budget the caller has in fact
-    spent.
-    An earlier revision of this line named the charge first; anyone reasoning
-    about crash compensation from that reading would have had the direction of
-    the required rollback backwards.
-    """
+    """Receipt an admitted callback's result; never charge or dispatch here."""
     if ctx.replay_response is not None:
         return ctx.replay_response
-
-    from app.services.agent_money import DEFAULT_PRICING, InsufficientFundsResponse
-
-    money = money or get_agent_money()
-    permits = get_permit_service()
-    idem = get_idempotency_service()
-    try:
-        await permits.reserve_budget(ctx.permit_id, ctx.credits)
-    except PermitError as exc:
-        detail = {
-            "error": exc.reason,
-            "message": exc.reason,
-            "tool": ctx.tool_name,
-        }
-        if exc.reason == "permit_write_contended":
-            # Transient: the guarded write lost to contention and exhausted its
-            # retries. Nothing was reserved and nothing was charged, so the key
-            # must stay usable -- *completing* the record here would freeze a
-            # momentary database conflict into a permanent stored denial that
-            # every retry of that idempotency key replays, long after the
-            # contention cleared. Release the key and answer 503 instead.
-            await idem.abandon(
-                wallet_id=ctx.wallet_id,
-                endpoint=ctx.endpoint,
-                idempotency_key=ctx.idempotency_key,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=detail,
-            ) from exc
-        # Terminal: a permit that expired or was revoked between validation and
-        # this reservation is a *denial*, not a server fault. Nothing was
-        # reserved and nothing was charged, so the caller gets the same 403
-        # shape the up-front validation would have produced. Without this the
-        # PermitError escaped uncaught and the route answered 500, which tells
-        # an operator the service is broken when in fact the permit did its job.
-        await abort_awi_http_governed(
-            ctx,
-            status_code=status.HTTP_403_FORBIDDEN,
-            error_payload=detail,
+    action_status = response_payload.get("status")
+    failed = action_status is not None and action_status != "success"
+    reason = None
+    outcome = "success"
+    if failed:
+        reason = _stable_awi_failure_reason(
+            str(action_status), response_payload.get("error")
         )
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=detail,
-        ) from exc
-
-    unit_price = DEFAULT_PRICING[ServiceCategory.AGENT_COMMS][1]
-    charge_units = ctx.credits / unit_price if unit_price else Decimal("1")
-
-    try:
-        charge_result = await money.charge(
-            wallet_id=ctx.wallet_id,
-            service_category=ServiceCategory.AGENT_COMMS,
-            units=charge_units,
-            request_path=ctx.endpoint,
-            description=f"AWI HTTP {ctx.tool_name}",
-            # Key the debit to this request's durable identity. Without it this
-            # path had neither the uq_ledger_wallet_operation_key constraint nor
-            # the adopt-the-existing-debit recovery that the governed MCP path
-            # relies on -- so a charge that committed but whose acknowledgement
-            # was lost took the except branch below, which releases budget and
-            # *completes* the idempotency record as charge_failed. The caller
-            # then retried under a fresh key and was debited a second time for
-            # one logical action. With the key, the second attempt adopts the
-            # first durable debit instead of creating one.
-            operation_key=ctx.record_id,
-        )
-    except LedgerWriteContendedError as exc:
-        # The governed MCP path frees the key here and tells the caller to
-        # retry. That is exactly wrong on this route, because the order is
-        # reversed: every governed AWI route runs its action BEFORE reaching
-        # this charge -- app/routers/awi.py drives manager.execute_action, which
-        # issues live Playwright DOM commands when a bridge is attached, and the
-        # enhanced routes execute browser commands, index RAG memories and
-        # consume WebAuthn challenges. None of them dedupe on the idempotency
-        # key. Freeing the key would therefore invite the caller to repeat a
-        # side effect that already happened, which is a worse outcome than the
-        # stored denial that freeing it was meant to avoid.
-        #
-        # So the record is completed, and the reason is carried through rather
-        # than flattened into charge_failed so an operator can still tell a lost
-        # write conflict from a substantive charge failure. The action ran and
-        # went unbilled; that cost is accepted deliberately, in preference to
-        # running it a second time.
-        detail = {
-            "error": "ledger_write_contended",
-            "message": "Wallet charge lost a write conflict after the action ran.",
-            "tool": ctx.tool_name,
-        }
-        await _release_reservation(permits, ctx)
-        await abort_awi_http_governed(ctx, status_code=500, error_payload=detail)
-        raise HTTPException(status_code=500, detail=detail) from exc
-    except Exception as exc:
-        await _release_reservation(permits, ctx)
-        detail = {
-            "error": "charge_failed",
-            "message": "Wallet charge failed for governed AWI action.",
-            "tool": ctx.tool_name,
-        }
-        await abort_awi_http_governed(ctx, status_code=500, error_payload=detail)
-        # Raise HTTPException so route handlers do not re-abort with a
-        # different detail (except HTTPException: raise).
-        raise HTTPException(status_code=500, detail=detail) from exc
-
-    if isinstance(charge_result, InsufficientFundsResponse):
-        await _release_reservation(permits, ctx)
-        detail = {
-            "error": "insufficient_funds",
-            "message": "Wallet cannot cover governed AWI action.",
-            "tool": ctx.tool_name,
-        }
-        await abort_awi_http_governed(
-            ctx, status_code=status.HTTP_402_PAYMENT_REQUIRED, error_payload=detail
-        )
-        raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail=detail,
-        )
-
-    ledger_entry_id = getattr(charge_result, "entry_id", None)
-    raw_amount = getattr(charge_result, "amount", ctx.credits)
-    try:
-        credits_charged = aligned_credits_charged(
-            ledger_amount=raw_amount,
-            authorized_credits=ctx.credits,
-            context=f"awi_http:{ctx.tool_name}",
-        )
-    except ChargeCreditMismatchError as mismatch_exc:
-        if ledger_entry_id:
-            await idem.mark_charged(
-                wallet_id=ctx.wallet_id,
-                endpoint=ctx.endpoint,
-                idempotency_key=ctx.idempotency_key,
-                ledger_entry_id=str(ledger_entry_id),
-            )
-        # Wallet was debited: keep permit budget reserved; close the key.
-        detail = {
-            "error": "charge_credit_mismatch",
-            "message": str(mismatch_exc),
-            "tool": ctx.tool_name,
-        }
-        await abort_awi_http_governed(ctx, status_code=500, error_payload=detail)
-        raise HTTPException(status_code=500, detail=detail) from mismatch_exc
-
-    if ledger_entry_id:
-        await idem.mark_charged(
-            wallet_id=ctx.wallet_id,
-            endpoint=ctx.endpoint,
-            idempotency_key=ctx.idempotency_key,
-            ledger_entry_id=str(ledger_entry_id),
-        )
-
-    # Finalization is retried as a unit — charge is already checkpointed.
-    # Re-load any receipt already written for this ledger entry so a failed
-    # refresh/return after commit cannot create a duplicate on retry.
-    finalize_attempts = 3
-    receipt = None
-    if ledger_entry_id:
-        receipt = await get_receipt_service().get_receipt_by_ledger_entry_id(
-            str(ledger_entry_id)
-        )
-    response_with_receipt: dict[str, Any] | None = None
-    last_exc: Exception | None = None
-    for attempt in range(1, finalize_attempts + 1):
-        try:
-            if receipt is None:
-                receipt = await get_receipt_service().create_receipt(
-                    permit_id=ctx.permit_id,
-                    wallet_id=ctx.wallet_id,
-                    key_id=ctx.auth.key_id,
-                    tool=ctx.tool_name,
-                    request_payload=request_payload,
-                    response_payload=response_payload,
-                    ledger_entry_id=ledger_entry_id,
-                    credits_authorized=ctx.credits,
-                    credits_charged=credits_charged,
-                    outcome="success",
-                    audit_event_id=None,
-                    reason_code=None,
-                )
-            assert receipt is not None
-            receipt_payload = {
-                "receipt_id": receipt.receipt_id,
-                "permit_id": receipt.permit_id,
-                "ledger_entry_id": receipt.ledger_entry_id,
-                "outcome": receipt.outcome,
-                "signature": receipt.signature,
-            }
-            response_with_receipt = {
-                **response_payload,
-                "receipt": receipt_payload,
-            }
-            await idem.complete(
-                wallet_id=ctx.wallet_id,
-                endpoint=ctx.endpoint,
-                idempotency_key=ctx.idempotency_key,
-                response_reference=receipt.receipt_id,
-                response_json=response_with_receipt,
-                status_code=200,
-            )
-            last_exc = None
-            break
-        except Exception as exc:
-            last_exc = exc
-            if receipt is None and ledger_entry_id:
-                # Commit may have succeeded even if create_receipt raised later.
-                receipt = await get_receipt_service().get_receipt_by_ledger_entry_id(
-                    str(ledger_entry_id)
-                )
-            if attempt == finalize_attempts:
-                break
-            logger.warning(
-                "awi_http_finalize_retry attempt=%d/%d ledger_entry_id=%s error=%s",
-                attempt,
-                finalize_attempts,
-                ledger_entry_id,
-                exc,
-            )
-            await asyncio.sleep(0.05 * attempt)
-
-    if last_exc is not None:
-        logger.error(
-            "awi_http_finalize_failed_after_retries ledger_entry_id=%s wallet_id=%s error=%s",
-            ledger_entry_id,
-            ctx.wallet_id,
-            last_exc,
-        )
-        raise last_exc
-
-    assert response_with_receipt is not None
-    return response_with_receipt
+        if response_payload.get("effect_status") == "not_dispatched":
+            await _refund_undispatched(ctx)
+            outcome = "failed_refunded"
+        else:
+            # Zero completed commands and thrown exceptions do not prove that
+            # the first command had no effect. Keep the debit and reservation.
+            outcome = "delivery_uncertain"
+    return await _finalize_awi_http(
+        ctx,
+        response_payload=response_payload,
+        status_code=200,
+        outcome=outcome,
+        reason_code=reason,
+    )
 
 
-async def _release_reservation(permits: Any, ctx: AwiHttpGovernedContext) -> None:
-    """Hand a governed AWI reservation back, never at the cost of the record.
-
-    ``release_budget`` runs its own guarded write and raises
-    ``PermitError("permit_write_contended")`` when that write exhausts its
-    retries. Called unguarded ahead of the idempotency completion, that failure
-    would do double damage: the record would never be closed, leaving the key
-    wedged in progress, and the ``PermitError`` would escape the route's typed
-    handling as an unclassified 500. The reservation is the recoverable half --
-    it lapses when the permit expires or is revoked -- so a failure here is
-    logged and the completion is allowed to proceed.
-    """
+async def _release_reservation(permits: Any, ctx: AwiHttpGovernedContext) -> bool:
     try:
         await permits.release_budget(ctx.permit_id, ctx.credits)
+        return True
     except Exception:
         logger.exception(
-            "awi_governed_release_budget_failed",
-            extra={"permit_id": ctx.permit_id, "endpoint": ctx.endpoint},
+            "awi_governed_release_budget_failed", extra={"permit_id": ctx.permit_id}
         )
-
-
-async def abort_awi_http_governed(
-    ctx: AwiHttpGovernedContext,
-    *,
-    status_code: int,
-    error_payload: dict[str, Any],
-) -> None:
-    """Close an in-progress idempotency key after a failed governed AWI attempt."""
-    if ctx.replay_response is not None:
-        return
-    await get_idempotency_service().complete(
-        wallet_id=ctx.wallet_id,
-        endpoint=ctx.endpoint,
-        idempotency_key=ctx.idempotency_key,
-        response_reference=None,
-        response_json={"detail": error_payload},
-        status_code=status_code,
-    )
+        await permits.record_absorbed_release_drift(
+            permit_id=ctx.permit_id,
+            amount=ctx.credits,
+            site="awi_http",
+        )
+        return False
 
 
 async def raise_awi_http_error(
@@ -564,9 +550,28 @@ async def raise_awi_http_error(
     status_code: int,
     detail: dict[str, Any],
 ) -> None:
-    """Abort idempotency then raise HTTPException (never returns)."""
-    await abort_awi_http_governed(ctx, status_code=status_code, error_payload=detail)
-    raise HTTPException(status_code=status_code, detail=detail)
+    """Receipt a rejection or uncertain callback error without losing its owner."""
+    if ctx.replay_response is not None or ctx.finalized:
+        raise HTTPException(status_code=status_code, detail=detail)
+    if ctx.finalization_started:
+        raise HTTPException(
+            status_code=503, detail={"error": "awi_finalization_incomplete"}
+        )
+    if ctx.dispatch_started:
+        outcome = "delivery_uncertain"
+    elif ctx.ledger_entry_id:
+        await _refund_undispatched(ctx)
+        outcome = "failed_refunded"
+    else:
+        outcome = "insufficient_funds" if status_code == 402 else "denied"
+    body = await _finalize_awi_http(
+        ctx,
+        response_payload=detail,
+        status_code=status_code,
+        outcome=outcome,
+        reason_code=_stable_awi_failure_reason("error", detail.get("error")),
+    )
+    raise HTTPException(status_code=status_code, detail=body)
 
 
 def parse_governed_headers(

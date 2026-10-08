@@ -12,7 +12,6 @@ unpermitted MCP is enabled.
 """
 
 import logging
-from dataclasses import asdict
 from threading import Lock
 from typing import Any, Callable, TypedDict
 
@@ -145,32 +144,17 @@ async def awi_memory_index(
 
 
 async def awi_rag_query(query: str, top_k: int = 5, **kwargs) -> dict[str, Any]:
-    """Semantic search via the RAG engine (governed MCP path)."""
-    from .awi_rag_engine import get_awi_rag_engine
+    """Wrapper for RAG memory queries.
 
-    engine = get_awi_rag_engine()
-    results = await engine.search(
-        query=query,
-        top_k=top_k,
-        session_type=kwargs.get("session_type"),
-    )
-    serialized = []
-    for item in results:
-        if hasattr(item, "model_dump"):
-            serialized.append(item.model_dump(mode="json"))
-        else:
-            payload = asdict(item)
-            for key, value in list(payload.items()):
-                if hasattr(value, "isoformat"):
-                    payload[key] = value.isoformat()
-            serialized.append(payload)
+    The MCP dispatch hands this tool no caller wallet, so it must not search
+    the shared memory store: doing so returned every tenant's memories under a
+    signed success receipt. Like its sibling wrappers it points at the HTTP
+    route, which scopes results to the caller's wallet.
+    """
     return {
-        "status": "ok",
-        "governed": True,
-        "tool": "awi_rag_query",
-        "query": query,
-        "count": len(serialized),
-        "results": serialized,
+        "endpoint": "/v1/awi/rag/query",
+        "method": "POST",
+        "requires": ["query"],
     }
 
 

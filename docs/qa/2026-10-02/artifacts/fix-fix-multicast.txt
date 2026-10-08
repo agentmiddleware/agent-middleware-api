@@ -1,0 +1,1 @@
+BE-003: reject literal/resolved multicast in both existing address predicates; preserve local override and loopback exceptions.

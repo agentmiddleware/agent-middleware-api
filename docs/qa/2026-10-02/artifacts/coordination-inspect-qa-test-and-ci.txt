@@ -1,0 +1,336 @@
+FILE tests/test_qa_20261002_backend.py
+"""QA sweep: public auth contract and replay-key encoding boundaries.
+
+Optional generative/schema tooling is installed by docs/qa/2026-10-02/
+requirements-qa.txt. Product behavior is deliberately unchanged.
+"""
+from __future__ import annotations
+
+import json
+from collections import Counter
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from app.main import app
+from app.services.idempotency import (
+    InvalidIdempotencyKeyError,
+    decode_idempotency_key_header,
+    resolve_client_idempotency_key,
+    validate_client_idempotency_key,
+)
+from tests.test_mcp_idempotency_key_validation import CountedTool, _snapshot
+from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
+
+
+@pytest.fixture
+async def qa_client():
+    async with AsyncClient(
+        transport=ASGITransport(app=app, raise_app_exceptions=False),
+        base_url="http://test",
+    ) as client:
+        yield client
+
+
+@pytest.mark.parametrize("method,path", [
+    ("GET", "/v1/permits"),
+    ("POST", "/v1/permits"),
+    ("GET", "/v1/receipts"),
+    ("GET", "/v1/receipts/missing"),
+    ("GET", "/v1/billing/wallets"),
+    ("POST", "/v1/billing/charge"),
+    ("GET", "/v1/audit/events"),
+    ("POST", "/v1/audit/verify-chain"),
+    ("GET", "/v1/me/authority"),
+    ("GET", "/v1/api-keys/missing"),
+    ("POST", "/mcp/messages"),
+    ("POST", "/mcp/tools/missing/invoke"),
+])
+@pytest.mark.parametrize("credential", ["absent", "invalid-bearer"])
+async def test_sensitive_route_rejects_unauthenticated_caller(
+    qa_client, method, path, credential
+):
+    # A malformed Authorization header must not fall back to a valid bootstrap key.
+    headers = {} if credential == "absent" else {
+        "Authorization": "Bearer [REDACTED]",
+        "X-API-Key": "test-key",
+    }
+    response = await qa_client.request(method, path, headers=headers, json={})
+    assert response.status_code == 401
+    assert response.headers["content-type"].startswith("application/json")
+    assert "traceback" not in response.text.lower()
+    assert "X-Credential-Rejected" not in response.headers
+
+
+def test_openapi_schema_is_valid_with_unique_operation_ids():
+    validator = pytest.importorskip("openapi_spec_validator")
+    # Force a fresh schema: other tests mount dormant routers dynamically.
+    old_schema = app.openapi_schema
+    try:
+        app.openapi_schema = None
+        schema = app.openapi()
+        validator.validate(schema)
+        operations = [
+            operation
+            for path in schema["paths"].values()
+            for method, operation in path.items()
+            if method in {"get", "post", "put", "patch", "delete"}
+        ]
+        counts = Counter(operation["operationId"] for operation in operations)
+        assert all(count == 1 for count in counts.values())
+    finally:
+        app.openapi_schema = old_schema
+
+
+@pytest.mark.xfail(strict=True, reason="BE-002: Bearer [REDACTED] is absent from OpenAPI security schemes")
+def test_openapi_declares_supported_bearer_authentication():
+    schemes = app.openapi()["components"]["securitySchemes"].values()
+    assert any(s.get("type") == "http" and s.get("scheme") == "bearer" for s in schemes)
+
+
+def test_scalar_unicode_replay_keys_roundtrip_without_normalization():
+    hypothesis = pytest.importorskip("hypothesis")
+    from hypothesis import strategies as st
+
+    alphabet = st.characters(
+        exclude_categories=("Cs",),
+        exclude_characters="".join(chr(i) for i in [*range(32), 127]),
+    )
+
+    @hypothesis.settings(max_examples=200, derandomize=True, deadline=None)
+    @hypothesis.given(st.text(alphabet=alphabet, min_size=1, max_size=128).filter(str.strip))
+    def check(key):
+        decoded = decode_idempotency_key_header(key.encode("utf-8").decode("latin-1"))
+        assert decoded == key
+        assert resolve_client_idempotency_key([("header", decoded), ("body", key)]) == key
+        with pytest.raises(InvalidIdempotencyKeyError):
+            resolve_client_idempotency_key([("header", key), ("body", key + " ")])
+
+    check()
+
+
+@pytest.mark.parametrize("key", ["\ud800", "prefix\udfff", "\ud800\udfff"])
+@pytest.mark.xfail(strict=True, reason="BE-001: lone surrogate replay keys pass validation and cannot be persisted as UTF-8")
+def test_replay_key_validator_rejects_non_scalar_unicode(key):
+    with pytest.raises(InvalidIdempotencyKeyError):
+        validate_client_idempotency_key(key, source="JSON body")
+
+
+@pytest.mark.xfail(strict=True, reason="BE-001: escaped lone surrogate replay key returns HTTP 500 instead of a client error")
+async def test_lone_surrogate_replay_key_is_rejected_before_effect_or_debit(
+    qa_client, clean_database
+):
+    tool = CountedTool("qa.encoding.effect")
+    try:
+        caller = await provision_agent_wallet(qa_client)
+        permit = await create_tool_permit(
+            qa_client,
+            wallet_id=caller["agent_wallet_id"],
+            key_id=caller["key_id"],
+            tool_name=tool.name,
+        )
+        before = await _snapshot(qa_client, caller, tool)
+        body = {
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {
+                "name": tool.name, "arguments": {"text": "one"},
+                "mcpContext": {
+                    "wallet_id": caller["agent_wallet_id"],
+                    "permit_id": permit["permit_id"],
+                    "idempotency_key": "\ud800",
+                },
+            },
+        }
+        response = await qa_client.post(
+            "/mcp/messages",
+            content=json.dumps(body).encode("ascii"),
+            headers={**caller["agent_headers"], "Content-Type": "application/json"},
+        )
+        assert await _snapshot(qa_client, caller, tool) == before
+        assert response.status_code == 200
+        assert response.json()["error"]["code"] == -32602
+    finally:
+        tool.close()
+
+FILE docs/qa/2026-10-02/frontend.spec.cjs
+// QA regression coverage. This suite cannot contact non-loopback hosts.
+const {test, expect} = require(process.env.QA_NODE_MODULES
+  ? `${process.env.QA_NODE_MODULES}/@playwright/test` : '/private/tmp/amw-qa-browser/node_modules/@playwright/test');
+test.beforeEach(async ({context}) => {
+  await context.route('**/*', route => ['127.0.0.1', 'localhost', '[::1]'].includes(new URL(route.request().url()).hostname)
+    ? route.continue() : route.abort('blockedbyclient'));
+});
+
+test('main public pages load without browser or resource errors', async ({page}) => {
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('response', response => {if (response.status() >= 400) errors.push(`${response.status()} ${response.url()}`);});
+  for (const route of ['/', '/proof/', '/compare/', '/concept/', '/404.html']) {
+    expect((await page.goto(route, {waitUntil: 'networkidle'})).status()).toBe(200);
+    await expect(page.locator('h1')).toBeVisible();
+    expect(await page.locator('body').innerText()).not.toContain('@@PUBLIC_');
+  }
+  expect(errors).toEqual([]);
+});
+
+test('calculator valid, boundary, invalid and cleared states stay local', async ({page}) => {
+  await page.goto('/');
+  const fields = ['actions', 'rate', 'loss', 'reduction', 'cost'].map(name => page.locator(`#fit-${name}`));
+  const summary = page.locator('[data-fit-summary]');
+  const guidance = page.locator('[data-fit-guidance]');
+  const requests = [];
+  await page.waitForLoadState('networkidle');
+  page.on('request', request => requests.push(request.url()));
+  async function fill(values) {for (let i = 0; i < values.length; i++) await fields[i].fill(String(values[i]));}
+  await expect(summary).toContainText('Enter the four');
+  await fill([100000, 0.1, 50, 80, 2800]);
+  await expect(summary).toContainText('$4,000.00');
+  await expect(guidance).toContainText('exceeds');
+  await expect(page.locator('[data-fit-next]')).toBeVisible();
+  await fill([0, 100, 50, 100, 0]);
+  await expect(guidance).toContainText('no avoided duplicates');
+  await fill([1, 101, 50, 100, 0]);
+  await expect(summary).toContainText('Check your inputs');
+  await expect(fields[1]).toHaveAttribute('aria-invalid', 'true');
+  await fill([1, 100, 1.005, 100, 1]);
+  await expect(summary).toContainText('$1.01');
+  await expect(guidance).toContainText('$0.01');
+  await fields[2].fill('');
+  await expect(summary).toContainText('Enter the four');
+  expect(requests).toEqual([]);
+});
+
+test('receipt evidence loads without claiming cryptographic verification', async ({page}) => {
+  await page.goto('/proof/');
+  await expect(page.locator('[data-proof-status]').first()).toHaveText('artifacts loaded');
+  await expect(page.locator('[data-proof-message]').first()).toContainText('Run the offline verifier');
+});
+
+test('receipt load failure removes published data and verification claims', async ({page}) => {
+  await page.route('**/proof/receipt.json', route => route.fulfill({status: 503, contentType: 'application/json', body: '{}'}));
+  await page.goto('/proof/');
+  await expect(page.locator('[data-proof-status]').first()).toHaveText('not published');
+  await expect(page.locator('[data-proof-message]').first()).toContainText('No verification claim');
+  for (const field of await page.locator('[data-proof-field]').all()) await expect(field).toHaveText('not published');
+});
+
+test('malformed receipt payload fails closed', async ({page}) => {
+  await page.route('**/proof/receipt.json', route => route.fulfill({status: 200, contentType: 'application/json', body: '{"signing_input":"not json"}'}));
+  await page.goto('/proof/');
+  await expect(page.locator('[data-proof-status]').first()).toHaveText('not published');
+});
+
+test('mobile pages do not overflow', async ({page}) => {
+  await page.setViewportSize({width: 320, height: 844});
+  for (const route of ['/', '/proof/', '/compare/', '/concept/', '/404.html']) {
+    await page.goto(route, {waitUntil: 'networkidle'});
+    await page.evaluate(() => document.fonts.ready);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), route).toBe(true);
+  }
+});
+
+test('operator index is static and does not ask for credentials', async ({page}) => {
+  await page.goto('http://127.0.0.1:8766/dashboard.html');
+  await expect(page.locator('h1')).toContainText('Inspect the trust plane');
+  expect(await page.locator('script, input, form').count()).toBe(0);
+  await expect(page.locator('.notice')).toContainText('does not request API keys');
+});
+
+test('no JavaScript retains the pilot and proof entry path', async ({browser}) => {
+  const context = await browser.newContext({javaScriptEnabled: false, serviceWorkers: 'block'});
+  await context.route('**/*', route => ['127.0.0.1', 'localhost', '[::1]'].includes(new URL(route.request().url()).hostname)
+    ? route.continue() : route.abort('blockedbyclient'));
+  const page = await context.newPage();
+  await page.goto('http://127.0.0.1:8765');
+  await expect(page.locator('#pilot')).toContainText('Who owns the budget');
+  await expect(page.locator('[data-fit-inputs]')).toBeHidden();
+  expect(await page.locator('a[href="/proof/"]').count()).toBeGreaterThan(0);
+  await context.close();
+});
+
+FILE docs/qa/2026-10-02/ux_csp_server.py
+"""Serve existing QA site artifacts with loopback-only resource restrictions."""
+
+from functools import partial
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from threading import Thread
+
+
+class LocalOnlyHandler(SimpleHTTPRequestHandler):
+    def end_headers(self):
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self' data: blob:; connect-src 'self'; "
+            "script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+            "object-src 'none'; frame-src 'none'; form-action 'self'; base-uri 'self'",
+        )
+        self.send_header("Cache-Control", "no-store")
+        super().end_headers()
+
+    def log_message(self, format, *args):
+        pass
+
+
+def main():
+    root = Path(__file__).resolve().parents[3]
+    site = ThreadingHTTPServer(
+        ("127.0.0.1", 8767),
+        partial(LocalOnlyHandler, directory="/private/tmp/amw-qa-site-dist"),
+    )
+    dashboard = ThreadingHTTPServer(
+        ("127.0.0.1", 8768),
+        partial(LocalOnlyHandler, directory=str(root / "static")),
+    )
+    Thread(target=dashboard.serve_forever, daemon=True).start()
+    print("Local CSP servers: 127.0.0.1:8767 and 127.0.0.1:8768", flush=True)
+    site.serve_forever()
+
+
+if __name__ == "__main__":
+    main()
+
+CI commands only
+60:           pip install pytest pytest-asyncio anyio httpx
+63:         run: pytest tests/ -v --tb=short -m "not production_trust"
+66:       # a production_trust marker, so re-running them added no coverage. Keep
+72:           pytest \
+83:       - name: Run trust-core coverage gate
+85:         run: scripts/trust_coverage_gate.sh
+114:         run: pytest tests/test_migrations.py -v --tb=short
+253:           pip install uv pytest pytest-asyncio ruff mypy
+267:           python -m pytest "$GITHUB_WORKSPACE/b2a_sdk/tests" -q
+269:           ruff check b2a_sdk/src b2a_sdk/tests tests/test_python_sdk_trust_loop.py
+270:           mypy --follow-imports=skip \
+314:       # module names. Explicit pytest boundaries exclude root app fixtures and
+319:           python -m pytest -c pyproject.toml --rootdir=. --confcutdir=.
+358:           pip install pytest pytest-asyncio anyio httpx
+377:           pytest -p no:anyio \
+396:         run: pytest tests/test_postgres_datetime_binding.py -v --tb=short
+406:           pytest -p no:anyio \
+433:           pip install pytest pytest-asyncio anyio httpx
+449:           pytest tests/test_production_trust_posture.py -m production_trust -v --tb=short
+482:           pip install pytest pytest-asyncio
+496:         run: pytest tests/test_mcp_postgres_multiprocess.py -v --tb=short
+503:           pytest tests/test_permit_postgres_concurrency.py -v --tb=short
+504:           pytest tests/test_duplicate_guard_postgres_concurrency.py -v --tb=short
+505:           pytest tests/test_permit_repeat_window_rollout.py tests/test_repeat_window_compatibility.py -v --tb=short -o asyncio_default_fixture_loop_scope=session -o asyncio_default_test_loop_scope=session
+515:       - name: Install gitleaks
+519:           curl -sSL -o /tmp/gitleaks.tar.gz \
+520:             "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+521:           tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+522:           sudo install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
+523:           gitleaks version
+526:       # 2026-08-24 with a full-history gitleaks scan across every ref (see
+527:       # the scope note in .gitleaks.toml): the only real credential ever
+532:         run: gitleaks detect --no-git --source . --config .gitleaks.toml --redact --verbose
+542:           printf 'API_KEY = [REDACTED] 'canary-lowentropy-credential-must-be-flagged' > ./_gitleaks_canary.py
+543:           if gitleaks detect --no-git --source . --config .gitleaks.toml --redact >/dev/null 2>&1; then
+544:             rm -f ./_gitleaks_canary.py
+548:           rm -f ./_gitleaks_canary.py
+577:           pip install pytest pytest-asyncio pytest-cov anyio httpx
+702:           pip install ruff mypy
+704:       - name: Run ruff
+705:         run: ruff check .
+707:       - name: Run mypy
+708:         run: mypy app/

@@ -1,0 +1,86 @@
+tests/test_site_agent_interface.py:154:    return subprocess.run(
+tests/test_site_agent_interface.py:3583:    result = subprocess.run(
+tests/test_partner_mcp.py:227:    result = subprocess.run(
+tests/test_failure_lab.py:33:    result = subprocess.run(
+tests/test_failure_lab.py:279:    result = subprocess.run(
+tests/test_postgres_datetime_binding.py:125:        subprocess.run(["alembic", "upgrade", "head"], check=True, env=dict(os.environ))
+tests/test_failure_lab_verifier.py:77:    completed = subprocess.run(
+tests/test_agent_ops_war_room_demo.py:96:    result = subprocess.run(
+tests/test_mcp_postgres_multiprocess.py:61:    process: subprocess.Popen[str]
+tests/test_mcp_postgres_multiprocess.py:71:    process: subprocess.Popen[str]
+tests/test_mcp_postgres_multiprocess.py:326:    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+tests/test_mcp_postgres_multiprocess.py:346:            except subprocess.TimeoutExpired:
+tests/test_mcp_postgres_multiprocess.py:380:            except subprocess.TimeoutExpired:
+tests/test_mcp_postgres_multiprocess.py:435:        process = subprocess.Popen(
+tests/test_mcp_postgres_multiprocess.py:454:            stderr=subprocess.STDOUT,
+tests/test_mcp_postgres_multiprocess.py:561:        process = subprocess.Popen(
+tests/test_mcp_postgres_multiprocess.py:580:            stderr=subprocess.STDOUT,
+tests/test_mcp_postgres_multiprocess.py:1240:    result = subprocess.run(
+tests/test_mcp_postgres_multiprocess.py:1244:        stdout=subprocess.PIPE,
+tests/test_mcp_postgres_multiprocess.py:1245:        stderr=subprocess.STDOUT,
+tests/test_demo_trust_plane.py:13:    result = subprocess.run(
+tests/test_red_team_trust_plane.py:26:    result = subprocess.run(
+tests/test_public_mcp_endpoint.py:276:    completed = subprocess.run(
+tests/test_db_urls_durable_state.py:359:        proc = subprocess.run(
+tests/test_db_urls_durable_state.py:366:    except subprocess.TimeoutExpired as exc:
+tests/test_db_urls_durable_state.py:533:        proc = subprocess.run(
+tests/test_db_urls_durable_state.py:539:    except subprocess.TimeoutExpired as exc:
+tests/test_db_urls_durable_state.py:540:        # The child is killed by subprocess.run before this propagates, so a
+tests/test_db_urls_durable_state.py:652:        proc = subprocess.run(
+tests/test_db_urls_durable_state.py:659:    except subprocess.TimeoutExpired as exc:
+tests/test_schema_boot.py:276:    result = subprocess.run(
+tests/test_demo_ambiguous_retry.py:20:    result = subprocess.run(
+tests/test_minimal_path_e2e.py:46:    with socket.socket() as sock:
+tests/test_minimal_path_e2e.py:72:    process = subprocess.Popen(
+tests/test_minimal_path_e2e.py:87:        stdout=subprocess.PIPE,
+tests/test_minimal_path_e2e.py:88:        stderr=subprocess.STDOUT,
+tests/test_minimal_path_e2e.py:112:        except subprocess.TimeoutExpired:
+tests/test_human_preflight.py:106:    return subprocess.run(
+tests/test_behavioral_sandbox.py:261:        monkeypatch.setattr(asyncio, "create_subprocess_exec", missing_docker)
+tests/test_onboarding_contract.py:261:        ignore_check = subprocess.run(
+tests/test_prepare_railway_release.py:15:    result = subprocess.run(
+tests/test_quickstart_path.py:39:    with socket.socket() as sock:
+tests/test_quickstart_path.py:51:        process = subprocess.Popen(
+tests/test_quickstart_path.py:63:            stderr=subprocess.STDOUT,
+tests/test_quickstart_path.py:90:        except subprocess.TimeoutExpired:
+tests/test_quickstart_path.py:103:def _verify_cli(bundle_path: Path, keys_path: Path) -> subprocess.CompletedProcess:
+tests/test_quickstart_path.py:105:    return subprocess.run(
+tests/test_quickstart_path.py:305:) -> subprocess.CompletedProcess:
+tests/test_quickstart_path.py:309:    return subprocess.run(
+tests/test_quickstart_path.py:395:    result = subprocess.run(
+tests/test_production_trust_posture.py:162:    result = subprocess.run(
+tests/test_constant_test_loop.py:37:    with socket.socket() as sock:
+tests/test_constant_test_loop.py:75:        process = subprocess.Popen(
+tests/test_constant_test_loop.py:89:            stderr=subprocess.STDOUT,
+tests/test_constant_test_loop.py:115:        except subprocess.TimeoutExpired:
+tests/test_constant_test_loop.py:126:    result = subprocess.run(
+tests/test_constant_test_loop.py:148:    result = subprocess.run(
+tests/test_constant_test_loop.py:293:    result = subprocess.run(
+tests/test_constant_test_loop.py:340:    result = subprocess.run(
+tests/test_constant_test_loop.py:372:    result = subprocess.run(
+tests/test_constant_test_loop.py:542:    result = subprocess.run(
+tests/test_constant_test_loop.py:559:    result = subprocess.run(
+tests/test_constant_test_loop.py:580:    result = subprocess.run(
+tests/test_constant_test_loop.py:597:    result = subprocess.run(
+tests/test_constant_test_loop.py:625:    result = subprocess.run(
+tests/test_constant_test_loop.py:643:    result = subprocess.run(
+tests/test_constant_test_loop.py:735:    result = subprocess.run(
+tests/test_dogfood_trust_plane.py:14:    result = subprocess.run(
+tests/test_rtaas.py:323:    proc = subprocess.run(
+tests/test_railway_preflight.py:466:    result = subprocess.run(
+tests/test_railway_preflight.py:563:    return subprocess.run(
+tests/test_railway_preflight.py:676:    result = subprocess.run(
+tests/test_railway_preflight.py:709:    return subprocess.run(
+tests/test_railway_iac_config.py:166:        result = subprocess.run(
+tests/test_failure_lab_diagnostic.py:655:    completed = subprocess.run(
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    from pathlib import Path; import subprocess; subprocess.run(["rg","-n","subprocess\\.|os\\.system|Popen|create_subprocess|load_dotenv|DotEnvSettingsSource|socket\\.socket|socket\\.create_connection","tests"]); print("SOCKET PLUGIN",Path("/private/tmp/amw-qa-python/lib/python3.13/site-packages/pytest_socket.py").read_text()[:15000]); print("TEST NAMES",[x.name for x in Path("tests").glob("test_*.py")])
+                                                                                                                                                                                                                                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.5/Frameworks/Python.framework/Versions/3.14/lib/python3.14/pathlib/__init__.py", line 787, in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+         ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.5/Frameworks/Python.framework/Versions/3.14/lib/python3.14/pathlib/__init__.py", line 771, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/private/tmp/amw-qa-python/lib/python3.13/site-packages/pytest_socket.py'

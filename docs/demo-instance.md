@@ -10,10 +10,21 @@ This document describes how to set up a public demo instance.
 4. Set environment variables:
 
 ```bash
-# Core
+# Core. Railway boots refuse an unset ENVIRONMENT (the injected RAILWAY_*
+# variables mark a hosted runtime). Any value other than a local one
+# (local, dev, test, ci, ...) is production-like — "demo" included — and
+# engages every production guardrail in app/core/trust_mode.py, so the rest
+# of this block is written to satisfy them.
+ENVIRONMENT=production
 DEBUG=false
 STATE_BACKEND=postgres
 DATABASE_URL=${{PostgreSQL.DATABASE_URL}}
+# Postgres schemas come from Alembic, never create_all; this runs
+# `alembic upgrade head` before uvicorn on a fresh database.
+RUN_MIGRATIONS_ON_START=true
+# This demo's own public HTTPS origin; unset, the OpenAPI servers entry falls
+# back to the first-party instance.
+PUBLIC_URL=https://your-demo-instance
 
 # Trust plane — REQUIRED. Trust mode is on by default and the service will not
 # start without a signing seed. Generate one and set it as a Railway variable:
@@ -23,59 +34,64 @@ DATABASE_URL=${{PostgreSQL.DATABASE_URL}}
 TRUST_SIGNING_PRIVATE_KEY_B64=<strict base64 of exactly 32 raw bytes>
 TRUST_SIGNING_KEY_ID=demo-ed25519
 
-# Authentication (demo keys)
-VALID_API_KEYS=demo-key-001,demo-key-002,demo-key-003
+# Authentication. Every VALID_API_KEYS entry is a bootstrap-admin
+# (full-control) credential — see "Demo API Keys" below. Generate one:
+#   python3 -c 'import secrets; print(secrets.token_urlsafe(32))'
+VALID_API_KEYS=<generated random value>
 
 # Rate Limits
 RATE_LIMIT_PER_MINUTE=60
 
-# CORS — a wildcard origin disables credentialed responses. List explicit
-# origins if a browser client needs credentials.
-CORS_ORIGINS=https://agentmarket.cloud,https://smithery.ai,*
+# CORS — the credential-less wildcard is the documented default (see
+# SECURITY_LIMITATIONS.md, "CORS Posture"). A wildcard disables credentialed
+# responses for every origin, so do not mix it with named origins: set an
+# explicit list instead (no `*`) only if a browser client needs credentials.
+CORS_ORIGINS=*
 ```
 
-5. Deploy
+`ENABLE_PROOF_SURFACES`, `ALLOW_LEGACY_UNPERMITTED_MCP`, and the other
+development escape hatches must stay at their off defaults; a production-like
+boot refuses them. The full variable reference is
+[deploy-railway.md](deploy-railway.md#required-production-variables).
 
-## Option 2: Docker Compose (Local Demo)
+5. Deploy with the release-context upload in
+   [deploy-railway.md](deploy-railway.md#canonical-deploy-path)
+   (`scripts/prepare_railway_release.py` + `railway up`). The production
+   `Dockerfile` copies a `.build_commit_sha` stamp that is gitignored and
+   written by that script, so a plain build of the fork's GitHub source
+   fails.
 
-This repository does not ship a `docker-compose.demo.yml`; save the following as
-that filename first. `TRUST_SIGNING_PRIVATE_KEY_B64` is required — the container
-exits at startup without it.
+## Option 2: Supported Local Demo
 
-```yaml
-services:
-  api:
-    image: ghcr.io/petrefiedthunder/agent-middleware-api:latest
-    ports:
-      - "8000:8000"
-    environment:
-      - STATE_BACKEND=memory
-      - VALID_API_KEYS=demo-key-001
-      - DEBUG=false
-      - RATE_LIMIT_PER_MINUTE=60
-      - TRUST_SIGNING_KEY_ID=demo-ed25519
-      - TRUST_SIGNING_PRIVATE_KEY_B64=${TRUST_SIGNING_PRIVATE_KEY_B64:?generate with python3 -c 'import base64, secrets; print(base64.b64encode(secrets.token_bytes(32)).decode())'}
-    volumes:
-      - ./demo.db:/app/demo.db
-```
+Use [the local quickstart](quickstart.md) for the wallet → permit → invoke →
+receipt workflow:
 
-Run with:
 ```bash
-export TRUST_SIGNING_PRIVATE_KEY_B64=$(python3 -c 'import base64, secrets; print(base64.b64encode(secrets.token_bytes(32)).decode())')
-docker-compose -f docker-compose.demo.yml up
+make quickstart
 ```
 
-`STATE_BACKEND=memory` keeps no durable state, so a fresh seed per run is fine
-here. Anything with a persistent database must reuse one saved seed.
+The quickstart binds loopback only, configures its SQLite database and durable
+state, and persists the database and signing seed together under
+`data/quickstart/`. Reuse that saved signing seed on every restart; do not
+regenerate it while keeping signed data. Follow the quickstart's self-provision
+step to obtain a wallet-scoped key and its governed invocation examples.
 
-## Demo API Keys (Development Only)
+The former ad hoc Compose recipe is retired: its memory-state setting and
+unused database mount did not configure the trust database. Hosted demo setup
+and operator bootstrap below apply to Option 1; local callers should use the
+complete quickstart flow above.
 
-For testing, use these keys:
-- `demo-key-001` — Full access, 10,000 credits
-- `demo-key-002` — Read-only, 1,000 credits
-- `demo-key-003` — Limited, 500 credits
+## Demo API Keys
 
-**WARNING: Never use these in production!**
+There are no tiered demo keys. Every `VALID_API_KEYS` entry is a
+bootstrap-admin credential with full control of every wallet
+(`app/core/auth.py` grants it `is_bootstrap_admin`); there is no read-only or
+credit-limited variant. Keep it in Railway variables, never hand it to demo
+users, and never reuse a guessable value like `demo-key-001`.
+
+To give someone limited access, use the bootstrap key once to mint a
+wallet-scoped key (`POST /v1/api-keys`), bounded by its agent wallet's budget —
+see [partner-api-key-bootstrap.md](partner-api-key-bootstrap.md).
 
 ## Testing the Demo
 
@@ -83,8 +99,8 @@ For testing, use these keys:
 # Health check
 curl https://your-demo-instance/health
 
-# Discovery manifest
-curl https://your-demo-instance/v1/discover
+# Discovery manifest (production-like boots require a key for tool catalogs)
+curl -H "X-API-Key: $BOOTSTRAP_KEY" https://your-demo-instance/v1/discover
 
 # Agent manifest
 curl https://your-demo-instance/.well-known/agent.json
@@ -95,11 +111,15 @@ curl https://your-demo-instance/llm.txt
 
 ## Demo Wallet
 
-Create a demo wallet with initial credits:
+Create a sponsor wallet, a funded agent wallet, and a wallet-scoped agent key
+in one step (the agent key is printed once):
 
 ```bash
-curl -X POST https://your-demo-instance/v1/billing/wallets/agent \
-  -H "X-API-Key: demo-key-001" \
-  -H "Content-Type: application/json" \
-  -d '{"wallet_id": "demo-agent", "parent_wallet_id": "demo-sponsor"}'
+BOOTSTRAP_KEY=<your VALID_API_KEYS value> \
+uv run --with-requirements requirements.txt \
+  python scripts/partner_api_key_bootstrap.py \
+  --api-url https://your-demo-instance \
+  --sponsor-name "Demo Sponsor" \
+  --agent-id demo-agent \
+  --budget-credits 1000
 ```

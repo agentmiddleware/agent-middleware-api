@@ -10,6 +10,7 @@ from datetime import datetime
 
 class TelemetryEventType(str, Enum):
     """Categories of telemetry events the system can ingest."""
+
     ERROR = "error"
     WARNING = "warning"
     SESSION = "session"
@@ -21,6 +22,7 @@ class TelemetryEventType(str, Enum):
 
 class Severity(str, Enum):
     """Severity levels for anomalies and issues."""
+
     CRITICAL = "critical"
     HIGH = "high"
     MEDIUM = "medium"
@@ -30,6 +32,7 @@ class Severity(str, Enum):
 
 class TelemetryEvent(BaseModel):
     """A single telemetry event to ingest."""
+
     event_type: TelemetryEventType
     source: str = Field(
         ...,
@@ -57,6 +60,7 @@ class TelemetryEvent(BaseModel):
 
 class TelemetryBatch(BaseModel):
     """Batch submission of telemetry events for efficient ingestion."""
+
     events: list[TelemetryEvent] = Field(
         ...,
         min_length=1,
@@ -71,6 +75,7 @@ class TelemetryBatch(BaseModel):
 
 class TelemetryBatchResponse(BaseModel):
     """Confirmation of batch ingestion."""
+
     ingested: int
     failed: int
     batch_id: str
@@ -82,6 +87,7 @@ class TelemetryBatchResponse(BaseModel):
 
 class AnomalyReport(BaseModel):
     """An anomaly detected by the Autonomous PM from telemetry analysis."""
+
     anomaly_id: str
     severity: Severity
     category: str = Field(
@@ -117,6 +123,7 @@ class AnomalyReport(BaseModel):
 
 class AnomalyListResponse(BaseModel):
     """Paginated anomaly listing."""
+
     anomalies: list[AnomalyReport]
     total: int
     page: int
@@ -125,6 +132,7 @@ class AnomalyListResponse(BaseModel):
 
 class AutoPRRequest(BaseModel):
     """Request the Autonomous PM to generate and push a fix."""
+
     anomaly_id: str = Field(
         ...,
         description="The anomaly to generate a fix for.",
@@ -145,10 +153,14 @@ class AutoPRRequest(BaseModel):
 
 class AutoPRResponse(BaseModel):
     """Result of an autonomous pull request generation."""
+
     anomaly_id: str
     pr_url: str | None = Field(
         None,
-        description="URL of the created PR (null if dry_run=true).",
+        description=(
+            "URL of a created PR. Always null: the generator is simulated "
+            "and never opens a PR."
+        ),
     )
     diff: str = Field(
         ...,
@@ -157,6 +169,9 @@ class AutoPRResponse(BaseModel):
     files_changed: list[str]
     tests_passed: bool | None = Field(
         None,
-        description="Whether auto-generated unit tests passed.",
+        description="Whether tests passed. Null: no test suite is run.",
     )
-    status: str
+    status: str = Field(
+        ...,
+        description='"dry_run", or "simulated" when dry_run=false.',
+    )

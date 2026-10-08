@@ -23,14 +23,34 @@ def upgrade() -> None:
         sa.Column("name", sa.String(length=255), nullable=False),
         sa.Column("allowed_tools_json", sa.Text(), nullable=True),
         sa.Column("allowed_service_categories_json", sa.Text(), nullable=True),
-        sa.Column("max_cost_per_action", sa.Numeric(precision=18, scale=8), nullable=True),
-        sa.Column("daily_spend_limit", sa.Numeric(precision=18, scale=8), nullable=True),
-        sa.Column("require_real_effects", sa.Boolean(), nullable=False, server_default=sa.false()),
-        sa.Column("risk_tier", sa.String(length=20), nullable=False, server_default="medium"),
-        sa.Column("human_approval_required", sa.Boolean(), nullable=False, server_default=sa.false()),
+        sa.Column(
+            "max_cost_per_action", sa.Numeric(precision=18, scale=8), nullable=True
+        ),
+        sa.Column(
+            "daily_spend_limit", sa.Numeric(precision=18, scale=8), nullable=True
+        ),
+        sa.Column(
+            "require_real_effects",
+            sa.Boolean(),
+            nullable=False,
+            server_default=sa.false(),
+        ),
+        sa.Column(
+            "risk_tier", sa.String(length=20), nullable=False, server_default="medium"
+        ),
+        sa.Column(
+            "human_approval_required",
+            sa.Boolean(),
+            nullable=False,
+            server_default=sa.false(),
+        ),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
-        sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(), nullable=False, server_default=sa.func.now()
+        ),
         sa.ForeignKeyConstraint(["wallet_id"], ["wallets.wallet_id"]),
     )
     op.create_index("ix_policy_bundles_wallet_id", "policy_bundles", ["wallet_id"])

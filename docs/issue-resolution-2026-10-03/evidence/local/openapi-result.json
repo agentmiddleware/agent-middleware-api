@@ -1,0 +1,13 @@
+{
+  "command": [
+    "/Users/sellers/Projects/agent-middleware-api/.venv/bin/python",
+    "scripts/export_openapi.py",
+    "--check"
+  ],
+  "workdir": "/Users/sellers/.openclaw/worktrees/amw-issues-20261003-release",
+  "head_before": "079bb7290f6ed86c6762baec02827305b5cb9da7",
+  "started_at": "2026-10-04T02:06:50.695362+00:00",
+  "exit_code": 0,
+  "finished_at": "2026-10-04T02:06:51.684536+00:00",
+  "head_after": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+}

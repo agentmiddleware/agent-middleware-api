@@ -46,10 +46,16 @@ async def create_quote(
         service.get("category", ServiceCategory.PLATFORM_FEE.value)
     )
     try:
+        quoted_credits = tool_price(service, category)
+    except ValueError:
+        # A price that is not a finite, non-negative number is never signed:
+        # the quote would be a durable promise no charge could honor.
+        raise HTTPException(status_code=400, detail="tool_price_invalid")
+    try:
         return await get_quote_service().create_quote(
             wallet_id=request.wallet_id,
             tool=request.tool,
-            quoted_credits=tool_price(service, category),
+            quoted_credits=quoted_credits,
             category=category.value,
         )
     except QuoteError as exc:
@@ -61,8 +67,19 @@ async def get_quote(
     quote_id: str,
     auth: AuthContext = Depends(get_auth_context),
 ) -> QuoteResponse:
+    """Read a quote the caller's wallet owns.
+
+    A quote another wallet owns reads as ``quote_not_found``, exactly like an
+    id that does not exist. Answering 403 instead confirmed the id was real,
+    and the ``wallet_access_denied`` body named the owning wallet_id.
+    """
     quote = await get_quote_service().get_quote(quote_id)
     if not quote:
         raise HTTPException(status_code=404, detail="quote_not_found")
-    auth.require_wallet_access(quote.wallet_id)
+    try:
+        auth.require_wallet_access(quote.wallet_id)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_403_FORBIDDEN:
+            raise HTTPException(status_code=404, detail="quote_not_found") from None
+        raise
     return quote

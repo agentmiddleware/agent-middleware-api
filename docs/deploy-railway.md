@@ -243,6 +243,8 @@ slice.
 
 For migration 040, follow [the compatibility rollout and rollback procedure](schema-040-rollout.md)
 before this upload sequence. The previous schema-039 image is not a valid rollback.
+For migration 041, read [its rollback boundary](schema-041-rollout.md): once it is
+applied, no image packaged at 040 can start again.
 
 **Build and ship from this repo with the in-repo Dockerfile. Production
 releases are operator-run from a clean exact-SHA checkout.**
@@ -348,12 +350,16 @@ in committed defaults.
 | `MCP_UPSTREAM_URL` | one public HTTPS MCP origin | The pilot supports exactly one real upstream tool server |
 | `MCP_UPSTREAM_BEARER_TOKEN` | customer-specific secret | Never put it in the manifest or committed files |
 | `SENTINEL_API_URL` / `SENTINEL_API_KEY` | Omit unless enabling Sentinel-backed human approval | Optional product integration, not an Agent Middleware release dependency. Approval-required operations fail closed unless both are configured. Send synthetic or redacted arguments only. |
-| `RUN_MIGRATIONS_ON_START` | `true` for routine forward-compatible migrations; **not a substitute for migration 037's first-activation maintenance gate** | Entrypoint runs `alembic upgrade head` before uvicorn. App boot then **verifies** trust tables exist and **never** calls `create_all` in production-like envs. Flag + empty `DATABASE_URL` fails closed (container exits). If the DB was previously bootstrapped with `create_all` and has no `alembic_version` row, run `alembic stamp head` once before enabling this flag. Migration 037 must be applied through the paused-ingress, drained-worker sequence above before any new reconciler can receive traffic. |
+| `RUN_MIGRATIONS_ON_START` | `true` for routine forward-compatible migrations; **not a substitute for migration 037's first-activation maintenance gate** | Entrypoint runs `alembic upgrade head` before uvicorn. App boot then **verifies** trust tables exist and **never** calls `create_all` in production-like envs. Flag + empty `DATABASE_URL` fails closed (container exits). If existing tables have no `alembic_version` row, stop for manual review: compare physical schema and data-migration history, stamp only a proven matching historical revision, then apply required migrations using [the current controlled rollout](schema-042-rollout.md). Table presence does not establish parity with head. Migration 037 must be applied through the paused-ingress, drained-worker sequence above before any new reconciler can receive traffic. |
 
 `REDIS_URL` is required for the managed pilot's isolated Redis service. Outside
 that pilot it remains optional when Redis rate limiting is unused; a
 production-like service fails closed on Redis outage whenever it is set.
-`CORS_ORIGINS` should be locked to known frontends.
+`CORS_ORIGINS` may stay at its documented default `*`: every authenticated
+route takes header credentials, and a wildcard disables credentialed CORS (see
+[`SECURITY_LIMITATIONS.md`](../SECURITY_LIMITATIONS.md), "CORS Posture"). Set
+an explicit origin list, without `*`, only when a browser app must send
+credentials.
 
 Committed `.railway/railway.ts` contains the complete API variable-name set but
 no values: every name, including `VALID_API_KEYS`, signing material, and
@@ -382,11 +388,11 @@ After this commit:
    `ENABLE_DEV_KEY_SELF_PROVISION`, `ENABLE_STANDARD_MCP_ENDPOINT`,
    `DEBUG`, `STATIC_DEV_API_KEYS`. Keep `ENVIRONMENT=production`. Do **not**
    rotate or remove `VALID_API_KEYS` — those are C.Lee's operator keys.
-3. **Deploy the merged commit** the same way this service is usually shipped
-   (`railway up` from that SHA, or the GitHub → Railway integration if it is
-   what currently ships). Do **not** click **Redeploy from GitHub source**
-   if that would roll back to an older image. This agent must not run that
-   deploy.
+3. **Deploy the merged commit** using the operator-run
+   [canonical deploy path](#canonical-deploy-path): a clean exact-SHA checkout,
+   completed release gates, and the stamped release-context upload. Confirm
+   [current schema compatibility](schema-042-rollout.md) before selecting the
+   release or recovery image. This agent must not run that deploy.
 4. **Check, from a terminal, with no API key:**
    - `curl -sS -o /dev/null -w '%{http_code}\n' https://api.thisisatest.tech/mcp/tools.json` → `401`
    - `curl -sS -o /dev/null -w '%{http_code}\n' https://api.thisisatest.tech/v1/discover` → `401`
@@ -409,8 +415,10 @@ any check it ran fails, so it works as a gate in a shell or in CI:
   this tree against the `alembic_version` row in the target database. A tree
   ahead of the deployed schema is the failure that produces a 500 on the first
   request touching a new table. It also detects a `create_all`-bootstrapped DB
-  with no `alembic_version` row and tells you to `alembic stamp head` once
-  before enabling `RUN_MIGRATIONS_ON_START`.
+  with no `alembic_version` row and blocks for manual review. Compare physical
+  schema and data-migration history; stamp only a proven matching historical
+  revision, then apply the missing migrations under
+  [the current controlled rollout](schema-042-rollout.md).
 - **Off-platform migration parity** (`--public-db`, needs
   `DATABASE_PUBLIC_URL`) — uses only the explicit public PostgreSQL URL. It
   never falls back to the private `DATABASE_URL`; missing, local, or
@@ -823,9 +831,10 @@ expectation naming the old key still passes. After any rotation:
 1. Update the expected key id and fingerprint, in the manifest or the
    first-party record below, from the new key's key-generation record.
 2. Retire the old key's metadata. The repository has no operator command for
-   this yet. `docs/key-management.md` describes
-   `POST /v1/admin/signing-keys/rotate`, but that route does not exist; it is
-   an open item in `docs/GAP_CLOSURE_PLAN.md`. `retire_key_metadata` and
+   this yet. `docs/key-management.md` proposes
+   `POST /v1/admin/signing-keys/rotate` for its KMS target state, but that
+   route does not exist; it is an unbuilt item in the frozen
+   `docs/GAP_CLOSURE_PLAN.md`. `retire_key_metadata` and
    `rotate_active_key_metadata` in `app/services/signing_keys.py` are service
    methods with no route or script. Do the retirement as its own reviewed
    change, and treat the signing-key check as unverified until it is done.

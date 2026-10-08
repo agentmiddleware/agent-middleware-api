@@ -83,8 +83,10 @@ class LLMService:
         provider = self._get_provider()
 
         if provider == "openai":
+            # LLM_BASE_URL is the API root, including any version prefix.
+            # This matches the content-generation client and the /v1 default.
             base = self.settings.LLM_BASE_URL.rstrip("/")
-            return f"{base}/v1{endpoint}"
+            return f"{base}/{endpoint.lstrip('/')}"
 
         if provider == "azure":
             base = self.settings.AZURE_OPENAI_ENDPOINT.rstrip("/")

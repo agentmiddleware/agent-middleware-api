@@ -1,0 +1,8 @@
+.                                                                        [100%]
+=============================== warnings summary ===============================
+tests/test_dispatch_call_slot_migration.py::test_dispatch_call_slot_upgrade_recovers_after_concurrent_index_failure
+  /Users/sellers/Projects/agent-middleware-api/.venv/lib/python3.12/site-packages/asyncpg/connect_utils.py:104: UserWarning: password file PosixPath('/dev/null') is not a plain file
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1 passed, 1 warning in 0.87s
