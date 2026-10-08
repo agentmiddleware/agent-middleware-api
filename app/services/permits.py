@@ -573,6 +573,13 @@ class PermitService:
         change, key mismatch, signature failure, or concurrent reservation
         therefore cannot slip between a stale read and the budget mutation.
         """
+        if estimated_credits < Decimal("0"):
+            # A negative estimate would decrement spent_credits through the
+            # relative UPDATE below, minting budget from nothing. Every live
+            # caller prices from tool_price or a validated quote, both of
+            # which refuse negatives, so this is a fail-closed guard on a
+            # billing primitive, not a policy decision.
+            raise PermitError("permit_invalid_amount")
         factory = get_session_factory()
 
         async def _once() -> PermitValidation:
@@ -1075,6 +1082,10 @@ class PermitService:
             return Decimal(str(total)) if total is not None else Decimal("0")
 
     async def reserve_budget(self, permit_id: str, amount: Decimal) -> None:
+        if amount < Decimal("0"):
+            # Same minting primitive as authorize_and_reserve: a negative
+            # amount decrements spent_credits through the relative UPDATE.
+            raise PermitError("permit_invalid_amount")
         factory = get_session_factory()
 
         async def _once() -> None:
@@ -1201,6 +1212,10 @@ class PermitService:
         await self._run_with_write_retry(_once)
 
     async def release_budget(self, permit_id: str, amount: Decimal) -> None:
+        if amount < Decimal("0"):
+            # A negative release would increment spent_credits, destroying
+            # budget the permit still owns. Zero stays a harmless no-op.
+            raise PermitError("permit_invalid_amount")
         factory = get_session_factory()
 
         async def _once() -> None:
