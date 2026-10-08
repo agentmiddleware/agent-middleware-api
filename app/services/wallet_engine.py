@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.sql.elements import ColumnElement
 
 from ..core.config import Settings
+from ..core.credits import credit_amount_fits_storage, supported_wallet_currency
 from ..core.time import utc_now
 from ..db.converters import wallet_model_to_response
 from ..db.models import LedgerEntryModel, WalletModel
@@ -48,6 +49,35 @@ class WalletExpiredError(RuntimeError):
         self.wallet_id = wallet_id
         self.expires_at = expires_at
         super().__init__(f"Wallet {wallet_id} expired at {expires_at.isoformat()}")
+
+
+def _require_ledger_amount(
+    amount: Decimal | None,
+    *,
+    label: str,
+    allow_zero: bool,
+    allow_none: bool = False,
+) -> None:
+    """Reject a money amount the Numeric(20, 8) columns cannot store.
+
+    NaN comparisons raise InvalidOperation when that decimal trap is enabled,
+    so finiteness is checked before any ordering comparison. A negative amount
+    must be refused on its own: the balance guard ``balance >= amount`` is
+    true for every negative amount, and the debit then runs as a credit.
+    """
+    if amount is None and allow_none:
+        return
+    if isinstance(amount, Decimal) and amount.is_finite() and amount < 0:
+        raise ValueError(f"{label} cannot be negative")
+    if (
+        isinstance(amount, Decimal)
+        and amount.is_finite()
+        and amount == 0
+        and not allow_zero
+    ):
+        raise ValueError(f"{label} must be positive")
+    if not isinstance(amount, Decimal) or not credit_amount_fits_storage(amount):
+        raise ValueError(f"{label} does not fit ledger precision")
 
 
 def _validate_child_wallet_ttl(ttl_seconds: int | None) -> None:
@@ -297,6 +327,13 @@ class WalletEngine:
         default) for the original standalone behavior: opens, commits, and
         closes its own session.
         """
+        # Refuse before opening a session. A negative opening balance is stored
+        # with no ledger row, and a blank or non-USD currency is discarded
+        # while the credits are still minted.
+        supported_wallet_currency(currency)
+        _require_ledger_amount(
+            initial_credits, label="initial_credits", allow_zero=True
+        )
         kyc_required = (
             require_kyc
             if require_kyc is not None
@@ -396,6 +433,8 @@ class WalletEngine:
         CALLER owns end to end — same contract as ``create_sponsor_wallet``.
         Omit it for the original standalone behavior.
         """
+        if isinstance(budget_credits, Decimal) and not budget_credits.is_finite():
+            raise ValueError("budget_credits does not fit ledger precision")
         if budget_credits < Decimal("0"):
             # A negative budget inverts the debit into a credit: the guard
             # ``balance >= budget_credits`` is trivially true for a negative
@@ -406,6 +445,18 @@ class WalletEngine:
             # empty wallet to be topped up later, which is what
             # SelfProvisionRequest.budget_credits (ge=0) offers callers.
             raise ValueError("budget_credits cannot be negative")
+        _require_ledger_amount(budget_credits, label="budget_credits", allow_zero=True)
+        _require_ledger_amount(
+            daily_limit, label="daily_limit", allow_zero=True, allow_none=True
+        )
+        _require_ledger_amount(
+            auto_refill_threshold,
+            label="auto_refill_threshold",
+            allow_zero=True,
+        )
+        _require_ledger_amount(
+            auto_refill_amount, label="auto_refill_amount", allow_zero=True
+        )
 
         if session is not None:
             return await self._create_agent_wallet_in(
@@ -555,12 +606,16 @@ class WalletEngine:
     ) -> WalletResponse:
         """Spawn a child sub-agent wallet from a parent agent's balance."""
         _validate_child_wallet_ttl(ttl_seconds)
+        if isinstance(budget_credits, Decimal) and not budget_credits.is_finite():
+            raise ValueError("budget_credits does not fit ledger precision")
         if budget_credits < Decimal("0"):
             # Same inversion as the sponsor path, and worse: a child opened
             # with a negative balance cannot be unwound by a later reclaim,
             # which only credits the parent back a positive reclaim_amount.
             # Zero is allowed here too, for the same reason.
             raise ValueError("budget_credits cannot be negative")
+        _require_ledger_amount(budget_credits, label="budget_credits", allow_zero=True)
+        _require_ledger_amount(max_spend, label="max_spend", allow_zero=True)
         async with self._session_factory()() as session:
             async with session.begin():
                 # Lock parent wallet
@@ -864,8 +919,11 @@ class WalletEngine:
             InsufficientFundsError: If source has insufficient balance
             ValueError: If amount <= 0 or same wallet IDs
         """
-        if amount <= Decimal("0"):
+        # is_finite() before the comparison: NaN raises InvalidOperation when
+        # that trap is on, which would escape this function as a 500.
+        if not isinstance(amount, Decimal) or not amount.is_finite() or amount <= 0:
             raise ValueError("Transfer amount must be positive")
+        _require_ledger_amount(amount, label="Transfer amount", allow_zero=False)
 
         if from_wallet_id == to_wallet_id:
             raise ValueError("Cannot transfer to the same wallet")
