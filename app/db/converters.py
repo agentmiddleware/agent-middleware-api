@@ -1,5 +1,11 @@
-"""
-Conversion utilities between SQLModel database rows and Pydantic API schemas.
+"""Conversion utilities between SQLModel database rows and Pydantic API schemas.
+
+Scope note: this module covers billing, telemetry, oracle, scans, and
+content rows. The core trust objects live elsewhere by design, since permits
+and receipts are signed before persistence and their conversion carries
+signature-adjacent rules: use ``permit_model_to_response`` in
+``app/services/permits.py`` and ``receipt_model_to_response`` in
+``app/services/receipts.py`` for those paths, not helpers here.
 """
 
 import json

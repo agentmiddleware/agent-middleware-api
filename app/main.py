@@ -37,6 +37,7 @@ from .core.health import (
     check_redis_liveness,
     check_database_readiness,
     check_mqtt_readiness,
+    conditional_route_state,
     gather_dependency_report,
 )
 from .core.public_contact import validated_public_contact as _public_contact_metadata
@@ -183,6 +184,10 @@ async def lifespan(app: FastAPI):
         enable_dogfood_second_tool=bool(settings.ENABLE_DOGFOOD_SECOND_TOOL),
         simulation_modes=get_simulation_modes(),
         cors_origins=settings.CORS_ORIGINS,
+        # Deploy-time mount truth: webhook and dev-key routes are silently
+        # present or absent based on env flags, so name their state here
+        # (same values /health/dependencies serves under conditional_routes).
+        conditional_routes=conditional_route_state(),
     )
     # A public deployment whose manifest tells agents the operator has no
     # contact is a discovery-honesty defect, not a neutral default. Partial
@@ -832,6 +837,8 @@ async def root(request: Request):
                 "auth_jwt",
                 "kyc",
                 "planner",
+                "pods",
+                "x402",
                 "billing_expansion",
             ],
             # Unmounted workloads are not discovery: the proof-surface name
@@ -1257,7 +1264,10 @@ async def health_ready():
         "Instances that mount proof surfaces additionally report those "
         "surfaces' dependencies and per-service simulation modes; deps whose "
         "consumers are simulated return `not_used` so the verdict doesn't "
-        "degrade on mock-only deployments."
+        "degrade on mock-only deployments. Both postures include "
+        "`conditional_routes`: the mounted state of the Stripe webhooks, "
+        "self-serve dev keys, dormant trust, and proof-surface routes, which "
+        "are otherwise silently present or absent based on env flags."
     ),
 )
 async def health_dependencies():
