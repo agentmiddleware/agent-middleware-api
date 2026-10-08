@@ -3,11 +3,14 @@ Legacy B2A MCP CLI & Helpers
 =====================
 
 Legacy discovery and serving helpers. Standalone generation is retired.
-Use the governed POST /mcp/messages flow documented in docs/quickstart.md.
+``serve`` is legacy as well: it calls the wallet-billing invoke path with
+no permit, no idempotency key, and no signed receipt, so a retried call
+bills again. Use the governed POST /mcp/messages flow documented in
+docs/quickstart.md.
 
 Usage:
     python -m b2a_sdk.mcp generate --output tools.json
-    python -m b2a_sdk.mcp serve --transport stdio
+    python -m b2a_sdk.mcp serve --transport stdio  # legacy, ungoverned
     python -m b2a_sdk.mcp list
 """
 
@@ -24,6 +27,28 @@ except ImportError:
 
 
 DEFAULT_API_URL = os.getenv("B2A_API_URL", "http://localhost:8000")
+
+
+def _load_server_class():
+    """Return the installed mcp server class plus its API generation.
+
+    ``mcp`` 1.x exposes ``FastMCP`` at ``mcp.server.fastmcp``; 2.x renamed it
+    to ``MCPServer`` at ``mcp.server.mcpserver`` with a different
+    ``add_tool`` signature. Returns ``(None, None)`` when no usable class is
+    importable, so callers can print the install hint instead of crashing.
+    """
+    try:
+        from mcp.server.fastmcp import FastMCP
+
+        return FastMCP, "v1"
+    except ImportError:
+        pass
+    try:
+        from mcp.server.mcpserver import MCPServer
+
+        return MCPServer, "v2"
+    except ImportError:
+        return None, None
 
 
 def generate_manifest(
@@ -114,21 +139,24 @@ async def serve_async(
     """
     Serve as an MCP server using the specified transport.
 
+    Legacy and ungoverned: calls go through the wallet-billing invoke path
+    with no permit, no idempotency key, and no signed receipt. Prefer the
+    governed flow in docs/quickstart.md.
+
     Args:
         transport: "stdio" or "sse"
         port: Port for SSE transport
         api_url: B2A API URL
     """
-    try:
-        from mcp.server.fastmcp import FastMCP
-    except ImportError:
+    server_cls, api = _load_server_class()
+    if server_cls is None:
         print('Error: mcp package required. Install: pip install "b2a-sdk[mcp]"')
         return
 
     manifest = generate_manifest(api_url=api_url)
     tools = manifest.get("tools", [])
 
-    mcp = FastMCP("B2A Marketplace")
+    mcp = server_cls("B2A Marketplace")
 
     async def call_tool(service_id: str, input_data: dict, wallet_id: str, api_key: str) -> dict:
         async with httpx.AsyncClient() as client:
@@ -156,7 +184,11 @@ async def serve_async(
 
             return handler
 
-        mcp.add_tool(name, desc, await create_handler(name, desc))
+        tool_handler = await create_handler(name, desc)
+        if api == "v2":
+            mcp.add_tool(fn=tool_handler, name=name, description=desc)
+        else:
+            mcp.add_tool(name, desc, tool_handler)
 
     print(f"Starting MCP server with {len(tools)} tools...")
     print(f"Transport: {transport}")
@@ -201,7 +233,7 @@ def main() -> None:
     list_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="B2A API URL")
     list_parser.add_argument("--category", help="Category filter")
 
-    serve_parser = subparsers.add_parser("serve", help="Start MCP server")
+    serve_parser = subparsers.add_parser("serve", help="Legacy: start ungoverned MCP server")
     serve_parser.add_argument(
         "--transport", default="stdio", choices=["stdio", "sse"], help="Transport"
     )

@@ -4,6 +4,7 @@ Tests for B2A SDK.
 
 import asyncio
 import json
+import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -18,6 +19,7 @@ from b2a_sdk import (
     combined,
     monitored,
 )
+from b2a_sdk.decorators import mcp_tool
 
 
 def _recording_client(
@@ -411,6 +413,42 @@ class TestDecorators:
         assert add(2, 3) == 5
         await asyncio.sleep(0)
         mock_client.telemetry.assert_awaited_once()
+
+    def test_monitored_sync_drop_logs_one_warning(self, mock_client, monkeypatch, caplog):
+        """A pilot debugging missing telemetry gets a warning, not silence."""
+
+        monkeypatch.setattr("b2a_sdk.decorators._drop_warned", False)
+
+        @monitored(mock_client, service_name="test_service")
+        def add(a, b):
+            return a + b
+
+        with caplog.at_level(logging.WARNING, logger="b2a_sdk"):
+            assert add(2, 3) == 5
+            assert add(1, 1) == 2
+
+        drops = [r for r in caplog.records if "no running event loop" in r.message]
+        assert len(drops) == 1
+        # telemetry() is still called to build the event; the resulting
+        # coroutine is what gets dropped, so it must never be awaited.
+        assert mock_client.telemetry.await_count == 0
+
+    def test_registration_callback_failure_is_logged_not_silent(self, monkeypatch, caplog):
+        """A broken registration callback must not swallow the error signal."""
+
+        def broken(service_id, func, input_schema, output_schema):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr("b2a_sdk.decorators._registration_callbacks", [broken])
+
+        with caplog.at_level(logging.WARNING, logger="b2a_sdk"):
+
+            @mcp_tool(service_id="svc", name="Svc")
+            async def my_tool():
+                return "ok"
+
+        assert any("registration callback" in r.message for r in caplog.records)
+        assert my_tool._b2a_mcp_metadata["service_id"] == "svc"
 
     @pytest.mark.asyncio
     async def test_billable_decorator_success(self, mock_client):

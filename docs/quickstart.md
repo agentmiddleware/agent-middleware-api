@@ -296,17 +296,20 @@ debits.
 
 ## 8. Verify the receipt offline (~2 minutes)
 
-So far you have trusted the plane's own word. Stop trusting it. Fetch the
-portable receipt bundle and the public key set — note the key set needs
-**no credential at all** — and verify the signature yourself, offline:
+So far you have trusted the plane's own word. Stop trusting it. Install
+the SDK from this checkout — the same install path the SDK README
+recommends — then fetch the portable receipt bundle and the public key set
+(note the key set needs **no credential at all**) and verify the signature
+yourself, offline:
 
 ```bash
+python -m pip install -e './b2a_sdk[verify]'
+
 curl -s "$API_URL/v1/receipts/$RECEIPT_ID/portable" \
   -H "X-API-Key: $AGENT_API_KEY" -o data/quickstart/receipt-bundle.json
 curl -s "$API_URL/.well-known/trust-keys.json" -o data/quickstart/trust-keys.json
 
-PYTHONPATH=b2a_sdk/src uv run --with-requirements requirements.txt \
-  python -m b2a_sdk.verify_cli \
+python -m b2a_sdk.verify_cli \
   --bundle data/quickstart/receipt-bundle.json \
   --keys data/quickstart/trust-keys.json
 ```
@@ -335,8 +338,7 @@ bundle["signing_input"] = forged
 json.dump(bundle, open("data/quickstart/forged-receipt.json", "w"))
 EOF
 
-PYTHONPATH=b2a_sdk/src uv run --with-requirements requirements.txt \
-  python -m b2a_sdk.verify_cli \
+python -m b2a_sdk.verify_cli \
   --bundle data/quickstart/forged-receipt.json \
   --keys data/quickstart/trust-keys.json
 echo "exit code: $?"

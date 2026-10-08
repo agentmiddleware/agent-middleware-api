@@ -60,17 +60,22 @@ Demonstrates how to create, register, and invoke MCP-enabled tools.
 **Status:** source-level registration example. It does not configure the
 supported one-tool upstream gateway path; use the
 [partner first-tool runbook](../docs/partner-first-tool-runbook.md) for that.
+`--register` prints the locally defined tools' metadata only: it performs no
+server call and registers nothing remotely. `--serve` runs the legacy
+standalone MCP server, which is ungoverned (no permit, no idempotency key, no
+receipt); for the supported governed call follow
+[docs/quickstart.md](../docs/quickstart.md).
 
 **What it shows:**
 - Defining billable tools with `@mcp_tool`
-- Registering tools with the service registry
+- Describing locally defined tools (local metadata only)
 - Generating a `tools.json` manifest
-- Running a standalone MCP server
+- Running a legacy standalone MCP server (ungoverned)
 
 **Run:**
 
 ```bash
-# 1. Register tools (typically done at app startup)
+# 1. Describe locally defined tools (no server call)
 python examples/mcp_tool_example.py --register
 
 # 2. List available tools
@@ -79,7 +84,7 @@ python examples/mcp_tool_example.py --list
 # 3. Generate tools.json
 python examples/mcp_tool_example.py --generate
 
-# 4. Run standalone MCP server
+# 4. Run legacy standalone MCP server (ungoverned)
 python examples/mcp_tool_example.py --serve
 ```
 

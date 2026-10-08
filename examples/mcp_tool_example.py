@@ -6,11 +6,17 @@ Example demonstrating how to create an MCP-enabled tool using the B2A SDK.
 
 This file shows:
 1. Creating a simple billable tool with @mcp_tool
-2. Registering it with the service registry
-3. Invoking it via the MCP protocol
+2. Describing the locally defined tools (--register prints local metadata
+   only; it performs no server call and registers nothing remotely)
+3. Fetching the gateway manifest and listing tools (--list, --generate)
+4. Running the legacy standalone MCP server (--serve, needs
+   ``b2a-sdk[mcp]``; ungoverned: no permit, no idempotency key, no receipt)
+
+For the supported governed call (permit, invoke, receipt), follow
+docs/quickstart.md instead.
 
 Usage:
-    # Register tools (typically done at app startup)
+    # Describe locally defined tools (local metadata only, no server call)
     python examples/mcp_tool_example.py --register
 
     # List available tools
@@ -19,7 +25,7 @@ Usage:
     # Generate tools.json
     python examples/mcp_tool_example.py --generate
 
-    # Run standalone MCP server
+    # Run legacy standalone MCP server (ungoverned)
     python examples/mcp_tool_example.py --serve
 """
 
@@ -156,7 +162,7 @@ def on_registration(service_id: str, func, input_schema, output_schema):
 
 
 async def register_tools():
-    """Register all tools with the backend."""
+    """Describe all locally defined tools (local metadata only, no server call)."""
     register_mcp_tool_callback(on_registration)
 
     print("Tools registered:")
@@ -206,11 +212,17 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="B2A MCP Tool Example")
-    parser.add_argument("--register", action="store_true", help="Register tools")
+    parser.add_argument(
+        "--register",
+        action="store_true",
+        help="Describe locally defined tools (no server call)",
+    )
     parser.add_argument("--list", action="store_true", help="List available tools")
     parser.add_argument("--generate", action="store_true", help="Generate tools.json")
     parser.add_argument(
-        "--serve", action="store_true", help="Run standalone MCP server"
+        "--serve",
+        action="store_true",
+        help="Run legacy standalone MCP server (ungoverned)",
     )
     args = parser.parse_args()
 
@@ -225,7 +237,9 @@ if __name__ == "__main__":
     else:
         parser.print_help()
         print("\nExample usage:")
-        print("  python examples/mcp_tool_example.py --register  # Register tools")
+        print(
+            "  python examples/mcp_tool_example.py --register  # Describe local tools"
+        )
         print("  python examples/mcp_tool_example.py --list     # List tools")
         print("  python examples/mcp_tool_example.py --generate # Generate tools.json")
-        print("  python examples/mcp_tool_example.py --serve   # Run MCP server")
+        print("  python examples/mcp_tool_example.py --serve   # Legacy server")

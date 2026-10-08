@@ -101,7 +101,12 @@ def _prepend_pythonpath(path: Path) -> dict:
 
 
 def _verify_cli(bundle_path: Path, keys_path: Path) -> subprocess.CompletedProcess:
-    """Run the offline verifier exactly as the doc does: CLI, branchable exit."""
+    """Run the offline verifier exactly as the doc does: CLI, branchable exit.
+
+    Uses the installed ``b2a_sdk`` (CI installs ``pip install -e ./b2a_sdk``),
+    matching the documented ``pip install`` path instead of a PYTHONPATH
+    source hack.
+    """
     return subprocess.run(
         [
             sys.executable,
@@ -112,7 +117,6 @@ def _verify_cli(bundle_path: Path, keys_path: Path) -> subprocess.CompletedProce
             "--keys",
             str(keys_path),
         ],
-        env=_prepend_pythonpath(REPO_ROOT / "b2a_sdk" / "src"),
         capture_output=True,
         text=True,
         timeout=60,

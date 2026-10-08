@@ -2,6 +2,28 @@
 
 ## Unreleased — 0.5.0
 
+### GTM review follow-up (2026-10-07)
+
+Docs and honesty fixes from the go-to-market review of the Python SDK slice.
+No behavior change except one new log line.
+
+- **`serve` marked legacy**: `b2a_sdk.mcp.serve` serves the wallet-billing
+  invoke path with no permit, no idempotency key, and no signed receipt.
+  The module docstring, the `serve_async` docstring, and the CLI help now say
+  so and point at the governed flow in `docs/quickstart.md`.
+- **Example flags say what they do**: `examples/mcp_tool_example.py
+  --register` only prints local tool metadata (no server call, nothing
+  registered remotely) and `--serve` is labeled as the legacy ungoverned
+  path; `examples/README.md` matches.
+- **Telemetry drops are visible**: `@monitored` logs one process-level warning
+  when a telemetry event is dropped for lack of a running event loop, and a
+  failing `register_mcp_tool_callback` callback is logged instead of
+  swallowed silently.
+- **README states the base-URL and async model up front**: always pass
+  `base_url` (the client and the helpers default to different hosts), the
+  client is async only with no sync wrapper, and `@billable` rejects sync
+  functions.
+
 `pyproject.toml` carries `0.5.0` from here on. `0.4.0` is published and
 tagged `python-sdk-v0.4.0`, and the entries below are new surface area on
 top of it, so leaving the source at `0.4.0` would have shipped something

@@ -27,8 +27,10 @@ Add offline receipt verification when you need it:
 python -m pip install -e './b2a_sdk[verify]'
 ```
 
-Add the MCP server dependency (`python -m b2a_sdk.mcp serve`) when you need it.
-The extra pins `mcp` below 2.x, which renamed the class the server imports:
+Add the MCP server dependency (`python -m b2a_sdk.mcp serve`) only for the
+legacy ungoverned serve path: served calls carry no permit, no idempotency
+key, and no signed receipt. The extra pins `mcp` below 2.x, which renamed
+the class the server imports:
 
 ```bash
 python -m pip install -e './b2a_sdk[mcp]'
@@ -105,6 +107,21 @@ invoking tools. Reusing a key with a different request raises
 If a remote tool was dispatched but its outcome could not be confirmed,
 `invoke_tool` raises `DeliveryUncertainError`. Its `receipt_id` identifies the
 signed, charged uncertainty receipt; the SDK never retries the dispatch.
+
+## Base URL and async model
+
+The client is async only: every network method is a coroutine, so drive it
+with `asyncio.run()` or your own running loop, as the snippet above does.
+There is no sync wrapper. `@billable` requires an async function and raises
+`RuntimeError` for a sync one; `@monitored` accepts sync functions, but with
+no running event loop its telemetry event is dropped (one warning is logged
+per process).
+
+Always pass `base_url` explicitly. The defaults differ across the SDK
+surface: `AgentMiddlewareClient` defaults to the test domain
+`https://api.thisisatest.tech`, while the edge client, the MCP helpers, and
+the examples default to `http://localhost:8000`. Copy-pasting without a
+`base_url` silently calls the wrong host.
 
 ## In-process permit validation (0.5+)
 
