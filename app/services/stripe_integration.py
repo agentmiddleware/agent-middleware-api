@@ -395,23 +395,44 @@ class StripeIntegration:
 
         return payment_intent_id, wallet_id, credits
 
-    async def _handle_payment_failed(self, payment_intent: dict) -> None:
-        """Log payment failure and notify via Slack."""
+    async def _handle_payment_failed(self, payment_intent: Any) -> None:
+        """Log payment failure and notify via Slack.
+
+        A failed payment writes nothing to the ledger, so this handler must
+        never raise: Stripe retries any non-2xx webhook response, and a
+        malformed ``payment_intent.payment_failed`` payload (missing metadata,
+        a null ``last_payment_error``, or a non-object body) would otherwise
+        retry forever while the alert it exists to send never goes out.
+        Every field is read defensively and a payload with nothing usable in
+        it is logged and dropped.
+        """
         from ..services.notifications import get_notification_service
 
-        wallet_id = payment_intent["metadata"].get("wallet_id")
-        error_msg = payment_intent.get("last_payment_error", {}).get(
-            "message", "Unknown error"
+        metadata = self._stripe_value(payment_intent, "metadata") or {}
+        wallet_id = self._stripe_value(metadata, "wallet_id")
+        last_error = self._stripe_value(payment_intent, "last_payment_error") or {}
+        error_msg = (
+            self._stripe_value(last_error, "message", "Unknown error")
+            or "Unknown error"
+        )
+        payment_intent_id = (
+            self._stripe_value(payment_intent, "id", "unknown") or "unknown"
         )
 
         logger.warning(f"Payment failed for wallet {wallet_id}: {error_msg}")
 
-        if wallet_id:
+        if isinstance(wallet_id, str) and wallet_id:
             notifications = get_notification_service()
             await notifications.send_payment_failed_alert(
                 wallet_id=wallet_id,
-                error_message=error_msg,
-                payment_intent_id=payment_intent["id"],
+                error_message=(
+                    error_msg if isinstance(error_msg, str) else "Unknown error"
+                ),
+                payment_intent_id=(
+                    payment_intent_id
+                    if isinstance(payment_intent_id, str)
+                    else "unknown"
+                ),
             )
 
     @staticmethod
