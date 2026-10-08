@@ -13,7 +13,7 @@ wallet-scoped tenant key is refused with 403 admin_access_denied.
 """
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 from datetime import datetime
 
 from ..core.auth import AuthContext, get_auth_context
@@ -37,8 +37,8 @@ class PreflightRequest(BaseModel):
         default="",
         description="Production BASE_URL to validate (e.g., https://api.mycompany.com).",
     )
-    stripe_secret_key: str = Field(
-        default="",
+    stripe_secret_key: SecretStr = Field(
+        default=SecretStr(""),
         description="Stripe secret key to validate (sk_live_... for production).",
     )
     campaign_source_url: str = Field(
@@ -103,8 +103,9 @@ async def run_preflight(
     config_overrides = {}
     if request.base_url:
         config_overrides["base_url"] = request.base_url
-    if request.stripe_secret_key:
-        config_overrides["stripe_secret_key"] = request.stripe_secret_key
+    stripe_secret_key = request.stripe_secret_key.get_secret_value()
+    if stripe_secret_key:
+        config_overrides["stripe_secret_key"] = stripe_secret_key
     if request.campaign_source_url:
         config_overrides["campaign_source_url"] = request.campaign_source_url
 

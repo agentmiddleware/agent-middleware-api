@@ -6,7 +6,6 @@ import asyncio
 import json
 import logging
 import math
-import re
 from dataclasses import dataclass, field
 from time import perf_counter
 from typing import Any, Literal
@@ -14,6 +13,9 @@ from typing import Any, Literal
 import httpx
 
 from app.core.config import DuplicateGuardMode, get_settings
+from app.core.secrets import SECRET_FIELD as _SECRET_FIELD
+from app.core.secrets import SECRET_PATTERNS as SECRET_PATTERNS
+from app.core.secrets import redact_text
 
 # All model questions and decision thresholds live here for operator review.
 INJECTED_INSTRUCTIONS_THRESHOLD = 0.70
@@ -88,25 +90,8 @@ QUESTIONS: dict[str, Any] = {
     },
 }
 
-# Ported from ~/.jevref/jevlib.py; redact before truncating any string.
-SECRET_PATTERNS = [
-    r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----",
-    r"\b(sk|pk|rk)[-_](live|test|proj|ant)?[-_]?[A-Za-z0-9_-]{16,}",
-    r"\bgh[pousr]_[A-Za-z0-9]{20,}",
-    r"\bgithub_pat_[A-Za-z0-9_]{20,}",
-    r"\bxox[abprs]-[A-Za-z0-9-]{10,}",
-    r"\bAKIA[0-9A-Z]{16}\b",
-    r"\bAIza[0-9A-Za-z_-]{30,}",
-    r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}",
-    r"(?i)\b(api[_-]?key|secret|token|password|passwd|pwd)\b\s*[:=]\s*\S+",
-    r"\b[A-Fa-f0-9]{32,}\b",
-    r"\b[A-Za-z0-9+/]{40,}={0,2}",
-]
-_SECRETS = [re.compile(pattern) for pattern in SECRET_PATTERNS]
-_SECRET_FIELD = re.compile(
-    r"api[_-]?key|secret|token|password|passwd|pwd|authorization|credential|private[_-]?key",
-    re.I,
-)
+# SECRET_PATTERNS lives in app.core.secrets (single shared copy); redact
+# before truncating any string.
 logger = logging.getLogger(__name__)
 
 
@@ -123,9 +108,8 @@ class JevGuardVerdict:
 
 
 def strip_secrets(text: str) -> str:
-    for pattern in _SECRETS:
-        text = pattern.sub("[secret]", text)
-    return text
+    """Keep the historic name; the patterns live in app.core.secrets."""
+    return redact_text(text)
 
 
 def _safe_state(state: dict[str, Any], api_key: str) -> dict[str, Any]:
