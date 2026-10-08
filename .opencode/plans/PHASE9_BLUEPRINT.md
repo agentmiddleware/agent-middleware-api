@@ -3,6 +3,12 @@
 **Based on arXiv:2506.10953v1 Gap Analysis**
 **Target: v0.5.0**
 
+> Status: implemented in tree. All three blueprint items are wired into
+> discovery: passkey (`app/services/webauthn_provider.py`),
+> DOM bridge (`app/services/awi_playwright_bridge.py`), and RAG memory
+> (`app/services/awi_rag_engine.py`), with capabilities listed in
+> `app/routers/discover.py`. Verified against checkout a1c4b0b (2026-10-07).
+
 ---
 
 ## Executive Summary

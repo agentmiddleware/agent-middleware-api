@@ -11,7 +11,8 @@ The reported external run dates were 2026-09-11/12. `RESULTS.txt` is a
 retained. The four recorded battery summaries contain 26, 21, 10 and 200
 experiments. The swarm summary includes three 503 responses and one timeout.
 These are historical diagnostic observations, not current runtime acceptance.
-The original raw output remains unchanged.
+RESULTS.txt is preserved as regenerated on 2026-09-14; the original 2026-09-11/12
+output was not retained, so this record cannot be re-run or cited as current.
 
 The harness and its network transport now refuse execution. Its fixed
 production target is not authorization to repeat probes. For supported local
