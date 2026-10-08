@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, cast
 
-from sqlalchemy import or_, select, update as sa_update
+from sqlalchemy import func, or_, select, update as sa_update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
@@ -1333,30 +1333,65 @@ class BillingEngine:
 
     # --- Alerts ---
 
-    async def get_alerts(self, wallet_id: str | None = None) -> list[BillingAlert]:
-        """Get billing alerts."""
+    async def get_alerts(
+        self,
+        wallet_id: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[BillingAlert]:
+        """Get billing alerts, newest first, paged in the query."""
         async with self._session_factory()() as session:
+            stmt = select(BillingAlertModel).order_by(
+                cast(ColumnElement[Any], BillingAlertModel.created_at).desc()
+            )
             if wallet_id:
-                result = await session.execute(
-                    select(BillingAlertModel)
-                    .where(
-                        cast(
-                            ColumnElement[bool],
-                            BillingAlertModel.wallet_id == wallet_id,
-                        )
-                    )
-                    .order_by(
-                        cast(ColumnElement[Any], BillingAlertModel.created_at).desc()
+                stmt = stmt.where(
+                    cast(
+                        ColumnElement[bool],
+                        BillingAlertModel.wallet_id == wallet_id,
                     )
                 )
-            else:
-                result = await session.execute(
-                    select(BillingAlertModel).order_by(
-                        cast(ColumnElement[Any], BillingAlertModel.created_at).desc()
-                    )
-                )
+            if offset:
+                stmt = stmt.offset(offset)
+            if limit is not None:
+                stmt = stmt.limit(limit)
+            result = await session.execute(stmt)
             alerts = list(result.scalars().all())
             return [billing_alert_model_to_schema(a) for a in alerts]
+
+    async def count_alerts(self, wallet_id: str | None = None) -> int:
+        """Count billing alerts without loading them."""
+        async with self._session_factory()() as session:
+            stmt = select(func.count()).select_from(BillingAlertModel)
+            if wallet_id:
+                stmt = stmt.where(
+                    cast(
+                        ColumnElement[bool],
+                        BillingAlertModel.wallet_id == wallet_id,
+                    )
+                )
+            result = await session.execute(stmt)
+            return int(result.scalar_one())
+
+    async def count_unacknowledged_alerts(self, wallet_id: str | None = None) -> int:
+        """Count unacknowledged billing alerts without loading them."""
+        async with self._session_factory()() as session:
+            stmt = select(func.count()).select_from(BillingAlertModel)
+            conditions = [
+                cast(
+                    ColumnElement[bool],
+                    BillingAlertModel.acknowledged == False,  # noqa: E712
+                )
+            ]
+            if wallet_id:
+                conditions.append(
+                    cast(
+                        ColumnElement[bool],
+                        BillingAlertModel.wallet_id == wallet_id,
+                    )
+                )
+            result = await session.execute(stmt.where(*conditions))
+            return int(result.scalar_one())
 
     # --- Wallet Queries ---
 

@@ -396,7 +396,7 @@ class StripeIntegration:
         return payment_intent_id, wallet_id, credits
 
     async def _handle_payment_failed(self, payment_intent: dict) -> None:
-        """Log payment failure and notify via Slack."""
+        """Log payment failure and notify via Slack and email."""
         from ..services.notifications import get_notification_service
 
         wallet_id = payment_intent["metadata"].get("wallet_id")
@@ -407,11 +407,30 @@ class StripeIntegration:
         logger.warning(f"Payment failed for wallet {wallet_id}: {error_msg}")
 
         if wallet_id:
+            sponsor_email: Optional[str] = None
+            try:
+                async with self._session_factory()() as session:
+                    result = await session.execute(
+                        select(WalletModel).where(
+                            cast(
+                                ColumnElement[bool],
+                                WalletModel.wallet_id == wallet_id,
+                            )
+                        )
+                    )
+                    wallet = result.scalars().first()
+                    sponsor_email = wallet.email if wallet else None
+            except Exception:
+                logger.warning(
+                    "payment_failed_email_lookup_failed",
+                    exc_info=True,
+                )
             notifications = get_notification_service()
             await notifications.send_payment_failed_alert(
                 wallet_id=wallet_id,
                 error_message=error_msg,
                 payment_intent_id=payment_intent["id"],
+                sponsor_email=sponsor_email,
             )
 
     @staticmethod

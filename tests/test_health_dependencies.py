@@ -126,6 +126,7 @@ async def test_report_default_shape():
         "upstream_mcp",
         "signing_key",
         "sentinel",
+        "notifications",
     }
     # Every check carries an error slot (None when healthy) and latency_ms.
     for name, res in report["dependencies"].items():
@@ -149,6 +150,10 @@ async def test_report_default_shape():
     # Sentinel gated on human_approval simulation mode.
     assert report["dependencies"]["sentinel"]["status"] == "not_used"
     assert "human_approval" in report["dependencies"]["sentinel"].get("reason", "")
+
+    # Notifications report configured state, never an outage: in the
+    # default test env no channel is set.
+    assert report["dependencies"]["notifications"]["status"] == "not_configured"
 
     # Simulation modes are surfaced for operators.
     assert "simulation_modes" in report
