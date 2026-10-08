@@ -9,8 +9,11 @@ services:
       - "8000:8000"
     env_file:
       - .env
+    # Overridable so a developer can mirror production guardrails locally
+    # (DEBUG=false) instead of always running the permissive default.
+    # Production itself runs via the Railway path, never this file.
     environment:
-      - DEBUG=true
+      - DEBUG=${DEBUG:-true}
     volumes:
       - ./app:/app/app  # Hot reload in dev
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload

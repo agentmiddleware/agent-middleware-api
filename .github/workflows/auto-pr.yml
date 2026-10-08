@@ -14,7 +14,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # Manual-only frozen surface that still holds write permissions so it can
+      # open a PR on demand. Do not persist the default credential in git
+      # config; the create-pull-request step below authenticates with its own
+      # explicit token input.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7

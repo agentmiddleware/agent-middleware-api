@@ -17,9 +17,16 @@ async def client():
 def test_dockerfile_requires_staged_commit_sha():
     """The image must fail to build when a release context lacks its stamp."""
     dockerfile = open("Dockerfile", encoding="utf-8").read()
-    assert "COPY .build_commit_sha /app/.build_commit_sha" in dockerfile
+    assert "test -f /app/.build_commit_sha" in dockerfile
     assert "ARG COMMIT_SHA" not in dockerfile
     assert "BUILD_COMMIT_SHA=${COMMIT_SHA}" not in dockerfile
+
+
+def test_dockerfile_stamp_guard_names_the_fix():
+    """The stamp guard must tell a local builder the exact recovery command."""
+    dockerfile = open("Dockerfile", encoding="utf-8").read()
+    assert "missing .build_commit_sha" in dockerfile
+    assert "git rev-parse HEAD" in dockerfile
 
 
 def test_local_compose_uses_the_unstamped_development_dockerfile():
