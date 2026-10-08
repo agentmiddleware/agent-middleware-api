@@ -110,6 +110,7 @@ import base64
 import uuid
 from datetime import datetime, timedelta
 
+
 class WebAuthnProvider:
     """WebAuthn/Passkey flow for high-risk AWI actions."""
 
@@ -147,9 +148,15 @@ class WebAuthnProvider:
 
     async def requires_passkey(self, session_id: str, action: str) -> bool:
         HIGH_RISK_ACTIONS = {
-            "checkout", "payment", "transfer_funds", "delete_account",
-            "change_password", "modify_billing", "add_payment_method",
-            "submit_pii", "export_user_data",
+            "checkout",
+            "payment",
+            "transfer_funds",
+            "delete_account",
+            "change_password",
+            "modify_billing",
+            "add_payment_method",
+            "submit_pii",
+            "export_user_data",
         }
         return action.lower() in HIGH_RISK_ACTIONS
 
@@ -177,7 +184,9 @@ class WebAuthnProvider:
 
         return {
             "challenge_id": challenge_id,
-            "challenge": base64.urlsafe_b64encode(challenge_bytes).decode("ascii").rstrip("="),
+            "challenge": base64.urlsafe_b64encode(challenge_bytes)
+            .decode("ascii")
+            .rstrip("="),
             "rp_id": self._rp_id,
             "rp_name": self._rp_name,
             "timeout": self._timeout_ms,
@@ -317,7 +326,11 @@ SEMANTIC_PATTERNS = {
     },
     "add_to_cart": {
         "tags": ["button", "a"],
-        "attributes": ["aria-label~=cart", "data-action~=add.*cart", "class~=add-to-cart"],
+        "attributes": [
+            "aria-label~=cart",
+            "data-action~=add.*cart",
+            "class~=add-to-cart",
+        ],
     },
     "checkout": {
         "tags": ["button", "a"],
@@ -340,38 +353,48 @@ async def _handle_search_and_sort(self, session, params):
 
     search_element = await self._find_semantic_element(session, "search_input")
     if search_element:
-        commands.append(PlaywrightCommand(
-            command_type="fill",
-            target=search_element.css_selector,
-            value=query,
-        ))
-        commands.append(PlaywrightCommand(
-            command_type="press",
-            target=search_element.css_selector,
-            value="Enter",
-        ))
+        commands.append(
+            PlaywrightCommand(
+                command_type="fill",
+                target=search_element.css_selector,
+                value=query,
+            )
+        )
+        commands.append(
+            PlaywrightCommand(
+                command_type="press",
+                target=search_element.css_selector,
+                value="Enter",
+            )
+        )
 
     if sort_by:
         sort_element = await self._find_semantic_element(session, "sort_dropdown")
         if sort_element:
-            commands.append(PlaywrightCommand(
-                command_type="select",
-                target=sort_element.css_selector,
-                value=self._get_sort_option_value(sort_by),
-            ))
+            commands.append(
+                PlaywrightCommand(
+                    command_type="select",
+                    target=sort_element.css_selector,
+                    value=self._get_sort_option_value(sort_by),
+                )
+            )
 
     return commands
+
 
 async def _handle_add_to_cart(self, session, params):
     cart_element = await self._find_semantic_element(session, "add_to_cart")
     if not cart_element:
         raise ValueError("No add-to-cart element found")
 
-    return [PlaywrightCommand(
-        command_type="click",
-        target=cart_element.css_selector,
-        options={"timeout": 10000},
-    )]
+    return [
+        PlaywrightCommand(
+            command_type="click",
+            target=cart_element.css_selector,
+            options={"timeout": 10000},
+        )
+    ]
+
 
 async def _handle_fill_form(self, session, params):
     commands = []
@@ -385,11 +408,13 @@ async def _handle_fill_form(self, session, params):
             element = await self._find_element_by_label(session, field_name)
 
         if element:
-            commands.append(PlaywrightCommand(
-                command_type="fill",
-                target=element.css_selector,
-                value=str(value),
-            ))
+            commands.append(
+                PlaywrightCommand(
+                    command_type="fill",
+                    target=element.css_selector,
+                    value=str(value),
+                )
+            )
 
     return commands
 ```
@@ -430,7 +455,9 @@ class AWIRAGEngine:
         key_entities = self._extract_entities(action_history, state_snapshots)
         user_intent = self._infer_intent(action_sequence, state_snapshots)
         embedding = await self._generate_embedding(
-            self._prepare_embedding_text(session_type, action_sequence, page_summaries, key_entities)
+            self._prepare_embedding_text(
+                session_type, action_sequence, page_summaries, key_entities
+            )
         )
         # Store memory...
         return memory_id
@@ -449,14 +476,16 @@ class AWIRAGEngine:
                 continue
             similarity = self._cosine_similarity(query_embedding, memory.embedding)
             if similarity >= similarity_threshold:
-                results.append({
-                    "memory_id": memory_id,
-                    "session_id": memory.session_id,
-                    "user_intent": memory.user_intent,
-                    "action_sequence": memory.action_sequence[:5],
-                    "similarity_score": similarity,
-                    "key_entities": memory.key_entities[:10],
-                })
+                results.append(
+                    {
+                        "memory_id": memory_id,
+                        "session_id": memory.session_id,
+                        "user_intent": memory.user_intent,
+                        "action_sequence": memory.action_sequence[:5],
+                        "similarity_score": similarity,
+                        "key_entities": memory.key_entities[:10],
+                    }
+                )
         results.sort(key=lambda x: x["similarity_score"], reverse=True)
         return results[:top_k]
 ```
@@ -512,7 +541,7 @@ async def execute_action(self, request: AWIExecutionRequest) -> AWIExecutionResp
             return AWIExecutionResponse(
                 status="passkey_required",
                 error="This action requires biometric verification. "
-                      "Call POST /v1/awi/passkey/challenge first.",
+                "Call POST /v1/awi/passkey/challenge first.",
             )
     # ... rest of execution
 ```

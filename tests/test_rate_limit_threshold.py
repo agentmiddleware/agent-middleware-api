@@ -587,6 +587,104 @@ def test_published_window_does_not_claim_one_backend_s_algorithm() -> None:
 
 
 @pytest.mark.anyio
+async def test_limit_of_zero_refuses_every_request() -> None:
+    """A limit of 0 must refuse everything, not fall back to the default.
+
+    The constructor used ``or`` for the default, so 0 silently became 120
+    and the first request passed.
+    """
+
+    async def ok(_request):
+        return PlainTextResponse("ok")
+
+    starlette_app = Starlette(routes=[Route("/v1/wallets", ok)])
+    limited = RateLimitMiddleware(starlette_app, requests_per_minute=0)
+    assert limited.limit == 0
+    assert limited.preauth_limit == 0
+
+    transport = ASGITransport(app=limited)
+    async with AsyncClient(transport=transport, base_url="http://test") as http:
+        first = await http.get("/v1/wallets", headers={"X-API-Key": "any-key"})
+        second = await http.get("/v1/wallets", headers={"X-API-Key": "other-key"})
+
+    assert first.status_code == 429
+    assert second.status_code == 429
+    assert first.headers["X-RateLimit-Remaining"] == "0"
+
+
+def _request_with_ip(*, real_ip: str | None, peer: str) -> Request:
+    headers = [(b"x-real-ip", real_ip.encode())] if real_ip is not None else []
+    return Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/v1/discover",
+            "headers": headers,
+            "client": (peer, 1234),
+        }
+    )
+
+
+def test_client_id_canonicalizes_equivalent_addresses(monkeypatch) -> None:
+    """``::ffff:1.2.3.4`` is the same host as ``1.2.3.4``: one bucket.
+
+    Without canonicalization a client reachable over both families spends a
+    budget per spelling from the shared pre-auth and public-MCP buckets.
+    """
+    from app.core.rate_limiter import _client_id
+
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT_ID", "test-env")
+    assert _client_id(_request_with_ip(real_ip="1.2.3.4", peer="9.9.9.9")) == (
+        _client_id(_request_with_ip(real_ip="::ffff:1.2.3.4", peer="9.9.9.9"))
+    )
+    assert _client_id(_request_with_ip(real_ip="::1", peer="9.9.9.9")) == (
+        _client_id(_request_with_ip(real_ip="0:0:0:0:0:0:0:1", peer="9.9.9.9"))
+    )
+    # Garbage still falls back to the peer address: handing it back would let
+    # each distinct garbage value mint its own budget.
+    assert _client_id(_request_with_ip(real_ip="not-an-ip", peer="9.9.9.9")) == (
+        "9.9.9.9"
+    )
+
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT_ID")
+    assert _client_id(_request_with_ip(real_ip=None, peer="::1")) == (
+        _client_id(_request_with_ip(real_ip=None, peer="0:0:0:0:0:0:0:1"))
+    )
+
+
+@pytest.mark.anyio
+async def test_alternating_ipv4_and_mapped_ipv6_share_one_budget(
+    monkeypatch,
+) -> None:
+    """Alternating ``1.2.3.4`` and ``::ffff:1.2.3.4`` must exhaust one bucket.
+
+    Each request carries a distinct invented key, so only the shared
+    per-client bucket bounds them. Without canonicalization the two spellings
+    name two buckets and the client gets twice the ceiling.
+    """
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT_ID", "test-env")
+
+    limited = RateLimitMiddleware(_governed_app(), requests_per_minute=2)
+    ceiling = limited.preauth_limit
+
+    transport = ASGITransport(app=limited)
+    async with AsyncClient(transport=transport, base_url="http://test") as http:
+        responses = [
+            await http.get(
+                "/v1/discover",
+                headers={
+                    "X-API-Key": f"invented-key-{index}",
+                    "X-Real-IP": ("1.2.3.4" if index % 2 == 0 else "::ffff:1.2.3.4"),
+                },
+            )
+            for index in range(ceiling + 1)
+        ]
+
+    assert [r.status_code for r in responses[:ceiling]] == [200] * ceiling
+    assert responses[ceiling].status_code == 429
+
+
+@pytest.mark.anyio
 async def test_bucket_key_is_canonicalized_like_auth() -> None:
     """``"key"`` and ``"key "`` are one credential to auth, so one bucket here.
 

@@ -168,6 +168,24 @@ def _presented_rate_identity(request: Request) -> str | None:
     return f"jwt:{payload.key_id}"
 
 
+def _canonical_host(value: str) -> str:
+    """Canonicalize one IP string so equivalent spellings share a bucket.
+
+    IPv4-mapped IPv6 (``::ffff:1.2.3.4``) is the same host as ``1.2.3.4``,
+    and IPv6 has many spellings of one address, so without this one client
+    reachable over both families gets a budget per spelling. Unparseable
+    values pass through unchanged.
+    """
+    try:
+        addr = ipaddress.ip_address(value.strip())
+    except ValueError:
+        return value
+    mapped = getattr(addr, "ipv4_mapped", None)
+    if mapped is not None:
+        addr = mapped
+    return addr.compressed
+
+
 def _client_id(request: Request) -> str:
     """Return a non-spoofable client identifier for the supported ingress.
 
@@ -180,18 +198,21 @@ def _client_id(request: Request) -> str:
 
     peer_host = request.client.host if request.client else "unknown"
     if not os.environ.get("RAILWAY_ENVIRONMENT_ID", "").strip():
-        return peer_host
+        return _canonical_host(peer_host)
 
     values = request.headers.getlist("x-real-ip")
     if len(values) != 1:
-        return peer_host
+        return _canonical_host(peer_host)
     raw = values[0].strip()
     if not raw or "," in raw or "%" in raw:
-        return peer_host
+        return _canonical_host(peer_host)
     try:
-        return ipaddress.ip_address(raw).compressed
+        addr = ipaddress.ip_address(raw)
     except ValueError:
-        return peer_host
+        # Garbage falls back to the peer address: handing it back would let
+        # each distinct garbage value mint its own budget.
+        return _canonical_host(peer_host)
+    return _canonical_host(addr.compressed)
 
 
 def _api_key_bucket(presented_key: str | None) -> str:
@@ -271,7 +292,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     def __init__(self, app, requests_per_minute: int | None = None):
         super().__init__(app)
-        self.limit = requests_per_minute or settings.RATE_LIMIT_PER_MINUTE
+        # Explicit None check: a limit of 0 must refuse everything, and
+        # ``or`` would silently turn it into the default.
+        if requests_per_minute is None:
+            requests_per_minute = settings.RATE_LIMIT_PER_MINUTE
+        self.limit = requests_per_minute
         self.preauth_limit = self.limit * _PREAUTH_LIMIT_MULTIPLIER
         self.window = 60.0  # seconds
         self._redis_url = settings.REDIS_URL.strip()
@@ -445,7 +470,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 if len(live) >= limit:
                     if bucket_key in self._requests:
                         self._requests[bucket_key] = live
-                    return True, max(1, int(live[0] + self.window - now) + 1)
+                    # live can be empty when the limit is 0: there is no
+                    # oldest entry, so report a full window.
+                    oldest = live[0] if live else now
+                    return True, max(1, int(oldest + self.window - now) + 1)
                 live.append(now)
                 self._requests[bucket_key] = live
             return False, window_size
