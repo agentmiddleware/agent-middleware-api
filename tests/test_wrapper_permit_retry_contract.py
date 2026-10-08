@@ -83,8 +83,10 @@ def _load_wrapper(monkeypatch, framework):
         module,
         "datetime",
         SimpleNamespace(
-            now=lambda tz: datetime(2026, 10, 2, tzinfo=timezone.utc)
-            + timedelta(seconds=next(tick))
+            now=lambda tz: (
+                datetime(2026, 10, 2, tzinfo=timezone.utc)
+                + timedelta(seconds=next(tick))
+            )
         ),
     )
     return module

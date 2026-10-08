@@ -33,6 +33,7 @@ from .models import (
     ReceiptVerification,
     ToolDefinition,
 )
+from .permit_cache import PermitCache, is_permit_lifecycle_denial
 from .receipt_verifier import (
     VerificationError,
     VerificationResult,
@@ -111,6 +112,7 @@ __all__ = [
     "LocalDecision",
     "LocalPermitValidator",
     "Permit",
+    "PermitCache",
     "PermitDeniedError",
     "PermitRequest",
     "Receipt",
@@ -123,6 +125,7 @@ __all__ = [
     "X402Client",
     "billable",
     "combined",
+    "is_permit_lifecycle_denial",
     "monitored",
     "key_set_from_document",
     "parse_402_response",

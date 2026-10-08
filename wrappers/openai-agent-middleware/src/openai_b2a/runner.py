@@ -37,7 +37,9 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Protocol
 
+from b2a_sdk.errors import PermitDeniedError
 from b2a_sdk.models import InvocationResult, PermitRequest, Receipt
+from b2a_sdk.permit_cache import is_permit_lifecycle_denial
 
 from .client import B2AClient
 
@@ -135,6 +137,29 @@ def operation_key_for(tool_call_id: str) -> str:
 def function_name_for(tool_name: str) -> str:
     """OpenAI function names are ``[a-zA-Z0-9_-]{1,64}``; MCP names may carry dots."""
     return _FUNCTION_NAME_INVALID.sub("_", tool_name)[:64]
+
+
+def _permit_record_expired(permit: PermitRecord) -> bool:
+    """Whether the recorded permit request is past its own expiry.
+
+    A resumed runner must not silently reuse a permit that died while it was
+    away. An unparseable timestamp is treated as live, preserving the legacy
+    behavior for records written before the expiry was recorded.
+    """
+    try:
+        expires_at = datetime.fromisoformat(permit.expires_at)
+    except (TypeError, ValueError):
+        return False
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=UTC)
+    return expires_at <= datetime.now(UTC)
+
+
+def _expired_permit_error(permit: PermitRecord) -> ValueError:
+    return ValueError(
+        f"permit {permit.permit_idempotency_key!r} expired at {permit.expires_at}: "
+        "start a new run with fresh tool-call ids for work needing a new permit"
+    )
 
 
 # ── Durable records ──────────────────────────────────────────────────────────
@@ -461,13 +486,29 @@ class GovernedToolRunner:
         # Durable before any network call, after local validation succeeds.
         self._key_store.put_operation(record)
         permit_id = await self._ensure_permit(record, permit)
-        result = await self._client.invoke_tool(
-            tool_name,
-            call.arguments,
-            wallet_id=self._wallet_id,
-            permit_id=permit_id,
-            idempotency_key=record.idempotency_key,
-        )
+        try:
+            result = await self._client.invoke_tool(
+                tool_name,
+                call.arguments,
+                wallet_id=self._wallet_id,
+                permit_id=permit_id,
+                idempotency_key=record.idempotency_key,
+            )
+        except PermitDeniedError as exc:
+            if is_permit_lifecycle_denial(exc):
+                # The permit is revoked or expired: drop the cached ids so the
+                # next attempt resolves again. The recorded request body is
+                # kept, so the retry replays the identical body under the same
+                # key and gets the same denial instead of a fresh conflict.
+                # Re-read from the store: _ensure_permit may have created the
+                # permit record after this call fetched it.
+                record.permit_id = None
+                stored = self._key_store.get_permit(record.permit_idempotency_key)
+                if stored is not None:
+                    stored.permit_id = None
+                    self._key_store.put_permit(stored)
+                self._key_store.put_operation(record)
+            raise
         record.receipt_id = result.receipt.receipt_id
         self._key_store.put_operation(record)
         return GovernedToolResult(
@@ -483,6 +524,10 @@ class GovernedToolRunner:
 
     async def _ensure_permit(self, record: OperationRecord, permit: PermitRecord | None) -> str:
         if record.permit_id:
+            # Never hand out a permit the record itself shows as expired: a
+            # resumed runner would otherwise invoke with a dead permit.
+            if permit is not None and _permit_record_expired(permit):
+                raise _expired_permit_error(permit)
             return record.permit_id
         if permit is None:
             # Fixed and persisted before the request so every later attempt
@@ -502,6 +547,11 @@ class GovernedToolRunner:
                 request_payload=request.to_payload(),
             )
             self._key_store.put_permit(permit)
+        if _permit_record_expired(permit):
+            # The key's fixed expiry already passed: no request under this key
+            # can succeed, so fail before spending a network call. Starting a
+            # new run mints a fresh key.
+            raise _expired_permit_error(permit)
         if permit.permit_id is None:
             if permit.request_payload is None:
                 raise ValueError(

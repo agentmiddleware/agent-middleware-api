@@ -1,6 +1,6 @@
 """Test permit caching to prevent 409 IdempotencyConflictError on replay."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
@@ -18,7 +18,7 @@ def _permit_payload() -> dict:
         "allowed_tools": ["partner.search"],
         "max_credits": "100",
         "spent_credits": "0",
-        "expires_at": datetime.now(UTC).isoformat(),
+        "expires_at": (datetime.now(UTC) + timedelta(minutes=30)).isoformat(),
         "nonce": "nonce-1",
         "status": "active",
         "signature": "sig-permit-1",
@@ -119,5 +119,116 @@ async def test_permit_cache_prevents_duplicate_create_permit():
 
     assert "receipt-success" in result1
     assert "receipt-success" in result2
+
+    await base_client.close()
+
+
+def _success_handler(counters):
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/permits":
+            counters["permit"] += 1
+            return httpx.Response(201, json=_permit_payload())
+
+        if request.url.path == "/mcp/messages":
+            counters["invoke"] += 1
+            return httpx.Response(
+                200,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": "cache-test",
+                    "result": {
+                        "content": [{"type": "text", "text": '{"ok": true}'}],
+                        "structuredContent": {"ok": True},
+                        "isError": False,
+                        "receipt": _receipt_payload(),
+                    },
+                },
+            )
+
+        return httpx.Response(404)
+
+    return handler
+
+
+@pytest.mark.asyncio
+async def test_expired_cached_permit_is_resolved_again():
+    """A cached permit read past its own expiry must not be reused.
+
+    With a zero-minute TTL every entry is born expired, so each call resolves
+    the permit again instead of reusing the cached id.
+    """
+    counters = {"permit": 0, "invoke": 0}
+    transport = httpx.MockTransport(_success_handler(counters))
+    base_client = B2AClient(api_key="test-key", transport=transport)
+    tool = CrewAIB2ATool(api_key="test-key", wallet_id="wallet-1", permit_ttl_minutes=0)
+    tool.client = base_client
+
+    for i in ("invoke-1", "invoke-2"):
+        result = await tool._arun(
+            operation="call_tool",
+            tool_name="partner.search",
+            idempotency_key=i,
+            permit_idempotency_key="permit-expiry-test",
+            arguments={},
+        )
+        assert "receipt-success" in result
+
+    assert counters["permit"] == 2, "an expired cached permit must be resolved again"
+    assert counters["invoke"] == 2
+
+    await base_client.close()
+
+
+@pytest.mark.asyncio
+async def test_revoked_permit_denial_drops_cached_permit():
+    """An invoke denied with permit_revoked must drop the cached permit id."""
+    counters = {"permit": 0, "invoke": 0}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/permits":
+            counters["permit"] += 1
+            return httpx.Response(201, json=_permit_payload())
+
+        if request.url.path == "/mcp/messages":
+            counters["invoke"] += 1
+            return httpx.Response(
+                200,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": "revoked-test",
+                    "error": {"code": -32003, "message": "permit_revoked"},
+                },
+            )
+
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+    base_client = B2AClient(api_key="test-key", transport=transport)
+    tool = CrewAIB2ATool(api_key="test-key", wallet_id="wallet-1")
+    tool.client = base_client
+
+    # CrewAI's _arun reports failures as strings instead of raising.
+    first = await tool._arun(
+        operation="call_tool",
+        tool_name="partner.search",
+        idempotency_key="invoke-1",
+        permit_idempotency_key="permit-revoked-test",
+        arguments={},
+    )
+    assert "permit_revoked" in first
+
+    # The cached id was dropped: the retry resolves the permit again instead
+    # of reusing a permit the server already reported as revoked.
+    second = await tool._arun(
+        operation="call_tool",
+        tool_name="partner.search",
+        idempotency_key="invoke-2",
+        permit_idempotency_key="permit-revoked-test",
+        arguments={},
+    )
+    assert "permit_revoked" in second
+
+    assert counters["permit"] == 2, "a revoked cached permit must be resolved again"
+    assert counters["invoke"] == 2
 
     await base_client.close()

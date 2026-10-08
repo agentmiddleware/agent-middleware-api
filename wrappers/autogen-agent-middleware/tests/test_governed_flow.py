@@ -1,7 +1,7 @@
 """Tests for governed permit→invoke→receipt flow in AutoGen wrapper."""
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
@@ -20,7 +20,7 @@ def _permit_payload() -> dict:
         "allowed_tools": ["partner.search"],
         "max_credits": "100",
         "spent_credits": "0",
-        "expires_at": datetime.now(timezone.utc).isoformat(),
+        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat(),
         "nonce": "nonce-1",
         "status": "active",
         "signature": "sig-permit-1",
