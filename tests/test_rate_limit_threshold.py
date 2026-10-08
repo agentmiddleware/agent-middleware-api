@@ -20,6 +20,7 @@ from starlette.routing import Route
 
 from app.core.auth import CREDENTIAL_REJECTED_HEADER, AuthContext, get_auth_context
 from app.core.config import get_settings
+from app.core.jwt import JWTError
 from app.core.rate_limiter import (
     _MEMORY_BUCKET_SWEEP_THRESHOLD,
     RateLimitMiddleware,
@@ -584,6 +585,58 @@ def test_published_window_does_not_claim_one_backend_s_algorithm() -> None:
         "fixed_window_shared_rolling_window_in_memory"
     )
     assert payload["rejected_credentials_scope"] == "shared_per_client_bucket"
+
+
+@pytest.mark.anyio
+async def test_flood_of_bad_tokens_is_throttled_before_verification(
+    monkeypatch,
+) -> None:
+    """Bad Bearer [REDACTED] meet the cheap per-client ceiling before any signature check.
+
+    Resolving the per-key bucket verifies a JWT signature, so verifying first
+    would let unauthenticated floods burn CPU without bound. The shared
+    per-client reservation is taken first; requests past it are refused 429
+    without the verifier ever seeing them. Each bad token below is distinct,
+    so only that shared ceiling can stop the flood.
+    """
+
+    from app.core import rate_limiter as rate_limiter_module
+
+    verify_calls: list[str] = []
+
+    class _CountingVerifier:
+        def verify_access_token(self, token: str):
+            verify_calls.append(token)
+            raise JWTError("invalid_token")
+
+    monkeypatch.setattr(
+        rate_limiter_module, "get_jwt_service", lambda: _CountingVerifier()
+    )
+
+    async def deny(_request):
+        return PlainTextResponse("no", status_code=401)
+
+    starlette_app = Starlette(routes=[Route("/v1/wallets", deny)])
+    limited = RateLimitMiddleware(starlette_app, requests_per_minute=2)
+    ceiling = limited.preauth_limit
+    attempts = ceiling + 5
+
+    transport = ASGITransport(app=limited)
+    async with AsyncClient(transport=transport, base_url="http://test") as http:
+        statuses = [
+            (
+                await http.get(
+                    "/v1/wallets",
+                    headers={"Authorization": f"Bearer bad-token-{index}"},
+                )
+            ).status_code
+            for index in range(attempts)
+        ]
+
+    assert statuses[:ceiling] == [401] * ceiling
+    assert statuses[ceiling:] == [429] * 5
+    assert len(verify_calls) == ceiling
+    assert len(set(verify_calls)) == ceiling
 
 
 @pytest.mark.anyio

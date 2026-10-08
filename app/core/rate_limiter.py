@@ -611,6 +611,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # rate-limit buckets (and the local test-key bypass cannot be reached
         # from the Internet).
         public_mcp_request = request.url.path.rstrip("/") == _PUBLIC_MCP_PATH
+        presented_key: str | None = None
+        bucket_limits: list[tuple[str, int]] | None = None
         if public_mcp_request:
             client_id = _client_id(request)
             namespace = (
@@ -629,14 +631,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     ),
                 ),
             ]
-        else:
-            # Canonicalize the way auth does (app.core.auth strips before
-            # lookup): otherwise "key" and "key " count as separate buckets and
-            # one accepted credential can sidestep the per-key limit. A blank
-            # header is no credential at all, so it shares the anonymous
-            # bucket. The bucket is then named by a digest, never the key.
-            presented_key = _presented_rate_identity(request)
-            bucket_limits = [(_api_key_bucket(presented_key), self.limit)]
+        # Non-public requests resolve their per-key bucket after the cheap
+        # pre-auth gate below passes. Resolving it may verify a JWT signature
+        # (see _presented_rate_identity), which is the CPU a flood of bad
+        # tokens tries to burn. Once resolved, the bucket is canonicalized
+        # the way auth does (app.core.auth strips before lookup), so "key"
+        # and "key " still share one bucket; a blank header still shares the
+        # anonymous bucket; and the bucket still names a digest, never the
+        # key.
 
         # Skip rate limiting for docs, health, and test clients
         skip_paths = (
@@ -659,27 +661,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             _credentials_were_rejected(response)  # strip the internal marker
             return response  # type: ignore[no-any-return]
 
-        # In test / CI environments, the special "test-key" bypasses rate limits
-        # so that large test suites don't self-throttle.
-        if (
-            not public_mcp_request
-            and presented_key == "test-key"
-            and not is_production_like_environment(settings.ENVIRONMENT)
-        ):
-            response = await call_next(request)
-            _credentials_were_rejected(response)  # strip the internal marker
-            response.headers["X-RateLimit-Limit"] = str(self.limit)
-            response.headers["X-RateLimit-Remaining"] = str(self.limit)
-            response.headers["X-RateLimit-Reset"] = "60"
-            return response  # type: ignore[no-any-return]
-
         now = time.time()
         applied_limit = self.limit
         header_remaining = self.limit
         header_reset = int(self.window)
 
-        # Pre-authentication ceiling. The per-key bucket above is selected from
-        # a header the caller controls, before verify_api_key has had a chance
+        # Pre-authentication ceiling. The per-key bucket is selected from a
+        # header the caller controls, before verify_api_key has had a chance
         # to reject it, so a caller sending a fresh X-API-Key on every request
         # would otherwise be handed a fresh 120-request budget each time — an
         # unbounded amount of traffic from one client. One shared per-client
@@ -690,10 +678,40 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # a 404) never refuses an invented key either. Rotation buys nothing
         # past the bucket, and a request whose credentials the app accepts
         # leaves it exactly as it found it.
+        #
+        # The reservation is taken before the presented identity is resolved
+        # on purpose: resolving it may verify a JWT signature, so a flood of
+        # bad tokens meets this cheap per-client ceiling before any signature
+        # check runs. The per-identity limits still apply after it.
         preauth_bucket = None if public_mcp_request else self._preauth_bucket(request)
         preauth_reserved = False
         preauth_in_memory = False
         keep_reservation = False
+
+        async def _test_key_bypass() -> Response | None:
+            """Serve the test-environment bypass, if this request qualifies.
+
+            In test / CI environments, the special "test-key" bypasses rate
+            limits so that large test suites don't self-throttle. The bypass
+            predates the pre-auth reservation, and this path never held one,
+            so a reservation taken by the cheap gate above is handed back.
+            """
+            nonlocal preauth_reserved
+            if (
+                public_mcp_request
+                or presented_key != "test-key"
+                or is_production_like_environment(settings.ENVIRONMENT)
+            ):
+                return None
+            if preauth_bucket is not None and preauth_reserved:
+                await self._release(preauth_bucket, now, force_memory=preauth_in_memory)
+                preauth_reserved = False
+            response = await call_next(request)
+            _credentials_were_rejected(response)  # strip the internal marker
+            response.headers["X-RateLimit-Limit"] = str(self.limit)
+            response.headers["X-RateLimit-Remaining"] = str(self.limit)
+            response.headers["X-RateLimit-Reset"] = "60"
+            return response  # type: ignore[no-any-return]
 
         try:
             try:
@@ -702,6 +720,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 )
                 if rejection is not None:
                     return rejection
+                if bucket_limits is None:
+                    presented_key = _presented_rate_identity(request)
+                    bucket_limits = [(_api_key_bucket(presented_key), self.limit)]
+                bypassed = await _test_key_bypass()
+                if bypassed is not None:
+                    return bypassed
                 for index, (bucket_key, applied_limit) in enumerate(bucket_limits):
                     limited, remaining, reset_in = await self._check_limit_with_redis(
                         bucket_key,
@@ -779,6 +803,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     if rejection is not None:
                         return rejection
                     preauth_in_memory = preauth_reserved
+                if bucket_limits is None:
+                    presented_key = _presented_rate_identity(request)
+                    bucket_limits = [(_api_key_bucket(presented_key), self.limit)]
+                bypassed = await _test_key_bypass()
+                if bypassed is not None:
+                    return bypassed
                 for index, (bucket_key, applied_limit) in enumerate(bucket_limits):
                     limited, remaining, reset_in = await self._check_limit_in_memory(
                         bucket_key,
