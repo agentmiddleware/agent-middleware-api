@@ -36,6 +36,11 @@ Notes
   and a failed ``/mcp/tools.json`` discovery is a FAIL.
 * Budget/over-spend containment is NOT exercised here (it needs a tool with a
   known per-call cost); verify it manually against the ledger.
+
+Exit codes follow scripts/script_outcome.py: 0 means every named check held,
+1 means a check failed, 2 means the run never started, and 3 means no check
+failed but success was not earned (everything skipped, or cleanup left keys
+behind for manual revoke).
 """
 
 from __future__ import annotations
@@ -51,8 +56,10 @@ from datetime import datetime, timedelta, timezone
 
 if __package__:
     from .live_script_target import LiveTargetError, resolve_live_target
+    from .script_outcome import EXIT_SETUP, exit_code
 else:
     from live_script_target import LiveTargetError, resolve_live_target
+    from script_outcome import EXIT_SETUP, exit_code
 
 # Name the target explicitly — never default to a live host, so an operator who
 # exports only BOOTSTRAP_KEY cannot unintentionally provision against production.
@@ -210,8 +217,15 @@ def provision(issued: list[dict]) -> tuple[str, dict, dict, dict, dict]:
     return sponsor_id, a, b, permit, {}
 
 
-def revoke_all(issued: list[dict]) -> None:
+def revoke_all(issued: list[dict]) -> list[str]:
+    """Revoke every minted key. Returns the labels still needing manual revoke.
+
+    A failed revoke is never silent: the caller reports these names and leaves
+    with a nonzero exit, so a run whose checks passed but whose keys are
+    still live cannot read as clean.
+    """
     print("\n=== cleanup ===")
+    left_behind: list[str] = []
     for k in issued:
         s, _ = req(
             "DELETE", f"/v1/api-keys/{k['wallet_id']}/{k['key_id']}", BOOTSTRAP_KEY
@@ -221,8 +235,10 @@ def revoke_all(issued: list[dict]) -> None:
         elif s in (404, 410):
             status = "already-gone"
         else:
-            status = f"FAILED(status={s}) — revoke manually"
+            status = f"FAILED(status={s}) - revoke manually"
+            left_behind.append(k["label"])
         print(f"  {k['label']}: {status}")
+    return left_behind
 
 
 def discover_echo_tool(agent_key: str) -> bool | None:
@@ -407,7 +423,7 @@ def main(argv: list[str] | None = None) -> int:
             "to test, e.g. export API_URL=https://staging.example.test",
             file=sys.stderr,
         )
-        return 2
+        return EXIT_SETUP
     try:
         # environ={}: this script names its target with API_URL only, never
         # the AGENT_MIDDLEWARE_API_URL the shared resolver would fall back to.
@@ -416,14 +432,14 @@ def main(argv: list[str] | None = None) -> int:
         )
     except LiveTargetError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
-        return 2
+        return EXIT_SETUP
     bootstrap_key = os.environ.get("BOOTSTRAP_KEY")
     if not bootstrap_key:
         print(
             "ERROR: set BOOTSTRAP_KEY (operator key from Railway variables).",
             file=sys.stderr,
         )
-        return 2
+        return EXIT_SETUP
 
     global API_URL, BOOTSTRAP_KEY
     API_URL = api_url
@@ -431,18 +447,24 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Target: {API_URL}  (run {RUN_ID})\n")
 
     issued: list[dict] = []
+    left_behind: list[str] = []
     try:
         sponsor_id, a, b, permit, _ = provision(issued)
         run_checks(sponsor_id, a, b, permit)
     finally:
-        revoke_all(issued)
+        left_behind = revoke_all(issued)
 
     print("\n=== SUMMARY ===")
     for name, verdict, _ in RESULTS:
         print(f"  {verdict:4}  {name}")
     failed = [n for n, v, _ in RESULTS if v == "FAIL"]
-    print(f"\n{len(RESULTS)} checks — {len(failed)} FAIL")
-    return 1 if failed else 0
+    held = [n for n, v, _ in RESULTS if v == "PASS"]
+    print(f"\n{len(RESULTS)} checks - {len(failed)} FAIL")
+    if left_behind:
+        print("CLEANUP FAILED for (revoke manually):")
+        for label in left_behind:
+            print(f"  - {label}")
+    return exit_code(failed=len(failed), held=len(held), incomplete=len(left_behind))
 
 
 if __name__ == "__main__":
