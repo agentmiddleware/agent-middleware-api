@@ -568,6 +568,20 @@ main,
   line-height: 1.55;
 }
 
+/* Scope qualifier pinned directly under the H1: same voice as the
+   constraint line, smaller than the lead, so the promise never renders
+   without the upstream-path and at-most-once boundary beside it. */
+.hero-scope {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: var(--text-dim);
+  border-left: 2px solid var(--brass);
+  padding-left: 0.9rem;
+  margin: 0 0 1.5rem;
+  max-width: 62ch;
+}
+
 .cta-row {
   display: flex;
   flex-wrap: wrap;

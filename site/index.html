@@ -26,7 +26,7 @@
     <meta property="og:site_name" content="Agent Middleware API" />
     <meta
       property="og:title"
-      content="Make consequential agent actions transactional."
+      content="Authorize one action, charge it at most once, prove what happened."
     />
     <meta
       property="og:description"
@@ -41,12 +41,12 @@
     <meta property="og:image:height" content="630" />
     <meta
       property="og:image:alt"
-      content="Agent Middleware API: make consequential agent actions transactional"
+      content="Agent Middleware API: authorize one action, charge it at most once, prove what happened"
     />
     <meta name="twitter:card" content="summary_large_image" />
     <meta
       name="twitter:title"
-      content="Make consequential agent actions transactional."
+      content="Authorize one action, charge it at most once, prove what happened."
     />
     <meta
       name="twitter:description"
@@ -124,7 +124,7 @@
             "@type": "WebPage",
             "@id": "https://www.thisisatest.tech/#webpage",
             "url": "https://www.thisisatest.tech/",
-            "name": "Make consequential agent actions transactional.",
+            "name": "Authorize one action, charge it at most once, prove what happened.",
             "description": "Transaction integrity for consequential autonomous actions on the configured upstream-MCP path: one logical action, at-most-one dispatch and debit, explicit delivery uncertainty, and linked evidence.",
             "inLanguage": "en",
             "isPartOf": { "@id": "https://www.thisisatest.tech/#website" },
@@ -204,6 +204,12 @@
             <span class="eyebrow-mark" aria-hidden="true"></span>
           </p>
           <h1>Authorize one agent action. Charge it once. Prove what happened.</h1>
+          <p class="hero-scope">
+            On the configured upstream-MCP path, and at most once per accepted
+            request: denied calls are never charged, pre-dispatch failures are
+            refunded, and ambiguous post-dispatch outcomes stay charged pending
+            manual review.
+          </p>
           <p class="hero-body hero-body-lead">
             An agent issues a customer refund through an internal MCP tool.
             The call times out, the agent retries, and without a boundary the
@@ -258,10 +264,11 @@
           <p class="hero-body">
             Agent Middleware API is a transaction boundary between your
             autonomous agents and your consequential MCP (Model Context
-            Protocol) tools. The first call executes and is charged once; a
-            retry carrying the same idempotency key cannot dispatch again or
-            debit again. Every completed call returns a signed receipt you can
-            verify offline.
+            Protocol) tools. On the configured upstream path, the first
+            accepted call executes and is charged, at most once; a retry
+            carrying the same idempotency key cannot dispatch again or debit
+            again. Every finalized or reconciled call on that path returns a
+            signed receipt you can verify offline.
           </p>
           <p class="wedge-line">
             The wedge today is metered calls. The underlying primitive is
@@ -327,7 +334,7 @@
             class="boundary-scroll"
             tabindex="0"
             role="group"
-            aria-label="Diagram: the governed boundary is the only path from the agent to the tool"
+            aria-label="Diagram: once the operator closes the tool's direct routes, the governed boundary is the only path from the agent to the tool"
           >
             <svg
               viewBox="0 0 920 316"
