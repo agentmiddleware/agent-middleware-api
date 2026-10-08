@@ -46,6 +46,10 @@ _PROD_TRUST_ENV = {
     "WEBAUTHN_ALLOW_MOCK": "false",
     "TRUST_SIGNING_PRIVATE_KEY_B64": _TEST_SIGNING_PRIVATE_KEY_B64,
     "PUBLIC_URL": "https://api.thisisatest.tech",
+    # Self-provision is never on in production (guardrails refuse to boot with
+    # it), so the route answers 404 here. Leaving the flag to ambient env made
+    # this test's expectation environment-conditional.
+    "ENABLE_DEV_KEY_SELF_PROVISION": "false",
     # A production posture is not complete without the relational database the
     # wallets, permits, receipts, and ledger live in. It is PostgreSQL because
     # validate_trust_mode_config refuses SQLite here: SQLAlchemy silently drops
@@ -312,7 +316,8 @@ async def test_anonymous_cannot_invoke_or_mint_in_production(
     )
     assert invoke.status_code == 401
     minted = await client.post("/v1/dev-keys/self-provision", json={})
-    assert minted.status_code in {403, 404}
+    # Flag off (pinned above): the handler answers 404 without a 403 body.
+    assert minted.status_code == 404
 
 
 @pytest.mark.production_trust

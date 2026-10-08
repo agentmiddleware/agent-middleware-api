@@ -421,7 +421,10 @@ async def test_quote_is_returned_when_the_charge_never_lands(
         permit_id=permit["permit_id"],
         quote_id=quote["quote_id"],
     )
-    assert resp.status_code in {402, 403}
+    # Insufficient funds with a valid permit: app/routers/mcp.py maps the
+    # insufficient_funds denial to 402 (anything else is a 403). A 403 here
+    # would mean the denial was misclassified, so both are not acceptable.
+    assert resp.status_code == 402
 
     read = await client.get(
         f"/v1/quotes/{quote['quote_id']}", headers=agent["agent_headers"]

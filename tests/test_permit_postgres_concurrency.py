@@ -616,13 +616,16 @@ async def test_concurrent_authorizations_admit_exactly_one_budget_reservation(
 
     second = asyncio.create_task(run_second())
     await asyncio.wait_for(second_started.wait(), timeout=5)
-    await asyncio.sleep(0.1)
-    second_reached_validation_while_locked = second_validation_entered.is_set()
+    # Negative wait: while the first worker holds the row lock the second must
+    # never reach validation. Waiting for the event (instead of sleeping and
+    # peeking at the flag) keeps a slow scheduler from producing a vacuous
+    # pass where the second worker simply had not run yet.
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(second_validation_entered.wait(), timeout=2)
 
     release_first_validation.set()
     results = await asyncio.wait_for(asyncio.gather(first, second), timeout=10)
 
-    assert second_reached_validation_while_locked is False
     assert sum(result.allowed for result in results) == 1
     denied = next(result for result in results if not result.allowed)
     assert denied.reason == "permit_budget_exceeded"
@@ -666,15 +669,17 @@ async def test_authorization_then_revocation_is_one_valid_serial_order(
 
     revocation = asyncio.create_task(revoke())
     await asyncio.wait_for(revocation_started.wait(), timeout=5)
-    await asyncio.sleep(0.1)
-    revocation_completed_while_locked = revocation.done()
+    # Negative wait: revocation must still be blocked on the row lock. The
+    # shield keeps the timed wait from cancelling the task itself, and a slow
+    # scheduler cannot fake a pass the way a fixed sleep plus .done() could.
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(asyncio.shield(revocation), timeout=2)
 
     release_authorization.set()
     authorization_result, revoked = await asyncio.wait_for(
         asyncio.gather(authorization, revocation), timeout=10
     )
 
-    assert revocation_completed_while_locked is False
     assert authorization_result.allowed is True
     assert revoked.status == "revoked"
 
@@ -725,14 +730,16 @@ async def test_revocation_then_authorization_is_other_valid_serial_order(
 
             authorization = asyncio.create_task(authorize())
             await asyncio.wait_for(authorization_started.wait(), timeout=5)
-            await asyncio.sleep(0.1)
-            authorization_validated_while_locked = (
-                authorization_reached_validation.is_set()
-            )
+            # Negative wait: the in-flight revocation holds the row lock, so
+            # authorization must not reach validation until the transaction
+            # commits. Waiting beats a fixed sleep the same way as above.
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(
+                    authorization_reached_validation.wait(), timeout=2
+                )
 
     authorization_result = await asyncio.wait_for(authorization, timeout=10)
 
-    assert authorization_validated_while_locked is False
     assert authorization_result.allowed is False
     assert authorization_result.reason == "permit_revoked"
 
@@ -791,13 +798,14 @@ async def test_concurrent_refund_reconciliation_is_exactly_once_in_postgres(
 
     second = asyncio.create_task(run_second_worker())
     await asyncio.wait_for(second_started.wait(), timeout=5)
-    await asyncio.sleep(0.1)
-    second_verified_while_first_held_lock = second_worker_reached_verification.is_set()
+    # Negative wait: the second worker must not reach verification while the
+    # first holds the durable work-item lock. See the first test above for why
+    # this waits instead of sleeping and peeking at the flag.
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(second_worker_reached_verification.wait(), timeout=2)
 
     release_first_worker.set()
     results = await asyncio.wait_for(asyncio.gather(first, second), timeout=10)
-
-    assert second_verified_while_first_held_lock is False
     assert [replayed for _item, replayed in results] == [False, True]
     assert all(item.status == "resolved" for item, _replayed in results)
 

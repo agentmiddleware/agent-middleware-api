@@ -73,10 +73,19 @@ async def test_wallet_permit_inspection_is_self_scoped_and_rejects_other_wallets
 ):
     wallet_a = await provision_agent_wallet(client)
     wallet_b = await provision_agent_wallet(client)
+    await create_tool_permit(
+        client,
+        wallet_id=wallet_a["agent_wallet_id"],
+        key_id=wallet_a["key_id"],
+        tool_name="self-scope-probe",
+    )
 
     # An unscoped list from a wallet key is its own permits, not everyone's.
+    # The seeded permit keeps this non-empty: all() over zero permits would
+    # pass even if scoping were broken.
     global_resp = await client.get("/v1/permits", headers=wallet_a["agent_headers"])
     assert global_resp.status_code == 200
+    assert len(global_resp.json()["permits"]) >= 1
     assert all(
         permit["subject_wallet_id"] == wallet_a["agent_wallet_id"]
         or permit["issuer_wallet_id"] == wallet_a["agent_wallet_id"]

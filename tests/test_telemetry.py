@@ -116,12 +116,15 @@ async def test_stats_endpoint(client, api_headers, sample_batch):
 
 
 @pytest.mark.anyio
-async def test_list_anomalies_empty(client, api_headers):
+async def test_list_anomalies_empty(client, api_headers, fresh_telemetry):
     resp = await client.get("/v1/telemetry/anomalies", headers=api_headers)
     assert resp.status_code == 200
     data = resp.json()
-    assert data["total"] >= 0
-    assert isinstance(data["anomalies"], list)
+    # fresh_telemetry clears the event store and detector, so an empty tenant
+    # reads back exactly zero anomalies. >= 0 passed on any count, including
+    # rows leaked from another test.
+    assert data["total"] == 0
+    assert data["anomalies"] == []
 
 
 @pytest.mark.anyio

@@ -7,7 +7,6 @@ import html
 import json
 import os
 import re
-import shutil
 import struct
 import subprocess
 import sys
@@ -2285,23 +2284,30 @@ def test_font_filenames_are_content_hashed_so_immutable_is_safe() -> None:
         )
 
 
-def teardown_module() -> None:
-    """Keep local focused runs from retaining an interrupted generated build."""
-
-    shutil.rmtree(SITE / "dist", ignore_errors=True)
-
-
-def test_build_refuses_a_malformed_or_stale_font_manifest(tmp_path) -> None:
+def test_build_refuses_a_malformed_or_stale_font_manifest(
+    tmp_path, monkeypatch
+) -> None:
     """json.loads accepts a list or a string; manifest.get would then raise
     AttributeError and the build would die with a traceback instead of the
     launch error it documents. A stale entry names a content-hashed file that no
-    longer exists, which would ship a <link rel="preload"> that 404s."""
+    longer exists, which would ship a <link rel="preload"> that 404s.
+
+    The manifest under test is a copy in tmp_path: this test never writes to
+    the committed site/fonts.manifest.json, so parallel runs cannot race on
+    it and a hard kill cannot leave it corrupted. The redirect targets the
+    function's real globals: runpy.run_path returns a copy of the namespace,
+    so assigning into that dict would silently keep reading the committed
+    file."""
 
     build_module = runpy.run_path(str(SITE / "build_site.py"))
     launch_error = build_module["LaunchConfigurationError"]
     font_preload_tags = build_module["font_preload_tags"]
-    manifest_path = SITE / "fonts.manifest.json"
-    original = manifest_path.read_text(encoding="utf-8")
+    manifest_path = tmp_path / "fonts.manifest.json"
+    manifest_path.write_text(
+        (SITE / "fonts.manifest.json").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    monkeypatch.setitem(font_preload_tags.__globals__, "FONT_MANIFEST", manifest_path)
 
     cases = {
         "top-level list": "[]",
@@ -2312,16 +2318,28 @@ def test_build_refuses_a_malformed_or_stale_font_manifest(tmp_path) -> None:
         "preload names a missing file": '{"preload": ["not-vendored.woff2"]}',
         "not json at all": "{",
     }
+    for label, payload in cases.items():
+        manifest_path.write_text(payload, encoding="utf-8")
+        try:
+            font_preload_tags()
+        except launch_error:
+            continue
+        pytest.fail(f"malformed manifest accepted: {label}")
+    manifest_path.write_text(
+        (SITE / "fonts.manifest.json").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    # The real manifest still renders, so the guards are not over-tight.
+    assert 'rel="preload"' in font_preload_tags()
+    # Deleting the copy breaks rendering, which proves the reads above went
+    # to tmp_path and not to the committed manifest.
+    manifest_path.unlink()
     try:
-        for label, payload in cases.items():
-            manifest_path.write_text(payload, encoding="utf-8")
-            with pytest.raises(launch_error):
-                font_preload_tags()
-        manifest_path.write_text(original, encoding="utf-8")
-        # The real manifest still renders, so the guards are not over-tight.
-        assert 'rel="preload"' in font_preload_tags()
-    finally:
-        manifest_path.write_text(original, encoding="utf-8")
+        font_preload_tags()
+    except launch_error:
+        pass
+    else:
+        pytest.fail("font_preload_tags did not read the redirected manifest")
 
 
 def test_vendored_font_license_is_published(tmp_path) -> None:

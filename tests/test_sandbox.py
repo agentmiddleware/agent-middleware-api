@@ -223,7 +223,9 @@ async def test_state_hides_rules(client):
     )
     data = create.json()
     state = data["state"]
-    assert "hidden_rules" not in str(state).lower() or "hidden_rules" not in state
+    # The whole serialized state is checked: dict membership alone would pass
+    # while the name leaked inside a value.
+    assert "hidden_rules" not in str(state).lower()
 
 
 @pytest.mark.anyio

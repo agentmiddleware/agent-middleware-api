@@ -178,11 +178,13 @@ class TestVelocityMonitorIntegration:
             assert velocity_resp.status_code == 200
             data = velocity_resp.json()
             assert data["wallet_id"] == wallet_id
-            assert "hourly_spent" in data
+            # Fresh wallet: nothing spent, so the counters read back exact
+            # zeros and no alerts, not just present keys.
+            assert data["hourly_spent"] == 0
+            assert data["daily_spent"] == 0
+            assert data["velocity_alerts"] == 0
             assert "hourly_limit" in data
-            assert "daily_spent" in data
             assert "daily_limit" in data
-            assert "velocity_alerts" in data
 
 
 class TestVelocityFreezeStatusGuard:

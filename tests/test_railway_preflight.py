@@ -62,6 +62,36 @@ def test_tree_head_is_single():
     assert preflight._tree_head()
 
 
+def test_tree_is_clean_reports_git_status(monkeypatch):
+    """The real clean-checkout gate answers from git, both directions.
+
+    The autouse fixture forces _tree_is_clean True for the manifest suite, so
+    without this test the real function could return True unconditionally (or
+    raise) and nothing would go red. A fresh module copy bypasses that patch.
+    """
+    from types import SimpleNamespace
+
+    fresh = _load_preflight()
+
+    def fake_run(stdout, **kwargs):
+        assert kwargs.get("cwd") == REPO_ROOT
+        return SimpleNamespace(stdout=stdout)
+
+    monkeypatch.setattr(
+        subprocess, "run", lambda *args, **kwargs: fake_run("", **kwargs)
+    )
+    assert fresh._tree_is_clean() is True
+
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *args, **kwargs: fake_run(
+            " M tests/test_railway_preflight.py\n", **kwargs
+        ),
+    )
+    assert fresh._tree_is_clean() is False
+
+
 def test_passes_when_schema_at_head(migrated_db):
     async_url, _ = migrated_db
     assert preflight.check_db(async_url) is True

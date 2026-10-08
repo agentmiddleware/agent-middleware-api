@@ -2367,9 +2367,13 @@ def test_register_local_derives_an_input_schema_alongside_an_output_model() -> N
         func=handler,
         output_model=Out,
     )
-
-    input_schema = record["input_schema"]
-    assert input_schema, "input schema was dropped because an output model was given"
+    try:
+        input_schema = record["input_schema"]
+        assert input_schema, (
+            "input schema was dropped because an output model was given"
+        )
+    finally:
+        registry.unregister_local("schema-fallback-probe")
     assert "value" in (input_schema.get("properties") or {}), (
         f"the handler's own parameter is missing from {input_schema!r}"
     )

@@ -143,10 +143,18 @@ async def test_get_vulnerabilities(client, api_headers):
     )
     assert resp.status_code == 200
     data = resp.json()
-    # After patching all findings, zero vulns = fortress mode
-    assert data["total"] >= 0
-    assert "critical_count" in data
-    assert "high_count" in data
+    # Structural pins: total matches the listed findings and the severity
+    # breakdown is consistent with them. A bare >= 0 passed on any payload,
+    # including a hardcoded total with an empty list.
+    assert data["total"] == len(data["vulnerabilities"])
+    assert data["critical_count"] + data["high_count"] <= data["total"]
+    assert {vuln["severity"] for vuln in data["vulnerabilities"]} <= {
+        "critical",
+        "high",
+        "medium",
+        "low",
+        "info",
+    }
 
 
 @pytest.mark.anyio
