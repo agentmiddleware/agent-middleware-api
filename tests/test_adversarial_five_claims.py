@@ -13,12 +13,14 @@ mid-flight:
         One idempotency key returns the original receipt with no second
         execution and no second debit. Also exercised live (deliberate retry).
 
-    Claim 2 — Budget over-spend containment.  [credential-only]
+    Claim 2 — Budget over-spend containment.
         A permit cannot authorize spend beyond its cap, cumulatively across a
         sequence of calls, and a denied call moves no money. The live battery
-        explicitly does NOT exercise this (it needs a tool with a known
-        per-call cost and a seeded permit) — see the note in
-        ``scripts/adversarial_battery.py`` and ``docs/PROOF_MATRIX.md``.
+        (``scripts/adversarial_battery.py``) exercises the representative case
+        when the target exposes golden-path-echo with an advertised per-call
+        cost: a one-call permit pays once, the over-cap call is budget-denied,
+        and the ledger shows no new debit. When the cost is not advertised the
+        live check is SKIP and the cumulative case stays proven here.
 
     Claim 3 — Interrupted-invocation accounting.  [credential-only]
         Every governed invocation ends in exactly one signed terminal

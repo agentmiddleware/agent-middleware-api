@@ -215,7 +215,7 @@ requires `--confirm-production`.
 |---|---|---|
 | `make trust-conformance-live` | Golden path; sequential replay; 15 identical concurrent requests exposing one receipt identity or explicit `idempotency_in_progress`, followed by a completed replay and one charge; a changed payload under a reused key conflicting rather than replaying; budget denial; expired and forged permit rejection; receipt and audit-chain verification; tenant isolation against a directly-supplied foreign wallet and permit id | Environment-only `AGENT_MIDDLEWARE_API_KEY`; explicit `AGENT_MIDDLEWARE_API_URL` or `TRUST_CONFORMANCE_ARGS="--api-url https://..."`; add `--confirm-production` to the args for the canonical production origin |
 | `python scripts/constant_test_loop.py` | Scoped permit sized from the tool's advertised `creditsPerCall`; governed invoke; signed success receipt with a ledger entry; replay returning the same `receipt_id` with no second debit; an out-of-scope but genuinely registered tool refused with `permit_tool_not_allowed` and charged nothing | `CI_SMOKE_AGENT_KEY` holding a **wallet-scoped** key (self-provisions on loopback when absent); `--tool` and `--tool-args` required off loopback |
-| `make adversarial-battery-live` | Wallet isolation, invalid-key rejection, forged-receipt rejection, permit key binding, expired permits, revoked keys, replay idempotency; always revokes keys it minted | `API_URL` (no default, by design) and `BOOTSTRAP_KEY` |
+| `make adversarial-battery-live` | Wallet isolation, invalid-key rejection, forged-receipt rejection, permit key binding, expired permits, revoked keys, replay idempotency, budget over-spend containment (when the tool advertises a per-call cost); always revokes keys it minted | `API_URL` (no default, by design) and `BOOTSTRAP_KEY` |
 
 `constant_test_loop.py` is the one built to run continuously: it needs no
 admin credential, so the key it runs on cannot mint keys or read another
@@ -232,8 +232,11 @@ tool's declared shape but not its semantics, and the derivation picks the
 first enum member, which for a consequential tool could be `delete`.
 
 The battery reports SKIP — never a false PASS — for MCP-invocation checks when
-the deployment exposes no invokable `golden-path-echo` tool. It does not
-exercise over-spend containment.
+the deployment exposes no invokable `golden-path-echo` tool. Over-spend
+containment is exercised when that tool advertises a per-call cost (a one-call
+permit pays once, then the next call must be budget-denied with no new debit);
+when the cost is not advertised that check is SKIP and the operator verifies
+the target manually against the ledger.
 
 ## What is not proven
 

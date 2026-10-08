@@ -158,13 +158,13 @@ trust-conformance-live:
 
 # adversarial-battery-live probes a deployment you operate for wallet
 # isolation, invalid keys, forged receipts, permit key binding, expired
-# permits, revoked keys, and replay idempotency, then revokes every key it
+# permits, revoked keys, replay idempotency, and budget over-spend containment
+# (when golden-path-echo advertises a per-call cost), then revokes every key it
 # minted. Requires BOOTSTRAP_KEY plus either API_URL (no default, by design) or
 # `ADVERSARIAL_BATTERY_ARGS="--api-url ..."`. Remote targets must use HTTPS,
 # and the canonical production origin also requires `--confirm-production` in
 # ADVERSARIAL_BATTERY_ARGS. MCP-invocation checks report SKIP when no
-# invokable golden-path-echo tool is exposed; over-spend containment is not
-# exercised.
+# invokable golden-path-echo tool is exposed.
 adversarial-battery-live:
 	uv run --with-requirements requirements.txt python scripts/adversarial_battery.py $(ADVERSARIAL_BATTERY_ARGS)
 
