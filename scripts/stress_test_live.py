@@ -8,19 +8,24 @@ Usage:
 Pass ``--confirm-production`` when intentionally targeting the canonical
 production origin. Remote targets require HTTPS; loopback targets may use HTTP.
 
-This script creates persistent wallets, permits, and receipts on its target. It
-has no cleanup. Point it at staging unless you intend to retain its test data in
-production.
+This script creates persistent wallets, permits, and receipts on its target.
+There is no delete endpoint for those rows, so every run writes a manifest
+file (``stress_run_<RUN_ID>.json`` by default, or ``--manifest-path``)
+naming the target, run id, and created wallet ids. Point the script at staging
+unless you intend to retain its test data in production, and keep the manifest
+so the staging rows can be found and removed by an operator afterwards.
 """
 
 import argparse
 import asyncio
+import json
 import os
 import sys
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
+from typing import Any
 
 import httpx
 
@@ -630,6 +635,50 @@ async def test_health_under_load():
     print("  Health during 20 parallel discoveries: ✅")
 
 
+def default_manifest_path() -> str:
+    """Manifest filename for this run (cwd, so the operator can find it)."""
+    return f"stress_run_{RUN_ID}.json"
+
+
+def build_run_manifest(
+    *,
+    target: str,
+    started_at: str,
+    outcome: str,
+    sponsor_wallet_id: str | None = None,
+    agent_wallet_id: str | None = None,
+) -> dict[str, Any]:
+    """Describe one stress run for later manual cleanup.
+
+    The payload carries only identifiers (target, run id, wallet ids): no API
+    keys, so the manifest is safe to keep next to run notes.
+    """
+    return {
+        "script": "scripts/stress_test_live.py",
+        "run_id": RUN_ID,
+        "target": target,
+        "started_at": started_at,
+        "outcome": outcome,
+        "sponsor_wallet_id": sponsor_wallet_id,
+        "agent_wallet_id": agent_wallet_id,
+        "cleanup": (
+            "wallets, permits, and receipts created by this run persist on "
+            "the target; there is no delete endpoint. Quote run_id and the "
+            "wallet ids when asking an operator to remove the staging rows."
+        ),
+    }
+
+
+def write_run_manifest(path: str, payload: dict[str, Any]) -> str:
+    """Write the manifest as JSON, creating parent dirs; returns the path."""
+    parent = os.path.dirname(os.path.abspath(path))
+    os.makedirs(parent, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+    return path
+
+
 async def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Run live trust-plane stress checks against an explicit target."
@@ -642,6 +691,12 @@ async def main(argv: list[str] | None = None) -> int:
         "--confirm-production",
         action="store_true",
         help="confirm intentional use of https://api.thisisatest.tech",
+    )
+    parser.add_argument(
+        "--manifest-path",
+        default=None,
+        help="where to write the run manifest "
+        "(default: stress_run_<RUN_ID>.json in cwd)",
     )
     args = parser.parse_args(argv)
 
@@ -667,18 +722,37 @@ async def main(argv: list[str] | None = None) -> int:
     API_URL = api_url
     API_KEY = api_key
 
+    manifest_path = args.manifest_path or default_manifest_path()
+    started_at = datetime.now(timezone.utc).isoformat()
+
+    def persist_manifest(outcome: str, spn: str | None, agt: str | None) -> None:
+        write_run_manifest(
+            manifest_path,
+            build_run_manifest(
+                target=API_URL,
+                started_at=started_at,
+                outcome=outcome,
+                sponsor_wallet_id=spn,
+                agent_wallet_id=agt,
+            ),
+        )
+
     print("=" * 60)
     print("HYPER EDGE-CASE STRESS TEST")
     print(f"Target: {API_URL}")
-    print(f"Time: {datetime.now().isoformat()}")
+    print(f"Time: {started_at}")
+    print(f"Run manifest: {manifest_path}")
     print("=" * 60)
 
+    spn: str | None = None
+    agt: str | None = None
     try:
         # Setup
         print("\n[SETUP] Creating wallets...")
         spn, agt = await setup_wallets()
         print(f"  Sponsor: {spn}")
         print(f"  Agent: {agt}")
+        persist_manifest("running", spn, agt)
 
         # Run all stress tests
         await test_budget_exhaustion(spn, agt)
@@ -694,13 +768,17 @@ async def main(argv: list[str] | None = None) -> int:
         await test_permit_reuse_after_replay(spn, agt)
         await test_health_under_load()
     except AssertionError as exc:
+        persist_manifest(f"failed: {exc}", spn, agt)
         print("\n" + "=" * 60)
         print(f"STRESS TEST FAILED ❌: {exc}")
+        print(f"Test rows persist on {API_URL}; see {manifest_path}")
         print("=" * 60)
         return 1
 
+    persist_manifest("passed", spn, agt)
     print("\n" + "=" * 60)
     print("ALL STRESS TESTS PASSED ✅")
+    print(f"Test rows persist on {API_URL}; see {manifest_path}")
     print("=" * 60)
     return 0
 

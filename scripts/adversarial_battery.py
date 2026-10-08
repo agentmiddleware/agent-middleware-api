@@ -25,6 +25,9 @@ Checks
 * expired_permit        — an expired permit cannot be created or used
 * revoked_key           — a revoked key stops working immediately
 * replay_idempotent     — replaying a governed call reuses the same receipt
+* budget_overspend      — a permit sized at exactly one call cost pays once,
+                          then denies the next call for budget reasons with no
+                          new ledger debit
 
 Notes
 -----
@@ -34,8 +37,10 @@ Notes
 * MCP-invocation checks require an invokable ``golden-path-echo`` governed tool;
   when the deployment exposes none they are reported SKIP (never a false PASS),
   and a failed ``/mcp/tools.json`` discovery is a FAIL.
-* Budget/over-spend containment is NOT exercised here (it needs a tool with a
-  known per-call cost); verify it manually against the ledger.
+* Budget/over-spend containment is exercised only when the tool advertises a
+  known positive per-call cost (``creditsPerCall`` annotation); when the cost
+  is missing the check is SKIP, and the operator should verify that target
+  manually against the ledger.
 """
 
 from __future__ import annotations
@@ -48,6 +53,7 @@ import urllib.error
 import urllib.request
 import uuid
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 
 if __package__:
     from .live_script_target import LiveTargetError, resolve_live_target
@@ -240,6 +246,149 @@ def discover_echo_tool(agent_key: str) -> bool | None:
     return "golden-path-echo" in names
 
 
+def discover_echo_cost(agent_key: str) -> Decimal | None:
+    """Per-call cost of golden-path-echo, or None when it is not advertised.
+
+    Returns None both when the tool is absent and when its annotations carry
+    no positive numeric cost. Callers treat None as "cannot size a permit",
+    which is a SKIP, never a PASS.
+    """
+    s, tools = req("GET", "/mcp/tools.json", agent_key)
+    if not 200 <= s < 300 or not isinstance(tools, dict):
+        return None
+    entries = tools.get("tools")
+    if not isinstance(entries, list):
+        return None
+    for entry in entries:
+        if not isinstance(entry, dict) or entry.get("name") != "golden-path-echo":
+            continue
+        annotations = entry.get("annotations")
+        if not isinstance(annotations, dict):
+            return None
+        for field in ("creditsPerCallExact", "creditsPerCall"):
+            try:
+                cost = Decimal(str(annotations.get(field)))
+            except (InvalidOperation, ValueError, TypeError):
+                continue
+            if cost > 0:
+                return cost
+        return None
+    return None
+
+
+def ledger_debit_count(agent_key: str, wallet_id: str) -> int | None:
+    """Number of debit entries on a wallet ledger, or None when unreadable."""
+    s, ledger = req("GET", f"/v1/billing/ledger/{wallet_id}", agent_key)
+    if not 200 <= s < 300 or not isinstance(ledger, dict):
+        return None
+    entries = ledger.get("entries")
+    if not isinstance(entries, list):
+        return None
+    return sum(
+        1
+        for entry in entries
+        if isinstance(entry, dict) and entry.get("action") == "debit"
+    )
+
+
+def run_budget_check(a: dict) -> None:
+    """Prove a permit capped at one call cost cannot over-spend.
+
+    Mints a permit worth exactly one golden-path-echo call, spends it, then
+    retries under a fresh idempotency key: the retry must be denied for budget
+    reasons and the ledger must show no new debit.
+    """
+    agent_key = a["key1"]["api_key"]
+    cost = discover_echo_cost(agent_key)
+    if cost is None:
+        record(
+            "budget_overspend_denied",
+            None,
+            "skipped: golden-path-echo advertises no per-call cost",
+        )
+        return
+
+    s, permit = req(
+        "POST",
+        "/v1/permits",
+        BOOTSTRAP_KEY,
+        {
+            "issuer_wallet_id": a["wallet_id"],
+            "subject_wallet_id": a["wallet_id"],
+            "subject_key_id": a["key1"]["key_id"],
+            "allowed_tools": ["golden-path-echo"],
+            "scopes": ["tool:golden-path-echo:invoke", "billing:charge"],
+            "max_credits": str(cost),
+            "expires_at": iso_in(30),
+        },
+        {"Idempotency-Key": f"adv-budget-{RUN_ID}"},
+    )
+    if (
+        not 200 <= s < 300
+        or not isinstance(permit, dict)
+        or not permit.get("permit_id")
+    ):
+        record(
+            "budget_overspend_denied",
+            False,
+            f"could not mint a one-call permit for cost={cost} (status={s})",
+        )
+        return
+    permit_id = permit["permit_id"]
+
+    _, first = invoke(agent_key, a["wallet_id"], permit_id, f"adv-budget-use-{RUN_ID}")
+    first_receipt = (
+        (first or {}).get("result", {}).get("receipt", {}).get("receipt_id")
+        if isinstance(first, dict)
+        else None
+    )
+    if not first_receipt:
+        record(
+            "budget_overspend_denied",
+            False,
+            f"seeded one-call spend failed: {_short(json.dumps(first))}",
+        )
+        return
+
+    debits_before = ledger_debit_count(agent_key, a["wallet_id"])
+    if debits_before is None:
+        record(
+            "budget_overspend_denied",
+            None,
+            "spent once, but the ledger is unreadable so a second debit "
+            "cannot be ruled out; verify manually",
+        )
+        return
+
+    _, second = invoke(
+        agent_key, a["wallet_id"], permit_id, f"adv-budget-over-{RUN_ID}"
+    )
+    blob = json.dumps(second) if not isinstance(second, str) else second
+    if "budget_exceeded" not in blob:
+        record(
+            "budget_overspend_denied",
+            False,
+            f"over-cap call was not budget-denied: {_short(blob)}",
+        )
+        return
+
+    debits_after = ledger_debit_count(agent_key, a["wallet_id"])
+    if debits_after is None:
+        record(
+            "budget_overspend_denied",
+            None,
+            "denied for budget reasons, but the ledger is unreadable so a "
+            "second debit cannot be ruled out; verify manually",
+        )
+        return
+    record(
+        "budget_overspend_denied",
+        debits_after == debits_before,
+        f"one call paid, over-cap call denied, debits "
+        f"before={debits_before} after={debits_after}",
+    )
+
+
 def invoke(
     agent_key: str, wallet_id: str, permit_id: str, idem: str
 ) -> tuple[int, object]:
@@ -383,6 +532,18 @@ def run_checks(sponsor_id: str, a: dict, b: dict, permit: dict) -> None:
             f"receipt1={rid(r1)} receipt2={rid(r2)} (replay must reuse the receipt)",
         )
 
+    # 8. Budget containment: a one-call permit pays once, then denies.
+    if echo is None:
+        record("budget_overspend_denied", None, "skipped: MCP discovery failed")
+    elif not echo:
+        record(
+            "budget_overspend_denied",
+            None,
+            "skipped: golden-path-echo not exposed",
+        )
+    else:
+        run_budget_check(a)
+
 
 def _short(text: str, n: int = 120) -> str:
     return text[:n]
@@ -441,7 +602,21 @@ def main(argv: list[str] | None = None) -> int:
     for name, verdict, _ in RESULTS:
         print(f"  {verdict:4}  {name}")
     failed = [n for n, v, _ in RESULTS if v == "FAIL"]
+    skipped = [n for n, v, _ in RESULTS if v == "SKIP"]
     print(f"\n{len(RESULTS)} checks — {len(failed)} FAIL")
+    # Pre-demo checklist: state plainly what this run did and did not cover,
+    # so a SKIP or an out-of-scope area is never read as a pass.
+    print("\n=== COVERAGE (pre-demo checklist) ===")
+    if skipped:
+        for name in skipped:
+            print(f"  NOT EXERCISED: {name} (SKIP on this target)")
+    else:
+        print("  every check ran to a PASS/FAIL verdict on this target")
+    print(
+        "  NEVER COVERED HERE: human-approval flow, crash recovery, "
+        "production Postgres row-lock path, real money movement. "
+        "Verify those separately before a buyer demo."
+    )
     return 1 if failed else 0
 
 

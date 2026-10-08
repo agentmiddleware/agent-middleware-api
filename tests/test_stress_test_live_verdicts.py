@@ -151,10 +151,13 @@ class FakeTrustPlane:
 
 def _run_stress(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
     *,
     keep: tuple[str, ...],
     fault: str | None = None,
 ) -> int:
+    # main() writes a run manifest to cwd; keep it out of the repo checkout.
+    monkeypatch.chdir(tmp_path)
     fake = FakeTrustPlane(fault)
     real_async_client = httpx.AsyncClient
 
@@ -196,9 +199,10 @@ VERDICT_SUB_TESTS = (
 def test_healthy_server_keeps_each_sub_test_green(
     sub_test: str,
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    assert _run_stress(monkeypatch, keep=(sub_test,)) == 0
+    assert _run_stress(monkeypatch, tmp_path, keep=(sub_test,)) == 0
     out = capsys.readouterr().out
     assert "❌" not in out
     assert "ALL STRESS TESTS PASSED" in out
@@ -206,9 +210,10 @@ def test_healthy_server_keeps_each_sub_test_green(
 
 def test_healthy_server_passes_all_verdict_sub_tests_together(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    assert _run_stress(monkeypatch, keep=VERDICT_SUB_TESTS) == 0
+    assert _run_stress(monkeypatch, tmp_path, keep=VERDICT_SUB_TESTS) == 0
     assert "ALL STRESS TESTS PASSED" in capsys.readouterr().out
 
 
@@ -241,9 +246,10 @@ def test_observed_failure_fails_the_run(
     sub_test: str,
     fault: str,
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    assert _run_stress(monkeypatch, keep=(sub_test,), fault=fault) != 0
+    assert _run_stress(monkeypatch, tmp_path, keep=(sub_test,), fault=fault) != 0
     out = capsys.readouterr().out
     assert "ALL STRESS TESTS PASSED" not in out
     assert "STRESS TEST FAILED" in out

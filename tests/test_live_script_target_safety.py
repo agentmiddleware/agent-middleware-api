@@ -289,8 +289,11 @@ def test_rejected_configuration_never_creates_an_http_client(
 def test_script_cli_target_overrides_env_and_key_is_not_printed(
     module_name: str,
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    # The stress script writes a run manifest to cwd; keep it in tmp.
+    monkeypatch.chdir(tmp_path)
     module = importlib.import_module(module_name)
     monkeypatch.setenv(TARGET_ENV, "https://environment.example.test")
     monkeypatch.setenv(KEY_ENV, CANARY_KEY)
