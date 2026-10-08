@@ -206,6 +206,23 @@ focused PRs get merged much faster than large ones. To make review cheap:
 If a PR sits without response for two weeks, comment on it to bump. That is a
 reasonable thing to do, not a nuisance — see [`GOVERNANCE.md`](GOVERNANCE.md).
 
+## Test quality convention
+
+A test that cannot fail certifies nothing. Every test must assert one exact
+expected value, never a range that also contains the failure mode (for
+example, prefer `assert data["total"] == 0` over
+`assert data["total"] >= 0`). `pytest.raises` must name the exact failure
+with `match` or a narrow exception type, so a different bug raising the
+same broad type cannot slip through. Golden tests call production code,
+they never recompute the expected value inline.
+
+The repo enforces the mechanical half of this in CI: `ruff check .` runs
+the flake8-pytest-style and bugbear rules selected in `ruff.toml` (broad
+`pytest.raises` without `match` fails the build), and pytest runs with
+`xfail_strict = true` (an `xfail` mark that unexpectedly passes fails the
+suite). A skip or `xfail` must carry a reason, an owner, and a linked
+issue, and the issue tracks removing it.
+
 ## Commit Style
 
 Preferred format:
