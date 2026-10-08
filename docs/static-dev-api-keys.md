@@ -109,6 +109,22 @@ wallet-scoped API key shown once — the same shape
 self-served agents exercise the real credential class end to end
 (permits, metering, receipts, audit).
 
+Quota story:
+
+- Each call is bounded (`budget_credits` defaults to 1000, max 100000;
+  anything above is refused before anything is minted). There is no
+  cross-call cap: every call mints a fresh sponsor wallet plus agent wallet,
+  so repeated calls accumulate wallets in the local database. That is fine
+  for a single-operator local instance and would be the wrong shape for a
+  shared trial, which is why this endpoint stays local-only.
+- To clear accumulated wallets, keys, and receipts on a quickstart server,
+  restart from scratch with `make quickstart QUICKSTART_ARGS="--reset"`
+  (see [quickstart](quickstart.md#starting-over)).
+- A self-provisioned key that is no longer wanted can be revoked like any
+  DB-backed wallet key: `DELETE /v1/api-keys/{wallet_id}/{key_id}` revokes
+  one key, `POST /v1/api-keys/emergency-revoke` revokes every key on a
+  wallet.
+
 Scope and safety:
 
 - The minted key is **wallet-scoped, never bootstrap-admin**: a credential
