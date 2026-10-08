@@ -86,6 +86,16 @@ still unreleased.
   `MCPServer`, which both paths import. The import-error hints now name the
   bound (or the extra) instead of an unbounded `pip install mcp`.
 
+### Packaging
+
+- **Single-source version**: `b2a_sdk.__version__` now reads the installed
+  distribution metadata and falls back to the `pyproject.toml` version when
+  running from a source checkout, instead of carrying a second hardcoded
+  copy. `b2a_sdk/tests/test_packaging.py` fails the build if the two drift
+  apart, and `scripts/sdk_install_smoke.sh` builds the wheel and sdist and
+  installs each into a fresh virtualenv to check the import, the version,
+  and the `b2a-verify-receipt` entry point.
+
 ### Fixed
 
 - **x402 HTTP 402 handling**: The x402 module's `parse_402()` and `settle_402()`
