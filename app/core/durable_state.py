@@ -171,6 +171,20 @@ class DurableStateStore:
     def enabled(self) -> bool:
         return self._backend != "memory"
 
+    async def shared_redis(self) -> redis.Redis | None:
+        """Return the Redis client when the redis backend is active.
+
+        None means there is no shared Redis store (another backend or an
+        in-memory fallback): callers must use their process-local path and
+        document its per-process scope. A configured-but-broken Redis raises
+        DurableStateConfigError in production-like environments and falls
+        back to memory elsewhere, per _ensure_ready.
+        """
+        await self._ensure_ready()
+        if self._backend == "redis":
+            return self._redis
+        return None
+
     def _resolve_backend(self) -> str:
         if self._state_backend in ("postgres", "postgresql"):
             if self._database_url:
