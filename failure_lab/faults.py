@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import threading
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
@@ -98,13 +99,25 @@ class FaultPlan:
         kinds = data.get("kinds")
         if mode is FaultMode.INITIALIZE_FAILURE and not kinds:
             kinds = (KIND_INITIALIZE,)
+        remaining = int(data.get("remaining", 1))
+        delay_ms = int(data.get("delay_ms", 0))
+        hold_seconds = float(data.get("hold_seconds", 30.0))
+        if remaining < 0:
+            raise ValueError(f"fault plan remaining must be >= 0, got {remaining}")
+        if delay_ms < 0:
+            raise ValueError(f"fault plan delay_ms must be >= 0, got {delay_ms}")
+        if not math.isfinite(hold_seconds) or hold_seconds < 0:
+            raise ValueError(
+                "fault plan hold_seconds must be a finite value >= 0, "
+                f"got {hold_seconds}"
+            )
         return cls(
             mode=mode,
             operation_id=data.get("operation_id"),
             kinds=tuple(kinds) if kinds else EXECUTION_KINDS,
-            remaining=int(data.get("remaining", 1)),
-            delay_ms=int(data.get("delay_ms", 0)),
-            hold_seconds=float(data.get("hold_seconds", 30.0)),
+            remaining=remaining,
+            delay_ms=delay_ms,
+            hold_seconds=hold_seconds,
             label=str(data.get("label", "")),
         )
 

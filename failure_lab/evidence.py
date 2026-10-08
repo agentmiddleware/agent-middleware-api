@@ -62,7 +62,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from dataclasses import fields as dataclass_fields
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from failure_lab import TEST_DEFINITION_VERSION
@@ -1300,15 +1300,43 @@ def verify_bundle_integrity(directory: Path | str) -> IntegrityReport:
             problems=[f"{MANIFEST_NAME} is not valid JSON: {exc}"],
         )
 
-    entries = manifest.get("files") or []
+    raw_entries = manifest.get("files") or []
     changed: list[str] = []
     missing: list[str] = []
     problems: list[str] = []
     checked = 0
     listed: set[str] = set()
 
+    if not isinstance(raw_entries, list):
+        problems.append(
+            "manifest 'files' is not a list, so no file entry could be "
+            "checked against it"
+        )
+        entries: list[Any] = []
+    else:
+        entries = raw_entries
+
     for entry in entries:
-        relative = str(entry.get("path", ""))
+        if not isinstance(entry, Mapping):
+            problems.append(
+                f"manifest entry {entry!r} is not an object; "
+                "it cannot be checked against any file"
+            )
+            continue
+        relative = entry.get("path", "")
+        if not isinstance(relative, str) or not relative:
+            problems.append(
+                f"manifest entry {entry!r} names no file path; "
+                "it cannot be checked against any file"
+            )
+            continue
+        if PurePosixPath(relative).is_absolute() or (
+            ".." in PurePosixPath(relative).parts
+        ):
+            problems.append(
+                f"{relative}: listed path escapes the bundle directory; it was not read"
+            )
+            continue
         listed.add(relative)
         path = root / relative
         if not path.is_file():
@@ -1323,10 +1351,19 @@ def verify_bundle_integrity(directory: Path | str) -> IntegrityReport:
                 f"{relative}: sha256 is {actual[:16]}..., manifest says {expected[:16]}..."
             )
         size = path.stat().st_size
-        if entry.get("bytes") is not None and int(entry["bytes"]) != size:
-            problems.append(
-                f"{relative}: {size} bytes on disk, manifest says {entry['bytes']}"
-            )
+        if entry.get("bytes") is not None:
+            try:
+                expected_size: int | None = int(entry["bytes"])  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                expected_size = None
+                problems.append(
+                    f"{relative}: manifest records bytes as "
+                    f"{entry['bytes']!r}, which is not an integer"
+                )
+            if expected_size is not None and expected_size != size:
+                problems.append(
+                    f"{relative}: {size} bytes on disk, manifest says {entry['bytes']}"
+                )
 
     on_disk = {
         str(path.relative_to(root)).replace(os.sep, "/")
