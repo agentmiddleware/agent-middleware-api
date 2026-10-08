@@ -341,6 +341,51 @@ def describe_permissive_trust_mode(
     return "; ".join(parts)
 
 
+def describe_debug_open_mode(
+    *,
+    debug: bool,
+    valid_api_keys: str,
+    static_dev_api_keys: str,
+) -> str | None:
+    """Describe an active DEBUG empty-key auth bootstrap, or None when closed.
+
+    Mirrors the fallthrough in ``app.core.auth._resolve_auth_context``: with
+    DEBUG on and no configured keys, any caller presenting a key-shaped
+    value authenticates as bootstrap admin. Production-like boots refuse
+    DEBUG outright, so this only fires on local/dev/test hosts — exactly
+    where a debug build may still be reachable over the network.
+    """
+    if not debug:
+        return None
+    configured = [key for key in (valid_api_keys or "").split(",") if key.strip()]
+    if configured or (static_dev_api_keys or "").strip():
+        return None
+    return (
+        "DEBUG=true with no VALID_API_KEYS or STATIC_DEV_API_KEYS: any "
+        "caller presenting a key-shaped value authenticates as bootstrap "
+        "admin (see app/core/auth.py). Bind to loopback or set real keys; "
+        "never expose this build to a network."
+    )
+
+
+def warn_if_debug_open_mode(settings: Settings) -> None:
+    """Log a loud warning when DEBUG empty-key auth bootstrap is active.
+
+    Called once at startup, after ``validate_trust_mode_guardrails``. Refusing
+    to boot would break local quickstart, so the control is visibility: an
+    operator who sees this line on a shared or forwarded host knows to set
+    keys or bind to loopback.
+    """
+    description = describe_debug_open_mode(
+        debug=settings.DEBUG,
+        valid_api_keys=settings.VALID_API_KEYS,
+        static_dev_api_keys=settings.STATIC_DEV_API_KEYS,
+    )
+    if description is None:
+        return
+    logger.warning("debug_open_mode: %s", description)
+
+
 def warn_if_trust_mode_permissive(settings: Settings) -> None:
     """Log a loud warning when the trust plane is running in opt-out mode.
 

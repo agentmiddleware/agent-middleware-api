@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import ipaddress
 import json
 import logging
@@ -708,10 +709,20 @@ class UpstreamMcpAdapter:
             expected_authorization = (
                 "Bearer " + self.configuration.bearer_token.get_secret_value()
             )
-            if (
-                self._injected_http_client.headers.get("Authorization")
-                != expected_authorization
-            ):
+            # Constant-time compare, matching the inbound auth path: a plain
+            # != would leak the expected Bearer [REDACTED] byte by byte through timing.
+            presented_authorization = (
+                self._injected_http_client.headers.get("Authorization") or ""
+            )
+            try:
+                authorized = hmac.compare_digest(
+                    presented_authorization, expected_authorization
+                )
+            except TypeError:
+                # compare_digest rejects non-ASCII input; that is a
+                # misconfigured header, not a match.
+                authorized = False
+            if not authorized:
                 raise UpstreamMcpConfigurationError(
                     "injected upstream MCP HTTP client must carry the configured bearer credential"
                 )

@@ -599,22 +599,34 @@ class AttackEngine:
                 notes="PATCHED: field_validator rejects traversal chars.",
             )
         elif "json bomb" in vector.name.lower():
-            # FastAPI/Pydantic handles nested JSON fine, but no depth limit
+            # Simulated check: this scan sends no traffic. The real control
+            # is the shared MCP nesting cap (app/routers/mcp.py,
+            # _MAX_JSON_NESTING_DEPTH=100), which refuses deeper payloads
+            # before parsing.
             return AttackResult(
                 vector=vector,
                 passed=True,
                 actual_status=200,
                 actual_response={},
-                notes="Pydantic validates structure. Deep nesting accepted.",
+                notes=(
+                    "Simulated check, no traffic sent. Production MCP "
+                    "transports refuse JSON nesting deeper than 100 levels "
+                    "before parsing (see app/routers/mcp.py)."
+                ),
             )
         elif "xss" in vector.name.lower():
-            # API-only, no browser rendering — XSS is low risk
+            # API-only, no browser rendering. Stored caller input is served
+            # back as JSON, which FastAPI encodes, never as HTML.
             return AttackResult(
                 vector=vector,
                 passed=True,
                 actual_status=202,
                 actual_response={},
-                notes="Zero-GUI means no browser rendering. XSS is informational only.",
+                notes=(
+                    "Simulated check, no traffic sent. The API serves JSON "
+                    "only and renders no caller input as HTML; stored values "
+                    "are returned JSON-encoded, never as markup."
+                ),
             )
         elif "sql" in vector.name.lower():
             # In-memory stores, no SQL — but note the finding for production
