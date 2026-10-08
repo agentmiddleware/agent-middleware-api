@@ -93,6 +93,7 @@ DORMANT_SURFACE_TEST_MODULES = frozenset(
         "test_wallet_ledger_integrity",
         "test_wallet_status_enforcement",
         "test_x402",
+        "test_x402_honesty",
     }
 )
 

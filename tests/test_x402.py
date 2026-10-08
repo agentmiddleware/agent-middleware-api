@@ -29,7 +29,7 @@ from app.services.receipts import (
     get_receipt_service,
 )
 from app.services.shadow_ledger import get_shadow_ledger
-from app.services.x402_engine import X402Error, get_x402_handler
+from app.services.x402_engine import X402_HONESTY_NOTE, X402Error, get_x402_handler
 from b2a_sdk.errors import PermitDeniedError
 from b2a_sdk.x402 import X402Client, parse_402_response
 from tests.test_trust_helpers import (
@@ -557,6 +557,7 @@ async def test_x402_parse_endpoint_maps_reasons_and_requires_auth(client):
         "pay_to": EVM_PAY_TO,
         "network": "base",
         "asset": "USDC",
+        "notice": X402_HONESTY_NOTE,
     }
 
     bad = await client.post(
