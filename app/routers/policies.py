@@ -3,12 +3,14 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.auth import AuthContext, get_auth_context
+from app.core.dependencies import get_agent_money
 from app.schemas.policies import (
     PolicyBundleCreate,
     PolicyBundleListResponse,
     PolicyBundlePatch,
     PolicyBundleResponse,
 )
+from app.services.agent_money import WalletNotFoundError
 from app.services.policies import (
     create_policy_bundle,
     get_policy_bundle,
@@ -27,6 +29,17 @@ async def create_policy(
     auth: AuthContext = Depends(get_auth_context),
 ) -> PolicyBundleResponse:
     auth.require_bootstrap_admin()
+    # policy_bundles.wallet_id references wallets: inserting for a missing
+    # wallet fails the foreign key and answers 500. 404 first, the same body
+    # the key-management routes use for an unknown wallet.
+    if await get_agent_money().get_wallet(request.wallet_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "wallet_not_found",
+                "message": str(WalletNotFoundError(request.wallet_id)),
+            },
+        )
     return await create_policy_bundle(request)
 
 

@@ -600,12 +600,30 @@ class APIKeyService:
                     )
                 )
                 if revoke_old:
-                    rotation_update = rotation_update.values(
+                    rotation_update = rotation_update.where(
+                        col(APIKeyModel.status) == APIKeyStatus.ACTIVE.value
+                    ).values(
                         status=APIKeyStatus.REVOKED.value,
                         revoked_at=persisted_now,
                         revoke_reason=reason,
                     )
-                await session.execute(rotation_update)
+                # A concurrent rotation of the same key can pass the ACTIVE
+                # snapshot check above before either transaction commits
+                # (SQLite ignores FOR UPDATE; both readers see ACTIVE). Make
+                # the revoking write conditional on still being ACTIVE: the
+                # loser matches zero rows and fails here instead of minting
+                # a second live replacement. The non-revoking path needs no
+                # such guard; it keeps the old key live by design.
+                result = await session.execute(rotation_update)
+                if (
+                    revoke_old
+                    and key_id is not None
+                    and (cast(Any, result).rowcount or 0) == 0
+                ):
+                    await session.rollback()
+                    raise InvalidRotationRequestError(
+                        "cannot rotate a key that is not active"
+                    )
 
             log_entry = KeyRotationLogModel(
                 log_id=rotation_id,
