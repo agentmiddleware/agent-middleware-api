@@ -1,9 +1,20 @@
+"""Script smoke test for the demo trust-plane script.
+
+This shells out to ``scripts/demo_trust_plane.py`` and asserts on the JSON it
+prints. A green run proves the script ran end to end, not that a customer
+integration works. Do not cite it as integration proof.
+"""
+
 from __future__ import annotations
 
 import json
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
+
+pytestmark = [pytest.mark.script_smoke]
 
 
 ROOT = Path(__file__).resolve().parents[1]

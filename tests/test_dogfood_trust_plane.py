@@ -1,4 +1,10 @@
-"""Dogfood playground: partner.notes.write behind the trust plane."""
+"""Script smoke test for the dogfood playground.
+
+Dogfood playground: partner.notes.write behind the trust plane. This shells
+out to ``scripts/dogfood_trust_plane.py`` and asserts on the JSON it prints.
+A green run proves the script ran end to end, not that a customer integration
+works. Do not cite it as integration proof.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +12,10 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
+
+pytestmark = [pytest.mark.script_smoke]
 
 ROOT = Path(__file__).resolve().parents[1]
 

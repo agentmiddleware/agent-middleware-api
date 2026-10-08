@@ -103,10 +103,15 @@ named customer needs them (see AGENTS.md, "Current Company Phase").
 | `app.routers.auth` (dormant) | JWT exchange (`/v1/auth/*`) — second auth story; wedge contract is `X-API-Key` |
 | `app.routers.kyc` (dormant) | Stripe Identity KYC |
 | `app.routers.planner` (dormant) | Budget optimizer |
+| `app.routers.pods` (dormant) | Named groups of agent API keys under one shared budget (see `docs/pods.md`) |
+| `app.routers.x402` (dormant) | Settlement facilitation: permit-governed 402 payment authorization, shadow-ledger metering, signed receipts; never writes real ledger entries (see `docs/settlement-rails.md` freeze) |
 | `app.routers.billing.expansion_router` (dormant) | Child/swarm wallets, transfers, top-ups, marketplace, velocity status, dry-run sandbox |
+| `app.routers.webhooks` (dormant) | Stripe webhooks; mounts only when `STRIPE_SECRET_KEY` is configured (or proof surfaces are on) |
 
 They mount via `app.main.mount_dormant_trust_surfaces` when
-`ENABLE_PROOF_SURFACES=true`. Unlike proof surfaces they are not demo
+`ENABLE_PROOF_SURFACES=true` (webhooks instead mount when `STRIPE_SECRET_KEY`
+is configured). A default production deploy (`ENABLE_PROOF_SURFACES=false`,
+no Stripe key) serves none of the rows above. Unlike proof surfaces they are not demo
 scaffolding, so they carry no freeze marker and their tests stay in the fast
 core loop (marked `dormant` by `tests/conftest.py`, which mounts the routes
 for those modules). The service layer underneath (transfers, velocity
