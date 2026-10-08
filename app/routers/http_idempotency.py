@@ -8,6 +8,7 @@ gets the original result instead of repeating the side effect.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -18,7 +19,9 @@ from ..services.idempotency import (
     IdempotencyConflictError,
     IdempotencyInProgressError,
     IdempotencyService,
+    InvalidIdempotencyKeyError,
     get_idempotency_service,
+    resolve_idempotency_header,
 )
 
 
@@ -57,23 +60,44 @@ class IdempotencyGuard:
         )
 
 
+def resolve_http_idempotency_header(
+    value: str | Sequence[str] | None,
+) -> str | None:
+    """Validate one Idempotency-Key header, or return None when it is absent.
+
+    A present but unusable key is HTTP 400. The call has not moved money yet.
+    """
+    try:
+        return resolve_idempotency_header(value)
+    except InvalidIdempotencyKeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"message": str(exc), **exc.as_error_data()},
+        ) from exc
+
+
 async def begin_http_idempotency(
     *,
-    idempotency_key: str | None,
+    idempotency_key: str | Sequence[str] | None,
     wallet_id: str,
     endpoint: str,
     request_payload: dict[str, Any],
 ) -> tuple[IdempotencyGuard, JSONResponse | None]:
     """Start (or replay) an idempotent operation. Returns the guard plus an
-    optional replay response to return immediately."""
-    if not idempotency_key:
+    optional replay response to return immediately.
+
+    Only a missing header skips the record. A blank or otherwise unusable
+    header is refused here, before the route moves money.
+    """
+    key = resolve_http_idempotency_header(idempotency_key)
+    if key is None:
         return IdempotencyGuard(None, wallet_id, endpoint, None), None
     idem = get_idempotency_service()
     try:
         replay = await idem.begin(
             wallet_id=wallet_id,
             endpoint=endpoint,
-            idempotency_key=idempotency_key,
+            idempotency_key=key,
             request_payload=request_payload,
         )
     except IdempotencyConflictError as exc:
@@ -86,7 +110,7 @@ async def begin_http_idempotency(
             status_code=status.HTTP_409_CONFLICT,
             detail={"error": "idempotency_in_progress", "message": str(exc)},
         ) from exc
-    guard = IdempotencyGuard(idem, wallet_id, endpoint, idempotency_key)
+    guard = IdempotencyGuard(idem, wallet_id, endpoint, key)
     if replay is not None:
         return guard, JSONResponse(
             status_code=replay.status_code, content=replay.response_json
