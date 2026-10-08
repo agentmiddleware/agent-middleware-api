@@ -22,6 +22,9 @@ resilience = ["tenacity>=8.0.0"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# Always print skip reasons in the short summary so skipped security and infra
+# tests cannot accumulate unnoticed (a bare "N skipped" line hides that).
+addopts = ["-rs"]
 pythonpath = [".", "b2a_sdk/src", "wrappers/openai-agent-middleware/src"]
 markers = [
     "proof: exercises an example proof-surface workload, not the trust-plane product. Skipped by `make test`; run the full suite with `make test-all`.",
