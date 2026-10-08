@@ -3,9 +3,22 @@ Conversion utilities between SQLModel database rows and Pydantic API schemas.
 """
 
 import json
+import logging
 from typing import Any
 
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+
+class CorruptStoredJsonError(ValueError):
+    """Stored JSON that cannot be parsed where the caller needs the data.
+
+    Raised for money records (wallets, ledger entries) instead of
+    substituting an empty value, so corruption is never mistaken for
+    a record that simply has no metadata.
+    """
+
 
 from ..core.time import to_naive_utc
 from ..schemas.billing import (
@@ -69,13 +82,25 @@ def wallet_model_to_response(
     if wallet.metadata_json:
         try:
             metadata = json.loads(wallet.metadata_json)
-        except json.JSONDecodeError:
-            pass
+        except json.JSONDecodeError as exc:
+            logger.error(
+                "corrupt wallet metadata_json for wallet_id=%s; "
+                "refusing to substitute empty metadata",
+                wallet.wallet_id,
+            )
+            raise CorruptStoredJsonError(
+                f"corrupt stored metadata for wallet {wallet.wallet_id}"
+            ) from exc
 
     kyc_status_str = wallet.kyc_status or "not_required"
     try:
         kyc_status = KYCStatus(kyc_status_str)
     except ValueError:
+        logger.warning(
+            "unknown kyc_status=%r for wallet_id=%s; using not_required",
+            kyc_status_str,
+            wallet.wallet_id,
+        )
         kyc_status = KYCStatus.NOT_REQUIRED
 
     return WalletResponse(
@@ -124,8 +149,15 @@ def ledger_entry_model_to_schema(
     if entry.metadata_json:
         try:
             metadata = json.loads(entry.metadata_json)
-        except json.JSONDecodeError:
-            pass
+        except json.JSONDecodeError as exc:
+            logger.error(
+                "corrupt ledger metadata_json for entry_id=%s; "
+                "refusing to substitute empty metadata",
+                entry.entry_id,
+            )
+            raise CorruptStoredJsonError(
+                f"corrupt stored metadata for ledger entry {entry.entry_id}"
+            ) from exc
 
     return LedgerEntry(
         entry_id=entry.entry_id,
@@ -200,6 +232,7 @@ def parse_metadata_json(metadata_json: str | None) -> dict[str, Any]:
     try:
         return json.loads(metadata_json)
     except json.JSONDecodeError:
+        logger.warning("corrupt stored metadata JSON; returning empty dict")
         return {}
 
 
@@ -274,7 +307,10 @@ def indexed_api_model_to_schema(row: OracleIndexedAPIModel) -> IndexedAPI:
             for item in json.loads(row.capabilities_json):
                 caps.append(IndexedCapability.model_validate(item))
         except (json.JSONDecodeError, ValueError):
-            pass
+            logger.warning(
+                "corrupt stored capabilities_json for api_id=%s; using empty list",
+                row.api_id,
+            )
 
     tags: list[str] = []
     if row.tags_json:
@@ -283,7 +319,10 @@ def indexed_api_model_to_schema(row: OracleIndexedAPIModel) -> IndexedAPI:
             if isinstance(parsed, list):
                 tags = [str(t) for t in parsed]
         except json.JSONDecodeError:
-            pass
+            logger.warning(
+                "corrupt stored tags_json for api_id=%s; using empty list",
+                row.api_id,
+            )
 
     return IndexedAPI(
         api_id=row.api_id,
@@ -343,6 +382,7 @@ def _parse_json_list(raw: str | None) -> list:
         parsed = json.loads(raw)
         return parsed if isinstance(parsed, list) else []
     except json.JSONDecodeError:
+        logger.warning("corrupt stored JSON list; returning empty list")
         return []
 
 
@@ -395,6 +435,10 @@ def vulnerability_model_to_schema(
             loaded = json.loads(row.evidence_json)
             evidence = loaded if isinstance(loaded, dict) else {"value": loaded}
         except json.JSONDecodeError:
+            logger.warning(
+                "corrupt stored evidence_json for vuln_id=%s; using empty dict",
+                row.vuln_id,
+            )
             evidence = {}
 
     return Vulnerability(
