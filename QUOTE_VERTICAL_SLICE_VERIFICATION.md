@@ -11,9 +11,12 @@
 > [`docs/signed-quotes.md`](docs/signed-quotes.md) plus
 > `tests/test_signed_quotes.py` and `tests/test_quote_vertical_slice.py`.
 
-## Status: ✅ COMPLETE ON MAIN
+## Status: historical snapshot (PR #331, commit `254a4ad`)
 
-The quote-locked pricing vertical slice described in WEDGE.md is **already fully implemented** on the current main branch (commit `254a4ad`).
+This file records what PR #331 verified at commit `254a4ad`; it is not
+re-verified on each release. For the current contract, read the maintained
+record: [`docs/signed-quotes.md`](docs/signed-quotes.md) plus
+`tests/test_signed_quotes.py` and `tests/test_quote_vertical_slice.py`.
 
 ## WEDGE.md Promise
 
@@ -118,9 +121,10 @@ python3 -m pytest tests/test_quote_vertical_slice.py -v
 
 All 17 tests pass (14 original + 3 new verification tests).
 
-## Conclusion
+## Conclusion (historical, at commit `254a4ad`)
 
-The quote-locked pricing vertical slice is **already complete** and **fully tested** on main. The implementation:
+At the time of PR #331 the quote-locked pricing vertical slice was complete
+and tested on main. The implementation then:
 
 1. ✅ Issues signed quotes that lock the price of one call
 2. ✅ Honors the quote even after the tool's registered price moves (up or down)

@@ -332,6 +332,35 @@ async def test_expired_quote_denies_rather_than_repricing(
 
 
 @pytest.mark.asyncio
+async def test_reading_an_expired_quote_persists_the_expiry(
+    client, clean_database, registered_tool
+):
+    """A single read must store the expiry, not just report it in memory."""
+    agent = await provision_agent_wallet(client)
+    quote = (
+        await _quote(client, agent["agent_headers"], agent["agent_wallet_id"])
+    ).json()
+
+    factory = get_session_factory()
+    async with factory() as session:
+        model = await session.get(QuoteModel, quote["quote_id"])
+        model.expires_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+            seconds=1
+        )
+        session.add(model)
+        await session.commit()
+
+    read = await client.get(
+        f"/v1/quotes/{quote['quote_id']}", headers=agent["agent_headers"]
+    )
+    assert read.json()["status"] == "expired"
+
+    async with factory() as session:
+        stored = await session.get(QuoteModel, quote["quote_id"])
+        assert stored.status == "expired"
+
+
+@pytest.mark.asyncio
 async def test_quote_for_another_wallet_or_tool_is_refused(
     client, clean_database, registered_tool
 ):

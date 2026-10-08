@@ -53,6 +53,13 @@ class MCPToolInfo(BaseModel):
     category: str
     credits_per_call: float
     unit_name: str
+    quotable: bool = Field(
+        default=True,
+        description=(
+            "Whether POST /v1/quotes can price this tool. False when its "
+            "registered price is not a finite, positive, storable amount."
+        ),
+    )
 
 
 class AWIEndpoint(BaseModel):
@@ -322,6 +329,8 @@ def _build_mcp_tools() -> list[MCPToolInfo]:
     When on, includes proof-surface stubs plus any registered tools.
     """
     from ..routers.mcp import _ensure_local_mcp_tools_registered
+    from ..schemas.billing import ServiceCategory
+    from ..services.pricing import tool_price
     from ..services.service_registry import get_service_registry
 
     _ensure_local_mcp_tools_registered()
@@ -329,6 +338,17 @@ def _build_mcp_tools() -> list[MCPToolInfo]:
     tools = []
 
     for service in registry._local_registry.values():
+        try:
+            category = ServiceCategory(
+                service.get("category", ServiceCategory.PLATFORM_FEE.value)
+            )
+        except ValueError:
+            category = ServiceCategory.PLATFORM_FEE
+        try:
+            tool_price(service, category)
+            quotable = True
+        except ValueError:
+            quotable = False
         tools.append(
             MCPToolInfo(
                 service_id=service["service_id"],
@@ -337,6 +357,7 @@ def _build_mcp_tools() -> list[MCPToolInfo]:
                 category=service.get("category", "unknown"),
                 credits_per_call=service.get("credits_per_unit", 1.0),
                 unit_name=service.get("unit_name", "call"),
+                quotable=quotable,
             )
         )
 
