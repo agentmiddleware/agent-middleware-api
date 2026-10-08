@@ -608,9 +608,10 @@ def test_public_surfaces_separate_public_proof_from_private_source_access(
     result = _render_site(output, VALID_TEST_CONTACTS)
     assert result.returncode == 0, result.stderr
 
+    # The proof page is stranger-verifiable: it states no repo visibility and
+    # links no private URL, so it sits outside both loops below.
     public_paths = (
         output / "index.html",
-        output / "proof" / "index.html",
         output / "compare" / "index.html",
         output / "llm.txt",
         output / "llms.txt",
@@ -628,7 +629,6 @@ def test_public_surfaces_separate_public_proof_from_private_source_access(
 
     source_reference_paths = (
         output / "index.html",
-        output / "proof" / "index.html",
         output / "compare" / "index.html",
         output / "llm.txt",
         output / "llms.txt",
@@ -641,6 +641,14 @@ def test_public_surfaces_separate_public_proof_from_private_source_access(
         assert REPO_URL.casefold() in content, (
             f"{path} does not link to the source repository"
         )
+
+    # The shared footer links the public org page, never the private repo,
+    # and the proof page carries no private-repo URL anywhere.
+    footer = (SITE / "partials" / "footer.html").read_text(encoding="utf-8")
+    assert "https://github.com/agentmiddleware" in footer
+    assert REPO_URL not in footer
+    proof = (output / "proof" / "index.html").read_text(encoding="utf-8")
+    assert REPO_URL.casefold() not in proof.casefold()
 
 
 def test_dynamic_routes_and_noncanonical_hosts_redirect_correctly() -> None:
