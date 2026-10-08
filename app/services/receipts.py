@@ -292,6 +292,11 @@ class ReceiptService:
         constraints_evaluated: dict[str, Any] | None = None,
         prepared_signing_key_id: str | None = None,
     ) -> ReceiptResponse:
+        # receipts.tool is VARCHAR(128). SQLite accepts a longer value and
+        # PostgreSQL rejects the insert, which turns a governed denial into
+        # an error with no signed receipt.
+        if not isinstance(tool, str) or tool == "" or len(tool) > 128:
+            raise ReceiptError("receipt_tool_invalid")
         if not all(
             credit_amount_fits_storage(amount)
             for amount in (credits_authorized, credits_charged)

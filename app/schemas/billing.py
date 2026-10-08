@@ -222,8 +222,20 @@ class CreateAgentWalletRequest(BaseModel):
     )
     agent_id: str = Field(
         ...,
+        min_length=1,
+        max_length=100,
         description="Agent ID from the comms registry.",
     )
+
+    @field_validator("agent_id")
+    @classmethod
+    def _agent_id_not_blank(cls, value: str) -> str:
+        # wallets.agent_id is VARCHAR(100). A blank id still minted a wallet
+        # the permit path would then treat as a real agent.
+        if not value.strip():
+            raise ValueError("agent_id is required")
+        return value
+
     budget_credits: float = Field(
         ...,
         gt=0,

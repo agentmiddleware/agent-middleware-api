@@ -38,6 +38,11 @@ _PositiveStoredCredit = Annotated[
     AfterValidator(_require_storable_credit),
 ]
 
+# Receipts, audit events, and dispatch attempts store the tool id in
+# VARCHAR(128). A longer id can be signed onto a permit and then fail the
+# denial receipt insert on PostgreSQL.
+_ToolName = Annotated[str, Field(min_length=1, max_length=128)]
+
 
 class ActionPermitFields(BaseModel):
     action_contract_version: int | None = Field(default=None, strict=True)
@@ -67,7 +72,7 @@ class PermitCreateRequest(ActionPermitFields):
     subject_wallet_id: str
     subject_key_id: str | None = None
     scopes: list[str] = Field(default_factory=list)
-    allowed_tools: list[str] = Field(default_factory=list)
+    allowed_tools: list[_ToolName] = Field(default_factory=list)
     max_credits: _PositiveStoredCredit
     expires_at: datetime
     # permits.nonce is String(64).
@@ -78,7 +83,7 @@ class PermitCreateRequest(ActionPermitFields):
     # Permit schema v2 constraints (all optional). A limit below one call, or
     # a cap of zero or less, could never admit a call; strict ints keep
     # ``true`` from coercing to a one-call limit.
-    max_calls_per_tool: dict[str, Annotated[StrictInt, Field(ge=1)]] = Field(
+    max_calls_per_tool: dict[_ToolName, Annotated[StrictInt, Field(ge=1)]] = Field(
         default_factory=dict
     )
     aggregate_value_cap: _PositiveStoredCredit | None = None
@@ -113,7 +118,7 @@ class ActionPermitCreateRequest(BaseModel):
     max_credits: _PositiveStoredCredit
     expires_at: datetime
     nonce: str | None = Field(default=None, max_length=64)
-    tool_name: str = Field(min_length=1)
+    tool_name: _ToolName
     arguments: dict[str, Any]
 
 
@@ -179,7 +184,7 @@ class PermitRequestCreate(BaseModel):
 
     issuer_wallet_id: str
     subject_wallet_id: str
-    allowed_tools: list[str] = Field(min_length=1)
+    allowed_tools: list[_ToolName] = Field(min_length=1)
     scopes: list[str] = Field(default_factory=list)
     # Hashed for the human at request time and stored as Numeric(20, 8), so
     # a value the column would round fails its own integrity check at mint.
@@ -269,7 +274,10 @@ class AuthoritySummaryResponse(BaseModel):
 class PermitVerifyRequest(BaseModel):
     permit_id: str
     wallet_id: str | None = None
-    tool: str | None = None
+    # No minimum length: an omitted or blank tool is "context missing" on
+    # verify, which is a different answer from a tool id the receipt column
+    # cannot store.
+    tool: Annotated[str, Field(max_length=128)] | None = None
     estimated_credits: Decimal | None = None
 
 

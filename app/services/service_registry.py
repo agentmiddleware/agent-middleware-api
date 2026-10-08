@@ -268,6 +268,8 @@ class ServiceRegistry:
         requires a signed permit + idempotency key — even if legacy
         unpermitted MCP is otherwise allowed.
         """
+        if not isinstance(service_id, str) or service_id == "" or len(service_id) > 128:
+            raise ValueError("service_id_invalid")
         input_schema = pydantic_to_mcp_schema(input_model)
         output_schema = pydantic_to_mcp_schema(output_model)
 
@@ -326,6 +328,15 @@ class ServiceRegistry:
         action_binding: ActionToolBinding | None = None,
     ) -> dict[str, Any]:
         """Register one runtime-backed remote MCP tool without persisting secrets."""
+        if (
+            not isinstance(service_id, str)
+            or service_id == ""
+            or len(service_id) > 128
+            or not isinstance(upstream_tool_name, str)
+            or upstream_tool_name == ""
+            or len(upstream_tool_name) > 128
+        ):
+            raise ValueError("service_id_invalid")
         existing = self._local_registry.get(service_id)
         if existing and existing.get("execution_backend") != "upstream_mcp":
             raise ValueError(f"Service ID already registered: {service_id}")

@@ -46,6 +46,7 @@ from decimal import Decimal
 from typing import Any, cast
 
 import httpx
+from pydantic import ValidationError
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.elements import ColumnElement
@@ -652,22 +653,31 @@ class PermitRequestService:
                 model, "permit_request_terms_integrity_violation"
             )
 
-        request = PermitCreateRequest(
-            issuer_wallet_id=model.issuer_wallet_id,
-            subject_wallet_id=model.subject_wallet_id,
-            subject_key_id=model.subject_key_id,
-            scopes=scopes,
-            allowed_tools=allowed_tools,
-            max_credits=model.max_credits,
-            expires_at=model.permit_expires_at,
-            requires_human_approval=model.requires_human_approval,
-        )
         try:
+            request = PermitCreateRequest(
+                issuer_wallet_id=model.issuer_wallet_id,
+                subject_wallet_id=model.subject_wallet_id,
+                subject_key_id=model.subject_key_id,
+                scopes=scopes,
+                allowed_tools=allowed_tools,
+                max_credits=model.max_credits,
+                expires_at=model.permit_expires_at,
+                requires_human_approval=model.requires_human_approval,
+            )
             await permits.create_permit(
                 request,
                 subject_key_id=model.subject_key_id,
                 permit_id=model.reserved_permit_id,
             )
+        except ValidationError:
+            # Stored terms can predate the tool-id length cap. Fail the
+            # request instead of leaving the mint claim stuck.
+            logger.warning(
+                "permit_request_mint_failed request_id=%s reason=%s",
+                model.request_id,
+                "permit_request_terms_rejected",
+            )
+            return await self._settle_failed(model, "permit_request_terms_rejected")
         except PermitError as exc:
             # The human approved terms the world no longer supports (expired
             # window, wallet drained). Terminal: asking again needs a new

@@ -108,6 +108,16 @@ def _num(value: Decimal | None) -> str | None:
     return None if value is None else str(value)
 
 
+def _credit_amount_is_storable(amount: Decimal) -> bool:
+    """True when a reserve or release delta can be stored as Numeric(20, 8).
+
+    Zero is included. A negative, non-finite, or over-precise value is not:
+    the budget comparison treats it as fitting, and the guarded UPDATE would
+    add it to ``spent_credits``.
+    """
+    return isinstance(amount, Decimal) and credit_amount_fits_storage(amount)
+
+
 def _stamp(value: datetime | None) -> str | None:
     """Render a naive-UTC column value as an explicit UTC timestamp."""
     return None if value is None else value.replace(microsecond=0).isoformat() + "Z"
@@ -891,6 +901,13 @@ class PermitService:
                     "missing_scopes": [s for s in required if s not in scopes],
                 },
             )
+        if not _credit_amount_is_storable(estimated_credits):
+            return PermitValidation(
+                False,
+                "permit_amount_invalid",
+                model,
+                {"constraint": "storable_non_negative_credit"},
+            )
         if model.spent_credits + estimated_credits > model.max_credits:
             return PermitValidation(
                 False,
@@ -1075,6 +1092,8 @@ class PermitService:
             return Decimal(str(total)) if total is not None else Decimal("0")
 
     async def reserve_budget(self, permit_id: str, amount: Decimal) -> None:
+        if not _credit_amount_is_storable(amount):
+            raise PermitError("permit_amount_invalid")
         factory = get_session_factory()
 
         async def _once() -> None:
@@ -1201,6 +1220,8 @@ class PermitService:
         await self._run_with_write_retry(_once)
 
     async def release_budget(self, permit_id: str, amount: Decimal) -> None:
+        if not _credit_amount_is_storable(amount):
+            raise PermitError("permit_amount_invalid")
         factory = get_session_factory()
 
         async def _once() -> None:

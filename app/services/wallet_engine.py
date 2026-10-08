@@ -396,6 +396,9 @@ class WalletEngine:
         CALLER owns end to end — same contract as ``create_sponsor_wallet``.
         Omit it for the original standalone behavior.
         """
+        if not isinstance(agent_id, str) or not agent_id.strip() or len(agent_id) > 100:
+            raise ValueError("agent_id is required")
+
         if budget_credits < Decimal("0"):
             # A negative budget inverts the debit into a credit: the guard
             # ``balance >= budget_credits`` is trivially true for a negative
