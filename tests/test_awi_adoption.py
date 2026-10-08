@@ -242,6 +242,110 @@ class TestAWIAdoptionGuide:
         assert "arXiv" in content or "arxiv" in content.lower()
 
 
+class TestManifestGeneratorCliHonesty:
+    """The CLI must offer only frameworks it implements (fastapi, openapi)."""
+
+    def test_cli_accepts_implemented_frameworks(self):
+        from app.tools.awi_manifest_generator import build_parser
+
+        parser = build_parser()
+        assert parser.parse_args(["--framework", "fastapi"]).framework == "fastapi"
+        assert parser.parse_args(["--framework", "openapi"]).framework == "openapi"
+
+    @pytest.mark.parametrize("framework", ["django", "express"])
+    def test_cli_rejects_unimplemented_frameworks(self, framework):
+        from app.tools.awi_manifest_generator import build_parser
+
+        parser = build_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(["--framework", framework])
+
+
+class TestOpenApiActions:
+    """OpenAPI generation must yield agent-ready actions, not only endpoints."""
+
+    def test_openapi_maps_known_operations_to_actions(self):
+        gen = ManifestGenerator(framework="openapi")
+        spec = {
+            "info": {"title": "Shop API", "version": "1.0.0"},
+            "servers": [{"url": "https://api.example.com"}],
+            "paths": {
+                "/search": {"post": {"summary": "Search items"}},
+                "/cart/add": {"post": {"summary": "Add to cart"}},
+                "/products": {"get": {"summary": "List products"}},
+            },
+        }
+
+        manifest = gen.generate_from_openapi(spec)
+
+        by_action = {a["awi_action"]: a for a in manifest["actions"]}
+        assert by_action["search_and_sort"]["route"] == "/search"
+        assert by_action["search_and_sort"]["description"] == "Search items"
+        assert by_action["add_to_cart"]["route"] == "/cart/add"
+        assert manifest["route_mappings"]["search_and_sort"] == "/search"
+        assert manifest["route_mappings"]["add_to_cart"] == "/cart/add"
+        paths = {e["path"] for e in manifest["endpoints"]}
+        assert {"/search", "/cart/add", "/products"} <= paths
+
+    def test_openapi_skips_malformed_operations(self):
+        gen = ManifestGenerator(framework="openapi")
+        spec = {
+            "info": {"title": "API", "version": "1.0.0"},
+            "paths": {
+                "/ok": {"post": {"summary": "Ok"}},
+                "/broken": "not-a-mapping",
+                "/empty": {"trace": {"summary": "Unsupported method"}},
+            },
+        }
+
+        manifest = gen.generate_from_openapi(spec)
+
+        assert [e["path"] for e in manifest["endpoints"]] == ["/ok"]
+
+    def test_scan_sample_shop_app_to_manifest_file(self, tmp_path):
+        """Worked example: sample FastAPI shop app scans to a saved manifest."""
+        from fastapi import FastAPI
+
+        from app.tools.awi_manifest_generator import ManifestGenerator
+
+        shop = FastAPI(title="Shop", version="2.0.0")
+
+        @shop.get("/")
+        async def home() -> dict:
+            return {}
+
+        @shop.post("/api/search")
+        async def search() -> dict:
+            """Search items."""
+            return {}
+
+        @shop.post("/api/cart/add")
+        async def add() -> dict:
+            """Add to cart."""
+            return {}
+
+        @shop.post("/checkout")
+        async def checkout() -> dict:
+            """Complete checkout."""
+            return {}
+
+        gen = ManifestGenerator()
+        manifest = gen.save_manifest(
+            gen.scan_fastapi_app(shop), tmp_path / ".well-known" / "awi.json"
+        )
+
+        assert manifest["name"] == "Shop"
+        assert manifest["route_mappings"]["navigate_to"] == "/"
+        assert manifest["route_mappings"]["search_and_sort"] == "/api/search"
+        assert manifest["route_mappings"]["add_to_cart"] == "/api/cart/add"
+        assert manifest["route_mappings"]["checkout"] == "/checkout"
+        import json
+
+        saved = json.loads((tmp_path / ".well-known" / "awi.json").read_text())
+        assert saved["actions"] == manifest["actions"]
+        assert len(saved["endpoints"]) >= 4
+
+
 class TestAWIAdoptionRouter:
     """Test AWI adoption endpoints."""
 
