@@ -47,11 +47,17 @@ def _status_code(model: PermitRequestModel) -> int:
 
 
 def _authorize_inspection(*, auth: AuthContext, model: PermitRequestModel) -> None:
+    """Only the issuer wallet, the subject wallet, or a bootstrap admin may poll.
+
+    A request the caller may not see answers exactly like a missing one.
+    The admin check's 403 would otherwise confirm the id exists, so a
+    foreign request is reported as not found instead.
+    """
     if auth.is_bootstrap_admin:
         return
     if auth.wallet_id in {model.issuer_wallet_id, model.subject_wallet_id}:
         return
-    auth.require_bootstrap_admin()
+    raise HTTPException(status_code=404, detail="permit_request_not_found")
 
 
 @router.post(
