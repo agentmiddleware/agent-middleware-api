@@ -138,7 +138,13 @@ class WalletEngine:
         return expires_at
 
     async def wallet_is_expired(self, wallet_id: str) -> bool:
-        """Return whether a wallet or any ancestor authority has expired."""
+        """Return whether a wallet or any ancestor authority has expired.
+
+        Unknown wallet ids return False (no expiry on record), matching
+        get_daily_spend, which returns zero for unknown wallets. Callers
+        that need to tell "healthy and empty" apart from "no such wallet"
+        should look the wallet up first instead of relying on this.
+        """
         async with self._session_factory()() as session:
             wallet = await session.get(WalletModel, wallet_id)
             if wallet is None:
@@ -692,7 +698,12 @@ class WalletEngine:
             return wallet_model_to_response(child)
 
     async def reclaim_child_wallet(self, child_wallet_id: str) -> dict:
-        """Reclaim unspent credits from a child wallet back to its parent."""
+        """Reclaim unspent credits from a child wallet back to its parent.
+
+        A reclaim with nothing left to move still closes the child and
+        writes a zero-amount ledger pair, so auditors can see every
+        reclaim, including empty ones.
+        """
         async with self._session_factory()() as session:
             async with session.begin():
                 # Discover the (immutable) parent id with an unlocked read, so
@@ -819,6 +830,33 @@ class WalletEngine:
                         )
                     )
 
+                if reclaim_amount == Decimal("0"):
+                    # A zero-balance reclaim still moves the child to closed,
+                    # so it still writes a ledger pair. Without entries there
+                    # is no audit trail that the reclaim happened at all.
+                    # Amounts are zero, so totals are unaffected.
+                    await session.refresh(parent)
+                    session.add(
+                        LedgerEntryModel(
+                            entry_id=str(uuid.uuid4()),
+                            wallet_id=child_wallet_id,
+                            action=LedgerAction.TRANSFER.value,
+                            amount=Decimal("0"),
+                            balance_after=Decimal("0"),
+                            description=f"Reclaimed to parent {parent.wallet_id} (no remaining balance)",
+                        )
+                    )
+                    session.add(
+                        LedgerEntryModel(
+                            entry_id=str(uuid.uuid4()),
+                            wallet_id=parent.wallet_id,
+                            action=LedgerAction.TRANSFER.value,
+                            amount=Decimal("0"),
+                            balance_after=parent.balance,
+                            description=f"Reclaimed from child {child_wallet_id} (no remaining balance)",
+                        )
+                    )
+
                 # The guarded claim above already closed the child and zeroed
                 # its balance; re-reading keeps the returned view honest.
                 await session.refresh(child)
@@ -862,7 +900,8 @@ class WalletEngine:
         Raises:
             WalletNotFoundError: If either wallet doesn't exist
             InsufficientFundsError: If source has insufficient balance
-            ValueError: If amount <= 0 or same wallet IDs
+            ValueError: If amount <= 0, same wallet IDs, source not
+                spendable, or destination frozen or closed
         """
         if amount <= Decimal("0"):
             raise ValueError("Transfer amount must be positive")
@@ -890,6 +929,19 @@ class WalletEngine:
                 if source.status not in SPENDABLE_WALLET_STATUSES:
                     raise ValueError(
                         f"Source wallet is {source.status} and cannot transfer credits"
+                    )
+                if dest.status in (
+                    WalletStatus.FROZEN.value,
+                    WalletStatus.CLOSED.value,
+                ):
+                    # Credits landing in a frozen or closed wallet cannot be
+                    # spent there, so the transfer would park money out of
+                    # reach. Closed is terminal; frozen needs an explicit
+                    # unfreeze first. Other non-spendable states (suspended,
+                    # operator holds) still accept deposits.
+                    raise ValueError(
+                        f"Destination wallet is {dest.status} and cannot "
+                        "receive credits"
                     )
                 await self.ensure_wallet_not_expired(session, source)
                 if (

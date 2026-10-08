@@ -142,6 +142,80 @@ class TestShadowLedger:
         result = asyncio.run(ledger.end_session("nonexistent-id"))
         assert result is None
 
+    def test_redis_store_round_trips_exact_decimals(self, ledger):
+        """The Redis JSON store keeps exact balances, never float estimates.
+
+        Balances and charges serialize as decimal strings. A float
+        round-trip silently loses precision past ~15-17 significant
+        digits, which then feeds the virtual-balance math.
+        """
+
+        class _FakeRedis:
+            """Minimal async Redis stand-in for the session JSON path."""
+
+            def __init__(self):
+                self.strings: dict = {}
+                self.sets: dict = {}
+
+            async def ping(self):
+                return True
+
+            async def setex(self, key, ttl, value):
+                self.strings[key] = value
+
+            async def get(self, key):
+                return self.strings.get(key)
+
+            async def set(self, key, value, ex=None, xx=False):
+                if xx and key not in self.strings:
+                    return None
+                self.strings[key] = value
+                return True
+
+            async def getdel(self, key):
+                return self.strings.pop(key, None)
+
+            async def delete(self, key):
+                self.strings.pop(key, None)
+
+            async def sadd(self, key, member):
+                self.sets.setdefault(key, set()).add(member)
+
+            async def srem(self, key, member):
+                self.sets.get(key, set()).discard(member)
+
+            async def smembers(self, key):
+                return set(self.sets.get(key, set()))
+
+        fake = _FakeRedis()
+        ledger._redis_url = "fake://precision-test"
+        ledger._redis = fake
+        try:
+
+            async def scenario():
+                balance = Decimal("12345678.123456789012")
+                # Sanity: this value really does lose precision through a
+                # float, so the test cannot pass for the wrong reason.
+                assert Decimal(str(float(balance))) != balance
+                session = await ledger.create_session(
+                    wallet_id="precision-wallet",
+                    real_balance=balance,
+                )
+                await ledger.simulate_charge(
+                    session_id=session.session_id,
+                    service_category=ServiceCategory.IOT_BRIDGE,
+                    units=1.0,
+                )
+                return await ledger.get_session(session.session_id)
+
+            reread = asyncio.run(scenario())
+        finally:
+            ledger._redis = None
+
+        assert reread.real_balance == Decimal("12345678.123456789012")
+        assert reread.simulated_charges[0].credits == Decimal("2")
+        assert reread.virtual_balance == Decimal("12345676.123456789012")
+
     def test_virtual_balance_calculation(self, ledger):
         """Virtual balance correctly reflects real balance minus charges."""
 
@@ -510,6 +584,61 @@ class TestBillingRouterDryRun:
             f"/v1/billing/wallets/{wallet_id}", headers={"X-API-Key": "test-key"}
         )
         assert wallet_resp.json()["balance"] == 1.0
+
+    @pytest.mark.anyio
+    async def test_commit_reports_live_balance_not_session_snapshot(self, client):
+        """Commit reads the real balance live instead of reusing the snapshot.
+
+        The session snapshots the balance at creation; if the real wallet
+        moves before commit, the reported real_balance_before must reflect
+        the live wallet, or the receipt misleads about what commit saw.
+        """
+        wallet_resp = await client.post(
+            "/v1/billing/wallets/sponsor",
+            json={
+                "sponsor_name": "Stale Snapshot Test",
+                "email": "stale-snapshot@test.com",
+                "initial_credits": 10,
+            },
+            headers={"X-API-Key": "test-key"},
+        )
+        wallet_id = wallet_resp.json()["wallet_id"]
+
+        create_resp = await client.post(
+            "/v1/billing/dry-run/session",
+            json={"wallet_id": wallet_id},
+            headers={"X-API-Key": "test-key"},
+        )
+        session_id = create_resp.json()["session_id"]
+
+        charge_resp = await client.post(
+            "/v1/billing/dry-run/charge",
+            json={
+                "wallet_id": wallet_id,
+                "service": "iot_bridge",
+                "units": 1.0,
+                "dry_run_session_id": session_id,
+            },
+            headers={"X-API-Key": "test-key"},
+        )
+        assert charge_resp.status_code == 200
+
+        # Move the real wallet after the session snapshot: 10 - 9 = 1.
+        drain_resp = await client.post(
+            f"/v1/billing/charge?wallet_id={wallet_id}&service=iot_bridge&units=4.5",
+            headers={"X-API-Key": "test-key"},
+        )
+        assert drain_resp.status_code == 200
+
+        commit_resp = await client.post(
+            f"/v1/billing/dry-run/session/{session_id}/commit",
+            headers={"X-API-Key": "test-key"},
+        )
+        assert commit_resp.status_code == 200
+        data = commit_resp.json()
+        assert data["real_balance_before"] == 1.0
+        assert data["real_balance_after"] == 1.0
+        assert data["success"] is False
 
     @pytest.mark.anyio
     async def test_revert_dry_run_session(self, client):

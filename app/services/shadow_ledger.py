@@ -11,6 +11,11 @@ Architecture:
 - Virtual balance is computed from real balance minus simulated charges
 - Sessions auto-expire via Redis EXPIRE
 
+Estimates, not quotes: the session snapshots the real balance at creation,
+so the virtual balance goes stale if the real wallet moves. Commit replays
+each simulated charge against the live wallet and reports per-charge
+outcomes, and reads the real balance live at commit time.
+
 Security:
 - Dry-run charges are INVISIBLE to VelocityMonitor
 - No real ledger entries are created
@@ -220,10 +225,13 @@ class ShadowLedger:
         redis_client = await self._get_redis()
 
         if redis_client:
+            # Decimal-safe: balances serialize as strings so the store
+            # round-trips the exact value. float() silently loses precision
+            # past ~15-17 significant digits.
             session_data = {
                 "session_id": session_id,
                 "wallet_id": wallet_id,
-                "real_balance": float(real_balance),
+                "real_balance": str(real_balance),
                 "simulated_charges": [],
                 "created_at": session.created_at.isoformat(),
             }
@@ -364,16 +372,18 @@ class ShadowLedger:
 
             redis_client = await self._get_redis()
             if redis_client:
+                # Decimal-safe (see create_session): the store keeps exact
+                # strings, never float approximations.
                 session_data = {
                     "session_id": session.session_id,
                     "wallet_id": session.wallet_id,
-                    "real_balance": float(session.real_balance),
+                    "real_balance": str(session.real_balance),
                     "simulated_charges": [
                         {
                             "charge_id": c.charge_id,
                             "service_category": c.service_category,
                             "units": c.units,
-                            "credits": float(c.credits),
+                            "credits": str(c.credits),
                             "description": c.description,
                             "timestamp": c.timestamp.isoformat(),
                         }
@@ -473,6 +483,13 @@ class ShadowLedger:
         Applies all simulated charges to the real wallet via AgentMoney.
         Uses the charge service for each simulated operation.
 
+        A dry-run quote is an estimate: the session snapshots the balance
+        when it starts, and the real wallet may move before commit. The
+        reported ``real_balance_before`` is read live here at commit time,
+        and every simulated charge reports its own committed/failed outcome
+        in ``ledger_entries``, so a partial commit is visible charge by
+        charge instead of looking like a final quote.
+
         Args:
             session_id: The dry-run session to commit
             agent_money: AgentMoney service instance for billing
@@ -498,20 +515,35 @@ class ShadowLedger:
                 message="Session not found",
             )
 
+        # Read the balance live: the session snapshot goes stale if the real
+        # wallet moves between simulate and commit. Fall back to the snapshot
+        # only when the wallet cannot be read (it should still exist).
+        # WalletResponse.balance is a float display field, so take the exact
+        # string form to keep this Decimal.
+        live_wallet = await agent_money.get_wallet(session.wallet_id)
+        live_balance: Decimal | None = None
+        if live_wallet is not None:
+            if live_wallet.balance_exact:
+                live_balance = Decimal(live_wallet.balance_exact)
+            else:
+                live_balance = Decimal(str(live_wallet.balance))
+        real_balance_before = (
+            live_balance if live_balance is not None else session.real_balance
+        )
+
         if not session.simulated_charges:
             return CommitResult(
                 session_id=session_id,
                 wallet_id=session.wallet_id,
                 committed_charges=0,
                 total_credits_deducted=Decimal("0"),
-                real_balance_before=session.real_balance,
-                real_balance_after=session.real_balance,
+                real_balance_before=real_balance_before,
+                real_balance_after=real_balance_before,
                 ledger_entries=[],
                 success=True,
                 message="No charges to commit",
             )
 
-        real_balance_before = session.real_balance
         total_deducted = Decimal("0")
         ledger_entries = []
         committed_count = 0
