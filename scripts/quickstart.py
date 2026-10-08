@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-command local trust plane for the 15-minute golden path.
+"""One-command local trust plane for the golden path in docs/quickstart.md.
 
 Boots the real API server on loopback with everything a stranger needs to
 drive the governed loop end to end with no operator and no pre-shared

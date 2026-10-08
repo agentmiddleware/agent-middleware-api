@@ -151,11 +151,13 @@ To drive the loop yourself instead of watching it:
 make quickstart        # boots a real strict-trust server on 127.0.0.1:8000
 ```
 
-Then follow [docs/quickstart.md](docs/quickstart.md): mint your own
-wallet-scoped key with no operator and no pre-shared secret, issue yourself a
-permit, invoke a governed tool, deliberately try to double-charge and overspend,
-and finish holding a signed receipt you verified offline. Every step runs in CI
-(`make quickstart-check`), so the documented path cannot silently rot.
+Then follow [docs/quickstart.md](docs/quickstart.md): in about five minutes,
+mint your own wallet-scoped key with no operator and no pre-shared secret,
+issue yourself a permit, invoke a governed tool, deliberately try to
+double-charge, and finish holding a signed receipt you verified offline.
+Follow-on sections cover overspend, authority denial, and an off-the-shelf
+MCP client. Every step runs in CI (`make quickstart-check`), so the
+documented path cannot silently rot.
 
 `make live-loop-proof` (against a running quickstart) writes a handoff bundle to
 `data/live-loop-proof/` — portable receipts, the issuer key set, and a
