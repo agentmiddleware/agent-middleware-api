@@ -39,8 +39,10 @@ verification. The private key is never persisted.
 - Hosting platforms (Railway, Fly, AWS) inject the env var from their own
   secret stores at deploy time
 - Public-key metadata is auditable (`GET /v1/signing-keys/active`,
-  `GET /v1/signing-keys/{key_id}`); retiring or rotating it is service code
-  only today, with no route or script (see [Status](#status))
+  `GET /v1/signing-keys/{key_id}`, `GET /v1/signing-keys/`); rotation and
+  retirement run through operator routes (`POST /v1/signing-keys/rotate`,
+  `POST /v1/signing-keys/retire`, bootstrap admin only, see
+  [Status](#status))
 - The trust boundary documented in `SECURITY_LIMITATIONS.md` is consistent
   with this loader
 
@@ -124,10 +126,11 @@ This is the property that closes the gap in `SECURITY_LIMITATIONS.md` between
 ## Rotation Flow Under KMS
 
 > **Target state, not implemented.** This flow is the design for after the
-> KMS integration ships. `POST /v1/admin/signing-keys/rotate` does not exist:
-> the only signing-key routes today are the read-only
-> `GET /v1/signing-keys/active` and `GET /v1/signing-keys/{key_id}`
-> (`app/routers/keys.py`). For what rotation means now, see [Status](#status).
+> KMS integration ships. The operator rotate and retire routes exist today
+> (`POST /v1/signing-keys/rotate`, `POST /v1/signing-keys/retire`), but they
+> rotate key ids against the gateway's current signing material; the KMS
+> counterpart (new key version without redeploy) is still future work. For
+> what rotation means now, see [Status](#status).
 
 Rotation under KMS is metadata + key-version change, not a redeploy:
 
@@ -185,13 +188,30 @@ Until the KMS integration ships, the production posture is:
   shipped defaults; nothing extra to configure
 - `TRUST_SIGNING_PRIVATE_KEY_B64` injected at deploy time from the hosting
   platform secret manager
-- Rotation by redeploy only: a new `TRUST_SIGNING_PRIVATE_KEY_B64` paired with
-  a new `TRUST_SIGNING_KEY_ID`. The redeploy activates the new `kid` but does
-  not retire the old one (`SigningKeyService.ensure_active_key`), so both stay
-  `active`. Retiring the old metadata has no route or script yet:
-  `retire_key_metadata` and `rotate_active_key_metadata` are service methods
-  only, and no `POST /v1/admin/signing-keys/rotate` route exists. The
-  post-rotation steps are in [`deploy-railway.md`](deploy-railway.md).
+- Operator key rotation is served by the gateway (`app/routers/keys.py`,
+  bootstrap admin only):
+  - `GET /v1/signing-keys/` lists every published key with its status, so a
+    rollover window with more than one `active` key is visible
+  - `POST /v1/signing-keys/rotate` moves signing to a new `kid` and retires
+    the previous one in one call
+  - `POST /v1/signing-keys/retire` retires a superseded key; retired keys
+    stay published so old receipts keep verifying. The key that is still
+    signing cannot be retired (rotate first)
+- Two rotation paths, depending on whether the private material changes:
+  - **New key material**: redeploy with a new `TRUST_SIGNING_PRIVATE_KEY_B64`
+    paired with a new `TRUST_SIGNING_KEY_ID`. The redeploy activates the new
+    `kid` but does not retire the old one
+    (`SigningKeyService.ensure_active_key`), so both stay `active` until an
+    operator retires the old one with `POST /v1/signing-keys/retire`. The
+    post-rotation steps are in [`deploy-railway.md`](deploy-railway.md).
+  - **Same material, new `kid`** (for example a scheduled id rollover):
+    `POST /v1/signing-keys/rotate` alone is enough.
+- After either path, restart or redeploy every gateway replica with the new
+  `TRUST_SIGNING_KEY_ID` so all signers converge. Until then a replica still
+  on the old id keeps signing artifacts that verify under its `kid`, which is
+  valid history, not forgery.
+- The auditor handoff for verifying receipts against these keys is
+  [`auditor-guide.md`](auditor-guide.md).
 
 This is documented as a known limitation in `SECURITY_LIMITATIONS.md` and
 should be the default answer to "where do the private keys live?" until the
