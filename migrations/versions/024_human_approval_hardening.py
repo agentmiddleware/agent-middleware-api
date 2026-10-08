@@ -8,14 +8,17 @@ Two changes:
    reloaded approval reject an invoke that reused the same idempotency key with
    different arguments or a different current price.
 
-2. Repair ``permits.requires_human_approval`` on SQLite. Migration 023 added
-   the column with ``server_default="false"`` — a plain string that SQLite
-   stores as the *text* ``'false'`` and then reads back through SQLAlchemy's
-   non-native Boolean as ``True`` (``bool("false")``). Every permit that
-   existed before 023 therefore reports ``requires_human_approval=True`` and
-   fails signature verification (the flag enters the signed payload only when
-   true). Postgres parses ``'false'`` as boolean false, so it is unaffected;
-   the repair runs on SQLite only, normalizing any non-0/1 value back to 0.
+2. Repair ``permits.requires_human_approval`` on SQLite. Migration 023
+   originally added the column with the string server default "false".
+   SQLite stores that as the text 'false', and SQLAlchemy's non-native
+   Boolean reads any non-empty string as True. Every permit that existed
+   before 023 therefore reported requires_human_approval=True and failed
+   signature verification (the flag enters the signed payload only when
+   true). Postgres parses 'false' as boolean false, so it is unaffected.
+   The repair runs on SQLite only. The column definition now uses
+   sa.false(), which renders as 0 on SQLite. Databases already stamped
+   past 023 keep the old text default until rebuilt, so this row repair
+   stays.
 
 Revision ID: 024_human_approval_hardening
 Revises: 023_human_approval_gate
@@ -40,11 +43,12 @@ def upgrade() -> None:
 
     bind = op.get_bind()
     if bind.dialect.name == "sqlite":
-        # Existing rows backfilled by 023 hold the text 'false'. Repair only
-        # the known text booleans, in the correct direction, so an unexpected
-        # value is never silently downgraded to "approval not required" (that
-        # would remove a control rather than restore one). 023's server_default
-        # can only produce 'false', but the 'true' side is handled defensively.
+        # Existing rows backfilled by the old string default hold the text
+        # 'false'. Repair only the known text booleans, in the correct
+        # direction, so an unexpected value is never silently downgraded to
+        # "approval not required" (that would remove a control rather than
+        # restore one). The old default could only produce 'false', but the
+        # 'true' side is handled defensively.
         op.execute(
             sa.text(
                 "UPDATE permits SET requires_human_approval = 0 "
