@@ -38,8 +38,14 @@ export VALID_API_KEYS=dev-bootstrap-key
 export DATABASE_URL=sqlite+aiosqlite:///./test.db
 export TRUST_SIGNING_KEY_ID=local-dev-ed25519
 export TRUST_SIGNING_PRIVATE_KEY_B64='<paste-the-saved-seed>'
+export ENABLE_PROOF_SURFACES=true
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
+
+`ENABLE_PROOF_SURFACES=true` mounts the dormant expansion surfaces used in
+step 7 (dry-run sandbox) and the velocity read in step 9. Production
+deployments do not mount these routes; the wedge path is quote, permit,
+invoke, receipt.
 
 Keep the seed in the gitignored `.env` or another local secret store. If you
 lose it, delete `./test.db` and start from a fresh database. Do not reuse local
@@ -56,7 +62,7 @@ export BOOTSTRAP_KEY=dev-bootstrap-key
 
 ```bash
 curl "$API_URL/.well-known/agent.json"
-curl "$API_URL/llm.txt"
+curl "$API_URL/llms.txt"
 curl "$API_URL/mcp/tools.json"
 ```
 
@@ -164,12 +170,34 @@ curl -i "$API_URL/v1/billing/wallets/$SPONSOR_WALLET_ID" \
 
 Expected result: `403 Forbidden`.
 
-## 7. Simulate Cost Before Acting
+### Optional: Attach A Wallet Policy
+
+Operators can constrain the agent wallet before execution:
+
+```bash
+curl -X POST "$API_URL/v1/policies" \
+  -H "X-API-Key: $BOOTSTRAP_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"wallet_id\": \"$AGENT_WALLET_ID\",
+    \"name\": \"golden-path-policy\",
+    \"allowed_service_categories\": [\"agent_comms\"],
+    \"max_cost_per_action\": 5
+  }"
+```
+
+If an MCP invocation, billing charge, or planner action violates the active
+wallet policy, it is denied before execution or charge and the audit event
+includes the `policy_id` and evaluated constraints.
+
+## 7. Simulate Cost Before Acting (Optional Expansion Surface)
 
 > **Dormant expansion surface.** The dry-run sandbox (and the velocity
 > status read in step 9) mounts only when the local instance runs with
-> `ENABLE_PROOF_SURFACES=true`. Production deployments do not mount these
-> routes; the wedge path is quote → permit → invoke → receipt.
+> `ENABLE_PROOF_SURFACES=true`, which the boot command above sets.
+> Production deployments do not mount these routes; the wedge path is
+> quote → permit → invoke → receipt. Skip this step if you started the
+> server without the flag: the calls below answer `404`.
 
 ```bash
 DRY_RUN_JSON=$(
@@ -193,27 +221,7 @@ curl -X POST "$API_URL/v1/billing/dry-run/charge" \
   }"
 ```
 
-## 6a. Optional: Attach A Wallet Policy
-
-Operators can constrain the agent wallet before execution:
-
-```bash
-curl -X POST "$API_URL/v1/policies" \
-  -H "X-API-Key: $BOOTSTRAP_KEY" \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"wallet_id\": \"$AGENT_WALLET_ID\",
-    \"name\": \"golden-path-policy\",
-    \"allowed_service_categories\": [\"agent_comms\"],
-    \"max_cost_per_action\": 5
-  }"
-```
-
-If an MCP invocation, billing charge, or planner action violates the active
-wallet policy, it is denied before execution or charge and the audit event
-includes the `policy_id` and evaluated constraints.
-
-## 7. Invoke Or Discover Tools
+## 8. Invoke Or Discover Tools
 
 Fetch the MCP manifest:
 
@@ -301,7 +309,7 @@ curl -s -X POST "$API_URL/mcp/messages" \
   }" | jq '.error'
 ```
 
-## 8. Inspect The Operation Record
+## 9. Inspect The Operation Record, Ledger, And Velocity
 
 After a scoped agent invokes a tool, operators can inspect the control-plane record:
 
@@ -362,14 +370,19 @@ curl -X POST "$API_URL/v1/audit/verify-chain" \
   -d "{\"wallet_id\": \"$AGENT_WALLET_ID\"}"
 ```
 
-## 9. Inspect Ledger And Velocity
+Inspect the receipt ledger for the agent wallet:
 
 ```bash
 curl "$API_URL/v1/billing/ledger/$AGENT_WALLET_ID" \
   -H "X-API-Key: $AGENT_API_KEY"
+```
 
-# Velocity status is a dormant expansion surface: requires a local instance
-# running with ENABLE_PROOF_SURFACES=true (never mounted in production).
+Velocity status is a dormant expansion surface: it needs the local instance
+running with `ENABLE_PROOF_SURFACES=true` (set in the boot command above)
+and is never mounted in production. Skip it on a server started without
+the flag.
+
+```bash
 curl "$API_URL/v1/billing/wallets/$AGENT_WALLET_ID/velocity" \
   -H "X-API-Key: $AGENT_API_KEY"
 ```
@@ -380,7 +393,8 @@ curl "$API_URL/v1/billing/wallets/$AGENT_WALLET_ID/velocity" \
 - Sponsor and agent wallets are created.
 - Agent API key authenticates.
 - Agent API key can access only its own wallet.
-- Dry-run simulation returns a cost estimate.
+- Dry-run simulation returns a cost estimate (optional expansion surface,
+  needs the boot flag).
 - MCP manifest is available.
 - Signed permit creation binds wallet, key, tool, budget, and expiry.
 - Governed MCP invocation returns a signed receipt.
@@ -391,4 +405,5 @@ curl "$API_URL/v1/billing/wallets/$AGENT_WALLET_ID/velocity" \
 - Control-plane audit records are inspectable with the bootstrap key.
 - Operators can inspect the policy decision, audit event, ledger entry, and
   request/correlation ID for the scoped tool call.
-- Ledger and velocity endpoints are inspectable with the agent key.
+- Ledger endpoint is inspectable with the agent key; velocity is an
+  optional expansion surface (needs the boot flag, never in production).

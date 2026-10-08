@@ -37,6 +37,57 @@ def test_golden_path_dogfood_arguments_bind_without_invoking_tool():
     assert "both the first invoke and its replay" in doc
 
 
+def test_golden_path_boot_enables_proof_surfaces():
+    doc = read("golden-path.md")
+    boot = doc.split("## 1.", 1)[0]
+    assert "export ENABLE_PROOF_SURFACES=true" in boot
+    assert "uvicorn app.main:app" in boot
+
+
+def test_golden_path_steps_run_one_to_nine_in_order():
+    doc = read("golden-path.md")
+    numbers = re.findall(r"^## (\d+)\.", doc, re.MULTILINE)
+    assert numbers == [str(n) for n in range(1, 10)], (
+        f"golden-path steps must run 1 to 9 with no gaps or repeats, got {numbers}"
+    )
+    assert "6a" not in doc
+
+
+def test_golden_path_discovery_uses_plural_llms_txt():
+    doc = read("golden-path.md")
+    step = doc.split("## 1.", 1)[1].split("## 2.", 1)[0]
+    assert "$API_URL/llms.txt" in step
+    assert "$API_URL/llm.txt" not in step
+
+
+def test_golden_path_marks_dormant_steps_optional():
+    doc = read("golden-path.md")
+    assert "## 7. Simulate Cost Before Acting (Optional Expansion Surface)" in doc
+    assert (
+        "Dry-run simulation returns a cost estimate (optional expansion surface" in doc
+    )
+
+
+def test_signed_quotes_example_avoids_deprecated_rest_invoke():
+    doc = read("signed-quotes.md")
+    assert "mcp/tools/summarize/invoke" not in doc
+    assert "deprecat" in doc.lower()
+    example = doc.split("## Example", 1)[1]
+    assert "POST /mcp/messages" in example
+
+
+def test_readme_typescript_claim_is_scoped_to_gateway_client():
+    readme = (ROOT / "README.md").read_text()
+    assert "there is no TypeScript package**" not in readme
+    assert "TypeScript package for the gateway client" in readme
+    assert "awi_sdk/typescript" in readme
+
+
+def test_readme_names_canonical_llms_copy():
+    readme = (ROOT / "README.md").read_text()
+    assert "canonical for the gateway" in readme
+
+
 def test_partner_install_has_verification_extra_for_source_and_wheel():
     doc = read("partner-first-tool-runbook.md")
     assert 'pip install "./b2a_sdk[verify]"' in doc

@@ -88,6 +88,13 @@ Spending happens on the existing governed invoke — pass `quote_id` in
 
 ## Example
 
+> **Use a supported invoke transport.** The legacy REST-shaped invoke
+> (`POST /mcp/tools/{service_id}/invoke`) below is marked deprecated in the
+> OpenAPI contract and kept for existing clients. New integrations should
+> spend quotes through `POST /mcp/messages` (JSON-RPC, available in a
+> default local run) or `POST /mcp` (Streamable HTTP, opt-in); every entry
+> point runs the same governed permit to meter to receipt path.
+
 ```bash
 QUOTE=$(curl -sS -X POST "$API_URL/v1/quotes" \
   -H "X-API-Key: $AGENT_KEY" -H 'Content-Type: application/json' \
@@ -95,18 +102,23 @@ QUOTE=$(curl -sS -X POST "$API_URL/v1/quotes" \
 
 echo "$QUOTE" | jq '{quoted_credits, expires_at, signature}'
 
-curl -sS -X POST "$API_URL/mcp/tools/summarize/invoke" \
+curl -sS -X POST "$API_URL/mcp/messages" \
   -H "X-API-Key: $AGENT_KEY" -H 'Content-Type: application/json' \
   -d '{
-        "name": "summarize",
-        "arguments": {"text": "..."},
-        "mcp_context": {
-          "wallet_id": "'"$WALLET"'",
-          "permit_id": "'"$PERMIT"'",
-          "quote_id": "'"$(echo "$QUOTE" | jq -r .quote_id)"'",
-          "idempotency_key": "'"$(uuidgen)"'"
+        "jsonrpc": "2.0",
+        "id": "quote-spend-1",
+        "method": "tools/call",
+        "params": {
+          "name": "summarize",
+          "arguments": {"text": "..."},
+          "mcpContext": {
+            "wallet_id": "'"$WALLET"'",
+            "permit_id": "'"$PERMIT"'",
+            "quote_id": "'"$(echo "$QUOTE" | jq -r .quote_id)"'",
+            "idempotency_key": "'"$(uuidgen)"'"
+          }
         }
-      }' | jq '.receipt.credits_charged'
+      }' | jq '.result.receipt.credits_charged'
 ```
 
 Migration `031_quotes` creates the table. No configuration is required beyond
