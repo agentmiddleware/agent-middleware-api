@@ -145,7 +145,16 @@ gateway adds and does not add, and the one failure every configuration
 shares: an agent that restarts with a new key pays twice. Mechanism, report
 layout, and limits: [docs/failure-lab.md](docs/failure-lab.md).
 
-To drive the loop yourself instead of watching it:
+To drive the loop yourself instead of watching it, start with the
+five-minute trial — one command, its own throwaway server, permit to
+signed receipt to offline verify:
+
+```bash
+make trial             # see docs/trial.md
+```
+
+For the full 15-minute walkthrough with the double-charge and overspend
+attacks by hand:
 
 ```bash
 make quickstart        # boots a real strict-trust server on 127.0.0.1:8000
