@@ -1,7 +1,17 @@
 target-version = "py311"
 
 [lint]
-# Pyflakes: unused imports/variables, undefined names, redefinitions.
-# Previously this file selected only E501 and then immediately ignored it,
-# so `ruff check` passed with zero rules actually enforced.
-select = ["F"]
+# Pyflakes (F) plus pycodestyle errors (E) and warnings (W). E501 (line
+# length) stays off: the codebase does not follow it and enabling it would be
+# a reformat, not a tightening. I (isort) stays off for now: 400+ violations,
+# needs its own dedicated pass.
+select = ["F", "E", "W"]
+ignore = ["E501"]
+
+[lint.per-file-ignores]
+# These files must run code before their local imports (sys.path bootstrap,
+# required env setup, import-time monkeypatching), so E402 does not apply.
+"scripts/awi_representation_benchmark.py" = ["E402"]
+"scripts/publish_live_proof.py" = ["E402"]
+"scripts/test_asyncpg_offset.py" = ["E402"]
+"docs/qa/2026-10-02/backend_safety/sitecustomize.py" = ["E402"]

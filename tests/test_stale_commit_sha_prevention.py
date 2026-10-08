@@ -254,10 +254,17 @@ async def test_deployment_without_baked_stamp_reports_null_not_stale(
 
 
 def test_dockerfile_requires_staged_build_commit_sha_file():
-    """Dockerfile must reject a release upload that lacks the staged stamp."""
+    """Dockerfile must refuse to build a release context lacking the stamp.
+
+    The stamp arrives via the context COPY; a RUN guard fails the build with
+    the remediation when it is absent. No ARG or env var may supply the SHA,
+    so a stale service variable can never become the baked identity.
+    """
     # Use relative path from test file location to repo root
     repo_root = Path(__file__).parent.parent
     dockerfile = (repo_root / "Dockerfile").read_text(encoding="utf-8")
 
-    assert "COPY .build_commit_sha /app/.build_commit_sha" in dockerfile
+    assert "test -f /app/.build_commit_sha" in dockerfile
+    assert ".build_commit_sha" in dockerfile
     assert "ARG COMMIT_SHA" not in dockerfile
+    assert "BUILD_COMMIT_SHA=${COMMIT_SHA}" not in dockerfile
