@@ -14,6 +14,7 @@ from typing import Any, Literal
 import httpx
 
 from app.core.config import DuplicateGuardMode, get_settings
+from app.core.url_guard import SafeFetchError, SafeFetchResponse, safe_fetch
 
 # All model questions and decision thresholds live here for operator review.
 INJECTED_INSTRUCTIONS_THRESHOLD = 0.70
@@ -262,11 +263,18 @@ def _reasons(
 
 async def _post(
     *, url: str, api_key: str, payload: dict[str, Any], timeout: float
-) -> httpx.Response:
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        return await client.post(
-            url, headers={"Authorization": f"Bearer {api_key}"}, json=payload
-        )
+) -> SafeFetchResponse:
+    # The TypeSafe endpoint is operator configuration, but it carries the
+    # API key, so it goes through the shared helper: the URL is validated,
+    # the connection is pinned to the resolved IP, redirects are rechecked
+    # and the body is capped.
+    return await safe_fetch(
+        url,
+        method="POST",
+        headers={"Authorization": f"Bearer {api_key}"},
+        json_body=payload,
+        timeout=timeout,
+    )
 
 
 async def evaluate_jev_guard(
@@ -355,6 +363,9 @@ async def evaluate_jev_guard(
         )
     except (TimeoutError, httpx.TimeoutException):
         reason = "timeout"
+    except SafeFetchError as exc:
+        # SafeFetchError reasons are short codes with no URL or key in them.
+        reason = exc.reason
     except asyncio.CancelledError:
         reason = "cancelled"
     except Exception:

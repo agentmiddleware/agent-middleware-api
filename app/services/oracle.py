@@ -377,6 +377,11 @@ class CrawlEngine:
     Crawls external API directories and extracts metadata.
     Production: async HTTP client with rate limiting, retry logic,
     and respect for robots.txt / crawl-delay headers.
+
+    NOTE: no live fetch exists yet (crawl_target synthesizes from a table).
+    When a real HTTP crawl lands here it must go through
+    app.core.url_guard.safe_fetch (validated URL, pinned IP, redirect
+    revalidation, size cap), never a bare client.
     """
 
     def __init__(self):
