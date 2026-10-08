@@ -295,7 +295,7 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
     boundary = (
         "Agent Middleware API is a transaction boundary between your "
         "agents and your consequential MCP tools. The "
-        "first call is charged once; a same-key retry cannot "
+        "first call executes and is charged once; a same-key retry cannot "
         "dispatch or debit again. Every completed "
         "call returns a signed receipt you can verify offline."
     )
