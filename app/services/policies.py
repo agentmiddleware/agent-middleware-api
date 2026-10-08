@@ -268,6 +268,15 @@ async def evaluate_wallet_policy(
     est = _as_decimal(estimated_cost)
     daily = _as_decimal(daily_spend_used)
 
+    if est is not None and est < 0:
+        # A negative cost is not a real price: it passes every cap comparison
+        # and, on the planner path where the caller supplies the cost, inflates
+        # the action's score. Refuse it instead of enforcing against it.
+        first_id = models[0].policy_id if models else None
+        return PolicyEvaluation(
+            False, "invalid_estimated_cost", first_id, {"policy_count": len(models)}
+        )
+
     evaluated: list[dict[str, Any]] = []
     for policy in models:
         try:
@@ -338,17 +347,25 @@ async def evaluate_wallet_policy(
                 policy.policy_id,
                 {"evaluated": evaluated},
             )
-        if (
-            policy.max_cost_per_action is not None
-            and est is not None
-            and est > policy.max_cost_per_action
-        ):
-            return PolicyEvaluation(
-                False,
-                "max_cost_per_action_exceeded",
-                policy.policy_id,
-                {"evaluated": evaluated},
-            )
+        if policy.max_cost_per_action is not None:
+            if est is None:
+                # The cap cannot be checked against an unknown cost. Fail
+                # closed instead of skipping the check: the planner path takes
+                # the cost from caller-supplied candidate data, where omitting
+                # it used to waive both money caps.
+                return PolicyEvaluation(
+                    False,
+                    "cost_unknown",
+                    policy.policy_id,
+                    {"evaluated": evaluated},
+                )
+            if est > policy.max_cost_per_action:
+                return PolicyEvaluation(
+                    False,
+                    "max_cost_per_action_exceeded",
+                    policy.policy_id,
+                    {"evaluated": evaluated},
+                )
         if policy.daily_spend_limit is not None:
             if daily is None:
                 # Past spending is unknown, so the cap cannot be shown to
@@ -359,7 +376,14 @@ async def evaluate_wallet_policy(
                     policy.policy_id,
                     {"evaluated": evaluated},
                 )
-            if est is not None and daily + est > policy.daily_spend_limit:
+            if est is None:
+                return PolicyEvaluation(
+                    False,
+                    "cost_unknown",
+                    policy.policy_id,
+                    {"evaluated": evaluated},
+                )
+            if daily + est > policy.daily_spend_limit:
                 return PolicyEvaluation(
                     False,
                     "daily_spend_limit_exceeded",

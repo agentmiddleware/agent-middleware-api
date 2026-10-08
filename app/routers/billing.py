@@ -8,6 +8,7 @@ Swarm arbitrage silently books margin on every transaction.
 This is how the API generates revenue autonomously.
 """
 
+import asyncio
 from decimal import Decimal
 from typing import ClassVar, cast
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
@@ -140,6 +141,27 @@ async def _record_billing_governance(
         error=error,
         metadata={"service_category": service_category, **(metadata or {})},
     )
+
+
+_wallet_charge_guards: dict[str, asyncio.Lock] = {}
+_wallet_charge_guards_lock = asyncio.Lock()
+
+
+async def _wallet_charge_guard(wallet_id: str) -> asyncio.Lock:
+    """Per-wallet lock covering the policy check plus the ledger debit.
+
+    The daily spend cap is read from the ledger and the charge writes to it,
+    so two concurrent charges can both read the pre-charge total and both
+    pass. Serializing check-plus-debit per wallet closes that window inside
+    this process. Entries are kept for the process lifetime; wallet ids are
+    bounded by the wallets table.
+    """
+    async with _wallet_charge_guards_lock:
+        guard = _wallet_charge_guards.get(wallet_id)
+        if guard is None:
+            guard = asyncio.Lock()
+            _wallet_charge_guards[wallet_id] = guard
+        return guard
 
 
 async def _enforce_billing_policy(
@@ -687,6 +709,8 @@ async def charge_wallet(
             status_code=status_code,
         )
 
+    charge_guard = await _wallet_charge_guard(wallet_id)
+    await charge_guard.acquire()
     try:
         (
             policy_estimated_cost,
@@ -702,16 +726,23 @@ async def charge_wallet(
             money=money,
         )
     except HTTPException as exc:
+        charge_guard.release()
         await _complete_idempotency({"detail": exc.detail}, exc.status_code)
         raise
+    except BaseException:
+        charge_guard.release()
+        raise
     try:
-        result = await money.charge(
-            wallet_id=wallet_id,
-            service_category=category,
-            units=Decimal(str(units)),
-            request_path=request_path,
-            description=description or "",
-        )
+        try:
+            result = await money.charge(
+                wallet_id=wallet_id,
+                service_category=category,
+                units=Decimal(str(units)),
+                request_path=request_path,
+                description=description or "",
+            )
+        finally:
+            charge_guard.release()
 
         if isinstance(result, SimulatedChargeResult):
             # This endpoint never passes dry_run=True, so a SimulatedChargeResult

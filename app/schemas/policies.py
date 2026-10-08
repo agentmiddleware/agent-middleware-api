@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 # policy_bundles stores both limits as Numeric(18, 8): ten integer digits, so
 # a limit must stay below 1e10. allow_inf_nan=False refuses the Infinity/NaN
@@ -46,6 +46,25 @@ class PolicyBundlePatch(BaseModel):
     risk_tier: RiskTier | None = None
     human_approval_required: bool | None = None
     is_active: bool | None = None
+
+    @field_validator(
+        "name",
+        "risk_tier",
+        "require_real_effects",
+        "human_approval_required",
+        "is_active",
+    )
+    @classmethod
+    def _reject_explicit_null(cls, value: object) -> object:
+        # These fields map to NOT NULL columns, so an explicit null has no
+        # valid stored meaning: writing it fails at the database with a 500.
+        # Absent fields never reach this validator, only explicit nulls do.
+        # (allowed_tools, allowed_service_categories, and the money caps map
+        # to nullable columns, where null keeps its "clear the restriction"
+        # meaning.)
+        if value is None:
+            raise ValueError("must not be null")
+        return value
 
 
 class PolicyBundleResponse(BaseModel):
