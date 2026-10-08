@@ -459,6 +459,8 @@ class PermitService:
             model = await session.get(PermitModel, permit_id)
             if not model:
                 raise PermitError("permit_not_found")
+            if model.status == "revoked":
+                raise PermitError("permit_already_revoked")
             model.status = "revoked"
             model.revoked_at = utc_now()
             session.add(model)

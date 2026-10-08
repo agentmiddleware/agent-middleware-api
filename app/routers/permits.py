@@ -248,7 +248,11 @@ async def revoke_permit(
     try:
         permit = await service.revoke_permit(permit_id)
     except PermitError as exc:
-        raise HTTPException(status_code=404, detail=exc.reason)
+        # Missing and already-settled are different answers: a dashboard
+        # shows revoked versus missing from the status code alone.
+        if exc.reason == "permit_not_found":
+            raise HTTPException(status_code=404, detail=exc.reason)
+        raise HTTPException(status_code=409, detail=exc.reason)
     return permit
 
 
