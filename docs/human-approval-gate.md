@@ -86,6 +86,30 @@ approval integration, not an Agent Middleware release dependency.
 Approval-required permits and invokes still fail closed when the integration
 is unavailable, incomplete, or configured with an unsafe origin.
 
+## Pilot prerequisites
+
+Before promising human approval in a pilot, settle these four items in the
+pilot plan:
+
+1. **Sentinel tenant.** Real approval needs a Sentinel tenant at
+   `SENTINEL_API_URL` with its `SENTINEL_API_KEY`, plus
+   `SIMULATION_MODE_HUMAN_APPROVAL=false`. Sentinel is a separate service
+   with its own account, so the plan must name who provides the tenant and
+   who pays for it.
+2. **Approvers who answer in time.** Set `SENTINEL_APPROVERS` or rely on the
+   tenant defaults, and staff a human who decides inside
+   `SENTINEL_APPROVAL_TIMEOUT_SECONDS` (default 300). A decision that arrives
+   after the window is discarded locally, and the agent must start over with
+   a fresh human decision.
+3. **Fallback when Sentinel is down.** There is no fallback approver: gated
+   calls stay pending with retryable `human_approval_unavailable`, nothing is
+   charged, and the agent retries the same request until Sentinel recovers.
+   Tell the buyer plainly that an outage stalls approval-gated calls.
+4. **When simulated approval is acceptable.** Simulation
+   (`SIMULATION_MODE_HUMAN_APPROVAL=true`) auto-approves instantly for local
+   evaluation only, with rows marked simulated. Production-like environments
+   refuse it, so never demo simulated approval as the pilot approval flow.
+
 ## Fail-closed rules
 
 - **Simulated approvals never authorize production invokes.** With

@@ -53,35 +53,38 @@ B2A_API_KEY=<wallet-scoped-local-key> python examples/dry_run_example.py
 
 ---
 
-### `mcp_tool_example.py` — MCP Tool Registration & Invocation
+### `mcp_tool_example.py` — MCP Tool Definition & Discovery
 
-Demonstrates how to create, register, and invoke MCP-enabled tools.
+Demonstrates how to define MCP-enabled tools with decorators and how to read
+the gateway manifest.
 
-**Status:** source-level registration example. It does not configure the
-supported one-tool upstream gateway path; use the
-[partner first-tool runbook](../docs/partner-first-tool-runbook.md) for that.
+**Status:** source-level definition example. It does not enroll tools on any
+server and does not configure the supported one-tool upstream gateway path;
+use the [partner first-tool runbook](../docs/partner-first-tool-runbook.md)
+for that.
 
 **What it shows:**
 - Defining billable tools with `@mcp_tool`
-- Registering tools with the service registry
-- Generating a `tools.json` manifest
-- Running a standalone MCP server
+- Inspecting local tool metadata (no server enrollment)
+- Generating a `tools.json` manifest from a running API
 
 **Run:**
 
 ```bash
-# 1. Register tools (typically done at app startup)
+# 1. Show locally defined tools (local decorator metadata only;
+#    nothing is enrolled on any server)
 python examples/mcp_tool_example.py --register
 
-# 2. List available tools
+# 2. List available tools from a running API
 python examples/mcp_tool_example.py --list
 
-# 3. Generate tools.json
+# 3. Generate tools.json from a running API
 python examples/mcp_tool_example.py --generate
-
-# 4. Run standalone MCP server
-python examples/mcp_tool_example.py --serve
 ```
+
+Standalone serving (`--serve`) is retired: it exits with guidance instead of
+starting a server. The retired shim never implemented the permit to receipt
+loop and its invoke path targets a route the gateway does not expose.
 
 ---
 
