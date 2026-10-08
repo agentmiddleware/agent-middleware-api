@@ -194,3 +194,74 @@ async def test_transfer_records_ledger(client, two_wallets, api_headers):
 
     assert transfer_out["amount"] == -500.0
     assert transfer_in["amount"] == 500.0
+
+
+@pytest.mark.anyio
+async def test_transfer_to_frozen_destination_fails(client, two_wallets, api_headers):
+    """Credits must not land in a frozen wallet where they cannot be spent."""
+    from app.db.database import get_session_factory
+    from app.db.models import WalletModel
+
+    sender_id = two_wallets["sender_id"]
+    receiver_id = two_wallets["receiver_id"]
+
+    async with get_session_factory()() as session:
+        wallet = await session.get(WalletModel, receiver_id)
+        wallet.status = "frozen"
+        await session.commit()
+
+    resp = await client.post(
+        "/v1/billing/transfer",
+        params={
+            "from_wallet_id": sender_id,
+            "to_wallet_id": receiver_id,
+            "amount": 100.0,
+        },
+        headers=api_headers,
+    )
+
+    assert resp.status_code == 400
+    assert "cannot receive" in resp.json()["detail"]["message"]
+
+    # Neither side moved: the debit never happened.
+    sender_balance = await client.get(
+        f"/v1/billing/wallets/{sender_id}", headers=api_headers
+    )
+    receiver_balance = await client.get(
+        f"/v1/billing/wallets/{receiver_id}", headers=api_headers
+    )
+    assert sender_balance.json()["balance"] == 10000.0
+    assert receiver_balance.json()["balance"] == 0.0
+
+
+@pytest.mark.anyio
+async def test_transfer_to_closed_destination_fails(client, two_wallets, api_headers):
+    """Credits must not land in a closed wallet, which is terminal."""
+    from app.db.database import get_session_factory
+    from app.db.models import WalletModel
+
+    sender_id = two_wallets["sender_id"]
+    receiver_id = two_wallets["receiver_id"]
+
+    async with get_session_factory()() as session:
+        wallet = await session.get(WalletModel, receiver_id)
+        wallet.status = "closed"
+        await session.commit()
+
+    resp = await client.post(
+        "/v1/billing/transfer",
+        params={
+            "from_wallet_id": sender_id,
+            "to_wallet_id": receiver_id,
+            "amount": 100.0,
+        },
+        headers=api_headers,
+    )
+
+    assert resp.status_code == 400
+    assert "cannot receive" in resp.json()["detail"]["message"]
+
+    sender_balance = await client.get(
+        f"/v1/billing/wallets/{sender_id}", headers=api_headers
+    )
+    assert sender_balance.json()["balance"] == 10000.0

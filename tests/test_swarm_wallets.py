@@ -117,6 +117,48 @@ async def test_reclaim_child_wallet(client):
 
 
 @pytest.mark.anyio
+async def test_reclaim_zero_balance_child_still_writes_ledger(client):
+    """Reclaiming an empty child closes it and still leaves an audit trail."""
+    _, agent_id = await _create_sponsor_and_agent(client)
+
+    child_resp = await client.post(
+        "/v1/billing/wallets/child",
+        json={
+            "parent_wallet_id": agent_id,
+            "child_agent_id": "empty-worker-01",
+            "budget_credits": 100.0,
+            "max_spend": 100.0,
+        },
+        headers=HEADERS,
+    )
+    assert child_resp.status_code == 201
+    child_id = child_resp.json()["wallet_id"]
+
+    # Drain the child to exactly zero with a real charge (1 iot_bridge
+    # unit costs 2 credits), so the reclaim below moves nothing.
+    drain = await client.post(
+        f"/v1/billing/charge?wallet_id={child_id}&service=iot_bridge&units=50.0",
+        headers=HEADERS,
+    )
+    assert drain.status_code == 200
+    assert drain.json()["balance_after"] == 0.0
+
+    reclaim = await client.post(
+        f"/v1/billing/wallets/{child_id}/reclaim", headers=HEADERS
+    )
+    assert reclaim.status_code == 200
+    data = reclaim.json()
+    assert data["credits_reclaimed"] == 0.0
+    assert data["child_status"] == "closed"
+
+    ledger = await client.get(f"/v1/billing/ledger/{child_id}", headers=HEADERS)
+    entries = ledger.json()["entries"]
+    reclaim_entries = [e for e in entries if "eclaim" in e["description"]]
+    assert reclaim_entries, "zero-balance reclaim must leave a ledger entry"
+    assert all(e["amount"] == 0.0 for e in reclaim_entries)
+
+
+@pytest.mark.anyio
 async def test_swarm_budget_summary(client):
     """View hierarchical budget for agent's child swarm."""
     _, agent_id = await _create_sponsor_and_agent(client)
