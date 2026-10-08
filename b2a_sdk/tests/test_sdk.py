@@ -545,3 +545,85 @@ class TestInsufficientFundsError:
         )
 
         assert error.shortfall is None
+
+    def test_error_garbage_shortfall_becomes_none(self):
+        """A non-numeric shortfall never crashes the error constructor."""
+        error = InsufficientFundsError(
+            wallet_id="wallet-123",
+            shortfall="lots",
+            top_up_url="http://test/top-up",
+        )
+
+        assert error.shortfall is None
+        assert "wallet-123" in str(error)
+
+
+class TestCharge402BodyShapes:
+    """charge() raises InsufficientFundsError for every 402 body shape."""
+
+    @pytest.mark.asyncio
+    async def test_string_detail(self):
+        """A plain-string detail (no shortfall object) still types the error."""
+        client, _ = _recording_client(
+            {
+                ("POST", "/v1/billing/charge"): httpx.Response(
+                    402, json={"detail": "insufficient_funds"}
+                )
+            }
+        )
+        async with client:
+            with pytest.raises(InsufficientFundsError) as exc_info:
+                await client.charge("wallet-123", "iot_bridge", units=100)
+
+        assert exc_info.value.wallet_id == "wallet-123"
+        assert exc_info.value.shortfall is None
+        assert "wallet-123" in exc_info.value.top_up_url
+
+    @pytest.mark.asyncio
+    async def test_missing_detail(self):
+        """A 402 with no detail key still types the error."""
+        client, _ = _recording_client(
+            {("POST", "/v1/billing/charge"): httpx.Response(402, json={})}
+        )
+        async with client:
+            with pytest.raises(InsufficientFundsError) as exc_info:
+                await client.charge("wallet-123", "iot_bridge")
+
+        assert exc_info.value.wallet_id == "wallet-123"
+        assert exc_info.value.shortfall is None
+
+    @pytest.mark.asyncio
+    async def test_non_dict_json_body(self):
+        """A 402 whose JSON body is not an object still types the error."""
+        client, _ = _recording_client(
+            {("POST", "/v1/billing/charge"): httpx.Response(402, json=["nope"])}
+        )
+        async with client:
+            with pytest.raises(InsufficientFundsError):
+                await client.charge("wallet-123", "iot_bridge")
+
+    @pytest.mark.asyncio
+    async def test_non_json_body(self):
+        """A 402 with a plain-text body still types the error."""
+        client, _ = _recording_client(
+            {("POST", "/v1/billing/charge"): httpx.Response(402, text="overdrawn")}
+        )
+        async with client:
+            with pytest.raises(InsufficientFundsError):
+                await client.charge("wallet-123", "iot_bridge")
+
+    @pytest.mark.asyncio
+    async def test_garbage_shortfall_string(self):
+        """A non-numeric shortfall string degrades to None, not a crash."""
+        client, _ = _recording_client(
+            {
+                ("POST", "/v1/billing/charge"): httpx.Response(
+                    402, json={"detail": {"shortfall": "lots"}}
+                )
+            }
+        )
+        async with client:
+            with pytest.raises(InsufficientFundsError) as exc_info:
+                await client.charge("wallet-123", "iot_bridge")
+
+        assert exc_info.value.shortfall is None

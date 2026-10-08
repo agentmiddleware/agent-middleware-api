@@ -550,10 +550,18 @@ class AgentMiddlewareClient:
         response = await self._client.post("/v1/billing/charge", params=params, headers=headers)
 
         if response.status_code == 402:
-            data = response.json().get("detail", {})
+            try:
+                body = response.json()
+            except ValueError:
+                body = None
+            if not isinstance(body, dict):
+                body = {}
+            detail = body.get("detail", {})
+            if not isinstance(detail, dict):
+                detail = {}
             raise InsufficientFundsError(
                 wallet_id=wallet_id,
-                shortfall=data.get("shortfall", "unknown"),
+                shortfall=detail.get("shortfall", "unknown"),
                 top_up_url=f"{self.base_url}/dashboard/top-up?wallet={wallet_id}",
             )
         # A 409 is an idempotency conflict only when a key was sent; unkeyed
