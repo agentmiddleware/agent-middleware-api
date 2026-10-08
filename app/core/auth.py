@@ -417,12 +417,16 @@ async def _auth_from_jwt(token: str) -> AuthContext:
 
 async def verify_api_key(
     api_key: str | None = Security(api_key_header),
+    authorization: Annotated[str | None, Header()] = None,
+    _bearer: HTTPAuthorizationCredentials | None = Security(bearer_header),
 ) -> str:
     """
-    Validate the provided API key.
-    Returns the raw key on success for backwards-compatible dependencies.
+    Validate credentials and return the raw key for older dependencies.
+
+    A presented Authorization header is authoritative, same as
+    get_auth_context. An invalid bearer must not authenticate as X-API-Key.
     """
-    context = await get_auth_context(api_key)
+    context = await get_auth_context(api_key, authorization, _bearer)
     return context.raw_key
 
 

@@ -124,6 +124,7 @@ GET  /v1/oauth/userinfo    → identity claims (sub, email, org)
 def create_access_token(wallet_id: str, scopes: list[str]) -> str:
     """JWT with exp=900s, iss=agent-middleware-api."""
 
+
 def verify_access_token(token: str) -> JWTPayload:
     """Verify signature, exp, iss, aud."""
 ```
@@ -152,8 +153,8 @@ class WebhookSubscriptionModel(SQLModel, table=True):
     wallet_id: str
     url: str
     events: list[str]  # ["permit.created", "receipt.created", "alert.fired"]
-    secret: str        # HMAC-SHA256 signing key
-    status: str        # active / paused / failed
+    secret: str  # HMAC-SHA256 signing key
+    status: str  # active / paused / failed
 ```
 
 **Delivery format:**
