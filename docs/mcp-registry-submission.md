@@ -1,5 +1,15 @@
 # MCP Registry Submission
 
+## Decision status (2026-10-08)
+
+Registry listing is intentionally deferred: `server.json` ships with no
+`remotes` block because no approved deployment serves `POST /mcp` yet (see
+"Publish gate" below). Revisit when an operator approves an origin to serve
+the standards-compliant endpoint; only then does the `remotes` block get
+added and the publish workflow run. Until that decision lands, buyers should
+assume zero registry discoverability and use the direct integration paths in
+this document.
+
 Publishing this server to the official MCP Registry
 (`registry.modelcontextprotocol.io`) is done with the checked-in
 [`server.json`](../server.json) and the `mcp-publisher` CLI. There is no
