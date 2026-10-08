@@ -1,4 +1,4 @@
-"""CI guard for the documented 15-minute golden path (docs/quickstart.md).
+"""CI guard for the documented golden path (docs/quickstart.md).
 
 Boots the server through the real entry point (``scripts/quickstart.py``,
 the same command ``make quickstart`` runs) in a throwaway state directory,
