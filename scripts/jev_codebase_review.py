@@ -350,6 +350,9 @@ async def main() -> int:
     args = ap.parse_args()
 
     chunks = collect([ROOT / p for p in args.paths])
+    if not chunks:
+        print("no Python files found under the given paths", file=sys.stderr)
+        return 2
     files = len({c.path for c in chunks})
     chars = sum(len(c.code) for c in chunks)
     print(

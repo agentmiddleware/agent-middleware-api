@@ -33,6 +33,9 @@ KEY_ENTROPY_BYTES = 32
 
 
 def generate(count: int) -> int:
+    if count < 1:
+        print(f"error: --count must be at least 1 (got {count})", file=sys.stderr)
+        return 2
     for _ in range(count):
         print(f"{KEY_PREFIX}{secrets.token_urlsafe(KEY_ENTROPY_BYTES)}")
     print(
