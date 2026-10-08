@@ -30,6 +30,7 @@ import pytest
 
 from framework_integrations import (
     B2AClient,
+    get_autogen_tools,
     get_crewai_tools,
     get_langgraph_tools,
     get_llamaindex_tools,
@@ -236,6 +237,48 @@ async def test_langgraph_tool_rejects_malformed_json_without_sending(
         await _ainvoke_langchain_style(
             tools["send_message"], {"to_agent": "agent-2", "content": "{not json"}
         )
+    assert sent == []
+
+
+def test_langgraph_factory_warns_legacy_and_points_at_governed(monkeypatch, recording):
+    """The legacy factory steers first-copy code to the governed path."""
+    _stub_module(monkeypatch, "langchain_core.tools", tool=lambda fn: fn)
+    client, sent = recording
+
+    with pytest.warns(DeprecationWarning, match="governed_tool"):
+        tools = get_langgraph_tools(client)
+
+    assert {fn.__name__ for fn in tools} == set(TOOL_CASES)
+    assert sent == []
+
+
+def test_llamaindex_factory_warns_legacy_and_points_at_governed(monkeypatch, recording):
+    """The legacy factory steers first-copy code to the governed path."""
+    _stub_module(monkeypatch, "llama_index.core.tools", FunctionTool=_StubFunctionTool)
+    client, sent = recording
+
+    with pytest.warns(DeprecationWarning, match="governed_tool"):
+        tools = get_llamaindex_tools(client)
+
+    assert {t.name for t in tools} == set(TOOL_CASES)
+    assert sent == []
+
+
+def test_autogen_factory_warns_legacy_and_points_at_governed_wrapper(recording):
+    """The legacy factory steers first-copy code to the governed wrapper."""
+    client, sent = recording
+
+    with pytest.warns(DeprecationWarning, match="autogen-agent-middleware"):
+        tools = get_autogen_tools(client)
+
+    assert set(tools) == {
+        "emit_telemetry",
+        "get_balance",
+        "send_message",
+        "ai_decide",
+        "self_heal",
+        "create_awi_session",
+    }
     assert sent == []
 
 

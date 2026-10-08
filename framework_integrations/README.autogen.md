@@ -2,6 +2,11 @@
 
 Use Agent Middleware API tools with Microsoft AutoGen agents.
 
+> Legacy path: `get_autogen_tools` wraps ungoverned helpers (no permit,
+> no signed receipt) and emits a `DeprecationWarning`. For new code use
+> the governed wrapper in `wrappers/autogen-agent-middleware`, which
+> runs the permit -> invoke -> receipt loop.
+
 ## Installation
 
 No PyPI package is published. Work from a checkout of this repository:

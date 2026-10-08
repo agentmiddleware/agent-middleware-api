@@ -2,6 +2,12 @@
 
 Use Agent Middleware API tools with LlamaIndex agents.
 
+> Legacy path: `get_llamaindex_tools` wraps ungoverned helpers (no
+> permit, no signed receipt) and emits a `DeprecationWarning`. For new
+> code use the governed middleware in
+> `framework_integrations/langgraph_middleware.py` (`governed_tool`),
+> which runs the permit -> invoke -> receipt loop.
+
 ## Installation
 
 No PyPI package is published. Work from a checkout of this repository:
