@@ -45,9 +45,11 @@ from .core.product_positioning import (
     POSITIONING_TAGLINE,
 )
 from .core.rate_limiter import RateLimitMiddleware, rate_limit_discovery
+from .core.request_metrics import get_metrics_snapshot
 from .core.runtime_mode import get_simulation_modes
 from .middleware.head_method import HeadMethodMiddleware
 from .middleware.request_body_limit import RequestBodyLimitMiddleware
+from .middleware.request_id import RequestIDMiddleware
 from .middleware.security_headers import SecurityHeadersMiddleware
 from .core.trust_mode import (
     is_production_like_environment,
@@ -610,12 +612,19 @@ if "*" in cors_origins:
 # and stamping rate-limit 429s and CORS preflights too is the point.
 app.add_middleware(SecurityHeadersMiddleware)
 
-# HEAD → GET translation, outermost. FastAPI's APIRoute does not auto-register
-# HEAD for GET routes (plain Starlette routes like /openapi.json do), which
-# made HEAD answer 405 on most public GETs. Outermost placement means every
-# layer below — routing included — sees a GET, and the response leaves with
-# the GET's status and headers but no body, per RFC 9110 §9.3.2.
+# HEAD → GET translation. It used to be outermost; the request-ID layer now
+# takes that place so even translated and short-circuited responses carry an
+# ID. FastAPI's APIRoute does not auto-register HEAD for GET routes (plain
+# Starlette routes like /openapi.json do), which made HEAD answer 405 on most
+# public GETs. This placement means every layer below — routing included —
+# sees a GET, and the response leaves with the GET's status and headers but
+# no body, per RFC 9110 §9.3.2.
 app.add_middleware(HeadMethodMiddleware)
+
+# Request IDs, per-request logs, and metrics counting. Registered last so it
+# is outermost: every response, including 413s from the body limiter and 429s
+# from the rate limiter, leaves stamped with X-Request-ID and counted.
+app.add_middleware(RequestIDMiddleware)
 
 
 def _json_safe_numbers(value: Any) -> Any:
@@ -1291,3 +1300,20 @@ async def health_duplicate_guard(
 ):
     auth.require_bootstrap_admin()
     return await get_duplicate_guard_metrics()
+
+
+@app.get(
+    "/metrics",
+    tags=["Discovery"],
+    summary="Operational request metrics",
+    description=(
+        "Process-local counters for pilot monitoring: total requests served, "
+        "total 5xx errors, uptime, and per-route request, error, and latency "
+        "figures. Unauthenticated like /health so a pilot dashboard can "
+        "scrape it without an API key. Each worker keeps its own counters "
+        "and every value resets on restart (see scope_note), so do not sum "
+        "across deploys or workers. Scraping /metrics itself is not counted."
+    ),
+)
+async def operational_metrics():
+    return get_metrics_snapshot()
