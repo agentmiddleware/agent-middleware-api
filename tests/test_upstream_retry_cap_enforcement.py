@@ -1221,14 +1221,20 @@ async def test_pre_dispatch_release_replays_a_lost_slot_cas(
 
     misses = _inject_one_lost_counter_cas(monkeypatch)
     permits = get_permit_service()
-    assert await permits.release_dispatch_budget_once(attempt.attempt_id) is True
+    assert (
+        await permits.release_dispatch_budget_once(attempt.attempt_id, is_system=True)
+        is True
+    )
 
     assert misses["count"] == 1
     counts, spent = await _permit_slot_state(permit_id)
     assert counts == {tool_name: 0}
     assert spent == Decimal("0")
     # The guarded claim keeps the release once-only across replays too.
-    assert await permits.release_dispatch_budget_once(attempt.attempt_id) is False
+    assert (
+        await permits.release_dispatch_budget_once(attempt.attempt_id, is_system=True)
+        is False
+    )
 
 
 @pytest.mark.anyio
