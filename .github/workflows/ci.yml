@@ -58,9 +58,35 @@ jobs:
           pip install -r requirements.txt
           pip install -e ./b2a_sdk
           pip install pytest pytest-asyncio anyio httpx
+          # Test-only deps for suites that must run, not skip: hypothesis
+          # drives the replay-key property test and openapi-spec-validator
+          # drives the OpenAPI validity test (both importorskip otherwise).
+          pip install hypothesis openapi-spec-validator
 
       - name: Run tests
-        run: pytest tests/ -v --tb=short -m "not production_trust"
+        run: pytest tests/ -v --tb=short -m "not production_trust" --junitxml=/tmp/pytest_main.xml
+
+      # Fails when coverage silently shrinks: a skip-count jump means a suite
+      # started skipping instead of running, and a zero collection means a
+      # file moved. Pinned 2026-10-08: the main leg skips ~85 locally
+      # (84 on Linux, where the Linux-only workflow test runs), so 95
+      # leaves headroom for one small legitimate addition. If a change
+      # legitimately adds skips, bump the number here and say why.
+      - name: Guard against silent coverage loss
+        if: matrix.python-version == '3.12'
+        run: |
+          python scripts/check_suite_skips.py \
+            --junitxml /tmp/pytest_main.xml \
+            --max-skipped 95 \
+            --expect-run tests.test_qa_20261002_backend::test_openapi_schema_is_valid_with_unique_operation_ids \
+            --expect-run tests.test_qa_20261002_backend::test_scalar_unicode_replay_keys_roundtrip_without_normalization \
+            --expect-run tests.test_tenant_isolation_hardening \
+            --expect-run tests.test_wallet_concurrency \
+            --expect-collected tests.test_action_postgres \
+            --expect-collected tests.test_action_migrations \
+            --expect-collected tests.test_dispatch_call_slot_migration \
+            --expect-collected tests.test_mcp_postgres_multiprocess \
+            --expect-collected tests.test_permit_postgres_concurrency
 
       # These files already ran unfiltered in "Run tests" above, and none carry
       # a production_trust marker, so re-running them added no coverage. Keep
@@ -504,6 +530,112 @@ jobs:
           pytest tests/test_duplicate_guard_postgres_concurrency.py -v --tb=short
           pytest tests/test_permit_repeat_window_rollout.py tests/test_repeat_window_compatibility.py -v --tb=short -o asyncio_default_fixture_loop_scope=session -o asyncio_default_test_loop_scope=session
 
+  # Opt-in action and migration proofs that skip everywhere else. Their guard
+  # (tests/support/action_database_guard.py) only accepts a disposable local
+  # PostgreSQL at 127.0.0.1:55439, user without password, amw_action_*
+  # database, so the service below provides exactly that profile and each
+  # proof owns its own empty database. Deliberately separate from the
+  # postgres_trust and postgres_permit_concurrency jobs, whose database
+  # wiring belongs to other owners.
+  action_postgres_proofs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sellers
+          POSTGRES_DB: sellers
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 55439:5432
+        options: >-
+          --health-cmd "pg_isready -U sellers -d sellers"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio anyio httpx
+
+      - name: Create disposable action databases
+        run: |
+          python - <<'PY'
+          import asyncio
+          import asyncpg
+
+          async def main():
+              conn = await asyncpg.connect(
+                  "postgresql://sellers@127.0.0.1:55439/sellers"
+              )
+              try:
+                  for db in (
+                      "amw_action_ci",
+                      "amw_action_mig_ci",
+                      "amw_action_dispatch_ci",
+                  ):
+                      await conn.execute(f'CREATE DATABASE "{db}"')
+              finally:
+                  await conn.close()
+
+          asyncio.run(main())
+          PY
+
+      - name: Migrate the action accounting database
+        env:
+          DATABASE_URL: postgresql+asyncpg://sellers@127.0.0.1:55439/amw_action_ci
+        run: alembic upgrade head
+
+      - name: Run action accounting proofs
+        env:
+          DATABASE_URL: postgresql+asyncpg://sellers@127.0.0.1:55439/amw_action_ci
+          ENVIRONMENT: test
+          RUN_POSTGRES_CONCURRENCY_TESTS: "1"
+        run: |
+          pytest tests/test_action_postgres.py -q --tb=short \
+            --junitxml=/tmp/pytest_action.xml
+
+      - name: Run action migration roundtrip proofs
+        env:
+          ACTION_MIGRATION_DATABASE_URL: postgresql+asyncpg://sellers@127.0.0.1:55439/amw_action_mig_ci
+          ENVIRONMENT: test
+        run: |
+          pytest tests/test_action_migrations.py -q --tb=short \
+            --junitxml=/tmp/pytest_action_migrations.xml
+
+      - name: Run dispatch slot migration proof
+        env:
+          DISPATCH_MIGRATION_DATABASE_URL: postgresql+asyncpg://sellers@127.0.0.1:55439/amw_action_dispatch_ci
+          ENVIRONMENT: test
+        run: |
+          pytest tests/test_dispatch_call_slot_migration.py -q --tb=short \
+            --junitxml=/tmp/pytest_dispatch_migration.xml
+
+      - name: Guard against silent coverage loss
+        # These files must run here, never skip: a skip means the job lost
+        # its database, and a zero collection means the file moved.
+        run: |
+          python scripts/check_suite_skips.py \
+            --junitxml /tmp/pytest_action.xml \
+            --junitxml /tmp/pytest_action_migrations.xml \
+            --junitxml /tmp/pytest_dispatch_migration.xml \
+            --max-skipped 0 \
+            --expect-run tests.test_action_postgres \
+            --expect-run tests.test_action_migrations \
+            --expect-run tests.test_dispatch_call_slot_migration
+
   # Blocks credentials from being committed. A live production API key reached
   # main through scripts/stress_test_live.py because nothing scanned for this.
   secret_scan:
@@ -599,7 +731,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install httpx
+          pip install httpx pytest pytest-asyncio
 
       - name: Run local trust-plane constant test loop (self-provision)
         # Always run: proves the local loop with self-provisioned credentials.
@@ -639,11 +771,21 @@ jobs:
           # Pass --other-tool to exercise out-of-scope denial with the second registered tool
           python scripts/constant_test_loop.py --other-tool partner.notes.count
           TEST_EXIT=$?
-          
+
+          # Run the opt-in integration pytest against this same server so the
+          # full-loop coverage it owns executes in CI instead of skipping on
+          # the missing RUN_CONSTANT_TEST_LOOP_INTEGRATION flag.
+          if [ "$TEST_EXIT" -eq 0 ]; then
+            RUN_CONSTANT_TEST_LOOP_INTEGRATION=1 pytest \
+              tests/test_constant_test_loop.py::test_constant_test_loop_full_integration \
+              -q --tb=short --junitxml=/tmp/pytest_loop_integration.xml
+            TEST_EXIT=$?
+          fi
+
           # Clean up server
           kill $SERVER_PID 2>/dev/null || true
           wait $SERVER_PID 2>/dev/null || true
-          
+
           exit $TEST_EXIT
 
       - name: Run production constant test loop (api.thisisatest.tech)

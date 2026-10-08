@@ -33,14 +33,17 @@ quickstart-check:
 live-loop-proof:
 	uv run --with-requirements requirements.txt python scripts/live_loop_proof.py $(LIVE_LOOP_PROOF_ARGS)
 
-# Fast inner loop: trust-plane (product) tests only. Proof-surface workloads
-# are skipped here — run them with `make test-all` (what CI runs) or `make test-proof`.
+# Full suite, same markers as the CI `test` job: everything except the
+# production-trust posture tests, which need production-like env vars and run
+# in their dedicated CI job. Proof-surface workloads are included here, so a
+# green `make test` means CI's main leg stays green too. (An older `-m "not
+# proof"` line silently skipped the proof-marked tenant-isolation tests.)
 # `--with-requirements` makes these self-contained: uv installs the runtime +
 # test deps for the run, so `make test` works on a fresh checkout without a
 # separate `pip install -r requirements.txt` (deps live in requirements.txt,
 # not pyproject [project.dependencies]).
 test:
-	uv run --with-requirements requirements.txt pytest tests/ -q -m "not proof"
+	uv run --with-requirements requirements.txt pytest tests/ -q -m "not production_trust"
 
 test-all:
 	uv run --with-requirements requirements.txt pytest tests/ -q
