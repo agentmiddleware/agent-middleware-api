@@ -297,6 +297,38 @@ def test_a_failed_guarantee_outranks_a_prevention_in_the_same_run():
     assert html.index("Read this first") < html.index(answer.headline)
 
 
+def _gateway_adds_duplicates():
+    """A run where the gateway produced more duplicates than the baseline."""
+    return [
+        _comparison(
+            [
+                _entry(
+                    Configuration.DIRECT_NAIVE, verdict=Verdict.OBSERVED, executions=3
+                ),
+                _entry(Configuration.DIRECT_NATIVE, verdict=Verdict.PASS, executions=1),
+                _entry(
+                    Configuration.GATEWAY_NATIVE,
+                    verdict=Verdict.PASS,
+                    executions=3,
+                    dispatches=3,
+                ),
+            ],
+            test_id="TWD",
+        )
+    ]
+
+
+def test_a_gateway_worse_than_baseline_is_a_headline_failure():
+    """More duplicates behind the gateway outranks anything good in the run."""
+    comparisons = _gateway_prevents() + _gateway_adds_duplicates()
+    assert headline_for(comparisons) is Answer.GATEWAY_DID_NOT_HOLD
+
+    answer = build_answer(_gateway_adds_duplicates())
+    assert answer.answer is Answer.GATEWAY_DID_NOT_HOLD
+    assert not answer.recommends_the_product
+    assert answer.gateway_failures, "the worse run must be listed as a failure"
+
+
 def test_a_run_with_no_baseline_does_not_claim_the_baseline_would_have_coped():
     answer = build_answer(_no_baseline())
 

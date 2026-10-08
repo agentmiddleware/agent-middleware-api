@@ -9,9 +9,10 @@ Three rules shape the whole module and each of them is a rule against the
 obvious temptation:
 
 1. **A failure of the product outranks anything good the product did.** If any
-   scenario reached ``gateway_did_not_hold``, that is the headline, above every
-   duplicate the gateway prevented in the same run. A page that leads with the
-   win and footnotes the failure is an advertisement.
+   scenario reached ``gateway_did_not_hold`` or ``gateway_added_duplicates``,
+   that is the headline, above every duplicate the gateway prevented in the
+   same run. A page that leads with the win and footnotes the failure is an
+   advertisement.
 
 2. **"You may not need us" is a real answer with its own headline.** It is not
    a softened version of a recommendation and it is not followed by a reason to
@@ -282,7 +283,10 @@ def headline_for(comparisons: list[Comparison]) -> Answer:
 
     kinds = [comparison.conclusion.kind for comparison in comparisons]
 
-    if ConclusionKind.GATEWAY_DID_NOT_HOLD in kinds:
+    if (
+        ConclusionKind.GATEWAY_DID_NOT_HOLD in kinds
+        or ConclusionKind.GATEWAY_ADDED_DUPLICATES in kinds
+    ):
         return Answer.GATEWAY_DID_NOT_HOLD
     if ConclusionKind.GATEWAY_PREVENTED_DUPLICATES in kinds:
         return Answer.GATEWAY_PREVENTED_DUPLICATES
@@ -318,6 +322,7 @@ def _not_tested(comparisons: list[Comparison]) -> list[str]:
             ConclusionKind.EXISTING_INTEGRATION_SUFFICIENT,
             ConclusionKind.GATEWAY_PREVENTED_DUPLICATES,
             ConclusionKind.GATEWAY_ADDED_EVIDENCE_ONLY,
+            ConclusionKind.GATEWAY_ADDED_DUPLICATES,
         )
     ]
     if not compared:
@@ -382,6 +387,7 @@ def build_answer(comparisons: list[Comparison]) -> DiagnosticAnswer:
         f"{c.test_id} — {c.title}: {c.conclusion.text}"
         for c in comparisons
         if c.conclusion.kind is ConclusionKind.GATEWAY_DID_NOT_HOLD
+        or c.conclusion.kind is ConclusionKind.GATEWAY_ADDED_DUPLICATES
         or c.verdict == Verdict.ERROR.value
     ]
 
