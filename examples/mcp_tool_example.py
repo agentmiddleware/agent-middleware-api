@@ -6,20 +6,27 @@ Example demonstrating how to create an MCP-enabled tool using the B2A SDK.
 
 This file shows:
 1. Creating a simple billable tool with @mcp_tool
-2. Registering it with the service registry
-3. Invoking it via the MCP protocol
+2. Displaying the local tool manifest (local-only; this step does not
+   register anything with the backend)
+3. Invoking tools via the MCP protocol
+
+This is a source-level example, not the supported design-partner path. For
+the governed one-tool upstream gateway loop, start with
+docs/quickstart.md and the partner first-tool runbook
+(docs/partner-first-tool-runbook.md).
 
 Usage:
-    # Register tools (typically done at app startup)
-    python examples/mcp_tool_example.py --register
+    # Show the local tool manifest (local-only display, no backend call)
+    python examples/mcp_tool_example.py --show-manifest
 
-    # List available tools
+    # List available tools from the running API
     python examples/mcp_tool_example.py --list
 
-    # Generate tools.json
+    # Generate tools.json from the running API
     python examples/mcp_tool_example.py --generate
 
-    # Run standalone MCP server
+    # Run standalone MCP server (retired path; prefer the governed
+    # POST /mcp/messages flow in docs/quickstart.md)
     python examples/mcp_tool_example.py --serve
 """
 
@@ -156,10 +163,15 @@ def on_registration(service_id: str, func, input_schema, output_schema):
 
 
 async def register_tools():
-    """Register all tools with the backend."""
+    """Display the local tool manifest (local-only, no backend call).
+
+    This step does not register anything with the backend. It prints the
+    tool metadata defined above plus the curl commands that invoke the
+    governed MCP path on a running API.
+    """
     register_mcp_tool_callback(on_registration)
 
-    print("Tools registered:")
+    print("Local tool manifest (local-only display; nothing was sent to the backend):")
     print(f"  - {process_data._b2a_mcp_metadata}")
     print(f"  - {summarize_url._b2a_mcp_metadata}")
     print(f"  - {generate_image._b2a_mcp_metadata}")
@@ -206,15 +218,33 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="B2A MCP Tool Example")
-    parser.add_argument("--register", action="store_true", help="Register tools")
+    parser.add_argument(
+        "--show-manifest",
+        action="store_true",
+        help="Show the local tool manifest (local-only, no backend call)",
+    )
+    parser.add_argument(
+        "--register",
+        action="store_true",
+        help="Deprecated alias for --show-manifest (local-only, no backend call)",
+    )
     parser.add_argument("--list", action="store_true", help="List available tools")
     parser.add_argument("--generate", action="store_true", help="Generate tools.json")
     parser.add_argument(
-        "--serve", action="store_true", help="Run standalone MCP server"
+        "--serve",
+        action="store_true",
+        help="Run standalone MCP server (retired path)",
     )
     args = parser.parse_args()
 
     if args.register:
+        print(
+            "Note: --register is deprecated; it only displays the local "
+            "manifest and registers nothing with the backend. "
+            "Use --show-manifest instead."
+        )
+        asyncio.run(register_tools())
+    elif args.show_manifest:
         asyncio.run(register_tools())
     elif args.list:
         asyncio.run(main_list())
@@ -225,7 +255,9 @@ if __name__ == "__main__":
     else:
         parser.print_help()
         print("\nExample usage:")
-        print("  python examples/mcp_tool_example.py --register  # Register tools")
+        print(
+            "  python examples/mcp_tool_example.py --show-manifest  # Show local manifest"
+        )
         print("  python examples/mcp_tool_example.py --list     # List tools")
         print("  python examples/mcp_tool_example.py --generate # Generate tools.json")
         print("  python examples/mcp_tool_example.py --serve   # Run MCP server")

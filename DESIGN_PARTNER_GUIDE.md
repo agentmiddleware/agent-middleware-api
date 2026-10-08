@@ -201,8 +201,8 @@ tool and engineer, not agreeing that the demo is interesting.
 Use:
 
 - "Authorize one agent action. Charge it once. Prove what happened."
-- "Exactly-once gateway authorization, debit, and receipt finalization for
-  metered MCP calls."
+- "Replay-safe gateway authorization, at most one debit per accepted
+  idempotency key, and signed receipt finalization for metered MCP calls."
 - "Signed proof of authorization, execution, and credit debit for one tool."
 - "Replay-safe metering: same idempotency key, same receipt, no second gateway
   dispatch or debit."

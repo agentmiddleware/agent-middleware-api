@@ -35,7 +35,8 @@ Demonstrates safe cost estimation without affecting real wallet balances.
 - Single-shot charge estimation
 
 **Status:** proof-surface demonstration only. It is not a pilot or production
-integration path.
+integration path. Run `make quickstart` and follow
+[docs/quickstart.md](../docs/quickstart.md) before this script.
 
 **Run locally:**
 
@@ -53,25 +54,27 @@ B2A_API_KEY=<wallet-scoped-local-key> python examples/dry_run_example.py
 
 ---
 
-### `mcp_tool_example.py` — MCP Tool Registration & Invocation
+### `mcp_tool_example.py` — MCP Tool Definition & Local Display
 
-Demonstrates how to create, register, and invoke MCP-enabled tools.
+Demonstrates how to define MCP-enabled tools and view their local manifest.
 
-**Status:** source-level registration example. It does not configure the
+**Status:** source-level example. It does not configure the
 supported one-tool upstream gateway path; use the
 [partner first-tool runbook](../docs/partner-first-tool-runbook.md) for that.
 
 **What it shows:**
 - Defining billable tools with `@mcp_tool`
-- Registering tools with the service registry
-- Generating a `tools.json` manifest
-- Running a standalone MCP server
+- Displaying the local tool manifest (local-only step; it registers nothing
+  with the backend)
+- Generating a `tools.json` manifest from a running API
+- Running a standalone MCP server (retired path)
 
 **Run:**
 
 ```bash
-# 1. Register tools (typically done at app startup)
-python examples/mcp_tool_example.py --register
+# 1. Show the local tool manifest (--register is a deprecated alias
+#    for this local-only step; neither contacts the backend)
+python examples/mcp_tool_example.py --show-manifest
 
 # 2. List available tools
 python examples/mcp_tool_example.py --list
@@ -79,7 +82,8 @@ python examples/mcp_tool_example.py --list
 # 3. Generate tools.json
 python examples/mcp_tool_example.py --generate
 
-# 4. Run standalone MCP server
+# 4. Run standalone MCP server (retired; prefer the governed
+#    POST /mcp/messages flow in docs/quickstart.md)
 python examples/mcp_tool_example.py --serve
 ```
 

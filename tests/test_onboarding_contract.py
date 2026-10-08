@@ -348,6 +348,107 @@ def test_dry_run_example_states_its_proof_surface_prerequisite() -> None:
     )
 
 
+def test_dry_run_example_points_at_quickstart() -> None:
+    """Nobody should demo cost estimation as metering.
+
+    The dry-run script is a legacy billing simulation. Its header must route
+    prospects to the supported trust loop in docs/quickstart.md first.
+    """
+
+    source = (REPO_ROOT / "examples" / "dry_run_example.py").read_text()
+    assert "docs/quickstart.md" in source, (
+        "the dry-run header must point readers at docs/quickstart.md, the "
+        "supported trust loop, instead of presenting simulation as metering"
+    )
+
+
+def test_mcp_example_offers_show_manifest_for_local_display() -> None:
+    """`--register` printed metadata but registered nothing with the backend.
+
+    The example now offers `--show-manifest` as the honest name for the
+    local-only display step. `--register` stays as a deprecated alias so old
+    commands keep working.
+    """
+
+    source = (REPO_ROOT / "examples" / "mcp_tool_example.py").read_text()
+    assert "--show-manifest" in source, (
+        "the example must offer --show-manifest, a name that does not imply "
+        "backend registration"
+    )
+    assert "--register" in source, (
+        "--register must stay as a deprecated alias; removing it would break "
+        "documented commands without warning"
+    )
+    assert "deprecat" in source.lower(), (
+        "the --register alias must be labeled deprecated so prospects stop "
+        "trusting it as a real registration step"
+    )
+
+
+def test_mcp_example_discloses_no_backend_registration() -> None:
+    """The register step must say plainly that it never contacts the backend."""
+
+    source = (REPO_ROOT / "examples" / "mcp_tool_example.py").read_text()
+    assert "does not register" in source or "no backend" in source.lower(), (
+        "the example must state it does not register anything with the "
+        "backend; a no-op register step burns trust in front of an engineer"
+    )
+    assert "quickstart" in source.lower(), (
+        "the example must route readers to the supported governed loop "
+        "(docs/quickstart.md or the partner runbook), not the standalone flow"
+    )
+
+
+def test_examples_readme_labels_mcp_register_local_only() -> None:
+    """The examples README must not present `--register` as backend registration."""
+
+    readme = (REPO_ROOT / "examples" / "README.md").read_text()
+    assert "--show-manifest" in readme, (
+        "the README must document --show-manifest as the honest flag name"
+    )
+    mcp_section = readme.split("mcp_tool_example.py", 1)[1]
+    assert "local-only" in mcp_section or "local only" in mcp_section, (
+        "the README's MCP section must say the display step is local-only "
+        "and registers nothing with the backend"
+    )
+
+
+def test_partner_guide_positioning_avoids_exactly_once() -> None:
+    """Approved sales language must match the engineering talk track.
+
+    The positioning list offered "Exactly-once gateway authorization, debit,
+    and receipt finalization" while the same file warns that a remote tool's
+    side effect cannot be promised as exactly once. The retry story is: the
+    same accepted key returns the same receipt, a new key is a new operation.
+    """
+
+    guide = (REPO_ROOT / "DESIGN_PARTNER_GUIDE.md").read_text()
+    assert "Exactly-once gateway" not in guide, (
+        "approved positioning must not promise an exactly-once gateway; the "
+        "scoped promise is one accepted key, at most one debit"
+    )
+
+
+def test_demo_script_crowns_quickstart_over_manual_setup() -> None:
+    """Prospects should meet one entry point, not two competing doors.
+
+    The manual uvicorn-plus-env-exports block stays for the persistent-DB
+    narrated demo, but the script must name `make quickstart` plus
+    docs/quickstart.md as the preferred first step.
+    """
+
+    demo = (REPO_ROOT / "DEMO_SCRIPT.md").read_text()
+    assert "make quickstart" in demo, "the demo script must crown make quickstart"
+    assert "docs/quickstart.md" in demo, (
+        "the demo script must point at docs/quickstart.md as the entry point"
+    )
+    lowered = demo.lower()
+    assert "prefer" in lowered or "appendix" in lowered, (
+        "the manual env-export block must be marked as the fallback, with "
+        "quickstart named as the preferred entry"
+    )
+
+
 # --- Framework wrapper SDK floor --------------------------------------------
 
 #: First b2a-sdk release with the typed async `AgentMiddlewareClient` trust
