@@ -7,6 +7,16 @@ were raw API keys stored by the content factory before it recorded wallet ids.
 No column changes shape. The downgrade is a no-op: the scrubbed values were
 credentials and are not restored.
 
+## Buyer impact
+
+Owners of pre-wallet pipelines and campaigns lose API read access when 041
+runs: their rows become ownerless, which only bootstrap admins can read.
+This matches the access those rows already had in practice (no wallet id
+could ever equal a raw key), but it is still a visible change for any
+integration listing old content. Tell buyers before a paid pilot: legacy
+content rows need operator-assisted recovery, and downgrading to 040
+restores no access.
+
 ## Release
 
 No compatibility release is needed, because no schema shape changes. Workers
