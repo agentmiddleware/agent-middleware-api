@@ -44,9 +44,9 @@ only reachable in local/dev/test, and it logs a loud startup warning.
 
 | # | Gate | Source | On failure |
 |---|------|--------|------------|
-| 1 | **Wallet ownership — unpriced** (before the idempotency store is touched) | `evaluate_tool_invocation` | `wallet_access_denied` |
+| 1 | **Wallet ownership — unpriced** (before the idempotency store is touched) | `evaluate_wallet_access_for_tool` | `wallet_access_denied` |
 | 2 | **Tool resolution + executability** | service registry | `Tool not found` / `Tool not executable` |
-| 3 | **Wallet ownership — priced** (re-run with real cost, for the audit record) | `evaluate_tool_invocation` | `wallet_access_denied` |
+| 3 | **Wallet ownership — priced** (re-run with real cost, for the audit record) | `evaluate_wallet_access_for_tool` | `wallet_access_denied` |
 | 4 | **Governed preconditions** | router | `permit_required` / `idempotency_key_required` |
 | 5 | **Idempotency begin** (completed prior call replays its stored signed receipt) | `get_idempotency_service()` | replay short-circuit |
 | 6 | **Permit validation** (Layer B) | `PermitService.validate_for_action` | `permit_*` |
@@ -65,12 +65,15 @@ again with the real estimated cost to produce the priced audit record.
 
 ## 3. Layer A — Tenant / wallet ownership
 
-`app/policy/decisions.py::evaluate_tool_invocation`
+`app/policy/decisions.py::evaluate_wallet_access_for_tool`
 
 Binary tenant-isolation check. The call is allowed only when the caller is the
 bootstrap admin **or** owns the target wallet (`auth.wallet_id == wallet_id`);
 otherwise it is denied `wallet_access_denied`. This layer does not consider
-cost, scope, or budget — it exists purely to stop cross-tenant access.
+cost, scope, or budget — it exists purely to stop cross-tenant access. Its
+name says what it checks: a passing result here is wallet ownership, not
+approval to run the tool. Permit validation (Layer B) and wallet policy
+bundles (Layer C) are enforced separately by the caller before dispatch.
 
 ---
 
@@ -309,7 +312,7 @@ for the full model.
 ## Source files
 
 - `app/routers/mcp.py` — `_execute_registered_tool` (the interceptor)
-- `app/policy/decisions.py` — `evaluate_tool_invocation` (Layer A)
+- `app/policy/decisions.py` — `evaluate_wallet_access_for_tool` (Layer A)
 - `app/services/permits.py` — `_evaluate` / `validate_for_action` (Layer B)
 - `app/services/policies.py` — `evaluate_wallet_policy` (Layer C)
 - `app/services/mcp_dispatch_attempts.py` — prepared attempts and the one-shot dispatch claim
