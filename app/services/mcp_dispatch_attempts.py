@@ -314,6 +314,8 @@ def _assert_sha256(value: str) -> str:
 
 
 def _assert_origin(value: str) -> str:
+    if not value or value != value.strip():
+        raise DispatchAttemptError("dispatch_upstream_origin_invalid")
     parsed = urlsplit(value)
     if (
         parsed.scheme not in {"http", "https"}
