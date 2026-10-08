@@ -99,7 +99,6 @@ class VelocityMonitor:
         self._session_factory = get_session_factory
         self._default_hourly_limit = Decimal(str(settings.VELOCITY_HOURLY_LIMIT))
         self._default_daily_limit = Decimal(str(settings.VELOCITY_DAILY_LIMIT))
-        self._alert_threshold = settings.VELOCITY_ALERT_THRESHOLD
         self._freeze_threshold = settings.VELOCITY_FREEZE_THRESHOLD
 
     async def check_and_record_charge(

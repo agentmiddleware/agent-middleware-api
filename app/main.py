@@ -50,6 +50,8 @@ from .middleware.head_method import HeadMethodMiddleware
 from .middleware.request_body_limit import RequestBodyLimitMiddleware
 from .middleware.security_headers import SecurityHeadersMiddleware
 from .core.trust_mode import (
+    describe_cors_wildcard,
+    describe_human_approval_mode,
     is_production_like_environment,
     validate_trust_mode_guardrails,
     warn_if_trust_mode_permissive,
@@ -184,6 +186,17 @@ async def lifespan(app: FastAPI):
         simulation_modes=get_simulation_modes(),
         cors_origins=settings.CORS_ORIGINS,
     )
+    # Name the human-approval mode in plain words: the simulation_modes map
+    # above shows human_approval=true but does not say no human is in the
+    # loop, or which Sentinel values a real pilot is still missing.
+    approval_posture = describe_human_approval_mode(
+        simulation_mode_human_approval=bool(settings.SIMULATION_MODE_HUMAN_APPROVAL),
+        sentinel_api_url=settings.SENTINEL_API_URL,
+        sentinel_api_key=settings.SENTINEL_API_KEY,
+        environment=settings.ENVIRONMENT,
+    )
+    if approval_posture is not None:
+        logger.warning("human_approval_posture", detail=approval_posture)
     # A public deployment whose manifest tells agents the operator has no
     # contact is a discovery-honesty defect, not a neutral default. Partial
     # configuration already fails the boot (validated_public_contact raises at
@@ -597,7 +610,10 @@ def add_cors_middleware(application: FastAPI, origins: list[str]) -> None:
 # in SECURITY_LIMITATIONS.md ("CORS posture").
 cors_origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
 add_cors_middleware(app, cors_origins)
-if "*" in cors_origins:
+cors_warning = describe_cors_wildcard(settings.CORS_ORIGINS, settings.ENVIRONMENT)
+if cors_warning is not None:
+    logger.warning("cors_wildcard_production", detail=cors_warning)
+elif "*" in cors_origins:
     logger.info(
         "cors_wildcard_active: credential-less wildcard CORS is the documented "
         "default for this header-authenticated API; set CORS_ORIGINS to an "

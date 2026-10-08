@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import difflib
 import logging
 import os
 from collections.abc import Mapping
@@ -128,6 +129,110 @@ def is_production_like_environment(environment: str | None) -> bool:
         or normalized.startswith(("prod-", "production-", "staging-", "stage-"))
         or bool(normalized)
     )
+
+
+# Every name the classifier recognizes, for typo hints. The empty string is
+# excluded: it means "variable dropped", which has its own guardrail.
+KNOWN_ENVIRONMENT_NAMES = sorted(
+    (LOCAL_COMPATIBLE_ENVIRONMENTS | PRODUCTION_LIKE_ENVIRONMENTS) - {""}
+)
+
+
+def suggest_environment_name(environment: str | None) -> str | None:
+    """Suggest the closest recognized ENVIRONMENT name, if one is close.
+
+    Any unrecognized non-empty value boots with the full production-like
+    guardrails, so a typo like ENVIRONMENT=prodution fails closed with a wall
+    of missing-production-setting errors instead of one naming the typo.
+    Returns None for recognized names (including prod-/staging- prefixed
+    values, which are deliberately production-like) and for values with no
+    close match. Classification is unchanged: this only names the likely
+    intent for the error message.
+    """
+    normalized = normalize_environment(environment)
+    if (
+        not normalized
+        or normalized in LOCAL_COMPATIBLE_ENVIRONMENTS
+        or normalized in PRODUCTION_LIKE_ENVIRONMENTS
+        or normalized.startswith(("prod-", "production-", "staging-", "stage-"))
+    ):
+        return None
+    matches = difflib.get_close_matches(
+        normalized, KNOWN_ENVIRONMENT_NAMES, n=1, cutoff=0.6
+    )
+    return matches[0] if matches else None
+
+
+def describe_cors_wildcard(
+    cors_origins: str | None, environment: str | None
+) -> str | None:
+    """Describe a wildcard CORS posture on a production-like boot, if any.
+
+    The wildcard default is deliberate for this header-authenticated API
+    (credentialed CORS is disabled under it), so this never refuses to boot.
+    It returns a warning string only when a production-like deployment would
+    otherwise inherit ``*`` unnoticed, so the operator makes that choice
+    explicitly instead.
+    """
+    origins = [
+        origin.strip() for origin in (cors_origins or "").split(",") if origin.strip()
+    ]
+    if "*" not in origins:
+        return None
+    if not is_production_like_environment(environment):
+        return None
+    return (
+        "CORS_ORIGINS includes '*' on a production-like deployment: any "
+        "website can read the public discovery surfaces. Credentialed "
+        "browser calls stay blocked, but set CORS_ORIGINS to an explicit "
+        "origin list when browser apps are in scope."
+    )
+
+
+def describe_human_approval_mode(
+    *,
+    simulation_mode_human_approval: bool,
+    sentinel_api_url: str = "",
+    sentinel_api_key: str = "",
+    environment: str | None = None,
+) -> str | None:
+    """Describe the human-approval gate posture for the startup log.
+
+    Returns None only when real approvals are configured (simulation off and
+    both Sentinel values present). Every other posture gets a line naming
+    the effective mode and what is missing, so a pilot operator sees at boot
+    whether any human is actually in the loop.
+    """
+    if simulation_mode_human_approval:
+        if is_production_like_environment(environment):
+            return (
+                "SIMULATION_MODE_HUMAN_APPROVAL=true on a production-like "
+                "deployment: simulated approvals are refused there, so "
+                "approval-gated actions fail closed. Set "
+                "SIMULATION_MODE_HUMAN_APPROVAL=false plus SENTINEL_API_URL "
+                "and SENTINEL_API_KEY for real approvals."
+            )
+        return (
+            "SIMULATION_MODE_HUMAN_APPROVAL=true: approvals auto-approve "
+            "(marked simulated) with no human in the loop. Set "
+            "SIMULATION_MODE_HUMAN_APPROVAL=false plus SENTINEL_API_URL and "
+            "SENTINEL_API_KEY for a real pilot."
+        )
+    missing = [
+        name
+        for name, value in (
+            ("SENTINEL_API_URL", sentinel_api_url),
+            ("SENTINEL_API_KEY", sentinel_api_key),
+        )
+        if not (value or "").strip()
+    ]
+    if missing:
+        return (
+            "SIMULATION_MODE_HUMAN_APPROVAL=false but "
+            f"{' and '.join(missing)} {'is' if len(missing) == 1 else 'are'} "
+            "unset: approval-gated permits fail closed until both are set."
+        )
+    return None
 
 
 def validate_trust_mode_config(
@@ -284,7 +389,15 @@ def validate_trust_mode_config(
             )
 
     if violations:
-        raise TrustModeGuardrailError("; ".join(violations))
+        hint = suggest_environment_name(environment)
+        prefix = (
+            f"ENVIRONMENT={environment!r} is not a recognized environment "
+            f"name (did you mean {hint!r}?). Unrecognized non-empty values "
+            "boot with the full production-like guardrails. "
+            if hint
+            else ""
+        )
+        raise TrustModeGuardrailError(prefix + "; ".join(violations))
 
 
 def validate_trust_mode_guardrails(settings: Settings) -> None:
