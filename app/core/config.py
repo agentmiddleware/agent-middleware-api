@@ -5,7 +5,7 @@ All settings are loaded from environment variables for zero-GUI deployment.
 
 from decimal import Decimal
 from enum import Enum
-from pydantic import SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 
@@ -27,8 +27,11 @@ class Settings(BaseSettings):
     # --- Application ---
     APP_NAME: str = "Agent Middleware API"
     APP_VERSION: str = "1.3.0"
-    # Public build provenance. Railway's RAILWAY_GIT_COMMIT_SHA is also
-    # recognized by app.core.build_metadata when this explicit value is empty.
+    # Legacy build-provenance placeholder. Nothing reads this field:
+    # app.core.build_metadata deliberately ignores BUILD_COMMIT_SHA (a stale
+    # service variable must never become the deployed identity) and trusts
+    # only RAILWAY_GIT_COMMIT_SHA and the baked /app/.build_commit_sha stamp.
+    # Kept so existing env files still parse; do not set it.
     BUILD_COMMIT_SHA: str = ""
     ENVIRONMENT: str = "local"
     DEBUG: bool = False
@@ -287,9 +290,13 @@ class Settings(BaseSettings):
     # --- Velocity Monitoring ---
     VELOCITY_HOURLY_LIMIT: Decimal = Decimal("1000.0")
     VELOCITY_DAILY_LIMIT: Decimal = Decimal("10000.0")
-    # Reserved: read into VelocityMonitor but used by no check today (there is
-    # no standard-deviation detection). Changing it has no effect.
-    VELOCITY_ALERT_THRESHOLD: int = 2
+    # Dead dial: accepted so existing env files still parse, but no check
+    # reads it (there is no standard-deviation detection). Tuning it changes
+    # nothing; VELOCITY_FREEZE_THRESHOLD below is the live control.
+    VELOCITY_ALERT_THRESHOLD: int = Field(default=2, deprecated=True)
+    # Live control: once a wallet's lifetime velocity-alert count reaches this
+    # value, its next over-limit charge freezes the wallet. See
+    # app/services/velocity_monitor.py.
     VELOCITY_FREEZE_THRESHOLD: int = 3
 
     # --- IoT Protocol Bridge ---

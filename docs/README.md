@@ -19,6 +19,7 @@ consequential MCP tool behind a governed boundary. Start with the
 | Read the public article on what the boundary does and does not guarantee | [Intent is not authority](articles/intent-is-not-authority.md) |
 | Confirm which commit production is actually running | [Deployment verification checklist](deployment-verification-checklist.md) |
 | Plan a design-partner evaluation | [Design partner guide](../DESIGN_PARTNER_GUIDE.md) |
+| Set pilot or production env vars without running on mocks | [Pilot environment checklist](pilot-env-checklist.md) |
 | Contribute to the repository | [Contributing guide](../CONTRIBUTING.md) |
 
 ## Agent and API discovery
