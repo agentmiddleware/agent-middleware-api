@@ -103,12 +103,14 @@ async def _load_owned_campaign(
     "/pipelines",
     response_model=ContentPipelineResponse,
     status_code=status.HTTP_202_ACCEPTED,
-    summary="Create a content generation pipeline",
+    summary="Create a content generation pipeline (simulated metadata)",
     description=(
         "Submit a source asset and target formats. The factory will "
-        "generate multiple content pieces adapted to each format: "
+        "generate multiple metadata records adapted to each format: "
         "short videos, static images, text posts, audiograms, carousels, "
-        "blog excerpts, and email snippets. Processing is async."
+        "blog excerpts, and email snippets. No bytes are rendered or "
+        "stored (download URLs stay empty, thumbnails null), and some "
+        "formats carry placeholder text. Processing is async."
     ),
 )
 async def create_pipeline(
@@ -188,8 +190,12 @@ async def list_pipeline_content(
 @router.get(
     "/content/{content_id}",
     response_model=GeneratedContent,
-    summary="Get content piece details",
-    description="Retrieve metadata and download URL for a specific content piece.",
+    summary="Get content piece metadata",
+    description=(
+        "Retrieve the metadata record for a specific content piece. Pieces "
+        "are metadata only: download_url is empty and thumbnail_url null "
+        "because no download or thumbnail routes exist."
+    ),
 )
 async def get_content(
     content_id: str,
@@ -215,14 +221,11 @@ async def get_content(
     status_code=status.HTTP_202_ACCEPTED,
     summary="Launch a live content campaign",
     description=(
-        "The 'Big Red Button' — submit a source video URL and targeted hooks. "
-        "Each hook is a specific segment (e.g., 30-45s reaction clip, 60s "
-        "explainer). The factory applies the 1-to-N multiplication rule: "
-        "each hook produces multiple format-adapted pieces (short videos, "
-        "quote cards, carousels, text posts) all rendered in 9:16 vertical "
-        "with animated captions. Then the AlgorithmicScheduler staggers posts "
-        "across platforms (TikTok, YouTube Shorts, Instagram Reels) to maximize "
-        "view velocity."
+        "Simulated campaign mode: submit a source video URL and targeted "
+        "hooks. Each hook produces multiple format-adapted metadata records "
+        "(short videos, quote cards, carousels, text posts); no video is "
+        "rendered and no bytes are stored. Scheduling staggers posts across "
+        "platforms using fixed default engagement windows, not measured data."
     ),
 )
 async def launch_campaign(
@@ -308,11 +311,11 @@ async def list_campaigns(
     "/analytics",
     response_model=AnalyticsIngestResponse,
     status_code=status.HTTP_202_ACCEPTED,
-    summary="Ingest engagement analytics",
+    summary="Ingest engagement analytics (stored, not learned from)",
     description=(
-        "Feed engagement data from platform APIs into the scheduling engine. "
-        "The scheduler uses this data to learn optimal posting windows. "
-        "More data = smarter scheduling = higher view velocity."
+        "Feed engagement data from platform APIs into the scheduling engine "
+        "for storage and summary. Recommendations still use fixed default "
+        "curves, so ingesting data does not change scheduling."
     ),
 )
 async def ingest_analytics(
@@ -342,12 +345,12 @@ async def get_analytics_summary(
 @router.post(
     "/schedule",
     response_model=ScheduleResponse,
-    summary="Get optimal posting schedule",
+    summary="Get simulated posting schedule",
     description=(
-        "Generate an algorithmically-optimized posting schedule for content pieces. "
-        "The scheduler analyzes historical engagement data per platform to pick "
-        "the highest-engagement time slots. Posts are spread across days to avoid "
-        "audience fatigue (configurable via max_posts_per_day)."
+        "Generate a simulated posting schedule for content pieces. Slots are "
+        "picked from fixed default per-platform engagement windows, not from "
+        "ingested analytics. Posts are spread across days to avoid audience "
+        "fatigue (configurable via max_posts_per_day)."
     ),
 )
 async def get_schedule(

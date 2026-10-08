@@ -66,7 +66,9 @@ class VideoUploadResponse(BaseModel):
     upload_url: str | None = Field(
         None,
         description=(
-            "Pre-signed URL for direct upload (if source_url was not provided)."
+            "Always null on this proof surface: no direct-upload route "
+            "exists, so there is no file push to perform. Videos are held "
+            "in process memory and do not survive restarts."
         ),
     )
     status: str = Field(default="pending")
@@ -74,7 +76,8 @@ class VideoUploadResponse(BaseModel):
 
 
 class ViralHook(BaseModel):
-    """A detected high-engagement moment in the source video."""
+    """A simulated high-engagement moment: random timestamps and heuristic
+    scores from a stub detector, not a measurement of the video."""
 
     hook_id: str
     start_time_seconds: float
@@ -83,18 +86,24 @@ class ViralHook(BaseModel):
         ...,
         ge=0.0,
         le=1.0,
-        description="Model confidence that this segment will drive engagement.",
+        description=(
+            "Simulated heuristic score from the stub detector, not a "
+            "measured engagement prediction."
+        ),
     )
     trigger_type: str = Field(
         ...,
         description=(
-            "What makes this moment engaging (e.g., 'emotional_peak', "
-            "'speech_pattern', 'visual_surprise')."
+            "Simulated label for what makes this moment engaging "
+            "(e.g., 'emotional_peak', 'speech_pattern', 'visual_surprise')."
         ),
     )
     transcript_snippet: str = Field(
         ...,
-        description="Text of what is being said during this hook.",
+        description=(
+            "Canned label for the hook, not words transcribed from the video "
+            "(transcription itself is a placeholder)."
+        ),
     )
 
 
@@ -127,19 +136,29 @@ class ClipGenerationRequest(BaseModel):
 
 
 class GeneratedClip(BaseModel):
-    """A single generated clip ready for distribution."""
+    """A metadata record describing a clip: no video bytes are rendered or
+    stored, so there is nothing to download."""
 
     clip_id: str
     video_id: str
     hook_id: str
     aspect_ratio: AspectRatio
     duration_seconds: float
-    download_url: str = Field(
-        ...,
-        description="Temporary URL to download the rendered clip.",
+    download_url: str | None = Field(
+        default=None,
+        description=(
+            "Always null on this proof surface: clips are metadata only and "
+            "no download route exists."
+        ),
     )
     caption_style: CaptionStyle
-    thumbnail_url: str | None = None
+    thumbnail_url: str | None = Field(
+        default=None,
+        description=(
+            "Always null on this proof surface: no thumbnails are rendered "
+            "and no thumbnail route exists."
+        ),
+    )
     generated_at: datetime
 
 
@@ -153,7 +172,8 @@ class ClipGenerationResponse(BaseModel):
 
 
 class DistributionRequest(BaseModel):
-    """Push clips directly to social platforms via API."""
+    """Record a simulated distribution of clips: nothing is posted to any
+    social platform."""
 
     clip_ids: list[str] = Field(
         ...,
@@ -178,7 +198,8 @@ class DistributionRequest(BaseModel):
     optimize_schedule: bool = Field(
         default=True,
         description=(
-            "Let the algorithm pick optimal posting windows based on engagement data."
+            "Pick a posting window from fixed default per-platform hours, "
+            "not from measured engagement data."
         ),
     )
 

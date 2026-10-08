@@ -70,11 +70,14 @@ async def _load_owned_video(
     "/videos",
     response_model=VideoUploadResponse,
     status_code=status.HTTP_202_ACCEPTED,
-    summary="Upload a video for processing",
+    summary="Upload a video for simulated processing",
     description=(
-        "Submit a video for the media engine pipeline. Provide either a "
-        "source_url for the engine to fetch, or use the returned upload_url "
-        "to push the file directly. Processing begins automatically after upload."
+        "Submit a video for the simulated media engine pipeline. "
+        "Transcription is a placeholder, hook detection uses random "
+        "heuristic scores, and clips are metadata records with no video "
+        "bytes. No direct-upload route exists (upload_url is always null). "
+        "Videos and clips are held in process memory and do not survive "
+        "restarts."
     ),
 )
 async def upload_video(
@@ -90,11 +93,12 @@ async def upload_video(
         owner_wallet_id=auth.wallet_id,
     )
 
+    # No PUT /v1/media/videos/{id}/upload route exists, so advertising one
+    # would end in a dead link. upload_url stays null until such a route is
+    # built behind an explicit product decision.
     return VideoUploadResponse(
         video_id=video.video_id,
-        upload_url=(
-            None if request.source_url else f"/v1/media/videos/{video.video_id}/upload"
-        ),
+        upload_url=None,
         status=video.status.value,
         estimated_processing_seconds=120 if request.source_url else None,
     )
@@ -134,12 +138,12 @@ async def get_video_status(
 @router.get(
     "/videos/{video_id}/hooks",
     response_model=list[ViralHook],
-    summary="Get detected viral hooks",
+    summary="Get simulated viral hooks",
     description=(
-        "Retrieve the viral hooks detected in a processed video. "
-        "Hooks are ranked by confidence_score. Each hook identifies "
-        "a high-engagement moment based on speech patterns, emotional "
-        "peaks, visual surprises, or audience retention signals."
+        "Retrieve the simulated viral hooks for a processed video, ranked "
+        "by confidence_score. Hooks carry random timestamps and heuristic "
+        "scores from a stub detector; they are not measurements of the "
+        "video, whose transcription is a placeholder."
     ),
 )
 async def get_viral_hooks(
@@ -167,12 +171,12 @@ async def get_viral_hooks(
     "/videos/{video_id}/clips",
     response_model=ClipGenerationResponse,
     status_code=status.HTTP_202_ACCEPTED,
-    summary="Generate platform-ready clips",
+    summary="Generate clip metadata (no video bytes)",
     description=(
-        "Generate reframed, captioned clips from detected viral hooks. "
-        "Clips are automatically reframed to the target aspect ratio(s) "
-        "and overlaid with animated captions in the chosen style. "
-        "80%% of social video is consumed muted — captions are not optional."
+        "Generate metadata records describing clips for detected hooks. "
+        "No video is reframed, no captions are rendered, and no bytes are "
+        "stored: download_url and thumbnail_url are always null because no "
+        "download or thumbnail routes exist."
     ),
 )
 async def generate_clips(
@@ -255,8 +259,11 @@ async def distribute_clips(
 @router.get(
     "/clips/{clip_id}",
     response_model=GeneratedClip,
-    summary="Get clip details",
-    description="Retrieve metadata and download URL for a generated clip.",
+    summary="Get clip metadata",
+    description=(
+        "Retrieve the metadata record for a generated clip. Clips are "
+        "metadata only: download_url and thumbnail_url are always null."
+    ),
 )
 async def get_clip(
     clip_id: str,
