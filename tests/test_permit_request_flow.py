@@ -581,7 +581,15 @@ async def test_unrelated_wallet_cannot_read_a_request(
     denied = await client.get(
         f"/v1/permit-requests/{request_id}", headers=stranger["agent_headers"]
     )
-    assert denied.status_code == 403
+    assert denied.status_code == 404
+
+    # A foreign request reads exactly like a missing one, so the endpoint
+    # is not an existence oracle for request ids.
+    missing = await client.get(
+        "/v1/permit-requests/preq-does-not-exist", headers=stranger["agent_headers"]
+    )
+    assert missing.status_code == 404
+    assert denied.json() == missing.json()
 
     allowed = await client.get(
         f"/v1/permit-requests/{request_id}", headers=BOOTSTRAP_HEADERS
@@ -624,7 +632,7 @@ async def test_approval_card_page_shows_the_reviewed_terms(
     denied = await client.get(
         f"/v1/permit-requests/{request_id}/card", headers=stranger["agent_headers"]
     )
-    assert denied.status_code == 403
+    assert denied.status_code == 404
 
 
 class _RecordingNotifications:
@@ -684,7 +692,7 @@ async def test_non_https_sentinel_approval_url_is_not_stored_or_linked(
     denied = await client.get(
         f"/v1/permit-requests/{request_id}/card", headers=stranger["agent_headers"]
     )
-    assert denied.status_code == 403
+    assert denied.status_code == 404
 
 
 @pytest.mark.asyncio
