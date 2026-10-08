@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 import httpx
 import pytest
+from b2a_sdk import IdempotencyConflictError
 
 from crewai_b2a import B2AClient, CrewAIB2ATool
 
@@ -106,14 +107,14 @@ async def test_call_tool_requires_idempotency_key():
     assert invoke_called
     assert "receipt-success" in result
 
-    result_blank = await tool._arun(
-        operation="call_tool",
-        tool_name="partner.search",
-        idempotency_key="   ",
-        permit_idempotency_key="permit-key",
-        arguments={},
-    )
-    assert "Error: idempotency_key is required" in result_blank
+    with pytest.raises(ValueError, match="idempotency_key is required"):
+        await tool._arun(
+            operation="call_tool",
+            tool_name="partner.search",
+            idempotency_key="   ",
+            permit_idempotency_key="permit-key",
+            arguments={},
+        )
 
     await base_client.close()
 
@@ -229,19 +230,19 @@ async def test_replay_with_changed_arguments_returns_idempotency_conflict():
         permit_idempotency_key="permit-replay-key",
         arguments={"query": "first"},
     )
-    conflict = await tool._arun(
-        operation="call_tool",
-        tool_name="partner.search",
-        idempotency_key="replay-key",
-        permit_idempotency_key="permit-replay-key",
-        arguments={"query": "second"},
-    )
+    with pytest.raises(IdempotencyConflictError, match="idempotency_key_reused"):
+        await tool._arun(
+            operation="call_tool",
+            tool_name="partner.search",
+            idempotency_key="replay-key",
+            permit_idempotency_key="permit-replay-key",
+            arguments={"query": "second"},
+        )
 
     assert gateway.invoke_keys == [("replay-key", "replay-key")] * 2
     assert gateway.permit_requests == 1
     assert gateway.charges == 1
     assert ast.literal_eval(first)["receipt_id"] == "receipt-charge-1"
-    assert conflict == "Error: idempotency_key_reused"
 
     await base_client.close()
 
