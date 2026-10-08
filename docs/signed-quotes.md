@@ -62,6 +62,20 @@ An invoke that consumed a quote and then failed to charge (insufficient funds)
 **returns the quote to `active`**, so a top-up inside the window can still use
 the price it was promised.
 
+## Credit amount limits, in plain English
+
+Every credit amount in the system follows one rule: zero or positive, below
+one trillion (1,000,000,000,000), with at most eight decimal places. A value
+that needs more precision is rejected, never silently rounded, so a signed
+amount survives storage exactly as signed. The same check runs at permit
+issue, pricing, quote issue, receipt signing, and schema validation, which
+means a value accepted at one layer cannot shift at another.
+
+In practice, price tools in whole credits or a few decimals, well below the
+ceiling. The trillion cap is a storage guard, not a spending target, and the
+eight-decimal exactness is what lets offline verifiers compare amounts
+without rounding disputes.
+
 ## Verifiable offline
 
 The signature covers `(quote_id, wallet_id, tool, quoted_credits, category,

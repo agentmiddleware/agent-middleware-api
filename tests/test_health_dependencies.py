@@ -141,6 +141,11 @@ async def test_report_default_shape():
     assert report["dependencies"]["upstream_mcp"]["status"] == "not_configured"
     assert report["dependencies"]["signing_key"]["status"] == "up"
     assert report["dependencies"]["signing_key"]["state"] == "ephemeral"
+    # The ephemeral entry must read as dev-only, never as production
+    # receipt-signing readiness.
+    assert "not production receipt-signing readiness" in report["dependencies"][
+        "signing_key"
+    ].get("reason", "")
 
     # MQTT gated on iot_bridge simulation mode.
     assert report["dependencies"]["mqtt"]["status"] == "not_used"
