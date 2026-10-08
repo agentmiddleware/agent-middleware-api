@@ -115,13 +115,11 @@ class TestDiscoverEndpoint:
         for name in ("billing", "mcp", "permits", "receipts", "audit"):
             assert by_name[name].surface == "product"
 
-    def test_discover_has_phase9_mcp_tools(self):
+    def test_discover_has_phase9_mcp_tools(self, monkeypatch):
         """Verify discover endpoint includes Phase 9 MCP tools when proof surfaces enabled."""
-        import os
-
         from app.routers.discover import _build_mcp_tools
 
-        os.environ["ENABLE_PROOF_SURFACES"] = "true"
+        monkeypatch.setenv("ENABLE_PROOF_SURFACES", "true")
         try:
             from app.core.config import get_settings
 
@@ -140,7 +138,8 @@ class TestDiscoverEndpoint:
             for tool in phase9_tools:
                 assert tool in tool_names, f"Missing Phase 9 MCP tool: {tool}"
         finally:
-            del os.environ["ENABLE_PROOF_SURFACES"]
+            from app.core.config import get_settings
+
             get_settings.cache_clear()
 
     def test_discover_has_phase9_awi_endpoints(self):

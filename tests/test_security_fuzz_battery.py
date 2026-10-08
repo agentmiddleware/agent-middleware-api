@@ -626,8 +626,11 @@ async def test_malformed_json_on_invoke_returns_parse_error(client, clean_databa
         content=b"{not json",
         headers={**BOOTSTRAP_HEADERS, "Content-Type": "application/json"},
     )
-    # FastAPI should return 422 or 400 for bad JSON
-    assert r.status_code in (400, 422)
+    # The /mcp/messages transport parses the raw body itself and answers a
+    # syntax error with 400 (see app/routers/mcp.py). 422 would mean the
+    # error fell through to schema validation instead.
+    assert r.status_code == 400
+    assert r.json()["detail"] == "Invalid JSON"
 
 
 @pytest.mark.anyio
@@ -642,7 +645,9 @@ async def test_malformed_json_on_permit_creation_returns_422(client, clean_datab
             "Idempotency-Key": "bad-json-1",
         },
     )
-    assert r.status_code in (400, 422)
+    # A standard FastAPI body endpoint: the JSON syntax error becomes a 422
+    # validation refusal, matching this test's name.
+    assert r.status_code == 422
 
 
 @pytest.mark.anyio

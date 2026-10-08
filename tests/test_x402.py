@@ -673,18 +673,22 @@ async def test_x402_settle_rejects_malformed_requirement(client, clean_database)
         permit_id="permit-any",
         wallet_id=provisioned["agent_wallet_id"],
     )
-    for override, reason in (
-        ({"amount": "-5"}, "x402_amount_not_positive"),
-        ({"amount": "0.1234567"}, "x402_amount_precision_exceeded"),
-        ({"network": "dogecoin"}, "x402_network_unsupported"),
-        ({"pay_to": "0xdeadbeef"}, "x402_pay_to_invalid"),
+    for index, (override, reason) in enumerate(
+        (
+            ({"amount": "-5"}, "x402_amount_not_positive"),
+            ({"amount": "0.1234567"}, "x402_amount_precision_exceeded"),
+            ({"network": "dogecoin"}, "x402_network_unsupported"),
+            ({"pay_to": "0xdeadbeef"}, "x402_pay_to_invalid"),
+        )
     ):
         resp = await client.post(
             "/v1/x402/settle",
             json={**base, **override},
             headers={
                 **provisioned["agent_headers"],
-                "Idempotency-Key": "x402-malformed-1",
+                # One key per malformed case: sharing a key across different
+                # payloads mixes validation failures with replay handling.
+                "Idempotency-Key": f"x402-malformed-{index}",
             },
         )
         assert resp.status_code == 400

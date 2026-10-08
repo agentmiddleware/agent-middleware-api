@@ -204,6 +204,8 @@ async def test_frozen_wallet_cannot_transfer_out(client, clean_database):
     )
     assert resp.status_code == 400
     assert resp.json()["detail"]["error"] == "transfer_error"
+    # The freeze reason, not just any transfer failure.
+    assert "frozen" in resp.json()["detail"]["message"]
 
 
 @pytest.mark.anyio

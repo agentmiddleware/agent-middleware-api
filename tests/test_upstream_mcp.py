@@ -10,6 +10,7 @@ from decimal import Decimal
 import json
 import logging
 import ssl
+import uuid
 from typing import Any
 
 import httpx
@@ -1473,12 +1474,14 @@ def test_registry_distinguishes_local_upstream_and_metadata_only_services() -> N
 async def test_persistent_services_are_metadata_only_and_not_executable(
     clean_database,
 ) -> None:
-    del clean_database
+    # Unique owner per run: a fixed wallet id lingers after this test opts
+    # out of row cleanup, so a rerun or a parallel worker would collide on it.
+    owner_wallet_id = f"wallet-catalog-{uuid.uuid4().hex[:8]}"
     registry = ServiceRegistry()
     async with get_session_factory()() as session:
         session.add(
             WalletModel(
-                wallet_id="wallet-catalog",
+                wallet_id=owner_wallet_id,
                 wallet_type="agent",
                 owner_name="Catalog owner",
             )
@@ -1489,7 +1492,7 @@ async def test_persistent_services_are_metadata_only_and_not_executable(
         description="No runtime executor",
         category=ServiceCategory.PLATFORM_FEE,
         credits_per_unit=1,
-        owner_wallet_id="wallet-catalog",
+        owner_wallet_id=owner_wallet_id,
     )
     fetched = await registry.get_persistent(persistent["service_id"])
     executable = await registry.list_executable()

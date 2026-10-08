@@ -40,8 +40,13 @@ def _free_port() -> int:
 
 
 @pytest.fixture(scope="module")
-def test_server(tmp_path_factory):
-    """Boot a minimal test server with a static dev key for bootstrap tests."""
+def bootstrap_test_server(tmp_path_factory):
+    """Boot a minimal test server with a static dev key for bootstrap tests.
+
+    Named without the test_ prefix on purpose: a fixture named test_* is
+    also collected as a test, which booted a whole server as a bogus
+    assertion-free "pass".
+    """
     import base64
     import secrets
 
@@ -162,13 +167,7 @@ def test_constant_test_loop_allows_http_loopback():
     )
 
 
-def test_constant_test_loop_validates_malformed_key():
-    """Validate that malformed key check exists in the code.
-
-    The actual validation happens during API fetch, so we can't easily test
-    it end-to-end without a running server. This test verifies the validation
-    logic exists by importing the module and checking the key derivation path.
-    """
+def _load_loop_module():
     import importlib.util
 
     spec = importlib.util.spec_from_file_location(
@@ -177,62 +176,82 @@ def test_constant_test_loop_validates_malformed_key():
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-
-    # The validation is in run_constant_test when deriving key_prefix
-    # Verify the code path exists by checking the function signature
-    import inspect
-
-    source = inspect.getsource(module.run_constant_test)
-    assert "malformed API key" in source
-    assert "expected format <prefix>_<suffix>" in source
-
-    # Verify the key is not logged anywhere in the source
-    full_source = CONSTANT_TEST_LOOP.read_text()
-    # The key variable should never be printed or logged directly
-    assert "print(agent_key)" not in full_source
-    assert 'print(f"{agent_key}' not in full_source
+    return module
 
 
-def test_constant_test_loop_never_logs_keys():
-    """Smoke: keys are never printed to stdout/stderr."""
-    # This is a negative test: we can't prove a key is never logged by running
-    # a successful loop (that would require a real server). Instead, we verify
-    # that the script imports cleanly and the key-reading functions don't print.
-    import importlib.util
+class _FakeLoopResponse:
+    def __init__(self, payload):
+        self._payload = payload
+        self.status_code = 200
+        self.text = "fake-ok"
 
-    spec = importlib.util.spec_from_file_location(
-        "constant_test_loop", CONSTANT_TEST_LOOP
-    )
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
+    def json(self):
+        return self._payload
+
+
+class _FakeLoopClient:
+    """Stands in for httpx.Client so the fetch branch runs without a server."""
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def get(self, path):
+        if path == "/v1/billing/wallets":
+            return _FakeLoopResponse({"wallets": [{"wallet_id": "wallet-1"}]})
+        return _FakeLoopResponse(
+            {"keys": [{"key_prefix": "deadbeef", "key_id": "key-1"}]}
+        )
+
+    def post(self, path, json=None):
+        raise AssertionError("no POST expected before key validation")
+
+
+def test_constant_test_loop_validates_malformed_key(monkeypatch, capsys):
+    """A malformed key is refused with a ConfigurationError, never used.
+
+    The fetch branch runs against a fake HTTP client, so this exercises the
+    real validation in run_constant_test instead of grepping its source.
+    """
+    module = _load_loop_module()
+    monkeypatch.setattr(module.httpx, "Client", _FakeLoopClient)
+
+    malformed = "not-a-key"
+    with pytest.raises(module.ConfigurationError, match="malformed API key"):
+        module.run_constant_test("http://127.0.0.1:8000", malformed, "", "")
+
+    captured = capsys.readouterr()
+    assert malformed not in captured.out
+    assert malformed not in captured.err
+
+
+def test_constant_test_loop_never_logs_keys(capsys, monkeypatch):
+    """Smoke: keys are never printed to stdout/stderr.
+
+    Reading the key happens with output capture active, so a print of the
+    canary fails the test instead of passing on code review alone.
+    """
+    module = _load_loop_module()
 
     # Set a canary key
     canary_key = "canary_key_must_not_appear_in_logs"
-    test_env = {
-        **os.environ,
-        "CI_SMOKE_AGENT_KEY": canary_key,
-        "CI_SMOKE_WALLET_ID": "wallet_id",
-        "CI_SMOKE_KEY_ID": "key_id",
-    }
+    monkeypatch.setenv("CI_SMOKE_AGENT_KEY", canary_key)
+    monkeypatch.setenv("CI_SMOKE_WALLET_ID", "wallet_id")
+    monkeypatch.setenv("CI_SMOKE_KEY_ID", "key_id")
 
-    # Temporarily override os.environ
-    original_environ = os.environ.copy()
-    os.environ.update(test_env)
+    agent_key, wallet_id, key_id = module._get_agent_key()
+    assert agent_key == canary_key
+    assert wallet_id == "wallet_id"
+    assert key_id == "key_id"
 
-    try:
-        spec.loader.exec_module(module)
-        agent_key, wallet_id, key_id = module._get_agent_key()
-        assert agent_key == canary_key
-        assert wallet_id == "wallet_id"
-        assert key_id == "key_id"
-
-        # The _get_agent_key function should not print the key
-        # (We can't fully test this without capturing stdout, but the function
-        # is designed to never print/log the key - code review confirms this.)
-
-    finally:
-        os.environ.clear()
-        os.environ.update(original_environ)
+    captured = capsys.readouterr()
+    assert canary_key not in captured.out
+    assert canary_key not in captured.err
 
 
 def test_constant_test_loop_self_provision_signal():
@@ -331,9 +350,9 @@ def test_partner_api_key_bootstrap_json_output():
                 assert isinstance(data["agent_api_key"], str)
                 assert len(data["agent_api_key"]) > 0
         except json.JSONDecodeError:
-            # If not JSON, it should be an error message
-            # Either way, verify no key leaked in non-JSON output
-            pass
+            # No server is running, so non-JSON stdout must signal failure:
+            # success with unparseable output would break --json consumers.
+            assert result.returncode != 0
 
     # The bootstrap key should never appear in raw stdout/stderr
     # (We can't test the actual key without a server, but we can verify
@@ -363,11 +382,11 @@ def test_constant_test_loop_full_integration():
     assert "ALL INVARIANTS HELD" in result.stderr
 
 
-def test_constant_test_loop_never_logs_api_key(test_server):
+def test_constant_test_loop_never_logs_api_key(bootstrap_test_server):
     """Agent key is never printed or logged during constant test execution."""
     import httpx
 
-    base_url, _ = test_server
+    base_url, _ = bootstrap_test_server
     # Pre-provision a key to test that it's never logged
     provision_response = httpx.post(
         f"{base_url}/v1/dev-keys/self-provision",
@@ -625,7 +644,7 @@ def test_bootstrap_key_only_pipes_without_jq():
 
 
 def test_unusable_tool_pin_exits_as_configuration_not_invariant_failure(
-    test_server,
+    bootstrap_test_server,
 ):
     """A bad pin must not page with the same signal as a broken trust plane.
 
@@ -633,7 +652,7 @@ def test_unusable_tool_pin_exits_as_configuration_not_invariant_failure(
     wrong. Conflating them makes a typo in $CI_SMOKE_TOOL indistinguishable
     from the product actually breaking.
     """
-    base_url, _ = test_server
+    base_url, _ = bootstrap_test_server
     env = {k: v for k, v in os.environ.items() if not k.startswith("CI_SMOKE")}
 
     result = subprocess.run(

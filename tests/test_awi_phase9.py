@@ -275,20 +275,17 @@ class TestWebAuthnProvider:
 
     def test_cleanup_expired(self, provider):
         """Test cleanup of expired challenges."""
-        provider._challenge_expiry = 1
+        provider._challenge_expiry = -1  # Already expired at creation
 
         import asyncio
 
-        asyncio.run(provider.create_challenge("session1", "checkout"))
-
-        import time
-
-        time.sleep(0.1)
+        challenge = asyncio.run(provider.create_challenge("session1", "checkout"))
 
         result = provider.cleanup_expired()
 
-        assert "challenges_removed" in result
-        assert "verifications_removed" in result
+        assert result["challenges_removed"] == 1
+        assert result["verifications_removed"] == 0
+        assert challenge["challenge_id"] not in provider._challenges
 
 
 @pytest.mark.proof
