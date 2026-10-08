@@ -210,6 +210,39 @@ async def test_refund_listing_is_wallet_scoped_and_retry_stays_admin_only(
 
 
 @pytest.mark.anyio
+async def test_refund_listing_totals_are_per_wallet(
+    client,
+    clean_database,
+):
+    """Totals must count only the requesting wallet's items.
+
+    The wallet filter belongs in the SQL query, not in a post-load sweep:
+    the operator queue grows across tenants, and a per-wallet total must
+    never include another tenant's items.
+    """
+    from app.services.refund_reconciliation import (
+        get_refund_reconciliation_service,
+    )
+
+    case = await _create_unrefunded_failure(client)
+    wallet_id = case["provisioned"]["agent_wallet_id"]
+    service = get_refund_reconciliation_service()
+
+    mine, my_total = await service.list_items(wallet_id=wallet_id)
+    assert my_total == 1
+    assert [item.wallet_id for item in mine] == [wallet_id]
+
+    other = await provision_agent_wallet(client)
+    theirs, their_total = await service.list_items(wallet_id=other["agent_wallet_id"])
+    assert theirs == []
+    assert their_total == 0
+
+    everything, total = await service.list_items()
+    assert total == 1
+    assert [item.wallet_id for item in everything] == [wallet_id]
+
+
+@pytest.mark.anyio
 async def test_refund_reconciliation_retries_exactly_once_and_preserves_agent_replay(
     client,
     clean_database,

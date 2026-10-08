@@ -3,6 +3,7 @@ Tests for Stripe Integration Service.
 Validates fiat top-up flow, webhook handling, and idempotency.
 """
 
+import logging
 from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -995,6 +996,154 @@ class TestStripeWebhookIdempotency:
                     f"/v1/billing/wallets/{wallet_id}", headers=api_headers
                 )
                 assert wallet.json()["balance"] == 50000.0
+
+
+class TestStripeWebhookHardening:
+    """Webhook edge cases: malformed failure events, watched unhandled
+    events, and structured prior-refund linkage."""
+
+    @pytest.mark.anyio
+    async def test_malformed_payment_failed_event_logs_cleanly(self, caplog):
+        """A malformed payment_failed object must log, never throw.
+
+        The handler used raw dict access, so an event without metadata (or
+        with a null error block) raised instead of logging. A throwing
+        webhook handler turns one bad Stripe delivery into a 500 plus a
+        Stripe retry storm.
+        """
+        from app.services.stripe_integration import get_stripe_integration
+
+        integration = get_stripe_integration()
+        with caplog.at_level(logging.WARNING, logger="app.services.stripe_integration"):
+            await integration._handle_payment_failed({})
+            await integration._handle_payment_failed({"id": "pi_malformed"})
+            await integration._handle_payment_failed(
+                {"id": "pi_null_blocks", "metadata": None}
+            )
+            await integration._handle_payment_failed(
+                {
+                    "id": "pi_wrong_shapes",
+                    "metadata": {"wallet_id": "w_123"},
+                    "last_payment_error": None,
+                }
+            )
+        assert any(
+            record.levelname == "WARNING" and "pi_malformed" in record.message
+            for record in caplog.records
+        )
+
+    @pytest.mark.anyio
+    async def test_well_formed_payment_failed_still_notifies(self):
+        """Hardening must not drop the notify path for good events."""
+        from app.services.stripe_integration import get_stripe_integration
+
+        integration = get_stripe_integration()
+        notifications = AsyncMock()
+        with patch(
+            "app.services.notifications.get_notification_service",
+            return_value=notifications,
+        ):
+            await integration._handle_payment_failed(
+                {
+                    "id": "pi_good",
+                    "metadata": {"wallet_id": "w_123"},
+                    "last_payment_error": {"message": "card declined"},
+                }
+            )
+        notifications.send_payment_failed_alert.assert_awaited_once_with(
+            wallet_id="w_123",
+            error_message="card declined",
+            payment_intent_id="pi_good",
+        )
+
+    @pytest.mark.anyio
+    async def test_dispute_event_warns_and_acks(self, caplog):
+        """Disputes are not acted on, but must warn loudly, not debug-log."""
+        from app.services.stripe_integration import get_stripe_integration
+
+        integration = get_stripe_integration()
+        event = {
+            "id": "evt_dispute_1",
+            "type": "charge.dispute.created",
+            "data": {"object": {"id": "dp_1"}},
+        }
+        with (
+            patch(
+                "app.services.stripe_integration.stripe.Webhook.construct_event",
+                return_value=event,
+            ),
+            caplog.at_level(logging.WARNING, logger="app.services.stripe_integration"),
+        ):
+            assert await integration.handle_webhook(b"{}", "sig") is True
+        assert any(
+            record.levelname == "WARNING" and "charge.dispute.created" in record.message
+            for record in caplog.records
+        ), "dispute events must warn so an operator routes them to review"
+
+    @pytest.mark.anyio
+    async def test_prior_refund_survives_description_relabel(
+        self, client, sponsor_wallet, api_headers
+    ):
+        """Prior refunds link by metadata, not by description text.
+
+        If an operator (or a future code change) relabels a refund ledger
+        description, the next cumulative refund event must still see the
+        earlier partial refund. Matching on description alone would debit
+        the full cumulative amount a second time.
+        """
+        from sqlalchemy import select
+
+        from app.core.dependencies import get_agent_money
+        from app.db.database import get_session_factory
+        from app.db.models import LedgerEntryModel
+        from app.services.stripe_integration import get_stripe_integration
+
+        wallet_id = sponsor_wallet["wallet_id"]
+        integration = get_stripe_integration()
+        money = get_agent_money()
+
+        await integration._mint_credits(
+            wallet_id=wallet_id,
+            amount=Decimal("50000"),
+            payment_intent_id="pi_relabeled_refund",
+            description="topup",
+        )
+        await integration._handle_refund(
+            refunded_charge(
+                payment_intent_id="pi_relabeled_refund",
+                amount_refunded=2500,
+            ),
+            "evt_relabeled_1",
+        )
+        assert (await money.get_wallet(wallet_id)).balance == Decimal("25000")
+
+        factory = get_session_factory()
+        async with factory() as session:
+            async with session.begin():
+                rows = (
+                    (
+                        await session.execute(
+                            select(LedgerEntryModel).where(
+                                LedgerEntryModel.action == "refund"
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                assert rows, "expected the first partial refund on the ledger"
+                for entry in rows:
+                    entry.description = "operator relabeled entry"
+                    session.add(entry)
+
+        await integration._handle_refund(
+            refunded_charge(
+                payment_intent_id="pi_relabeled_refund",
+                amount_refunded=5000,
+            ),
+            "evt_relabeled_2",
+        )
+        assert (await money.get_wallet(wallet_id)).balance == Decimal("0")
 
 
 class TestNotificationService:

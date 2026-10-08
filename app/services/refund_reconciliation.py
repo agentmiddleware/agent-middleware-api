@@ -412,29 +412,41 @@ class RefundReconciliationService:
         """List failed-refund work items, optionally for one wallet.
 
         ``wallet_id`` narrows the view to a single tenant so a wallet key can
-        see money owed back to *it* without an operator key. Applied before
-        pagination, so a wallet's own totals are its own.
+        see money owed back to *it* without an operator key. It is applied in
+        the SQL query (``idempotency_records.wallet_id`` is indexed), so a
+        wallet's rows and totals never depend on the size of the cross-tenant
+        operator queue. ``status`` still filters in memory because it lives
+        inside the schemaless response payload, not in a column.
         """
         factory = get_session_factory()
         async with factory() as session:
+            query = (
+                select(IdempotencyRecordModel, ReceiptModel)
+                .join(
+                    ReceiptModel,
+                    cast(
+                        ColumnElement[bool],
+                        ReceiptModel.receipt_id
+                        == IdempotencyRecordModel.response_reference,
+                    ),
+                )
+                .where(
+                    cast(
+                        ColumnElement[bool],
+                        ReceiptModel.outcome == "failed_unrefunded",
+                    )
+                )
+            )
+            if wallet_id is not None:
+                query = query.where(
+                    cast(
+                        ColumnElement[bool],
+                        IdempotencyRecordModel.wallet_id == wallet_id,
+                    )
+                )
             rows = (
                 await session.execute(
-                    select(IdempotencyRecordModel, ReceiptModel)
-                    .join(
-                        ReceiptModel,
-                        cast(
-                            ColumnElement[bool],
-                            ReceiptModel.receipt_id
-                            == IdempotencyRecordModel.response_reference,
-                        ),
-                    )
-                    .where(
-                        cast(
-                            ColumnElement[bool],
-                            ReceiptModel.outcome == "failed_unrefunded",
-                        )
-                    )
-                    .order_by(
+                    query.order_by(
                         cast(
                             ColumnElement[Any], IdempotencyRecordModel.created_at
                         ).desc()
