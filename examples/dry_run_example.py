@@ -1,9 +1,13 @@
 """
-Dry-Run Sandbox Example
-=======================
+Dry-Run Sandbox Example (legacy billing simulation)
+===================================================
 
 Demonstrates how agents can safely test billing operations without
 affecting real wallet balances or triggering velocity monitoring.
+
+This is a legacy cost-estimation demo, not metering and not the supported
+design-partner path. Start with ``docs/quickstart.md`` (``make quickstart``)
+for the governed permit, invoke, receipt, and replay loop.
 
 .. note::
    The dry-run endpoints live on the billing router, which is a **proof

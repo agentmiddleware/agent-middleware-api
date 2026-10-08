@@ -25,7 +25,12 @@ tool loop is trusted. Checklist:
 [`docs/partner-first-tool-runbook.md`](docs/partner-first-tool-runbook.md).
 See [`WEDGE.md`](WEDGE.md).
 
-## Environment
+## Environment (manual setup; prefer `make quickstart`)
+
+New to the loop? Prefer the crowned entry point: `make quickstart`, then
+follow [docs/quickstart.md](docs/quickstart.md). It boots the same trust
+plane with one command and is the path CI exercises. The manual block below
+is the fallback for the persistent-DB narrated demo, kept as an appendix.
 
 Trust mode requires an Ed25519 signing seed; without it the server exits at
 startup with `trust_signing_private_key_required`. Generate one **once** and
