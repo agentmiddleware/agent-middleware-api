@@ -596,6 +596,126 @@ def test_024_repairs_sqlite_boolean_backfill(tmp_path, monkeypatch):
     engine.dispose()
 
 
+def test_sqlite_boolean_server_defaults_read_as_false(tmp_path, monkeypatch):
+    """Inserts that omit these flags must stay false on SQLite.
+
+    A server default of the text false is stored as text. SQLAlchemy's
+    non-native Boolean then reads any non-empty string as True, so a permit
+    looks human-gated, an approval looks simulated, and a refresh token looks
+    revoked even though the migration author meant false.
+    """
+    from sqlalchemy import Boolean, Column, MetaData, String, Table, select
+
+    db_path = tmp_path / "bool-default.db"
+    async_url = f"sqlite+aiosqlite:///{db_path}"
+    sync_url = f"sqlite:///{db_path}"
+    monkeypatch.setenv("DATABASE_URL", async_url)
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+    asyncio.set_event_loop(asyncio.new_event_loop())
+
+    engine = create_engine(sync_url)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO wallets (
+                    wallet_id, wallet_type, balance, lifetime_credits,
+                    lifetime_debits, daily_spent, auto_refill, status
+                ) VALUES ('w-bool', 'agent', 0, 0, 0, 0, 0, 'active')
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO signing_keys (key_id, alg, public_key_b64, status)
+                VALUES ('k-bool', 'Ed25519', 'pub', 'active')
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO permits (
+                    permit_id, issuer_wallet_id, subject_wallet_id,
+                    scopes_json, allowed_tools_json, max_credits,
+                    expires_at, nonce, signature, key_id
+                ) VALUES (
+                    'p-bool', 'w-bool', 'w-bool', '[]', '[]', 1,
+                    '2030-01-01 00:00:00', 'n-bool', 'sig', 'k-bool'
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO human_approvals (
+                    approval_id, wallet_id, permit_id, tool, idempotency_key,
+                    requested_at, expires_at
+                ) VALUES (
+                    'a-bool', 'w-bool', 'p-bool', 'tool', 'idem-bool',
+                    '2026-01-01 00:00:00', '2030-01-01 00:00:00'
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO refresh_tokens (
+                    jti, wallet_id, created_at, expires_at
+                ) VALUES (
+                    'j-bool', 'w-bool', '2026-01-01 00:00:00', '2030-01-01 00:00:00'
+                )
+                """
+            )
+        )
+        raw = connection.execute(
+            text(
+                """
+                SELECT
+                    typeof(requires_human_approval),
+                    (SELECT typeof(simulated) FROM human_approvals WHERE approval_id = 'a-bool'),
+                    (SELECT typeof(revoked) FROM refresh_tokens WHERE jti = 'j-bool')
+                FROM permits WHERE permit_id = 'p-bool'
+                """
+            )
+        ).one()
+    assert raw == ("integer", "integer", "integer"), raw
+
+    metadata = MetaData()
+    permits = Table(
+        "permits",
+        metadata,
+        Column("permit_id", String, primary_key=True),
+        Column("requires_human_approval", Boolean),
+    )
+    approvals = Table(
+        "human_approvals",
+        metadata,
+        Column("approval_id", String, primary_key=True),
+        Column("simulated", Boolean),
+    )
+    tokens = Table(
+        "refresh_tokens",
+        metadata,
+        Column("jti", String, primary_key=True),
+        Column("revoked", Boolean),
+    )
+    with engine.connect() as connection:
+        requires_human = connection.execute(
+            select(permits.c.requires_human_approval)
+        ).scalar_one()
+        simulated = connection.execute(select(approvals.c.simulated)).scalar_one()
+        revoked = connection.execute(select(tokens.c.revoked)).scalar_one()
+    engine.dispose()
+    assert requires_human is False
+    assert simulated is False
+    assert revoked is False
+
+
 def test_040_repeat_window_seconds_column_upgrade_and_downgrade(tmp_path, monkeypatch):
     """Migration 040 preserves legacy permit data and adds a nullable window."""
     db_path = tmp_path / "repeat-window-migration.db"
