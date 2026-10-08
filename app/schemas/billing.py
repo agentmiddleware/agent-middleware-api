@@ -16,9 +16,12 @@ from typing import Any, ClassVar, Literal
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
 from enum import Enum
 from datetime import datetime
 import re
+
+from ..core.credits import credit_amount_fits_storage, supported_wallet_currency
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +139,21 @@ SAFE_WALLET_ID = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$")
 MAX_STORABLE_AMOUNT = 1e12
 
 
+def _reject_unstorable_credit(value: Any) -> Any:
+    """Refuse a money input the ledger column cannot store unchanged.
+
+    ``lt=1e12`` still allows values such as 999999999999.99 and 1e-9. SQLite
+    binds those through a float and reads back a different number, so the
+    wallet we return would not match the wallet we store.
+    """
+    if value is None:
+        return value
+    amount = value if isinstance(value, Decimal) else Decimal(str(value))
+    if not credit_amount_fits_storage(amount):
+        raise ValueError("amount does not fit ledger precision")
+    return value
+
+
 def _exact_decimal(value: Any) -> str | None:
     """Return a JSON-safe exact decimal string without binary float math."""
     if value is None:
@@ -212,6 +230,16 @@ class CreateSponsorWalletRequest(BaseModel):
         description="Arbitrary metadata (Stripe customer ID, org info, etc.).",
     )
 
+    @field_validator("initial_credits")
+    @classmethod
+    def _initial_credits_fit_ledger(cls, value: Any) -> Any:
+        return _reject_unstorable_credit(value)
+
+    @field_validator("currency")
+    @classmethod
+    def _currency_is_usd(cls, value: str) -> str:
+        return supported_wallet_currency(value)
+
 
 class CreateAgentWalletRequest(BaseModel):
     """Provision a pre-paid agent wallet under a sponsor."""
@@ -257,6 +285,16 @@ class CreateAgentWalletRequest(BaseModel):
         description="Amount to refill.",
     )
 
+    @field_validator(
+        "budget_credits",
+        "daily_limit",
+        "auto_refill_threshold",
+        "auto_refill_amount",
+    )
+    @classmethod
+    def _amounts_fit_ledger(cls, value: Any) -> Any:
+        return _reject_unstorable_credit(value)
+
 
 class CreateChildWalletRequest(BaseModel):
     """Spawn a sub-agent child wallet from an agent wallet."""
@@ -297,6 +335,11 @@ class CreateChildWalletRequest(BaseModel):
         default=True,
         description="Reclaim unspent credits when child completes.",
     )
+
+    @field_validator("budget_credits", "max_spend")
+    @classmethod
+    def _amounts_fit_ledger(cls, value: Any) -> Any:
+        return _reject_unstorable_credit(value)
 
     @field_validator("ttl_seconds", mode="before")
     @classmethod

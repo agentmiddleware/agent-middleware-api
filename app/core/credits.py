@@ -16,3 +16,18 @@ def credit_amount_fits_storage(amount: Decimal) -> bool:
         and Decimal("0") <= amount < Decimal("1000000000000")
         and Decimal(f"{float(amount):.8f}") == amount
     )
+
+
+def supported_wallet_currency(currency: object) -> str:
+    """Return USD, or reject a missing or unsupported currency.
+
+    Wallet balances are one credit unit. The wallet row does not store a
+    currency, so a blank code or EUR would still mint credits that spend as
+    USD. Only USD is accepted, matching the fiat top-up rail.
+    """
+    if not isinstance(currency, str):
+        raise ValueError("currency is required")
+    normalized = currency.strip().upper()
+    if normalized != "USD":
+        raise ValueError("currency must be USD")
+    return "USD"
