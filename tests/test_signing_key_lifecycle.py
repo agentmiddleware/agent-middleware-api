@@ -413,6 +413,91 @@ async def test_active_signing_key_requires_authentication(
 
 
 @pytest.mark.anyio
+async def test_operator_can_rotate_and_retire_signing_key_over_http(
+    client,
+    clean_database,
+):
+    """Rotate and retire are reachable operator endpoints, not code-only.
+
+    Before the fix, rotate_active_key_metadata and retire_key_metadata had
+    no HTTP route, so receipt signing keys could not be rotated through
+    the gateway.
+    """
+    service = get_signing_key_service()
+    original = await service.ensure_active_key()
+    original_id = original.key_id
+    try:
+        rotated = await client.post(
+            "/v1/signing-keys/rotate",
+            json={"new_key_id": "operator-rotated-key"},
+            headers=BOOTSTRAP_HEADERS,
+        )
+        assert rotated.status_code == 200, rotated.text
+        assert rotated.json()["key_id"] == "operator-rotated-key"
+        assert rotated.json()["status"] == "active"
+
+        active = await client.get("/v1/signing-keys/active", headers=BOOTSTRAP_HEADERS)
+        assert active.json()["key_id"] == "operator-rotated-key"
+
+        old = await client.get(
+            f"/v1/signing-keys/{original_id}", headers=BOOTSTRAP_HEADERS
+        )
+        assert old.json()["status"] == "retired"
+
+        # The active id cannot be retired: signing would re-activate it on
+        # the next receipt, so the endpoint refuses with 409.
+        conflict = await client.post(
+            "/v1/signing-keys/operator-rotated-key/retire",
+            headers=BOOTSTRAP_HEADERS,
+        )
+        assert conflict.status_code == 409
+        assert conflict.json()["detail"]["error"] == "cannot_retire_active_key"
+
+        retired = await client.post(
+            f"/v1/signing-keys/{original_id}/retire",
+            headers=BOOTSTRAP_HEADERS,
+        )
+        assert retired.status_code == 200
+        assert retired.json()["status"] == "retired"
+
+        missing = await client.post(
+            "/v1/signing-keys/no-such-key/retire", headers=BOOTSTRAP_HEADERS
+        )
+        assert missing.status_code == 404
+
+        blank = await client.post(
+            "/v1/signing-keys/rotate",
+            json={"new_key_id": ""},
+            headers=BOOTSTRAP_HEADERS,
+        )
+        assert blank.status_code == 422
+    finally:
+        await service.rotate_active_key_metadata(original_id)
+
+
+@pytest.mark.anyio
+async def test_signing_key_rotate_and_retire_require_bootstrap_admin(
+    client,
+    clean_database,
+):
+    """A wallet-scoped key must not rotate or retire signing keys."""
+    provisioned = await provision_agent_wallet(client)
+
+    denied_rotate = await client.post(
+        "/v1/signing-keys/rotate",
+        json={"new_key_id": "wallet-attempt"},
+        headers=provisioned["agent_headers"],
+    )
+    assert denied_rotate.status_code == 403
+
+    denied_retire = await client.post(
+        "/v1/signing-keys/anything/retire",
+        headers=provisioned["agent_headers"],
+    )
+    assert denied_retire.status_code == 403
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize("headers,expected_status", _UNAUTHORIZED_CREDENTIALS)
 async def test_signing_key_by_id_requires_authentication(
     client, clean_database, headers, expected_status

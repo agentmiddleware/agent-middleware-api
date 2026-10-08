@@ -279,6 +279,7 @@ class APIKeyService:
                     "expires_at": key.expires_at,
                     "max_uses": key.max_uses,
                     "use_count": key.use_count,
+                    "is_live": _key_is_live(key, now),
                 }
             )
 
@@ -659,6 +660,13 @@ class APIKeyService:
         """
         Revoke an API key.
 
+        A revoked key already fails the origin-key liveness check on refresh,
+        but the derived rows must still be marked revoked: anything reading
+        the stored flag would otherwise treat this key's chain as live. Every
+        live refresh token bound to this key is therefore revoked in the same
+        transaction, and the revoke is written to the rotation audit log so
+        the wallet's containment trail has no hole for its most common action.
+
         Args:
             wallet_id: Wallet owning the key
             key_id: Key to revoke
@@ -667,6 +675,7 @@ class APIKeyService:
         Returns:
             True if revoked successfully
         """
+        now = utc_now()
         async with self._session_factory()() as session:
             result = await session.execute(
                 select(APIKeyModel).where(
@@ -680,12 +689,44 @@ class APIKeyService:
                 raise KeyNotFoundError(key_id)
 
             key.status = APIKeyStatus.REVOKED.value
-            key.revoked_at = utc_now()
+            key.revoked_at = now
             key.revoke_reason = reason
             session.add(key)
+
+            # Kill the derived sessions, scoped to this key only: sibling
+            # keys and their chains are untouched.
+            derived = await session.execute(
+                select(RefreshTokenModel).where(
+                    col(RefreshTokenModel.wallet_id) == wallet_id,
+                    col(RefreshTokenModel.key_id) == key_id,
+                    col(RefreshTokenModel.revoked).is_(False),
+                )
+            )
+            revoked_derived = 0
+            for token in derived.scalars().all():
+                token.revoked = True
+                session.add(token)
+                revoked_derived += 1
+
+            session.add(
+                KeyRotationLogModel(
+                    log_id=f"rot_{uuid4().hex[:12]}",
+                    key_id=key_id,
+                    wallet_id=wallet_id,
+                    rotation_type=RotationType.REVOCATION.value,
+                    old_key_id=key_id,
+                    new_key_id=None,
+                    trigger_reason=reason,
+                    triggered_by="user",
+                    created_at=to_naive_utc(now),
+                )
+            )
             await session.commit()
 
-        logger.warning(f"Revoked API key {key_id} for wallet {wallet_id}: {reason}")
+        logger.warning(
+            f"Revoked API key {key_id} for wallet {wallet_id}: {reason} "
+            f"(revoked {revoked_derived} derived refresh tokens)"
+        )
         return True
 
     async def emergency_revocation(

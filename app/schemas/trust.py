@@ -456,6 +456,21 @@ class TrustMcpMetadata(BaseModel):
     receipt: dict[str, Any] | None = None
 
 
+class RotateSigningKeyRequest(BaseModel):
+    """Move future signatures to a new key id, retiring the current one.
+
+    This rotates metadata only: the new id is published with this plane's
+    current public key, and the previous key stays published as retired so
+    old receipts remain verifiable. A full cryptographic rotation (new key
+    material) additionally requires new TRUST_SIGNING_PRIVATE_KEY_B64
+    material paired with a new key id; reusing an id for different material
+    is rejected so history cannot be clobbered.
+    """
+
+    model_config = {"extra": "forbid"}
+    new_key_id: str = Field(min_length=1, max_length=64)
+
+
 class SigningKeyMetadataResponse(BaseModel):
     key_id: str
     alg: str

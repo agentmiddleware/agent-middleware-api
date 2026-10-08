@@ -107,7 +107,9 @@ async def test_refresh_denied_once_the_wallet_has_no_active_key(
         "/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
     )
     assert resp.status_code == 401
-    assert resp.json()["detail"]["error"] == "no_active_api_key"
+    # Single revoke marks the derived row itself, so the stored-flag check
+    # fires before the origin-key liveness check.
+    assert resp.json()["detail"]["error"] == "revoked_refresh_token"
 
 
 @pytest.mark.anyio
@@ -202,7 +204,7 @@ async def test_revoking_one_of_several_keys_kills_only_its_own_tokens(
         json={"refresh_token": compromised_tokens["refresh_token"]},
     )
     assert denied.status_code == 401
-    assert denied.json()["detail"]["error"] == "no_active_api_key"
+    assert denied.json()["detail"]["error"] == "revoked_refresh_token"
 
     allowed = await client.post(
         "/v1/auth/refresh",
@@ -243,7 +245,7 @@ async def test_rotation_carries_the_key_binding_forward(
         "/v1/auth/refresh", json={"refresh_token": rotated_refresh}
     )
     assert resp.status_code == 401
-    assert resp.json()["detail"]["error"] == "no_active_api_key"
+    assert resp.json()["detail"]["error"] == "revoked_refresh_token"
 
 
 @pytest.mark.anyio
@@ -430,6 +432,66 @@ async def test_revoked_key_cannot_mint_new_tokens(client, clean_database, signin
 
     resp = await client.post("/v1/auth/token", json={"api_key": api_key})
     assert resp.status_code == 401
+
+
+@pytest.mark.anyio
+async def test_single_revoke_endpoint_kills_derived_chain_and_logs_it(
+    client, clean_database, signing_key
+):
+    """The ordinary DELETE revoke contains derived sessions and is audited.
+
+    Before the fix, revoke_key touched only the api_keys row: the refresh
+    row stayed live in storage and no audit entry was written, so the most
+    common containment action left no trace for auditors.
+    """
+    from sqlalchemy import select
+
+    from app.db.database import get_session_factory
+    from app.db.models import RefreshTokenModel
+
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    tokens = await _mint_tokens(client, provisioned["agent_headers"]["X-API-Key"])
+
+    resp = await client.delete(
+        f"/v1/api-keys/{wallet_id}/{provisioned['key_id']}",
+        params={"reason": "compromised"},
+        headers={"X-API-Key": "test-key"},
+    )
+    assert resp.status_code == 204, resp.text
+
+    factory = get_session_factory()
+    async with factory() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(RefreshTokenModel).where(
+                        RefreshTokenModel.wallet_id == wallet_id,
+                        RefreshTokenModel.key_id == provisioned["key_id"],
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert rows, "expected a stored refresh token bound to the revoked key"
+    assert all(row.revoked for row in rows)
+
+    denied = await client.post(
+        "/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
+    )
+    assert denied.status_code == 401
+    assert denied.json()["detail"]["error"] == "revoked_refresh_token"
+
+    logs = await client.get(
+        f"/v1/api-keys/{wallet_id}/logs", headers={"X-API-Key": "test-key"}
+    )
+    assert logs.status_code == 200
+    entries = [e for e in logs.json() if e["rotation_type"] == "revocation"]
+    assert len(entries) == 1
+    assert entries[0]["old_key_id"] == provisioned["key_id"]
+    assert entries[0]["new_key_id"] is None
+    assert entries[0]["trigger_reason"] == "compromised"
 
 
 @pytest.mark.anyio

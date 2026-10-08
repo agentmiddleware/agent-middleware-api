@@ -113,6 +113,10 @@ class RotationType(str, Enum):
     AUTOMATIC = "automatic"
     EMERGENCY = "emergency"
     SCHEDULED = "scheduled"
+    # A single-key revoke with no replacement. It is not a rotation, but the
+    # rotation log is the wallet's containment audit trail, so plain revokes
+    # are recorded here with old_key_id set and new_key_id empty.
+    REVOCATION = "revocation"
 
 
 class AlertSeverity(str, Enum):
@@ -813,6 +817,11 @@ class APIKeyResponse(BaseModel):
     expires_at: datetime | None = None
     max_uses: int | None = None
     use_count: int = 0
+    # Stored status is never swept, so an expired or exhausted key still reads
+    # "active" there. This is the liveness rule from validation (active status,
+    # unspent budget, unexpired): False means the key cannot authenticate even
+    # though its stored status may still say active.
+    is_live: bool
 
 
 class APIKeyWithSecret(BaseModel):
