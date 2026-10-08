@@ -483,6 +483,24 @@ async def run_in_process(
         return await run_with_database(f"sqlite+aiosqlite:///{db_path}")
 
 
+LOCAL_BOOTSTRAP_API_KEY = "war-room-bootstrap-key"
+
+
+def resolve_bootstrap_api_key(cli_value: str | None) -> str:
+    """Resolve the proof bootstrap key: env first, flag with a warning, local default."""
+    from app.core.secrets import resolve_secret
+
+    return (
+        resolve_secret(
+            env_name="BOOTSTRAP_API_KEY",
+            cli_value=cli_value,
+            description="war-room bootstrap API key",
+            required=False,
+        )
+        or LOCAL_BOOTSTRAP_API_KEY
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Run the Agent Ops War Room trust-plane proof."
@@ -505,15 +523,22 @@ def main() -> None:
     )
     parser.add_argument(
         "--bootstrap-api-key",
-        default="war-room-bootstrap-key",
-        help="Bootstrap API key used to create the proof wallets and key.",
+        default=None,
+        help=(
+            "Bootstrap API key used to create the proof wallets and key. "
+            "Prefer BOOTSTRAP_API_KEY in the environment (argv is visible "
+            "to local process listings). Defaults to the synthetic local "
+            "key 'war-room-bootstrap-key' when neither is set."
+        ),
     )
     args = parser.parse_args()
+
+    bootstrap_api_key = resolve_bootstrap_api_key(args.bootstrap_api_key)
 
     result = asyncio.run(
         run_in_process(
             database_url=args.database_url,
-            bootstrap_api_key=args.bootstrap_api_key,
+            bootstrap_api_key=bootstrap_api_key,
             emit=not args.json,
         )
     )

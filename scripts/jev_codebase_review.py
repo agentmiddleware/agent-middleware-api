@@ -24,7 +24,6 @@ import asyncio
 import datetime as dt
 import json
 import os
-import re
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -33,29 +32,17 @@ from typing import Any
 import httpx
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-# Same patterns as app.policy.jev_guard.SECRET_PATTERNS, copied so this script
-# needs only httpx and not the app's FastAPI import chain.
-SECRET_PATTERNS = [
-    r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----",
-    r"\b(sk|pk|rk)[-_](live|test|proj|ant)?[-_]?[A-Za-z0-9_-]{16,}",
-    r"\bgh[pousr]_[A-Za-z0-9]{20,}",
-    r"\bgithub_pat_[A-Za-z0-9_]{20,}",
-    r"\bxox[abprs]-[A-Za-z0-9-]{10,}",
-    r"\bAKIA[0-9A-Z]{16}\b",
-    r"\bAIza[0-9A-Za-z_-]{30,}",
-    r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}",
-    r"(?i)\b(api[_-]?key|secret|token|password|passwd|pwd)\b\s*[:=]\s*\S+",
-    r"\b[A-Fa-f0-9]{32,}\b",
-    r"\b[A-Za-z0-9+/]{40,}={0,2}",
-]
-_SECRETS = [re.compile(p) for p in SECRET_PATTERNS]
+# Single shared copy in app.core.secrets (stdlib-only, so this script still
+# avoids the app's FastAPI import chain). Aliases keep older references working.
+from app.core.secrets import SECRET_PATTERNS as SECRET_PATTERNS
+from app.core.secrets import redact_text
 
 
 def strip_secrets(text: str) -> str:
-    for pattern in _SECRETS:
-        text = pattern.sub("[secret]", text)
-    return text
+    return redact_text(text)
 
 
 DEFAULT_MODEL = os.environ.get("TYPESAFE_DEFAULT_MODEL", "jev-1.13.0")
