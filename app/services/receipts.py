@@ -27,6 +27,21 @@ from app.services.signing_keys import (
 
 _REASON_CODE_PATTERN = re.compile(r"[a-z][a-z0-9_.:-]{0,127}\Z")
 
+# Every outcome the governed paths mint through ``create_receipt``. Anything
+# else is a caller bug: the outcome is signed evidence and downstream readers
+# (refund reconciliation, idempotency repair) branch on these exact strings.
+_RECEIPT_OUTCOMES = frozenset(
+    {
+        "success",
+        "denied",
+        "insufficient_funds",
+        "failed_refunded",
+        "failed_unrefunded",
+        "delivery_uncertain",
+        "response_rejected",
+    }
+)
+
 
 class ReceiptError(RuntimeError):
     def __init__(self, reason: str) -> None:
@@ -231,6 +246,13 @@ class ReceiptService:
             raise ReceiptError("receipt_action_binding_conflict")
         if any(getattr(model, name) != value for name, value in expected.items()):
             raise ReceiptError("receipt_idempotency_conflict")
+        # Constraints are signed evidence too: returning the stored receipt
+        # when the caller evaluated different constraints would present old
+        # evidence as the answer to a new evaluation.
+        if _loads_dict(model.constraints_evaluated_json) != (
+            constraints_evaluated or {}
+        ):
+            raise ReceiptError("receipt_idempotency_conflict")
 
     @staticmethod
     async def _get_by_idempotency_record(
@@ -297,6 +319,8 @@ class ReceiptService:
             for amount in (credits_authorized, credits_charged)
         ):
             raise ReceiptError("receipt_credits_invalid")
+        if outcome not in _RECEIPT_OUTCOMES:
+            raise ReceiptError("receipt_outcome_invalid")
         # Reuse the existing signed JSON field; no receipt schema/migration.
         # The audit link also covers denial/refund/reconciliation helpers.
         if get_settings().JEV_RISK_GUARD != DuplicateGuardMode.OFF:
