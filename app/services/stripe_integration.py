@@ -29,6 +29,7 @@ from ..core.time import utc_now
 from ..core.resilience import run_with_write_conflict_retry
 from ..schemas.billing import AlertSeverity, AlertType, WalletStatus
 from .agent_money import WalletNotFoundError
+from .stripe_webhook_auth import verify_stripe_event
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -287,14 +288,12 @@ class StripeIntegration:
         Raises:
             ValueError: For unhandled event types
         """
-        try:
-            event = stripe.Webhook.construct_event(
-                payload,
-                sig_header,
-                settings.STRIPE_WEBHOOK_SECRET,
-            )
-        except (ValueError, stripe.SignatureVerificationError) as e:
-            logger.error(f"Invalid Stripe signature: {e}")
+        event = verify_stripe_event(
+            payload,
+            sig_header,
+            settings.STRIPE_WEBHOOK_SECRET,
+        )
+        if event is None:
             return False
 
         # The refund handler is dispatched separately because it also needs the

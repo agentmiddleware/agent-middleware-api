@@ -25,6 +25,7 @@ from ..db.models import KYCVerificationModel, WalletModel
 from ..core.config import get_settings
 from ..schemas.billing import KYCDocumentType, KYCStatus, WalletStatus
 from .agent_money import WalletNotFoundError
+from .stripe_webhook_auth import verify_stripe_event
 from .wallet_status import SPENDABLE_WALLET_STATUSES
 
 logger = logging.getLogger(__name__)
@@ -326,16 +327,15 @@ class KYCService:
         Returns:
             True if processed successfully, False on signature failure
         """
-        try:
-            event = stripe.Webhook.construct_event(
-                payload,
-                sig_header,
-                settings.STRIPE_WEBHOOK_SECRET,
-            )
-        # SignatureVerificationError is a StripeError, not a ValueError, so it
-        # must be named: otherwise a bad signature escapes as a 500.
-        except (ValueError, stripe.SignatureVerificationError) as e:
-            logger.error(f"Invalid Stripe signature: {e}")
+        # Verification lives in stripe_webhook_auth so the settlement and KYC
+        # webhooks cannot drift apart: a bad signature maps to False (the
+        # router answers 400), never to an exception that escapes as a 500.
+        event = verify_stripe_event(
+            payload,
+            sig_header,
+            settings.STRIPE_WEBHOOK_SECRET,
+        )
+        if event is None:
             return False
 
         handler_map = {

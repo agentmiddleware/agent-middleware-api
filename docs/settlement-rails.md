@@ -110,10 +110,9 @@ enforces, generalized.
 **Authenticity**
 1. Settlement notifications are cryptographically verifiable against a secret
    or key the operator holds, and verification failure is a hard rejection.
-2. Verification is shared code, not re-implemented per consumer. (The
-   repository currently fails this: the KYC webhook handler and the settlement
-   handler verify the same signing secret with different exception handling and
-   no shared helper.)
+2. Verification is shared code, not re-implemented per consumer. (Both
+   the settlement and the KYC webhook handlers verify through
+   `app/services/stripe_webhook_auth.py::verify_stripe_event`.)
 
 **Settlement validity — separate from authenticity**
 3. The credited amount is re-derivable from fields the *rail* controls, never
@@ -167,9 +166,14 @@ enforces, generalized.
     Identity gating top-up preparation; a non-Stripe rail has no provider
     behind that gate.
 15. Aggregate minted credits reconcile against the rail's own reported balance.
-    **Nothing does this today** — no job, report, or invariant check asserts
-    that live credits are backed by verified settlements. With one rail this is
-    a latent gap; with several it becomes materially dangerous.
+    The ledger-internal half exists: `BillingEngine.get_settlement_summary`
+    totals every Stripe mint by payment intent, totals refunds, and flags
+    refunds that reference an intent with no mint row; scripts/reconcile_topups.py
+    renders it as a report (text, CSV, or JSON) and fails when orphan
+    refunds exist. The Stripe-side half is still manual: the operator
+    compares the reported minted total against Stripe dashboard payouts.
+    No automated pull from Stripe exists yet, so with several rails the
+    manual step becomes materially dangerous.
 
 ## Facilitation surfaces under the freeze (x402, ACP)
 

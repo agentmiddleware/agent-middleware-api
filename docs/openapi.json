@@ -1147,6 +1147,99 @@
         }
       }
     },
+    "/v1/billing/statement/{wallet_id}": {
+      "get": {
+        "tags": [
+          "Agent Financial Gateways"
+        ],
+        "summary": "Export wallet statement as CSV",
+        "description": "Per-wallet top-up and spend statement for pilot billing: ledger entries rendered as plain CSV so a finance contact can reconcile usage without waiting for full invoices. This is a statement of internal ledger debits and credits, not an invoice.",
+        "operationId": "get_statement_v1_billing_statement__wallet_id__get",
+        "security": [
+          {
+            "APIKeyHeader": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "wallet_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Wallet Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 5000,
+              "minimum": 1,
+              "default": 500,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "Missing API key"
+          },
+          "402": {
+            "description": "Insufficient funds",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InsufficientFundsResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Wallet belongs to another tenant"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/billing/charge": {
       "post": {
         "tags": [
@@ -8632,12 +8725,28 @@
             "title": "Tier Name"
           },
           "price_per_credit": {
-            "type": "number",
-            "title": "Price Per Credit"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Per Credit",
+            "description": "Public per-credit price in USD, or null when pricing is custom-quoted per pilot in writing."
           },
           "minimum_purchase": {
-            "type": "number",
-            "title": "Minimum Purchase"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimum Purchase",
+            "description": "Minimum purchase in USD, or null when there is no public tier."
           },
           "features": {
             "items": {
@@ -8650,8 +8759,6 @@
         "type": "object",
         "required": [
           "tier_name",
-          "price_per_credit",
-          "minimum_purchase",
           "features"
         ],
         "title": "PricingTier"
