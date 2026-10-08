@@ -70,6 +70,10 @@ class WalletModel(SQLModel, table=True):
 
     # Status and metadata
     status: str = Field(default="active", max_length=20)
+    # Tenant isolation label. NULL = normal wallet; "demo" = self-serve demo
+    # tenant (synthetic credits, tightly capped permits). See
+    # docs/demo-tenant.md.
+    tenant: Optional[str] = Field(default=None, max_length=32, index=True)
     kyc_status: str = Field(default="not_required", max_length=30)
     kyc_verified_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
     metadata_json: Optional[str] = Field(default=None)
@@ -293,6 +297,14 @@ class APIKeyModel(SQLModel, table=True):
     # overshot by concurrent requests.
     max_uses: Optional[int] = Field(default=None)
     use_count: int = Field(default=0)
+
+    # Per-key tool allowlist (JSON list of tool names). NULL = unrestricted
+    # (every existing key stays exactly as it is); an empty list means no
+    # tools. Enforced at permit creation and at invoke. See docs/demo-tenant.md.
+    allowed_tools_json: Optional[str] = Field(default=None)
+    # Tenant label mirroring the owning wallet. NULL = normal; "demo" =
+    # self-serve demo tenant (route-confined, kill-switchable).
+    tenant: Optional[str] = Field(default=None, max_length=32, index=True)
 
     revoked_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
     revoke_reason: Optional[str] = Field(default=None, max_length=255)

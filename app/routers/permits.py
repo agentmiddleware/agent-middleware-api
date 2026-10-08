@@ -50,6 +50,95 @@ def _authorize_permit_inspection(
     auth.require_bootstrap_admin()
 
 
+async def _enforce_permit_key_and_demo_bounds(
+    request: PermitCreateRequest,
+    auth: AuthContext,
+) -> None:
+    """Deny out-of-bounds permits BEFORE the idempotency record is begun.
+
+    Runs the shared allowlist + demo-cap policy with the caller key's bounds
+    and the issuer/subject wallets' tenants. Denials are 403 carrying
+    ``key_tool_not_allowed`` / ``demo_permit_out_of_bounds``. Fast path: when
+    the caller key has no allowlist, no tenant, and neither wallet is
+    demo-tenant, nothing is enforced and behavior is unchanged.
+    """
+    from datetime import timedelta
+
+    from app.db.database import get_session_factory
+    from app.db.models import WalletModel
+    from app.services.demo_tenant import (
+        DEMO_TENANT_LABEL,
+        DemoPermitDenied,
+        KeyAllowlistDenied,
+        check_demo_permit_bounds,
+        check_key_allowlist_for_permit,
+    )
+
+    # Demo caps apply when a demo wallet is involved regardless of who calls,
+    # so issuer/subject tenants are always loaded; the checks themselves are
+    # no-ops for unrestricted keys and normal wallets.
+    key_allowlist = auth.allowed_tools
+    caller_tenant = auth.tenant
+    issuer_tenant: str | None = None
+    subject_tenant: str | None = None
+    caller_key_expires_at = None
+    factory = get_session_factory()
+    async with factory() as session:
+        issuer = await session.get(WalletModel, request.issuer_wallet_id)
+        subject = await session.get(WalletModel, request.subject_wallet_id)
+        issuer_tenant = getattr(issuer, "tenant", None) if issuer else None
+        subject_tenant = getattr(subject, "tenant", None) if subject else None
+    if auth.key_id:
+        from app.services.api_key_service import get_api_key_service
+
+        row = await get_api_key_service().get_key_record(auth.key_id)
+        caller_key_expires_at = row.expires_at if row is not None else None
+    try:
+        check_key_allowlist_for_permit(
+            key_allowlist=key_allowlist,
+            allowed_tools=list(request.allowed_tools or []),
+            scopes=list(request.scopes or []),
+        )
+    except KeyAllowlistDenied as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"error": exc.error, "message": exc.message},
+        )
+    demo_involved = (
+        issuer_tenant == DEMO_TENANT_LABEL
+        or subject_tenant == DEMO_TENANT_LABEL
+        or caller_tenant == DEMO_TENANT_LABEL
+    )
+    if not demo_involved:
+        return
+    settings = get_settings()
+    from app.core.time import utc_now
+
+    try:
+        check_demo_permit_bounds(
+            issuer_tenant=issuer_tenant,
+            subject_tenant=subject_tenant,
+            caller_tenant=caller_tenant,
+            allowed_tools=list(request.allowed_tools or []),
+            scopes=list(request.scopes or []),
+            max_credits=request.max_credits,
+            expires_at=request.expires_at,
+            caller_key_expires_at=caller_key_expires_at,
+            requires_human_approval=request.requires_human_approval,
+            repeat_window_seconds=request.repeat_window_seconds,
+            action_contract_version=request.action_contract_version,
+            demo_allowed_tools=settings.demo_allowed_tools_list,
+            max_permit_credits=settings.DEMO_MAX_PERMIT_CREDITS,
+            max_permit_ttl=timedelta(minutes=settings.DEMO_MAX_PERMIT_TTL_MINUTES),
+            now=utc_now(),
+        )
+    except DemoPermitDenied as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"error": exc.error, "message": exc.message},
+        )
+
+
 @router.get("", response_model=PermitListResponse)
 async def list_permits(
     wallet_id: str | None = Query(None),
@@ -104,6 +193,7 @@ async def create_permit(
     auth: AuthContext = Depends(get_auth_context),
     money: AgentMoney = Depends(get_agent_money),
 ) -> PermitResponse:
+    await _enforce_permit_key_and_demo_bounds(request, auth)
     if request.action_contract_version is not None:
         raise HTTPException(
             status_code=400, detail="action_permit_requires_trusted_issuance"
@@ -160,7 +250,7 @@ async def create_permit(
 
     try:
         permit = await get_permit_service().create_permit(
-            request, subject_key_id=auth.key_id
+            request, subject_key_id=auth.key_id, auth=auth
         )
     except PermitCreationRejectedError as exc:
         if not await idem.abandon(

@@ -48,6 +48,13 @@ class AuthContext:
     wallet_id: str | None = None
     is_bootstrap_admin: bool = False
     scopes: list[str] = None  # type: ignore[assignment]
+    # Per-key tool allowlist. None = unrestricted (every pre-existing key);
+    # an empty tuple = no tools. Populated from the key row on the DB-key
+    # and JWT paths; static/bootstrap keys keep None.
+    allowed_tools: tuple[str, ...] | None = None
+    # Tenant label from the key row. None = normal; "demo" = self-serve demo
+    # tenant (route-confined, kill-switchable). Static/bootstrap keys keep None.
+    tenant: str | None = None
     # Enterprise (Okta/Entra) bearer that accompanied an X-API-Key call. Set
     # ONLY when the Authorization header carried a token whose UNVERIFIED
     # issuer names a pinned IGA issuer (see get_auth_context). It is identity
@@ -263,18 +270,48 @@ async def _resolve_auth_context(
 
     try:
         from ..services.api_key_service import get_api_key_service
+        from ..services.demo_tenant import (
+            DEMO_TENANT_DISABLED,
+            DEMO_KEY_ROUTE_FORBIDDEN,
+            current_demo_request,
+            demo_route_allowed,
+            parse_allowlist,
+        )
 
         db_key = await get_api_key_service().validate_key(stripped)
     except RuntimeError:
         db_key = None
 
     if db_key:
+        tenant = getattr(db_key, "tenant", None)
+        if tenant == "demo" and not settings.ENABLE_DEMO_TENANT:
+            # Kill switch: flipping the flag off instantly disables all demo
+            # traffic, including keys minted while it was on.
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": DEMO_TENANT_DISABLED,
+                    "message": "The demo tenant is currently disabled.",
+                },
+            )
+        if tenant == "demo":
+            current = current_demo_request()
+            if current is None or not demo_route_allowed(*current):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail={
+                        "error": DEMO_KEY_ROUTE_FORBIDDEN,
+                        "message": "This demo key may not call this route.",
+                    },
+                )
         return AuthContext(
             source="db",
             raw_key=stripped,
             key_id=db_key.key_id,
             wallet_id=db_key.wallet_id,
             is_bootstrap_admin=False,
+            allowed_tools=parse_allowlist(getattr(db_key, "allowed_tools_json", None)),
+            tenant=tenant,
         )
 
     # Configured static dev keys close DEBUG open mode the same way
@@ -388,6 +425,13 @@ async def _auth_from_jwt(token: str) -> AuthContext:
         )
 
     from ..services.api_key_service import get_api_key_service
+    from ..services.demo_tenant import (
+        DEMO_TENANT_DISABLED,
+        DEMO_KEY_ROUTE_FORBIDDEN,
+        current_demo_request,
+        demo_route_allowed,
+        parse_allowlist,
+    )
 
     if not await get_api_key_service().consume_derived_key_use(
         payload.key_id, payload.sub
@@ -402,6 +446,40 @@ async def _auth_from_jwt(token: str) -> AuthContext:
             },
         )
 
+    # The JWT proves the key identity, but the allowlist/tenant live on the
+    # key row: load them so a derived token carries exactly the bounds its
+    # originating key has. Fail closed when the row cannot be loaded.
+    key_row = await get_api_key_service().get_key_record(payload.key_id)
+    if key_row is None or key_row.wallet_id != payload.sub:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "error": "no_active_api_key",
+                "message": (
+                    "The API key that issued this access token is no longer active."
+                ),
+            },
+        )
+    tenant = getattr(key_row, "tenant", None)
+    if tenant == "demo" and not get_settings().ENABLE_DEMO_TENANT:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": DEMO_TENANT_DISABLED,
+                "message": "The demo tenant is currently disabled.",
+            },
+        )
+    if tenant == "demo":
+        current = current_demo_request()
+        if current is None or not demo_route_allowed(*current):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": DEMO_KEY_ROUTE_FORBIDDEN,
+                    "message": "This demo key may not call this route.",
+                },
+            )
+
     return AuthContext(
         source="jwt",
         # Not a credential: a stable, non-secret handle for the API key that
@@ -412,6 +490,8 @@ async def _auth_from_jwt(token: str) -> AuthContext:
         key_id=payload.key_id,
         is_bootstrap_admin=False,
         scopes=payload.scopes,
+        allowed_tools=parse_allowlist(getattr(key_row, "allowed_tools_json", None)),
+        tenant=tenant,
     )
 
 

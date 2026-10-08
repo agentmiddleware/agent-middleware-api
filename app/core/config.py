@@ -84,6 +84,90 @@ class Settings(BaseSettings):
     # handler independently fails closed there. See docs/static-dev-api-keys.md.
     ENABLE_DEV_KEY_SELF_PROVISION: bool = False
 
+    # --- Self-serve demo tenant (POST /v1/demo/keys) ---
+    # Lets an anonymous visitor mint a short-lived, tightly capped demo key
+    # (tenant="demo" wallets + wallet-scoped key with a per-key tool
+    # allowlist) with no pre-shared secret. Default off: the issuance route
+    # answers 404 and every existing demo-tenant key is refused at
+    # authentication. Unlike dev keys this IS allowed in production-like
+    # environments, but then REDIS_URL is required at boot so issuance
+    # limits are shared across replicas. See docs/demo-tenant.md.
+    ENABLE_DEMO_TENANT: bool = False
+    # Comma-separated list of tools a demo key may use. Default is the
+    # side-effect-free echo tool.
+    DEMO_ALLOWED_TOOLS: str = "partner.echo"
+    DEMO_KEY_TTL_DAYS: int = 3
+    DEMO_KEY_MAX_USES: int = 40
+    DEMO_WALLET_CREDITS: Decimal = Decimal("10")
+    DEMO_MAX_PERMIT_CREDITS: Decimal = Decimal("5")
+    DEMO_MAX_PERMIT_TTL_MINUTES: int = 30
+    DEMO_ISSUE_PER_IP_PER_DAY: int = 3
+    DEMO_ISSUE_GLOBAL_PER_HOUR: int = 30
+    DEMO_ISSUE_GLOBAL_PER_DAY: int = 200
+    DEMO_MAX_LIVE_KEYS: int = 500
+    DEMO_ALERT_ISSUES_PER_HOUR: int = 20
+    # Comma-separated origins allowed to mint demo keys from a browser.
+    # Default empty: only no-Origin callers (CLI/SDK/curl) and same-host
+    # pages may mint, so a third-party page cannot farm keys through
+    # visitors' browsers.
+    DEMO_ALLOWED_ORIGINS: str = ""
+
+    @field_validator(
+        "DEMO_KEY_TTL_DAYS",
+        "DEMO_KEY_MAX_USES",
+        "DEMO_MAX_PERMIT_TTL_MINUTES",
+        "DEMO_ISSUE_PER_IP_PER_DAY",
+        "DEMO_ISSUE_GLOBAL_PER_HOUR",
+        "DEMO_ISSUE_GLOBAL_PER_DAY",
+        "DEMO_MAX_LIVE_KEYS",
+        "DEMO_ALERT_ISSUES_PER_HOUR",
+    )
+    @classmethod
+    def _validate_demo_ints(cls, value: int, info) -> int:
+        """Keep demo budgets positive and bounded.
+
+        These bound unauthenticated issuance and demo authority, so a zero
+        would disable the control and an absurd value would neuter it. Fail
+        at construction rather than at the first visitor.
+        """
+        bounds = {
+            "DEMO_KEY_TTL_DAYS": (1, 30),
+            "DEMO_KEY_MAX_USES": (1, 10_000),
+            "DEMO_MAX_PERMIT_TTL_MINUTES": (1, 1_440),
+            "DEMO_ISSUE_PER_IP_PER_DAY": (1, 1_000),
+            "DEMO_ISSUE_GLOBAL_PER_HOUR": (1, 100_000),
+            "DEMO_ISSUE_GLOBAL_PER_DAY": (1, 1_000_000),
+            "DEMO_MAX_LIVE_KEYS": (1, 100_000),
+            "DEMO_ALERT_ISSUES_PER_HOUR": (1, 100_000),
+        }
+        low, high = bounds[info.field_name]
+        if not low <= value <= high:
+            raise ValueError(f"{info.field_name} must be between {low} and {high}")
+        return value
+
+    @field_validator("DEMO_WALLET_CREDITS", "DEMO_MAX_PERMIT_CREDITS")
+    @classmethod
+    def _validate_demo_credits(cls, value: Decimal, info) -> Decimal:
+        """Demo credits must be positive, finite, and bounded."""
+        if not value.is_finite() or value <= 0 or value > Decimal("1000000"):
+            raise ValueError(
+                f"{info.field_name} must be a positive amount up to 1000000"
+            )
+        return value
+
+    @field_validator("DEMO_ALLOWED_TOOLS")
+    @classmethod
+    def _validate_demo_allowed_tools(cls, value: str) -> str:
+        """A demo tenant with no usable tool is a misconfiguration."""
+        if not [t.strip() for t in value.split(",") if t.strip()]:
+            raise ValueError("DEMO_ALLOWED_TOOLS must name at least one tool")
+        return value
+
+    @property
+    def demo_allowed_tools_list(self) -> list[str]:
+        """Parsed DEMO_ALLOWED_TOOLS (comma-separated env string)."""
+        return [t.strip() for t in self.DEMO_ALLOWED_TOOLS.split(",") if t.strip()]
+
     # --- Enterprise IGA bridge (OIDC -> PolicyBundle) ---
     # JSON object mapping a trusted enterprise OIDC issuer URL to its pinned
     # verification material, e.g.
