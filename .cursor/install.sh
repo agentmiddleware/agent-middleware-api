@@ -12,12 +12,22 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-# 1. Install uv (to ~/.local/bin) if it is not present. Login shells already
-#    include that directory; non-login shells often do not, so export it
-#    before the presence check. Otherwise every re-run re-invokes the installer.
+# 1. Require uv (at ~/.local/bin or on PATH). This script deliberately does
+#    NOT fetch and execute a remote installer: piping a URL to sh runs
+#    unaudited code with the caller's privileges and cannot be pinned or
+#    checksum-verified from here. Install uv yourself first, for example:
+#
+#      curl -LsSf https://astral.sh/uv/install.sh -o /tmp/uv-install.sh
+#      sh /tmp/uv-install.sh
+#
+#    Inspect /tmp/uv-install.sh before running it, then re-run this script.
+#    Login shells already include ~/.local/bin; non-login shells often do
+#    not, so export it before the presence check.
 export PATH="$HOME/.local/bin:$PATH"
 if ! command -v uv >/dev/null 2>&1; then
-  curl -LsSf https://astral.sh/uv/install.sh | sh
+  echo "[install] uv is not installed; refusing to fetch a remote installer." >&2
+  echo "[install] install uv manually (see the comment at the top of $0), then re-run." >&2
+  exit 1
 fi
 
 # 2. Create the .venv only if missing (keeps re-runs idempotent), then always

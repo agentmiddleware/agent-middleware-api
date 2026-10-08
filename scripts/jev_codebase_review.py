@@ -9,7 +9,8 @@ re-rank never needs another model call.
 
 Usage:
     python scripts/jev_codebase_review.py --dry-run          # no network
-    TYPESAFE_API_KEY=... python scripts/jev_codebase_review.py
+    TYPESAFE_API_KEY=... python scripts/jev_codebase_review.py \
+        --i-understand-this-uploads-code   # uploads every chunk to api.typesafe.ai
 
 Outputs (under --out, default docs/research/jev-codebase-review-<date>/):
     answers.jsonl   one line per chunk: path, span, questions' raw answers, usage
@@ -347,6 +348,14 @@ async def main() -> int:
     ap.add_argument(
         "--dry-run", action="store_true", help="chunk and size only; send nothing"
     )
+    ap.add_argument(
+        "--i-understand-this-uploads-code",
+        action="store_true",
+        help=(
+            "Required for any non-dry-run: confirms you understand every "
+            "collected source chunk is uploaded to the external review API."
+        ),
+    )
     args = ap.parse_args()
 
     chunks = collect([ROOT / p for p in args.paths])
@@ -362,6 +371,24 @@ async def main() -> int:
         )
         print(json.dumps(payload(chunks[0], args.model), indent=1)[:1500])
         return 0
+
+    if not args.i_understand_this_uploads_code:
+        print(
+            "refusing to upload source: re-run with "
+            "--i-understand-this-uploads-code to confirm the upload",
+            file=sys.stderr,
+        )
+        return 2
+    # State exactly what is about to leave the machine before any network.
+    print(f"upload target: POST {BASE_URL}/v1/systemone (model {args.model})")
+    print(
+        f"upload payload: {len(chunks)} chunks from {files} files, "
+        f"{chars:,} source chars with secret-shaped spans redacted; "
+        "each request carries path, definitions, code, and questions; "
+        "per-chunk answers are persisted without the code "
+        "(answers.jsonl stores code: null)"
+    )
+    print(f"first chunk: {chunks[0].path}:{chunks[0].start}-{chunks[0].end}")
 
     key = os.environ.get("TYPESAFE_API_KEY", "")
     if not key:

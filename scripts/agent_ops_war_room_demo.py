@@ -483,6 +483,31 @@ async def run_in_process(
         return await run_with_database(f"sqlite+aiosqlite:///{db_path}")
 
 
+def _secret_from_env_or_flag(
+    *,
+    env_name: str,
+    flag_value: str | None,
+    flag_name: str,
+) -> str | None:
+    """Prefer an environment variable over argv for secret-ish values.
+
+    The flag stays working for local-only use but prints a deprecation
+    warning, because process arguments are visible in local listings.
+    Returns None when neither source provides a value.
+    """
+    env_value = (os.environ.get(env_name) or "").strip()
+    if env_value:
+        return env_value
+    if flag_value:
+        print(
+            f"warning: prefer {env_name} env over {flag_name} "
+            "(argv is visible to local process listings)",
+            file=sys.stderr,
+        )
+        return flag_value.strip()
+    return None
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Run the Agent Ops War Room trust-plane proof."
@@ -501,19 +526,34 @@ def main() -> None:
     parser.add_argument(
         "--database-url",
         default=None,
-        help="Optional SQLAlchemy async database URL. Defaults to a temp SQLite DB.",
+        help=(
+            "Deprecated: prefer DATABASE_URL env (argv is process-visible). "
+            "Defaults to a temp SQLite DB."
+        ),
     )
     parser.add_argument(
         "--bootstrap-api-key",
-        default="war-room-bootstrap-key",
-        help="Bootstrap API key used to create the proof wallets and key.",
+        default=None,
+        help=(
+            "Deprecated: prefer BOOTSTRAP_KEY env (argv is process-visible). "
+            "Defaults to a local-only proof key."
+        ),
     )
     args = parser.parse_args()
 
     result = asyncio.run(
         run_in_process(
-            database_url=args.database_url,
-            bootstrap_api_key=args.bootstrap_api_key,
+            database_url=_secret_from_env_or_flag(
+                env_name="DATABASE_URL",
+                flag_value=args.database_url,
+                flag_name="--database-url",
+            ),
+            bootstrap_api_key=_secret_from_env_or_flag(
+                env_name="BOOTSTRAP_KEY",
+                flag_value=args.bootstrap_api_key,
+                flag_name="--bootstrap-api-key",
+            )
+            or "war-room-bootstrap-key",
             emit=not args.json,
         )
     )

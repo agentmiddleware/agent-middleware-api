@@ -227,9 +227,13 @@ def test_command_failure_never_renders_public_database_url(
     async def fail(_url):
         raise RuntimeError(f"failed against {public_url}")
 
-    monkeypatch.setattr(retire_owner_keys, "retire_owner_keys", fail)
+    async def no_backup(_url, _path):
+        return {}
 
-    assert retire_owner_keys.main() == 1
+    monkeypatch.setattr(retire_owner_keys, "retire_owner_keys", fail)
+    monkeypatch.setattr(retire_owner_keys, "write_backup", no_backup)
+
+    assert retire_owner_keys.main(["--apply"]) == 1
     captured = capsys.readouterr()
     assert "public database scrub or verification failed" in captured.err
     assert public_url not in captured.err
@@ -301,9 +305,13 @@ def test_private_command_uses_only_private_database_url_without_rendering_it(
             "unbound_refresh_tokens": 0,
         }
 
-    monkeypatch.setattr(retire_owner_keys, "retire_owner_keys", succeed)
+    async def no_backup(_url, _path):
+        return {}
 
-    assert retire_owner_keys.main(["--private-db"]) == 0
+    monkeypatch.setattr(retire_owner_keys, "retire_owner_keys", succeed)
+    monkeypatch.setattr(retire_owner_keys, "write_backup", no_backup)
+
+    assert retire_owner_keys.main(["--private-db", "--apply"]) == 0
     assert seen == [private_url]
 
     captured = capsys.readouterr()
@@ -325,9 +333,13 @@ def test_private_command_failure_never_renders_private_database_url(
     async def fail(_url):
         raise RuntimeError(f"failed against {private_url}")
 
-    monkeypatch.setattr(retire_owner_keys, "retire_owner_keys", fail)
+    async def no_backup(_url, _path):
+        return {}
 
-    assert retire_owner_keys.main(["--private-db"]) == 1
+    monkeypatch.setattr(retire_owner_keys, "retire_owner_keys", fail)
+    monkeypatch.setattr(retire_owner_keys, "write_backup", no_backup)
+
+    assert retire_owner_keys.main(["--private-db", "--apply"]) == 1
     captured = capsys.readouterr()
     assert "private database scrub or verification failed" in captured.err
     assert private_url not in captured.err
