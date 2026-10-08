@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.optimizer.candidates import CALLER_SUPPLIED_SOURCE
 from app.optimizer.policy import get_risk_budget, is_admissible
 from app.schemas.optimizer import OptimizerRequest, OptimizerState
 
@@ -38,6 +39,7 @@ def _pack_response(
     expected_utility = sum(_score(a, lambdas) for a in selected)
     return {
         "status": status,
+        "candidate_source": CALLER_SUPPLIED_SOURCE,
         "selected_actions": selected,
         "rejected_actions": rejected,
         "policy_reasons": policy_reasons,

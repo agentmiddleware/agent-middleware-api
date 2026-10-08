@@ -39,6 +39,7 @@ async def test_launch_full_scan(client, api_headers):
     data = resp.json()
     assert "scan_id" in data
     assert data["status"] == "completed"
+    assert data["simulated"] is True
     assert data["total_attack_vectors"] > 0
     assert "iot" in data["target_services"]
 
@@ -68,6 +69,7 @@ async def test_quick_scan(client, api_headers):
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "completed"
+    assert data["simulated"] is True
     assert data["total_tests_run"] > 0
     assert "score" in data
     assert 0 <= data["score"] <= 100
@@ -93,6 +95,7 @@ async def test_get_scan_report(client, api_headers):
     assert resp.status_code == 200
     data = resp.json()
     assert data["scan_id"] == scan_id
+    assert data["simulated"] is True
     assert "vulnerabilities" in data
     assert "recommendations" in data
     assert "severity_breakdown" in data
@@ -145,6 +148,7 @@ async def test_get_vulnerabilities(client, api_headers):
     data = resp.json()
     # After patching all findings, zero vulns = fortress mode
     assert data["total"] >= 0
+    assert data["simulated"] is True
     assert "critical_count" in data
     assert "high_count" in data
 

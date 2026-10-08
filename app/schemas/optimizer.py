@@ -70,6 +70,9 @@ class OptimizerResponse(BaseModel):
     # solver was never a declared dependency). Selection is the deterministic
     # greedy heuristic, so these are the two statuses the planner can emit.
     status: Literal["HeuristicFallback", "Infeasible"]
+    # Where the ranked candidates came from. Caller supplied today; a real
+    # manifest plus pricing feed would change this value, not just the docs.
+    candidate_source: str = "caller_supplied"
     selected_actions: List[Dict]
     rejected_actions: List[Dict]
     policy_reasons: Dict[str, str]
