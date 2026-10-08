@@ -15,12 +15,15 @@ import asyncio
 import contextvars
 import functools
 import inspect
+import logging
 import time
 import traceback
 from collections.abc import Callable, Coroutine
 from typing import Any, ParamSpec, TypeVar, get_type_hints
 
 from .client import B2AClient, DryRunSimulation
+
+logger = logging.getLogger("b2a_sdk")
 
 P = ParamSpec("P")
 T = TypeVar("T")
@@ -36,18 +39,30 @@ _dry_run_context: contextvars.ContextVar[DryRunSimulation | None] = contextvars.
 _background_tasks: set[asyncio.Task] = set()
 
 
+_drop_warned = False
+
+
 def _fire_and_forget(coro: Coroutine[Any, Any, Any]) -> None:
     """Schedule a telemetry coroutine without blocking or failing the caller.
 
     A sync function under @monitored can run with no event loop, where
     ``asyncio.create_task`` raises RuntimeError *after* the function already
     ran -- discarding its result, or masking its own exception. Telemetry is
-    best-effort, so with no running loop the event is dropped instead.
+    best-effort, so with no running loop the event is dropped instead, with
+    one warning per process so a pilot debugging missing telemetry has a
+    signal instead of silence.
     """
+    global _drop_warned
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         coro.close()
+        if not _drop_warned:
+            _drop_warned = True
+            logger.warning(
+                "telemetry event dropped: no running event loop; "
+                "call from inside a running loop or accept the loss"
+            )
         return
     task = loop.create_task(coro)
     _background_tasks.add(task)
@@ -85,8 +100,12 @@ def _notify_registration(
     for callback in _registration_callbacks:
         try:
             callback(service_id, func, input_schema, output_schema)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(
+                "mcp tool registration callback %r failed: %s",
+                getattr(callback, "__name__", callback),
+                type(exc).__name__,
+            )
 
 
 def _extract_schema_from_func(func: Callable) -> tuple[dict | None, dict | None]:
@@ -153,7 +172,8 @@ def monitored(
     Tracks execution latency and success/failure status, and reports the
     exception type on error. Telemetry is fired in the background to add zero
     latency to execution; a sync function called with no running event loop
-    still runs normally, but its telemetry event is dropped.
+    still runs normally, but its telemetry event is dropped, with one
+    process-level warning logged so the loss is visible.
 
     Usage:
         b2a = B2AClient(api_key="agt-xyz123")
