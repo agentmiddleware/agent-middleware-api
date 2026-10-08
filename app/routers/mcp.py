@@ -1614,6 +1614,71 @@ async def _execute_registered_tool_inner(
             await _raise_replayed_error(replay)
             return replay.response_json
 
+    if (
+        not governed_call
+        and idempotency_key
+        and not idem_started
+        and execution_backend == "local"
+        and func is not None
+    ):
+        # Legacy unpermitted calls carry a client key through the same
+        # validation as governed ones, so the key must also be honored here:
+        # without a record a retried request executes and charges again. The
+        # row lives under this transport's physical endpoint; the normalized
+        # MCP identity index still keeps one debit per (wallet, key) across
+        # the legacy and canonical scopes, with a cross-scope collision
+        # failing closed below. Only successes are completed (see the local
+        # finalizer); a failed call abandons its record so the retry the
+        # error invites can run instead of replaying the failure.
+        try:
+            try:
+                idem_begin = await idem.begin_with_record(
+                    wallet_id=wallet_id,
+                    endpoint=endpoint,
+                    idempotency_key=idempotency_key,
+                    request_payload=effective_request_payload,
+                    operation_kind="local",
+                )
+            except IntegrityError:
+                winner = await idem.get_governed_mcp_record(
+                    wallet_id=wallet_id,
+                    idempotency_key=idempotency_key,
+                )
+                if winner is not None:
+                    if winner.response_json:
+                        raise IdempotencyConflictError(
+                            "idempotency_key_reused"
+                        ) from None
+                    raise IdempotencyInProgressError(
+                        "idempotency_in_progress"
+                    ) from None
+                raise
+            replay = idem_begin.replay
+            idem_started = True
+            if owned_record is not None:
+                owned_record["record_id"] = idem_begin.record_id
+                owned_record["endpoint"] = endpoint
+                owned_record["key"] = idempotency_key
+        except (IdempotencyConflictError, IdempotencyInProgressError) as exc:
+            await _audit_mcp_invocation(
+                effects_committed=False,
+                decision=decision,
+                endpoint=endpoint,
+                transport=transport,
+                ok=False,
+                error=str(exc),
+                extra_metadata={
+                    "permit_id": permit_id,
+                    "idempotency_key": idempotency_key,
+                    "request_hash": effective_request_hash,
+                },
+            )
+            if isinstance(exc, IdempotencyInProgressError):
+                raise
+            raise ValueError(str(exc))
+        if replay and replay.response_json:
+            return replay.response_json
+
     permit_model = None
     if governed_call:
         permit_validation = await get_permit_service().validate_for_action(
@@ -1951,10 +2016,14 @@ async def _execute_registered_tool_inner(
                         metadata={"jev_risk_guard": stored_jev},
                     )
                 except (IntegrityError, AuditEventConflictError):
-                    winner = await load_jev_guard_metadata(jev_event_id, wallet_id)
-                    if winner is None:
+                    # Distinct from the idempotency-record `winner` above.
+                    # Reusing that name makes mypy join the two assignments.
+                    existing_guard = await load_jev_guard_metadata(
+                        jev_event_id, wallet_id
+                    )
+                    if existing_guard is None:
                         raise
-                    stored_jev = winner
+                    stored_jev = existing_guard
         jev_metadata = {"jev_risk_guard": stored_jev}
         policy_metadata.update(jev_metadata)
         jev_escalated = (
@@ -2451,11 +2520,12 @@ async def _execute_registered_tool_inner(
             )
         except Exception:
             logger.exception("mcp_contended_audit_failed")
-        if governed_call and idem_begin is not None and idempotency_key:
+        # Governed or legacy-unpermitted alike: a begun record with no charge
+        # and no response frees its key, and abandon() refuses any row that
+        # carries either, so this can never erase evidence that money moved.
+        # Here neither exists, by construction.
+        if idem_begin is not None and idempotency_key:
             try:
-                # abandon() refuses to delete a record carrying a response or a
-                # ledger entry, so this can never erase evidence that money
-                # moved. Here neither exists, by construction.
                 await idem.abandon(
                     wallet_id=wallet_id,
                     endpoint=idempotency_endpoint,
@@ -2595,6 +2665,20 @@ async def _execute_registered_tool_inner(
                     denial_reason,
                 ),
             )
+        if not governed_call and idem_begin is not None and idempotency_key:
+            # No execution, no charge: free the key so a top-up retry can run.
+            # abandon() is a no-op on any row that gained a response or a
+            # ledger checkpoint, and its own failure must not replace the
+            # denial the caller acts on.
+            try:
+                await idem.abandon(
+                    wallet_id=wallet_id,
+                    endpoint=endpoint,
+                    idempotency_key=idempotency_key,
+                    expected_record_id=idem_begin.record_id,
+                )
+            except Exception:
+                logger.exception("mcp_denied_legacy_idempotency_abandon_failed")
         raise ValueError(denial_reason)
 
     # money.charge() is only ever invoked here without dry_run=True, so a real
@@ -2857,6 +2941,21 @@ async def _execute_registered_tool_inner(
                 status_code=500,
                 jsonrpc_code=-32603,
             ) from exc
+        if not governed_call and idem_begin is not None and idempotency_key:
+            # The tool ran but failed and its charge was refunded, so nothing
+            # durable pins this key: abandon it so the retry the error invites
+            # executes instead of meeting idempotency_in_progress forever.
+            # abandon() refuses any row carrying a response or ledger entry,
+            # and its own failure must not replace the tool's error.
+            try:
+                await idem.abandon(
+                    wallet_id=wallet_id,
+                    endpoint=endpoint,
+                    idempotency_key=idempotency_key,
+                    expected_record_id=idem_begin.record_id,
+                )
+            except Exception:
+                logger.exception("mcp_failed_legacy_idempotency_abandon_failed")
         raise ToolExecutionError(str(exc)) from exc
 
     response_payload = {
@@ -2936,6 +3035,19 @@ async def _execute_registered_tool_inner(
                     endpoint=idempotency_endpoint,
                     idempotency_key=idempotency_key or "",
                     response_reference=receipt.receipt_id,
+                    response_json=response_payload,
+                    status_code=200,
+                )
+            if not governed_call and idem_begin is not None and idempotency_key:
+                # Legacy unpermitted success: pin the response so a retried
+                # key replays it instead of executing and charging again. The
+                # ledger entry id is the response reference; there is no
+                # receipt on this path.
+                await idem.complete(
+                    wallet_id=wallet_id,
+                    endpoint=endpoint,
+                    idempotency_key=idempotency_key,
+                    response_reference=charge_result.entry_id,
                     response_json=response_payload,
                     status_code=200,
                 )
