@@ -638,7 +638,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             presented_key = _presented_rate_identity(request)
             bucket_limits = [(_api_key_bucket(presented_key), self.limit)]
 
-        # Skip rate limiting for docs, health, and test clients
+        # Skip rate limiting for docs, health, and test clients. Polling
+        # these paths is safe without a bucket: liveness answers from a
+        # short cached verdict under single-flight so pollers share one
+        # cheap probe instead of loading Redis, per-check timeouts bound
+        # the cost, and the remaining skipped paths serve static content
+        # with no backend work.
         skip_paths = (
             "/docs",
             "/redoc",

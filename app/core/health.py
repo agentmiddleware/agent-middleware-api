@@ -426,7 +426,10 @@ async def _check_signing_key() -> dict[str, Any]:
         return {
             "status": "up",
             "state": "ephemeral",
-            "reason": "trust mode disabled; process-ephemeral signing key",
+            "reason": (
+                "trust mode disabled; process-ephemeral signing key, "
+                "not production receipt-signing readiness"
+            ),
         }
     return {"status": "up", "state": "loaded"}
 
