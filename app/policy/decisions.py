@@ -31,6 +31,12 @@ def evaluate_tool_invocation(
     estimated_cost: float | None,
     request_id: str | None,
 ) -> PolicyDecision:
+    """Wallet-ownership check only, despite the general name.
+
+    This verifies the caller is the bootstrap admin or owns ``wallet_id``.
+    It does not evaluate wallet policy bundles (tools, caps, tiers); callers
+    needing those run ``evaluate_wallet_policy`` separately.
+    """
     if auth.is_bootstrap_admin or auth.wallet_id == wallet_id:
         return PolicyDecision(
             decision_id=f"pol-{uuid.uuid4().hex[:16]}",

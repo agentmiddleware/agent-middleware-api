@@ -50,8 +50,26 @@ async def _wallet(client: AsyncClient, agent_id: str = "policy-agent") -> str:
 
 
 @pytest.mark.anyio
-async def test_policy_crud_requires_bootstrap_admin(client, clean_database):
+async def test_policy_wallet_owner_can_self_serve_own_bundles(client, clean_database):
+    """A wallet key owner manages their own bundles; strangers are denied."""
     wallet_id = await _wallet(client, "policy-crud")
+    other_wallet_id = await _wallet(client, "policy-crud-other")
+
+    owner_key = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": wallet_id, "key_name": "runtime"},
+        headers={"X-API-Key": "test-key"},
+    )
+    assert owner_key.status_code == 201
+    owner_headers = {"X-API-Key": owner_key.json()["api_key"]}
+    stranger_key = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": other_wallet_id, "key_name": "runtime"},
+        headers={"X-API-Key": "test-key"},
+    )
+    assert stranger_key.status_code == 201
+    stranger_headers = {"X-API-Key": stranger_key.json()["api_key"]}
+
     created = await client.post(
         "/v1/policies",
         json={
@@ -61,39 +79,78 @@ async def test_policy_crud_requires_bootstrap_admin(client, clean_database):
             "allowed_service_categories": ["agent_comms"],
             "max_cost_per_action": 3,
         },
-        headers={"X-API-Key": "test-key"},
+        headers=owner_headers,
     )
     assert created.status_code == 201
     policy = created.json()
     assert policy["policy_id"].startswith("polb-")
 
-    listed = await client.get(
-        f"/v1/policies?wallet_id={wallet_id}",
-        headers={"X-API-Key": "test-key"},
+    # An owner cannot create bundles for somebody else's wallet.
+    foreign_create = await client.post(
+        "/v1/policies",
+        json={"wallet_id": other_wallet_id, "name": "Sneaky policy"},
+        headers=owner_headers,
     )
+    assert foreign_create.status_code == 403
+
+    # An unfiltered list is scoped to the caller's own wallet.
+    listed = await client.get("/v1/policies", headers=owner_headers)
     assert listed.status_code == 200
     assert listed.json()["total"] == 1
 
+    stranger_listed = await client.get(
+        f"/v1/policies?wallet_id={wallet_id}", headers=stranger_headers
+    )
+    assert stranger_listed.status_code == 403
+
+    fetched = await client.get(
+        f"/v1/policies/{policy['policy_id']}", headers=owner_headers
+    )
+    assert fetched.status_code == 200
+    stranger_fetched = await client.get(
+        f"/v1/policies/{policy['policy_id']}", headers=stranger_headers
+    )
+    assert stranger_fetched.status_code == 403
+
     patched = await client.patch(
         f"/v1/policies/{policy['policy_id']}",
-        json={"max_cost_per_action": 1, "is_active": False},
-        headers={"X-API-Key": "test-key"},
+        json={"max_cost_per_action": 1},
+        headers=owner_headers,
     )
     assert patched.status_code == 200
     assert patched.json()["max_cost_per_action"] == 1.0
-    assert patched.json()["is_active"] is False
+    stranger_patched = await client.patch(
+        f"/v1/policies/{policy['policy_id']}",
+        json={"max_cost_per_action": 999},
+        headers=stranger_headers,
+    )
+    assert stranger_patched.status_code == 403
 
-    key = await client.post(
-        "/v1/api-keys",
-        json={"wallet_id": wallet_id, "key_name": "runtime"},
+    # DELETE is a soft delete: history kept, bundle no longer evaluated.
+    deleted = await client.delete(
+        f"/v1/policies/{policy['policy_id']}", headers=owner_headers
+    )
+    assert deleted.status_code == 200
+    assert deleted.json()["is_active"] is False
+    after = await evaluate_wallet_policy(wallet_id=wallet_id, tool_name="policy-echo")
+    assert after.allowed is True
+    assert after.evaluated_constraints == {"policy_count": 0}
+
+    missing = await client.delete(
+        "/v1/policies/polb-does-not-exist", headers=owner_headers
+    )
+    assert missing.status_code == 404
+
+    # The bootstrap admin keeps full cross-wallet management.
+    admin_created = await client.post(
+        "/v1/policies",
+        json={"wallet_id": other_wallet_id, "name": "Admin bundle"},
         headers={"X-API-Key": "test-key"},
     )
-    assert key.status_code == 201
-    denied = await client.get(
-        f"/v1/policies?wallet_id={wallet_id}",
-        headers={"X-API-Key": key.json()["api_key"]},
-    )
-    assert denied.status_code == 403
+    assert admin_created.status_code == 201
+    admin_listed = await client.get("/v1/policies", headers={"X-API-Key": "test-key"})
+    assert admin_listed.status_code == 200
+    assert admin_listed.json()["total"] == 2
 
 
 @pytest.mark.anyio
@@ -547,24 +604,26 @@ async def test_corrupt_bundle_reads_back_as_deny_all_not_unrestricted(
 
 @pytest.mark.anyio
 async def test_wallet_key_cannot_clear_a_corrupt_restriction(client, clean_database):
-    """Unauthorized path: the agent the bundle restricts cannot turn the
-    corrupt column into NULL (unrestricted) itself."""
+    """Cross-wallet path: a stranger's key cannot turn the corrupt column
+    into NULL (unrestricted). The owning wallet's own key can, since buyers
+    manage their own guardrails."""
     wallet_id = await _wallet(client, "policy-corrupt-unauth")
+    other_wallet_id = await _wallet(client, "policy-corrupt-stranger")
     policy_id = await _restrictive_policy(client, wallet_id)
     await _set_policy_column(policy_id, "allowed_tools_json", "not-json")
 
-    key = await client.post(
+    stranger_key = await client.post(
         "/v1/api-keys",
-        json={"wallet_id": wallet_id, "key_name": "runtime"},
+        json={"wallet_id": other_wallet_id, "key_name": "runtime"},
         headers={"X-API-Key": "test-key"},
     )
-    assert key.status_code == 201
-    patched = await client.patch(
+    assert stranger_key.status_code == 201
+    stranger_patched = await client.patch(
         f"/v1/policies/{policy_id}",
         json={"allowed_tools": None},
-        headers={"X-API-Key": key.json()["api_key"]},
+        headers={"X-API-Key": stranger_key.json()["api_key"]},
     )
-    assert patched.status_code == 403
+    assert stranger_patched.status_code == 403
 
     evaluation = await evaluate_wallet_policy(
         wallet_id=wallet_id,
@@ -573,6 +632,20 @@ async def test_wallet_key_cannot_clear_a_corrupt_restriction(client, clean_datab
     )
     assert evaluation.allowed is False
     assert evaluation.reason == "policy_constraint_corrupt"
+
+    owner_key = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": wallet_id, "key_name": "runtime"},
+        headers={"X-API-Key": "test-key"},
+    )
+    assert owner_key.status_code == 201
+    owner_patched = await client.patch(
+        f"/v1/policies/{policy_id}",
+        json={"allowed_tools": None},
+        headers={"X-API-Key": owner_key.json()["api_key"]},
+    )
+    assert owner_patched.status_code == 200
+    assert owner_patched.json()["allowed_tools"] is None
 
 
 @pytest.mark.anyio
@@ -842,6 +915,51 @@ async def test_policy_denies_daily_cap_when_spend_unknown(client, clean_database
     )
     assert over.allowed is False
     assert over.reason == "daily_spend_limit_exceeded"
+
+
+@pytest.mark.anyio
+async def test_policy_denies_daily_cap_when_estimate_unknown(client, clean_database):
+    """A call with no price estimate cannot prove a daily cap holds."""
+    wallet_id = await _wallet(client, "policy-unknown-estimate")
+    created = await client.post(
+        "/v1/policies",
+        json={
+            "wallet_id": wallet_id,
+            "name": "Capped bundle",
+            "daily_spend_limit": 100,
+        },
+        headers={"X-API-Key": "test-key"},
+    )
+    assert created.status_code == 201
+
+    unknown = await evaluate_wallet_policy(
+        wallet_id=wallet_id,
+        tool_name="any-tool",
+        estimated_cost=None,
+        daily_spend_used=0,
+    )
+    assert unknown.allowed is False
+    assert unknown.reason == "estimated_cost_unknown"
+
+    # A bundle with no daily cap still allows unpriced calls.
+    uncapped_wallet_id = await _wallet(client, "policy-no-daily-cap")
+    uncapped = await client.post(
+        "/v1/policies",
+        json={
+            "wallet_id": uncapped_wallet_id,
+            "name": "Per-action cap only",
+            "max_cost_per_action": 50,
+        },
+        headers={"X-API-Key": "test-key"},
+    )
+    assert uncapped.status_code == 201
+    evaluation = await evaluate_wallet_policy(
+        wallet_id=uncapped_wallet_id,
+        tool_name="any-tool",
+        estimated_cost=None,
+        daily_spend_used=0,
+    )
+    assert evaluation.allowed is True
 
 
 @pytest.mark.anyio
