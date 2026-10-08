@@ -421,15 +421,24 @@ async def validate_action_request(
         return PermitValidation(False, reason, permit)
     try:
         action_execution_identity(permit, binding)
-        if (
-            permit.requires_human_approval
-            or permit.allow_identical_repeats
-            or permit.repeat_window_seconds is not None
-            or permit.aggregate_value_cap is not None
-            or json.loads(permit.forbidden_fields_json or "[]")
-            or permit.recipient_domain is not None
-        ):
-            raise ValueError("unsupported_action_constraints")
+    except (ValueError, TypeError) as exc:
+        return PermitValidation(False, str(exc), permit)
+    unsupported = _unsupported_action_constraints(permit)
+    if unsupported:
+        return PermitValidation(
+            False,
+            "unsupported_action_constraints",
+            permit,
+            {
+                "unsupported_constraints": unsupported,
+                "remedy": (
+                    "use the standard permit invoke path, which enforces "
+                    "these constraints; single-use action permits accept "
+                    "exact tool, schema, wallet, and argument binding only"
+                ),
+            },
+        )
+    try:
         scopes = json.loads(permit.scopes_json)
         if not {f"tool:{binding.public_tool_id}:invoke", "billing:charge"} <= set(
             scopes
@@ -443,3 +452,27 @@ async def validate_action_request(
     except (ValueError, TypeError) as exc:
         return PermitValidation(False, str(exc), permit)
     return PermitValidation(True, None, permit)
+
+
+def _unsupported_action_constraints(permit: PermitModel) -> list[str]:
+    """Name the v2 constraints this single-use path cannot express.
+
+    Returned in ``details["unsupported_constraints"]`` beside the stable
+    ``unsupported_action_constraints`` reason so an agent knows which
+    constraint to drop (or that it needs the standard permit path)
+    instead of retrying the same request.
+    """
+    unsupported: list[str] = []
+    if permit.requires_human_approval:
+        unsupported.append("requires_human_approval")
+    if permit.allow_identical_repeats:
+        unsupported.append("allow_identical_repeats")
+    if permit.repeat_window_seconds is not None:
+        unsupported.append("repeat_window_seconds")
+    if permit.aggregate_value_cap is not None:
+        unsupported.append("aggregate_value_cap")
+    if json.loads(permit.forbidden_fields_json or "[]"):
+        unsupported.append("forbidden_fields")
+    if permit.recipient_domain is not None:
+        unsupported.append("recipient_domain")
+    return unsupported
