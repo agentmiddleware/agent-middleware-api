@@ -1,0 +1,42 @@
+name: Requirements lock check
+
+on:
+  push:
+    branches: [main]
+    paths: ["requirements.txt", "requirements.lock", "scripts/compile_requirements_lock.sh"]
+  pull_request:
+    branches: [main, master]
+    paths: ["requirements.txt", "requirements.lock", "scripts/compile_requirements_lock.sh"]
+
+permissions:
+  contents: read
+
+jobs:
+  lock-fresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check lock is fresh
+        run: |
+          pip install uv==0.12.2
+          uv pip compile requirements.txt --generate-hashes \
+            --python-version 3.12 -o /tmp/fresh.lock
+          diff -u requirements.lock /tmp/fresh.lock
+
+  lock-install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install from hashed lock
+        run: |
+          python -m pip install --upgrade pip
+          pip install --require-hashes -r requirements.lock
