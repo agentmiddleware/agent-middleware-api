@@ -150,20 +150,28 @@ Python (`pip install typesafe-sdk`, Python ≥ 3.10; depends on `httpx2`,
 ```python
 from typesafe_sdk import AsyncTypeSafeClient, Choice, Noul, Score, RetryPolicy
 
-async with AsyncTypeSafeClient(timeout=10.0, retry=RetryPolicy(max_retries=2)) as client:
+async with AsyncTypeSafeClient(
+    timeout=10.0, retry=RetryPolicy(max_retries=2)
+) as client:
     result = await client.system_one(
-        state={"ticket": {"subject": "Duplicate charge", "body": "I was charged twice."}},
+        state={
+            "ticket": {"subject": "Duplicate charge", "body": "I was charged twice."}
+        },
         questions={
             "billing": Noul(instructions="Is `ticket` about billing?"),
             "route": Choice(
                 instructions="Which team should handle `ticket`?",
-                criteria={"billing": None, "technical": None, "none_of_these": "No listed team fits"},
+                criteria={
+                    "billing": None,
+                    "technical": None,
+                    "none_of_these": "No listed team fits",
+                },
             ),
         },
     )
-    result.nouls["billing"].noul          # float 0–1
-    result.choices["route"].choice        # label
-    result.choices["route"].probabilities # dict[label, float]
+    result.nouls["billing"].noul  # float 0–1
+    result.choices["route"].choice  # label
+    result.choices["route"].probabilities  # dict[label, float]
 ```
 
 `TypeSafeClient` is the synchronous twin. Questions may also be passed as

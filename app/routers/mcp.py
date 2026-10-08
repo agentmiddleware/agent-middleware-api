@@ -1404,48 +1404,64 @@ async def _execute_registered_tool_inner(
     if governed_call and action_identity is None:
         idempotency_endpoint = GOVERNED_MCP_IDEMPOTENCY_ENDPOINT
 
-    registered_cost = _registered_tool_cost(service, category)
-
-    # A quote is a signed commitment to a price. Resolve it before anything
-    # downstream reads the cost, so the policy decision, the permit budget
-    # check, and the charge all see the number the caller was promised — not
-    # the live price it may have drifted from. Nothing is spent here; the
-    # single-use consume happens immediately before the charge.
+    # A quote is a signed commitment to a price. When the caller presents one,
+    # the live registration is not the price: it may have moved, or it may no
+    # longer be a chargeable number. Policy, the permit budget, and the charge
+    # all see the quoted credits. Nothing is spent here; the single-use consume
+    # happens immediately before the charge. A quote this same idempotency key
+    # already spent is not a fresh denial: the store below may still hold the
+    # original result, and charging again would bill the call a second time.
     quoted = None
+    quote_held_for_replay = False
     if quote_id:
         quoted = await get_quote_service().validate_for_action(
             quote_id=quote_id,
             wallet_id=wallet_id,
             tool_name=tool_name,
         )
+        spent_by_this_key = (
+            quoted.reason == QUOTE_REASON_CONSUMED
+            and bool(idempotency_key)
+            and quoted.quote is not None
+            and quoted.quote.consumed_by_idempotency_key == idempotency_key
+        )
         if not quoted.allowed or quoted.quote is None:
-            reason = quoted.reason or "quote_invalid"
-            await _audit_mcp_invocation(
-                effects_committed=False,
-                decision=tenant_decision,
-                endpoint=endpoint,
-                transport=transport,
-                ok=False,
-                error=reason,
-                extra_metadata={
-                    "quote_id": quote_id,
-                    "permit_id": permit_id,
-                    "idempotency_key": idempotency_key,
-                    "request_hash": effective_request_hash,
-                },
-            )
-            await _complete_governed_denial_idempotency(
-                idem=idem,
-                idem_started=idem_started,
-                wallet_id=wallet_id,
-                endpoint=idempotency_endpoint,
-                idempotency_key=idempotency_key,
-                reason=reason,
-            )
-            # Denying beats quietly charging a different number: a price lock
-            # that silently reprices is worse than no lock at all.
-            raise PermissionError(reason)
-        registered_cost = quoted.quote.quoted_credits
+            # spent_by_this_key is only true when quote is present. Repeat the
+            # None check so mypy narrows quoted.quote on the replay path.
+            if not spent_by_this_key or quoted.quote is None:
+                reason = quoted.reason or "quote_invalid"
+                await _audit_mcp_invocation(
+                    effects_committed=False,
+                    decision=tenant_decision,
+                    endpoint=endpoint,
+                    transport=transport,
+                    ok=False,
+                    error=reason,
+                    extra_metadata={
+                        "quote_id": quote_id,
+                        "permit_id": permit_id,
+                        "idempotency_key": idempotency_key,
+                        "request_hash": effective_request_hash,
+                    },
+                )
+                await _complete_governed_denial_idempotency(
+                    idem=idem,
+                    idem_started=idem_started,
+                    wallet_id=wallet_id,
+                    endpoint=idempotency_endpoint,
+                    idempotency_key=idempotency_key,
+                    reason=reason,
+                )
+                # Denying beats quietly charging a different number: a price lock
+                # that silently reprices is worse than no lock at all.
+                raise PermissionError(reason)
+            quote_held_for_replay = True
+            registered_cost = quoted.quote.quoted_credits
+            quoted = None
+        else:
+            registered_cost = quoted.quote.quoted_credits
+    else:
+        registered_cost = _registered_tool_cost(service, category)
 
     charge_units = _charge_units_for_registered_cost(registered_cost, category)
     estimated_cost = float(registered_cost)
@@ -1613,6 +1629,34 @@ async def _execute_registered_tool_inner(
             )
             await _raise_replayed_error(replay)
             return replay.response_json
+
+    if quote_held_for_replay:
+        # The quote is spent by this key and the store has no completed result
+        # to hand back. Stop before any permit reservation or charge.
+        reason = QUOTE_REASON_CONSUMED
+        await _audit_mcp_invocation(
+            effects_committed=False,
+            decision=decision,
+            endpoint=endpoint,
+            transport=transport,
+            ok=False,
+            error=reason,
+            extra_metadata={
+                "quote_id": quote_id,
+                "permit_id": permit_id,
+                "idempotency_key": idempotency_key,
+                "request_hash": effective_request_hash,
+            },
+        )
+        await _complete_governed_denial_idempotency(
+            idem=idem,
+            idem_started=idem_started,
+            wallet_id=wallet_id,
+            endpoint=idempotency_endpoint,
+            idempotency_key=idempotency_key,
+            reason=reason,
+        )
+        raise PermissionError(reason)
 
     permit_model = None
     if governed_call:
@@ -3037,8 +3081,17 @@ async def _charge_and_checkpoint(
 
     from app.services.governed_metering import aligned_credits_charged
 
+    # `amount` is a float display field. Some prices that pass the 8-place
+    # storage check print differently through str(float), so comparing that
+    # display raises after the debit and leaves the quote spent. The exact
+    # ledger string is the debit.
+    ledger_amount = (
+        charge_result.amount_exact
+        if charge_result.amount_exact is not None
+        else charge_result.amount
+    )
     credits_charged = aligned_credits_charged(
-        ledger_amount=charge_result.amount,
+        ledger_amount=ledger_amount,
         authorized_credits=registered_cost,
         context=f"mcp:{tool_name}",
     )
