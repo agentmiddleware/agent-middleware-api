@@ -1,7 +1,9 @@
 """
 AWI Manifest Generator — Phase 8
 =================================
-CLI tool that generates /.well-known/awi.json from existing FastAPI/Django/Express apps.
+CLI tool that generates /.well-known/awi.json from an existing FastAPI app
+or OpenAPI spec. Only FastAPI scanning and OpenAPI reading are implemented;
+Django and Express are not supported.
 
 Website owners can use this to expose their existing APIs as an AWI-compliant interface
 without changing their human-facing UI.
@@ -11,6 +13,7 @@ import argparse
 import inspect
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 
@@ -151,14 +154,33 @@ class ManifestGenerator:
 
         paths = openapi_spec.get("paths", {})
         for path, methods in paths.items():
+            if not isinstance(methods, dict):
+                continue
             for method, spec in methods.items():
-                if method.upper() in ["GET", "POST", "PUT", "DELETE", "PATCH"]:
-                    endpoint = {
-                        "path": path,
-                        "methods": [method.upper()],
-                        "description": spec.get("summary", spec.get("description", "")),
-                    }
-                    manifest.setdefault("endpoints", []).append(endpoint)
+                if not isinstance(method, str):
+                    continue
+                if method.upper() not in ["GET", "POST", "PUT", "DELETE", "PATCH"]:
+                    continue
+                if not isinstance(spec, dict):
+                    spec = {}
+                endpoint = {
+                    "path": path,
+                    "methods": [method.upper()],
+                    "description": spec.get("summary", spec.get("description", "")),
+                }
+                manifest.setdefault("endpoints", []).append(endpoint)
+                # Reuse the same route-to-action mapping as FastAPI scanning so
+                # the manifest carries agent-ready actions, not only endpoints.
+                route = SimpleNamespace(path=path, methods=[method.upper()])
+                action = self._route_to_action(route)
+                if action:
+                    if isinstance(spec.get("summary"), str) and spec["summary"]:
+                        action["description"] = spec["summary"]
+                    self.actions.append(action)
+                    self.route_mappings[action["awi_action"]] = path
+
+        manifest["actions"] = self.actions
+        manifest["route_mappings"] = self.route_mappings
 
         return manifest
 
@@ -176,14 +198,17 @@ class ManifestGenerator:
         return manifest
 
 
-def main():
-    """CLI entry point."""
+SUPPORTED_FRAMEWORKS = ("fastapi", "openapi")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the generator CLI parser (only implemented frameworks offered)."""
     parser = argparse.ArgumentParser(
         description="Generate AWI manifest from existing applications"
     )
     parser.add_argument(
         "--framework",
-        choices=["fastapi", "django", "express", "openapi"],
+        choices=list(SUPPORTED_FRAMEWORKS),
         default="fastapi",
         help="Framework to scan",
     )
@@ -203,7 +228,12 @@ def main():
         type=Path,
         help="Path to OpenAPI spec JSON file",
     )
+    return parser
 
+
+def main() -> None:
+    """CLI entry point."""
+    parser = build_parser()
     args = parser.parse_args()
 
     generator = ManifestGenerator(framework=args.framework)
