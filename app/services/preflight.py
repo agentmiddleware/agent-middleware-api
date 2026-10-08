@@ -16,6 +16,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from urllib.parse import urlsplit
 
 from ..core.config import get_settings
 
@@ -58,17 +59,24 @@ class PreflightReport:
 # ---------------------------------------------------------------------------
 
 PLACEHOLDER_PATTERNS = [
-    r"^test[-_]?key$",
+    r"^test[-_]?key",
     r"^sk[-_]test[-_]",
     r"^pk[-_]test[-_]",
     r"^your[-_]",
-    r"^changeme$",
-    r"^placeholder$",
-    r"^xxx+$",
+    r"^changeme",
+    r"^placeholder",
+    r"^xxx+",
     r"^TODO",
     r"^REPLACE",
     r"^example",
 ]
+
+# Placeholder stems matched as whole tokens anywhere in a key, so infixed
+# values such as "my-test-key" are caught while random strings that merely
+# contain those letters (e.g. "contest", "latest") still pass.
+PLACEHOLDER_TOKENS = frozenset(
+    {"test", "changeme", "placeholder", "todo", "replace", "example"}
+)
 
 PLACEHOLDER_DOMAINS = [
     "localhost",
@@ -89,21 +97,39 @@ def _is_placeholder(value: str) -> bool:
     for pattern in PLACEHOLDER_PATTERNS:
         if re.match(pattern, v, re.IGNORECASE):
             return True
+    for token in re.split(r"[^a-z0-9]+", v):
+        if token in PLACEHOLDER_TOKENS:
+            return True
+        if len(token) >= 3 and set(token) == {"x"}:
+            return True
     return False
 
 
 def _is_placeholder_domain(url: str) -> bool:
-    """Check if a URL contains a placeholder domain."""
-    url_lower = url.lower()
+    """Check if a URL's host is a placeholder domain.
+
+    Matches the host exactly or as a subdomain of a placeholder domain, so
+    real domains that merely contain those letters (e.g. notexample.com)
+    pass, while blank or unparsable values fail closed.
+    """
+    if not url or not url.strip():
+        return True
+    try:
+        host = (urlsplit(url.strip()).hostname or "").lower()
+    except ValueError:
+        return True
+    if not host:
+        return True
     for domain in PLACEHOLDER_DOMAINS:
-        if domain in url_lower:
+        if host == domain or host.endswith("." + domain):
             return True
     return False
 
 
 def _looks_like_live_stripe_key(key: str) -> bool:
-    """Stripe live keys start with sk_live_ or pk_live_."""
-    return key.startswith("sk_live_") or key.startswith("pk_live_")
+    """Stripe live keys start with sk_live_ or pk_live_ and carry a secret."""
+    k = key.strip()
+    return (k.startswith("sk_live_") or k.startswith("pk_live_")) and len(k) >= 16
 
 
 # ---------------------------------------------------------------------------
@@ -332,7 +358,7 @@ class PreflightEngine:
             )
 
         # Check HTTPS
-        if not base_url.startswith("https://"):
+        if not base_url.strip().lower().startswith("https://"):
             results.append(
                 CheckResult(
                     name="base_url_https",
@@ -384,7 +410,10 @@ class PreflightEngine:
                     name="manifests_resolvable",
                     passed=True,
                     severity="info",
-                    message=f"Manifests will serve at {agent_json_url} and {llm_txt_url}.",
+                    message=(
+                        f"Manifest URL formats validated (reachability not "
+                        f"checked): {agent_json_url} and {llm_txt_url}."
+                    ),
                 )
             )
 
@@ -456,10 +485,12 @@ class PreflightEngine:
                 name="oracle_directories_total",
                 passed=reachable >= 2,
                 severity="warning" if reachable < 2 else "info",
-                message=f"{reachable}/{len(directories)} directory targets validated.",
+                message=(
+                    f"{reachable}/{len(directories)} directory URL formats "
+                    f"validated (reachability not checked)."
+                ),
                 detail=(
-                    "Recommend at least 2 reachable directories "
-                    "for meaningful visibility."
+                    "Recommend at least 2 valid directories for meaningful visibility."
                 ),
             )
         )
