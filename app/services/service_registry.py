@@ -305,6 +305,12 @@ class ServiceRegistry:
 
         self._local_registry[service_id] = service_record
         self._func_registry[service_id] = func
+        # A local registration owns no upstream executor or action binding.
+        # Drop any leftover from a replaced upstream registration under the
+        # same id so dispatch and permit paths cannot resolve state for a
+        # tool that no longer exists here.
+        self._executor_registry.pop(service_id, None)
+        self._action_bindings.pop(service_id, None)
 
         logger.info(f"Registered local service: {service_id} ({name})")
         return service_record
@@ -643,6 +649,10 @@ class ServiceRegistry:
             if service_id in self._func_registry:
                 del self._func_registry[service_id]
             self._executor_registry.pop(service_id, None)
+            # Bindings authorize a specific upstream destination. A removed
+            # tool must not keep authorizing permit or manifest lookups that
+            # still hold its old record.
+            self._action_bindings.pop(service_id, None)
             return True
         return False
 
