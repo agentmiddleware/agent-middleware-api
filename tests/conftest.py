@@ -152,6 +152,12 @@ os.environ.setdefault("VALID_API_KEYS", "test-key")
 # for examples that flip back to strict at the test boundary).
 os.environ.setdefault("TRUST_MODE_ENABLED", "false")
 os.environ.setdefault("ALLOW_LEGACY_UNPERMITTED_MCP", "true")
+# Fail-closed hardening flags (app/core/config.py) default to deny. Most of
+# the suite exercises wallets with no policy bundles and unpriced calls, so
+# opt back into the permissive posture here the same way the lines above do
+# for trust mode. Tests for the closed posture set the flags explicitly.
+os.environ.setdefault("POLICY_DENY_EMPTY_BUNDLES", "false")
+os.environ.setdefault("POLICY_DENY_UNKNOWN_COST", "false")
 # Stop the suite from self-throttling. RateLimitMiddleware exempts only the
 # literal "test-key"; unauthenticated requests all share the "anonymous"
 # bucket and provisioned agent keys each get their own, so a fast full-suite

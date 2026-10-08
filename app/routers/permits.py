@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 
 from app.core.auth import AuthContext, get_auth_context
 from app.core.config import get_settings
+from app.core.scopes import require_scope
 from app.schemas.trust import (
     ActionPermitFields,
     ActionPermitCreateRequest,
@@ -98,6 +99,7 @@ async def list_permits(
 
 
 @router.post("", response_model=PermitResponse, status_code=status.HTTP_201_CREATED)
+@require_scope("tool:invoke")
 async def create_permit(
     request: PermitCreateRequest,
     idempotency_key: str = Header(..., alias="Idempotency-Key"),

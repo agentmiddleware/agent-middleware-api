@@ -24,12 +24,18 @@ def require_scope(*required_scopes: str) -> Callable[[F], F]:
 
     API key callers (source="db" or "env") bypass scope checks
     (they have implicit full access). JWT callers must have at least
-    one of the required scopes.
+    one of the required scopes, unless REQUIRE_JWT_SCOPES is False, in
+    which case the decorator passes through (explicit operator opt-out
+    to the old posture where scopes are carried but never checked).
     """
 
     def decorator(func: F) -> F:
         @wraps(func)
         async def wrapper(*args, **kwargs) -> F:
+            from app.core.config import get_settings
+
+            if not get_settings().REQUIRE_JWT_SCOPES:
+                return await func(*args, **kwargs)
             # Find AuthContext in kwargs
             auth: AuthContext | None = kwargs.get("auth")
             if auth is None:

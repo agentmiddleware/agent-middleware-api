@@ -404,6 +404,29 @@ class Settings(BaseSettings):
     # honoring a simulated approval. False requires SENTINEL_API_URL + KEY.
     SIMULATION_MODE_HUMAN_APPROVAL: bool = True
 
+    # --- Fail-closed hardening (go-to-market fix #5) ---
+    # Each flag closes one permissive default called out in review. All four
+    # default to the closed posture; the test suite opts the two policy flags
+    # back to permissive in tests/conftest.py (documented there) because most
+    # existing tests exercise wallets with no bundles and unpriced calls.
+    # Operators enable the permissive side only deliberately.
+    # Enforce JWT scopes on routes decorated with app.core.scopes.require_scope
+    # (money and permit-issue routes). False makes the decorator pass through,
+    # so scope-limited tokens are honored only as far as the wallet checks go.
+    REQUIRE_JWT_SCOPES: bool = True
+    # Allow DEBUG mode with no keys configured to authenticate any key-shaped
+    # string as bootstrap admin (the legacy local open mode). False (default)
+    # denies unknown keys with 403 instead. True never applies in
+    # production-like environments, which refuse DEBUG at boot regardless.
+    DEBUG_ALLOW_OPEN_ADMIN: bool = False
+    # Deny governed calls for wallets with no active policy bundles instead of
+    # allowing them unguarded (reason: policy_no_bundles).
+    POLICY_DENY_EMPTY_BUNDLES: bool = True
+    # Deny calls whose cost estimate is unknown when a bundle caps spending
+    # (reasons: daily_spend_estimate_unknown, max_cost_estimate_unknown)
+    # instead of skipping the capped check.
+    POLICY_DENY_UNKNOWN_COST: bool = True
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
