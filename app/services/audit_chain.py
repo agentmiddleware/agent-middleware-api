@@ -19,6 +19,12 @@ from app.db.models import AuditChainHeadModel, ControlPlaneAuditEventModel
 from app.services.signing_keys import get_signing_key_service, sha256_hex
 
 
+#: Version marker bound into the signed payload of audit entries written
+#: after the sequence number joined the signed payload. Entries written
+#: before that carry no marker and verify under the old rule.
+AUDIT_PAYLOAD_VERSION = 2
+
+
 def audit_payload(
     *,
     event_id: str,
@@ -35,8 +41,9 @@ def audit_payload(
     error: str | None,
     metadata_json: str | None,
     previous_hash: str | None,
+    seq: int | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload = {
         "event_id": event_id,
         "created_at": created_at,
         "event": event,
@@ -52,6 +59,45 @@ def audit_payload(
         "metadata_json": metadata_json,
         "previous_hash": previous_hash,
     }
+    if seq is not None:
+        # New entries bind their chain position into the signed payload, so a
+        # renumbered or reordered entry no longer matches its signature. The
+        # marker lets verification tell new entries from historic ones, which
+        # were signed without a sequence number and still verify as before.
+        payload["seq"] = seq
+        payload["audit_payload_version"] = AUDIT_PAYLOAD_VERSION
+    return payload
+
+
+def _stored_audit_payload(
+    event: ControlPlaneAuditEventModel,
+) -> dict[str, Any]:
+    """Rebuild the exact payload dict an already stored event was signed with.
+
+    New entries carry the sequence number plus a version marker; historic
+    entries were signed without them. The stored payload hash names which
+    shape applies, so no schema change is needed to tell them apart.
+    """
+    base_kwargs = {
+        "event_id": event.event_id,
+        "created_at": event.created_at,
+        "event": event.event,
+        "wallet_id": event.wallet_id,
+        "tool": event.tool,
+        "endpoint": event.endpoint,
+        "auth_source": event.auth_source,
+        "key_id": event.key_id,
+        "policy_decision_id": event.policy_decision_id,
+        "request_id": event.request_id,
+        "ok": event.ok,
+        "error": event.error,
+        "metadata_json": event.metadata_json,
+        "previous_hash": event.previous_hash,
+    }
+    with_seq = audit_payload(**base_kwargs, seq=event.seq)
+    if event.payload_hash == sha256_hex(with_seq):
+        return with_seq
+    return audit_payload(**base_kwargs)
 
 
 def _sign_with_previous(
@@ -63,9 +109,9 @@ def _sign_with_previous(
     """Sign ``model`` as the successor of ``previous_hash`` (seq set by caller).
 
     Pure (no DB I/O) so it can run inside an open chain-head transaction. The
-    active signing key must be ensured by the caller beforehand. seq is
-    deliberately NOT part of the signed payload, so events signed before that
-    column existed still verify.
+    active signing key must be ensured by the caller beforehand. The sequence
+    number is part of the signed payload for new entries, with a version
+    marker; entries signed before that still verify under the old rule.
     """
     payload = audit_payload(
         event_id=model.event_id,
@@ -82,6 +128,7 @@ def _sign_with_previous(
         error=model.error,
         metadata_json=model.metadata_json,
         previous_hash=previous_hash,
+        seq=model.seq,
     )
     payload_hash = sha256_hex(payload)
     payload["payload_hash"] = payload_hash
@@ -184,22 +231,7 @@ def _assert_same_audit_intent(
     ):
         raise AuditEventConflictError("audit_event_id_conflict")
 
-    payload = audit_payload(
-        event_id=existing.event_id,
-        created_at=existing.created_at,
-        event=existing.event,
-        wallet_id=existing.wallet_id,
-        tool=existing.tool,
-        endpoint=existing.endpoint,
-        auth_source=existing.auth_source,
-        key_id=existing.key_id,
-        policy_decision_id=existing.policy_decision_id,
-        request_id=existing.request_id,
-        ok=existing.ok,
-        error=existing.error,
-        metadata_json=existing.metadata_json,
-        previous_hash=existing.previous_hash,
-    )
+    payload = _stored_audit_payload(existing)
     if (
         existing.payload_hash != sha256_hex(payload)
         or existing.signature is None
@@ -537,22 +569,7 @@ async def _verify_single_chain(
     first_event_id = events[0].event_id if events else None
     last_event_id = events[-1].event_id if events else None
     for event in events:
-        payload = audit_payload(
-            event_id=event.event_id,
-            created_at=event.created_at,
-            event=event.event,
-            wallet_id=event.wallet_id,
-            tool=event.tool,
-            endpoint=event.endpoint,
-            auth_source=event.auth_source,
-            key_id=event.key_id,
-            policy_decision_id=event.policy_decision_id,
-            request_id=event.request_id,
-            ok=event.ok,
-            error=event.error,
-            metadata_json=event.metadata_json,
-            previous_hash=event.previous_hash,
-        )
+        payload = _stored_audit_payload(event)
         payload_hash = sha256_hex(payload)
         if event.payload_hash != payload_hash:
             return AuditChainVerification(
