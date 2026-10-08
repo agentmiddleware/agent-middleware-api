@@ -64,8 +64,20 @@ class AWIEndpoint(BaseModel):
 
 class PricingTier(BaseModel):
     tier_name: str
-    price_per_credit: float
-    minimum_purchase: float
+    # Null means custom pilot pricing quoted in writing, never a public
+    # per-credit price. A literal 0.0 read as "free" to agents and buyers,
+    # so pilot tiers must not use it.
+    price_per_credit: Optional[float] = Field(
+        default=None,
+        description=(
+            "Public per-credit price in USD, or null when pricing is "
+            "custom-quoted per pilot in writing."
+        ),
+    )
+    minimum_purchase: Optional[float] = Field(
+        default=None,
+        description=("Minimum purchase in USD, or null when there is no public tier."),
+    )
     features: list[str]
 
 
@@ -449,22 +461,24 @@ def _build_pricing() -> list[PricingTier]:
     return [
         PricingTier(
             tier_name="self_hosted",
-            price_per_credit=0.0,
-            minimum_purchase=0.0,
+            price_per_credit=None,
+            minimum_purchase=None,
             features=[
                 "Logical action + bounded delegated authority",
                 "Configured-upstream at-most-one dispatch/debit + delivery uncertainty",
                 "Linked gateway receipt/audit evidence for reconciliation",
+                "Pilot pricing is custom and quoted in writing, not a public tier",
             ],
         ),
         PricingTier(
             tier_name="design_partner",
-            price_per_credit=0.0,
-            minimum_purchase=0.0,
+            price_per_credit=None,
+            minimum_purchase=None,
             features=[
                 "Same transaction-integrity loop as self-hosted",
                 "One environment-configured upstream MCP tool",
                 "Operator-provisioned wallet, key, credits, and permit",
+                "Pilot pricing is custom and quoted in writing, not a public tier",
                 "No public SLA, pricing, compliance, or tenant-isolation claim",
             ],
         ),

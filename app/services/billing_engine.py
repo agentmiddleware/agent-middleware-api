@@ -160,6 +160,21 @@ async def _reverse_velocity_counters(
         )
 
 
+_STRIPE_REFUND_DESCRIPTION_PREFIX = "Refund for PaymentIntent "
+
+
+def _refund_payment_intent_id(description: str | None) -> str | None:
+    """Extract the payment intent id from a Stripe refund description.
+
+    Returns None for non-Stripe refunds (for example, charge reversals in
+    the billing engine write "Refund for ..." copy of their own), which
+    the settlement summary lists separately instead of flagging.
+    """
+    if not description or not description.startswith(_STRIPE_REFUND_DESCRIPTION_PREFIX):
+        return None
+    return description[len(_STRIPE_REFUND_DESCRIPTION_PREFIX) :] or None
+
+
 class BillingEngine:
     """Internal billing and ledger implementation behind AgentMoney."""
 
@@ -1373,6 +1388,83 @@ class BillingEngine:
             )
             entries = list(result.scalars().all())
             return [ledger_entry_model_to_schema(e) for e in entries]
+
+    async def get_settlement_summary(self) -> dict[str, Any]:
+        """Aggregate Stripe-minted credits and refunds for reconciliation.
+
+        Checklist item 15 in docs/settlement-rails.md: nothing asserts that
+        live credits are backed by verified settlements. This is the
+        ledger-internal half of that check. It totals every mint (ledger
+        rows carrying a Stripe ``payment_intent_id``) and every refund,
+        and flags Stripe refunds that reference a payment intent with no
+        matching mint row, which is the shape a missed or dropped mint
+        webhook leaves behind.
+
+        It cannot prove Stripe's side on its own: the operator compares
+        ``minted_total_exact`` against Stripe dashboard payouts. See
+        scripts/reconcile_topups.py, which renders this summary as the
+        nightly report.
+        """
+        async with self._session_factory()() as session:
+            mint_result = await session.execute(
+                select(LedgerEntryModel)
+                .where(
+                    cast(
+                        ColumnElement[bool],
+                        LedgerEntryModel.payment_intent_id.is_not(None),
+                    )
+                )
+                .order_by(cast(ColumnElement[Any], LedgerEntryModel.timestamp).desc())
+            )
+            mints = list(mint_result.scalars().all())
+            refund_result = await session.execute(
+                select(LedgerEntryModel).where(
+                    cast(
+                        ColumnElement[bool],
+                        LedgerEntryModel.action == LedgerAction.REFUND.value,
+                    )
+                )
+            )
+            refunds = list(refund_result.scalars().all())
+
+        minted_total = sum((m.amount for m in mints), Decimal("0"))
+        refunded_total = sum((-r.amount for r in refunds), Decimal("0"))
+        minted_ids = {m.payment_intent_id for m in mints}
+
+        orphan_refunds = []
+        unlinked_refunds = []
+        for refund in refunds:
+            intent_id = _refund_payment_intent_id(refund.description)
+            row = {
+                "entry_id": refund.entry_id,
+                "wallet_id": refund.wallet_id,
+                "description": refund.description,
+                "amount_exact": str(refund.amount),
+            }
+            if intent_id is None:
+                unlinked_refunds.append(row)
+            elif intent_id not in minted_ids:
+                row["payment_intent_id"] = intent_id
+                orphan_refunds.append(row)
+
+        return {
+            "minted_count": len(mints),
+            "minted_total_exact": str(minted_total),
+            "refunded_count": len(refunds),
+            "refunded_total_exact": str(refunded_total),
+            "net_minted_exact": str(minted_total - refunded_total),
+            "mints": [
+                {
+                    "payment_intent_id": m.payment_intent_id,
+                    "wallet_id": m.wallet_id,
+                    "amount_exact": str(m.amount),
+                    "timestamp": m.timestamp.isoformat(),
+                }
+                for m in mints
+            ],
+            "orphan_refunds": orphan_refunds,
+            "unlinked_refunds": unlinked_refunds,
+        }
 
     # --- Service Registry ---
 

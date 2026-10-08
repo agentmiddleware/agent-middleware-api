@@ -339,6 +339,9 @@ class AgentMoney:
     async def get_ledger(self, wallet_id: str, limit: int = 50) -> list[LedgerEntry]:
         return await self._billing_engine.get_ledger(wallet_id, limit)
 
+    async def get_settlement_summary(self) -> dict:
+        return await self._billing_engine.get_settlement_summary()
+
     async def register_service(
         self,
         owner_wallet_id: str,

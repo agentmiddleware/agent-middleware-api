@@ -8,10 +8,12 @@ Swarm arbitrage silently books margin on every transaction.
 This is how the API generates revenue autonomously.
 """
 
+import csv
+import io
 from decimal import Decimal
 from typing import ClassVar, cast
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from ..core.auth import AuthContext, get_auth_context, verify_api_key
@@ -562,6 +564,93 @@ async def get_ledger(
         period_credits_exact=str(period_credits),
         period_debits=float(period_debits),
         period_debits_exact=str(period_debits),
+    )
+
+
+STATEMENT_CSV_COLUMNS = (
+    "entry_id",
+    "timestamp",
+    "action",
+    "amount_exact",
+    "balance_after_exact",
+    "service_category",
+    "description",
+)
+
+
+def _statement_cell(value: object) -> str:
+    """Render one CSV cell, neutralizing spreadsheet formula injection.
+
+    Ledger text is server-generated, but fields such as request paths and
+    descriptions can carry caller-influenced content. A cell starting with
+    ``=``, ``+``, ``-``, or ``@`` is prefixed with a single quote so Excel
+    and Sheets treat it as text rather than a formula.
+    """
+    text = "" if value is None else str(value)
+    if text[:1] in ("=", "+", "-", "@"):
+        return "'" + text
+    return text
+
+
+def build_statement_csv(entries: list) -> str:
+    """Render ledger entries as a finance-readable CSV statement.
+
+    Gateway receipts prove authorization, not payment: this export is the
+    per-wallet top-up and spend record a pilot customer can reconcile
+    against invoices. It is a statement of internal ledger debits and
+    credits, not an invoice and not proof of money movement.
+    """
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(STATEMENT_CSV_COLUMNS)
+    for entry in entries:
+        action = getattr(entry.action, "value", entry.action)
+        writer.writerow(
+            [
+                _statement_cell(entry.entry_id),
+                _statement_cell(entry.timestamp.isoformat()),
+                _statement_cell(action),
+                _statement_cell(entry.amount_exact),
+                _statement_cell(entry.balance_after_exact),
+                _statement_cell(entry.service_category),
+                _statement_cell(entry.description),
+            ]
+        )
+    return buffer.getvalue()
+
+
+@router.get(
+    "/statement/{wallet_id}",
+    summary="Export wallet statement as CSV",
+    description=(
+        "Per-wallet top-up and spend statement for pilot billing: ledger "
+        "entries rendered as plain CSV so a finance contact can reconcile "
+        "usage without waiting for full invoices. This is a statement of "
+        "internal ledger debits and credits, not an invoice."
+    ),
+    responses={
+        status.HTTP_403_FORBIDDEN: {
+            "description": "Wallet belongs to another tenant",
+        },
+    },
+)
+async def get_statement(
+    wallet_id: str,
+    limit: int = Query(500, ge=1, le=5000),
+    auth: AuthContext = Depends(get_auth_context),
+    money: AgentMoney = Depends(get_agent_money),
+):
+    _require_wallet_access(auth, wallet_id)
+    entries = await money.get_ledger(wallet_id, limit)
+    safe_name = "".join(ch for ch in wallet_id if ch.isalnum() or ch in ("-", "_"))
+    return Response(
+        content=build_statement_csv(entries),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="statement-{safe_name}.csv"'
+            ),
+        },
     )
 
 
