@@ -145,6 +145,8 @@ class DurableStateStore:
         self.namespace = settings.STATE_NAMESPACE
         self._state_backend = settings.STATE_BACKEND.strip().lower()
         self._redis_url = settings.REDIS_URL.strip()
+        self._redis_connect_timeout = settings.REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS
+        self._redis_socket_timeout = settings.REDIS_SOCKET_TIMEOUT_SECONDS
         self._database_url = settings.DATABASE_URL.strip()
         self._sqlite_url = settings.SQLITE_URL.strip()
         # A SQLAlchemy SQLite ``DATABASE_URL`` is the standard local-development
@@ -272,12 +274,24 @@ class DurableStateStore:
                             """
                         )
                 elif self._backend == "redis":
-                    self._redis = redis.from_url(
-                        self._redis_url,
-                        encoding="utf-8",
-                        decode_responses=True,
+                    from .rate_limiter import enforce_redis_timeouts
+
+                    self._redis = enforce_redis_timeouts(
+                        redis.from_url(
+                            self._redis_url,
+                            encoding="utf-8",
+                            decode_responses=True,
+                            socket_connect_timeout=self._redis_connect_timeout,
+                            socket_timeout=self._redis_socket_timeout,
+                            health_check_interval=15,
+                        ),
+                        connect_timeout=self._redis_connect_timeout,
+                        read_timeout=self._redis_socket_timeout,
                     )
-                    await self._redis.ping()
+                    await asyncio.wait_for(
+                        self._redis.ping(),
+                        timeout=self._redis_connect_timeout,
+                    )
                 elif self._backend == "sqlite":
                     self._sqlite_conn = await aiosqlite.connect(self._sqlite_url)
                     self._register_sqlite_shutdown_backstop()
@@ -512,14 +526,20 @@ class DurableStateStore:
 
         try:
             assert self._redis is not None
-            await self._redis.ping()
+            # Bounded so a hung Redis reports unhealthy promptly instead of
+            # stalling the caller (startup and /health/ready call this with
+            # no tighter bound of their own on every path).
+            await asyncio.wait_for(
+                self._redis.ping(),
+                timeout=self._redis_socket_timeout,
+            )
             return {"ok": True, "backend": "redis", "enabled": True}
         except Exception as exc:
             return {
                 "ok": False,
                 "backend": "redis",
                 "enabled": True,
-                "error": str(exc),
+                "error": str(exc) or type(exc).__name__,
             }
 
     async def close(self) -> None:
