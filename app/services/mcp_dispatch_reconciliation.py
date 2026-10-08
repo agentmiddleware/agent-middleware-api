@@ -35,6 +35,7 @@ from app.services.mcp_dispatch_attempts import (
     DispatchAttemptConflictError,
     DispatchAttemptError,
     McpDispatchAttemptService,
+    capped_dispatch_audit_timestamp,
     get_mcp_dispatch_attempt_service,
 )
 from app.services.permits import (
@@ -110,6 +111,13 @@ class McpDispatchReconciliationService:
         terminal_idle = (
             idle_seconds if terminal_idle_seconds is None else terminal_idle_seconds
         )
+        if idle_seconds < 0 or terminal_idle < 0 or not 1 <= limit <= 500:
+            raise DispatchAttemptError("dispatch_reconciliation_query_invalid")
+        # A future updated_at is never < now - idle, so an active row dated
+        # ahead of the skew allowance would stay invisible. Pull those stamps
+        # back to this clock first. State is unchanged, and the stale query
+        # below still misses them until a later sweep's idle window elapses.
+        await self._dispatch.clamp_future_activity_timestamps()
         prepared_finalized = 0
         dispatched_uncertain = 0
         terminal_recovered = 0
@@ -258,6 +266,7 @@ class McpDispatchReconciliationService:
         """
         if idle_seconds is not None and idle_seconds < 0:
             raise DispatchAttemptError("dispatch_reconciliation_query_invalid")
+        await self._dispatch.clamp_future_activity_timestamps(attempt_id=attempt_id)
         context = await self._required_context(attempt_id)
         attempt = context.attempt
         if idle_seconds is not None and (
@@ -432,6 +441,14 @@ class McpDispatchReconciliationService:
         existing_receipt = await self._receipts.get_receipt_by_idempotency_record_id(
             attempt.idempotency_record_id
         )
+        # A signed receipt that does not say failed_refunded is a different
+        # fact from this attempt. Refunding first would move money the receipt
+        # does not agree with, then the sweep would fail closed anyway.
+        if (
+            existing_receipt is not None
+            and existing_receipt.outcome != "failed_refunded"
+        ):
+            raise DispatchAttemptError("dispatch_receipt_outcome_conflict")
         debit = await self._find_operation_debit(attempt)
         if debit is not None:
             if attempt.ledger_entry_id is None:
@@ -472,11 +489,8 @@ class McpDispatchReconciliationService:
         # permit, and its guarded `budget_released_at IS NULL` UPDATE is the
         # once-only gate on every engine, so a stale read here cannot
         # double-subtract either.
-        if existing_receipt is not None:
-            if existing_receipt.outcome != "failed_refunded":
-                raise DispatchAttemptError("dispatch_receipt_outcome_conflict")
-            if attempt.budget_released_at is not None:
-                return
+        if existing_receipt is not None and attempt.budget_released_at is not None:
+            return
         await self._permits.release_dispatch_budget_once(attempt.attempt_id)
 
     async def _find_operation_debit(
@@ -580,7 +594,9 @@ class McpDispatchReconciliationService:
             metadata["approval_id"] = attempt.approval_id
         if get_settings().JEV_RISK_GUARD != DuplicateGuardMode.OFF:
             jev = await load_jev_guard_metadata(
-                jev_audit_id(attempt.wallet_id, context.endpoint, context.idempotency_key),
+                jev_audit_id(
+                    attempt.wallet_id, context.endpoint, context.idempotency_key
+                ),
                 attempt.wallet_id,
             )
             if jev is not None:
@@ -591,7 +607,7 @@ class McpDispatchReconciliationService:
             # key. Deriving it from the durable attempt gives every replica the
             # same append identity without an external lock or mutable lease.
             event_id=f"audit-dsp-{sha256_hex(attempt.attempt_id)[:32]}",
-            created_at=attempt.completed_at or attempt.updated_at,
+            created_at=capped_dispatch_audit_timestamp(attempt),
             wallet_id=attempt.wallet_id,
             tool=attempt.public_tool_id,
             endpoint=context.endpoint,

@@ -24,116 +24,146 @@ Add Phase 9 capabilities to the discovery manifest.
 
 1. Add new `ServiceCapability` entries:
 ```python
-ServiceCapability(
-    name="passkey",
-    version="1.0",
-    description="FIDO2/WebAuthn passkey verification for high-risk AWI actions",
-    category="security",
-),
-ServiceCapability(
-    name="dom_bridge",
-    version="1.0",
-    description="Bidirectional DOM↔AWI translation via Playwright for real browser automation",
-    category="automation",
-),
-ServiceCapability(
-    name="rag_memory",
-    version="1.0",
-    description="Semantic memory over AWI sessions with vector store and retrieval",
-    category="intelligence",
-),
+(
+    ServiceCapability(
+        name="passkey",
+        version="1.0",
+        description="FIDO2/WebAuthn passkey verification for high-risk AWI actions",
+        category="security",
+    ),
+)
+(
+    ServiceCapability(
+        name="dom_bridge",
+        version="1.0",
+        description="Bidirectional DOM↔AWI translation via Playwright for real browser automation",
+        category="automation",
+    ),
+)
+(
+    ServiceCapability(
+        name="rag_memory",
+        version="1.0",
+        description="Semantic memory over AWI sessions with vector store and retrieval",
+        category="intelligence",
+    ),
+)
 ```
 
 2. Add new MCP tools:
 ```python
-MCPToolInfo(
-    service_id="passkey",
-    name="create_passkey_challenge",
-    description="Create WebAuthn challenge for high-risk action verification",
-    category="security",
-    credits_per_call=2.0,
-    unit_name="challenge",
-),
-MCPToolInfo(
-    service_id="passkey",
-    name="verify_passkey",
-    description="Verify WebAuthn credential response",
-    category="security",
-    credits_per_call=1.0,
-    unit_name="verification",
-),
-MCPToolInfo(
-    service_id="dom_bridge",
-    name="create_dom_session",
-    description="Create browser session for DOM automation",
-    category="automation",
-    credits_per_call=5.0,
-    unit_name="session",
-),
-MCPToolInfo(
-    service_id="dom_bridge",
-    name="sync_dom",
-    description="Execute AWI action via real browser",
-    category="automation",
-    credits_per_call=3.0,
-    unit_name="action",
-),
-MCPToolInfo(
-    service_id="rag_memory",
-    name="query_memories",
-    description="Semantic search over past AWI sessions",
-    category="intelligence",
-    credits_per_call=2.0,
-    unit_name="query",
-),
-MCPToolInfo(
-    service_id="rag_memory",
-    name="get_session_context",
-    description="Get relevant context from past sessions",
-    category="intelligence",
-    credits_per_call=2.0,
-    unit_name="context",
-),
+(
+    MCPToolInfo(
+        service_id="passkey",
+        name="create_passkey_challenge",
+        description="Create WebAuthn challenge for high-risk action verification",
+        category="security",
+        credits_per_call=2.0,
+        unit_name="challenge",
+    ),
+)
+(
+    MCPToolInfo(
+        service_id="passkey",
+        name="verify_passkey",
+        description="Verify WebAuthn credential response",
+        category="security",
+        credits_per_call=1.0,
+        unit_name="verification",
+    ),
+)
+(
+    MCPToolInfo(
+        service_id="dom_bridge",
+        name="create_dom_session",
+        description="Create browser session for DOM automation",
+        category="automation",
+        credits_per_call=5.0,
+        unit_name="session",
+    ),
+)
+(
+    MCPToolInfo(
+        service_id="dom_bridge",
+        name="sync_dom",
+        description="Execute AWI action via real browser",
+        category="automation",
+        credits_per_call=3.0,
+        unit_name="action",
+    ),
+)
+(
+    MCPToolInfo(
+        service_id="rag_memory",
+        name="query_memories",
+        description="Semantic search over past AWI sessions",
+        category="intelligence",
+        credits_per_call=2.0,
+        unit_name="query",
+    ),
+)
+(
+    MCPToolInfo(
+        service_id="rag_memory",
+        name="get_session_context",
+        description="Get relevant context from past sessions",
+        category="intelligence",
+        credits_per_call=2.0,
+        unit_name="context",
+    ),
+)
 ```
 
 3. Add Phase 9 AWI endpoints:
 ```python
-AWIEndpoint(
-    path="/v1/awi/passkey/challenge",
-    method="POST",
-    description="Create WebAuthn challenge for high-risk action verification",
-    action_type="security",
-),
-AWIEndpoint(
-    path="/v1/awi/passkey/verify",
-    method="POST",
-    description="Verify WebAuthn credential response",
-    action_type="security",
-),
-AWIEndpoint(
-    path="/v1/awi/dom/session",
-    method="POST",
-    description="Create browser session for DOM automation",
-    action_type="browser_automation",
-),
-AWIEndpoint(
-    path="/v1/awi/dom/sync",
-    method="POST",
-    description="Execute AWI action via Playwright",
-    action_type="browser_automation",
-),
-AWIEndpoint(
-    path="/v1/awi/rag/query",
-    method="POST",
-    description="Semantic search over session memories",
-    action_type="memory",
-),
-AWIEndpoint(
-    path="/v1/awi/rag/context/{session_id}",
-    method="GET",
-    description="Get context from past sessions for current session",
-    action_type="memory",
-),
+(
+    AWIEndpoint(
+        path="/v1/awi/passkey/challenge",
+        method="POST",
+        description="Create WebAuthn challenge for high-risk action verification",
+        action_type="security",
+    ),
+)
+(
+    AWIEndpoint(
+        path="/v1/awi/passkey/verify",
+        method="POST",
+        description="Verify WebAuthn credential response",
+        action_type="security",
+    ),
+)
+(
+    AWIEndpoint(
+        path="/v1/awi/dom/session",
+        method="POST",
+        description="Create browser session for DOM automation",
+        action_type="browser_automation",
+    ),
+)
+(
+    AWIEndpoint(
+        path="/v1/awi/dom/sync",
+        method="POST",
+        description="Execute AWI action via Playwright",
+        action_type="browser_automation",
+    ),
+)
+(
+    AWIEndpoint(
+        path="/v1/awi/rag/query",
+        method="POST",
+        description="Semantic search over session memories",
+        action_type="memory",
+    ),
+)
+(
+    AWIEndpoint(
+        path="/v1/awi/rag/context/{session_id}",
+        method="GET",
+        description="Get context from past sessions for current session",
+        action_type="memory",
+    ),
+)
 ```
 
 ---
@@ -148,36 +178,40 @@ Enhance `/.well-known/agent.json` with Phase 9 capabilities.
 
 1. Update capabilities list:
 ```python
-capabilities=[
-    "billing",
-    "telemetry",
-    "agent_communication",
-    "ai_decision_making",
-    "mcp_tools",
-    "awi_automation",
-    "sandbox_testing",
-    "passkey_auth",          # NEW
-    "dom_bridge",           # NEW
-    "rag_memory",            # NEW
-],
+capabilities = (
+    [
+        "billing",
+        "telemetry",
+        "agent_communication",
+        "ai_decision_making",
+        "mcp_tools",
+        "awi_automation",
+        "sandbox_testing",
+        "passkey_auth",  # NEW
+        "dom_bridge",  # NEW
+        "rag_memory",  # NEW
+    ],
+)
 ```
 
 2. Add Phase 9 endpoints:
 ```python
-endpoints={
-    "api_base": "/v1",
-    "discovery": "/v1/discover",
-    "mcp": "/mcp",
-    "awi": "/v1/awi",
-    "awi_passkey": "/v1/awi/passkey",
-    "awi_dom": "/v1/awi/dom",
-    "awi_rag": "/v1/awi/rag",
-    "billing": "/v1/billing",
-    "telemetry": "/v1/telemetry",
-    "comms": "/v1/comms",
-    "ai": "/v1/ai",
-    "health": "/health",
-},
+endpoints = (
+    {
+        "api_base": "/v1",
+        "discovery": "/v1/discover",
+        "mcp": "/mcp",
+        "awi": "/v1/awi",
+        "awi_passkey": "/v1/awi/passkey",
+        "awi_dom": "/v1/awi/dom",
+        "awi_rag": "/v1/awi/rag",
+        "billing": "/v1/billing",
+        "telemetry": "/v1/telemetry",
+        "comms": "/v1/comms",
+        "ai": "/v1/ai",
+        "health": "/health",
+    },
+)
 ```
 
 3. Add Phase 9 pricing info:
@@ -293,6 +327,7 @@ Option B: Manual registration in `mcp_generator.py`
 
 from app.services.service_registry import get_service_registry
 
+
 def register_phase9_tools():
     registry = get_service_registry()
 
@@ -373,6 +408,7 @@ import httpx
 
 BASE_URL = "https://api.example.com"
 
+
 async def agent_workflow():
     # 1. Discover capabilities
     async with httpx.AsyncClient() as client:
@@ -380,44 +416,62 @@ async def agent_workflow():
         print(f"Discovered {len(manifest['capabilities'])} capabilities")
 
     # 2. Create AWI session
-    session = await client.post("/v1/awi/sessions", json={
-        "target_url": "https://shop.example.com",
-        "max_steps": 50,
-    })
+    session = await client.post(
+        "/v1/awi/sessions",
+        json={
+            "target_url": "https://shop.example.com",
+            "max_steps": 50,
+        },
+    )
 
     # 3. Try checkout (requires passkey)
-    result = await client.post("/v1/awi/execute", json={
-        "session_id": session["session_id"],
-        "action": "checkout",
-    })
+    result = await client.post(
+        "/v1/awi/execute",
+        json={
+            "session_id": session["session_id"],
+            "action": "checkout",
+        },
+    )
 
     if result["status"] == "passkey_required":
         # 4. Get passkey challenge
-        challenge = await client.post("/v1/awi/passkey/challenge", json={
-            "session_id": session["session_id"],
-            "action": "checkout",
-        })
+        challenge = await client.post(
+            "/v1/awi/passkey/challenge",
+            json={
+                "session_id": session["session_id"],
+                "action": "checkout",
+            },
+        )
 
         # 5. Client-side verification (simulated)
         credential = simulate_webauthn_flow(challenge)
 
         # 6. Verify passkey
-        await client.post("/v1/awi/passkey/verify", json={
-            "challenge_id": challenge["challenge_id"],
-            "credential": credential,
-        })
+        await client.post(
+            "/v1/awi/passkey/verify",
+            json={
+                "challenge_id": challenge["challenge_id"],
+                "credential": credential,
+            },
+        )
 
         # 7. Retry checkout
-        result = await client.post("/v1/awi/execute", json={
-            "session_id": session["session_id"],
-            "action": "checkout",
-        })
+        result = await client.post(
+            "/v1/awi/execute",
+            json={
+                "session_id": session["session_id"],
+                "action": "checkout",
+            },
+        )
 
     # 8. Query past shopping sessions
-    memories = await client.post("/v1/awi/rag/query", json={
-        "query": "laptop shopping",
-        "top_k": 3,
-    })
+    memories = await client.post(
+        "/v1/awi/rag/query",
+        json={
+            "query": "laptop shopping",
+            "top_k": 3,
+        },
+    )
 
     print(f"Found {len(memories['results'])} similar past sessions")
 ```
@@ -449,6 +503,7 @@ async def test_discover_includes_phase9():
     assert any(c["name"] == "dom_bridge" for c in capabilities)
     assert any(c["name"] == "rag_memory" for c in capabilities)
 
+
 async def test_agent_json_includes_phase9():
     response = await client.get("/.well-known/agent.json")
     manifest = response.json()
@@ -467,8 +522,11 @@ async def test_full_agent_discovery_flow(client):
 
     # 2. Get MCP tools
     tools = await client.get("/mcp/tools.json")
-    phase9_tools = [t for t in tools["tools"]
-                    if t["category"] in ["security", "automation", "intelligence"]]
+    phase9_tools = [
+        t
+        for t in tools["tools"]
+        if t["category"] in ["security", "automation", "intelligence"]
+    ]
     assert len(phase9_tools) >= 6
 
     # 3. Use llm.txt
