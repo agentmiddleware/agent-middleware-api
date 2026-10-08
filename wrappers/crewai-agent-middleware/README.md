@@ -31,10 +31,13 @@ module used below.
 from crewai import Agent
 from crewai_b2a import CrewAIB2ATool
 
-# Initialize tool with required wallet_id and api_key
+# Initialize tool with required wallet_id and api_key.
+# base_url must point at your gateway (default http://127.0.0.1:8000
+# for a local quickstart). There is no hosted default.
 b2a_tool = CrewAIB2ATool(
     api_key="your-api-key",
     wallet_id="agent-001",
+    base_url="http://127.0.0.1:8000",
 )
 
 # Create agent with B2A tool
@@ -109,6 +112,13 @@ result2 = b2a_tool.run(
     arguments={"query": "test"},  # same arguments
 )
 ```
+
+## Errors
+
+Failures raise instead of returning strings: `ValueError` for missing or
+blank inputs, and the typed `b2a_sdk` error (auth, denial, idempotency
+conflict, short funds, uncertain delivery) for gateway failures, matching
+the LangChain wrapper. The sync and async paths share one implementation.
 
 ## Permit Configuration
 

@@ -112,5 +112,6 @@ tools = get_mcp_tools(
 ## Requirements
 
 - Python 3.11+
-- LangChain 0.1.0+
+- LangChain 1.3.9+
+- LangGraph 1.0.10+
 - httpx 0.25.0+
