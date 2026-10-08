@@ -233,8 +233,12 @@ async def test_signing_input_for_model_covers_approval_id(
             model, session=session
         )
         assert signing_input is not None
+        # Fresh receipts carry the domain label; the frozen goldens above pin
+        # the unlabeled historic branches, which verify unchanged.
         expected = canonical_json(
-            ReceiptService._verification_payload(model, include_linkage=True)
+            ReceiptService._verification_payload(
+                model, include_linkage=True, include_domain=True
+            )
         )
         assert signing_input == expected
         assert json.loads(signing_input)["approval_id"] == "apr_golden_0001"

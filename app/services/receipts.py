@@ -19,6 +19,7 @@ from app.schemas.trust import ActionPermitFields, ReceiptResponse
 from app.services.jev_guard_metadata import load_jev_guard_metadata
 from app.services.pricing import credit_amount_fits_storage
 from app.services.signing_keys import (
+    RECEIPT_AUDIENCE,
     canonical_json,
     get_signing_key_service,
     sha256_hex,
@@ -102,6 +103,7 @@ class ReceiptService:
         model: ReceiptModel,
         *,
         include_linkage: bool,
+        include_domain: bool = False,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "receipt_id": model.receipt_id,
@@ -120,6 +122,14 @@ class ReceiptService:
             "alg": "Ed25519",
             "kid": model.signature_key_id,
         }
+        if include_domain:
+            # Domain separation: receipts minted from here on carry an
+            # explicit audience no login token can bear, so one key signing
+            # both can never confuse them. Historic receipts have no ``aud``
+            # claim and keep verifying through the ``include_domain=False``
+            # branches below; ``aud`` is covered by ``payload_hash`` on new
+            # receipts only.
+            payload["aud"] = RECEIPT_AUDIENCE
         if model.reason_code is not None:
             payload["reason_code"] = model.reason_code
         if include_linkage and model.idempotency_record_id is not None:
@@ -408,6 +418,11 @@ class ReceiptService:
             "outcome": outcome,
             "audit_event_id": audit_event_id,
             "created_at": created_at,
+            # Domain label covered by the signature; mirrors
+            # ``_verification_payload(..., include_domain=True)``. Receipts
+            # minted before this label keep verifying on the unlabeled
+            # branches of ``verify_model``.
+            "aud": RECEIPT_AUDIENCE,
         }
         if reason_code is not None:
             payload["reason_code"] = reason_code
@@ -686,6 +701,17 @@ class ReceiptService:
         out as evidence.
         """
         signing_keys = get_signing_key_service()
+        domain_payload = self._verification_payload(
+            model, include_linkage=True, include_domain=True
+        )
+        if await signing_keys.verify_payload(
+            domain_payload,
+            signature=model.signature,
+            key_id=model.signature_key_id,
+            session=session,
+        ):
+            return canonical_json(domain_payload)
+
         current_payload = self._verification_payload(model, include_linkage=True)
         if await signing_keys.verify_payload(
             current_payload,
@@ -727,6 +753,19 @@ class ReceiptService:
     ) -> bool:
         """Verify current signatures, then the constrained migration fallback."""
         signing_keys = get_signing_key_service()
+        # Newest first: domain-labeled receipts, then unlabeled receipts
+        # minted before the label, then the constrained migration fallback.
+        domain_payload = self._verification_payload(
+            model, include_linkage=True, include_domain=True
+        )
+        if await signing_keys.verify_payload(
+            domain_payload,
+            signature=model.signature,
+            key_id=model.signature_key_id,
+            session=session,
+        ):
+            return True
+
         current_payload = self._verification_payload(model, include_linkage=True)
         if await signing_keys.verify_payload(
             current_payload,

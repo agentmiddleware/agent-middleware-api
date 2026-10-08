@@ -19,12 +19,19 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 from app.core.config import get_settings
-from app.services.signing_keys import _decode_private_key
+from app.services.signing_keys import (
+    RECEIPT_AUDIENCE,
+    TOKEN_AUDIENCE,
+    TOKEN_ISSUER,
+    _decode_private_key,
+)
 
 
 JWT_ALGORITHM = "EdDSA"
-JWT_ISSUER = "agent-middleware-api"
-JWT_AUDIENCE = "agent-middleware-api"
+# Single source of truth for the token domain lives with the shared key
+# (app.services.signing_keys); these aliases keep existing imports working.
+JWT_ISSUER = TOKEN_ISSUER
+JWT_AUDIENCE = TOKEN_AUDIENCE
 JWT_ACCESS_EXPIRY = 900  # 15 minutes
 JWT_REFRESH_EXPIRY = 604800  # 7 days
 
@@ -144,6 +151,14 @@ class JWTService:
             raise JWTError("token_expired")
         except jwt.InvalidTokenError as e:
             raise JWTError(f"invalid_token: {e}")
+
+        # Domain separation: the trust-plane key also signs receipts, so a
+        # payload carrying receipt claims is never a login token even when
+        # its signature is valid. (The receipt audience itself is already
+        # refused above by the PyJWT audience check; this catches a token
+        # that pairs the token audience with receipt-shaped claims.)
+        if payload.get("aud") == RECEIPT_AUDIENCE or "receipt_id" in payload:
+            raise JWTError("token_receipt_domain_mismatch")
 
         if payload.get("type") != token_type:
             raise JWTError(f"token_type_mismatch: expected {token_type}")

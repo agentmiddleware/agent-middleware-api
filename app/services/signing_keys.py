@@ -36,6 +36,20 @@ class SigningKeyError(RuntimeError):
 RECEIPT_CANONICALIZATION = "awi-canonical-json/1"
 
 
+# Domain separation for the shared trust-plane Ed25519 key. The same key
+# signs JWT login tokens (``app.core.jwt``) and canonical-JSON payloads
+# (receipts, permits, quotes, audit entries). A signature is only meaningful
+# inside the domain whose claims it carries: login tokens carry the token
+# issuer/audience with an access-or-refresh type, receipts carry the receipt
+# audience. Verification on each side refuses the other's shape, so a receipt
+# body can never verify as a login token and a token's claims can never
+# verify as a receipt, even though one key signs both.
+TOKEN_ISSUER = "agent-middleware-api"
+TOKEN_AUDIENCE = "agent-middleware-api"
+TOKEN_TYPES = frozenset({"access", "refresh"})
+RECEIPT_AUDIENCE = "agent-middleware-api/receipts"
+
+
 def _decode_private_key(configured: str) -> Ed25519PrivateKey:
     """Decode strict base64 Ed25519 seed material without exposing it."""
 
@@ -382,6 +396,14 @@ class SigningKeyService:
         key_id: str,
         session: AsyncSession | None = None,
     ) -> bool:
+        # Domain separation: a JWT login token's claims are never a receipt
+        # (or permit, quote, or audit) payload, even when the signature over
+        # them is valid. Refuse before touching the database so a token's
+        # claims fail closed as "not verified" in every canonical-JSON
+        # verifier that shares this key. None of those payload shapes carry
+        # the token issuer with an access-or-refresh type.
+        if payload.get("iss") == TOKEN_ISSUER and payload.get("type") in TOKEN_TYPES:
+            return False
         key = await self.get_public_key(key_id, session=session)
         if not key or key.status == "disabled":
             return False

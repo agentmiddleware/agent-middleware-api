@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — planned v1.3.0
 
+### Fixed — domain separation between login tokens and signed receipts
+
+- The trust-plane Ed25519 key signs both JWT login tokens and receipt
+  payloads. New receipts now carry an explicit audience
+  (`agent-middleware-api/receipts`) covered by the receipt signature, JWT
+  verification refuses payloads carrying receipt claims, and receipt
+  verification refuses login-token claims. Receipts minted before the label
+  keep verifying unchanged.
+
 ### Changed — standard `/mcp` returns `delivery_uncertain` as a tool result
 
 - On `POST /mcp`, a lost upstream response (`delivery_uncertain`) is now a
