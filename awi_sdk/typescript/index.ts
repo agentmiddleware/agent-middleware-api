@@ -3,15 +3,119 @@
  * TypeScript client for Agentic Web Interface (AWI) services
  *
  * Based on arXiv:2506.10953v1 - "Build the web for agents, not agents for the web"
+ *
+ * Proof surface note: the /v1/awi/* routes this client calls are frozen
+ * proof surfaces. Production-like deployments leave them unmounted
+ * (ENABLE_PROOF_SURFACES=false), so this client only works against a
+ * server started with proof surfaces enabled. See docs/PROOF_SURFACES.md.
  */
 
-import axios, { AxiosInstance, AxiosResponse } from "axios";
+import axios, { AxiosError, AxiosInstance, AxiosResponse } from "axios";
+
+/** Default base URL, matching the Python SDK default. */
+export const DEFAULT_BASE_URL = "http://localhost:8000";
 
 export interface AWIConfig {
-  baseUrl: string;
-  apiKey: string;
+  baseUrl?: string;
+  apiKey?: string;
   walletId?: string;
   timeout?: number;
+}
+
+/** Base class for typed API failures. Carries the axios response. */
+export class AWIError extends Error {
+  readonly status?: number;
+  readonly detail: string;
+  readonly response?: AxiosResponse;
+
+  constructor(detail: string, response?: AxiosResponse) {
+    super(detail);
+    this.name = "AWIError";
+    this.detail = detail;
+    this.response = response;
+    this.status = response?.status;
+  }
+}
+
+/** The API returned an error status with no more specific mapping. */
+export class AWIApiError extends AWIError {
+  constructor(detail: string, response?: AxiosResponse) {
+    super(detail, response);
+    this.name = "AWIApiError";
+  }
+}
+
+/** The API key was missing or invalid (HTTP 401). */
+export class AWIAuthenticationError extends AWIError {
+  constructor(detail: string, response?: AxiosResponse) {
+    super(detail, response);
+    this.name = "AWIAuthenticationError";
+  }
+}
+
+/** The key is valid but may not perform this action (HTTP 403). */
+export class AWIAuthorizationError extends AWIError {
+  constructor(detail: string, response?: AxiosResponse) {
+    super(detail, response);
+    this.name = "AWIAuthorizationError";
+  }
+}
+
+/** A governed call was refused by its permit (HTTP 403, permit error). */
+export class AWIPermitDeniedError extends AWIAuthorizationError {
+  constructor(detail: string, response?: AxiosResponse) {
+    super(detail, response);
+    this.name = "AWIPermitDeniedError";
+  }
+}
+
+/** An idempotency key was reused for a different request (HTTP 409). */
+export class AWIIdempotencyConflictError extends AWIError {
+  constructor(detail: string, response?: AxiosResponse) {
+    super(detail, response);
+    this.name = "AWIIdempotencyConflictError";
+  }
+}
+
+function errorCode(data: unknown): string {
+  if (typeof data === "object" && data !== null && "error" in data) {
+    const code = (data as Record<string, unknown>).error;
+    return typeof code === "string" ? code : "";
+  }
+  return "";
+}
+
+function errorMessage(data: unknown, fallback: string): string {
+  if (typeof data === "object" && data !== null) {
+    const record = data as Record<string, unknown>;
+    const message = record.message;
+    if (typeof message === "string" && message) return message;
+    const code = record.error;
+    if (typeof code === "string" && code) return code;
+  }
+  if (typeof data === "string" && data) return data;
+  return fallback;
+}
+
+/** Map an axios failure to the matching typed error, preserving .response. */
+export function toAWIError(error: unknown): unknown {
+  if (!axios.isAxiosError(error) || !error.response) return error;
+  const response = error.response as AxiosResponse;
+  const status = response.status;
+  const data = response.data;
+  const code = errorCode(data);
+  const detail = errorMessage(data, (error as AxiosError).message);
+  if (status === 401) return new AWIAuthenticationError(detail, response);
+  if (status === 403) {
+    if (code.startsWith("permit")) {
+      return new AWIPermitDeniedError(detail, response);
+    }
+    return new AWIAuthorizationError(detail, response);
+  }
+  if (status === 409 && (code.includes("idempot") || code.includes("conflict"))) {
+    return new AWIIdempotencyConflictError(detail, response);
+  }
+  return new AWIApiError(detail, response);
 }
 
 export interface AWISession {
@@ -126,17 +230,24 @@ export class AWIClient {
   private client: AxiosInstance;
   private config: AWIConfig;
 
-  constructor(config: AWIConfig) {
+  constructor(config: AWIConfig = {}) {
     this.config = config;
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (config.apiKey) {
+      headers["X-API-Key"] = config.apiKey;
+    }
     this.client = axios.create({
-      baseURL: config.baseUrl,
+      baseURL: config.baseUrl || DEFAULT_BASE_URL,
       timeout: config.timeout || 30000,
       // Never follow redirects: axios forwards X-API-Key to the new host.
       maxRedirects: 0,
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": config.apiKey,
-      },
+      headers,
+    });
+    // Surface typed errors while keeping the axios response attached.
+    this.client.interceptors.response.use(undefined, (error: unknown) => {
+      throw toAWIError(error);
     });
   }
 

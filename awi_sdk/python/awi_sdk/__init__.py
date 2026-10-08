@@ -3,20 +3,39 @@ AWI Python SDK — Phase 8
 =========================
 Lightweight Python client for interacting with AWI-enabled services.
 
-Not published to PyPI and not pip-installable from this repository
-(no pyproject.toml). Add awi_sdk/python to PYTHONPATH from a checkout.
+Install from this checkout (not published to PyPI)::
+
+    python -m pip install ./awi_sdk/python
+
+Proof surface note: the ``/v1/awi/*`` routes this client calls are frozen
+proof surfaces, unmounted in production-like deployments
+(``ENABLE_PROOF_SURFACES=false``). Point the client at a server started
+with proof surfaces enabled. See ``docs/PROOF_SURFACES.md``.
 """
 
-from .client import AWIClient, AWIClientConfig
+from .client import (
+    MAX_IDEMPOTENCY_KEY_LENGTH,
+    RETRYABLE_STATUS_CODES,
+    AWIClient,
+    AWIClientConfig,
+)
+from .errors import (
+    AuthenticationError,
+    AuthorizationError,
+    AWIAPIError,
+    AWIError,
+    IdempotencyConflictError,
+    PermitDeniedError,
+)
 from .models import (
     AWIActionDefinition,
     AWIActionRiskLevel,
     AWIActionStatus,
     AWIActionTier,
-    AWIRepresentationType,
-    AWIStandardAction,
     AWIExecutionResponse,
+    AWIRepresentationType,
     AWISession,
+    AWIStandardAction,
 )
 
 __all__ = [
@@ -30,6 +49,14 @@ __all__ = [
     "AWIRepresentationType",
     "AWISession",
     "AWIExecutionResponse",
+    "AWIError",
+    "AWIAPIError",
+    "AuthenticationError",
+    "AuthorizationError",
+    "PermitDeniedError",
+    "IdempotencyConflictError",
+    "MAX_IDEMPOTENCY_KEY_LENGTH",
+    "RETRYABLE_STATUS_CODES",
 ]
 
 __version__ = "0.1.0"

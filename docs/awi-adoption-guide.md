@@ -27,20 +27,26 @@ AWI is a standardized, stateful interface layer that lets autonomous agents inte
 
 ## Quick Start (15 minutes)
 
-### 1. Install the AWI Kit — **[not implemented]**
+### 1. Install the AWI Kit — **[implemented]**
 
-There is no `agent-middleware-awi` package on PyPI, and `awi_sdk/` ships no
-`pyproject.toml`, so it cannot be pip-installed from this repository either.
-To use the Python client today, work from a checkout and put the SDK on your
-path:
+Neither SDK is published to a registry (no PyPI, no npm), but both install
+from this checkout. No `PYTHONPATH` hack is needed anymore:
 
 ```bash
 git clone https://github.com/PetrefiedThunder/agent-middleware-api.git
 cd agent-middleware-api
-python -m pip install -r requirements.txt
-export PYTHONPATH="$PWD/awi_sdk/python:$PYTHONPATH"
+python -m pip install ./awi_sdk/python
 python -c 'from awi_sdk import AWIClient, AWIClientConfig; print(AWIClient)'
 ```
+
+```bash
+cd awi_sdk/typescript
+npm install
+npm run build
+```
+
+Each SDK folder now has its own README and runnable example
+(`awi_sdk/python/README.md`, `awi_sdk/typescript/README.md`).
 
 ### 2. Generate Your AWI Manifest — **[implemented]**
 
@@ -188,9 +194,10 @@ awi = AWIAdapter(middleware_url="https://your-middleware.example.com")
 app.mount("/awi", awi.router)
 ```
 
-### Next.js (coming soon)
+### Next.js
 ```typescript
-// awi_sdk/typescript
+// See awi_sdk/typescript/README.md and examples/quickstart.mjs.
+// Install from the checkout; the package is not on the npm registry.
 import { AWIClient } from "@agent-middleware/awi-sdk";
 
 const client = new AWIClient({
