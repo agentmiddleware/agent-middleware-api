@@ -430,31 +430,41 @@ class APIKeyService:
             if expires_at and expires_at < now:
                 return None
 
-            if key.max_uses is not None:
-                # Guarded increment: the WHERE clause makes concurrent
-                # requests race for the remaining budget instead of all
-                # reading the same stale count, so max_uses cannot be
-                # overshot. rowcount 0 means the budget is spent.
-                consumed = await session.execute(
-                    update(APIKeyModel)
-                    .where(
-                        col(APIKeyModel.key_id) == key.key_id,
-                        col(APIKeyModel.status) == APIKeyStatus.ACTIVE.value,
+            # One guarded write for every key, including unlimited ones.
+            # The old unlimited branch stamped last_used_at on the row it
+            # had already loaded, so a revoke or expiry that committed
+            # after the read still authenticated. Capped keys rechecked
+            # status and remaining uses, but not expiry. This WHERE is the
+            # same liveness check consume_derived_key_use uses. Unlimited
+            # keys do not increment use_count. rowcount 0 means the key
+            # was no longer usable. An unknown rowcount (-1) still accepts.
+            persisted_now = to_naive_utc(now)
+            consumed = await session.execute(
+                update(APIKeyModel)
+                .where(
+                    col(APIKeyModel.key_id) == key.key_id,
+                    col(APIKeyModel.status) == APIKeyStatus.ACTIVE.value,
+                    or_(
+                        col(APIKeyModel.expires_at).is_(None),
+                        col(APIKeyModel.expires_at) >= persisted_now,
+                    ),
+                    or_(
+                        col(APIKeyModel.max_uses).is_(None),
                         col(APIKeyModel.use_count) < col(APIKeyModel.max_uses),
-                    )
-                    .values(
-                        use_count=APIKeyModel.use_count + 1,
-                        last_used_at=to_naive_utc(now),
-                    )
-                    .execution_options(synchronize_session=False)
+                    ),
                 )
-                await session.commit()
-                if (cast(Any, consumed).rowcount or 0) == 0:
-                    return None
-            else:
-                key.last_used_at = to_naive_utc(now)
-                session.add(key)
-                await session.commit()
+                .values(
+                    use_count=case(
+                        (col(APIKeyModel.max_uses).is_(None), APIKeyModel.use_count),
+                        else_=APIKeyModel.use_count + 1,
+                    ),
+                    last_used_at=persisted_now,
+                )
+                .execution_options(synchronize_session=False)
+            )
+            await session.commit()
+            if (cast(Any, consumed).rowcount or 0) == 0:
+                return None
 
         return key
 
