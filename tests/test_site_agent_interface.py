@@ -295,10 +295,21 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
     stand_in = "The tool in the recording is a stand-in echo tool, not a refund tool"
     boundary = (
         "Agent Middleware API is a transaction boundary between your autonomous "
-        "agents and your consequential MCP (Model Context Protocol) tools. The "
-        "first call executes and is charged once; a retry carrying the same "
-        "idempotency key cannot dispatch again or debit again. Every completed "
-        "call returns a signed receipt you can verify offline."
+        "agents and your consequential MCP (Model Context Protocol) tools. On "
+        "the configured upstream path, the first accepted call executes and is "
+        "charged, at most once; a retry carrying the same idempotency key "
+        "cannot dispatch again or debit again. Every finalized or reconciled "
+        "call on that path returns a signed receipt you can verify offline."
+    )
+    # The H1 keeps the one-line buyer sentence used identically across the
+    # site, pitch, and wedge, so the scope travels directly beneath it: the
+    # headline must never appear without its upstream-path and at-most-once
+    # qualifier on the same page.
+    hero_scope = (
+        "On the configured upstream-MCP path, and at most once per accepted "
+        "request: denied calls are never charged, pre-dispatch failures are "
+        "refunded, and ambiguous post-dispatch outcomes stay charged pending "
+        "manual review."
     )
     wedge = (
         "The wedge today is metered calls. The underlying primitive is bounded "
@@ -310,8 +321,22 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
     )
 
     assert headline in text
+    assert hero_scope in text
+    # The scope qualifier rides directly under the headline, before the
+    # scenario paragraph, so no render can show the promise without it.
+    # (Ordered on the whitespace-normalized text: the raw markup wraps
+    # each paragraph across source lines.)
+    assert text.index(headline) < text.index(hero_scope) < text.index(failure)
     assert failure in text
     assert boundary in text
+    # The old unqualified offer-band sentences must not survive anywhere on
+    # the page: each promised a charge or receipt the gateway does not
+    # produce on every path.
+    for stale_sentence in (
+        "The first call executes and is charged once",
+        "Every completed call returns a signed receipt",
+    ):
+        assert stale_sentence not in text
     assert wedge in text
     assert credit in text
     assert stand_in in text
@@ -697,6 +722,23 @@ def test_search_social_and_analytics_contracts(tmp_path) -> None:
     assert (
         "<title>Agent Middleware API | Transaction integrity for agent actions</title>"
         in page
+    )
+    # Social and structured-data titles must carry the scoped promise, not
+    # the bare database-style "transactional" reading, which the page body
+    # would otherwise leave unqualified for anyone who only sees the card.
+    scoped_title = "Authorize one action, charge it at most once, prove what happened."
+    assert f'content="{scoped_title}"' in page
+    assert page.count(scoped_title) >= 3, (
+        "the scoped social title should appear in og:title, twitter:title, "
+        "and the structured-data page name"
+    )
+    assert "Make consequential agent actions transactional" not in page
+    # The boundary diagram's accessible name carries the same qualifier as
+    # its figcaption: the gateway is the only path once the operator closes
+    # the direct routes, not unconditionally.
+    assert (
+        "aria-label=\"Diagram: once the operator closes the tool's direct "
+        "routes, the governed boundary is the only path" in page
     )
     assert "explicit delivery uncertainty" in page
     assert "https://www.thisisatest.tech/social-card.png" in page
@@ -2033,6 +2075,20 @@ def test_comparison_page_names_alternatives_and_refuses_superlatives(
     # States the compliance boundary rather than dodging the question.
     assert "not on their own" in text
     assert "hold no" in text and "certification" in text
+
+    # The debit and dispatch rows hold for the configured upstream path only
+    # (local governed tools have no dispatch state machine), so no cell may
+    # carry a bare "Yes" on those rows.
+    assert text.count("yes, on the configured upstream path") == 3
+    assert "local governed tools have no dispatch state machine" in text
+    assert "last re-checked 2026-08-25" in text
+    # Agent payment networks are a named non-assessment, not a silent gap:
+    # a buyer comparing against Skyfire-class rails must see that this
+    # table makes no claim about them.
+    assert "not assessed here: agent payment networks" in text
+    for network in ("skyfire", "nevermined", "payman"):
+        assert network in text
+    assert "this table makes no claim about how they compare" in text
 
 
 def test_local_site_assets_exist() -> None:

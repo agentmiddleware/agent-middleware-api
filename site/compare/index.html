@@ -167,15 +167,18 @@
           <table class="compare-table">
             <caption>
               Assessed August 2026 from each project's public source and
-              documentation. &ldquo;Not documented&rdquo; means we did not find
-              the capability described &mdash; not that we proved it absent.
-              Capabilities change; verify before deciding. Retry protection is
-              scoped to this gateway: for an authorized request, one accepted
-              idempotency key permits <em>at most one</em> dispatch from here —
-              a call denied or failed before dispatch produces a terminal
-              receipt and no debit at all. Whether your upstream tool then runs
-              its own side effect exactly once depends on that tool honouring
-              the forwarded key.
+              documentation, last re-checked 2026-08-25. &ldquo;Not
+              documented&rdquo; means we did not find the capability described
+              &mdash; not that we proved it absent. Capabilities change;
+              verify before deciding. Retry protection is scoped to the
+              configured upstream path through this gateway: for an authorized
+              request, one accepted idempotency key permits <em>at most
+              one</em> dispatch from here — a call denied or failed before
+              dispatch produces a terminal receipt and no debit at all. Local
+              governed tools have no dispatch state machine, so the three
+              retry and debit rows below describe the upstream path only.
+              Whether your upstream tool then runs its own side effect exactly
+              once depends on that tool honouring the forwarded key.
             </caption>
             <thead>
               <tr>
@@ -224,21 +227,21 @@
               </tr>
               <tr>
                 <th scope="row">Duplicate gateway dispatch prevented on retry</th>
-                <td>Yes</td>
+                <td>Yes, on the configured upstream path</td>
                 <td>Varies</td>
                 <td>No</td>
                 <td>N/A — dedupes in-process, and only at call sites that use the wrapper</td>
               </tr>
               <tr>
                 <th scope="row">Debit bound to the idempotency record</th>
-                <td>Yes</td>
+                <td>Yes, on the configured upstream path</td>
                 <td>Not documented</td>
                 <td>Not documented</td>
                 <td>Not documented</td>
               </tr>
               <tr>
                 <th scope="row">Ambiguous outcome is a distinct receipted state</th>
-                <td>Yes</td>
+                <td>Yes, on the configured upstream path</td>
                 <td>Not documented</td>
                 <td>Not documented</td>
                 <td>Not documented</td>
@@ -297,6 +300,13 @@
             >latch</a
           >
           (reliability libraries).
+        </p>
+        <p class="machine-note">
+          Not assessed here: agent payment networks such as Skyfire,
+          Nevermined, and Payman. The August 2026 sweep flags them as an open
+          gap on the debit-binding question, so this table makes no claim
+          about how they compare. If you are evaluating those rails, ask them
+          directly whether they bind a charge to an idempotency record.
         </p>
       </section>
 
