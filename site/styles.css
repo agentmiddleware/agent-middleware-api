@@ -588,6 +588,28 @@ main,
   overflow-wrap: anywhere;
 }
 
+.email-template {
+  font-size: 0.95rem;
+  color: var(--text-dim);
+  max-width: 100%;
+}
+
+.email-template summary {
+  min-height: 44px;
+  padding: 0.65rem 0;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.email-template ol {
+  margin: 0.5rem 0 0.5rem 1.25rem;
+  padding: 0;
+}
+
+.email-template li {
+  margin: 0.25rem 0;
+}
+
 .constraint-line {
   font-family: var(--font-mono);
   font-size: 0.8rem;
@@ -1438,6 +1460,12 @@ main,
   font-size: 0.8rem;
   color: var(--danger);
   flex: none;
+}
+
+.boundary-next {
+  font-size: 0.95rem;
+  color: var(--text-dim);
+  max-width: 62ch;
 }
 
 /* Who's behind this + closing call to action ---------------------------------------------- */

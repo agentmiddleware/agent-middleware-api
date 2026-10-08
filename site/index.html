@@ -6,7 +6,7 @@
     <title>Agent Middleware API | Transaction integrity for agent actions</title>
     <meta
       name="description"
-      content="Transaction integrity for consequential autonomous actions on the configured upstream-MCP path: at-most-one gateway dispatch and debit, explicit delivery uncertainty, and linked evidence."
+      content="An agent retries a timed-out refund and the customer is charged twice. Agent Middleware API is a transaction boundary for one internal tool: authorize one agent action, charge it once, and prove what happened with a signed receipt. Paid pilot, priced after fit."
     />
     <meta name="robots" content="index, follow" />
     <meta name="theme-color" content="#0b1020" />
@@ -30,7 +30,7 @@
     />
     <meta
       property="og:description"
-      content="On the configured upstream-MCP path: one logical action, bounded authority consumption, at-most-one dispatch and debit, and explicit delivery uncertainty."
+      content="An agent retries a timed-out refund and the customer is charged twice. A transaction boundary for one internal tool: authorize one agent action, charge it once, and prove what happened. Paid pilot, priced after fit."
     />
     <meta property="og:url" content="https://www.thisisatest.tech/" />
     <meta
@@ -50,7 +50,7 @@
     />
     <meta
       name="twitter:description"
-      content="On the configured upstream-MCP path: one logical action, bounded authority consumption, at-most-one dispatch and debit, and explicit delivery uncertainty."
+      content="An agent retries a timed-out refund and the customer is charged twice. A transaction boundary for one internal tool: authorize one agent action, charge it once, and prove what happened. Paid pilot, priced after fit."
     />
     <meta
       name="twitter:image"
@@ -125,7 +125,7 @@
             "@id": "https://www.thisisatest.tech/#webpage",
             "url": "https://www.thisisatest.tech/",
             "name": "Make consequential agent actions transactional.",
-            "description": "Transaction integrity for consequential autonomous actions on the configured upstream-MCP path: one logical action, at-most-one dispatch and debit, explicit delivery uncertainty, and linked evidence.",
+            "description": "An agent retries a timed-out refund and the customer is charged twice. A transaction boundary for one internal tool: authorize one agent action, charge it once, and prove what happened with a signed receipt.",
             "inLanguage": "en",
             "isPartOf": { "@id": "https://www.thisisatest.tech/#website" },
             "about": { "@id": "https://www.thisisatest.tech/#software" },
@@ -237,6 +237,27 @@
             with your tool scenario. Replies are written; a call happens only
             when a scenario needs one.
           </p>
+          <!-- No mail app, no problem: the address above is plain text to
+               copy, and the template below is the whole intake, so a buyer
+               can send the same enquiry from any mailbox. Plain markup, no
+               script, so it works with JavaScript off. -->
+          <details class="email-template">
+            <summary>
+              No mail app? Copy this address and template instead
+            </summary>
+            <p>
+              Send it to <strong>@@PUBLIC_CONTACT_EMAIL@@</strong> with the
+              subject <strong>One-tool paid pilot enquiry</strong>:
+            </p>
+            <ol>
+              <li>The tool or action, and what changes when it runs.</li>
+              <li>What goes wrong on retry today.</li>
+              <li>How you currently check whether the action ran, and ran once.</li>
+              <li>What one duplicate or unproven call costs, measured or estimated.</li>
+              <li>Who owns the budget and the target decision date.</li>
+            </ol>
+            <p>Use synthetic or redacted examples only, never production secrets.</p>
+          </details>
           <p class="constraint-line">
             Paid, bounded pilot · one internal MCP tool · priced after fit is
             established · no self-serve rollout
@@ -724,6 +745,14 @@
             <li>Exactly-once upstream side effects without upstream support</li>
             <li>Universal governance across every agent framework</li>
           </ul>
+          <p class="boundary-next">
+            What to do instead: if you need payment rails or settlement, say
+            so in your <a href="#pilot">pilot email</a> and you will get a
+            written answer on fit. If you need compliance-grade storage, it is
+            agreed per pilot in writing before work starts. If you need a
+            different framework covered, start with one tool and
+            <a href="/compare/">compare simpler reliability options</a>.
+          </p>
         </div>
       </section>
 
@@ -822,10 +851,8 @@
             <span aria-hidden="true">▶</span> HUMANS: PRESS START
           </button>
           <p class="footer-arcade-note">
-            This product is built for agents. While they discover, authorize,
-            meter, and receipt, the human has nothing to do — so this fades the
-            page and opens an arcade of cabinets with no stakes. Nothing in
-            there is billed, metered, or real.
+            Built for agents; humans get a no-stakes arcade. Nothing in there
+            is billed, metered, or real.
           </p>
         </div>
       </div>
