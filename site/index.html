@@ -223,7 +223,7 @@
               class="button button-secondary"
               href="/proof/"
               data-analytics-event="proof_click"
-              aria-label="Run the local proof — opens the verification page"
+              aria-label="Run the local proof: opens the verification page"
               >Run the local proof</a
             >
           </div>
@@ -234,8 +234,7 @@
               data-analytics-event="email_click"
               >@@PUBLIC_CONTACT_EMAIL@@</a
             >
-            with your tool scenario. Replies are written; a call happens only
-            when a scenario needs one.
+            with your tool scenario. Replies are written.
           </p>
           <p class="constraint-line">
             Paid, bounded pilot · one internal MCP tool · priced after fit is
@@ -257,11 +256,10 @@
         <div class="offer-copy">
           <p class="hero-body">
             Agent Middleware API is a transaction boundary between your
-            autonomous agents and your consequential MCP (Model Context
-            Protocol) tools. The first call executes and is charged once; a
-            retry carrying the same idempotency key cannot dispatch again or
-            debit again. Every completed call returns a signed receipt you can
-            verify offline.
+            autonomous agents and your consequential MCP tools. The first
+            call executes and is charged once; a same-key retry cannot
+            dispatch or debit again. Every completed call returns a signed
+            receipt you can verify offline.
           </p>
           <p class="wedge-line">
             The wedge today is metered calls. The underlying primitive is
@@ -272,15 +270,15 @@
             operator-provisioned wallet, not payment rails. The gateway
             reserves the tool's registered credit price against the permit
             before anything runs, and writes at most one ledger debit per
-            accepted idempotency key. A denied call is never charged. A call
-            the gateway can prove never reached the tool is refunded. But once
-            it has committed to sending on the configured upstream path, it
-            can no longer prove the tool did not run: a timeout or a crash
-            from that point stays charged, and is never retried for you —
-            refunding an ambiguous call automatically would pay a caller to
+            accepted idempotency key. A denied call is never charged; a call
+            the gateway can prove never reached the tool is refunded. Once
+            committed to sending on the configured upstream path, it
+            cannot prove the tool did not run: a timeout or a crash
+            from that point stays charged, and is never retried for you.
+            Refunding an ambiguous call automatically would pay a caller to
             induce timeouts against a tool that had already done the work.
-            Turning credits into invoices, settlement, or payment rails is out
-            of scope by design, and the pilot is priced separately, in writing.
+            Credits never become invoices, settlement, or payment rails, and
+            the pilot is priced separately, in writing.
           </p>
         </div>
 
@@ -292,19 +290,18 @@
             </div>
           </div>
           <p class="agent-entry-copy">
-            We map one governed action end to end: delegated authority before
-            execution, one debit no matter how many times the same request is
-            replayed, and portable evidence after.
+            We map one governed action end to end: delegated authority
+            before execution, one debit across same-key replays, and portable
+            evidence after.
           </p>
-          <p>Paid and bounded to one tool. Setup and recurring service are quoted separately after fit is established.</p>
           <ol class="pilot-steps">
             <li><span>01</span><strong>Scope the action and budget</strong></li>
             <li><span>02</span><strong>Invoke through the gateway</strong></li>
             <li>
               <span>03</span
               ><strong
-                >Replay it safely, watch an out-of-scope call get denied, and
-                verify the receipt offline</strong
+                >Replay it safely, watch a denial, and verify the receipt
+                offline</strong
               >
             </li>
           </ol>
@@ -337,9 +334,9 @@
             >
               <title id="bf-title">The governed boundary</title>
               <desc id="bf-desc">
-                An agent's tools/call passes through the governed boundary —
-                permit, scope, budget and expiry, replay protection, signed
-                receipt — before it reaches the tool. A dashed direct route
+                An agent's tools/call passes through the governed boundary
+                (permit, scope, budget and expiry, replay protection, signed
+                receipt) before it reaches the tool. A dashed direct route
                 from the agent to the tool is marked closed by the operator,
                 so the boundary is the only path.
               </desc>
@@ -373,14 +370,12 @@
               <path d="M476 280 H810 V194" fill="none" stroke="var(--text-dim)" stroke-opacity="0.55" stroke-width="1.25" stroke-dasharray="5 6" />
               <line x1="452" y1="272" x2="468" y2="288" stroke="var(--danger)" stroke-width="2" />
               <line x1="468" y1="272" x2="452" y2="288" stroke="var(--danger)" stroke-width="2" />
-              <text x="460" y="308" text-anchor="middle" font-family="'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace" font-size="12" fill="var(--danger)">direct route — closed by the operator</text>
+              <text x="460" y="308" text-anchor="middle" font-family="'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace" font-size="12" fill="var(--danger)">direct route: closed by the operator</text>
             </svg>
           </div>
           <figcaption>
             The gateway sits between the agent and one tool, and becomes the
             only path to that tool once you close the tool's other routes.
-            The agent decides what it wants; the operator decides what
-            authority it holds.
           </figcaption>
         </figure>
       </section>
@@ -388,22 +383,18 @@
       <section class="section thesis-section" aria-labelledby="thesis-title" data-wave="order">
         <p class="section-kicker">00 / Operational problem</p>
         <div class="thesis-layout">
-          <h2 id="thesis-title">Agent intent is not authority—or evidence.</h2>
+          <h2 id="thesis-title">Agent intent is not authority or evidence.</h2>
           <div class="thesis-copy">
             <p>
               An agent can be correct and still exceed its mandate, retry an
               expensive call, or leave an operator unable to prove what ran.
-              The gateway holds the authority at the resource boundary, so
-              the agent's intent is checked against what it is actually
-              allowed to do — before the tool runs.
+              The gateway holds authority at the resource boundary and
+              checks intent against what the agent may do, before
+              the tool runs.
             </p>
             <p>
-              The result is inspectable before, during, and after execution
-              without asking you to replace your agent framework.
-            </p>
-            <p>
-              Built for agents. Controlled by operators. For the teams
-              responsible for both.
+              Inspectable before, during, and after execution, without
+              replacing your agent framework.
             </p>
           </div>
         </div>
@@ -416,7 +407,7 @@
           <li>
             <span>During</span>
             <strong>Charge the call once</strong>
-            <p>The same accepted request key cannot become a second debit.</p>
+            <p>One accepted request key cannot become a second debit.</p>
           </li>
           <li>
             <span>After</span>
@@ -432,9 +423,9 @@
           <h2 id="protocol-title">One control loop from intent to evidence.</h2>
           <p>
             Discover, authenticate, authorize, invoke, meter, receipt, audit,
-            govern. Here is the loop as the gateway actually ran it, shown in
-            loop order: every request, every response, and the verifier's
-            verdict, recorded from <code>make prove-trust-plane</code> and
+            govern. The loop as the gateway actually ran it, in loop order:
+            every request, every response, and the verifier's verdict,
+            recorded from <code>make prove-trust-plane</code> and
             reproducible from a clone. The tool in the recording is a stand-in
             echo tool, not a refund tool; the permit, debit, receipt, and
             replay steps are the same for any governed action, and a
@@ -453,14 +444,13 @@
             <h2 id="proof-title">Inspect the receipt, then verify it offline.</h2>
           </div>
           <p>
-            This is a self-issued gateway receipt, published as a historical
-            sample: it was issued on
-            <time datetime="@@PROOF_RECEIPT_ISSUED@@">@@PROOF_RECEIPT_ISSUED@@</time>
-            from a non-sensitive <code>partner.echo</code> call, and it is not
-            customer traction. The bundle is paired with the exact public-key
-            snapshot the offline verifier used. Verifying it proves that
-            signature against that key; it is not a test of the deployment
-            running today.
+            This self-issued gateway receipt is published as a historical
+            sample from a non-sensitive <code>partner.echo</code> call on
+            <time datetime="@@PROOF_RECEIPT_ISSUED@@">@@PROOF_RECEIPT_ISSUED@@</time>,
+            and it is not customer traction. The bundle ships the exact
+            public-key snapshot the offline verifier used. Verifying it
+            proves that signature against that key; it is not a test of the
+            deployment running today.
           </p>
         </div>
 
@@ -508,47 +498,45 @@
         <div class="pilot-copy">
           <p>
             Bring one internal MCP tool, such as a refund tool, a deploy
-            trigger, or a payout call, with a real operator, permission
-            boundary, and retry or audit concern. Send the scenario by email.
-            You get a written answer on whether the boundary fits, and if it
-            does, we define the one action and walk it through permit →
-            invoke → charge → receipt → replay → deny before discussing any
-            broader rollout.
+            trigger, or a payout call, with a retry or audit concern. Send
+            the scenario by email. You get a written answer on fit; if it
+            fits, we walk the one action through permit →
+            invoke → charge → receipt → replay → deny before discussing
+            rollout.
           </p>
           <p>
             The pilot is paid, bounded to one tool, and priced after fit is
-            established. We agree a setup fee and a separate recurring
-            managed-service quote, with infrastructure and support scope
-            stated in writing before work starts.
+            established: one setup fee and one recurring managed-service
+            quote, both in writing before work starts.
           </p>
           <h3>What the pilot includes</h3>
           <ul class="intake-list">
-            <li>One partner-owned agent, one staging MCP tool, one consequential action, and one named partner engineer operating it.</li>
-            <li>A dedicated staging environment using synthetic or redacted data, with a written scope and end date.</li>
-            <li>An acceptance flow your engineer runs: repeat the request, confirm no second gateway dispatch or debit, test conflicts and denials, and verify the receipt offline.</li>
-            <li>Recorded onboarding hours, latency, infrastructure usage, and exception-handling effort.</li>
-            <li>A renewal decision at the end, with a named buyer, budget owner, and decision date.</li>
+            <li>One partner-owned agent, one staging MCP tool, one consequential action, one named partner engineer.</li>
+            <li>A dedicated staging environment on synthetic or redacted data, with a written scope and end date.</li>
+            <li>An acceptance flow your engineer runs: repeat the request, confirm no second dispatch or debit, test conflicts and denials, verify the receipt offline.</li>
+            <li>Recorded onboarding hours, latency, infrastructure usage, exception-handling effort.</li>
+            <li>A renewal decision with a named buyer, budget owner, and decision date.</li>
           </ul>
           <h3>Five things to include in your email</h3>
           <ol class="intake-list">
             <li>
-              <strong>The tool or action.</strong> What the agent calls, and
+              <strong>The tool or action.</strong> What the agent calls and
               what changes when it runs, for example a refund tool, a deploy
               trigger, or a payout call.
             </li>
             <li>
               <strong>What goes wrong on retry.</strong> What happens today
-              when the call times out or the agent tries again.
+              when the call times out or the agent retries.
             </li>
             <li>
-              <strong>How you check it happened.</strong> How you currently
-              find out whether the action ran, and whether it ran once.
+              <strong>How you check it happened.</strong> How you find out
+              whether the action ran, and whether it ran once.
             </li>
             <li>
               <strong>What one duplicate or unproven call costs.</strong>
-              Estimate lost money, recovery hours and their cost, or a
-              concrete customer consequence. Say what is measured and what is
-              an estimate; if the cost is unknown, say so.
+              Lost money, recovery hours and their cost, or a concrete
+              customer consequence. Say what is measured and what is
+              estimated; unknown is an acceptable answer.
             </li>
             <li>
               <strong>Who owns the budget and when they decide.</strong>
@@ -560,10 +548,10 @@
             secrets, credentials, or customer data.
           </p>
           <p class="constraint-line">
-            One tool · one operator · one action. Email first; a call is
+            One tool, one operator, one action. Email first; a call is
             available only when a scenario needs one. The source repository is
-            private; clone access must be granted separately. Authorized clones
-            can run <code>make prove-trust-plane</code> locally without live API credentials.
+            private; authorized clones can run
+            <code>make prove-trust-plane</code> locally with no live API credentials.
           </p>
           <div class="pilot-links">
             <a
@@ -595,18 +583,18 @@
         <div class="pilot-fit" id="economic-fit" aria-labelledby="economic-fit-title">
           <h3 id="economic-fit-title">Does avoiding duplicates justify the cost?</h3>
           <p>
-            Take the refund example: each duplicate is one refund paid twice
+            Take the refund example: each duplicate is one refund paid twice,
             plus the hours spent clawing it back.
             Monthly actions × baseline duplicate rate × loss per duplicate ×
             expected reduction = estimated monthly avoided loss.
-            Use the loss you actually bear, including recovery labor, rather
-            than the full transaction value. Count each cost once.
+            Use the loss you actually bear, including recovery labor, not
+            the full transaction value.
           </p>
           <p id="fit-assumptions">
             Expected reduction is an assumption about your whole adopted
-            workflow, including the upstream tool, to validate in a pilot.
-            It is not a gateway guarantee. These numbers stay in your browser
-            and are not saved or sent to us.
+            workflow, including the upstream tool, to validate in a pilot,
+            not a gateway guarantee. These numbers stay in your browser and
+            are never sent to us.
           </p>
           <fieldset class="fit-fields" aria-describedby="fit-assumptions" data-fit-inputs hidden>
             <legend>Your workflow assumptions</legend>
@@ -625,7 +613,7 @@
             </label>
             <label for="fit-cost">Total monthly cost (USD, optional)
               <input id="fit-cost" type="number" min="0" step="any" inputmode="decimal" aria-describedby="fit-cost-help" />
-              <span id="fit-cost-help">Include the service quote, your operations, and setup plus integration costs spread over your evaluation period. Leave blank if unknown.</span>
+              <span id="fit-cost-help">Include the service quote, your operations, and setup plus integration costs over your evaluation period. Leave blank if unknown.</span>
             </label>
           </fieldset>
           <div class="fit-result" role="status" aria-live="polite" aria-atomic="true" data-fit-result hidden>
@@ -638,11 +626,11 @@
             <summary>Illustrative example: how a $35 threshold is calculated</summary>
             <p>
               100,000 actions/month × 0.1% duplicates × $50 actual loss × 80%
-              reduction = $4,000/month in estimated avoided loss. With $2,800
-              in total monthly cost, the break-even loss is $35 per duplicate:
+              reduction = $4,000/month avoided. With $2,800 monthly cost,
+              break-even is $35 per duplicate:
               $2,800 ÷ (100,000 × 0.001 × 0.8). At 0.01% duplication, the
-              threshold rises to $350. These are illustrative assumptions,
-              not our pricing or measured results.
+              threshold rises to $350. Illustrative assumptions, not our
+              pricing or measured results.
             </p>
           </details>
           <noscript><p>Use the formula and example above to estimate fit, then include your assumptions in your email.</p></noscript>
@@ -659,8 +647,8 @@
           <p class="section-kicker">04 / Machine discovery</p>
           <h2 id="machine-title">Public pointers for agents and operators.</h2>
           <p>
-            Machine-readable discovery — what an agent fetches before it ever
-            calls a tool. Discovery is public. Protected actions still require
+            Machine-readable discovery: what an agent fetches before it ever
+            calls a tool. Discovery is public. Protected actions still need
             an operator-issued API key and an applicable scoped permit.
           </p>
         </div>
@@ -705,9 +693,8 @@
           </a>
         </div>
         <p class="machine-note">
-          Four unauthenticated GETs against the API origin; each opens the raw
-          JSON in a new tab. Protected routes answer these same requests with
-          401 until an operator-issued key is presented.
+          Four unauthenticated GETs; each opens raw JSON in a new tab.
+          Protected routes answer 401 until an operator-issued key is presented.
         </p>
       </section>
 
@@ -721,7 +708,7 @@
             <li>Customer traction or production adoption</li>
             <li>Production settlement or payment rails</li>
             <li>Compliance-grade ledger storage</li>
-            <li>Exactly-once upstream side effects without upstream support</li>
+            <li>Once-only upstream side effects without upstream support</li>
             <li>Universal governance across every agent framework</li>
           </ul>
         </div>
@@ -738,10 +725,10 @@
             <p class="section-kicker">06 / Who is behind this</p>
             <h2 id="provenance-title">Built and run by one accountable operator.</h2>
             <p>
-              Agent Middleware API is built and run by
-              @@PUBLIC_DISPLAY_NAME@@. The source repository is private; access
-              must be granted separately. The product boundary and security limitations are published from
-              the API origin below.
+              Built and run by @@PUBLIC_DISPLAY_NAME@@. The source
+              repository is private; access is granted separately. The product
+              boundary and security limitations are published from the API
+              origin below.
             </p>
             <p>
               <a
@@ -769,9 +756,8 @@
           <div class="closing-cta">
             <h2>Bring one tool. Keep the evidence.</h2>
             <p>
-              Email one governed action on a tool you already run. You get a
-              written answer on fit, and if it fits, a receipt you can verify
-              without us. A call is available only when a scenario needs one.
+              Email one governed action on a tool you already run, and get
+              a receipt you can verify without us.
             </p>
             <div class="pilot-links">
               <a
@@ -822,10 +808,9 @@
             <span aria-hidden="true">▶</span> HUMANS: PRESS START
           </button>
           <p class="footer-arcade-note">
-            This product is built for agents. While they discover, authorize,
-            meter, and receipt, the human has nothing to do — so this fades the
-            page and opens an arcade of cabinets with no stakes. Nothing in
-            there is billed, metered, or real.
+            Built for agents. While they discover, authorize, meter, and
+            receipt, the human has nothing to do, so this page fades into an
+            arcade with no stakes. Nothing in there is billed, metered, or real.
           </p>
         </div>
       </div>

@@ -280,14 +280,14 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
         "operator-provisioned wallet, not payment rails. The gateway reserves "
         "the tool's registered credit price against the permit before "
         "anything runs, and writes at most one ledger debit per accepted "
-        "idempotency key. A denied call is never charged. A call the gateway "
-        "can prove never reached the tool is refunded. But once it has "
-        "committed to sending on the configured upstream path, it can no "
-        "longer prove the tool did not run: a timeout or a crash from that "
-        "point stays charged, and is never retried for you — refunding an "
-        "ambiguous call automatically would pay a caller to induce timeouts "
-        "against a tool that had already done the work. Turning credits into "
-        "invoices, settlement, or payment rails is out of scope by design, "
+        "idempotency key. A denied call is never charged; a call the gateway "
+        "can prove never reached the tool is refunded. Once committed to "
+        "sending on the configured upstream path, it cannot prove the tool "
+        "did not run: a timeout or a crash from that "
+        "point stays charged, and is never retried for you. "
+        "Refunding an ambiguous call automatically would pay a caller to "
+        "induce timeouts against a tool that had already done the work. "
+        "Credits never become invoices, settlement, or payment rails, "
         "and the pilot is priced separately, in writing."
     )
     # The recording uses a stand-in tool. Naming a refund in the hero without
@@ -295,9 +295,9 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
     stand_in = "The tool in the recording is a stand-in echo tool, not a refund tool"
     boundary = (
         "Agent Middleware API is a transaction boundary between your autonomous "
-        "agents and your consequential MCP (Model Context Protocol) tools. The "
-        "first call executes and is charged once; a retry carrying the same "
-        "idempotency key cannot dispatch again or debit again. Every completed "
+        "agents and your consequential MCP tools. The "
+        "first call executes and is charged once; a same-key retry cannot "
+        "dispatch or debit again. Every completed "
         "call returns a signed receipt you can verify offline."
     )
     wedge = (
@@ -1173,7 +1173,7 @@ def test_faq_structured_data_is_generated_from_the_visible_answers(tmp_path) -> 
     exactly_once_answer = next(
         entry["acceptedAnswer"]["text"]
         for entry in questions
-        if entry["name"] == "Does exactly-once hold all the way to my tool?"
+        if entry["name"] == "Does once-only hold all the way to my tool?"
     )
     canonical_boundary = (
         "At our boundary: one accepted idempotency key maps to at most one "
