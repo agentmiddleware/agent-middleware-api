@@ -5,7 +5,9 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
+from b2a_sdk.errors import PermitDeniedError
 from b2a_sdk.models import PermitRequest
+from b2a_sdk.permit_cache import PermitCache, is_permit_lifecycle_denial
 from langchain_core.tools import StructuredTool
 
 from .client import B2AClient
@@ -30,8 +32,9 @@ def create_mcp_tool(
     # Server hashes the FULL permit request body including expires_at.
     # Sending different expires_at with same key → 409 IdempotencyConflictError.
     # Keep the original body before sending and the ID after acknowledgement.
-    permit_cache: dict[str, str] = {}  # permit_idempotency_key → permit_id
-    permit_requests: dict[str, PermitRequest] = {}
+    # Entries expire with the permit itself and the cache holds at most a
+    # small LRU-capped number of keys.
+    permit_cache = PermitCache()
 
     async def call_mcp(
         tool_name: str,
@@ -61,8 +64,10 @@ def create_mcp_tool(
             raise ValueError("permit_idempotency_key is required and must not be blank")
 
         # Snapshot before awaiting creation, including a response lost after
-        # acceptance. Concurrent coroutines also see this same request body.
-        request = permit_requests.get(permit_idempotency_key)
+        # acceptance. Concurrent coroutines also see this same request body. A
+        # retained body read past its own expiry is treated as a miss, so an
+        # expired permit is resolved again instead of being reused.
+        request = permit_cache.get_request(permit_idempotency_key)
         if request is None:
             request = PermitRequest(
                 issuer_wallet_id=wallet_id,
@@ -72,24 +77,32 @@ def create_mcp_tool(
                 allowed_tools=[tool_name],
                 scopes=[f"tool:{tool_name}:invoke", "billing:charge"],
             )
-            permit_requests[permit_idempotency_key] = request
+            permit_cache.store_request(permit_idempotency_key, request)
         elif request.allowed_tools != [tool_name]:
             raise ValueError("permit_idempotency_key reused with different permit terms")
 
-        if permit_idempotency_key in permit_cache:
-            permit_id = permit_cache[permit_idempotency_key]
-        else:
+        permit_id = permit_cache.get_permit_id(permit_idempotency_key)
+        if permit_id is None:
             permit = await client.create_permit(request, idempotency_key=permit_idempotency_key)
+            permit_cache.store_permit(permit_idempotency_key, permit)
             permit_id = permit.permit_id
-            permit_cache[permit_idempotency_key] = permit_id
 
-        result = await client.invoke_tool(
-            tool_name,
-            arguments,
-            wallet_id=wallet_id,
-            permit_id=permit_id,
-            idempotency_key=idempotency_key,
-        )
+        try:
+            result = await client.invoke_tool(
+                tool_name,
+                arguments,
+                wallet_id=wallet_id,
+                permit_id=permit_id,
+                idempotency_key=idempotency_key,
+            )
+        except PermitDeniedError as exc:
+            if is_permit_lifecycle_denial(exc):
+                # The permit is revoked or expired: drop the cached id so the
+                # next attempt resolves again. The retained request body is
+                # kept, so the retry replays the identical body under the same
+                # key and gets the same denial instead of a fresh conflict.
+                permit_cache.drop_permit(permit_idempotency_key)
+            raise
 
         return str(
             {

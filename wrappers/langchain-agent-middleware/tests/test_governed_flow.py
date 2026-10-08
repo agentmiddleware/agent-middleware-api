@@ -2,7 +2,7 @@
 
 import ast
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
@@ -22,7 +22,7 @@ def _permit_payload() -> dict:
         "allowed_tools": ["partner.search"],
         "max_credits": "100",
         "spent_credits": "0",
-        "expires_at": datetime.now(UTC).isoformat(),
+        "expires_at": (datetime.now(UTC) + timedelta(minutes=30)).isoformat(),
         "nonce": "nonce-1",
         "status": "active",
         "signature": "sig-permit-1",

@@ -5,7 +5,9 @@ from decimal import Decimal
 from typing import Any
 from autogen.agentchat.conversable_agent import ConversableAgent
 
+from b2a_sdk.errors import PermitDeniedError
 from b2a_sdk.models import PermitRequest
+from b2a_sdk.permit_cache import PermitCache, is_permit_lifecycle_denial
 
 from .client import B2AClient
 
@@ -32,9 +34,10 @@ class B2AFunctionTool:
         self.wallet_id = wallet_id
         self.permit_budget = permit_budget
         self.permit_ttl_minutes = permit_ttl_minutes
-        # Cache permits to avoid 409 on replay (server hashes full permit body including expires_at)
-        self._permit_cache: dict[str, str] = {}  # permit_idempotency_key → permit_id
-        self._permit_requests: dict[str, PermitRequest] = {}
+        # Cache permits to avoid 409 on replay (server hashes full permit body including expires_at).
+        # Entries expire with the permit itself and the cache holds at most a
+        # small LRU-capped number of keys. permit_idempotency_key → permit_id.
+        self._permit_cache = PermitCache()
 
     async def discover_tools(self) -> list[dict[str, Any]]:
         """Discover all available MCP tools."""
@@ -71,8 +74,10 @@ class B2AFunctionTool:
             raise ValueError("permit_idempotency_key is required and must not be blank")
 
         # Retain the body before the first await: a lost acknowledgement must
-        # replay the original expiry under the same caller-owned key.
-        request = self._permit_requests.get(permit_idempotency_key)
+        # replay the original expiry under the same caller-owned key. A
+        # retained body read past its own expiry is treated as a miss, so an
+        # expired permit is resolved again instead of being reused.
+        request = self._permit_cache.get_request(permit_idempotency_key)
         if request is None:
             request = PermitRequest(
                 issuer_wallet_id=self.wallet_id,
@@ -83,7 +88,7 @@ class B2AFunctionTool:
                 allowed_tools=[tool_name],
                 scopes=[f"tool:{tool_name}:invoke", "billing:charge"],
             )
-            self._permit_requests[permit_idempotency_key] = request
+            self._permit_cache.store_request(permit_idempotency_key, request)
         elif (
             request.subject_wallet_id != self.wallet_id
             or request.max_credits != self.permit_budget
@@ -93,22 +98,30 @@ class B2AFunctionTool:
                 "permit_idempotency_key reused with different permit terms"
             )
 
-        if permit_idempotency_key in self._permit_cache:
-            permit_id = self._permit_cache[permit_idempotency_key]
-        else:
+        permit_id = self._permit_cache.get_permit_id(permit_idempotency_key)
+        if permit_id is None:
             permit = await self.client.create_permit(
                 request, idempotency_key=permit_idempotency_key
             )
+            self._permit_cache.store_permit(permit_idempotency_key, permit)
             permit_id = permit.permit_id
-            self._permit_cache[permit_idempotency_key] = permit_id
 
-        result = await self.client.invoke_tool(
-            tool_name,
-            arguments,
-            wallet_id=self.wallet_id,
-            permit_id=permit_id,
-            idempotency_key=idempotency_key,
-        )
+        try:
+            result = await self.client.invoke_tool(
+                tool_name,
+                arguments,
+                wallet_id=self.wallet_id,
+                permit_id=permit_id,
+                idempotency_key=idempotency_key,
+            )
+        except PermitDeniedError as exc:
+            if is_permit_lifecycle_denial(exc):
+                # The permit is revoked or expired: drop the cached id so the
+                # next attempt resolves again. The retained request body is
+                # kept, so the retry replays the identical body under the same
+                # key and gets the same denial instead of a fresh conflict.
+                self._permit_cache.drop_permit(permit_idempotency_key)
+            raise
 
         return {
             "content": result.content,
