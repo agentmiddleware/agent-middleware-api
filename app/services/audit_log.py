@@ -85,6 +85,10 @@ async def record_audit_event(
     *,
     event: str,
     event_id: str | None = None,
+    # Server-side timestamp only (for example a dispatch attempt's stored
+    # completion time). Never pass client-controlled time: backdated entries
+    # would enter the signed chain. Omit it and the record is stamped at
+    # append time.
     created_at: datetime | None = None,
     wallet_id: str | None = None,
     tool: str | None = None,

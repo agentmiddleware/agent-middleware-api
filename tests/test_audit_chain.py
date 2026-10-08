@@ -549,3 +549,138 @@ async def test_windowed_verify_of_valid_chain_is_valid(client, clean_database):
     )
     assert tampered.valid is False
     assert tampered.reason == "audit_previous_hash_mismatch"
+
+
+@pytest.mark.anyio
+async def test_open_ended_windowed_verify_detects_tail_deletion(clean_database):
+    """An open-ended date window must still catch a deleted tail.
+
+    Regression: the chain head was only loaded for unfiltered checks, so a
+    windowed verification reported valid while events after the window start
+    were deleted.
+    """
+    wallet_id = "wlt-window-truncation"
+    for n in range(4):
+        await record_audit_event(
+            event="trust.windowtrunc", wallet_id=wallet_id, metadata={"n": n}
+        )
+        await asyncio.sleep(0.01)
+
+    factory = get_session_factory()
+    async with factory() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(ControlPlaneAuditEventModel)
+                    .where(ControlPlaneAuditEventModel.wallet_id == wallet_id)
+                    .order_by(ControlPlaneAuditEventModel.seq)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    second_created = rows[1].created_at
+
+    windowed = await verify_audit_chain(
+        wallet_id=wallet_id,
+        created_after=second_created,
+    )
+    assert windowed.valid is True
+    assert windowed.checked_events == 3
+    assert windowed.first_event_id == rows[1].event_id
+    assert windowed.last_event_id == rows[3].event_id
+
+    # Delete the tail event; the head still points at it.
+    async with factory() as session:
+        last = (
+            (
+                await session.execute(
+                    select(ControlPlaneAuditEventModel)
+                    .where(ControlPlaneAuditEventModel.wallet_id == wallet_id)
+                    .order_by(ControlPlaneAuditEventModel.seq.desc())
+                )
+            )
+            .scalars()
+            .first()
+        )
+        await session.delete(last)
+        await session.commit()
+
+    truncated = await verify_audit_chain(
+        wallet_id=wallet_id,
+        created_after=second_created,
+    )
+    assert truncated.valid is False
+    assert truncated.reason == "audit_chain_truncated"
+
+
+@pytest.mark.anyio
+async def test_end_bounded_window_does_not_falsely_report_truncation(
+    clean_database,
+):
+    """An end-bounded window legitimately excludes the tail.
+
+    Its result is window-only evidence (the in-window events link
+    correctly), not a full-chain attestation, so it must stay valid on an
+    intact chain even though the last in-window event is not the head.
+    """
+    wallet_id = "wlt-window-endbound"
+    for n in range(4):
+        await record_audit_event(
+            event="trust.windowend", wallet_id=wallet_id, metadata={"n": n}
+        )
+        await asyncio.sleep(0.01)
+
+    factory = get_session_factory()
+    async with factory() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(ControlPlaneAuditEventModel)
+                    .where(ControlPlaneAuditEventModel.wallet_id == wallet_id)
+                    .order_by(ControlPlaneAuditEventModel.seq)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    second_created = rows[1].created_at
+
+    windowed = await verify_audit_chain(
+        wallet_id=wallet_id,
+        created_before=second_created,
+    )
+    assert windowed.valid is True
+    assert windowed.checked_events == 2
+
+
+@pytest.mark.anyio
+async def test_global_verify_leaves_per_chain_ids_unset(clean_database):
+    """Global results must not mix per-chain event ids across wallets.
+
+    The first id of one wallet paired with the last id of another reads as
+    one chain that never existed, so the global path leaves both unset and
+    names only the broken event on failure.
+    """
+    await record_audit_event(event="trust.gids", wallet_id="wlt-gids-a")
+    broken = await record_audit_event(event="trust.gids", wallet_id="wlt-gids-b")
+
+    result = await verify_audit_chain(wallet_id=None)
+    assert result.valid is True
+    assert result.checked_events == 2
+    assert result.first_event_id is None
+    assert result.last_event_id is None
+
+    factory = get_session_factory()
+    async with factory() as session:
+        event = await session.get(ControlPlaneAuditEventModel, broken.event_id)
+        event.metadata_json = '{"n": "tampered"}'
+        session.add(event)
+        await session.commit()
+
+    tampered = await verify_audit_chain(wallet_id=None)
+    assert tampered.valid is False
+    assert tampered.reason == "audit_payload_hash_mismatch"
+    assert tampered.broken_event_id == broken.event_id
+    assert tampered.first_event_id is None
+    assert tampered.last_event_id is None

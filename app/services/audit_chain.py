@@ -400,27 +400,29 @@ async def verify_audit_chain(
             }
             distinct_wallets = event_wallets | head_wallets
         checked = 0
-        first_event_id: str | None = None
-        last_event_id: str | None = None
-        for current_wallet_id in distinct_wallets:
+        for current_wallet_id in sorted(
+            distinct_wallets, key=lambda wallet: wallet or ""
+        ):
             chain_result = await _verify_single_chain(
                 wallet_id=current_wallet_id,
                 created_after=created_after,
                 created_before=created_before,
             )
             checked += chain_result.checked_events
-            first_event_id = first_event_id or chain_result.first_event_id
-            last_event_id = chain_result.last_event_id or last_event_id
             if not chain_result.valid:
+                # First/last ids stay unset on the global path: they are
+                # per-chain values, and mixing the first id of one wallet with
+                # the last id of another reads as one chain that never
+                # existed. The broken event id still names the failure.
                 return AuditChainVerification(
                     False,
                     checked,
-                    first_event_id,
-                    last_event_id,
+                    None,
+                    None,
                     chain_result.reason,
                     chain_result.broken_event_id,
                 )
-        return AuditChainVerification(True, checked, first_event_id, last_event_id)
+        return AuditChainVerification(True, checked)
 
     return await _verify_single_chain(
         wallet_id=wallet_id,
@@ -436,7 +438,15 @@ async def _verify_single_chain(
     created_before: datetime | None = None,
 ) -> AuditChainVerification:
     """Verify one wallet's audit chain (``wallet_id=None`` -> the wallet-less
-    chain of ``wallet_id IS NULL`` events)."""
+    chain of ``wallet_id IS NULL`` events).
+
+    A date window narrows which events are checked, not what the result
+    attests. An open-ended window (no ``created_before``) still runs the
+    tail-truncation check against the chain head, so deleting events after
+    the window start is caught. A window with an end bound legitimately
+    excludes the tail, so its result is window-only evidence: it says the
+    in-window events link correctly, not that the full chain is intact.
+    """
     created_after = to_naive_utc(created_after) if created_after else None
     created_before = to_naive_utc(created_before) if created_before else None
     stmt = select(ControlPlaneAuditEventModel).order_by(
@@ -504,6 +514,10 @@ async def _verify_single_chain(
         else:
             result = await session.execute(stmt)
             events = list(result.scalars().all())
+            # A filtered window still needs the head anchor. Without it the
+            # tail-truncation check below is skipped and a window can report
+            # valid while events outside the window were deleted.
+            head = await session.get(AuditChainHeadModel, wallet_id or "")
 
     # A window that excludes the wallet's genesis event starts mid-chain: the
     # first in-window event legitimately links to an event *outside* the
@@ -622,7 +636,14 @@ async def _verify_single_chain(
     # Tail-truncation check: the last verified event must match the head the
     # append path recorded. If the head says seq=N/chain_hash=H but the loaded
     # chain ends earlier (or is empty), the tail was deleted.
-    if head is not None:
+    # A window with an end bound legitimately excludes the tail, so the check
+    # runs only when the window is open at the top. An empty filtered window
+    # matches nothing and proves nothing either way, so it verifies as empty
+    # rather than truncated; the unfiltered and global paths still catch a
+    # fully deleted chain.
+    window_covers_tail = created_before is None
+    unfiltered = created_after is None and created_before is None
+    if head is not None and window_covers_tail and (events or unfiltered):
         last_event = events[-1] if events else None
         if last_event is None or (
             last_event.seq != head.last_seq
