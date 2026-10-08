@@ -224,6 +224,14 @@ class Settings(BaseSettings):
     # Require KYC verification before allowing fiat top-ups (default: false for dev)
     KYC_REQUIRED_FOR_TOPUP: bool = False
 
+    # --- Money-movement idempotency ---
+    # When true, the money-moving endpoints (charge, transfer, fiat top-up
+    # prepare) refuse requests without an Idempotency-Key header instead of
+    # executing them unprotected. A retried request without a key cannot be
+    # told apart from a new one, so it would bill twice. Relax to false only
+    # during a client migration, and only while no client retries in flight.
+    REQUIRE_IDEMPOTENCY_KEY: bool = True
+
     # --- Credit Exchange Rate ---
     # Credits minted per $1.00 USD settled (1000 credits = $1.00, 1 credit =
     # $0.001). This is the single source of truth: Stripe settlement mints

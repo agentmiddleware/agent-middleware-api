@@ -489,7 +489,10 @@ class TestBillingRouterDryRun:
         # charge before the dry-run session is committed.
         drain_resp = await client.post(
             f"/v1/billing/charge?wallet_id={wallet_id}&service=iot_bridge&units=4.5",
-            headers={"X-API-Key": "test-key"},
+            headers={
+                "X-API-Key": "test-key",
+                "Idempotency-Key": "sandbox-drain-charge-1",
+            },
         )
         assert drain_resp.status_code == 200
         assert drain_resp.json()["balance_after"] == 1.0

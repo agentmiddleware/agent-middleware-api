@@ -66,10 +66,19 @@ async def test_terminal_policy_denial_replays_even_after_policy_changes(
 
 
 @pytest.mark.anyio
-async def test_unknown_wallet_charge_is_404_with_or_without_key(client, clean_database):
+async def test_unknown_wallet_charge_is_404_with_key_400_without(
+    client, clean_database
+):
     params = {"wallet_id": "missing-billing-wallet", "service": "platform_fee"}
-    first = await client.post(
+    unkeyed = await client.post(
         "/v1/billing/charge", params=params, headers=BOOTSTRAP_HEADERS
+    )
+    assert unkeyed.status_code == 400
+    assert unkeyed.json()["detail"]["error"] == "missing_idempotency_key"
+    first = await client.post(
+        "/v1/billing/charge",
+        params=params,
+        headers={**BOOTSTRAP_HEADERS, "Idempotency-Key": "unknown-wallet"},
     )
     assert first.status_code == 404
     for _ in range(2):
