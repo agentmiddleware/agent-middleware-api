@@ -973,6 +973,57 @@ async def test_discovery_fails_closed_when_exact_tool_is_absent() -> None:
     with pytest.raises(UpstreamMcpConfigurationError) as exc_info:
         await adapter.discover_tool()
     assert exc_info.value.dispatch_started is False
+    assert exc_info.value.detail == "configured upstream tool not found in tools/list"
+
+
+@pytest.mark.anyio
+async def test_discovery_names_duplicated_tool() -> None:
+    adapter = UpstreamMcpAdapter(_configuration())
+    _bind_session(
+        adapter,
+        FakeSession(
+            tools=[
+                Tool(name="partner.write", inputSchema={"type": "object"}),
+                Tool(name="partner.write", inputSchema={"type": "object"}),
+            ]
+        ),
+    )
+    with pytest.raises(UpstreamMcpConfigurationError) as exc_info:
+        await adapter.discover_tool()
+    assert exc_info.value.dispatch_started is False
+    assert (
+        exc_info.value.detail
+        == "configured upstream tool appears multiple times in tools/list"
+    )
+
+
+@pytest.mark.anyio
+async def test_disabled_upstream_logs_unset_field_names_without_values(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    settings = _settings(
+        MCP_UPSTREAM_ENABLED=False,
+        MCP_UPSTREAM_URL="",
+        MCP_UPSTREAM_TOOL_NAME="",
+        MCP_UPSTREAM_PUBLIC_TOOL_ID="",
+        MCP_UPSTREAM_BEARER_TOKEN="",
+    )
+    with caplog.at_level(logging.INFO, logger="app.services.upstream_mcp"):
+        result = await register_configured_upstream_mcp(
+            settings=settings,
+            registry=ServiceRegistry(),
+        )
+    assert result is None
+    records = [r for r in caplog.records if r.getMessage() == "upstream_mcp_disabled"]
+    assert records, "expected an upstream_mcp_disabled boot log line"
+    unset_fields = getattr(records[0], "unset_fields", None)
+    assert unset_fields == [
+        "MCP_UPSTREAM_URL",
+        "MCP_UPSTREAM_TOOL_NAME",
+        "MCP_UPSTREAM_PUBLIC_TOOL_ID",
+        "MCP_UPSTREAM_BEARER_TOKEN",
+    ]
+    assert "secret-partner-token" not in caplog.text
 
 
 @pytest.mark.anyio

@@ -80,7 +80,7 @@ async def awi_passkey_challenge(session_id: str, action: str) -> dict[str, Any]:
 
 
 async def awi_passkey_verify(challenge_id: str, credential: dict) -> dict[str, Any]:
-    """Wrapper for passkey verification (endpoint pointer; not always-governed)."""
+    """Return the wallet-scoped HTTP endpoint pointer for passkey verification."""
     return {
         "endpoint": "/v1/awi/passkey/verify",
         "method": "POST",
@@ -202,7 +202,9 @@ MCP_PHASE9_TOOLS: list[Phase9ToolDef] = [
         "service_id": "awi_passkey_verify",
         "name": "AWI Passkey Verify",
         "description": (
-            "Verify a passkey assertion response from the client authenticator. "
+            "HTTP route pointer: returns the wallet-scoped endpoint that "
+            "verifies a passkey assertion response from the client "
+            "authenticator. This MCP call performs no verification itself. "
             "Always requires a signed permit."
         ),
         "category": ServiceCategory.AGENT_COMMS,
@@ -216,8 +218,9 @@ MCP_PHASE9_TOOLS: list[Phase9ToolDef] = [
         "service_id": "awi_dom_bridge_session",
         "name": "AWI DOM Bridge Session",
         "description": (
-            "Create a new Playwright bridge session for real browser automation. "
-            "Always requires a signed permit."
+            "HTTP route pointer: returns the wallet-scoped endpoint that "
+            "creates a Playwright bridge session. This MCP call creates no "
+            "browser session itself. Always requires a signed permit."
         ),
         "category": ServiceCategory.AGENT_COMMS,
         "credits_per_unit": 5.0,
@@ -230,8 +233,9 @@ MCP_PHASE9_TOOLS: list[Phase9ToolDef] = [
         "service_id": "awi_dom_sync",
         "name": "AWI DOM Sync",
         "description": (
-            "Execute an AWI action against real browser DOM and return state "
-            "representation. Always requires a signed permit."
+            "HTTP route pointer: returns the wallet-scoped endpoint that "
+            "executes an AWI action against browser DOM. This MCP call runs "
+            "no browser action itself. Always requires a signed permit."
         ),
         "category": ServiceCategory.AGENT_COMMS,
         "credits_per_unit": 3.0,
@@ -244,8 +248,10 @@ MCP_PHASE9_TOOLS: list[Phase9ToolDef] = [
         "service_id": "awi_dom_state",
         "name": "AWI DOM State",
         "description": (
-            "Get current DOM state as AWI representation (summary, accessibility "
-            "tree, etc.). Always requires a signed permit."
+            "HTTP route pointer: returns the wallet-scoped endpoint that "
+            "reads current DOM state as AWI representation (summary, "
+            "accessibility tree, etc.). This MCP call reads no browser "
+            "state itself. Always requires a signed permit."
         ),
         "category": ServiceCategory.AGENT_COMMS,
         "credits_per_unit": 2.0,
@@ -258,7 +264,9 @@ MCP_PHASE9_TOOLS: list[Phase9ToolDef] = [
         "service_id": "awi_dom_action_preview",
         "name": "AWI DOM Action Preview",
         "description": (
-            "Preview what Playwright commands will be generated for an AWI action. "
+            "HTTP route pointer: returns the wallet-scoped endpoint that "
+            "previews what Playwright commands an AWI action would generate. "
+            "This MCP call generates no commands itself. "
             "Always requires a signed permit."
         ),
         "category": ServiceCategory.AGENT_COMMS,
@@ -272,7 +280,9 @@ MCP_PHASE9_TOOLS: list[Phase9ToolDef] = [
         "service_id": "awi_memory_index",
         "name": "AWI Memory Index",
         "description": (
-            "Index a completed AWI session for semantic search over session history. "
+            "HTTP route pointer: returns the wallet-scoped endpoint that "
+            "indexes a completed AWI session for semantic search. This MCP "
+            "call indexes nothing itself. "
             "Always requires a signed permit."
         ),
         "category": ServiceCategory.AGENT_COMMS,
@@ -286,8 +296,9 @@ MCP_PHASE9_TOOLS: list[Phase9ToolDef] = [
         "service_id": "awi_rag_query",
         "name": "AWI RAG Query",
         "description": (
-            "Semantic search query over session memories using vector "
-            "similarity. Always requires a signed permit."
+            "HTTP route pointer: returns the wallet-scoped endpoint for "
+            "semantic search over session memories. This MCP call searches "
+            "nothing itself. Always requires a signed permit."
         ),
         "category": ServiceCategory.AGENT_COMMS,
         "credits_per_unit": 3.0,
@@ -300,8 +311,9 @@ MCP_PHASE9_TOOLS: list[Phase9ToolDef] = [
         "service_id": "awi_session_context",
         "name": "AWI Session Context",
         "description": (
-            "Get relevant context from past sessions for the current session. "
-            "Always requires a signed permit."
+            "HTTP route pointer: returns the wallet-scoped endpoint for "
+            "relevant context from past sessions. This MCP call retrieves "
+            "no context itself. Always requires a signed permit."
         ),
         "category": ServiceCategory.AGENT_COMMS,
         "credits_per_unit": 2.0,
@@ -443,7 +455,11 @@ def register_default_mcp_services():
             {
                 "service_id": "data-indexer",
                 "name": "Data Indexer",
-                "description": "Fast vector indexing for documents and content. Enables semantic search capabilities for AI agents.",
+                "description": (
+                    "Preview only: demonstrates the control-plane contract "
+                    "for document indexing. No indexing side effects are "
+                    "wired; calls return a preview message."
+                ),
                 "category": ServiceCategory.PROTOCOL_GEN,
                 "credits_per_unit": 10.0,
                 "unit_name": "document",
@@ -453,7 +469,11 @@ def register_default_mcp_services():
             {
                 "service_id": "content-generator",
                 "name": "Content Generator",
-                "description": "Generate marketing copy, product descriptions, and social media content using AI.",
+                "description": (
+                    "Preview only: demonstrates the control-plane contract "
+                    "for content generation. No generation side effects are "
+                    "wired; calls return a preview message."
+                ),
                 "category": ServiceCategory.CONTENT_FACTORY,
                 "credits_per_unit": 25.0,
                 "unit_name": "piece",
@@ -463,7 +483,11 @@ def register_default_mcp_services():
             {
                 "service_id": "telemetry-processor",
                 "name": "Telemetry Processor",
-                "description": "Process and analyze agent telemetry data for anomaly detection and monitoring.",
+                "description": (
+                    "Preview only: demonstrates the control-plane contract "
+                    "for telemetry processing. No analysis side effects are "
+                    "wired; calls return a preview message."
+                ),
                 "category": ServiceCategory.TELEMETRY_PM,
                 "credits_per_unit": 5.0,
                 "unit_name": "event",
@@ -473,7 +497,11 @@ def register_default_mcp_services():
             {
                 "service_id": "semantic-search",
                 "name": "Semantic Search",
-                "description": "Natural language search across indexed content using embeddings.",
+                "description": (
+                    "Preview only: demonstrates the control-plane contract "
+                    "for semantic search. No search side effects are wired; "
+                    "calls return a preview message."
+                ),
                 "category": ServiceCategory.PROTOCOL_GEN,
                 "credits_per_unit": 15.0,
                 "unit_name": "query",

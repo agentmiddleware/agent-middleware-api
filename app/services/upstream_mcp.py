@@ -844,9 +844,13 @@ class UpstreamMcpAdapter:
                 "upstream MCP discovery or initialization failed"
             ) from None
 
-        if len(matches) != 1:
+        if not matches:
             raise UpstreamMcpConfigurationError(
-                "configured upstream tool must appear exactly once in tools/list"
+                "configured upstream tool not found in tools/list"
+            )
+        if len(matches) > 1:
+            raise UpstreamMcpConfigurationError(
+                "configured upstream tool appears multiple times in tools/list"
             )
         selected = matches[0]
         if not isinstance(selected.inputSchema, dict):
@@ -1114,6 +1118,26 @@ async def register_configured_upstream_mcp(
     active_registry = registry or get_service_registry()
     active_registry.unregister_execution_backend("upstream_mcp")
     if not active_settings.MCP_UPSTREAM_ENABLED:
+        unset_fields = [
+            name
+            for name, value in (
+                ("MCP_UPSTREAM_URL", active_settings.MCP_UPSTREAM_URL),
+                ("MCP_UPSTREAM_TOOL_NAME", active_settings.MCP_UPSTREAM_TOOL_NAME),
+                (
+                    "MCP_UPSTREAM_PUBLIC_TOOL_ID",
+                    active_settings.MCP_UPSTREAM_PUBLIC_TOOL_ID,
+                ),
+                (
+                    "MCP_UPSTREAM_BEARER_TOKEN",
+                    active_settings.MCP_UPSTREAM_BEARER_TOKEN.get_secret_value(),
+                ),
+            )
+            if not (value or "").strip()
+        ]
+        logger.info(
+            "upstream_mcp_disabled",
+            extra={"unset_fields": unset_fields},
+        )
         return None
 
     configuration = UpstreamMcpConfiguration.from_settings(active_settings)
