@@ -84,6 +84,15 @@ class Settings(BaseSettings):
     # handler independently fails closed there. See docs/static-dev-api-keys.md.
     ENABLE_DEV_KEY_SELF_PROVISION: bool = False
 
+    # --- API key hash pepper ---
+    # Optional server-side secret mixed into stored API key digests with
+    # HMAC-SHA256. Empty (the default) keeps the legacy plain SHA-256
+    # behavior. When set, newly issued keys are stored peppered while keys
+    # stored before the pepper was set keep verifying, so no rotation of
+    # existing keys is needed. Changing or removing the pepper invalidates
+    # keys stored under it, so treat it like any other credential.
+    API_KEY_PEPPER: SecretStr = SecretStr("")
+
     # --- Enterprise IGA bridge (OIDC -> PolicyBundle) ---
     # JSON object mapping a trusted enterprise OIDC issuer URL to its pinned
     # verification material, e.g.
