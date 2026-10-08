@@ -1,6 +1,13 @@
 """
-Tests for Stripe Integration Service.
-Validates fiat top-up flow, webhook handling, and idempotency.
+Tests for the Stripe Integration Service (mocked provider only).
+
+Every success-path test below patches ``stripe.PaymentIntent.create`` (or the
+webhook constructor): no test in this module calls the live Stripe API, moves
+real money, or mints credits from a real rail. The fiat top-up flow is
+therefore tested against mocks, not against Stripe, and green here must never
+be read as proof against the live rail.
+``test_prepare_top_up_fails_closed_without_stripe_mock`` pins that boundary
+by showing the unmocked path fails closed.
 """
 
 from datetime import timedelta
@@ -231,6 +238,36 @@ async def test_prepare_top_up_wallet_not_found(client, api_headers):
             headers=api_headers,
         )
         assert resp.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_prepare_top_up_fails_closed_without_stripe_mock(
+    client, sponsor_wallet, api_headers, monkeypatch
+):
+    """Without the mock there is no live rail: prepare fails closed.
+
+    No test in this module may depend on the real Stripe API, so the unmocked
+    path must never succeed. With the key set to ``None`` the Stripe SDK
+    raises ``AuthenticationError`` before any HTTP request leaves the process
+    (an empty string would not trip its client-side guard), the endpoint
+    answers 400 ``topup_prepare_error``, and the wallet balance is unchanged.
+    """
+    import stripe as stripe_lib
+
+    monkeypatch.setattr(stripe_lib, "api_key", None)
+    wallet_id = sponsor_wallet["wallet_id"]
+    before = await client.get(f"/v1/billing/wallets/{wallet_id}", headers=api_headers)
+    assert before.status_code == 200
+
+    resp = await client.post(
+        f"/v1/billing/top-up/prepare?wallet_id={wallet_id}&amount_fiat=50.0",
+        headers=api_headers,
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["error"] == "topup_prepare_error"
+
+    after = await client.get(f"/v1/billing/wallets/{wallet_id}", headers=api_headers)
+    assert after.json()["balance"] == before.json()["balance"]
 
 
 @pytest.mark.anyio
