@@ -223,6 +223,58 @@ wallet so two tenants reusing one client-chosen intent id never share a
 Stripe key. The order id is bound into the tamper-evident audit chain, and
 the signed receipt again carries `ledger_entry_id = None`.
 
+**ACP demo enablement recipe.** None of this is discoverable from the route
+alone, so rehearse it before any prospect sees a checkout. All three are
+required: (1) boot with `ENABLE_PROOF_SURFACES=true` (the checkout lives on
+`billing.expansion_router`, which stays unmounted otherwise, and production
+deploys must keep it off); (2) a configured `STRIPE_SECRET_KEY` (test mode
+for any demo); (3) a funded agent wallet sitting under its sponsor in the
+funding hierarchy, holding balance at or above the derived checkout total,
+since the bridge mints a permit against that wallet and refuses an unfunded
+one with `permit_budget_exceeds_wallet_balance`. The caller passes
+`sponsor_wallet_id` and `agent_wallet_id` as query params plus an
+`Idempotency-Key` header; the response carries `order_id` (`acp-{intent_id}`),
+`permit_id`, `receipt_id`, and the server-derived total. x402 needs only the
+flag, no Stripe key and no funded wallet: `POST /v1/x402/settle` with an
+`Idempotency-Key` header, a permit with budget, and (for EVM networks) the
+payer's on-chain address.
+
+**Operator runbook: x402 and ACP unhappy paths.** Owner: the pilot operator
+on call (assign a named owner before any paid pilot; these states have no
+other responder today).
+
+- `409 x402_settlement_needs_review`: the first attempt is older than 300s
+  with no persisted receipt, so its permit reservation may or may not have
+  committed. Steps: (1) look up the idempotency record for
+  (`wallet_id`, `/v1/x402/settle`, key) and the wallet's audit events;
+  (2) check whether the original worker is still alive and whether the
+  permit shows a reservation; (3) if the reservation committed and the
+  worker is gone, keep the key and reconcile the permit budget manually;
+  (4) retry with the SAME key only after confirming no reservation
+  committed. A different key is a new settlement, not recovery, and can
+  reserve budget twice.
+- `409 x402_settled_unrecoverable_replay`: a receipt exists but the exact
+  response bytes were never saved, so the bytes cannot be rebuilt from the
+  receipt's hashes. No operator action replays it. Record the `receipt_id`
+  as the settlement evidence, reconcile the permit budget against it, and
+  start any new attempt under a new key.
+- ACP `acp_intent_in_progress` past 300s: the bridge recovers this itself
+  (receipted intents reconstruct from the receipt, unreceipted ones re-run
+  under the same deterministic Stripe key, so no double charge). If it
+  persists, treat it like the x402 review case above and inspect the
+  `acp-{intent_id}` audit trail before touching anything.
+- ACP orphaned Stripe intents: every charge failure writes an
+  `acp_checkout_charge_failed` audit event carrying the
+  `stripe_payment_intent_id` and the cancel outcome. Query
+  `GET /v1/audit/events` with the checkout's `request_id`
+  (`acp-{intent_id}`). `canceled` means Stripe took it back, no action
+  needed. `not_cancelable` (notably `processing`) or `cancel_failed` means
+  the PaymentIntent is still live at Stripe with no governance record:
+  open it in the Stripe dashboard by its intent id and cancel or refund it
+  there, then note the dashboard action against the audit event. Never
+  re-issue the checkout under a new intent id to "fix" it; that is a second
+  charge, not recovery.
+
 Against the checklist above, read the two surfaces this way:
 
 - **Items 3–5 (settlement validity):** ACP enforces all three at its

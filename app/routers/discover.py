@@ -226,6 +226,44 @@ def _build_capabilities() -> list[ServiceCapability]:
             )
         )
 
+    # x402 and ACP are dormant trust surfaces: their routers mount only with
+    # ENABLE_PROOF_SURFACES, so they are advertised only when the routes
+    # actually answer. Descriptions carry the facilitation boundary in plain
+    # words so no prospect reads either as money movement.
+    if get_settings().ENABLE_PROOF_SURFACES:
+        product.append(
+            ServiceCapability(
+                name="x402",
+                version="1.0",
+                description=(
+                    "x402 payment-demand authorization and evidence: "
+                    "authorizes a USDC demand against a permit and returns "
+                    "the signable authorization plus a facilitator "
+                    "attestation. It does not execute any transfer "
+                    "and it never mints or moves credits."
+                ),
+                category="payments",
+                surface="product",
+            )
+        )
+    # ACP checkout charges through Stripe, so like KYC it is listed only
+    # when a Stripe key is configured as well as the flag.
+    if _is_stripe_configured() and get_settings().ENABLE_PROOF_SURFACES:
+        product.append(
+            ServiceCapability(
+                name="acp",
+                version="1.0",
+                description=(
+                    "ACP checkout settled through a Stripe Shared Payment "
+                    "Token under single-use permit bounds. It never mints "
+                    "credits and no credits are debited or moved; the "
+                    "permit reservation is the only economic bound."
+                ),
+                category="payments",
+                surface="product",
+            )
+        )
+
     proof = [
         ServiceCapability(
             name="telemetry",
