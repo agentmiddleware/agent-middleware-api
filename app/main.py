@@ -55,6 +55,7 @@ from .core.trust_mode import (
     warn_if_trust_mode_permissive,
 )
 from .db.database import SchemaInitError, init_db, close_db
+from .services.human_approval import describe_human_approval_posture
 from .services.mcp_dispatch_attempts import get_duplicate_guard_metrics
 from .services.mcp_phase9_tools import sync_proof_surface_mcp_registration
 from .services.signing_keys import (
@@ -183,6 +184,14 @@ async def lifespan(app: FastAPI):
         enable_dogfood_second_tool=bool(settings.ENABLE_DOGFOOD_SECOND_TOOL),
         simulation_modes=get_simulation_modes(),
         cors_origins=settings.CORS_ORIGINS,
+    )
+    # Approval posture in one place: which human approval path is active and
+    # which Sentinel settings are still missing. Presence flags only, so no
+    # key material or URLs reach the log.
+    logger.info(
+        "app_startup",
+        phase="human_approval_posture",
+        **describe_human_approval_posture(),
     )
     # A public deployment whose manifest tells agents the operator has no
     # contact is a discovery-honesty defect, not a neutral default. Partial
