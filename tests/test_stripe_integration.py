@@ -3,6 +3,7 @@ Tests for Stripe Integration Service.
 Validates fiat top-up flow, webhook handling, and idempotency.
 """
 
+import logging
 from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -289,7 +290,10 @@ async def test_webhook_rejects_metadata_credit_inflation(
             headers={"stripe-signature": "valid_signature"},
         )
 
-    assert response.status_code == 400
+    # Permanent settlement failure: acknowledged so Stripe stops retrying,
+    # with nothing minted.
+    assert response.status_code == 200
+    assert response.json()["settlement"] == "rejected"
     wallet = await client.get(f"/v1/billing/wallets/{wallet_id}", headers=api_headers)
     assert wallet.json()["balance"] == 0.0
 
@@ -328,7 +332,9 @@ async def test_webhook_rejects_invalid_settlement_fields_without_minting(
                 content=event["data"]["object"]["id"].encode(),
                 headers={"stripe-signature": "valid_signature"},
             )
-            assert response.status_code == 400
+            # Permanent for the payload: acknowledged, not retried.
+            assert response.status_code == 200
+            assert response.json()["settlement"] == "rejected"
 
     wallet = await client.get(f"/v1/billing/wallets/{wallet_id}", headers=api_headers)
     assert wallet.json()["balance"] == 0.0
@@ -366,13 +372,90 @@ async def test_webhook_rejects_agent_and_child_wallets(
                 content=event["data"]["object"]["id"].encode(),
                 headers={"stripe-signature": "valid_signature"},
             )
-            assert response.status_code == 400
+            # Wrong wallet type can never settle: acknowledged, not retried.
+            assert response.status_code == 200
+            assert response.json()["settlement"] == "rejected"
 
     for wallet_id, starting_balance in starting_balances.items():
         wallet = await client.get(
             f"/v1/billing/wallets/{wallet_id}", headers=api_headers
         )
         assert wallet.json()["balance"] == starting_balance
+
+
+@pytest.mark.anyio
+async def test_webhook_unknown_event_type_logs_warning_with_event_id(client, caplog):
+    """A new Stripe event type (for example a dispute) must stay visible."""
+    unknown_event = {
+        "id": "evt_unknown_dispute_1",
+        "type": "charge.dispute.created",
+        "data": {"object": {}},
+    }
+
+    with patch(
+        "app.services.stripe_integration.stripe.Webhook.construct_event",
+        return_value=unknown_event,
+    ):
+        with caplog.at_level(logging.WARNING, logger="app.services.stripe_integration"):
+            response = await client.post(
+                "/v1/webhooks/stripe",
+                content=b"unknown_event_type",
+                headers={"stripe-signature": "valid_signature"},
+            )
+
+    assert response.status_code == 200
+    warnings = [
+        record
+        for record in caplog.records
+        if record.levelno >= logging.WARNING
+        and "charge.dispute.created" in record.getMessage()
+    ]
+    assert warnings, "unknown event type produced no warning log"
+    assert any("evt_unknown_dispute_1" in w.getMessage() for w in warnings), (
+        "warning log does not carry the event id"
+    )
+
+
+@pytest.mark.anyio
+async def test_webhook_retryable_settlement_asks_stripe_to_retry(client):
+    """A refund arriving before its top-up must come back as retryable."""
+    orphan_refund_event = {
+        "id": "evt_refund_before_topup",
+        "type": "charge.refunded",
+        "data": {
+            "object": refunded_charge(
+                payment_intent_id="pi_not_yet_recorded",
+                amount_refunded=1000,
+            )
+        },
+    }
+
+    with patch(
+        "app.services.stripe_integration.stripe.Webhook.construct_event",
+        return_value=orphan_refund_event,
+    ):
+        response = await client.post(
+            "/v1/webhooks/stripe",
+            content=b"orphan_refund",
+            headers={"stripe-signature": "valid_signature"},
+        )
+
+    assert response.status_code == 500
+    assert response.json()["detail"]["error"] == "stripe_settlement_retryable"
+
+
+def test_settlement_errors_are_not_retryable_by_default():
+    """Only explicitly marked ordering races may ask Stripe to retry."""
+    assert StripeSettlementError("credit_metadata_mismatch").retryable is False
+    assert (
+        StripeSettlementError(
+            "refund_payment_intent_not_found", retryable=True
+        ).retryable
+        is True
+    )
+    assert str(StripeSettlementError("credit_metadata_mismatch")) == (
+        "credit_metadata_mismatch"
+    )
 
 
 class TestStripeWebhookIdempotency:

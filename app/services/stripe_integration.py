@@ -50,7 +50,20 @@ SUPPORTED_TOP_UP_CURRENCY = "usd"
 
 
 class StripeSettlementError(ValueError):
-    """A verified Stripe event does not prove an acceptable top-up settlement."""
+    """A verified Stripe event does not prove an acceptable top-up settlement.
+
+    ``retryable`` tells the webhook router whether Stripe should send the
+    event again. Permanent validation failures (wrong currency, forged
+    metadata) are not retryable: the same payload would fail the same way,
+    so the router acknowledges them instead of causing a retry storm.
+    Ordering races (a refund arriving before its top-up was recorded) are
+    retryable: a later delivery may find the missing row.
+    """
+
+    def __init__(self, code: str, *, retryable: bool = False) -> None:
+        super().__init__(code)
+        self.code = code
+        self.retryable = retryable
 
 
 class _RefundSnapshotChanged(RuntimeError):
@@ -283,9 +296,13 @@ class StripeIntegration:
             sig_header: Stripe-Signature header value
 
         Returns:
-            True if processed successfully, False on signature failure
+            True if processed successfully, False on signature failure.
+            Unknown event types are acknowledged as processed after a
+            warning log so new Stripe event types stay visible.
         Raises:
-            ValueError: For unhandled event types
+            StripeSettlementError: When a verified event does not prove an
+                acceptable settlement. The error carries a ``retryable``
+                flag telling the caller whether redelivery could succeed.
         """
         try:
             event = stripe.Webhook.construct_event(
@@ -315,7 +332,11 @@ class StripeIntegration:
         elif event_type in handler_map:
             await handler_map[event_type](event_object)
         else:
-            logger.debug(f"Ignoring unhandled event type: {event_type}")
+            logger.warning(
+                "Ignoring unhandled Stripe event type %s for event %s",
+                event_type,
+                self._stripe_value(event, "id"),
+            )
 
         return True
 
@@ -487,7 +508,14 @@ class StripeIntegration:
                     )
                     credit_entry = credit_result.scalar_one_or_none()
                     if not credit_entry:
-                        raise StripeSettlementError("refund_payment_intent_not_found")
+                        # The matching top-up success event may simply not
+                        # have been processed yet, so a redelivery can
+                        # succeed. Every other settlement failure here is
+                        # permanent for the same payload.
+                        raise StripeSettlementError(
+                            "refund_payment_intent_not_found",
+                            retryable=True,
+                        )
                     if credit_entry.amount <= 0:
                         raise StripeSettlementError("invalid_original_credit_amount")
 

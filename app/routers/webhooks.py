@@ -50,14 +50,26 @@ async def handle_stripe_webhook(request: Request):
     try:
         success = await stripe_integration.handle_webhook(payload, sig_header)
     except StripeSettlementError as exc:
+        if exc.retryable:
+            # A redelivery may find the missing row (for example a refund
+            # arriving before its top-up), so return a server error and let
+            # Stripe retry.
+            logger.warning("Retryable Stripe settlement failure: %s", exc)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "error": "stripe_settlement_retryable",
+                    "message": str(exc),
+                },
+            ) from exc
+        # Permanent for this payload: retrying would fail the same way, so
+        # acknowledge the event to stop Stripe retries without minting.
         logger.warning("Rejected invalid Stripe settlement: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "error": "invalid_stripe_settlement",
-                "message": str(exc),
-            },
-        ) from exc
+        return {
+            "status": "received",
+            "settlement": "rejected",
+            "reason": str(exc),
+        }
 
     if not success:
         raise HTTPException(
