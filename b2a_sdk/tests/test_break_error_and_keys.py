@@ -353,3 +353,68 @@ class TestIdempotencyKeyHeader:
         assert seen[0].headers["x-permit-id"] == "permit-1"
         assert seen[0].headers["x-api-key"] == "test-key"
         assert len(seen) == 1
+
+
+class TestInsufficientFundsDirectConstruction:
+    """Direct construction must coerce bad shortfalls instead of raising."""
+
+    @pytest.mark.parametrize("bad_value", ["nope", True, {"amount": 5}])
+    def test_direct_construction_with_unusable_shortfall_gives_none(self, bad_value):
+        err = InsufficientFundsError("w-1", shortfall=bad_value)
+        assert err.shortfall is None
+        assert err.status_code == 402
+        assert err.wallet_id == "w-1"
+
+    def test_direct_construction_keeps_usable_values(self):
+        assert InsufficientFundsError("w-1", shortfall="2.5").shortfall == 2.5
+        assert InsufficientFundsError("w-1", shortfall=4).shortfall == 4.0
+        assert InsufficientFundsError("w-1", shortfall=None).shortfall is None
+        assert InsufficientFundsError("w-1", shortfall="unknown").shortfall is None
+
+
+class TestSharedHttp402TopUpUrl:
+    """_raise_http_error must report the same URL as charge() for one body."""
+
+    @pytest.mark.asyncio
+    async def test_shared_path_joins_leading_slash_top_up_url(self):
+        body = {
+            "detail": {
+                "error": "insufficient_funds",
+                "shortfall": "2.5",
+                "top_up_url": "  /v1/billing/top-up/prepare  ",
+            }
+        }
+        client, _ = _recording_client(httpx.Response(402, json=body))
+        async with client:
+            with pytest.raises(InsufficientFundsError) as exc_info:
+                await client.discover_tools()
+        assert exc_info.value.top_up_url == "http://test/v1/billing/top-up/prepare"
+
+    @pytest.mark.asyncio
+    async def test_shared_path_keeps_absolute_top_up_url(self):
+        body = {"detail": {"shortfall": 1, "top_up_url": "https://pay.example/top-up"}}
+        client, _ = _recording_client(httpx.Response(402, json=body))
+        async with client:
+            with pytest.raises(InsufficientFundsError) as exc_info:
+                await client.discover_tools()
+        assert exc_info.value.top_up_url == "https://pay.example/top-up"
+
+    @pytest.mark.asyncio
+    async def test_shared_path_matches_charge_for_same_body(self):
+        body = {
+            "detail": {
+                "error": "insufficient_funds",
+                "shortfall": "2.5",
+                "top_up_url": "/v1/billing/top-up/prepare",
+            }
+        }
+        shared_client, _ = _recording_client(httpx.Response(402, json=body))
+        async with shared_client:
+            with pytest.raises(InsufficientFundsError) as shared_exc:
+                await shared_client.discover_tools()
+        charge_client, _ = _recording_client(httpx.Response(402, json=body))
+        async with charge_client:
+            with pytest.raises(InsufficientFundsError) as charge_exc:
+                await charge_client.charge("wallet-123", "iot_bridge")
+        assert shared_exc.value.top_up_url == charge_exc.value.top_up_url
+        assert shared_exc.value.top_up_url == "http://test/v1/billing/top-up/prepare"

@@ -227,7 +227,12 @@ class AgentMiddlewareClient:
             body_detail = payload.get("detail")
             detail_payload = body_detail if isinstance(body_detail, dict) else {}
             raw_top_up = detail_payload.get("top_up_url")
-            top_up_url = raw_top_up if isinstance(raw_top_up, str) and raw_top_up.strip() else None
+            if isinstance(raw_top_up, str) and raw_top_up.strip():
+                top_up_url = raw_top_up.strip()
+                if top_up_url.startswith("/") and not top_up_url.startswith("//"):
+                    top_up_url = f"{self.base_url}{top_up_url}"
+            else:
+                top_up_url = None
             raise InsufficientFundsError(
                 wallet_id=wallet_id or "unknown",
                 shortfall=_coerce_shortfall(detail_payload.get("shortfall", "unknown")),

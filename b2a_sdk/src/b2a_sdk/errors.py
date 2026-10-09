@@ -108,14 +108,14 @@ class InsufficientFundsError(APIError):
     def __init__(
         self,
         wallet_id: str,
-        shortfall: float | str | None = None,
+        shortfall: Any = None,
         top_up_url: str | None = None,
         *,
         receipt_id: str | None = None,
         payload: dict[str, Any] | None = None,
     ) -> None:
         self.wallet_id = wallet_id
-        self.shortfall = None if shortfall is None or shortfall == "unknown" else float(shortfall)
+        self.shortfall = _coerce_shortfall(shortfall)
         self.top_up_url = top_up_url
         self.receipt_id = receipt_id
         message = f"Insufficient funds in wallet {wallet_id}. Shortfall: {self.shortfall} credits."
