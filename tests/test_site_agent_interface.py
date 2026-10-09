@@ -7,7 +7,6 @@ import html
 import json
 import os
 import re
-import shutil
 import struct
 import subprocess
 import sys
@@ -2285,13 +2284,9 @@ def test_font_filenames_are_content_hashed_so_immutable_is_safe() -> None:
         )
 
 
-def teardown_module() -> None:
-    """Keep local focused runs from retaining an interrupted generated build."""
-
-    shutil.rmtree(SITE / "dist", ignore_errors=True)
-
-
-def test_build_refuses_a_malformed_or_stale_font_manifest(tmp_path) -> None:
+def test_build_refuses_a_malformed_or_stale_font_manifest(
+    tmp_path, monkeypatch
+) -> None:
     """json.loads accepts a list or a string; manifest.get would then raise
     AttributeError and the build would die with a traceback instead of the
     launch error it documents. A stale entry names a content-hashed file that no
@@ -2300,8 +2295,16 @@ def test_build_refuses_a_malformed_or_stale_font_manifest(tmp_path) -> None:
     build_module = runpy.run_path(str(SITE / "build_site.py"))
     launch_error = build_module["LaunchConfigurationError"]
     font_preload_tags = build_module["font_preload_tags"]
-    manifest_path = SITE / "fonts.manifest.json"
-    original = manifest_path.read_text(encoding="utf-8")
+    original = (SITE / "fonts.manifest.json").read_text(encoding="utf-8")
+
+    # Exercise the guards against a scratch copy. Rewriting the committed
+    # manifest in place leaves the checkout dirty when the run is interrupted
+    # and races parallel runs, so the committed file is only ever read here.
+    manifest_path = tmp_path / "fonts.manifest.json"
+    manifest_path.write_text(original, encoding="utf-8")
+    # runpy.run_path returns a copy of the module namespace, so patch the
+    # function's own globals dict rather than the returned mapping.
+    monkeypatch.setitem(font_preload_tags.__globals__, "FONT_MANIFEST", manifest_path)
 
     cases = {
         "top-level list": "[]",
@@ -2312,16 +2315,44 @@ def test_build_refuses_a_malformed_or_stale_font_manifest(tmp_path) -> None:
         "preload names a missing file": '{"preload": ["not-vendored.woff2"]}',
         "not json at all": "{",
     }
-    try:
-        for label, payload in cases.items():
-            manifest_path.write_text(payload, encoding="utf-8")
-            with pytest.raises(launch_error):
-                font_preload_tags()
-        manifest_path.write_text(original, encoding="utf-8")
-        # The real manifest still renders, so the guards are not over-tight.
-        assert 'rel="preload"' in font_preload_tags()
-    finally:
-        manifest_path.write_text(original, encoding="utf-8")
+    for label, payload in cases.items():
+        manifest_path.write_text(payload, encoding="utf-8")
+        with pytest.raises(launch_error):
+            font_preload_tags()
+    manifest_path.write_text(original, encoding="utf-8")
+    # The real manifest still renders, so the guards are not over-tight.
+    assert 'rel="preload"' in font_preload_tags()
+
+
+def test_font_manifest_guard_leaves_the_committed_manifest_untouched(
+    tmp_path, monkeypatch
+) -> None:
+    """The guard test above must not rewrite the committed manifest file.
+
+    The scratch-copy approach keeps the checkout clean even when the run is
+    interrupted. This test snapshots the committed file and requires both its
+    bytes and its mtime to survive the guard test unchanged, so a return to
+    in-place rewrites fails here.
+    """
+
+    manifest_path = SITE / "fonts.manifest.json"
+    before_content = manifest_path.read_text(encoding="utf-8")
+    before_mtime = manifest_path.stat().st_mtime_ns
+    test_build_refuses_a_malformed_or_stale_font_manifest(tmp_path, monkeypatch)
+    assert manifest_path.read_text(encoding="utf-8") == before_content
+    assert manifest_path.stat().st_mtime_ns == before_mtime
+
+
+def test_no_module_teardown_deletes_the_generated_site_output() -> None:
+    """Tests in this module build only under tmp_path, so there is nothing for
+    a module teardown to clean up. A teardown that deletes site/dist would
+    remove a real local build the developer may want to keep, so it must not
+    come back.
+    """
+
+    assert "teardown_module" not in globals(), (
+        "teardown_module deletes site/dist; tests must only write under tmp_path"
+    )
 
 
 def test_vendored_font_license_is_published(tmp_path) -> None:
