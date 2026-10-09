@@ -76,10 +76,11 @@ https://api.thisisatest.tech/.well-known/trust-keys.json. Public API contract:
 https://api.thisisatest.tech/openapi.json and https://api.thisisatest.tech/docs.
 Permits and tool calls on the live API need an operator-issued key.
 
-## Try the complete loop locally (source access on request)
+## Try the complete loop locally (public source)
 
-No live API credentials are required. The source repository is private; partner
-access is available on request. With access, two local paths are self-contained:
+No live API credentials are required. Clone
+https://github.com/agentmiddleware/agent-middleware-api. Two local paths are
+self-contained:
 
 Drive it yourself (a real server, you hold the keys):
 
@@ -103,7 +104,7 @@ evidence.
 https://www.thisisatest.tech/
 https://www.thisisatest.tech/proof/ (download a receipt and verify it offline)
 https://www.thisisatest.tech/compare/ (named alternatives, including the rows this loses)
-https://github.com/agentmiddleware (GitHub organization; the source repository is private)
+https://github.com/agentmiddleware/agent-middleware-api (public source repository)
 
 ## Longer machine brief
 

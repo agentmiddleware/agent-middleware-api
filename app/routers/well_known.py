@@ -267,8 +267,8 @@ def _local_try_it_manifest() -> dict[str, Any]:
     """Credential-free proof path for the logical-action transaction loop."""
     return {
         "mode": "local_self_hosted",
-        "repository": "https://github.com/agentmiddleware",
-        "repository_access": "private",
+        "repository": "https://github.com/agentmiddleware/agent-middleware-api",
+        "repository_access": "public",
         "command": "make prove-trust-plane",
         "live_access": "operator_issued",
         "requires_live_credentials": False,
@@ -284,8 +284,8 @@ def _local_try_it_manifest() -> dict[str, Any]:
             "Runs the real FastAPI transaction-integrity path against a "
             "throwaway local SQLite database. This is a reproducible proof, "
             "not a production or settlement claim. The source repository is "
-            "private; clone access must be granted separately. Authorized "
-            "clones can run the proof locally without live API credentials."
+            "public and can be cloned to run the proof locally without live "
+            "API credentials."
         ),
     }
 
