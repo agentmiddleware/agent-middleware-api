@@ -668,19 +668,34 @@ def test_public_surfaces_separate_public_proof_from_private_source_access(
         assert private_url not in footer
 
 
+OWN_GITHUB_OWNERS = ("petrefiedthunder", "agentmiddleware")
+
+
 def _github_url_is_public_org(url: str) -> bool:
+    """Our own GitHub links must be the public org page, never a private repo.
+
+    Third-party repositories (for example named alternatives on /compare/)
+    are public and out of scope.
+    """
     url = url.rstrip(".,;:")
+    path = url[len("https://github.com") :].strip("/")
+    owner = path.split("/", 1)[0].casefold() if path else ""
+    if owner not in OWN_GITHUB_OWNERS:
+        return True
     if url.rstrip("/") == PUBLIC_ORG_URL:
         return True
-    if not url.startswith(PUBLIC_ORG_URL + "/"):
+    if owner != "agentmiddleware":
         return False
-    return not any(url.startswith(private) for private in PRIVATE_REPO_URLS)
+    return not any(
+        url.casefold().startswith(private.casefold()) for private in PRIVATE_REPO_URLS
+    )
 
 
 def test_built_site_github_links_point_only_at_public_org(tmp_path) -> None:
-    """Every GitHub URL a stranger can reach must resolve for a stranger.
+    """Every link to our own GitHub must resolve for a stranger.
 
-    site/concept/ is archived and excluded.
+    Only the public org page qualifies today. site/concept/ is archived and
+    excluded; third-party repositories are allowed.
     """
     output = tmp_path / "site"
     result = _render_site(output, VALID_TEST_CONTACTS)
