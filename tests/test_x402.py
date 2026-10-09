@@ -1732,6 +1732,41 @@ def test_x402_settle_requires_idempotency_record_id():
         )
 
 
+@pytest.mark.anyio
+@pytest.mark.parametrize("bad_record_id", [None, "", "   "])
+async def test_x402_settle_rejects_blank_record_id_without_touching_permit(
+    monkeypatch, bad_record_id
+):
+    """A missing or blank record id fails closed before any budget is touched.
+
+    The type-level required argument stops honest callers, but at runtime a
+    new caller can still pass None or blank. Without the guard, settle would
+    reserve permit budget and then skip receipt dedupe (create_receipt treats
+    a None record id as no prior receipt), so a retry reserves twice.
+    """
+    from app.services import x402_engine
+
+    def _no_permits():
+        pytest.fail("settle must not touch the permit without a record id")
+
+    monkeypatch.setattr(x402_engine, "get_permit_service", _no_permits)
+    handler = get_x402_handler()
+    requirement = handler.build_requirement(
+        amount="0.01", pay_to=EVM_PAY_TO, network="base"
+    )
+    with pytest.raises(X402Error) as exc_info:
+        await handler.settle(
+            permit_id="permit-does-not-exist",
+            wallet_id="wallet-does-not-exist",
+            key_id=None,
+            requirement=requirement,
+            idempotency_key="x402-no-record-guard",
+            payer=EVM_PAYER,
+            idempotency_record_id=bad_record_id,
+        )
+    assert exc_info.value.reason == "x402_idempotency_record_required"
+
+
 def test_recipient_binding_matches_addresses_and_hosts():
     """The shared comparison the MCP and x402 paths both enforce."""
     from app.services.permits import recipient_binding_matches

@@ -346,13 +346,23 @@ class X402PaymentHandler:
     ) -> X402Settlement:
         """Authorize a 402 demand against a permit and record the settlement.
 
-        Sequence: reserve permit budget atomically, build the transfer
-        authorization, sign the facilitator attestation, meter the amount in a
-        shadow-ledger dry-run session, append an audit event, emit the signed
-        receipt. Known unreceipted failures compensate the reservation;
-        uncertain receipt writes or incomplete compensation retain ownership
-        for review so retries cannot reserve the same authority again.
+        Sequence: reject a missing idempotency record id, reserve permit
+        budget atomically, build the transfer authorization, sign the
+        facilitator attestation, meter the amount in a shadow-ledger dry-run
+        session, append an audit event, emit the signed receipt. Known
+        unreceipted failures compensate the reservation; uncertain receipt
+        writes or incomplete compensation retain ownership for review so
+        retries cannot reserve the same authority again.
         """
+        # The record id links this settlement to its idempotency owner, which
+        # is what receipt dedupe matches on. Refuse a missing or blank id
+        # before touching the permit: without it the receipt write skips
+        # dedupe, so a retry would reserve the same budget a second time.
+        if (
+            not isinstance(idempotency_record_id, str)
+            or not idempotency_record_id.strip()
+        ):
+            raise X402Error("x402_idempotency_record_required")
         settings = get_settings()
         # settings.EXCHANGE_RATE is the single credits-per-USD source of truth
         # (see app/core/config.py — do not re-declare it as a constant here).
