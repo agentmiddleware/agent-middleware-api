@@ -40,10 +40,57 @@ def _load_preflight():
 preflight = _load_preflight()
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def clean_release_checkout(monkeypatch):
-    """Manifest tests run in a shared worktree containing intended edits."""
+    """Pretend the release checkout is clean for tests that assert past it.
+
+    Deliberately not autouse: applied globally it would also mask a broken
+    dirty-checkout gate in every other test. Only the manifest tests that
+    need a clean tree to reach the behavior they assert take this fixture;
+    the dirty-checkout test sets _tree_is_clean to False itself, and the
+    _tree_is_clean unit tests below exercise the real function.
+    """
     monkeypatch.setattr(preflight, "_tree_is_clean", lambda: True)
+
+
+def test_tree_is_clean_reads_git_status(monkeypatch):
+    """The gate reports the real git status output, not a fixed answer."""
+    calls = []
+
+    def fake_run(*args, **kwargs):
+        calls.append(args[0])
+
+        class Completed:
+            stdout = " M tracked-change.py\n?? untracked-file\n"
+
+        return Completed()
+
+    monkeypatch.setattr(preflight.subprocess, "run", fake_run)
+    assert preflight._tree_is_clean() is False
+    assert calls[0][:2] == ["git", "status"]
+
+
+def test_tree_is_clean_passes_on_empty_status(monkeypatch):
+    """Empty git status means a clean checkout."""
+    import subprocess
+
+    def fake_run(*args, **kwargs):
+        return subprocess.CompletedProcess(args[0], 0, stdout="   \n", stderr="")
+
+    monkeypatch.setattr(preflight.subprocess, "run", fake_run)
+    assert preflight._tree_is_clean() is True
+
+
+def test_tree_is_clean_fails_closed_when_git_errors(monkeypatch):
+    """An uninspectable checkout raises instead of reading as clean."""
+    import subprocess
+
+    def fake_run(*args, **kwargs):
+        raise subprocess.CalledProcessError(128, args[0])
+
+    monkeypatch.setattr(preflight.subprocess, "run", fake_run)
+    with pytest.raises(RuntimeError, match="unable to inspect"):
+        preflight._tree_is_clean()
 
 
 @pytest.fixture
@@ -1165,7 +1212,9 @@ def test_manifest_rejects_dirty_release_checkout(tmp_path, monkeypatch, capsys):
     assert "customer-manifest.json" not in output
 
 
-def test_manifest_rejects_live_url_mismatch(tmp_path, monkeypatch, capsys):
+def test_manifest_rejects_live_url_mismatch(
+    tmp_path, monkeypatch, capsys, clean_release_checkout
+):
     path = _write_manifest(tmp_path, _manifest_document())
     monkeypatch.setattr(
         preflight,
@@ -1188,7 +1237,9 @@ def test_manifest_rejects_live_url_mismatch(tmp_path, monkeypatch, capsys):
     assert "live URL does not match" in capsys.readouterr().out
 
 
-def test_manifest_rejects_conflicting_expected_commit(tmp_path, capsys):
+def test_manifest_rejects_conflicting_expected_commit(
+    tmp_path, capsys, clean_release_checkout
+):
     path = _write_manifest(tmp_path, _manifest_document())
 
     assert (
@@ -1209,6 +1260,7 @@ def test_manifest_rejects_conflicting_expected_commit(tmp_path, capsys):
 def test_manifest_supplies_live_url_commit_and_signing_key(
     tmp_path,
     monkeypatch,
+    clean_release_checkout,
 ):
     path = _write_manifest(tmp_path, _manifest_document())
     seen = []
@@ -1250,6 +1302,7 @@ def test_manifest_live_gate_rejects_absent_build_provenance(
     tmp_path,
     monkeypatch,
     capsys,
+    clean_release_checkout,
 ):
     path = _write_manifest(tmp_path, _manifest_document())
     payload = {**HEALTHY, "commit_sha": TREE_COMMIT_SHA}
@@ -1268,6 +1321,7 @@ def test_manifest_only_validates_new_candidate_without_probing_old_release(
     tmp_path,
     monkeypatch,
     capsys,
+    clean_release_checkout,
 ):
     path = _write_manifest(tmp_path, _manifest_document())
     monkeypatch.setattr(

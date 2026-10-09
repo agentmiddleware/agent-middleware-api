@@ -138,101 +138,160 @@ def test_constant_test_loop_refuses_cleartext_http_non_loopback():
 
 
 def test_constant_test_loop_allows_http_loopback():
-    """HTTP is allowed for loopback addresses (localhost, 127.0.0.1, ::1)."""
-    # This test validates the URL validation logic without actually running the loop.
-    # We expect it to fail on connection (no server running), not on URL validation.
+    """HTTP is allowed for loopback addresses (localhost, 127.0.0.1, ::1).
+
+    Points at a loopback port with no server, so the run must get past URL
+    validation and fail downstream as an invariant failure (exit 1 with the
+    handled FAILED signal), not as a configuration error and not as a crash.
+    """
     env = {
         **os.environ,
-        "API_URL": "http://localhost:8000",
+        "API_URL": "http://localhost:9",
         "CI_SMOKE_AGENT_KEY": "",  # Will self-provision, but fail to connect
     }
+    # Strip ambient CI_SMOKE_* so a developer's exported tool pin cannot flip
+    # the failure into a configuration error for reasons unrelated to the URL.
+    env = {k: v for k, v in env.items() if not k.startswith("CI_SMOKE_")}
+    env["CI_SMOKE_AGENT_KEY"] = ""
     result = subprocess.run(
         [sys.executable, str(CONSTANT_TEST_LOOP)],
         env=env,
         capture_output=True,
         text=True,
-        timeout=10,
+        timeout=60,
     )
-    # Exit 2 (configuration error) or 1 (network error) - not 0
-    # The point is that URL validation didn't reject http://localhost
-    assert result.returncode != 0
+    # Past URL validation means a handled downstream failure: an invariant
+    # failure (exit 1, FAILED) or a handled network error (exit 2). A crash
+    # (traceback, neither handled signal) or a configuration refusal both
+    # fail this test.
+    assert result.returncode in (1, 2), result.stdout + result.stderr
+    assert ("FAILED" in result.stderr) or ("network error" in result.stderr)
+    assert "Traceback" not in result.stderr
+    assert "configuration error" not in result.stderr
     # Should NOT contain the cleartext refusal message
     assert (
         "refusing to send CI_SMOKE_AGENT_KEY over cleartext HTTP" not in result.stderr
     )
 
 
-def test_constant_test_loop_validates_malformed_key():
-    """Validate that malformed key check exists in the code.
+class _LoopFakeResponse:
+    def __init__(self, payload, status_code=200):
+        self._payload = payload
+        self.status_code = status_code
+        self.text = str(payload)
 
-    The actual validation happens during API fetch, so we can't easily test
-    it end-to-end without a running server. This test verifies the validation
-    logic exists by importing the module and checking the key derivation path.
-    """
+    def json(self):
+        return self._payload
+
+
+class _LoopFakeClient:
+    """Stands in for httpx.Client for the wallet/key fetch stage."""
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def get(self, path, **kwargs):
+        if path == "/v1/billing/wallets":
+            return _LoopFakeResponse({"wallets": [{"wallet_id": "wallet_1"}]})
+        if path.startswith("/v1/billing/wallets/"):
+            return _LoopFakeResponse(
+                {
+                    "keys": [
+                        {"key_prefix": "abcdefgh", "key_id": "key_1"},
+                    ]
+                }
+            )
+        if path == "/mcp/tools.json":
+            return _LoopFakeResponse({"tools": []})
+        return _LoopFakeResponse({}, status_code=404)
+
+    def post(self, path, **kwargs):
+        return _LoopFakeResponse({}, status_code=404)
+
+
+def _load_loop_module(name="constant_test_loop_malformed"):
     import importlib.util
 
-    spec = importlib.util.spec_from_file_location(
-        "constant_test_loop", CONSTANT_TEST_LOOP
-    )
+    spec = importlib.util.spec_from_file_location(name, CONSTANT_TEST_LOOP)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-
-    # The validation is in run_constant_test when deriving key_prefix
-    # Verify the code path exists by checking the function signature
-    import inspect
-
-    source = inspect.getsource(module.run_constant_test)
-    assert "malformed API key" in source
-    assert "expected format <prefix>_<suffix>" in source
-
-    # Verify the key is not logged anywhere in the source
-    full_source = CONSTANT_TEST_LOOP.read_text()
-    # The key variable should never be printed or logged directly
-    assert "print(agent_key)" not in full_source
-    assert 'print(f"{agent_key}' not in full_source
+    return module
 
 
-def test_constant_test_loop_never_logs_keys():
-    """Smoke: keys are never printed to stdout/stderr."""
-    # This is a negative test: we can't prove a key is never logged by running
-    # a successful loop (that would require a real server). Instead, we verify
-    # that the script imports cleanly and the key-reading functions don't print.
-    import importlib.util
+def _stub_loop_http(monkeypatch, module):
+    """Point the loop module at the fake HTTP client without touching httpx."""
+    import types
 
-    spec = importlib.util.spec_from_file_location(
-        "constant_test_loop", CONSTANT_TEST_LOOP
-    )
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setattr(module, "httpx", types.SimpleNamespace(Client=_LoopFakeClient))
+
+
+def test_constant_test_loop_rejects_malformed_key(monkeypatch):
+    """A key without the <prefix>_<suffix> shape fails closed as config error.
+
+    Runs the real fetch-and-derive path in run_constant_test with a stubbed
+    HTTP layer: the wallets and keys calls succeed, so only the format check
+    itself can reject the key. Deleting the check turns this into a later
+    failure instead of the malformed-key refusal, which fails this test.
+    """
+    module = _load_loop_module()
+    _stub_loop_http(monkeypatch, module)
+
+    with pytest.raises(module.ConfigurationError, match="malformed"):
+        module.run_constant_test(
+            "http://127.0.0.1:9",
+            "malformed-key-without-separator",
+            "",
+            "",
+        )
+
+
+def test_constant_test_loop_accepts_wellformed_key_prefix(monkeypatch):
+    """Control: a well-formed key passes the format check with the same stub.
+
+    The stubbed registry is empty, so the run must fail later at tool
+    selection, never on the key format. If both tests raise the same error,
+    the format check is not doing the discriminating.
+    """
+    module = _load_loop_module("constant_test_loop_wellformed")
+    _stub_loop_http(monkeypatch, module)
+
+    with pytest.raises(module.ConfigurationError) as exc_info:
+        module.run_constant_test(
+            "http://127.0.0.1:9",
+            "abcdefgh_1234567890",
+            "",
+            "",
+        )
+    assert "malformed" not in str(exc_info.value).lower()
+
+
+def test_constant_test_loop_never_logs_keys(capsys, monkeypatch):
+    """The canary key never reaches stdout/stderr while credentials are read."""
+    module = _load_loop_module("constant_test_loop_never_logs")
 
     # Set a canary key
     canary_key = "canary_key_must_not_appear_in_logs"
-    test_env = {
-        **os.environ,
-        "CI_SMOKE_AGENT_KEY": canary_key,
-        "CI_SMOKE_WALLET_ID": "wallet_id",
-        "CI_SMOKE_KEY_ID": "key_id",
-    }
+    monkeypatch.setenv("CI_SMOKE_AGENT_KEY", canary_key)
+    monkeypatch.setenv("CI_SMOKE_WALLET_ID", "wallet_id")
+    monkeypatch.setenv("CI_SMOKE_KEY_ID", "key_id")
 
-    # Temporarily override os.environ
-    original_environ = os.environ.copy()
-    os.environ.update(test_env)
+    agent_key, wallet_id, key_id = module._get_agent_key()
+    assert agent_key == canary_key
+    assert wallet_id == "wallet_id"
+    assert key_id == "key_id"
 
-    try:
-        spec.loader.exec_module(module)
-        agent_key, wallet_id, key_id = module._get_agent_key()
-        assert agent_key == canary_key
-        assert wallet_id == "wallet_id"
-        assert key_id == "key_id"
-
-        # The _get_agent_key function should not print the key
-        # (We can't fully test this without capturing stdout, but the function
-        # is designed to never print/log the key - code review confirms this.)
-
-    finally:
-        os.environ.clear()
-        os.environ.update(original_environ)
+    # Actually capture the output: if _get_agent_key ever prints the key,
+    # this fails instead of passing on an admission.
+    captured = capsys.readouterr()
+    assert canary_key not in captured.out
+    assert canary_key not in captured.err
 
 
 def test_constant_test_loop_self_provision_signal():
@@ -297,49 +356,127 @@ def test_constant_test_loop_partial_credentials_fetch_from_api():
         os.environ.update(original_environ)
 
 
-def test_partner_api_key_bootstrap_json_output():
-    """Bootstrap script produces JSON-parseable output and never prints the key."""
-    import json
+class _BootstrapFakeResponse:
+    def __init__(self, payload, status_code=200):
+        self._payload = payload
+        self.status_code = status_code
+        self.text = str(payload)
 
-    BOOTSTRAP = ROOT / "scripts" / "partner_api_key_bootstrap.py"
+    def json(self):
+        return self._payload
 
-    # Run with --json flag
-    result = subprocess.run(
-        [sys.executable, str(BOOTSTRAP), "--json"],
-        input=json.dumps(
+
+class _BootstrapFakeClient:
+    """Stands in for httpx.Client; mints one canned key."""
+
+    minted_key = "b2a_test_minted_key_for_json_path"
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def get(self, path, **kwargs):
+        return _BootstrapFakeResponse({})
+
+    def post(self, path, json=None, **kwargs):
+        if path == "/v1/billing/wallets/sponsor":
+            return _BootstrapFakeResponse({"wallet_id": "wal_sponsor"})
+        if path == "/v1/billing/wallets/agent":
+            return _BootstrapFakeResponse({"wallet_id": "wal_agent"})
+        return _BootstrapFakeResponse(
             {
-                "api_url": "http://127.0.0.1:8000",
-                "sponsor_name": "test-sponsor",
-                "agent_id": "test-agent",
+                "api_key": self.minted_key,
+                "key_id": "key_1",
+                "key_prefix": "b2a_test_",
             }
-        ),
-        capture_output=True,
-        text=True,
-        timeout=5,
+        )
+
+
+def test_partner_api_key_bootstrap_json_output(monkeypatch, capsys):
+    """The --json key-bearing path emits parseable JSON holding the key once.
+
+    Runs the real provision() with a stubbed HTTP layer, so stdout must
+    parse as JSON containing the minted key while stderr carries status only
+    and neither stream carries the bootstrap secret. A --json run that
+    prints non-JSON output, or echoes either secret to stderr, fails.
+    """
+    import importlib.util
+    import json
+    import sys
+
+    spec = importlib.util.spec_from_file_location(
+        "partner_api_key_bootstrap_json", BOOTSTRAP_SCRIPT
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    import types
+
+    bootstrap_secret = "bootstrap-secret-must-not-appear"
+    monkeypatch.setenv("BOOTSTRAP_KEY", bootstrap_secret)
+    monkeypatch.setattr(
+        module, "httpx", types.SimpleNamespace(Client=_BootstrapFakeClient)
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            str(BOOTSTRAP_SCRIPT),
+            "--api-url",
+            "https://api.example.test",
+            "--sponsor-name",
+            "test-sponsor",
+            "--agent-id",
+            "test-agent",
+            "--json",
+        ],
     )
 
-    # Should fail (no server), but output should still be JSON-parseable
-    # The important part is that --json produces parseable JSON even on error
-    # and that the key is not in the output
-    if result.stdout.strip():
-        try:
-            data = json.loads(result.stdout)
-            # If it succeeded (unlikely without server), verify structure
-            if "agent_api_key" in data:
-                # The key should be present in the JSON (that's the point)
-                # but should NOT appear in plaintext anywhere else
-                assert isinstance(data["agent_api_key"], str)
-                assert len(data["agent_api_key"]) > 0
-        except json.JSONDecodeError:
-            # If not JSON, it should be an error message
-            # Either way, verify no key leaked in non-JSON output
-            pass
+    # Run the real --json CLI path end to end against the stubbed transport.
+    assert module.main() == 0
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    minted_key = data["api_key"]
+    assert isinstance(minted_key, str) and len(minted_key) > 0
+    assert minted_key == _BootstrapFakeClient.minted_key
+    assert minted_key not in captured.err
+    assert bootstrap_secret not in captured.out + captured.err
 
-    # The bootstrap key should never appear in raw stdout/stderr
-    # (We can't test the actual key without a server, but we can verify
-    # the output is structured and doesn't contain test markers)
-    assert "b2a_test_" not in result.stdout
-    assert "b2a_test_" not in result.stderr
+
+def test_partner_api_key_bootstrap_failure_prints_no_key_to_stdout():
+    """Without a server the bootstrap fails and stdout stays empty.
+
+    An empty stdout is asserted (not conditionally parsed), so any future
+    change that prints non-JSON output, or key material, on the error path
+    fails this test instead of passing vacuously.
+    """
+    canary = "bootstrap-canary-must-not-appear"
+    env = {
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "BOOTSTRAP_KEY": canary,
+    }
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(BOOTSTRAP_SCRIPT),
+            "--api-url",
+            "http://127.0.0.1:9",
+            "--json",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode != 0
+    assert result.stdout == "", f"stdout must stay empty on failure: {result.stdout!r}"
+    assert canary not in result.stdout + result.stderr
 
 
 @pytest.mark.skipif(
