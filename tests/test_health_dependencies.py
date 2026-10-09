@@ -671,3 +671,109 @@ async def test_health_dependencies_is_public_no_auth_required(client):
     like Kubernetes liveness probes don't carry authentication."""
     resp = await client.get("/health/dependencies")
     assert resp.status_code == 200
+
+
+@pytest.mark.anyio
+async def test_public_health_omits_broker_address_payment_mode_and_upstream_origin(
+    client, monkeypatch, clean_database
+):
+    """Unauthenticated health output names no broker, partner server, or
+    live-versus-test payment mode.
+
+    Call and dispatch counters stay. They carry no address, request body, or
+    credential, and operators read the reconciliation backlog from this
+    endpoint. This test fails while those three details are still returned.
+    """
+    import sys
+    import types
+
+    broker_host = "secret-broker.internal"
+    origin = "https://partner.example"
+    live_key = "sk_live_do_not_publish"
+
+    class _MqttClient:
+        def __init__(self, hostname, port, timeout):
+            assert hostname == broker_host
+            assert port == 1883
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class _Balance:
+        livemode = True
+
+    class _BalanceAPI:
+        @staticmethod
+        def retrieve():
+            return _Balance()
+
+    fake_mqtt = types.ModuleType("aiomqtt")
+    fake_mqtt.Client = _MqttClient
+    fake_stripe = types.ModuleType("stripe")
+    fake_stripe.api_key = None
+    fake_stripe.Balance = _BalanceAPI
+    monkeypatch.setitem(sys.modules, "aiomqtt", fake_mqtt)
+    monkeypatch.setitem(sys.modules, "stripe", fake_stripe)
+
+    settings = get_settings()
+    previous_proof = settings.ENABLE_PROOF_SURFACES
+    settings.ENABLE_PROOF_SURFACES = True
+    settings.SIMULATION_MODE_IOT_BRIDGE = False
+    settings.MQTT_BROKER_URL = f"mqtt://{broker_host}:1883"
+    settings.STRIPE_SECRET_KEY = live_key
+    settings.MCP_UPSTREAM_ENABLED = True
+    settings.MCP_UPSTREAM_PUBLIC_TOOL_ID = "partner.lookup"
+    settings.MCP_UPSTREAM_BEARER_TOKEN = SecretStr("never-report-this-token")
+    registry = get_service_registry()
+    registry.unregister_execution_backend("upstream_mcp")
+    registry.register_upstream(
+        service_id="partner.lookup",
+        name="partner_lookup",
+        description="Gateway-owned partner tool",
+        category=ServiceCategory.PLATFORM_FEE,
+        executor=object(),
+        input_schema={"type": "object"},
+        output_schema=None,
+        credits_per_unit=1.0,
+        upstream_tool_name="partner_lookup",
+        upstream_origin=origin,
+    )
+    try:
+        ready = await client.get("/health/ready")
+        dependencies = await client.get("/health/dependencies")
+    finally:
+        settings.ENABLE_PROOF_SURFACES = previous_proof
+        registry.unregister_execution_backend("upstream_mcp")
+
+    assert ready.status_code == 200
+    mqtt = ready.json()["checks"]["mqtt"]
+    assert mqtt["status"] == "up"
+    assert "host" not in mqtt
+    assert "port" not in mqtt
+
+    assert dependencies.status_code == 200
+    body = dependencies.json()
+    mqtt_dep = body["dependencies"]["mqtt"]
+    stripe = body["dependencies"]["stripe"]
+    upstream = body["dependencies"]["upstream_mcp"]
+    assert mqtt_dep["status"] == "up"
+    assert "host" not in mqtt_dep
+    assert "port" not in mqtt_dep
+    assert stripe["status"] == "up"
+    assert "mode" not in stripe
+    assert "livemode" not in stripe
+    assert upstream["status"] == "up"
+    assert "upstream_origin" not in upstream
+    assert "call_metrics" in upstream
+    assert "latency_seconds_average" in upstream["call_metrics"]
+    assert "reconciliation_backlog" in upstream["dispatch_metrics"]
+
+    rendered = ready.text + dependencies.text
+    assert broker_host not in rendered
+    assert origin not in rendered
+    assert live_key not in rendered
+    assert "never-report-this-token" not in rendered
+    assert "livemode" not in rendered
