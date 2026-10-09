@@ -1,12 +1,12 @@
 """CrewAI Tool for Agent Middleware API."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
-from crewai.tools import BaseTool
-from pydantic import BaseModel
 
 from b2a_sdk.models import PermitRequest
+from crewai.tools import BaseTool
+from pydantic import BaseModel, PrivateAttr
 
 from .client import B2AClient
 
@@ -38,18 +38,20 @@ class CrewAIB2ATool(BaseTool):
     base_url: str = "https://api.thisisatest.tech"
     api_key: str
     wallet_id: str
-    permit_budget: Decimal = Decimal("100")
+    permit_budget: Decimal = Decimal(100)
     permit_ttl_minutes: int = 30
     # Cache permits to avoid 409 on replay (server hashes full permit body including expires_at)
-    _permit_cache: dict[str, str] = {}  # permit_idempotency_key → permit_id
-    _permit_requests: dict[str, PermitRequest] = {}
+    # Private per-instance state (permit_idempotency_key → permit_id); a fresh
+    # dict per instance so replays never leak across tool instances.
+    _permit_cache: dict[str, str] = PrivateAttr(default_factory=dict)
+    _permit_requests: dict[str, PermitRequest] = PrivateAttr(default_factory=dict)
 
     def __init__(
         self,
         api_key: str,
         wallet_id: str,
         base_url: str = "https://api.thisisatest.tech",
-        permit_budget: Decimal = Decimal("100"),
+        permit_budget: Decimal = Decimal(100),
         permit_ttl_minutes: int = 30,
         **kwargs,
     ):
@@ -83,8 +85,7 @@ class CrewAIB2ATool(BaseTool):
                 issuer_wallet_id=self.wallet_id,
                 subject_wallet_id=self.wallet_id,
                 max_credits=self.permit_budget,
-                expires_at=datetime.now(timezone.utc)
-                + timedelta(minutes=self.permit_ttl_minutes),
+                expires_at=datetime.now(UTC) + timedelta(minutes=self.permit_ttl_minutes),
                 allowed_tools=[tool_name],
                 scopes=[f"tool:{tool_name}:invoke", "billing:charge"],
             )
@@ -94,9 +95,7 @@ class CrewAIB2ATool(BaseTool):
             or request.max_credits != self.permit_budget
             or request.allowed_tools != [tool_name]
         ):
-            raise ValueError(
-                "permit_idempotency_key reused with different permit terms"
-            )
+            raise ValueError("permit_idempotency_key reused with different permit terms")
         return request
 
     def _run(
@@ -116,12 +115,8 @@ class CrewAIB2ATool(BaseTool):
 
         try:
             if operation == "discover_tools":
-                tools = asyncio.get_event_loop().run_until_complete(
-                    client.discover_tools()
-                )
-                return str(
-                    [{"name": t.name, "description": t.description} for t in tools]
-                )
+                tools = asyncio.get_event_loop().run_until_complete(client.discover_tools())
+                return str([{"name": t.name, "description": t.description} for t in tools])
 
             elif operation == "call_tool":
                 tool_name = kwargs.get("tool_name")
@@ -140,9 +135,7 @@ class CrewAIB2ATool(BaseTool):
                     permit_id = self._permit_cache[permit_idempotency_key]
                 else:
                     permit = asyncio.get_event_loop().run_until_complete(
-                        client.create_permit(
-                            request, idempotency_key=permit_idempotency_key
-                        )
+                        client.create_permit(request, idempotency_key=permit_idempotency_key)
                     )
                     permit_id = permit.permit_id
                     self._permit_cache[permit_idempotency_key] = permit_id
@@ -176,8 +169,10 @@ class CrewAIB2ATool(BaseTool):
             else:
                 return f"Unknown operation: {operation}"
 
-        except Exception as e:
-            return f"Error: {str(e)}"
+        # The tool contract returns errors as strings, so any failure
+        # (network, auth, validation) is reported, never raised.
+        except Exception as e:  # noqa: BLE001 - errors are tool output here
+            return f"Error: {e!s}"
 
     async def _arun(
         self,
@@ -190,9 +185,7 @@ class CrewAIB2ATool(BaseTool):
         try:
             if operation == "discover_tools":
                 tools = await client.discover_tools()
-                return str(
-                    [{"name": t.name, "description": t.description} for t in tools]
-                )
+                return str([{"name": t.name, "description": t.description} for t in tools])
 
             elif operation == "call_tool":
                 tool_name = kwargs.get("tool_name")
@@ -241,5 +234,7 @@ class CrewAIB2ATool(BaseTool):
             else:
                 return f"Unknown operation: {operation}"
 
-        except Exception as e:
-            return f"Error: {str(e)}"
+        # The tool contract returns errors as strings, so any failure
+        # (network, auth, validation) is reported, never raised.
+        except Exception as e:  # noqa: BLE001 - errors are tool output here
+            return f"Error: {e!s}"

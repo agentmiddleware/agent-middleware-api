@@ -14,10 +14,10 @@ This package is not published to PyPI. Install it from a checkout of
 this repository:
 
 ```bash
-git clone https://github.com/PetrefiedThunder/agent-middleware-api.git
+git clone https://github.com/agentmiddleware/agent-middleware-api.git
 cd agent-middleware-api
 python -m pip install -e ./b2a_sdk
-python -m pip install -e wrappers/crewai-agent-middleware
+python -m pip install -e ./wrappers/crewai-agent-middleware
 ```
 
 `b2a_sdk` must be installed from the local path first: this package
@@ -130,3 +130,18 @@ b2a_tool = CrewAIB2ATool(
 - Python 3.11+
 - CrewAI 0.1.0+
 - httpx 0.25.0+
+
+## Release checklist (not yet run)
+
+This package has not been published to PyPI or submitted to any CrewAI
+marketplace. Nothing here has been uploaded; release needs C.Lee's decision.
+When C.Lee approves, the checklist is:
+
+1. Confirm `b2a-sdk` is published to PyPI first, since this wrapper depends
+   on it and a published package cannot depend on a checkout-only package.
+2. Build from this directory with `python -m build` (or `uv build`) and run
+   `twine check dist/*`; both must pass.
+3. Smoke test in a fresh virtualenv: `pip install` the built wheel plus the
+   published `b2a-sdk`, then `python -c "import crewai_b2a"`.
+4. Run `pytest tests/` from this directory and confirm it passes.
+5. Tag and publish with `twine upload dist/*`, then announce the version.

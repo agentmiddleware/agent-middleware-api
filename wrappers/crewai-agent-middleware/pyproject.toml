@@ -7,16 +7,67 @@ name = "crewai-agent-middleware"
 version = "0.1.0"
 description = "CrewAI integration for Agent Middleware API (MCP + AWI)"
 readme = "README.md"
-license = "MIT"
+license = { text = "MIT" }
 requires-python = ">=3.11"
+authors = [{ name = "Agent Middleware" }]
+keywords = [
+    "mcp",
+    "model-context-protocol",
+    "agent-authorization",
+    "delegated-authorization",
+    "permits",
+    "idempotency",
+    "replay-protection",
+    "signed-receipts",
+    "audit",
+    "agent-governance",
+    "crewai",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
 dependencies = [
+    # Installed from the local checkout (see README): b2a-sdk is not on PyPI,
+    # so installing this wrapper on its own cannot resolve this dependency.
     "b2a-sdk>=0.4.0",
-    "crewai>=0.1.0",
-    "httpx>=0.25.0",
+    "crewai>=0.1.0,<1",
+    "httpx>=0.25.0,<1",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-asyncio", "ruff"]
+dev = ["pytest>=9.0.0", "pytest-asyncio>=0.24.0", "ruff>=0.8.0"]
+
+[project.urls]
+Homepage = "https://github.com/agentmiddleware/agent-middleware-api"
+Repository = "https://github.com/agentmiddleware/agent-middleware-api"
+Issues = "https://github.com/agentmiddleware/agent-middleware-api/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/crewai_b2a"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/crewai_b2a",
+    "tests",
+    "LICENSE",
+    "README.md",
+    "pyproject.toml",
+]
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+# Relative to this directory, so `pytest wrappers/crewai-agent-middleware/tests`
+# works from the repository root as well as from here. The bare `b2a_sdk/`
+# directory at the repository root would otherwise resolve as a namespace
+# package and shadow the real SDK under `b2a_sdk/src`.
+pythonpath = ["src", "../../b2a_sdk/src"]
