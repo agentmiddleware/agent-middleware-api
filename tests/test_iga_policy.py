@@ -202,6 +202,7 @@ async def _make_bundle(
     *,
     allowed_tools: list[str] | None,
     is_active: bool = True,
+    max_cost_per_action: Decimal | None = None,
 ) -> str:
     policy_id = f"polb-{uuid.uuid4().hex[:16]}"
     factory = get_session_factory()
@@ -215,6 +216,7 @@ async def _make_bundle(
                     json.dumps(allowed_tools) if allowed_tools is not None else None
                 ),
                 is_active=is_active,
+                max_cost_per_action=max_cost_per_action,
             )
         )
         await session.commit()
@@ -1249,6 +1251,74 @@ async def test_ledger_contention_releases_iga_use(
         assert payload["result"]["receipt"]["outcome"] == "success"
         assert calls == [{"message": "hello"}]
         # And the call that did dispatch keeps its use.
+        assert sum(oidc_iga._lifetime_uses.values()) == 1
+    finally:
+        registry.unregister_local(E2E_TOOL)
+
+
+async def test_policy_denial_releases_iga_use(
+    iga_config, clean_database, rsa_key, client
+):
+    """A wallet-policy refusal after the gate charges nothing and dispatches
+    nothing, so the IGA use recorded at the gate is handed back: a max_uses=1
+    principal is NOT locked out by a policy denial, and a retry after the
+    policy cause clears succeeds."""
+    calls: list[dict] = []
+    registry = _register_e2e_tool(calls)
+    try:
+        setup = await _provision_for_e2e(client, idem_key="iga-e2e-policy-permit")
+        wallet_id = setup["agent_wallet_id"]
+        agent_headers = setup["agent_headers"]
+
+        bundle_wallet = await _make_wallet()
+        policy_id = await _make_bundle(bundle_wallet, allowed_tools=[E2E_TOOL])
+        iga_config(
+            _okta_issuers(rsa_key),
+            {"payments-ops": {"policy_id": policy_id, "max_uses": 1}},
+        )
+        token = _mint(rsa_key, extra={"groups": ["payments-ops"]})
+        headers = {**agent_headers, "Authorization": f"Bearer {token}"}
+
+        # The tool costs 2 credits; a wallet policy capping each action at 1
+        # denies at the policy gate, which runs after the IGA gate consumes.
+        wallet_policy_id = await _make_bundle(
+            wallet_id, allowed_tools=None, max_cost_per_action=Decimal("1")
+        )
+
+        payload = await _invoke_tool_call(
+            client,
+            wallet_id=wallet_id,
+            permit_id=setup["permit_id"],
+            idem_key="iga-e2e-policy-1",
+            headers=headers,
+        )
+        assert "error" in payload, payload
+        assert payload["error"]["message"] == "max_cost_per_action_exceeded", payload
+        assert calls == []
+        # The recorded use was compensated: nothing dispatched, nothing kept.
+        assert oidc_iga._lifetime_uses == {}
+        assert oidc_iga._window_calls == {}
+
+        # Lift the policy cap; the same max_uses=1 principal can now act.
+        factory = get_session_factory()
+        async with factory() as session:
+            bundle = await session.get(PolicyBundleModel, wallet_policy_id)
+            assert bundle is not None
+            bundle.max_cost_per_action = Decimal("100")
+            session.add(bundle)
+            await session.commit()
+
+        payload = await _invoke_tool_call(
+            client,
+            wallet_id=wallet_id,
+            permit_id=setup["permit_id"],
+            idem_key="iga-e2e-policy-2",
+            headers=headers,
+        )
+        assert "result" in payload, payload
+        assert payload["result"]["receipt"]["outcome"] == "success"
+        assert calls == [{"message": "hello"}]
+        # The dispatched call keeps its committed use.
         assert sum(oidc_iga._lifetime_uses.values()) == 1
     finally:
         registry.unregister_local(E2E_TOOL)

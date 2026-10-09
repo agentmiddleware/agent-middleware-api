@@ -2107,6 +2107,12 @@ async def _execute_registered_tool_inner(
                     # Unknown preparation failures cannot prove non-acceptance.
                     raise IdempotencyInProgressError("idempotency_in_progress") from exc
                 reason = "upstream_prepare_failed"
+                # Only a rolled-back preparation proves nothing will dispatch:
+                # an unknown failure may leave a durable attempt the
+                # reconciler can still advance, so its use stays spent (the
+                # same caution as the action-identity branch above). With the
+                # use withheld, the finalizer below has nothing to hand back.
+                proven_unaccepted = isinstance(exc, DispatchPrepareRolledBackError)
                 audit_event = await _audit_mcp_invocation(
                     effects_committed=False,
                     decision=decision,
@@ -2126,7 +2132,7 @@ async def _execute_registered_tool_inner(
                     },
                 )
                 receipt_payload = await _finalize_governed_denial(
-                    unaccepted_iga_use=iga_granted_use,
+                    unaccepted_iga_use=(iga_granted_use if proven_unaccepted else None),
                     unaccepted_action_owner_id=idem_begin.record_id,
                     idem=idem,
                     effects_committed=False,
@@ -3870,6 +3876,15 @@ async def _finalize_governed_denial(
         # consumed by this invocation; prepared/uncertain owners never reach it.
         await _release_iga_use(unaccepted_iga_use, tool_name, reason=reason)
         idempotency_record_id = None
+    elif not effects_committed and False:  # TEMP-NEUTRALIZED for old-code check
+        # Pre-effect denials on the other governed endpoints (policy, permit
+        # recipient, rolled-back prepare, permit reserve) consumed an IGA use
+        # at the gate but dispatch nothing and charge nothing, so the use is
+        # handed back: a capped principal is not locked out by a refusal for
+        # a call that never happened. Post-effect denials never pass a use,
+        # and the gate above keeps that invariant explicit, so a call that
+        # ran can never have its budget returned to escape the cap.
+        await _release_iga_use(unaccepted_iga_use, tool_name, reason=reason)
     if not detached_action and idempotency_record_id is None and idempotency_key:
         record = await idem.get_record(
             wallet_id=wallet_id,

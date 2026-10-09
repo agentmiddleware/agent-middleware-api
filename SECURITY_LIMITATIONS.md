@@ -109,6 +109,12 @@ Keep these out of the wedge until a design partner requires them:
   still the operator's job.
 - No public uptime SLA, compliance scope, RTO/RPO, tenant-isolation guarantee,
   or immutable-ledger claim is made.
+- Enterprise login call caps (`max_uses` and the velocity window in
+  `IGA_GROUP_POLICY_MAP`) are enforced per server process: counters live in
+  memory, reset on restart, and are not shared across replicas, so each
+  replica enforces its own budget. Operators who need a fleet-wide cap must
+  either run a single replica or accept per-replica budgets until a shared
+  cap store exists.
 - Sandbox and AWI/browser automation are not production isolation boundaries.
 - Auto-PR and agentic workflow automation must treat GitHub issues, PRs,
   comments, webhook bodies, tool outputs, and generated scripts as untrusted.
