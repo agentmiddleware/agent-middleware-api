@@ -3,9 +3,39 @@ Conversion utilities between SQLModel database rows and Pydantic API schemas.
 """
 
 import json
+import logging
 from typing import Any
 
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+_CORRUPT_STORED_JSON_COUNTS: dict[str, int] = {}
+
+
+def _report_corrupt_stored_json(field: str, record_id: str | None, reason: str) -> int:
+    """Log a corrupt stored JSON value and count it per field."""
+    count = _CORRUPT_STORED_JSON_COUNTS.get(field, 0) + 1
+    _CORRUPT_STORED_JSON_COUNTS[field] = count
+    logger.warning(
+        "corrupt_stored_json field=%s record_id=%s reason=%s count=%d",
+        field,
+        record_id if record_id is not None else "unknown",
+        reason,
+        count,
+    )
+    return count
+
+
+def corrupt_stored_json_counts() -> dict[str, int]:
+    """Return a copy of per-field corrupt stored JSON counts."""
+    return dict(_CORRUPT_STORED_JSON_COUNTS)
+
+
+def reset_corrupt_stored_json_counts() -> None:
+    """Clear per-field corrupt stored JSON counts (used by tests)."""
+    _CORRUPT_STORED_JSON_COUNTS.clear()
+
 
 from ..core.time import to_naive_utc
 from ..schemas.billing import (
@@ -65,12 +95,11 @@ def wallet_model_to_response(
     wallet: WalletModel,
 ) -> WalletResponse:
     """Convert a WalletModel to a WalletResponse Pydantic schema."""
-    metadata = {}
-    if wallet.metadata_json:
-        try:
-            metadata = json.loads(wallet.metadata_json)
-        except json.JSONDecodeError:
-            pass
+    metadata = parse_metadata_json(
+        wallet.metadata_json,
+        field="wallet.metadata_json",
+        record_id=wallet.wallet_id,
+    )
 
     kyc_status_str = wallet.kyc_status or "not_required"
     try:
@@ -120,12 +149,11 @@ def ledger_entry_model_to_schema(
     entry: LedgerEntryModel,
 ) -> LedgerEntry:
     """Convert a LedgerEntryModel to a LedgerEntry Pydantic schema."""
-    metadata = {}
-    if entry.metadata_json:
-        try:
-            metadata = json.loads(entry.metadata_json)
-        except json.JSONDecodeError:
-            pass
+    metadata = parse_metadata_json(
+        entry.metadata_json,
+        field="ledger.metadata_json",
+        record_id=entry.entry_id,
+    )
 
     return LedgerEntry(
         entry_id=entry.entry_id,
@@ -193,13 +221,20 @@ def metadata_dict_to_json(metadata: dict[str, Any] | None) -> str | None:
     return json.dumps(metadata, default=str)
 
 
-def parse_metadata_json(metadata_json: str | None) -> dict[str, Any]:
+def parse_metadata_json(
+    metadata_json: str | None,
+    field: str | None = None,
+    record_id: str | None = None,
+) -> dict[str, Any]:
     """Parse metadata JSON string to dict."""
     if not metadata_json:
         return {}
     try:
         return json.loads(metadata_json)
     except json.JSONDecodeError:
+        _report_corrupt_stored_json(
+            field or "metadata_json", record_id, "json_decode_error"
+        )
         return {}
 
 
@@ -237,7 +272,11 @@ def telemetry_event_model_to_schema(row: TelemetryEventModel) -> TelemetryEvent:
         message=row.message,
         severity=Severity(row.severity),
         stack_trace=row.stack_trace,
-        metadata=parse_metadata_json(row.payload_json),
+        metadata=parse_metadata_json(
+            row.payload_json,
+            field="telemetry.payload_json",
+            record_id=row.event_id,
+        ),
         timestamp=row.event_timestamp,
     )
 
@@ -271,19 +310,44 @@ def indexed_api_model_to_schema(row: OracleIndexedAPIModel) -> IndexedAPI:
     caps: list[IndexedCapability] = []
     if row.capabilities_json:
         try:
-            for item in json.loads(row.capabilities_json):
-                caps.append(IndexedCapability.model_validate(item))
-        except (json.JSONDecodeError, ValueError):
-            pass
+            parsed_caps = json.loads(row.capabilities_json)
+        except json.JSONDecodeError:
+            _report_corrupt_stored_json(
+                "oracle.capabilities_json", row.api_id, "json_decode_error"
+            )
+            parsed_caps = None
+        if parsed_caps is not None:
+            if not isinstance(parsed_caps, list):
+                _report_corrupt_stored_json(
+                    "oracle.capabilities_json", row.api_id, "not_a_list"
+                )
+            else:
+                try:
+                    for item in parsed_caps:
+                        caps.append(IndexedCapability.model_validate(item))
+                except ValueError:
+                    _report_corrupt_stored_json(
+                        "oracle.capabilities_json",
+                        row.api_id,
+                        "validation_error",
+                    )
 
     tags: list[str] = []
     if row.tags_json:
         try:
             parsed = json.loads(row.tags_json)
+        except json.JSONDecodeError:
+            _report_corrupt_stored_json(
+                "oracle.tags_json", row.api_id, "json_decode_error"
+            )
+            parsed = None
+        if parsed is not None:
             if isinstance(parsed, list):
                 tags = [str(t) for t in parsed]
-        except json.JSONDecodeError:
-            pass
+            else:
+                _report_corrupt_stored_json(
+                    "oracle.tags_json", row.api_id, "not_a_list"
+                )
 
     return IndexedAPI(
         api_id=row.api_id,
@@ -336,14 +400,24 @@ def _str_list_to_json(values: list | None) -> str | None:
     return json.dumps(list(values), default=str)
 
 
-def _parse_json_list(raw: str | None) -> list:
+def _parse_json_list(
+    raw: str | None,
+    field: str | None = None,
+    record_id: str | None = None,
+) -> list:
     if not raw:
         return []
     try:
         parsed = json.loads(raw)
-        return parsed if isinstance(parsed, list) else []
     except json.JSONDecodeError:
+        _report_corrupt_stored_json(
+            field or "json_list", record_id, "json_decode_error"
+        )
         return []
+    if isinstance(parsed, list):
+        return parsed
+    _report_corrupt_stored_json(field or "json_list", record_id, "not_a_list")
+    return []
 
 
 def scan_report_to_scan_model(report: ScanReport) -> SecurityScanModel:
@@ -395,6 +469,9 @@ def vulnerability_model_to_schema(
             loaded = json.loads(row.evidence_json)
             evidence = loaded if isinstance(loaded, dict) else {"value": loaded}
         except json.JSONDecodeError:
+            _report_corrupt_stored_json(
+                "vulnerability.evidence_json", row.vuln_id, "json_decode_error"
+            )
             evidence = {}
 
     return Vulnerability(
@@ -437,9 +514,18 @@ def scan_model_to_report(
         started_at=scan.started_at or scan.created_at,
         completed_at=scan.completed_at,
         duration_seconds=duration,
-        target_services=_parse_json_list(scan.targets_json),
+        target_services=_parse_json_list(
+            scan.targets_json,
+            field="scan.targets_json",
+            record_id=scan.scan_id,
+        ),
         attack_categories=[
-            str(c) for c in _parse_json_list(scan.attack_categories_json)
+            str(c)
+            for c in _parse_json_list(
+                scan.attack_categories_json,
+                field="scan.attack_categories_json",
+                record_id=scan.scan_id,
+            )
         ],
         intensity=scan.intensity,
         total_tests_run=scan.total_tests_run,
@@ -448,7 +534,14 @@ def scan_model_to_report(
         vulnerabilities_found=len(vulnerabilities),
         severity_breakdown=severity_breakdown,
         vulnerabilities=vulnerabilities,
-        recommendations=[str(r) for r in _parse_json_list(scan.recommendations_json)],
+        recommendations=[
+            str(r)
+            for r in _parse_json_list(
+                scan.recommendations_json,
+                field="scan.recommendations_json",
+                record_id=scan.scan_id,
+            )
+        ],
         score=scan.security_score,
     )
 
@@ -490,7 +583,11 @@ def content_piece_model_to_schema(row: ContentPieceModel) -> GeneratedContent:
         file_size_bytes=row.file_size_bytes,
         status=ContentStatus(row.status),
         generated_at=row.generated_at,
-        metadata=parse_metadata_json(row.metadata_json),
+        metadata=parse_metadata_json(
+            row.metadata_json,
+            field="content.metadata_json",
+            record_id=row.content_id,
+        ),
     )
 
 
