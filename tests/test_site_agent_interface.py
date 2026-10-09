@@ -608,6 +608,7 @@ def test_public_surfaces_link_public_source_without_requiring_credentials(
     public_paths = (
         output / "index.html",
         output / "compare" / "index.html",
+        output / "proof" / "index.html",
         output / "llm.txt",
         output / "llms.txt",
         output / "llms-full.txt",
@@ -620,6 +621,7 @@ def test_public_surfaces_link_public_source_without_requiring_credentials(
         normalized = " ".join(content.split())
         assert "source repository is private" not in normalized, path
         assert "source access on request" not in normalized, path
+        assert "partners with source access" not in normalized, path
         assert "open source" not in normalized, path
         assert "open-source repository" not in normalized, path
         assert OLD_REPO_URL.casefold() not in content, path
