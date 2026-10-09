@@ -592,7 +592,12 @@ def test_customer_facing_outputs_do_not_publish_provider_origins(tmp_path) -> No
             assert suffix not in content, f"{path} publishes {suffix}"
 
 
-REPO_URL = "https://github.com/PetrefiedThunder/agent-middleware-api"
+PUBLIC_ORG_URL = "https://github.com/agentmiddleware"
+PRIVATE_REPO_URLS = (
+    "https://github.com/PetrefiedThunder/agent-middleware-api",
+    "https://github.com/agentmiddleware/agent-middleware-api",
+)
+GITHUB_URL_PATTERN = re.compile(r"https://github\.com[^\s\"'<>)\]]*")
 
 
 def test_public_surfaces_separate_public_proof_from_private_source_access(
@@ -601,14 +606,16 @@ def test_public_surfaces_separate_public_proof_from_private_source_access(
     """Repository visibility was verified private on 2026-10-02.
 
     These local tests enforce copy consistency, not live GitHub availability.
-    Public proof downloads remain distinct from source access.
+    Public surfaces state that the source is private but never link a
+    repository URL that returns 404 for a stranger; they point at the public
+    GitHub organization page instead.
     """
     output = tmp_path / "site"
     result = _render_site(output, VALID_TEST_CONTACTS)
     assert result.returncode == 0, result.stderr
 
     # The proof page is stranger-verifiable: it states no repo visibility and
-    # links no private URL, so it sits outside both loops below.
+    # links no private URL, so it sits outside the visibility loop below.
     public_paths = (
         output / "index.html",
         output / "compare" / "index.html",
@@ -624,30 +631,92 @@ def test_public_surfaces_separate_public_proof_from_private_source_access(
         normalized = " ".join(content.split())
         assert "source repository is public" not in normalized, path
         assert "public source repository" not in normalized, path
+        assert "open source" not in normalized, path
+        assert "open-source repository" not in normalized, path
         assert "source repository is private" in normalized, path
 
-    source_reference_paths = (
+    stranger_paths = (
         output / "index.html",
         output / "compare" / "index.html",
+        output / "proof" / "index.html",
         output / "llm.txt",
         output / "llms.txt",
         output / "llms-full.txt",
         output / ".well-known" / "agent.json",
         ROOT / "static" / "llm.txt",
     )
-    for path in source_reference_paths:
-        content = path.read_text(encoding="utf-8").casefold()
-        assert REPO_URL.casefold() in content, (
-            f"{path} does not link to the source repository"
-        )
+    for path in stranger_paths:
+        content = path.read_text(encoding="utf-8")
+        assert "petrefiedthunder" not in content.casefold(), path
+        for private_url in PRIVATE_REPO_URLS:
+            assert private_url.casefold() not in content.casefold(), (
+                f"{path} links private repository {private_url}"
+            )
 
-    # The shared footer links the public org page, never the private repo,
-    # and the proof page carries no private-repo URL anywhere.
+    manifest = json.loads(
+        (output / ".well-known" / "agent.json").read_text(encoding="utf-8")
+    )
+    assert manifest["github"] == PUBLIC_ORG_URL
+    assert manifest["github_access"] == "private"
+    assert manifest["try_it"]["repository"] == PUBLIC_ORG_URL
+    assert manifest["try_it"]["repository_access"] == "private"
+
+    # The shared footer links the public org page, never a private repo.
     footer = (SITE / "partials" / "footer.html").read_text(encoding="utf-8")
-    assert "https://github.com/agentmiddleware" in footer
-    assert REPO_URL not in footer
-    proof = (output / "proof" / "index.html").read_text(encoding="utf-8")
-    assert REPO_URL.casefold() not in proof.casefold()
+    assert PUBLIC_ORG_URL in footer
+    for private_url in PRIVATE_REPO_URLS:
+        assert private_url not in footer
+
+
+OWN_GITHUB_OWNERS = ("petrefiedthunder", "agentmiddleware")
+
+
+def _github_url_is_public_org(url: str) -> bool:
+    """Our own GitHub links must be the public org page, never a private repo.
+
+    Third-party repositories (for example named alternatives on /compare/)
+    are public and out of scope.
+    """
+    url = url.rstrip(".,;:")
+    path = url[len("https://github.com") :].strip("/")
+    owner = path.split("/", 1)[0].casefold() if path else ""
+    if owner not in OWN_GITHUB_OWNERS:
+        return True
+    if url.rstrip("/") == PUBLIC_ORG_URL:
+        return True
+    if owner != "agentmiddleware":
+        return False
+    return not any(
+        url.casefold().startswith(private.casefold()) for private in PRIVATE_REPO_URLS
+    )
+
+
+def test_built_site_github_links_point_only_at_public_org(tmp_path) -> None:
+    """Every link to our own GitHub must resolve for a stranger.
+
+    Only the public org page qualifies today. site/concept/ is archived and
+    excluded; third-party repositories are allowed.
+    """
+    output = tmp_path / "site"
+    result = _render_site(output, VALID_TEST_CONTACTS)
+    assert result.returncode == 0, result.stderr
+
+    text_suffixes = {".html", ".txt", ".json", ".xml", ".js", ".md", ".css"}
+    checked = 0
+    offenders: list[str] = []
+    for path in sorted(output.rglob("*")):
+        if not path.is_file() or path.suffix not in text_suffixes:
+            continue
+        relative = path.relative_to(output)
+        if relative.parts and relative.parts[0] == "concept":
+            continue
+        content = path.read_text(encoding="utf-8", errors="replace")
+        for url in GITHUB_URL_PATTERN.findall(content):
+            checked += 1
+            if not _github_url_is_public_org(url):
+                offenders.append(f"{relative}: {url}")
+    assert checked > 0, "expected at least the footer GitHub link"
+    assert offenders == []
 
 
 def test_dynamic_routes_and_noncanonical_hosts_redirect_correctly() -> None:
@@ -719,7 +788,7 @@ def test_search_social_and_analytics_contracts(tmp_path) -> None:
         for node in _json_ld_graph(page, "index.html")
         if node["@type"] == "Organization"
     )
-    assert organization["sameAs"] == [REPO_URL]
+    assert organization["sameAs"] == [PUBLIC_ORG_URL]
     software = next(
         node
         for node in _json_ld_graph(page, "index.html")
