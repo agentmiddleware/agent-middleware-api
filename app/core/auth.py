@@ -7,6 +7,7 @@ Agents pass credentials via:
 """
 
 import hmac
+import logging
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from typing import Annotated
@@ -16,6 +17,8 @@ from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBea
 from .config import get_settings
 from .oidc_iga import EnterprisePrincipal, IGADecision, IGAError, is_iga_issuer_token
 from .trust_mode import is_production_like_environment
+
+logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
@@ -228,8 +231,8 @@ async def _resolve_auth_context(
     # the Authorization header would verify it, and never falls through to
     # API-key lookup: a token that fails to parse is already a 401, and an
     # unexpected failure (a liveness check that could not run) must surface
-    # here as it does there, not be retried as a key — or, in DEBUG open
-    # mode, as a bootstrap admin.
+    # here as it does there, not be retried as a key — or, in development
+    # open-admin mode, as a bootstrap admin.
     if stripped.count(".") == 2 and len(stripped) > 50:
         return await _auth_from_jwt(stripped)
 
@@ -277,10 +280,18 @@ async def _resolve_auth_context(
             is_bootstrap_admin=False,
         )
 
-    # Configured static dev keys close DEBUG open mode the same way
-    # VALID_API_KEYS does: once keys exist, an unknown key fails closed
-    # instead of authenticating as an anonymous bootstrap admin.
-    if valid_keys or settings.STATIC_DEV_API_KEYS.strip() or not settings.DEBUG:
+    # Configured static dev keys close development open-admin mode the same
+    # way VALID_API_KEYS does: once keys exist, an unknown key fails closed
+    # instead of authenticating as an anonymous bootstrap admin. The mode
+    # also stays closed unless the operator explicitly opts in with
+    # ALLOW_DEBUG_OPEN_ADMIN on top of DEBUG: DEBUG alone never grants admin
+    # to an unknown key.
+    if (
+        valid_keys
+        or settings.STATIC_DEV_API_KEYS.strip()
+        or not settings.DEBUG
+        or not settings.ALLOW_DEBUG_OPEN_ADMIN
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
@@ -300,6 +311,11 @@ async def _resolve_auth_context(
             headers=dict(_CREDENTIAL_REJECTED),
         )
 
+    logger.warning(
+        "debug_open_admin_grant: unknown API key accepted as bootstrap admin "
+        "(DEBUG with ALLOW_DEBUG_OPEN_ADMIN and no keys configured). Local "
+        "development only; configure VALID_API_KEYS or static dev keys.",
+    )
     return AuthContext(
         source="env",
         raw_key=stripped,

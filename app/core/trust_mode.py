@@ -137,6 +137,7 @@ def validate_trust_mode_config(
     signing_private_key_b64: str | None,
     allow_legacy_unpermitted_mcp: bool,
     debug: bool = False,
+    allow_debug_open_admin: bool = False,
     webauthn_allow_mock: bool = False,
     enable_proof_surfaces: bool = True,
     static_dev_api_keys: str = "",
@@ -190,6 +191,12 @@ def validate_trust_mode_config(
             violations.append(
                 "DEBUG must be false in production-like environments "
                 "(DEBUG empty-key auth bootstrap is a deploy footgun)"
+            )
+        if allow_debug_open_admin:
+            violations.append(
+                "ALLOW_DEBUG_OPEN_ADMIN must be false in production-like "
+                "environments (development open-admin mode grants any "
+                "unknown key bootstrap admin power)"
             )
         if webauthn_allow_mock:
             violations.append(
@@ -300,6 +307,7 @@ def validate_trust_mode_guardrails(settings: Settings) -> None:
         signing_private_key_b64=settings.TRUST_SIGNING_PRIVATE_KEY_B64,
         allow_legacy_unpermitted_mcp=settings.ALLOW_LEGACY_UNPERMITTED_MCP,
         debug=settings.DEBUG,
+        allow_debug_open_admin=settings.ALLOW_DEBUG_OPEN_ADMIN,
         webauthn_allow_mock=settings.WEBAUTHN_ALLOW_MOCK,
         enable_proof_surfaces=settings.ENABLE_PROOF_SURFACES,
         static_dev_api_keys=settings.STATIC_DEV_API_KEYS,
@@ -320,6 +328,7 @@ def describe_permissive_trust_mode(
     *,
     trust_mode_enabled: bool,
     allow_legacy_unpermitted_mcp: bool,
+    allow_debug_open_admin: bool = False,
 ) -> str | None:
     """Describe a permissive trust-mode posture, or return None when strict.
 
@@ -329,7 +338,11 @@ def describe_permissive_trust_mode(
     incremental migrations cannot drift into permissive territory by
     accident.
     """
-    if trust_mode_enabled and not allow_legacy_unpermitted_mcp:
+    if (
+        trust_mode_enabled
+        and not allow_legacy_unpermitted_mcp
+        and not allow_debug_open_admin
+    ):
         return None
     parts: list[str] = []
     if not trust_mode_enabled:
@@ -338,6 +351,8 @@ def describe_permissive_trust_mode(
         parts.append(
             "ALLOW_LEGACY_UNPERMITTED_MCP=true (ungoverned MCP calls accepted)"
         )
+    if allow_debug_open_admin:
+        parts.append("ALLOW_DEBUG_OPEN_ADMIN=true (any unknown key is bootstrap admin)")
     return "; ".join(parts)
 
 
@@ -353,6 +368,7 @@ def warn_if_trust_mode_permissive(settings: Settings) -> None:
     description = describe_permissive_trust_mode(
         trust_mode_enabled=settings.TRUST_MODE_ENABLED,
         allow_legacy_unpermitted_mcp=settings.ALLOW_LEGACY_UNPERMITTED_MCP,
+        allow_debug_open_admin=settings.ALLOW_DEBUG_OPEN_ADMIN,
     )
     if description is None:
         return
@@ -361,4 +377,33 @@ def warn_if_trust_mode_permissive(settings: Settings) -> None:
         "mode; production deployments must set TRUST_MODE_ENABLED=true and "
         "ALLOW_LEGACY_UNPERMITTED_MCP=false.",
         description,
+    )
+
+
+def warn_if_debug_open_admin(settings: Settings) -> None:
+    """Log on every boot where development open-admin mode is armed.
+
+    Called once at startup, after `validate_trust_mode_guardrails`. Fires
+    only when an unknown key would actually authenticate as a bootstrap
+    admin (local-compatible environment, DEBUG on, the explicit opt-in,
+    and no keys configured), so the line means the mode is live, not
+    merely that a flag is set.
+    """
+    valid_keys = [
+        key.strip() for key in (settings.VALID_API_KEYS or "").split(",") if key.strip()
+    ]
+    armed = (
+        not is_production_like_environment(settings.ENVIRONMENT)
+        and settings.DEBUG
+        and settings.ALLOW_DEBUG_OPEN_ADMIN
+        and not valid_keys
+        and not (settings.STATIC_DEV_API_KEYS or "").strip()
+    )
+    if not armed:
+        return
+    logger.warning(
+        "debug_open_admin_enabled: DEBUG with ALLOW_DEBUG_OPEN_ADMIN and no "
+        "keys configured, so any unknown API key authenticates as a "
+        "bootstrap admin. Local development only; configure VALID_API_KEYS "
+        "or static dev keys to close it.",
     )
