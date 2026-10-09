@@ -222,4 +222,4 @@ clients require `/mcp` after the operator enables the Streamable HTTP transport.
 - OpenAPI Spec: `/openapi.json`
 - Wedge: `/WEDGE.md`
 - Security limitations: `/SECURITY_LIMITATIONS.md`
-- GitHub: https://github.com/PetrefiedThunder/agent-middleware-api
+- GitHub organization: https://github.com/agentmiddleware (the source repository is private)
