@@ -97,7 +97,7 @@ SECRET_PATTERNS = [
     r"\bxox[abprs]-[A-Za-z0-9-]{10,}",
     r"\bAKIA[0-9A-Z]{16}\b",
     r"\bAIza[0-9A-Za-z_-]{30,}",
-    r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}",
+    r"\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}",
     r"(?i)\b(api[_-]?key|secret|token|password|passwd|pwd)\b\s*[:=]\s*\S+",
     r"\b[A-Fa-f0-9]{32,}\b",
     r"\b[A-Za-z0-9+/]{40,}={0,2}",
@@ -108,6 +108,23 @@ _SECRET_FIELD = re.compile(
     re.I,
 )
 logger = logging.getLogger(__name__)
+
+# Process-local advisory counters so fail-open stays visible to operators.
+_JEV_GUARD_EVALUATIONS = 0
+_JEV_GUARD_FAIL_OPEN = 0
+
+
+def get_jev_guard_metrics() -> dict[str, Any]:
+    """Return process-local guard counts and the fail-open skip rate."""
+    evaluations = _JEV_GUARD_EVALUATIONS
+    fail_open = _JEV_GUARD_FAIL_OPEN
+    skip_rate = (fail_open / evaluations) if evaluations else 0.0
+    return {
+        "evaluations": evaluations,
+        "fail_open": fail_open,
+        "skip_rate": skip_rate,
+        "scope": "process_local",
+    }
 
 
 @dataclass(frozen=True)
@@ -128,11 +145,24 @@ def strip_secrets(text: str) -> str:
     return text
 
 
-def _safe_state(state: dict[str, Any], api_key: str) -> dict[str, Any]:
+def _encoded_len(payload: Any) -> int:
+    try:
+        return len(json.dumps(payload, ensure_ascii=True, allow_nan=False))
+    except (TypeError, ValueError):
+        return MAX_STATE_CHARS + 1
+
+
+def _safe_state(state: Any, api_key: str) -> dict[str, Any]:
     remaining = MAX_STATE_NODES
 
     def text(value: str) -> str:
         return strip_secrets(value.replace(api_key, "[secret]"))[:MAX_STRING_CHARS]
+
+    def safe_key_of(key: Any) -> str:
+        try:
+            return text(str(key))
+        except Exception:
+            return "[unreadable]"
 
     def sanitize(value: Any, depth: int = 0) -> Any:
         nonlocal remaining
@@ -142,38 +172,90 @@ def _safe_state(state: dict[str, Any], api_key: str) -> dict[str, Any]:
         if isinstance(value, str):
             return text(value)
         if isinstance(value, dict):
+            try:
+                entries = list(value.items())
+            except Exception:
+                return "[unreadable]"
             result = {}
-            for key, item in value.items():
+            for key, item in entries:
                 if remaining <= 0:
                     break
-                safe_key = text(str(key))
-                result[safe_key] = (
-                    "[secret]"
-                    if _SECRET_FIELD.search(str(key))
-                    else sanitize(item, depth + 1)
-                )
+                try:
+                    secret_hit = bool(_SECRET_FIELD.search(str(key)))
+                except Exception:
+                    secret_hit = False
+                try:
+                    result[safe_key_of(key)] = (
+                        "[secret]" if secret_hit else sanitize(item, depth + 1)
+                    )
+                except Exception:
+                    result[safe_key_of(key)] = "[unreadable]"
                 remaining -= 1  # bound keys as well as values
             return result
         if isinstance(value, (list, tuple)):
+            try:
+                members = list(value)
+            except Exception:
+                return "[unreadable]"
             result_list = []
-            for item in value:
+            for item in members:
                 if remaining <= 0:
                     break
-                result_list.append(sanitize(item, depth + 1))
+                try:
+                    result_list.append(sanitize(item, depth + 1))
+                except Exception:
+                    result_list.append("[unreadable]")
             return result_list
-        if value is None or isinstance(value, (bool, int, float)):
+        if value is None or isinstance(value, bool):
             return value
-        return text(str(value))
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return value if math.isfinite(value) else "[non-finite]"
+        try:
+            return text(str(value))
+        except Exception:
+            return "[unreadable]"
+
+    # Callers may pass an odd envelope; keep a dict shape either way.
+    if not isinstance(state, dict):
+        state = {"value": state}
+    try:
+        entries = list(state.items())
+    except Exception:
+        return {"value": "[unreadable]"}
+    safe: dict[str, Any] = {}
+    for key, value in entries:
+        try:
+            safe[key] = sanitize(value)
+        except Exception:
+            safe[key] = "[unreadable]"
 
     # Preserve the envelope even when a large scope/argument tree exhausts
-    # the node budget. Missing context is explicitly marked as truncated.
-    safe = {key: sanitize(value) for key, value in state.items()}
-    if len(json.dumps(safe, ensure_ascii=True, allow_nan=False)) > MAX_STATE_CHARS:
+    # the node budget. Missing context is explicitly marked as omitted.
+    if _encoded_len(safe) > MAX_STATE_CHARS:
         safe["arguments"] = "[omitted: state limit]"
-        safe["permit"]["scope_description"] = "[omitted: state limit]"
-    if len(json.dumps(safe, ensure_ascii=True, allow_nan=False)) > MAX_STATE_CHARS:
-        safe["tool"]["description"] = "[omitted: state limit]"
+        permit = safe.get("permit")
+        if isinstance(permit, dict):
+            permit["scope_description"] = "[omitted: state limit]"
+        else:
+            safe["permit"] = "[omitted: state limit]"
+    if _encoded_len(safe) > MAX_STATE_CHARS:
+        tool = safe.get("tool")
+        if isinstance(tool, dict):
+            tool["description"] = "[omitted: state limit]"
+        else:
+            safe["tool"] = "[omitted: state limit]"
         safe["agent_purpose"] = "[omitted: state limit]"
+    if _encoded_len(safe) > MAX_STATE_CHARS:
+        tool = safe.get("tool")
+        if isinstance(tool, dict):
+            name = tool.get("name")
+            safe["tool"] = (
+                {"name": name} if isinstance(name, str) else "[omitted: state limit]"
+            )
+        else:
+            safe["tool"] = "[omitted: state limit]"
     return safe
 
 
@@ -281,6 +363,7 @@ async def evaluate_jev_guard(
     agent_purpose: str | None = None,
 ) -> JevGuardVerdict:
     """Never raise on advisory failure; one bounded HTTP attempt, no retries."""
+    global _JEV_GUARD_EVALUATIONS, _JEV_GUARD_FAIL_OPEN
     started = perf_counter()
     model_requested = "jev-1.13.0"
     reason = "unexpected"
@@ -343,6 +426,7 @@ async def evaluate_jev_guard(
             raise ValueError(reason)
         answers = _answer_summary(body["answers"])
         reasons = _reasons(answers, risk_tier, requires_human_approval)
+        _JEV_GUARD_EVALUATIONS += 1
         return JevGuardVerdict(
             "escalate" if reasons else "pass",
             "ok",
@@ -361,6 +445,8 @@ async def evaluate_jev_guard(
         pass  # Never log exception text: it may contain a key, URL or state.
     status = f"unavailable:{reason}"
     logger.warning("%s", status)
+    _JEV_GUARD_EVALUATIONS += 1
+    _JEV_GUARD_FAIL_OPEN += 1
     return JevGuardVerdict(
         "skipped",
         status,
