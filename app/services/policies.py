@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Storage and enforcement for wallet policy bundles.
 
 A policy bundle is a named set of limits attached to one wallet, such as
@@ -17,6 +15,8 @@ Decimal, and a daily cap cannot pass when past spend is unknown. A demand
 for human approval denies unless the caller shows an approval gate is
 active. A risk tier acts as a ceiling, and an unknown tier denies.
 """
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 from app.core.time import utc_now
