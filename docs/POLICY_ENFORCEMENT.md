@@ -127,8 +127,9 @@ All monetary comparisons are done in `Decimal` end-to-end (thresholds stored as
 | An allow-list column is present but is not a JSON array of strings | `policy_constraint_corrupt` (denied; never read as unrestricted) |
 | `estimated > max_cost_per_action` | `max_cost_per_action_exceeded` |
 | `daily_spend_used + estimated > daily_spend_limit` | `daily_spend_limit_exceeded` |
+| Bundle sets `daily_spend_limit` but `daily_spend_used` is unknown | `daily_spend_unknown` (denied; an unproven cap is never skipped) |
 | Bundle requires real effects but the call is in simulation mode | `real_effects_required` |
-| `risk_tier` mismatch | *recorded on the decision, does not deny* |
+| Requested `risk_tier` sits above the bundle's `risk_tier` ceiling (`low < medium < high`) or is an unknown tier | `risk_tier_not_allowed` (the requested tier is recorded on the decision as `requested_risk_tier`) |
 
 Layer B (permit) and Layer C (wallet policy) are complementary: the permit is a
 per-delegation capability issued to one agent for one job; policy bundles are
