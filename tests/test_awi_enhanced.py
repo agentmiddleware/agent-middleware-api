@@ -83,16 +83,12 @@ def test_ownerless_resource_needs_bootstrap_admin():
 
 
 def test_non_forbidden_errors_are_reraised(monkeypatch):
-    auth = _auth("w1")
-    monkeypatch.setattr(
-        auth,
-        "require_wallet_access",
-        lambda wallet_id: (_ for _ in ()).throw(
-            HTTPException(status_code=500, detail="boom")
-        ),
-    )
+    def _boom(self, wallet_id):
+        raise HTTPException(status_code=500, detail="boom")
+
+    monkeypatch.setattr(AuthContext, "require_wallet_access", _boom)
     with pytest.raises(HTTPException) as caught:
-        _require_owner_or_not_found(auth, "w2", _missing())
+        _require_owner_or_not_found(_auth("w1"), "w2", _missing())
     assert caught.value.status_code == 500
 
 
