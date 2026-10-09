@@ -103,3 +103,56 @@ def test_bundle_script_builds_into_a_fresh_dir(tmp_path):
     assert (out_dir / "main.py").exists()
     assert (out_dir / "requirements.txt").exists()
     assert (out_dir / "railway.json").exists()
+
+
+def test_bundle_script_refuses_unnormalized_protected_spellings(tmp_path):
+    from pathlib import Path as P
+
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    sentinel = scratch / "keep.txt"
+    sentinel.write_text("keep", encoding="utf-8")
+    dangerous_spellings = [
+        str(REPO_ROOT) + "//",
+        str(REPO_ROOT) + "///",
+        str(REPO_ROOT) + "/.",
+        str(P(tempfile.gettempdir())) + "//",
+        "//",
+        str(scratch) + "//",
+    ]
+    for dangerous in dangerous_spellings:
+        result = _run_bundle_script(dangerous)
+        assert result.returncode != 0, dangerous
+    assert sentinel.exists()
+    assert (REPO_ROOT / "scripts" / "quickstart.py").exists()
+
+
+def test_bundle_script_refuses_symlink_to_protected_dir(tmp_path):
+    link = tmp_path / "repo-link"
+    link.symlink_to(REPO_ROOT, target_is_directory=True)
+    result = _run_bundle_script(str(link))
+    assert result.returncode != 0
+    assert (REPO_ROOT / "scripts" / "quickstart.py").exists()
+
+
+def test_bundle_script_builds_with_single_trailing_slash(tmp_path):
+    out_dir = tmp_path / "refund-partner-bundle"
+    result = _run_bundle_script(str(out_dir) + "/")
+    assert result.returncode == 0, result.stderr
+    assert (out_dir / "main.py").exists()
+
+
+def test_bundle_script_treats_dash_leading_arg_as_path(tmp_path):
+    result = subprocess.run(
+        [
+            "sh",
+            str(REPO_ROOT / "scripts" / "build_refund_partner_bundle.sh"),
+            "-dashdir",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "-dashdir" / "main.py").exists()
