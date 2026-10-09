@@ -117,10 +117,12 @@ from ..trust import (
     get_human_approval_service,
     get_idempotency_service,
     charge_units_for,
+    extract_recipient_identity,
     get_permit_service,
     get_quote_service,
     get_receipt_service,
     permit_constraints_snapshot,
+    recipient_binding_matches,
     record_audit_event,
     get_refund_reconciliation_service,
     resolve_client_idempotency_key,
@@ -1893,7 +1895,8 @@ async def _execute_registered_tool_inner(
         )
         stored_jev = (
             await load_jev_guard_metadata(jev_event_id, wallet_id)
-            if jev_event_id is not None else None
+            if jev_event_id is not None
+            else None
         )
         if stored_jev is None:
             evaluated = policy.evaluated_constraints.get("evaluated", [])
@@ -1910,7 +1913,8 @@ async def _execute_registered_tool_inner(
                     "allowed_tools": json.loads(permit_model.allowed_tools_json),
                     **_permit_constraints_snapshot(permit_model),
                 }
-                if permit_model else None
+                if permit_model
+                else None
             )
             jev = await evaluate_jev_guard(
                 tool_name=tool_name,
@@ -1918,22 +1922,33 @@ async def _execute_registered_tool_inner(
                 service_category=category.value,
                 risk_tier=policy_risk_tier,
                 permit_scope=scope,
-                requires_human_approval=bool(permit_model and permit_model.requires_human_approval),
+                requires_human_approval=bool(
+                    permit_model and permit_model.requires_human_approval
+                ),
                 arguments=arguments,
             )
             stored_jev = {
-                **asdict(jev), "mode": jev_settings.JEV_RISK_GUARD.value, "advisory": True,
+                **asdict(jev),
+                "mode": jev_settings.JEV_RISK_GUARD.value,
+                "advisory": True,
             }
             if jev_event_id is not None:
                 # This checkpoint survives pending approval abandoning its
                 # idempotency record, and is recoverable after a worker crash.
                 try:
                     await record_audit_event(
-                        event="jev.risk_guard", event_id=jev_event_id,
-                        wallet_id=wallet_id, tool=tool_name, endpoint=endpoint,
-                        auth_source=decision.auth_source, key_id=auth.key_id,
-                        policy_decision_id=decision.decision_id, request_id=request_id,
-                        ok=True, error=None, metadata={"jev_risk_guard": stored_jev},
+                        event="jev.risk_guard",
+                        event_id=jev_event_id,
+                        wallet_id=wallet_id,
+                        tool=tool_name,
+                        endpoint=endpoint,
+                        auth_source=decision.auth_source,
+                        key_id=auth.key_id,
+                        policy_decision_id=decision.decision_id,
+                        request_id=request_id,
+                        ok=True,
+                        error=None,
+                        metadata={"jev_risk_guard": stored_jev},
                     )
                 except (IntegrityError, AuditEventConflictError):
                     winner = await load_jev_guard_metadata(jev_event_id, wallet_id)
@@ -1949,14 +1964,22 @@ async def _execute_registered_tool_inner(
         if jev_escalated and not (governed_call and permit_model):
             reason = "jev_risk_review_required"
             await _audit_mcp_invocation(
-                effects_committed=False, decision=decision, endpoint=endpoint,
-                transport=transport, ok=False, error=reason,
+                effects_committed=False,
+                decision=decision,
+                endpoint=endpoint,
+                transport=transport,
+                ok=False,
+                error=reason,
                 extra_metadata=policy_metadata,
             )
             raise PermissionError(reason)
 
     approval_check = None
-    if governed_call and permit_model and (permit_model.requires_human_approval or jev_escalated):
+    if (
+        governed_call
+        and permit_model
+        and (permit_model.requires_human_approval or jev_escalated)
+    ):
         approval_check = await _require_human_approval(
             decision=decision,
             permit_model=permit_model,
@@ -1982,11 +2005,10 @@ async def _execute_registered_tool_inner(
         and execution_backend == "upstream_mcp"
     ):
         upstream_origin = str(service.get("upstream_origin", ""))
-        from urllib.parse import urlparse
-
-        parsed = urlparse(upstream_origin)
-        origin_domain = parsed.hostname or upstream_origin
-        if origin_domain != permit_model.recipient_domain:
+        origin_domain = extract_recipient_identity(upstream_origin)
+        if not recipient_binding_matches(
+            permit_model.recipient_domain, upstream_origin
+        ):
             audit_event = await _audit_mcp_invocation(
                 effects_committed=False,
                 decision=decision,
