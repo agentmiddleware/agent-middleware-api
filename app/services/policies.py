@@ -1,5 +1,23 @@
 from __future__ import annotations
 
+"""Storage and enforcement for wallet policy bundles.
+
+A policy bundle is a named set of limits attached to one wallet, such as
+allowed tools, allowed service categories, per action and daily spend caps,
+a risk tier ceiling, and whether human approval is required. This module
+provides the create, read, update, and evaluate operations used by the
+policy API and by the invoke path.
+
+Key invariants: evaluation looks at active bundles only, oldest first, and
+the action must satisfy each of them, with the first failure deciding the
+denial reason. A wallet with no active bundles is allowed. A NULL allowlist
+means no restriction on that dimension, while a stored allowlist that cannot
+be read as a JSON array of strings fails closed. Money is compared in
+Decimal, and a daily cap cannot pass when past spend is unknown. A demand
+for human approval denies unless the caller shows an approval gate is
+active. A risk tier acts as a ceiling, and an unknown tier denies.
+"""
+
 from dataclasses import dataclass
 from app.core.time import utc_now
 from decimal import Decimal
@@ -30,6 +48,8 @@ _RISK_TIER_ORDER = {"low": 0, "medium": 1, "high": 2}
 
 @dataclass(frozen=True)
 class PolicyEvaluation:
+    """Outcome of checking one intended action against wallet policy."""
+
     allowed: bool
     reason: str
     policy_id: str | None
@@ -120,6 +140,7 @@ def _to_response(model: PolicyBundleModel) -> PolicyBundleResponse:
 
 
 async def create_policy_bundle(request: PolicyBundleCreate) -> PolicyBundleResponse:
+    """Persist a new policy bundle and return it as a response model."""
     model = PolicyBundleModel(
         policy_id=f"polb-{uuid.uuid4().hex[:16]}",
         wallet_id=request.wallet_id,
@@ -154,6 +175,7 @@ async def create_policy_bundle(request: PolicyBundleCreate) -> PolicyBundleRespo
 async def list_policy_bundles(
     wallet_id: str | None = None,
 ) -> list[PolicyBundleResponse]:
+    """List policy bundles, optionally filtered to one wallet, oldest first."""
     # SQLModel fields are typed as plain Python types (not Mapped[...]), so mypy
     # sees `.created_at`/`==` comparisons as datetime/bool rather than SQLAlchemy
     # ColumnElement expressions. Root cause lives in app/db/models.py (out of scope here).
@@ -167,6 +189,7 @@ async def list_policy_bundles(
 
 
 async def get_policy_bundle(policy_id: str) -> PolicyBundleResponse | None:
+    """Fetch one policy bundle by id, or None when it does not exist."""
     factory = get_session_factory()
     async with factory() as session:
         row = await session.get(PolicyBundleModel, policy_id)
@@ -177,6 +200,7 @@ async def patch_policy_bundle(
     policy_id: str,
     patch: PolicyBundlePatch,
 ) -> PolicyBundleResponse | None:
+    """Apply the set fields of a patch to one bundle, or None when missing."""
     factory = get_session_factory()
     async with factory() as session:
         row = await session.get(PolicyBundleModel, policy_id)
