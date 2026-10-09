@@ -218,7 +218,9 @@ async def test_off_has_zero_calls_and_no_metadata(
 ):
     from app.services import receipts
 
-    lookup = AsyncMock(side_effect=AssertionError("Off mode must not load Jev metadata"))
+    lookup = AsyncMock(
+        side_effect=AssertionError("Off mode must not load Jev metadata")
+    )
     monkeypatch.setattr(receipts, "load_jev_guard_metadata", lookup)
     monkeypatch.setattr(mcp, "load_jev_guard_metadata", lookup, raising=False)
     assert (await _evaluate()).status == "off"
@@ -381,7 +383,9 @@ async def test_different_idempotency_key_gets_new_advice(
     agent, permit = await _setup(client)
     first = await _invoke(client, agent, permit, key="jev-first")
     assert first.status_code == 200, first.text
-    await _assert_metadata(first.json()["receipt"], agent["agent_wallet_id"], verdict="pass")
+    await _assert_metadata(
+        first.json()["receipt"], agent["agent_wallet_id"], verdict="pass"
+    )
     mock_jev.body = _response(injected=0.9)
     second = await _invoke(client, agent, permit, key="jev-second")
     assert second.status_code == 200, second.text
@@ -440,8 +444,7 @@ async def test_advisory_insert_race_uses_winning_escalation(
     pending = [event for event in events if event.error == "human_approval_pending"]
     assert len(pending) == ensure_approval.await_count == 2
     assert all(
-        event.metadata["jev_risk_guard"]["verdict"] == "escalate"
-        for event in pending
+        event.metadata["jev_risk_guard"]["verdict"] == "escalate" for event in pending
     )
     assert len(mock_jev.calls) == 1
     assert registered_tool == []
@@ -453,13 +456,18 @@ def test_advisory_identity_is_bounded_and_scoped():
     identity = jev_audit_id("wallet", "/mcp/invoke", "key")
     assert len(identity) <= 50
     assert identity == jev_audit_id("wallet", "/mcp/invoke", "key")
-    assert len({
-        identity,
-        jev_audit_id("other-wallet", "/mcp/invoke", "key"),
-        jev_audit_id("wallet", "/other-endpoint", "key"),
-        jev_audit_id("wallet", "/mcp/invoke", "other-key"),
-        jev_audit_id("wallet/mcp", "/invoke", "key"),
-    }) == 5
+    assert (
+        len(
+            {
+                identity,
+                jev_audit_id("other-wallet", "/mcp/invoke", "key"),
+                jev_audit_id("wallet", "/other-endpoint", "key"),
+                jev_audit_id("wallet", "/mcp/invoke", "other-key"),
+                jev_audit_id("wallet/mcp", "/invoke", "key"),
+            }
+        )
+        == 5
+    )
 
 
 @pytest.mark.anyio
@@ -790,7 +798,9 @@ async def test_upstream_terminal_metadata(
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("reconcile_mode", [DuplicateGuardMode.LOG, DuplicateGuardMode.OFF])
+@pytest.mark.parametrize(
+    "reconcile_mode", [DuplicateGuardMode.LOG, DuplicateGuardMode.OFF]
+)
 async def test_upstream_crash_reconciliation_retains_advice(
     client, clean_database, mock_jev, monkeypatch, reconcile_mode
 ):
@@ -833,8 +843,12 @@ async def test_upstream_crash_reconciliation_retains_advice(
         if reconcile_mode == DuplicateGuardMode.OFF:
             from app.services import mcp_dispatch_reconciliation, receipts
 
-            lookup = AsyncMock(side_effect=AssertionError("Off mode must not load Jev metadata"))
-            monkeypatch.setattr(mcp_dispatch_reconciliation, "load_jev_guard_metadata", lookup)
+            lookup = AsyncMock(
+                side_effect=AssertionError("Off mode must not load Jev metadata")
+            )
+            monkeypatch.setattr(
+                mcp_dispatch_reconciliation, "load_jev_guard_metadata", lookup
+            )
             monkeypatch.setattr(receipts, "load_jev_guard_metadata", lookup)
         await get_mcp_dispatch_reconciliation_service().reconcile_attempt(
             attempt.attempt_id
@@ -842,7 +856,10 @@ async def test_upstream_crash_reconciliation_retains_advice(
         replay = await _invoke(client, agent, permit)
         assert replay.status_code == 200, replay.text
         if reconcile_mode == DuplicateGuardMode.OFF:
-            assert "jev_risk_guard" not in replay.json()["receipt"]["constraints_evaluated"]
+            assert (
+                "jev_risk_guard"
+                not in replay.json()["receipt"]["constraints_evaluated"]
+            )
             lookup.assert_not_awaited()
         else:
             await _assert_metadata(
@@ -909,3 +926,127 @@ async def test_receipt_metadata_loader_is_wallet_scoped_and_tolerates_legacy_dat
         await session.commit()
     assert await load_jev_guard_metadata(event.event_id, "jev-wallet") is None
     assert mock_jev.calls == []
+
+
+def test_harmless_dotted_text_is_not_redacted_as_a_token():
+    """Host names and file names that merely start with eyJ are not tokens."""
+    harmless = [
+        "See the host eyJservice001.production1.internalnet for the job.",
+        "file eyJreport2024.finaldraft.backupcopy was archived",
+        "The customer reference is eyJ1234567890.abcdefghijk.lmnopqrstuv today.",
+        "token eyJaaaaaaaaaa.bbbbbbbbbb.ccccccccccHELLO world",
+    ]
+    for sample in harmless:
+        assert jev_guard.strip_secrets(sample) == sample
+    real = (
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+        ".eyJzdWIiOiIxMjM0NTY3ODkwIn0"
+        ".SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+    )
+    short = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature12"
+    assert jev_guard.strip_secrets(f"Read {real} now") == "Read [secret] now"
+    assert jev_guard.strip_secrets(f"Bearer {short} extra") == "Bearer [secret] extra"
+
+
+def test_odd_envelope_stays_within_the_state_limit():
+    """A wide tool tree must not crash the size trim when permit is no longer a dict."""
+    chunk = "word " * 60
+    state = {
+        "tool": {f"field{i:02d}": chunk for i in range(64)},
+        "permit": {"scope_description": "keep", "requires_human_approval": False},
+        "agent_purpose": "purpose text",
+        "arguments": {"message": "hello"},
+    }
+    safe = jev_guard._safe_state(state, "jev-test-placeholder")
+    encoded = json.dumps(safe, ensure_ascii=True, allow_nan=False)
+    assert len(encoded) <= jev_guard.MAX_STATE_CHARS
+    assert isinstance(safe, dict)
+
+    # A caller that does not pass a dict used to raise inside the helper.
+    fallback = jev_guard._safe_state(["not", "a", "dict"], "jev-test-placeholder")
+    json.dumps(fallback, ensure_ascii=True, allow_nan=False)
+    assert isinstance(fallback, dict)
+
+
+@pytest.mark.anyio
+async def test_odd_values_do_not_skip_the_risk_check(mock_jev, monkeypatch):
+    monkeypatch.setattr(get_settings(), "JEV_RISK_GUARD", DuplicateGuardMode.LOG)
+
+    class Boom:
+        def __str__(self):
+            raise RuntimeError("boom")
+
+    class BadDict(dict):
+        def items(self):
+            raise RuntimeError("items boom")
+
+    result = await _evaluate(
+        arguments={
+            "n": float("nan"),
+            "i": float("inf"),
+            "o": Boom(),
+            "note": "visible",
+        }
+    )
+    assert result.status == "ok"
+    assert result.verdict == "pass"
+    state = mock_jev.calls[-1]["state"]
+    serialized = json.dumps(state, allow_nan=False)
+    assert "visible" in serialized
+    assert "[non-finite]" in serialized
+    assert "[unreadable]" in serialized
+    assert "boom" not in serialized
+
+    unreadable = await _evaluate(arguments=BadDict(message="visible"))
+    assert unreadable.status == "ok"
+    assert mock_jev.calls[-1]["state"]["arguments"] == "[unreadable]"
+    json.dumps(mock_jev.calls[-1]["state"], allow_nan=False)
+
+
+@pytest.mark.anyio
+async def test_fail_open_skip_rate_is_counted(mock_jev, monkeypatch):
+    monkeypatch.setattr(get_settings(), "JEV_RISK_GUARD", DuplicateGuardMode.LOG)
+    before = jev_guard.get_jev_guard_metrics()
+    mock_jev.failure = "http_500"
+    failed = await _evaluate()
+    assert failed.verdict == "skipped"
+    assert failed.status == "unavailable:http_500"
+    mid = jev_guard.get_jev_guard_metrics()
+    assert mid["fail_open"] == before["fail_open"] + 1
+    assert mid["evaluations"] == before["evaluations"] + 1
+    assert mid["skip_rate"] == pytest.approx(mid["fail_open"] / mid["evaluations"])
+    assert mid["scope"] == "process_local"
+
+    mock_jev.failure = None
+    passed = await _evaluate()
+    assert passed.verdict == "pass"
+    after = jev_guard.get_jev_guard_metrics()
+    assert after["fail_open"] == mid["fail_open"]
+    assert after["evaluations"] == mid["evaluations"] + 1
+    assert after["skip_rate"] == pytest.approx(
+        after["fail_open"] / after["evaluations"]
+    )
+    assert after["skip_rate"] < mid["skip_rate"]
+
+    monkeypatch.setattr(get_settings(), "JEV_RISK_GUARD", DuplicateGuardMode.OFF)
+    assert (await _evaluate()).status == "off"
+    monkeypatch.setattr(get_settings(), "JEV_RISK_GUARD", DuplicateGuardMode.LOG)
+    assert (await _evaluate(risk_tier="low")).status == "skipped_tier"
+    end = jev_guard.get_jev_guard_metrics()
+    assert end["evaluations"] == after["evaluations"]
+    assert end["fail_open"] == after["fail_open"]
+
+
+@pytest.mark.anyio
+async def test_wide_arguments_keep_the_tool_envelope(mock_jev, monkeypatch):
+    monkeypatch.setattr(get_settings(), "JEV_RISK_GUARD", DuplicateGuardMode.LOG)
+    chunk = "word " * 60
+    result = await _evaluate(arguments={f"field{i:02d}": chunk for i in range(40)})
+    assert result.status == "ok"
+    state = mock_jev.calls[-1]["state"]
+    encoded = json.dumps(state, ensure_ascii=True, allow_nan=False)
+    assert len(encoded) <= jev_guard.MAX_STATE_CHARS
+    assert state["tool"]["name"] == TOOL
+    assert state["arguments"] == "[omitted: state limit]"
+    assert state["permit"]["scope_description"] == "[omitted: state limit]"
+    assert state["agent_purpose"] is None
