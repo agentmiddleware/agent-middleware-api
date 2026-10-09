@@ -639,6 +639,72 @@ def test_health_reports_whether_external_targets_are_enabled():
     assert body["scenarios"]
 
 
+def test_health_reports_no_operator_notes():
+    """Readiness only: notes can carry paths and error text, and a health
+    endpoint is the URL most likely to be scraped by something other than
+    its operator."""
+    with _client() as client:
+        body = client.get("/healthz").json()
+    assert "notes" not in body
+    assert body["status"] == "ok"
+
+
+def _asgi_status(app, *, method: str, path: str, peer: str) -> int:
+    """Drive one request through the whole app with a chosen peer address.
+
+    The peer comes from the socket, not from any header, so this is the
+    honest form of "mounted publicly": the Host header stays untrusted.
+    """
+    seen: list[dict] = []
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": method,
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": b"",
+        "headers": [(b"host", b"diagnostic.local")],
+        "client": (peer, 5123),
+        "server": ("0.0.0.0", 8080),
+    }
+
+    async def receive() -> dict:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: dict) -> None:
+        seen.append(message)
+
+    asyncio.run(app(scope, receive, send))
+    assert seen and seen[0]["type"] == "http.response.start"
+    return int(seen[0]["status"])
+
+
+def test_a_non_loopback_peer_is_refused_on_every_route():
+    """`serve` refuses a public bind, but `create_app` returns a plain app.
+
+    Any host process could mount it publicly, where anyone could run checks
+    and download evidence with no login. The app itself must fail closed.
+    """
+    app = create_app(DiagnosticSettings(telemetry=False))
+    for method, path in [
+        ("GET", "/healthz"),
+        ("GET", "/diagnostic"),
+        ("POST", "/diagnostic/run"),
+        ("GET", "/diagnostic/run/does-not-exist"),
+    ]:
+        assert _asgi_status(app, method=method, path=path, peer="203.0.113.7") == 403, (
+            f"{method} {path} answered a non-loopback peer"
+        )
+
+
+def test_a_loopback_peer_still_reaches_the_app():
+    """The guard refuses strangers; it must not refuse the machine itself."""
+    app = create_app(DiagnosticSettings(telemetry=False))
+    assert _asgi_status(app, method="GET", path="/healthz", peer="127.0.0.1") == 200
+
+
 def test_an_unknown_run_is_not_found_rather_than_invented():
     with _client() as client:
         assert client.get("/diagnostic/run/does-not-exist").status_code == 404

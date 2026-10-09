@@ -87,8 +87,16 @@ from failure_lab.telemetry import (
 logger = logging.getLogger("failure_lab.diagnostic")
 
 #: Addresses this server will bind. Not a default -- a whitelist. The check is
-#: in :func:`serve` so a wrapper cannot pass ``--host 0.0.0.0`` through.
+#: in :func:`serve` so a wrapper cannot pass ``--host 0.0.0.0`` through, and
+#: :func:`create_app` refuses non-loopback peers per request, so mounting the
+#: returned app behind a public listener or a forwarding proxy still fails
+#: closed instead of serving unauthenticated.
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
+
+#: Peer identities the in-app loopback guard trusts besides
+#: :data:`LOOPBACK_HOSTS`. Starlette's TestClient reports one of these; neither
+#: value can arrive over a real socket, so neither weakens the guard.
+TEST_CLIENT_HOSTS = frozenset({"testclient", "testserver"})
 
 #: Run requests per client per window. Low, because one run occupies the whole
 #: machine's sandbox for its duration.
@@ -213,6 +221,53 @@ def _now() -> str:
 def _client_key(request: Request) -> str:
     client = request.client
     return client.host if client and client.host else "unknown"
+
+
+def _is_loopback_client(request: Request) -> bool:
+    """Whether this request arrived over loopback, checked on the peer.
+
+    The peer address comes from the socket, not from any header, so it cannot
+    be spoofed by the caller. A request with no peer address is refused: an
+    unauthenticated surface fails closed rather than guessing.
+    """
+    client = request.client
+    if client is None or not client.host:
+        return False
+    return client.host in LOOPBACK_HOSTS | TEST_CLIENT_HOSTS
+
+
+class _LoopbackOnlyMiddleware:
+    """Refuse non-loopback peers before any route runs, pass the rest through.
+
+    Plain ASGI rather than a framework wrapper, so loopback traffic keeps the
+    exact same streaming behavior it had: allowed requests are handed to the
+    inner app untouched, and only refusals are answered here.
+    """
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope.get("type") == "http" and not self._allowed(scope):
+            response = JSONResponse(
+                {
+                    "error": "forbidden",
+                    "reason": (
+                        "this diagnostic serves the loopback interface only "
+                        "and answers no request from another host."
+                    ),
+                },
+                status_code=403,
+            )
+            await response(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
+
+    @staticmethod
+    def _allowed(scope: Any) -> bool:
+        client = scope.get("client")
+        host = client[0] if client else ""
+        return bool(host) and host in LOOPBACK_HOSTS | TEST_CLIENT_HOSTS
 
 
 def _looks_like_browser(request: Request) -> bool:
@@ -622,7 +677,17 @@ def _refuse_target(payload: dict[str, Any]) -> None:
 
 
 def create_app(settings: DiagnosticSettings | None = None) -> Starlette:
-    """Build the diagnostic application, refusing a production-like process."""
+    """Build the diagnostic application, refusing a production-like process.
+
+    The app serves unauthenticated and must only ever face loopback. Two
+    layers say so: :func:`serve` will not bind a non-loopback address, and
+    the middleware registered here refuses any request whose peer is not a
+    loopback address, so mounting this app behind a public listener still
+    fails closed instead of serving. Do not place it behind a forwarding
+    proxy: the proxy's own address is what the guard sees. Rate limits are
+    keyed by peer address, which on loopback is one shared bucket by design:
+    contention refuses rather than queues.
+    """
     runs.assert_not_production_like()
     service = DiagnosticService(settings)
     scenario_titles = {
@@ -843,6 +908,9 @@ def create_app(settings: DiagnosticSettings | None = None) -> Starlette:
         return service.html(pages.render_deployment())
 
     async def healthz(request: Request) -> Response:
+        # Readiness only. Operator notes stay out: they can carry paths and
+        # error text, and a health endpoint is the one URL most likely to be
+        # scraped by something other than its operator.
         return JSONResponse(
             {
                 "status": "ok",
@@ -852,7 +920,6 @@ def create_app(settings: DiagnosticSettings | None = None) -> Starlette:
                 "external_targets_enabled": service.settings.allow_external_targets,
                 "scenarios": list(service.settings.allowed_scenarios),
                 "busy": service.busy,
-                "notes": list(service.notes),
             }
         )
 
@@ -917,6 +984,12 @@ def create_app(settings: DiagnosticSettings | None = None) -> Starlette:
         exception_handlers={ResponseWithheld: withheld},
     )
     app.state.service = service
+    # The bind check in :func:`serve` covers the supported entry point. This
+    # covers every other way of serving the returned app: a public mount
+    # answers 403 on every route, including /healthz, instead of running
+    # checks and serving evidence to strangers. Plain ASGI, deliberately:
+    # a base-HTTP-middleware wrapper would buffer the event stream.
+    app.add_middleware(_LoopbackOnlyMiddleware)
     return app
 
 
