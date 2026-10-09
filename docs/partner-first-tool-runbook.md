@@ -62,6 +62,9 @@ at 028 fails on those columns. Revision 033 drops `optimizer_telemetry`, a
 table no code reads, so it adds no column requirement — but a database stopped
 at 032 still fails startup, because `app/db/database.py` refuses to boot on any
 revision behind the packaged head, not only on missing columns.
+The 033 drop is irreversible: its downgrade recreates the empty table schema
+only and restores no rows, so take a backup before upgrading if the data could
+matter, and never run the downgrade as a rollback expecting recovery.
 
 Revision 027 stops with only an aggregate conflict count if historical rows
 already reuse one wallet/key across MCP endpoint generations. Do not pick or

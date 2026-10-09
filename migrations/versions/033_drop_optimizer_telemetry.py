@@ -34,6 +34,14 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Recreate the empty table schema only; dropped rows are not restored.
+
+    The upgrade deletes the table data by design, so this downgrade is
+    irreversible: it rebuilds the columns and indexes exactly as 013 did,
+    but the new table starts empty. Do not run this downgrade as a rollback
+    expecting to recover data; restore from a backup taken before the
+    upgrade instead.
+    """
     op.create_table(
         "optimizer_telemetry",
         sa.Column("id", sa.Integer(), primary_key=True),
