@@ -6,7 +6,9 @@ Agents pass credentials via:
 - Authorization: Bearer <jwt> header (modern, short-lived tokens)
 """
 
+import base64
 import hmac
+import json
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from typing import Annotated
@@ -229,8 +231,11 @@ async def _resolve_auth_context(
     # API-key lookup: a token that fails to parse is already a 401, and an
     # unexpected failure (a liveness check that could not run) must surface
     # here as it does there, not be retried as a key — or, in DEBUG open
-    # mode, as a bootstrap admin.
-    if stripped.count(".") == 2 and len(stripped) > 50:
+    # mode, as a bootstrap admin. The shape check requires a JWT header
+    # (first segment decodes to a JSON object with an alg claim) so dotted
+    # API keys fall through to key lookup and get the key error, not a
+    # confusing token error.
+    if _is_jwt_shaped(stripped):
         return await _auth_from_jwt(stripped)
 
     valid_keys = [k.strip() for k in settings.VALID_API_KEYS.split(",") if k.strip()]
@@ -338,6 +343,28 @@ def _parse_static_dev_keys(configured: str) -> list[str]:
         for key in (k.strip() for k in configured.split(","))
         if key.startswith(STATIC_DEV_KEY_PREFIX)
     ]
+
+
+def _is_jwt_shaped(value: str) -> bool:
+    """Check whether a raw X-API-Key value looks like a JWT access token.
+
+    Requires two dots, a minimum length, and a first segment that base64url
+    decodes to a JSON object containing an alg claim (the JWT header). A
+    dotted API key (for example "partner.live.<chars>") fails the header
+    check and falls through to key lookup instead of token verification.
+    Any decode or parse failure means not a JWT, never an error here: the
+    caller then handles the value as an API key.
+    """
+    if value.count(".") != 2 or len(value) <= 50:
+        return False
+    header_segment = value.split(".", 1)[0]
+    padded = header_segment + "=" * (-len(header_segment) % 4)
+    try:
+        decoded = base64.urlsafe_b64decode(padded)
+        header = json.loads(decoded)
+    except (ValueError, json.JSONDecodeError):
+        return False
+    return isinstance(header, dict) and "alg" in header
 
 
 def _parse_bearer_authorization(authorization: str) -> str:
