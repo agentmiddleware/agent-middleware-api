@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from failure_lab.configurations import (
@@ -32,6 +33,35 @@ DEFAULT_TIMEOUT_SECONDS = 15.0
 #: The only durable boundary that commits an idempotency record while leaving
 #: no reservation, debit, attempt or receipt behind it.
 CRASH_BOUNDARY = "after_idempotency_begin"
+
+#: Grace window when deciding whether a created_at timestamp is really aged.
+#: The lab backdates rows and then reads them back, so a correctly aged row
+#: can look a moment younger than age_seconds by the time the verdict runs.
+_BACKDATE_TOLERANCE_SECONDS = 60
+
+
+def _created_at_backdated(values: Any, age_seconds: int) -> bool:
+    """True when every recorded created_at timestamp is at least age old.
+
+    Fails closed: an empty list, a missing value or an unparseable timestamp
+    is not evidence that the record's clock moved, so it returns False.
+    """
+    if not isinstance(values, list) or not values:
+        return False
+    from app.core.time import to_naive_utc, utc_now
+
+    now = utc_now()
+    for raw in values:
+        if not isinstance(raw, str) or not raw:
+            return False
+        try:
+            created = datetime.fromisoformat(raw)
+        except ValueError:
+            return False
+        age = (now - to_naive_utc(created)).total_seconds()
+        if age < age_seconds - _BACKDATE_TOLERANCE_SECONDS:
+            return False
+    return True
 
 
 def _added(
@@ -338,9 +368,12 @@ class RetentionExpiration(Scenario):
     total. ``FAIL`` if an aged but intact record stops replaying, or if the
     effect-free release lets a *second* effect land.
 
-    The ``record_removed`` case is descriptive and must NOT be folded into the
-    verdict -- it measures the consequence of removing the record, which is
-    not something the gateway does. Record it in
+    The ``record_removed`` case is descriptive and its consequence must NOT
+    be folded into the verdict -- it measures what follows removing the
+    record, which is not something the gateway does. The verdict does check
+    the precondition that the simulated purge really removed the row, so a
+    run whose purge left the record in place fails instead of reporting a
+    normal success as life after expiration. Record it in
     ``extra["record_removed"]`` and put the conclusion in
     ``remaining_risks``: the replay guarantee lasts exactly as long as the
     idempotency record does, and no automatic expiry currently shortens that.
@@ -1016,6 +1049,18 @@ class RetentionExpiration(Scenario):
                 "aged_record: the same-key retry produced a second downstream "
                 "effect for an operation whose record was intact"
             )
+        # The aging step must really have moved the record's clock. Without
+        # it the sweep ran over a fresh row, and "the record survived" plus
+        # "the replay suppressed dispatch" prove nothing about retention.
+        aged_rows = (aged.get("rows_aged") or {}).get("idempotency_records", 0)
+        if aged_rows < 1 or not _created_at_backdated(
+            aged.get("record_created_at_after_aging"), age_seconds
+        ):
+            failures.append(
+                "aged_record: the idempotency record was not backdated "
+                f"({aged_rows} idempotency row(s) aged), so the sweep ran "
+                "over a fresh row and the replay proves nothing about retention"
+            )
 
         # -- the one deliberate release --------------------------------
         if not release["crash_fired"]:
@@ -1074,6 +1119,33 @@ class RetentionExpiration(Scenario):
                 f"retry (retry status '{release['retry_status']}'), so the "
                 "effect-free release did not let the stranded operation "
                 "complete"
+            )
+        # This case claims to measure a release. When the sweep never
+        # released the key, the retry ran against the original record and a
+        # normal success would pass as if a release had been exercised.
+        if not release.get("record_released_by_sweep"):
+            failures.append(
+                "effect_free_release: the sweep did not release the aged "
+                "effect-free record, so the retry measured a normal success "
+                "against the original key, not a release"
+            )
+
+        # The record_removed case is descriptive about what follows a purge,
+        # but the purge itself must really have happened. When the record is
+        # still in place the retry ran against the original row, so the case
+        # describes a normal success, not life after expiration.
+        purge_records_deleted = (removed.get("purge") or {}).get("records_deleted", 0)
+        purge_failed = (
+            not removed.get("record_gone_after_purge") or purge_records_deleted < 1
+        )
+        if purge_failed:
+            failures.append(
+                "record_removed: the simulated purge did not remove the "
+                "idempotency record "
+                f"(record gone={removed.get('record_gone_after_purge')}, "
+                f"records_deleted={purge_records_deleted}), so the retry ran "
+                "against the original row and describes a normal success, "
+                "not life after expiration"
             )
 
         verdict = Verdict.PASS if not failures else Verdict.FAIL
@@ -1304,6 +1376,14 @@ class RetentionExpiration(Scenario):
             + ") depended on whether the downstream tool had idempotency of "
             "its own -- not on anything the gateway did.",
         ]
+        if purge_failed:
+            risks.append(
+                "The simulated purge did not remove the idempotency record "
+                f"(record gone={removed.get('record_gone_after_purge')}, "
+                f"records_deleted={purge_records_deleted}), so the "
+                "record_removed retry describes a normal success against the "
+                "original row, not life after expiration."
+            )
         if removed["record_gone_after_purge"] and removed["receipts_surviving_purge"]:
             risks.append(
                 "The signed receipt outlives the record that made the key "
