@@ -636,3 +636,83 @@ async def test_a_period_rollover_is_not_charged_for_a_rejected_charge(
         # them, so it has nothing to take back from them.
         assert wallet.hourly_spent == Decimal("7")
         assert wallet.daily_spent == Decimal("9")
+
+
+@pytest.mark.anyio
+async def test_a_duplicate_refund_racing_the_guards_returns_the_winner(
+    client, clean_database, monkeypatch
+):
+    """A refund that loses the insert race must return the existing refund.
+
+    ``refund_charge`` checks for an existing refund, then inserts. Two refunds
+    for the same charge that overlap between the check and the insert both
+    pass the guards, and the loser loses on the primary key. That conflict
+    used to surface as a server error; the money was safe (the losing
+    transaction rolls back), but the caller could not tell a duplicate from a
+    failure. The loser must return the winner's refund instead.
+    """
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    await _set_balance(wallet_id, Decimal("100"))
+
+    money = get_agent_money()
+    import app.services.billing_engine as billing_module
+
+    real_factory = get_session_factory()
+
+    charge = await money.charge(
+        wallet_id=wallet_id,
+        service_category=ServiceCategory.AGENT_COMMS,
+        units=Decimal("1"),
+        request_path="/to-be-refunded-twice",
+    )
+
+    state: dict = {}
+
+    async def _concurrent_refund() -> None:
+        monkeypatch.setattr(
+            billing_module, "get_session_factory", lambda: real_factory, raising=False
+        )
+        state["second"] = await money.refund_charge(
+            wallet_id=wallet_id,
+            charge_entry_id=charge.entry_id,
+            description="winning duplicate refund",
+        )
+
+    # The loser runs four reads (wallet, charge, two duplicate guards)
+    # before its wallet update and insert, so fire after the fourth: the
+    # winner commits once both guards have passed and the race is real.
+    monkeypatch.setattr(
+        money._billing_engine,
+        "_session_factory",
+        interleaving_factory(real_factory, _concurrent_refund, state, fire_on=4),
+    )
+
+    first = await money.refund_charge(
+        wallet_id=wallet_id,
+        charge_entry_id=charge.entry_id,
+        description="losing duplicate refund",
+    )
+
+    assert state.get("fired"), "the interleave never ran — the test proved nothing"
+    second = state["second"]
+    assert first.entry_id == f"refund-{charge.entry_id}"
+    assert second.entry_id == first.entry_id
+    # One credit, not two: the loser's transaction rolled back.
+    assert await _balance(wallet_id) == Decimal("100")
+
+    async with real_factory() as session:
+        refunds = (
+            (
+                await session.execute(
+                    select(LedgerEntryModel).where(
+                        LedgerEntryModel.wallet_id == wallet_id,  # type: ignore[arg-type]
+                        LedgerEntryModel.action == "refund",  # type: ignore[arg-type]
+                        LedgerEntryModel.correlation_id == charge.entry_id,  # type: ignore[arg-type]
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(refunds) == 1
