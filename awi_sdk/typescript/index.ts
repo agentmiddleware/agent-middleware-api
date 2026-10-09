@@ -276,7 +276,7 @@ export class AWIClient {
       task_type: taskType,
       target_url: targetUrl,
       action_sequence: actionSequence,
-      priority: priority || 5,
+      priority: priority ?? 5,
     });
     return response.data;
   }
