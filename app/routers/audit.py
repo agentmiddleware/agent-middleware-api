@@ -1,5 +1,14 @@
 from __future__ import annotations
 
+"""Read only HTTP routes for control plane audit evidence.
+
+This module exposes audit event listing, audit summaries, and audit chain
+verification. It never writes audit rows, it only reads rows recorded
+elsewhere. Key invariants: a wallet scoped caller can only read events for
+its own wallet, cross wallet reads need a bootstrap admin caller, and
+summaries are computed over the same scoped rows as the matching list query.
+"""
+
 from dataclasses import asdict
 from datetime import datetime
 
@@ -63,6 +72,7 @@ async def get_audit_events(
     offset: int = Query(0, ge=0),
     auth: AuthContext = Depends(get_auth_context),
 ) -> AuditEventListResponse:
+    """List audit events visible to the caller with paging and optional totals."""
     wallet_id, key_id = _authorize_audit_events_request(
         auth=auth,
         wallet_id=wallet_id,
@@ -144,6 +154,7 @@ async def get_audit_summary(
     created_before: datetime | None = Query(None),
     auth: AuthContext = Depends(get_auth_context),
 ) -> AuditSummaryResponse:
+    """Return aggregate audit counts for the caller's scope and time window."""
     # Cross-tenant totals stay an operator view; a wallet key gets the same
     # shape computed over its own events only.
     wallet_id = None
@@ -164,6 +175,7 @@ async def verify_chain(
     request: AuditChainVerifyRequest,
     auth: AuthContext = Depends(get_auth_context),
 ) -> AuditChainVerifyResponse:
+    """Verify the hash chain over the audit events visible to the caller."""
     wallet_id = request.wallet_id
     if wallet_id:
         auth.require_wallet_access(wallet_id)
