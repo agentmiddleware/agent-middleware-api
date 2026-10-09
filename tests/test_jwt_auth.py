@@ -412,3 +412,80 @@ async def test_raw_token_failure_cannot_fall_through_to_debug_bootstrap(
 
     with pytest.raises(_KeyStoreUnavailable):
         await get_auth_context(api_key=token)
+
+
+# Longer than the old "two dots and 50 characters" shortcut, but not a JWT:
+# the first segment does not decode to a JSON object with an alg claim.
+DOTTED_API_KEY = "partner.live." + ("k" * 40)
+
+
+@pytest.mark.anyio
+async def test_configured_dotted_api_key_is_accepted(monkeypatch):
+    """A configured key with two dots is a key, not a token.
+
+    The old shortcut sent every long two-dot value to token verification,
+    so this key came back as invalid_token instead of an admin login.
+    """
+    monkeypatch.setenv("VALID_API_KEYS", DOTTED_API_KEY)
+    monkeypatch.setenv("STATIC_DEV_API_KEYS", "")
+    get_settings.cache_clear()
+    try:
+        auth = await get_auth_context(api_key=DOTTED_API_KEY)
+    finally:
+        get_settings.cache_clear()
+
+    assert auth.source == "env"
+    assert auth.is_bootstrap_admin is True
+
+
+@pytest.mark.anyio
+async def test_stored_dotted_api_key_is_looked_up(monkeypatch):
+    """A stored key with two dots must reach key lookup."""
+    from types import SimpleNamespace
+
+    from app.services.api_key_service import APIKeyService
+
+    async def validate_key(_self, api_key: str):
+        if api_key == DOTTED_API_KEY:
+            return SimpleNamespace(key_id="key_dotted", wallet_id="wallet_dotted")
+        return None
+
+    monkeypatch.setattr(APIKeyService, "validate_key", validate_key)
+    monkeypatch.setenv("VALID_API_KEYS", "test-key")
+    monkeypatch.setenv("STATIC_DEV_API_KEYS", "")
+    monkeypatch.setenv("DEBUG", "false")
+    get_settings.cache_clear()
+    try:
+        auth = await get_auth_context(api_key=DOTTED_API_KEY)
+    finally:
+        get_settings.cache_clear()
+
+    assert auth.source == "db"
+    assert auth.key_id == "key_dotted"
+    assert auth.wallet_id == "wallet_dotted"
+    assert auth.is_bootstrap_admin is False
+
+
+@pytest.mark.anyio
+async def test_unknown_dotted_api_key_is_rejected_as_a_key(auth_client, monkeypatch):
+    """An unknown dotted key gets the API-key error, not a token error."""
+    from app.services.api_key_service import APIKeyService
+
+    async def validate_key(_self, _api_key: str):
+        return None
+
+    monkeypatch.setattr(APIKeyService, "validate_key", validate_key)
+    monkeypatch.setenv("VALID_API_KEYS", "test-key")
+    monkeypatch.setenv("STATIC_DEV_API_KEYS", "")
+    monkeypatch.setenv("DEBUG", "false")
+    get_settings.cache_clear()
+    try:
+        response = await auth_client.get(
+            "/protected",
+            headers={"X-API-Key": DOTTED_API_KEY},
+        )
+    finally:
+        get_settings.cache_clear()
+
+    assert response.status_code == 403
+    assert response.json()["detail"]["error"] == "invalid_api_key"
