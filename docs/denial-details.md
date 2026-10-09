@@ -101,6 +101,8 @@ adjacent `details.field` value identifies the rejected field.
 | `policy_constraint_corrupt` | A wallet policy's allow-list column is not a JSON array of strings, so the policy cannot be applied. | Have an administrator repair or recreate the policy bundle; the action stays denied until then. |
 | `max_cost_per_action_exceeded` | The quoted action cost exceeds the wallet policy's per-action limit. | Lower the action cost or raise the policy limit. |
 | `daily_spend_limit_exceeded` | Current daily spend plus this action exceeds the wallet policy limit. | Wait for the policy window to reset or have an administrator change the limit. |
+| `daily_spend_unknown` | The wallet policy sets a daily spend cap but past spending is unknown, so the cap cannot be shown to hold. | Retry once the spend figure is available, or have an administrator revise the policy. |
+| `risk_tier_not_allowed` | The action's risk tier sits above the wallet policy's risk-tier ceiling (`low < medium < high`), or is not a known tier. | Use a lower-risk action or have an administrator raise the policy's risk tier. |
 | `real_effects_required` | The policy forbids a simulated execution path. | Use a real-effects tool configuration or revise the policy. |
 | `policy_denied` | Policy evaluation denied without a narrower stable reason. | Inspect the adjacent audit policy ID and evaluated constraints, then correct the blocking policy. |
 
