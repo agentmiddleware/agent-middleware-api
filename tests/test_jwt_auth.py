@@ -13,7 +13,9 @@ from app.core.jwt import (
     JWT_ACCESS_EXPIRY,
     JWT_ALGORITHM,
     JWT_AUDIENCE,
+    JWT_DOMAIN,
     JWT_ISSUER,
+    JWT_TYPE,
     JWTError,
     get_jwt_service,
 )
@@ -317,7 +319,7 @@ def _signed_access_token_without(jwt_service, claim: str) -> str:
     Uses the deployment's own signing key, so the only thing wrong with the
     token is the missing claim.
     """
-    private_key, _signing_key_id = jwt_service._load_keys()
+    private_key, signing_key_id = jwt_service._load_keys()
     now = datetime.now(timezone.utc)
     claims = {
         "sub": "wallet_missing_claim",
@@ -329,9 +331,15 @@ def _signed_access_token_without(jwt_service, claim: str) -> str:
         "aud": JWT_AUDIENCE,
         "jti": "jwt-missing-claim",
         "type": "access",
+        "dom": JWT_DOMAIN,
     }
     del claims[claim]
-    return pyjwt.encode(claims, private_key, algorithm=JWT_ALGORITHM)
+    return pyjwt.encode(
+        claims,
+        private_key,
+        algorithm=JWT_ALGORITHM,
+        headers={"kid": signing_key_id, "typ": JWT_TYPE},
+    )
 
 
 @pytest.mark.parametrize("claim", ["exp", "iat", "sub", "jti"])
@@ -412,3 +420,140 @@ async def test_raw_token_failure_cannot_fall_through_to_debug_bootstrap(
 
     with pytest.raises(_KeyStoreUnavailable):
         await get_auth_context(api_key=token)
+
+
+def _login_claims(token_type: str) -> dict:
+    """Claims a login token needs, including the domain label."""
+    now = datetime.now(timezone.utc)
+    expiry = JWT_ACCESS_EXPIRY if token_type == "access" else 3600
+    claims = {
+        "sub": "wallet_domain",
+        "scopes": [],
+        "iat": now,
+        "exp": now + timedelta(seconds=expiry),
+        "iss": JWT_ISSUER,
+        "aud": JWT_AUDIENCE,
+        "jti": f"jwt-domain-{token_type}",
+        "type": token_type,
+        "dom": JWT_DOMAIN,
+    }
+    if token_type == "access":
+        claims["key_id"] = "key_domain"
+    return claims
+
+
+def _verify_login(jwt_service, token: str, token_type: str):
+    if token_type == "access":
+        return jwt_service.verify_access_token(token)
+    return jwt_service.verify_refresh_token(token)
+
+
+@pytest.mark.parametrize("token_type", ["access", "refresh"])
+def test_trust_plane_key_cannot_mint_a_login_token(jwt_service, token_type):
+    """A signature from the receipt key must not authenticate a caller.
+
+    Login tokens used to be signed with the same private key as permits and
+    receipts. A token built that way, even with the login domain label and a
+    header key id, still verified.
+    """
+    from app.services.signing_keys import _decode_private_key
+
+    trust_key = _decode_private_key(TEST_SIGNING_KEY)
+    token = pyjwt.encode(
+        _login_claims(token_type),
+        trust_key,
+        algorithm=JWT_ALGORITHM,
+        headers={"kid": "ed25519-trust-plane", "typ": JWT_TYPE},
+    )
+
+    with pytest.raises(JWTError):
+        _verify_login(jwt_service, token, token_type)
+
+
+def test_login_signature_does_not_verify_under_the_trust_plane_key(jwt_service):
+    """The bytes of a login token must not be a trust-plane signature."""
+    import base64
+
+    from cryptography.exceptions import InvalidSignature
+    from app.services.signing_keys import _decode_private_key
+
+    token = jwt_service.create_access_token(
+        wallet_id="wallet_separated", key_id="key_separated", scopes=[]
+    )
+    signing_input, signature_b64 = token.rsplit(".", 1)
+    signature = base64.urlsafe_b64decode(
+        signature_b64 + "=" * (-len(signature_b64) % 4)
+    )
+    trust_public = _decode_private_key(TEST_SIGNING_KEY).public_key()
+
+    with pytest.raises(InvalidSignature):
+        trust_public.verify(signature, signing_input.encode("ascii"))
+
+
+@pytest.mark.parametrize("token_type", ["access", "refresh"])
+def test_login_token_key_id_is_in_the_header(jwt_service, token_type):
+    """The signing key id is a protected header, not a body field."""
+    if token_type == "access":
+        token = jwt_service.create_access_token(
+            wallet_id="wallet_header", key_id="key_header", scopes=["billing:read"]
+        )
+    else:
+        token = jwt_service.create_refresh_token(
+            wallet_id="wallet_header", scopes=["billing:read"]
+        )
+
+    header = pyjwt.get_unverified_header(token)
+    body = pyjwt.decode(token, options={"verify_signature": False})
+
+    assert header["typ"] == JWT_TYPE
+    assert isinstance(header["kid"], str) and header["kid"]
+    assert "kid" not in body
+    assert body["dom"] == JWT_DOMAIN
+    verified = _verify_login(jwt_service, token, token_type)
+    assert verified.sub == "wallet_header"
+    assert verified.type == token_type
+
+
+@pytest.mark.parametrize("token_type", ["access", "refresh"])
+def test_login_token_rejects_a_receipt_domain_claim(jwt_service, token_type):
+    """The same login key must not accept a token labeled as a receipt."""
+    private_key, signing_key_id = jwt_service._load_keys()
+    claims = _login_claims(token_type)
+    claims["dom"] = "receipt"
+    token = pyjwt.encode(
+        claims,
+        private_key,
+        algorithm=JWT_ALGORITHM,
+        headers={"kid": signing_key_id, "typ": JWT_TYPE},
+    )
+
+    with pytest.raises(JWTError, match="token_domain_mismatch"):
+        _verify_login(jwt_service, token, token_type)
+
+
+def test_login_token_rejects_a_generic_jwt_type(jwt_service):
+    """A normal JWT type is not the login domain, even with a valid signature."""
+    private_key, signing_key_id = jwt_service._load_keys()
+    token = pyjwt.encode(
+        _login_claims("access"),
+        private_key,
+        algorithm=JWT_ALGORITHM,
+        headers={"kid": signing_key_id, "typ": "JWT"},
+    )
+
+    with pytest.raises(JWTError, match="token_domain_mismatch"):
+        jwt_service.verify_access_token(token)
+
+
+def test_login_token_rejects_a_mismatched_header_kid(jwt_service):
+    """The header key id has to name the login key that signed the token."""
+    private_key, signing_key_id = jwt_service._load_keys()
+    token = pyjwt.encode(
+        _login_claims("access"),
+        private_key,
+        algorithm=JWT_ALGORITHM,
+        headers={"kid": signing_key_id + "-other", "typ": JWT_TYPE},
+    )
+
+    with pytest.raises(JWTError, match="signing_key_mismatch"):
+        jwt_service.verify_access_token(token)

@@ -252,13 +252,21 @@ async def test_refresh_missing_signed_scope_binding_fails_closed(client):
 
     key = await seed("qa_legacy_refresh")
     tokens = await exchange(client, key, ["billing:read"])
+    header = jwt.get_unverified_header(tokens["refresh_token"])
     payload = jwt.decode(tokens["refresh_token"], options={"verify_signature": False})
     del payload["scopes"]
     private_key, _ = get_jwt_service()._load_keys()
-    legacy = jwt.encode(payload, private_key, algorithm=JWT_ALGORITHM)
+    # Keep the login header. The only defect left is the missing scope claim.
+    legacy = jwt.encode(
+        payload,
+        private_key,
+        algorithm=JWT_ALGORITHM,
+        headers={"kid": header["kid"], "typ": header["typ"]},
+    )
     response = await client.post("/v1/auth/refresh", json={"refresh_token": legacy})
     assert response.status_code == 401
     assert response.json()["detail"]["error"] == "invalid_refresh_token"
+    assert "scopes" in response.json()["detail"]["message"]
 
 
 @pytest.mark.parametrize("header", ["Authorization", "X-API-Key"])
