@@ -550,7 +550,14 @@ class AgentMiddlewareClient:
         response = await self._client.post("/v1/billing/charge", params=params, headers=headers)
 
         if response.status_code == 402:
-            data = response.json().get("detail", {})
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = None
+            if not isinstance(payload, dict):
+                payload = {}
+            detail = payload.get("detail")
+            data = detail if isinstance(detail, dict) else {}
             raise InsufficientFundsError(
                 wallet_id=wallet_id,
                 shortfall=data.get("shortfall", "unknown"),

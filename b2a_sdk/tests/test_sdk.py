@@ -164,6 +164,28 @@ class TestB2AClient:
         assert exc_info.value.shortfall == 100.0
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "response",
+        [
+            httpx.Response(402, json={"detail": "insufficient_funds"}),
+            httpx.Response(402, json={"detail": ["insufficient_funds"]}),
+            httpx.Response(402, json={"error": "insufficient_funds"}),
+            httpx.Response(402, content=b"payment required"),
+        ],
+        ids=["string-detail", "list-detail", "missing-detail", "non-json-body"],
+    )
+    async def test_charge_insufficient_funds_survives_non_object_detail(self, response):
+        """A 402 with a string, non-dict, missing, or non-JSON detail still
+        raises InsufficientFundsError instead of crashing on ``.get``."""
+        client, _ = _recording_client({("POST", "/v1/billing/charge"): response})
+        async with client:
+            with pytest.raises(InsufficientFundsError) as exc_info:
+                await client.charge("wallet-123", "iot_bridge", units=100)
+
+        assert exc_info.value.wallet_id == "wallet-123"
+        assert exc_info.value.shortfall is None
+
+    @pytest.mark.asyncio
     async def test_charge_cross_wallet_denial_still_raises(self):
         """A 403 (wallet the key does not own) is not swallowed, with or without a key."""
         client, _ = _recording_client(
