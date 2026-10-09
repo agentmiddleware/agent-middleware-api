@@ -143,6 +143,7 @@ def validate_trust_mode_config(
     enable_dev_key_self_provision: bool = False,
     enable_public_mcp_endpoint: bool = False,
     allow_private_network_targets: bool = False,
+    allow_private_network_names: bool = False,
     allow_unsafe_host_python_sandbox: bool = False,
     behavioral_sandbox_python_backend: str = "",
     redis_url: str = "",
@@ -238,6 +239,13 @@ def validate_trust_mode_config(
                 "loopback/RFC1918/link-local checks, re-opening SSRF against "
                 "cloud metadata endpoints and internal services)"
             )
+        if allow_private_network_names:
+            violations.append(
+                "ALLOW_PRIVATE_NETWORK_NAMES must be false in production-like "
+                "environments (it skips the outbound-URL guard's blocked name "
+                "checks for localhost and internal style names, weakening "
+                "SSRF protection)"
+            )
         if allow_unsafe_host_python_sandbox:
             violations.append(
                 "ALLOW_UNSAFE_HOST_PYTHON_SANDBOX must be false in "
@@ -306,6 +314,7 @@ def validate_trust_mode_guardrails(settings: Settings) -> None:
         enable_dev_key_self_provision=settings.ENABLE_DEV_KEY_SELF_PROVISION,
         enable_public_mcp_endpoint=settings.ENABLE_PUBLIC_MCP_ENDPOINT,
         allow_private_network_targets=settings.ALLOW_PRIVATE_NETWORK_TARGETS,
+        allow_private_network_names=settings.ALLOW_PRIVATE_NETWORK_NAMES,
         allow_unsafe_host_python_sandbox=settings.ALLOW_UNSAFE_HOST_PYTHON_SANDBOX,
         behavioral_sandbox_python_backend=settings.BEHAVIORAL_SANDBOX_PYTHON_BACKEND,
         redis_url=settings.REDIS_URL,

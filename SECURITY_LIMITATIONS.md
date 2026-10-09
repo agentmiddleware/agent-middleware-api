@@ -130,7 +130,9 @@ repo; do not Redeploy from GitHub source).
 - Production-like boots also refuse `DEBUG=true`, `WEBAUTHN_ALLOW_MOCK=true`,
   `ENABLE_PROOF_SURFACES=true`, `ENABLE_PUBLIC_MCP_ENDPOINT=true`,
   `ALLOW_PRIVATE_NETWORK_TARGETS=true` (it disables the outbound-URL guard's
-  private-address checks), `ALLOW_UNSAFE_HOST_PYTHON_SANDBOX=true`, a
+  private-address checks) and `ALLOW_PRIVATE_NETWORK_NAMES=true` (it disables
+  the blocked name checks for localhost and internal style names),
+  `ALLOW_UNSAFE_HOST_PYTHON_SANDBOX=true`, a
   host `BEHAVIORAL_SANDBOX_PYTHON_BACKEND` (`unsafe_host`/`host`), and the
   local/CI dogfood tools `ENABLE_DOGFOOD_TOOL=true` /
   `ENABLE_DOGFOOD_SECOND_TOOL=true` (they register executable `partner.*`

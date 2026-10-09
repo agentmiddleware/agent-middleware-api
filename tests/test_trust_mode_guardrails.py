@@ -275,6 +275,7 @@ def test_production_accepts_a_postgres_database_url():
     ("kwarg", "variable"),
     [
         ("allow_private_network_targets", "ALLOW_PRIVATE_NETWORK_TARGETS"),
+        ("allow_private_network_names", "ALLOW_PRIVATE_NETWORK_NAMES"),
         ("allow_unsafe_host_python_sandbox", "ALLOW_UNSAFE_HOST_PYTHON_SANDBOX"),
         ("enable_dogfood_tool", "ENABLE_DOGFOOD_TOOL"),
         ("enable_dogfood_second_tool", "ENABLE_DOGFOOD_SECOND_TOOL"),
@@ -286,10 +287,13 @@ def test_production_refuses_local_only_escape_hatches(
 ):
     """The SSRF and host-sandbox escape hatches are local-only, like DEBUG.
 
-    ``ALLOW_PRIVATE_NETWORK_TARGETS`` makes ``app.core.url_guard`` skip every
-    loopback/RFC1918/link-local check, and ``ALLOW_UNSAFE_HOST_PYTHON_SANDBOX``
-    runs agent code on the host. Both must refuse to boot a production-like
-    deployment rather than rely on the operator never setting them.
+    ``ALLOW_PRIVATE_NETWORK_TARGETS`` makes ``app.core.url_guard`` skip the
+    literal and resolved private-address checks, and
+    ``ALLOW_PRIVATE_NETWORK_NAMES`` skips the blocked name checks for
+    localhost and internal style names, while
+    ``ALLOW_UNSAFE_HOST_PYTHON_SANDBOX`` runs agent code on the host. Each
+    must refuse to boot a production-like deployment rather than rely on
+    the operator never setting them.
     """
     with pytest.raises(TrustModeGuardrailError) as exc_info:
         validate_trust_mode_config(
@@ -349,6 +353,7 @@ def test_local_environments_accept_local_only_escape_hatches(environment: str):
         signing_private_key_b64="",
         allow_legacy_unpermitted_mcp=False,
         allow_private_network_targets=True,
+        allow_private_network_names=True,
         allow_unsafe_host_python_sandbox=True,
         behavioral_sandbox_python_backend="unsafe_host",
         enable_dogfood_tool=True,
@@ -370,6 +375,7 @@ def test_settings_wrapper_forwards_local_only_escape_hatches():
         WEBAUTHN_ALLOW_MOCK=False,
         DATABASE_URL=VALID_PRODUCTION_DATABASE_URL,
         ALLOW_PRIVATE_NETWORK_TARGETS=True,
+        ALLOW_PRIVATE_NETWORK_NAMES=True,
         ALLOW_UNSAFE_HOST_PYTHON_SANDBOX=True,
         BEHAVIORAL_SANDBOX_PYTHON_BACKEND="unsafe_host",
         ENABLE_DOGFOOD_TOOL=True,
@@ -381,6 +387,7 @@ def test_settings_wrapper_forwards_local_only_escape_hatches():
 
     message = str(exc_info.value)
     assert "ALLOW_PRIVATE_NETWORK_TARGETS" in message
+    assert "ALLOW_PRIVATE_NETWORK_NAMES" in message
     assert "ALLOW_UNSAFE_HOST_PYTHON_SANDBOX" in message
     assert "BEHAVIORAL_SANDBOX_PYTHON_BACKEND" in message
     assert "ENABLE_DOGFOOD_TOOL" in message
