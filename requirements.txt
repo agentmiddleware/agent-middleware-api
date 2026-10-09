@@ -4,7 +4,7 @@
 # --- Core Framework ---
 fastapi>=0.142.2
 uvicorn[standard]>=0.53.0
-pydantic>=2.13.5
+pydantic>=2.13.5,<2.14  # Hold below 2.14: 2.14 drops Decimal string-branch patterns from JSON Schema, which breaks docs/openapi.json parity and permit credit schema tests
 pydantic-settings>=2.14.2
 email-validator>=2.3.0  # Keep FastAPI/Pydantic OpenAPI email schema stable in CI
 structlog>=24.1.0       # Structured startup/runtime logging
