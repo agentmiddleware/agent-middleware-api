@@ -68,12 +68,14 @@ def _patch_startup_side_effects(monkeypatch, main_module):
     async def _state_report():
         return {"ok": True, "backend": "memory", "enabled": False}
 
+    _real_sleep = asyncio.sleep
+
     async def _fast_sleep(delay, result=None):
         # The shutdown drain is a fixed 2 second wait. Leave every other
         # sleep (the cleanup loop) alone so this test does not spin.
         if delay == 2:
             return result
-        return await asyncio.sleep(delay)
+        return await _real_sleep(delay)
 
     monkeypatch.setattr(main_module.settings, "ENVIRONMENT", "local")
     monkeypatch.setattr(main_module.settings, "TRUST_MODE_ENABLED", False)

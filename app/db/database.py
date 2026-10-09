@@ -80,6 +80,30 @@ REQUIRED_TRUST_COLUMNS = {
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
 
+# Records a non-production boot that survived a failed ``init_db``. The
+# database session can still answer SELECT 1 afterwards, so readiness must
+# consult this flag instead of trusting the probe alone. Only the fixed
+# string ``database_init_failed`` is ever exposed; exception text stays in
+# the server log.
+_database_init_failed: bool = False
+
+
+def record_database_init_failure() -> None:
+    """Remember that database setup failed and boot continued."""
+    global _database_init_failed
+    _database_init_failed = True
+
+
+def clear_database_init_failure() -> None:
+    """Forget a recorded setup failure (successful init, test cleanup)."""
+    global _database_init_failed
+    _database_init_failed = False
+
+
+def get_database_init_failure() -> bool:
+    """Return True when boot continued after a failed database setup."""
+    return _database_init_failed
+
 
 class SchemaInitError(RuntimeError):
     """Raised when production schema is missing or unsafe to auto-create."""
@@ -388,9 +412,11 @@ async def init_db() -> None:
             "Database tables initialized via create_all",
             extra={"dialect": dialect, "environment": environment},
         )
+        clear_database_init_failure()
         return
 
     await verify_required_schema(engine)
+    clear_database_init_failure()
     logger.info(
         "Database schema verified (Alembic path; create_all skipped)",
         extra={"dialect": dialect, "environment": environment},

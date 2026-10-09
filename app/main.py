@@ -54,7 +54,13 @@ from .core.trust_mode import (
     validate_trust_mode_guardrails,
     warn_if_trust_mode_permissive,
 )
-from .db.database import SchemaInitError, init_db, close_db
+from .db.database import (
+    SchemaInitError,
+    clear_database_init_failure,
+    init_db,
+    close_db,
+    record_database_init_failure,
+)
 from .services.mcp_dispatch_attempts import get_duplicate_guard_metrics
 from .services.mcp_phase9_tools import sync_proof_surface_mcp_registration
 from .services.signing_keys import (
@@ -383,6 +389,7 @@ async def lifespan(app: FastAPI):
     if settings.DATABASE_URL:
         try:
             await init_db()
+            clear_database_init_failure()
             logger.info(
                 "app_startup",
                 phase="database_initialized",
@@ -400,7 +407,19 @@ async def lifespan(app: FastAPI):
                     error=str(e),
                 )
                 raise
-            logger.warning("app_startup", phase="database_init_failed", error=str(e))
+            record_database_init_failure()
+            logger.error(
+                "app_startup_failed",
+                phase="database_init_failed",
+                error=str(e),
+                continued=True,
+                remediation=(
+                    "Database setup failed but boot continued; money paths "
+                    "have nowhere durable to record. Fix DATABASE_URL and "
+                    "schema, restart, and confirm /health/ready reports the "
+                    "database as up before consequential traffic."
+                ),
+            )
 
         if settings.TRUST_MODE_ENABLED:
             from .services.signing_keys import get_signing_key_service

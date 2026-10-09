@@ -433,6 +433,18 @@ async def _check_signing_key() -> dict[str, Any]:
 
 async def check_database_readiness() -> dict[str, Any]:
     """Probe the required ORM database with the shared timeout/sanitization."""
+    from ..db.database import get_database_init_failure
+
+    # A boot that survived a failed setup can still answer SELECT 1, so the
+    # probe alone would report up with nowhere durable to record. The flag
+    # carries only the fixed code, never the exception text.
+    if get_database_init_failure():
+        return {
+            "status": "down",
+            "error": "database_init_failed",
+            "configured": bool(get_settings().DATABASE_URL),
+            "latency_ms": 0.0,
+        }
     result = await _run_check("database", _check_postgres)
     # A missing engine/configuration cannot serve the trust-plane ORM routes.
     if result["status"] != "up":
