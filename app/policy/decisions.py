@@ -23,7 +23,7 @@ class PolicyDecision:
         return asdict(self)
 
 
-def evaluate_tool_invocation(
+def evaluate_wallet_access(
     *,
     auth: AuthContext,
     wallet_id: str,
@@ -31,6 +31,12 @@ def evaluate_tool_invocation(
     estimated_cost: float | None,
     request_id: str | None,
 ) -> PolicyDecision:
+    """Check wallet ownership only, not full tool-call approval.
+
+    A positive result means the caller may act for this wallet. It says
+    nothing about permits, policy bundles, budgets, or approval gates,
+    which callers must enforce separately before dispatch or charging.
+    """
     if auth.is_bootstrap_admin or auth.wallet_id == wallet_id:
         return PolicyDecision(
             decision_id=f"pol-{uuid.uuid4().hex[:16]}",
@@ -57,6 +63,29 @@ def evaluate_tool_invocation(
     )
 
 
+def evaluate_tool_invocation(
+    *,
+    auth: AuthContext,
+    wallet_id: str,
+    tool_name: str,
+    estimated_cost: float | None,
+    request_id: str | None,
+) -> PolicyDecision:
+    """Deprecated alias for evaluate_wallet_access.
+
+    Kept so in-flight callers keep working while they migrate. New code
+    must use evaluate_wallet_access. Like the canonical function, this
+    checks wallet ownership only, never permits or policy.
+    """
+    return evaluate_wallet_access(
+        auth=auth,
+        wallet_id=wallet_id,
+        tool_name=tool_name,
+        estimated_cost=estimated_cost,
+        request_id=request_id,
+    )
+
+
 def evaluate_governed_action(
     *,
     auth: AuthContext | None,
@@ -68,7 +97,11 @@ def evaluate_governed_action(
     allowed: bool | None = None,
     reason: str | None = None,
 ) -> PolicyDecision:
-    """Create the shared policy-shaped decision used by governed actions."""
+    """Create the shared policy-shaped decision used by governed actions.
+
+    When allowed is not given, this falls back to a wallet-ownership check
+    only, never to permit or policy evaluation.
+    """
     auth_source = (
         "bootstrap"
         if auth and auth.is_bootstrap_admin

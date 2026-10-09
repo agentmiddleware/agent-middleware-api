@@ -111,7 +111,7 @@ from ..trust import (
     PermitWriteContendedError,
     PolicyDecision,
     ReceiptWriteContendedError,
-    evaluate_tool_invocation,
+    evaluate_wallet_access,
     evaluate_wallet_policy,
     get_agent_money,
     get_human_approval_service,
@@ -1095,7 +1095,9 @@ async def _action_request_denial_receipt(
         "tool_name": tool_name,
         "arguments": arguments,
     }
-    decision = evaluate_tool_invocation(
+    # Wallet ownership only. Permit and policy gates run separately on the
+    # governed path; this decision must never be read as full approval.
+    decision = evaluate_wallet_access(
         auth=auth,
         wallet_id=wallet_id,
         tool_name=tool_name,
@@ -1217,7 +1219,7 @@ async def _execute_registered_tool_inner(
     # namespace on denial, permanently poisoning that (wallet, key). Gate here so
     # a caller who does not own wallet_id never reaches the store. The priced
     # decision below re-runs this check with the real cost for the audit record.
-    tenant_decision = evaluate_tool_invocation(
+    tenant_decision = evaluate_wallet_access(
         auth=auth,
         wallet_id=wallet_id,
         tool_name=tool_name,
@@ -1450,7 +1452,7 @@ async def _execute_registered_tool_inner(
     charge_units = _charge_units_for_registered_cost(registered_cost, category)
     estimated_cost = float(registered_cost)
 
-    decision = evaluate_tool_invocation(
+    decision = evaluate_wallet_access(
         auth=auth,
         wallet_id=wallet_id,
         tool_name=tool_name,

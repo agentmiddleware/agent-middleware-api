@@ -95,6 +95,7 @@ def test_audit_facade_matches_service():
 
 def test_policy_facade_matches_service():
     assert trust.evaluate_tool_invocation is decisions.evaluate_tool_invocation
+    assert trust.evaluate_wallet_access is decisions.evaluate_wallet_access
     assert trust.evaluate_governed_action is decisions.evaluate_governed_action
     assert trust.PolicyDecision is decisions.PolicyDecision
     assert trust.evaluate_wallet_policy is policies.evaluate_wallet_policy
