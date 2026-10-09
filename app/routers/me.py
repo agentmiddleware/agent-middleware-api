@@ -1,3 +1,12 @@
+"""Agent self inspection endpoints under /v1/me.
+
+Lets a wallet-scoped API key read back its own wallet state: alerts,
+authority summary, permits, permit requests, quotes, receipts, and audit
+events. Every endpoint here is read only and limited to the caller's own
+wallet; callers without a wallet key get a 403 wallet_key_required error,
+and permit and audit listings are further limited to the calling key.
+"""
+
 from __future__ import annotations
 
 from dataclasses import asdict
@@ -50,6 +59,7 @@ async def list_my_alerts(
     offset: int = Query(0, ge=0),
     auth: AuthContext = Depends(get_auth_context),
 ) -> AlertListResponse:
+    """List spending alerts for the caller's own wallet, paginated."""
     wallet_id, _ = _require_wallet_key(auth)
     money = get_agent_money()
     alerts = await money.get_alerts(wallet_id)
@@ -142,6 +152,7 @@ async def list_my_permits(
     offset: int = Query(0, ge=0),
     auth: AuthContext = Depends(get_auth_context),
 ) -> PermitListResponse:
+    """List permits issued to the calling key, with optional filters."""
     wallet_id, key_id = _require_wallet_key(auth)
     permits, total = await get_permit_service().list_permits(
         wallet_id=wallet_id,
@@ -233,6 +244,7 @@ async def list_my_receipts(
     offset: int = Query(0, ge=0),
     auth: AuthContext = Depends(get_auth_context),
 ) -> ReceiptListResponse:
+    """List signed receipts for the caller's own wallet, with optional filters."""
     wallet_id, _ = _require_wallet_key(auth)
     receipts, total = await get_receipt_service().list_receipts(
         permit_id=permit_id,
@@ -267,6 +279,7 @@ async def list_my_audit_events(
     offset: int = Query(0, ge=0),
     auth: AuthContext = Depends(get_auth_context),
 ) -> AuditEventListResponse:
+    """List audit events for the caller's own wallet and key, with optional filters."""
     wallet_id, key_id = _require_wallet_key(auth)
     events = await list_audit_events(
         event=event,
