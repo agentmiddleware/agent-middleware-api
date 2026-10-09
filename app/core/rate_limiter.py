@@ -194,6 +194,26 @@ def _client_id(request: Request) -> str:
         return peer_host
 
 
+def _presents_raw_test_key(request: Request) -> bool:
+    """Say whether the request carries the test-suite bypass key, cheaply.
+
+    Mirrors the cases where :func:`_presented_rate_identity` would return the
+    literal ``"test-key"`` — the raw header with no Authorization header, or
+    with an enterprise bearer that leaves the API key as the credential —
+    without verifying any token signature.
+    """
+    if request.headers.get(settings.API_KEY_HEADER, "").strip() != "test-key":
+        return False
+    authorization = request.headers.get("authorization")
+    if authorization is None:
+        return True
+    try:
+        token = _parse_bearer_authorization(authorization)
+    except HTTPException:
+        return False
+    return is_iga_issuer_token(token)
+
+
 def _api_key_bucket(presented_key: str | None) -> str:
     """Name a presented key's bucket without putting the key itself in it.
 
@@ -606,39 +626,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return False, remaining, reset_in
 
     async def dispatch(self, request: Request, call_next) -> Response:
-        # Public MCP is intentionally unauthenticated. Ignore caller-supplied
-        # API-key headers there so rotating bogus values cannot mint fresh
-        # rate-limit buckets (and the local test-key bypass cannot be reached
-        # from the Internet).
-        public_mcp_request = request.url.path.rstrip("/") == _PUBLIC_MCP_PATH
-        if public_mcp_request:
-            client_id = _client_id(request)
-            namespace = (
-                f"{settings.STATE_NAMESPACE}:{settings.PUBLIC_URL or settings.APP_NAME}"
-            )
-            bucket_limits = [
-                (
-                    f"{namespace}:{_PUBLIC_MCP_BUCKET_PREFIX}:client:{client_id}",
-                    self.limit,
-                ),
-                (
-                    f"{namespace}:{_PUBLIC_MCP_BUCKET_PREFIX}:global",
-                    max(
-                        self.limit,
-                        self.limit * _PUBLIC_MCP_GLOBAL_LIMIT_MULTIPLIER,
-                    ),
-                ),
-            ]
-        else:
-            # Canonicalize the way auth does (app.core.auth strips before
-            # lookup): otherwise "key" and "key " count as separate buckets and
-            # one accepted credential can sidestep the per-key limit. A blank
-            # header is no credential at all, so it shares the anonymous
-            # bucket. The bucket is then named by a digest, never the key.
-            presented_key = _presented_rate_identity(request)
-            bucket_limits = [(_api_key_bucket(presented_key), self.limit)]
-
-        # Skip rate limiting for docs, health, and test clients
+        # Skip rate limiting for docs, health, and test clients. This stays
+        # first and compares the path only, so skipped routes never pay for
+        # the credential inspection further down.
         skip_paths = (
             "/docs",
             "/redoc",
@@ -659,11 +649,41 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             _credentials_were_rejected(response)  # strip the internal marker
             return response  # type: ignore[no-any-return]
 
+        # Public MCP is intentionally unauthenticated. Ignore caller-supplied
+        # API-key headers there so rotating bogus values cannot mint fresh
+        # rate-limit buckets (and the local test-key bypass cannot be reached
+        # from the Internet).
+        public_mcp_request = request.url.path.rstrip("/") == _PUBLIC_MCP_PATH
+        bucket_limits: list[tuple[str, int]] = []
+        if public_mcp_request:
+            client_id = _client_id(request)
+            namespace = (
+                f"{settings.STATE_NAMESPACE}:{settings.PUBLIC_URL or settings.APP_NAME}"
+            )
+            bucket_limits = [
+                (
+                    f"{namespace}:{_PUBLIC_MCP_BUCKET_PREFIX}:client:{client_id}",
+                    self.limit,
+                ),
+                (
+                    f"{namespace}:{_PUBLIC_MCP_BUCKET_PREFIX}:global",
+                    max(
+                        self.limit,
+                        self.limit * _PUBLIC_MCP_GLOBAL_LIMIT_MULTIPLIER,
+                    ),
+                ),
+            ]
+        # Otherwise the per-key bucket is resolved after the pre-auth
+        # reservation below: naming it verifies a token signature, and that
+        # cost must sit behind the cheap per-client ceiling, not in front of
+        # it, or junk tokens burn CPU before any limit applies.
+
         # In test / CI environments, the special "test-key" bypasses rate limits
-        # so that large test suites don't self-throttle.
+        # so that large test suites don't self-throttle. This matches the raw
+        # header, without verifying anything.
         if (
             not public_mcp_request
-            and presented_key == "test-key"
+            and _presents_raw_test_key(request)
             and not is_production_like_environment(settings.ENVIRONMENT)
         ):
             response = await call_next(request)
@@ -678,7 +698,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         header_remaining = self.limit
         header_reset = int(self.window)
 
-        # Pre-authentication ceiling. The per-key bucket above is selected from
+        # Pre-authentication ceiling. The per-key bucket below is selected from
         # a header the caller controls, before verify_api_key has had a chance
         # to reject it, so a caller sending a fresh X-API-Key on every request
         # would otherwise be handed a fresh 120-request budget each time — an
@@ -702,6 +722,22 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 )
                 if rejection is not None:
                     return rejection
+                if not public_mcp_request:
+                    # Canonicalize the way auth does (app.core.auth strips
+                    # before lookup): otherwise "key" and "key " count as
+                    # separate buckets and one accepted credential can sidestep
+                    # the per-key limit. A blank header is no credential at
+                    # all, so it shares the anonymous bucket. The bucket is
+                    # then named by a digest, never the key. This verifies a
+                    # token signature, so it runs only for requests the
+                    # pre-auth ceiling already let through: past the ceiling,
+                    # junk tokens are refused before any crypto runs.
+                    bucket_limits = [
+                        (
+                            _api_key_bucket(_presented_rate_identity(request)),
+                            self.limit,
+                        )
+                    ]
                 for index, (bucket_key, applied_limit) in enumerate(bucket_limits):
                     limited, remaining, reset_in = await self._check_limit_with_redis(
                         bucket_key,

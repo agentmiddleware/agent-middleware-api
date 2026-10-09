@@ -609,3 +609,54 @@ async def test_bucket_key_is_canonicalized_like_auth() -> None:
     assert first.status_code == 200
     assert second.status_code == 200
     assert third.status_code == 429
+
+
+@pytest.mark.anyio
+async def test_junk_tokens_are_refused_before_any_signature_check(
+    monkeypatch,
+) -> None:
+    """Signature verification sits behind the cheap pre-auth ceiling.
+
+    Every header below is JWT-shaped, so resolving the rate-limit bucket
+    verifies a token signature. Once the shared per-client ceiling is spent,
+    the limiter must refuse without verifying at all: otherwise junk tokens
+    burn CPU before any limit applies.
+    """
+    from app.core import rate_limiter as rate_limiter_module
+    from app.core.jwt import JWTError
+
+    verify_calls = 0
+
+    class _CountingJWTService:
+        def verify_access_token(self, token):
+            nonlocal verify_calls
+            verify_calls += 1
+            raise JWTError("invalid_token")
+
+    monkeypatch.setattr(
+        rate_limiter_module, "get_jwt_service", lambda: _CountingJWTService()
+    )
+
+    async def deny(_request):
+        return PlainTextResponse("no", status_code=401)
+
+    starlette_app = Starlette(routes=[Route("/v1/wallets", deny)])
+    limited = RateLimitMiddleware(starlette_app, requests_per_minute=2)
+    ceiling = limited.preauth_limit
+    attempts = ceiling + 5
+
+    transport = ASGITransport(app=limited)
+    async with AsyncClient(transport=transport, base_url="http://test") as http:
+        statuses = [
+            (
+                await http.get(
+                    "/v1/wallets",
+                    headers={"X-API-Key": f"header.{index}.signature"},
+                )
+            ).status_code
+            for index in range(attempts)
+        ]
+
+    assert statuses[:ceiling] == [401] * ceiling
+    assert statuses[ceiling:] == [429] * (attempts - ceiling)
+    assert verify_calls <= ceiling
