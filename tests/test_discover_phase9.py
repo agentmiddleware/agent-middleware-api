@@ -121,6 +121,7 @@ class TestDiscoverEndpoint:
 
         from app.routers.discover import _build_mcp_tools
 
+        previous = os.environ.get("ENABLE_PROOF_SURFACES")
         os.environ["ENABLE_PROOF_SURFACES"] = "true"
         try:
             from app.core.config import get_settings
@@ -140,7 +141,10 @@ class TestDiscoverEndpoint:
             for tool in phase9_tools:
                 assert tool in tool_names, f"Missing Phase 9 MCP tool: {tool}"
         finally:
-            del os.environ["ENABLE_PROOF_SURFACES"]
+            if previous is None:
+                os.environ.pop("ENABLE_PROOF_SURFACES", None)
+            else:
+                os.environ["ENABLE_PROOF_SURFACES"] = previous
             get_settings.cache_clear()
 
     def test_discover_has_phase9_awi_endpoints(self):

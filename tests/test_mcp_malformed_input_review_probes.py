@@ -114,3 +114,10 @@ async def test_malformed_legacy_envelope_never_returns_500(review_client, body):
     assert response.status_code < 500, (
         f"Malformed envelope caused HTTP {response.status_code}: {response.text[:160]}"
     )
+    payload = response.json()
+    assert "error" in payload, (
+        f"Malformed envelope was not refused: {response.text[:160]}"
+    )
+    assert "result" not in payload, (
+        f"Malformed envelope produced a result with no valid request: {response.text[:160]}"
+    )

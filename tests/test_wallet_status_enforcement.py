@@ -204,6 +204,7 @@ async def test_frozen_wallet_cannot_transfer_out(client, clean_database):
     )
     assert resp.status_code == 400
     assert resp.json()["detail"]["error"] == "transfer_error"
+    assert "frozen" in resp.json()["detail"]["message"]
 
 
 @pytest.mark.anyio
@@ -223,6 +224,7 @@ async def test_frozen_wallet_cannot_spawn_child(client, clean_database):
     )
     assert resp.status_code == 400
     assert resp.json()["detail"]["error"] == "child_wallet_error"
+    assert "frozen" in resp.json()["detail"]["message"]
 
 
 @pytest.mark.anyio

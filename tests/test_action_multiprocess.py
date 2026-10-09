@@ -220,9 +220,8 @@ async def test_twenty_fresh_keys_two_workers_and_restart(runtime):
         )
     )
     for response in responses:
-        assert response.status_code < 400 and (
-            "error" not in response.json() or "idempotency_in_progress" in response.text
-        ), response.text
+        assert response.status_code == 200, response.text
+        assert "error" not in response.json(), response.text
     before = await rows(seeded)
     assert_chain(before)
     assert Decimal(before["permit"]["spent_credits"]) == 2

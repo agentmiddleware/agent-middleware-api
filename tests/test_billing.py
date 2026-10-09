@@ -2359,20 +2359,25 @@ def test_register_local_derives_an_input_schema_alongside_an_output_model() -> N
     def handler(value: str) -> Out:
         return Out(echoed=value)
 
-    record = registry.register_local(
-        service_id="schema-fallback-probe",
-        name="Schema fallback probe",
-        description="Input schema must still be derived from the callable",
-        category=ServiceCategory.AGENT_COMMS,
-        func=handler,
-        output_model=Out,
-    )
+    try:
+        record = registry.register_local(
+            service_id="schema-fallback-probe",
+            name="Schema fallback probe",
+            description="Input schema must still be derived from the callable",
+            category=ServiceCategory.AGENT_COMMS,
+            func=handler,
+            output_model=Out,
+        )
 
-    input_schema = record["input_schema"]
-    assert input_schema, "input schema was dropped because an output model was given"
-    assert "value" in (input_schema.get("properties") or {}), (
-        f"the handler's own parameter is missing from {input_schema!r}"
-    )
+        input_schema = record["input_schema"]
+        assert input_schema, (
+            "input schema was dropped because an output model was given"
+        )
+        assert "value" in (input_schema.get("properties") or {}), (
+            f"the handler's own parameter is missing from {input_schema!r}"
+        )
+    finally:
+        registry.unregister_local("schema-fallback-probe")
 
 
 @pytest.mark.anyio
