@@ -1,3 +1,14 @@
+"""Read and write control-plane audit events.
+
+This module is the read and write path for the audit trail behind the
+authorize, invoke, meter, receipt, audit, and govern loop. Writes are
+persisted through the hash chained append in app.services.audit_chain, so
+stored rows carry chain hashes and signatures. Reads never change stored
+data. Rows with unreadable metadata JSON are returned with empty metadata,
+and the policy reason bucket in summaries can cover only a capped scan, in
+which case the summary flags it as partial.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -22,6 +33,8 @@ AUDIT_SUMMARY_SCAN_LIMIT = 10_000
 
 @dataclass(frozen=True)
 class AuditEvent:
+    """One audit event row returned to callers."""
+
     event_id: str
     created_at: datetime
     event: str
@@ -44,6 +57,8 @@ class AuditEvent:
 
 @dataclass(frozen=True)
 class AuditEventCount:
+    """Count of events sharing one event name, wallet, and outcome."""
+
     event: str
     wallet_id: str | None
     ok: bool
@@ -97,6 +112,7 @@ async def record_audit_event(
     error: str | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> AuditEvent:
+    """Persist one audit event through the hash chained append and return it."""
     if event_id is not None and (not event_id or len(event_id) > 50):
         raise ValueError("audit_event_id_invalid")
     model_kwargs: dict[str, Any] = {
@@ -140,6 +156,7 @@ async def list_audit_events(
     limit: int = 50,
     offset: int = 0,
 ) -> list[AuditEvent]:
+    """List matching audit events, newest first, without changing stored data."""
     stmt = (
         select(ControlPlaneAuditEventModel)
         .order_by(
@@ -181,6 +198,7 @@ async def count_audit_events(
     created_after: datetime | None = None,
     created_before: datetime | None = None,
 ) -> int:
+    """Count matching audit events under the given filters."""
     stmt = select(func.count()).select_from(ControlPlaneAuditEventModel)
     stmt = _apply_audit_filters(
         stmt,
