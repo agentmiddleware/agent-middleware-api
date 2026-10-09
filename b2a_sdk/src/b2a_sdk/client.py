@@ -766,10 +766,12 @@ class AgentMiddlewareClient:
 
         Returns a client_secret for Stripe Elements.
 
-        Every prepare carries an ``Idempotency-Key``. Pass a caller-owned key
-        and reuse it for every retry of the same logical top-up; the server
-        then returns the original PaymentIntent instead of creating a second
-        one. When no key is passed the SDK mints one for this call.
+        Every prepare carries an ``Idempotency-Key``: the caller key when
+        given, otherwise one minted for this call. The key is sent so a
+        retry can deduplicate once the server honors it; this server route
+        does not deduplicate yet, so a retry may create a second
+        PaymentIntent. Callers that retry one logical top-up must reuse
+        the key.
 
         Args:
             wallet_id: Wallet to credit
