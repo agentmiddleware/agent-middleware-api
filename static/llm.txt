@@ -159,8 +159,8 @@ boundary.
 CI builds a wheel and sdist from `b2a_sdk/`. The agent manifest's
 `integrations.python_sdk` reports both the source version and the available
 release tag; do not infer a package-index install from this document. The SDK
-is **not** published to PyPI. The source repository is private; repository and
-release-asset access must be granted separately. Install from an authorized clone:
+is **not** published to PyPI. Clone the public source repository and install
+from source:
 
 ```bash
 pip install -e ./b2a_sdk
@@ -222,4 +222,4 @@ clients require `/mcp` after the operator enables the Streamable HTTP transport.
 - OpenAPI Spec: `/openapi.json`
 - Wedge: `/WEDGE.md`
 - Security limitations: `/SECURITY_LIMITATIONS.md`
-- GitHub organization: https://github.com/agentmiddleware (the source repository is private)
+- Source repository: https://github.com/agentmiddleware/agent-middleware-api (public)

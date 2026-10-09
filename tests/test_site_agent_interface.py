@@ -525,9 +525,8 @@ def test_marketing_manifest_points_to_custom_origins_and_local_proof() -> None:
     assert manifest["product_wedge"] == "governed_mcp_trust_plane"
     assert manifest["product_loop"] == get_agent_first_metadata()["product_loop"]
     assert manifest["try_it"] == _local_try_it_manifest()
-    # Public proof downloads do not imply access to the private source.
-    assert manifest["try_it"]["repository_access"] == "private"
-    assert manifest["github_access"] == "private"
+    assert manifest["try_it"]["repository_access"] == "public"
+    assert manifest["github_access"] == "public"
     assert manifest["discovery"]["llms_txt"] == f"{CANONICAL_API}/llms.txt"
     assert f"{CANONICAL_API}/llms.txt" in manifest["bootstrap_sequence"]
     assert "transaction-integrity boundary" in manifest["description"]
@@ -546,7 +545,7 @@ def test_machine_pointer_copies_match_and_state_live_access_boundary() -> None:
     assert "Transaction integrity" in llm_txt
     assert "delivery_uncertain" in llm_txt
     assert "at most one gateway dispatch and debit" in " ".join(llm_txt.split())
-    assert "The source repository is private" in llm_txt
+    assert "public source" in llm_txt
     assert "make prove-trust-plane" in llm_txt
     assert "operator-issued" in llm_txt
     assert "no public self-serve key mint" in llm_txt
@@ -593,29 +592,19 @@ def test_customer_facing_outputs_do_not_publish_provider_origins(tmp_path) -> No
 
 
 PUBLIC_ORG_URL = "https://github.com/agentmiddleware"
-PRIVATE_REPO_URLS = (
-    "https://github.com/PetrefiedThunder/agent-middleware-api",
-    "https://github.com/agentmiddleware/agent-middleware-api",
-)
+PUBLIC_REPO_URL = "https://github.com/agentmiddleware/agent-middleware-api"
+OLD_REPO_URL = "https://github.com/PetrefiedThunder/agent-middleware-api"
 GITHUB_URL_PATTERN = re.compile(r"https://github\.com[^\s\"'<>)\]]*")
 
 
-def test_public_surfaces_separate_public_proof_from_private_source_access(
+def test_public_surfaces_link_public_source_without_requiring_credentials(
     tmp_path,
 ) -> None:
-    """Repository visibility was verified private on 2026-10-02.
-
-    These local tests enforce copy consistency, not live GitHub availability.
-    Public surfaces state that the source is private but never link a
-    repository URL that returns 404 for a stranger; they point at the public
-    GitHub organization page instead.
-    """
+    """Published copy and manifest point at the public source repository."""
     output = tmp_path / "site"
     result = _render_site(output, VALID_TEST_CONTACTS)
     assert result.returncode == 0, result.stderr
 
-    # The proof page is stranger-verifiable: it states no repo visibility and
-    # links no private URL, so it sits outside the visibility loop below.
     public_paths = (
         output / "index.html",
         output / "compare" / "index.html",
@@ -629,74 +618,55 @@ def test_public_surfaces_separate_public_proof_from_private_source_access(
     for path in public_paths:
         content = path.read_text(encoding="utf-8").casefold()
         normalized = " ".join(content.split())
-        assert "source repository is public" not in normalized, path
-        assert "public source repository" not in normalized, path
+        assert "source repository is private" not in normalized, path
+        assert "source access on request" not in normalized, path
         assert "open source" not in normalized, path
         assert "open-source repository" not in normalized, path
-        assert "source repository is private" in normalized, path
+        assert OLD_REPO_URL.casefold() not in content, path
 
-    stranger_paths = (
+    source_paths = (
         output / "index.html",
         output / "compare" / "index.html",
-        output / "proof" / "index.html",
         output / "llm.txt",
         output / "llms.txt",
         output / "llms-full.txt",
         output / ".well-known" / "agent.json",
         ROOT / "static" / "llm.txt",
     )
-    for path in stranger_paths:
+    for path in source_paths:
         content = path.read_text(encoding="utf-8")
+        assert PUBLIC_REPO_URL in content, path
         assert "petrefiedthunder" not in content.casefold(), path
-        for private_url in PRIVATE_REPO_URLS:
-            assert private_url.casefold() not in content.casefold(), (
-                f"{path} links private repository {private_url}"
-            )
 
     manifest = json.loads(
         (output / ".well-known" / "agent.json").read_text(encoding="utf-8")
     )
-    assert manifest["github"] == PUBLIC_ORG_URL
-    assert manifest["github_access"] == "private"
-    assert manifest["try_it"]["repository"] == PUBLIC_ORG_URL
-    assert manifest["try_it"]["repository_access"] == "private"
+    assert manifest["github"] == PUBLIC_REPO_URL
+    assert manifest["github_access"] == "public"
+    assert manifest["try_it"]["repository"] == PUBLIC_REPO_URL
+    assert manifest["try_it"]["repository_access"] == "public"
 
-    # The shared footer links the public org page, never a private repo.
+    # The shared footer still links the organization page.
     footer = (SITE / "partials" / "footer.html").read_text(encoding="utf-8")
     assert PUBLIC_ORG_URL in footer
-    for private_url in PRIVATE_REPO_URLS:
-        assert private_url not in footer
+    assert OLD_REPO_URL not in footer
 
 
 OWN_GITHUB_OWNERS = ("petrefiedthunder", "agentmiddleware")
 
 
-def _github_url_is_public_org(url: str) -> bool:
-    """Our own GitHub links must be the public org page, never a private repo.
-
-    Third-party repositories (for example named alternatives on /compare/)
-    are public and out of scope.
-    """
+def _github_url_uses_current_owner(url: str) -> bool:
+    """Our own GitHub links use the current organization, not the old owner."""
     url = url.rstrip(".,;:")
     path = url[len("https://github.com") :].strip("/")
     owner = path.split("/", 1)[0].casefold() if path else ""
     if owner not in OWN_GITHUB_OWNERS:
         return True
-    if url.rstrip("/") == PUBLIC_ORG_URL:
-        return True
-    if owner != "agentmiddleware":
-        return False
-    return not any(
-        url.casefold().startswith(private.casefold()) for private in PRIVATE_REPO_URLS
-    )
+    return owner == "agentmiddleware"
 
 
-def test_built_site_github_links_point_only_at_public_org(tmp_path) -> None:
-    """Every link to our own GitHub must resolve for a stranger.
-
-    Only the public org page qualifies today. site/concept/ is archived and
-    excluded; third-party repositories are allowed.
-    """
+def test_built_site_github_links_use_current_owner(tmp_path) -> None:
+    """Published links avoid the old owner; third-party links are allowed."""
     output = tmp_path / "site"
     result = _render_site(output, VALID_TEST_CONTACTS)
     assert result.returncode == 0, result.stderr
@@ -713,7 +683,7 @@ def test_built_site_github_links_point_only_at_public_org(tmp_path) -> None:
         content = path.read_text(encoding="utf-8", errors="replace")
         for url in GITHUB_URL_PATTERN.findall(content):
             checked += 1
-            if not _github_url_is_public_org(url):
+            if not _github_url_uses_current_owner(url):
                 offenders.append(f"{relative}: {url}")
     assert checked > 0, "expected at least the footer GitHub link"
     assert offenders == []
