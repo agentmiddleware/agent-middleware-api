@@ -16,7 +16,26 @@ from fastapi import HTTPException, status
 
 from app.core.auth import AuthContext
 
+#: Scope names the login endpoint (POST /v1/auth/token) may mint into a
+#: token. Requested names outside this set are dropped at mint time, so a
+#: caller cannot self-mint a permission that a scope-checked route would
+#: later trust. Extend this set when a new scope-checked route ships.
+ALLOWED_TOKEN_SCOPES = frozenset({"billing:charge", "tool:invoke"})
+
 F = TypeVar("F", bound=Callable)
+
+
+def intersect_token_scopes(requested: list[str]) -> list[str]:
+    """Limit requested scopes to ALLOWED_TOKEN_SCOPES, keeping order.
+
+    Unknown names are dropped (not rejected), and duplicates collapse, so
+    the minted token carries only permissions the service itself grants.
+    """
+    kept: list[str] = []
+    for scope in requested:
+        if scope in ALLOWED_TOKEN_SCOPES and scope not in kept:
+            kept.append(scope)
+    return kept
 
 
 def require_scope(*required_scopes: str) -> Callable[[F], F]:

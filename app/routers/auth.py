@@ -13,6 +13,7 @@ from sqlalchemy import select, update
 from sqlmodel import col
 
 from app.core.jwt import JWTError, get_jwt_service
+from app.core.scopes import intersect_token_scopes
 from app.db.database import get_session_factory
 from app.db.models import RefreshTokenModel
 from app.schemas.auth import (
@@ -54,8 +55,10 @@ async def exchange_api_key_for_tokens(
 
     jwt_svc = get_jwt_service()
 
-    # Default scopes: all billing and tool invoke
-    scopes = (
+    # Default scopes: all billing and tool invoke. Requested names are
+    # intersected with the allowlist so callers cannot self-mint
+    # permissions a scope-checked route would later trust.
+    scopes = intersect_token_scopes(
         request.scopes
         if request.scopes is not None
         else ["billing:charge", "tool:invoke"]
@@ -196,15 +199,15 @@ async def refresh_access_token(
             },
         )
 
-    # Issue new tokens
+    # Issue new tokens. Re-apply the allowlist so refresh tokens minted
+    # before scope filtering cannot reintroduce invented names.
+    scopes = intersect_token_scopes(payload.scopes)
     new_access = jwt_svc.create_access_token(
         wallet_id=payload.sub,
         key_id=origin_key_id,
-        scopes=payload.scopes,
+        scopes=scopes,
     )
-    new_refresh = jwt_svc.create_refresh_token(
-        wallet_id=payload.sub, scopes=payload.scopes
-    )
+    new_refresh = jwt_svc.create_refresh_token(wallet_id=payload.sub, scopes=scopes)
 
     # Store new refresh token, carrying the binding forward so rotation cannot
     # launder a chain into an unbound one.

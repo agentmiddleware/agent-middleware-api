@@ -52,14 +52,15 @@ async def exchange(client, key, scopes):
     return response.json()
 
 
-@pytest.mark.parametrize("scopes", [["billing:read"], [], ["custom:read"]])
+@pytest.mark.parametrize("scopes", [["billing:charge"], [], ["tool:invoke"]])
 async def test_refresh_preserves_requested_scopes(client, scopes):
     key = await seed("qa_refresh_scope")
     tokens = await exchange(client, key, scopes)
     before = await client.get(
         "/guarded", headers={"Authorization": "Bearer " + tokens["access_token"]}
     )
-    assert before.status_code == 403
+    # /guarded requires billing:charge; anything else is denied.
+    assert before.status_code == (200 if "billing:charge" in scopes else 403)
     refreshed = await client.post(
         "/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
     )
