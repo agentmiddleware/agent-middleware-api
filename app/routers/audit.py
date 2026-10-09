@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Read only HTTP routes for control plane audit evidence.
 
 This module exposes audit event listing, audit summaries, and audit chain
@@ -8,6 +6,8 @@ elsewhere. Key invariants: a wallet scoped caller can only read events for
 its own wallet, cross wallet reads need a bootstrap admin caller, and
 summaries are computed over the same scoped rows as the matching list query.
 """
+
+from __future__ import annotations
 
 from dataclasses import asdict
 from datetime import datetime

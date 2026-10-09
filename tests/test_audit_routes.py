@@ -487,3 +487,11 @@ async def test_wallet_key_aggregated_summaries_stay_scoped_to_its_wallet(
 
     unauthenticated = await client.get("/v1/audit/summary")
     assert unauthenticated.status_code in (401, 403)
+
+
+def test_audit_router_docstrings_are_present():
+    assert audit_router.__doc__ is not None
+    assert "Read only" in audit_router.__doc__
+    assert audit_router.get_audit_events.__doc__ is not None
+    assert audit_router.get_audit_summary.__doc__ is not None
+    assert audit_router.verify_chain.__doc__ is not None
