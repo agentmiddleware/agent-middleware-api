@@ -48,8 +48,12 @@ def downgrade():
                 "LOCK TABLE permits, receipts, idempotency_records IN ACCESS EXCLUSIVE MODE"
             )
         )
-    elif connection.dialect.name == "sqlite":
-        connection.execute(sa.text("BEGIN IMMEDIATE"))
+    # No lock step on SQLite. Alembic runs SQLite migrations outside a
+    # tracked transaction, so a raw BEGIN IMMEDIATE here opens an untracked
+    # driver-level transaction: it nests and fails wherever a transaction is
+    # already open, and leaves the commit to accident. SQLite serializes
+    # writers, and the batch-table rebuild below carries the change, which
+    # matches migration 027 (lock on PostgreSQL only).
     for table in ("permits", "receipts"):
         predicate = " OR ".join(f"{name} IS NOT NULL" for name in _FIELDS)
         if connection.execute(
