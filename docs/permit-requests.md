@@ -51,7 +51,10 @@ notification email renders from the same template
 (`app/services/approval_card.py`), so the two surfaces cannot show different
 terms for one decision. Both are read-only disclosures: **approve/reject
 happens in Sentinel**, whose magic link is the card's primary action when the
-create response carried one.
+create response carried one. Only an absolute `https://` link is kept; any
+other scheme (`javascript:`, `data:`, plain `http:`, relative) is dropped and
+logged as `sentinel_approval_url_rejected`, and the card falls back to
+pointing the approver at the Sentinel notification.
 
 The card is authorized like the request itself (issuer wallet, subject wallet,
 or bootstrap admin) and served `no-store`, `X-Robots-Tag: noindex`.
@@ -109,7 +112,7 @@ without paging a human or minting anything as a side effect of looking.
 | `SENTINEL_APPROVERS` | empty | Comma-separated; email entries also get the card |
 | `SENTINEL_RISK_LEVEL` | `high` | Forwarded on the approval request |
 | `PERMIT_REQUEST_TIMEOUT_SECONDS` | `3600` | Local decision window (60..86400) |
-| `RESEND_API_KEY` / `ALERT_FROM_EMAIL` | empty | Optional card email delivery |
+| `RESEND_API_KEY` / `ALERT_FROM_EMAIL` | empty | Optional card email delivery; set both, with a sender address you control |
 
 ## Fail-closed rules
 

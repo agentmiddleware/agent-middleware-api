@@ -1015,7 +1015,10 @@ def test_race_money_integrity_tolerates_reserve_leading_the_debit() -> None:
     # lost the lock race, so only two debits/two successes are visible. Reserve
     # and debit are separate transactions and the reservation heals only
     # downward, so spent legitimately leads the ledger here.
-    assert _race_violations(spent=Decimal("6"), debits=2, visible_successes=2, tool_runs=2) == []
+    assert (
+        _race_violations(spent=Decimal("6"), debits=2, visible_successes=2, tool_runs=2)
+        == []
+    )
 
 
 def test_race_money_integrity_tolerates_charge_hidden_as_transient() -> None:
@@ -1043,7 +1046,9 @@ def test_race_money_integrity_flags_overspend_by_one_debit() -> None:
 def test_race_money_integrity_flags_phantom_success_without_a_charge() -> None:
     # A client told "success" for a call that never committed a debit — the
     # dangerous direction the <= bound must still catch.
-    violations = _race_violations(spent=Decimal("4"), debits=2, visible_successes=3, tool_runs=2)
+    violations = _race_violations(
+        spent=Decimal("4"), debits=2, visible_successes=3, tool_runs=2
+    )
     assert any("phantom success" in v for v in violations)
 
 

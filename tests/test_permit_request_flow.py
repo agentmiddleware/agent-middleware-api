@@ -19,6 +19,7 @@ Covers the contract of request -> notify -> approve -> mint -> poll:
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -339,9 +340,9 @@ async def test_decision_after_local_expiry_is_not_honored(
     factory = get_session_factory()
     async with factory() as session:
         model = await session.get(PermitRequestModel, request_id)
-        model.expires_at = datetime.now(timezone.utc).replace(
-            tzinfo=None
-        ) - timedelta(seconds=1)
+        model.expires_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+            seconds=1
+        )
         session.add(model)
         await session.commit()
 
@@ -415,8 +416,14 @@ async def test_approved_request_mints_stored_terms_not_polled_terms(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("approval_window_elapsed", [False, True])
 async def test_interrupted_mint_is_resumed_without_double_minting(
-    client, clean_database, monkeypatch, sentinel, fresh_service
+    client,
+    clean_database,
+    monkeypatch,
+    sentinel,
+    fresh_service,
+    approval_window_elapsed,
 ):
     _sentinel_env(monkeypatch, simulated=False)
     agent = await provision_agent_wallet(client)
@@ -431,6 +438,10 @@ async def test_interrupted_mint_is_resumed_without_double_minting(
         model.decided_by = "issuer@example.com"
         model.decided_at = stale
         model.mint_started_at = stale
+        if approval_window_elapsed:
+            # The claim was valid when acquired; recovering it after the
+            # approval window closes must not discard already granted authority.
+            model.expires_at = stale + timedelta(seconds=300)
         session.add(model)
         await session.commit()
 
@@ -483,9 +494,7 @@ async def test_mint_failure_is_terminal_with_a_reason(
     """A human approved terms the wallet can no longer support."""
     _sentinel_env(monkeypatch, simulated=False)
     agent = await provision_agent_wallet(client)
-    request_id = (
-        await _request(client, agent, max_credits=900)
-    ).json()["request_id"]
+    request_id = (await _request(client, agent, max_credits=900)).json()["request_id"]
 
     # Drain the subject wallet below the approved budget.
     factory = get_session_factory()
@@ -522,9 +531,7 @@ async def test_sentinel_outage_on_create_is_retryable(
     # Nothing was banked, so the same key works once Sentinel recovers.
     factory = get_session_factory()
     async with factory() as session:
-        assert (
-            await session.execute(select(PermitRequestModel))
-        ).scalars().all() == []
+        assert (await session.execute(select(PermitRequestModel))).scalars().all() == []
 
     sentinel.fail_with = None
     recovered = await _request(client, agent, idem="preq-retry")
@@ -620,6 +627,66 @@ async def test_approval_card_page_shows_the_reviewed_terms(
     assert denied.status_code == 403
 
 
+class _RecordingNotifications:
+    def __init__(self) -> None:
+        self.sent: list[dict] = []
+
+    async def send_email(self, **kwargs) -> None:
+        self.sent.append(kwargs)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "approval_url",
+    [
+        "javascript:alert(document.domain)",
+        " JaVaScRiPt:alert(1)",
+        "data:text/html,<script>alert(1)</script>",
+        "http://sentinel.test/a/abc123",
+    ],
+)
+async def test_non_https_sentinel_approval_url_is_not_stored_or_linked(
+    client, clean_database, monkeypatch, sentinel, approval_url
+):
+    import app.services.notifications as notifications_module
+
+    settings = _sentinel_env(monkeypatch, simulated=False)
+    monkeypatch.setattr(settings, "SENTINEL_APPROVERS", "approver@example.com")
+    mailer = _RecordingNotifications()
+    monkeypatch.setattr(
+        notifications_module, "get_notification_service", lambda: mailer
+    )
+    sentinel.approval_url = approval_url
+    agent = await provision_agent_wallet(client)
+    created = await _request(client, agent)
+    assert created.status_code == 202
+    request_id = created.json()["request_id"]
+
+    # The Sentinel response is not trusted to choose the link scheme: the
+    # row keeps no URL, so neither surface can turn it into a clickable link.
+    assert (await _load(request_id)).approval_url is None
+
+    assert len(mailer.sent) == 1
+    email = mailer.sent[0]
+    for rendered in (email["html"], email["body"]):
+        assert approval_url.strip() not in rendered
+        assert "<a " not in rendered
+    assert "Approve or reject from the Sentinel" in email["html"]
+
+    card = await client.get(
+        f"/v1/permit-requests/{request_id}/card", headers=agent["agent_headers"]
+    )
+    assert card.status_code == 200
+    assert approval_url.strip() not in card.text
+    assert "<a " not in card.text
+
+    stranger = await provision_agent_wallet(client)
+    denied = await client.get(
+        f"/v1/permit-requests/{request_id}/card", headers=stranger["agent_headers"]
+    )
+    assert denied.status_code == 403
+
+
 @pytest.mark.asyncio
 async def test_request_hash_binds_every_reviewed_term(
     client, clean_database, monkeypatch, sentinel
@@ -653,9 +720,9 @@ async def test_requested_gate_flag_rides_onto_the_minted_permit(
 ):
     _sentinel_env(monkeypatch, simulated=False)
     agent = await provision_agent_wallet(client)
-    request_id = (
-        await _request(client, agent, requires_human_approval=True)
-    ).json()["request_id"]
+    request_id = (await _request(client, agent, requires_human_approval=True)).json()[
+        "request_id"
+    ]
 
     sentinel.status = "approved"
     resp = await client.get(
@@ -715,7 +782,7 @@ async def test_tampered_request_terms_cannot_mint_after_approval(
     client, clean_database, monkeypatch, sentinel
 ):
     """An attacker who modifies the stored terms after approval cannot escalate authority.
-    
+
     The minted permit must carry exactly the terms the human reviewed. If the stored
     terms are tampered with between approval and mint, the integrity check must fail
     and no permit may be issued.
@@ -758,7 +825,7 @@ async def test_agent_cannot_escalate_via_poll_body_injection(
     client, clean_database, monkeypatch, sentinel
 ):
     """An agent cannot escalate by injecting wider terms into the poll request.
-    
+
     The poll endpoint takes no body — only the request_id path parameter. Even
     if an attacker tried to inject terms via headers or query params, minting
     reads from the stored row, not from the poll request.
@@ -791,7 +858,7 @@ async def test_coherent_tampering_of_terms_and_hash_fails_anchor_check(
     client, clean_database, monkeypatch, sentinel
 ):
     """An attacker who tampers with both terms AND request_hash cannot mint.
-    
+
     Even if an attacker recomputes request_hash to match the tampered terms,
     the original_request_hash anchor detects the coherent tampering and refuses
     to mint.
@@ -810,6 +877,7 @@ async def test_coherent_tampering_of_terms_and_hash_fails_anchor_check(
         model.max_credits = escalated_credits
         # Attacker recomputes the hash to match the new terms.
         from app.services.permit_requests import permit_request_hash
+
         model.request_hash = permit_request_hash(
             issuer_wallet_id=model.issuer_wallet_id,
             subject_wallet_id=model.subject_wallet_id,
@@ -840,5 +908,209 @@ async def test_coherent_tampering_of_terms_and_hash_fails_anchor_check(
     async with factory() as session:
         from sqlalchemy import select
         from app.db.models import PermitModel
+
         assert (await session.execute(select(PermitModel))).scalars().all() == []
 
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "max_credits",
+    ["1.123456789", "0.000000001", "1000000000000", "100000000000.12345678"],
+)
+async def test_request_max_credits_outside_storage_scale_is_refused(
+    client, clean_database, monkeypatch, sentinel, max_credits
+):
+    """permit_requests.max_credits is Numeric(20, 8), like the permit it mints.
+
+    A 9-decimal ask was hashed for the human at full precision, then stored
+    rounded, so the approved request failed its own integrity check at mint;
+    0.000000001 passed the ``> 0`` guard and was stored as zero. Both are a
+    422 now, before a row is written or a human is paged.
+    """
+    _sentinel_env(monkeypatch, simulated=False)
+    agent = await provision_agent_wallet(client)
+
+    resp = await _request(client, agent, idem="preq-scale", max_credits=max_credits)
+    assert resp.status_code == 422, resp.text
+    assert sentinel.created == []
+    factory = get_session_factory()
+    async with factory() as session:
+        rows = (await session.execute(select(PermitRequestModel))).scalars().all()
+        assert rows == []
+
+
+@pytest.mark.asyncio
+async def test_request_at_full_storage_scale_mints_a_verifiable_permit(
+    client, clean_database, monkeypatch, sentinel
+):
+    _sentinel_env(monkeypatch, simulated=True)
+    monkeypatch.setattr(get_settings(), "ENVIRONMENT", "development")
+    agent = await provision_agent_wallet(client)
+
+    resp = await _request(client, agent, idem="preq-scale-ok", max_credits="1.12345678")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["status"] == "approved", body
+    permit = body["permit"]
+    assert Decimal(str(permit["max_credits"])) == Decimal("1.12345678")
+
+    verify = await client.post(
+        "/v1/permits/verify",
+        json={
+            "permit_id": permit["permit_id"],
+            "wallet_id": agent["agent_wallet_id"],
+            "tool": TOOLS[0],
+            "estimated_credits": "1",
+        },
+        headers=agent["agent_headers"],
+    )
+    assert verify.status_code == 200
+    assert verify.json()["valid"] is True, verify.json()
+
+
+@pytest.mark.anyio
+async def test_malformed_sentinel_response_never_logs_the_approval_url(
+    client, clean_database, monkeypatch, sentinel, caplog
+):
+    """A malformed create response is logged by shape, never by value.
+
+    The response may still carry approval_url, a magic-link credential, so
+    the error log names only the payload's keys.
+    """
+    _sentinel_env(monkeypatch, simulated=False)
+    token = "SENTINEL-MAGIC-LINK-TOKEN-7f3a"
+
+    async def malformed_create(**kwargs):
+        return {"status": "pending", "approval_url": f"https://sentinel.test/a/{token}"}
+
+    monkeypatch.setattr(sentinel, "create_approval", malformed_create)
+    agent = await provision_agent_wallet(client)
+    with caplog.at_level(logging.ERROR, logger="app.services.permit_requests"):
+        created = await _request(client, agent)
+    assert created.status_code == 503, created.text
+    assert "sentinel_permit_request_malformed" in caplog.text
+    assert "approval_url" in caplog.text
+    assert token not in caplog.text
+    assert "sentinel.test" not in caplog.text
+
+
+class IdempotentSentinel(FakeSentinel):
+    """Reuse a provider action on the documented Idempotency-Key boundary."""
+
+    def __init__(self):
+        super().__init__()
+        self.actions = {}
+        self.decisions = {}
+        self.lose_response_once = False
+
+    async def create_approval(self, **kwargs):
+        key = kwargs["idempotency_key"]
+        if key not in self.actions:
+            self.actions[key] = await super().create_approval(**kwargs)
+            self.decisions[self.actions[key]["action_id"]] = "pending"
+        if self.lose_response_once:
+            self.lose_response_once = False
+            raise httpx.ReadTimeout("synthetic lost approval-create response")
+        return self.actions[key]
+
+    async def get_approval(self, action_id):
+        return {"action_id": action_id, "status": self.decisions[action_id]}
+
+
+@pytest.mark.asyncio
+async def test_new_client_key_needs_distinct_human_approval(
+    client, clean_database, monkeypatch, fresh_service
+):
+    _sentinel_env(monkeypatch, simulated=False)
+    provider = IdempotentSentinel()
+    monkeypatch.setattr(fresh_service, "_sentinel", lambda: provider)
+    agent = await provision_agent_wallet(client)
+    first = await _request(client, agent, idem="first-ask")
+    assert first.status_code == 202
+    first_model = await _load(first.json()["request_id"])
+    provider.decisions[first_model.sentinel_action_id] = "approved"
+    approved = await client.get(
+        f"/v1/permit-requests/{first_model.request_id}", headers=agent["agent_headers"]
+    )
+    assert approved.json()["status"] == "approved"
+
+    second = await _request(client, agent, idem="second-ask")
+    assert second.status_code == 202
+    second_model = await _load(second.json()["request_id"])
+    assert second_model.sentinel_action_id != first_model.sentinel_action_id
+    assert len(provider.actions) == 2
+    still_pending = await client.get(
+        f"/v1/permit-requests/{second_model.request_id}", headers=agent["agent_headers"]
+    )
+    assert still_pending.json()["status"] == "pending"
+    async with get_session_factory()() as session:
+        assert len((await session.execute(select(PermitModel))).scalars().all()) == 1
+
+
+@pytest.mark.asyncio
+async def test_remote_created_but_response_lost_reuses_approval_on_retry(
+    client, clean_database, monkeypatch, fresh_service
+):
+    _sentinel_env(monkeypatch, simulated=False)
+    provider = IdempotentSentinel()
+    provider.lose_response_once = True
+    monkeypatch.setattr(fresh_service, "_sentinel", lambda: provider)
+    agent = await provision_agent_wallet(client)
+    first = await _request(client, agent, idem="lost-create")
+    assert first.status_code == 503
+    async with get_session_factory()() as session:
+        assert not (await session.execute(select(PermitRequestModel))).scalars().all()
+    retry = await _request(client, agent, idem="lost-create")
+    assert retry.status_code == 202
+    assert len(provider.actions) == 1
+    model = await _load(retry.json()["request_id"])
+    assert (
+        model.sentinel_action_id == next(iter(provider.actions.values()))["action_id"]
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("decision", ["approved", "rejected", "pending"])
+async def test_provider_poll_crossing_deadline_expires_without_minting(
+    client, clean_database, monkeypatch, sentinel, decision
+):
+    _sentinel_env(monkeypatch, simulated=False)
+    agent = await provision_agent_wallet(client)
+    response = await _request(client, agent, idem="deadline-poll")
+    model = await _load(response.json()["request_id"])
+
+    async def late_decision(action_id):
+        monkeypatch.setattr(
+            permit_requests_module,
+            "utc_now",
+            lambda: model.expires_at + timedelta(seconds=1),
+        )
+        return {"action_id": action_id, "status": decision}
+
+    monkeypatch.setattr(sentinel, "get_approval", late_decision)
+    result = await client.get(
+        f"/v1/permit-requests/{model.request_id}", headers=agent["agent_headers"]
+    )
+    assert result.json()["status"] == "expired"
+    assert result.json()["reason"] == "approval_window_elapsed"
+    assert result.json()["permit_id"] is None
+    async with get_session_factory()() as session:
+        assert not (await session.execute(select(PermitModel))).scalars().all()
+
+
+@pytest.mark.asyncio
+async def test_mint_claim_checks_persisted_deadline_with_stale_pending_model(
+    client, clean_database, monkeypatch, sentinel, fresh_service
+):
+    _sentinel_env(monkeypatch, simulated=False)
+    agent = await provision_agent_wallet(client)
+    response = await _request(client, agent, idem="deadline-claim")
+    stale = await _load(response.json()["request_id"])
+    async with get_session_factory()() as session:
+        model = await session.get(PermitRequestModel, stale.request_id)
+        model.expires_at = permit_requests_module.utc_now() - timedelta(seconds=1)
+        await session.commit()
+    result = await fresh_service._decide(stale, "approved")
+    assert result.status == "expired"
+    async with get_session_factory()() as session:
+        assert not (await session.execute(select(PermitModel))).scalars().all()

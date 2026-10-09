@@ -2,7 +2,7 @@ name: CI — Agent Middleware API
 
 on:
   push:
-    branches: [master, main, develop, openclaw/amw-schema040-bridge]
+    branches: [master, main, develop, openclaw/amw-schema040-bridge, hotfix/redis-health-34fbdb9]
   pull_request:
     branches: [master, main]
 
@@ -366,10 +366,13 @@ jobs:
         # DATABASE_URL controls the shared application fixtures. TEST_POSTGRES_URL
         # alone only selects the dedicated datetime regression fixture below.
         # Keep asyncpg's connection pool on one event loop across this suite.
+        # The rapid-fire accounting test skips on SQLite; REQUIRE_POSTGRES_TESTS
+        # makes it fail here instead if this step ever loses its Postgres URL.
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/trust_ci
           STATE_BACKEND: postgres
           ENVIRONMENT: test
+          REQUIRE_POSTGRES_TESTS: "1"
         run: |
           pytest -p no:anyio \
             -o asyncio_default_fixture_loop_scope=session \
@@ -380,6 +383,7 @@ jobs:
             tests/test_audit_chain.py \
             tests/test_key_management.py \
             tests/test_idempotency.py \
+            tests/test_security_fuzz_battery.py::test_rapid_fire_invokes_all_accounted \
             -v --tb=short
 
       - name: Run PostgreSQL datetime regressions
@@ -408,6 +412,20 @@ jobs:
             tests/test_wallet_status_enforcement.py::test_unknown_wallet_status_fails_closed_for_charge \
             tests/test_governed_debit_dispatch_fence.py::test_freeze_notification_observes_committed_governed_state \
             -q --tb=short
+
+      - name: Run permit row-lock concurrency against Postgres
+        # The dedicated postgres_permit_concurrency job runs this file too;
+        # this step keeps the required postgres_trust job honest as well.
+        # REQUIRE_POSTGRES_CONCURRENCY_TESTS turns the file's opt-in skip
+        # into a failure, so a lost DATABASE_URL or flag goes red instead
+        # of passing by skipping the only proof this step was added for.
+        # Migrations for this database were applied above; this suite only
+        # inserts and deletes its own uuid-suffixed rows.
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/trust_ci
+          RUN_POSTGRES_CONCURRENCY_TESTS: "1"
+          REQUIRE_POSTGRES_CONCURRENCY_TESTS: "1"
+        run: pytest tests/test_permit_postgres_concurrency.py -v --tb=short
 
   # Production-like trust flags (default conftest stays permissive for unit speed).
   production_trust:
@@ -495,6 +513,7 @@ jobs:
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/agent_middleware_permit_test
           RUN_POSTGRES_CONCURRENCY_TESTS: "1"
+          REQUIRE_POSTGRES_CONCURRENCY_TESTS: "1"
         run: |
           pytest tests/test_permit_postgres_concurrency.py -v --tb=short
           pytest tests/test_duplicate_guard_postgres_concurrency.py -v --tb=short

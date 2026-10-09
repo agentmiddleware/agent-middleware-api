@@ -35,10 +35,7 @@ STATIC_HEADERS = {
 # JSON and every non-HTML response: browsers should not execute anything here.
 # frame-ancestors 'self' matches X-Frame-Options: SAMEORIGIN.
 API_CSP = (
-    "default-src 'none'; "
-    "frame-ancestors 'self'; "
-    "base-uri 'none'; "
-    "form-action 'none'"
+    "default-src 'none'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'"
 )
 
 # Dashboard and permit-request cards: inline CSS, data: icons, no scripts.

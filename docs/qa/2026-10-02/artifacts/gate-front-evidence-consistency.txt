@@ -1,0 +1,101 @@
+FILE frontend-component-contract-gate-rerun.txt
+ERR_ASSERTION]: Declared npm run build must succeed
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api/docs/qa/2026-10-02/frontend-components.test.cjs:140:10)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at docs/qa/2026-10-02/frontend-components.test.cjs:145:1
+⚠ FE-002: maxSteps=0 is not silently promoted to 100 actions (9.580708ms) # FE-002: preserve invalid zero for API rejection or reject locally
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  100 !== 0
+  
+      at TestContext.<anonymous> (/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api/docs/qa/2026-10-02/frontend-components.test.cjs:149:10)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 100,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+FILE frontend-component-contract-final.txt
+ERR_ASSERTION]: Declared npm run build must succeed
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api/docs/qa/2026-10-02/frontend-components.test.cjs:140:10)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at docs/qa/2026-10-02/frontend-components.test.cjs:145:1
+⚠ FE-002: maxSteps=0 is not silently promoted to 100 actions (9.868292ms) # FE-002: preserve invalid zero for API rejection or reject locally
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  100 !== 0
+  
+      at TestContext.<anonymous> (/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api/docs/qa/2026-10-02/frontend-components.test.cjs:149:10)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 100,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+FILE frontend-browser-engine-outcomes.txt
+- [pid=24308] <skipped force kill spawnedProcess.killed=false processClosed=true>[22m
+[2m  - [pid=24308] finished temporary directories cleanup[22m
+[2m  - [pid=24308] <gracefully close end>[22m
+
+webkit Error: browserType.launch: Target page, context or browser has been closed
+Browser logs:
+
+<launching> /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh --inspector-pipe --headless --no-startup-window
+<launched> pid=24833
+[pid=24833][err] /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh: line 7: 24840 Abort trap: 6              DYLD_FRAMEWORK_PATH="$DYLIB_PATH" DYLD_LIBRARY_PATH="$DYLIB_PATH" "$PLAYWRIGHT" "$@"
+Call log:
+[2m  - <launching> /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh --inspector-pipe --headless --no-startup-window[22m
+[2m  - <launched> pid=24833[22m
+[2m  - [pid=24833][err] /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh: line 7: 24840 Abort trap: 6              DYLD_FRAMEWORK_PATH="$DYLIB_PATH" DYLD_LIBRARY_PATH="$DYLIB_PATH" "$PLAYWRIGHT" "$@"[22m
+[2m  - [pid=24833] <gracefully close start>[22m
+[2m  - [pid=24833] <kill>[22m
+[2m  - [pid=24833] <will force kill>[22m
+[2m  - [pid=24833] exception while trying to kill process: Error: kill EPERM[22m
+[2m  - [pid=24833] <process did exit: exitCode=134, signal=null>[22m
+[2m  - [pid=24833] starting temporary directories cleanup[22m
+[2m  - [pid=24833] finished temporary directories cleanup[22m
+[2m  - [pid=24833] <gracefully close end>[22m
+
+
+COVERAGE FILES ['backend-baseline-coverage.json']
+BROWSER STATS {'startTime': '2026-10-03T00:38:04.225Z', 'duration': 16775.043999999998, 'expected': 0, 'skipped': 0, 'unexpected': 24, 'flaky': 0}

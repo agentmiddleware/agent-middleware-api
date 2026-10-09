@@ -1,0 +1,85 @@
+diff --git a/app/core/url_guard.py b/app/core/url_guard.py
+index 8d57e55..6a5bfd4 100644
+--- a/app/core/url_guard.py
++++ b/app/core/url_guard.py
+@@ -44,9 +44,9 @@ def _address_blocked(address: str) -> bool:
+     except ValueError:
+         return False
+     # is_global is False for loopback, RFC1918/ULA, link-local (including
+-    # 169.254.169.254 metadata), CGNAT shared space, multicast, reserved,
+-    # and unspecified addresses.
+-    return not ip.is_global
++    # 169.254.169.254 metadata), CGNAT shared space, reserved, and unspecified
++    # addresses. Multicast needs an explicit check: it can be classified global.
++    return ip.is_multicast or not ip.is_global
+
+
+ async def _resolve_host(host: str):
+diff --git a/app/services/upstream_mcp.py b/app/services/upstream_mcp.py
+index 2f864f8..b97643f 100644
+--- a/app/services/upstream_mcp.py
++++ b/app/services/upstream_mcp.py
+@@ -404,7 +404,7 @@ async def validate_upstream_url(
+             "MCP_UPSTREAM_URL must use https except for loopback local/test servers"
+         )
+     if not loopback_exception and any(
+-        not address.is_global for address in parsed_addresses
++        address.is_multicast or not address.is_global for address in parsed_addresses
+     ):
+         raise UpstreamMcpConfigurationError(
+             "MCP_UPSTREAM_URL must not resolve to private, loopback, link-local, metadata, or reserved addresses"
+diff --git a/tests/test_qa_20261002_backend.py b/tests/test_qa_20261002_backend.py
+index 1459982..9309bae 100644
+--- a/tests/test_qa_20261002_backend.py
++++ b/tests/test_qa_20261002_backend.py
+@@ -144,19 +144,25 @@ async def test_lone_surrogate_replay_key_is_rejected_before_effect_or_debit(
+
+
+ @pytest.mark.parametrize("address", ["224.0.0.1", "239.255.255.250", "ff02::1", "ff05::1"])
+-@pytest.mark.xfail(strict=True, reason="BE-003: is_global alone permits multicast addresses through outbound guards")
+-async def test_outbound_url_guard_rejects_multicast(address, monkeypatch):
++@pytest.mark.parametrize("resolved", [False, True], ids=["literal", "mixed-dns"])
++async def test_outbound_url_guard_rejects_multicast(address, resolved, monkeypatch):
+     from app.core.config import get_settings
+     from app.core.url_guard import check_outbound_url
+
+     monkeypatch.setattr(get_settings(), "ALLOW_PRIVATE_NETWORK_TARGETS", False)
+     host = f"[{address}]" if ":" in address else address
++    if resolved:
++        async def resolve(_host):
++            return [(None, None, None, None, (value, 0)) for value in ("8.8.8.8", address)]
++
++        monkeypatch.setattr("app.core.url_guard._resolve_host", resolve)
++        host = "multicast.example"
+     assert await check_outbound_url(f"http://{host}/") == "private_address_blocked"
+
+
+ @pytest.mark.parametrize("address", ["224.0.0.1", "ff02::1"])
+-@pytest.mark.xfail(strict=True, reason="BE-003: is_global alone permits multicast addresses through upstream guard")
+-async def test_upstream_url_guard_rejects_multicast(address):
++@pytest.mark.parametrize("resolved", [False, True], ids=["literal", "mixed-dns"])
++async def test_upstream_url_guard_rejects_multicast(address, resolved):
+     from decimal import Decimal
+     from app.services.upstream_mcp import (
+         UpstreamMcpConfiguration,
+@@ -165,6 +171,12 @@ async def test_upstream_url_guard_rejects_multicast(address):
+     )
+
+     host = f"[{address}]" if ":" in address else address
++    if resolved:
++        host = "multicast.example"
++
++    async def resolve(_host, _port):
++        return ("8.8.8.8", address)
++
+     configuration = UpstreamMcpConfiguration(
+         url=f"https://{host}/mcp",
+         origin=f"https://{host}",
+@@ -177,5 +189,5 @@ async def test_upstream_url_guard_rejects_multicast(address):
+         max_response_bytes=1024,
+         environment="production",
+     )
+-    with pytest.raises(UpstreamMcpConfigurationError):
+-        await validate_upstream_url(configuration)
++    with pytest.raises(UpstreamMcpConfigurationError, match="must not resolve"):
++        await validate_upstream_url(configuration, resolver=resolve)

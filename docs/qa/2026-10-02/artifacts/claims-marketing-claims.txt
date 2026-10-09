@@ -1,0 +1,157 @@
+FILE WEDGE.md
+1:# Wedge: Replay-safe MCP permits and exactly-once debits
+2:
+3:Agent Middleware API should not initially sell itself as a full platform for
+4:autonomous economic actors. The credible wedge is narrower:
+5:
+6:> Exactly-once gateway authorization, debit, and receipt finalization for
+7:> metered MCP calls.
+8:
+9:Or in one line:
+10:
+11:> Authorize one agent action. Charge it once. Prove what happened.
+12:
+13:Start with the [documentation guide](docs/README.md) for the supported
+14:evaluation, integration, SDK, security, and pilot paths.
+15:
+16:**What "exactly-once" means here, precisely.** It is the distributed-systems
+17:term of art for the *deduplication* guarantee — no duplicate dispatch, no
+18:duplicate debit — not a promise that every accepted call results in a charge.
+19:Two paths produce no net debit at all: a crash before dispatch reconciles to a
+20:refund, and an out-of-scope or over-budget call is denied before money moves.
+21:The enforceable claim is **never a duplicate charge, not always a charge.**
+22:Every precise statement of the guarantee below says "at most one" for that
+23:reason. See [`docs/failure-semantics.md`](docs/failure-semantics.md).
+24:
+25:The core job is to put one enforceable **economic** boundary between autonomous
+26:agents and tools:
+27:
+28:```text
+29:scoped signed permit -> governed MCP invoke -> wallet charge -> signed receipt
+30:-> ledger -> audit chain -> replay no double charge -> out-of-scope denial
+FILE README.md
+120:shares: an agent that restarts with a new key pays twice. Mechanism, report
+121:layout, and limits: [docs/failure-lab.md](docs/failure-lab.md).
+122:
+123:To drive the loop yourself instead of watching it:
+124:
+125:```bash
+126:make quickstart        # boots a real strict-trust server on 127.0.0.1:8000
+127:```
+128:
+129:Then follow [docs/quickstart.md](docs/quickstart.md): mint your own
+130:wallet-scoped key with no operator and no pre-shared secret, issue yourself a
+131:permit, invoke a governed tool, deliberately try to double-charge and overspend,
+132:and finish holding a signed receipt you verified offline. Every step runs in CI
+133:(`make quickstart-check`), so the documented path cannot silently rot.
+134:
+135:`make live-loop-proof` (against a running quickstart) writes a handoff bundle to
+136:`data/live-loop-proof/` — portable receipts, the issuer key set, and a
+137:`VERIFY.md` another engineer can follow with no account and no network access to
+138:this server.
+139:
+140:## What it guarantees
+141:
+142:| Guarantee | What it means | Proof |
+143:|---|---|---|
+144:| **Charge-once under retry** | Same idempotency key → same receipt, no second dispatch, no second debit. A changed payload under that key conflicts. | `tests/test_adversarial_five_claims.py` |
+145:| **Budget containment** | A permit's `max_credits` is reserved by one atomic guarded `UPDATE`; concurrent invocations cannot over-spend it, including on SQLite. | `tests/test_permits.py`, `postgres_permit_concurrency` CI job |
+146:| **Interrupted-call accounting** | For the configured upstream tool, one persisted chain links the idempotency record, reservation, debit, dispatch attempt, receipt, and audit event. Ambiguity after the send claim is receipted `delivery_uncertain`, never silently redispatched. Local governed tools have no dispatch state machine and fail closed into manual review. | [docs/failure-semantics.md](docs/failure-semantics.md) |
+147:| **Offline-verifiable receipts** | Ed25519-signed; verifiable with no credentials and no network access to the issuer, using the SDK verifier or any JOSE tooling. | `GET /v1/receipts/{id}/portable`, `/.well-known/jwks.json` |
+148:| **Authority before money** | Out-of-scope, expired, revoked, or tampered permits are denied with a reason code *before* any charge. When a valid permit was present, that refusal is itself a signed receipt. Unpermitted and unknown-tool calls fail closed without one. | `tests/test_adversarial_five_claims.py` |
+149:
+150:CI runs the full release gate as one required check (`trust_release_gate`), so
+151:these claims cannot regress into `main` unproven.
+152:[docs/PROOF_MATRIX.md](docs/PROOF_MATRIX.md) maps every proof command to the
+153:invariant it asserts — and to what it does not prove.
+154:
+155:## What it does not do
+156:
+157:- **Not universal exactly-once.** Gateway replay safety makes the *remote* side
+158:  effect exactly once only if the upstream tool also honors the forwarded
+159:  idempotency key.
+160:- **Not proof of downstream effect.** The dispatch claim is committed *before*
+161:  the network send, so it records the authority to send — not that a send
+162:  happened, and never that the tool acted.
+163:- **Not settlement or compliance.** An internal credit ledger, not merchant
+164:  settlement, dispute handling, or a certified compliance record.
+165:- **Not an IAM replacement.** Wallet isolation is application-layer
+166:  authorization and query scoping; PostgreSQL RLS and a public multi-tenant
+FILE ELEVATOR_PITCH.md
+58:agent invoke. If the call times out, can you tell whether the gateway dispatched
+59:it, whether a retry creates another debit, who authorized the economic exposure,
+60:and what evidence survives afterward? Existing IAM, gateway, or logging controls
+61:may already be sufficient; the first conversation must establish that they are
+62:not before this product is proposed.
+63:
+64:**The wedge.** Not a general MCP gateway, and not payments. The narrow,
+65:differentiating primitive is **exactly-once economic authorization at the
+66:gateway boundary**:
+67:
+68:```text
+69:scoped signed permit -> governed MCP invoke -> wallet charge -> signed receipt
+70:-> ledger -> audit chain -> replay no double charge -> out-of-scope denial
+71:```
+72:
+73:**What that buys you.**
+74:
+75:- **Budgets that bind.** Decimal wallet balances with row-locked debits. Final
+76:  permit checks and budget reservation happen while the permit row is locked,
+108:
+109:## Positioning in one table
+110:
+111:| Nearby category | Their center of gravity | Our difference |
+112:|---|---|---|
+113:| MCP trust gateways | Policy and evidence | Wallet debit plus economic idempotency |
+114:| MCP monetization / pay-per-tool | Payment rails | Internal budgets, no settlement claim |
+115:| Enterprise authz for MCP | Who may call | Meter, receipt, and charge exactly once |
+116:| Agent reliability libraries | Retry safety inside the caller | A boundary the agent cannot route around, and evidence a third party can check |
+117:| Agent audit / compliance layers | Regulatory mapping and exports | The economic consequence, not just the record of the call |
+160:inside the trust boundary, and we say so.)
+161:
+162:**"Does exactly-once really hold across the network?"** For one accepted
+163:idempotency key at our boundary: one gateway dispatch, one debit, one receipt.
+164:A *remote* tool's own side effect is exactly once only if that tool also honors
+165:the forwarded key. Anything broader would overstate the distributed-systems
+166:guarantee.
+167:
+168:**"Why not just use an open-source library?"** If your problem is reliability,
+169:do. A decorator library gives you idempotency, timeouts, and budget caps for
+FILE docs/denial-details.md
+155:or HTTP **409** (from `POST /mcp/tools/{id}/invoke`), with the message
+156:`permit_write_contended`. **Retry with the same idempotency key** — the rollback
+157:freed that record, leaving no persisted reservation or dispatch state, so the
+158:same-key retry runs a fresh compare-and-swap without replaying a denial. A
+159:new-key retry is a separate call: it can dispatch in addition to a retry of the
+160:original key, bounded only by the per-tool call cap when the permit sets
+161:`max_calls_per_tool` (otherwise by the permit's budget and expiry). The cap
+162:bounds the number of calls; it does not deduplicate across keys. The cross-key
+163:duplicate guard (`MCP_UPSTREAM_DUPLICATE_GUARD`, validated at startup to be `off`, `log`, or `enforce`) runs in log-only mode by default
+164:and does not prevent new-key retries. On Postgres, the permit row lock serializes
+165:concurrent reservations, making this contention path practically unreachable; it
+166:remains reachable on SQLite under high concurrency.
+167:
+168:## What details deliberately do not say
+169:
+170:**Binding mismatches carry no values.** A caller that presents a permit bound
+171:to a different wallet or key has not proved it is the subject, so the denial
+172:names the binding that failed (`{"bound_to": "subject_wallet_id"}`) and nothing
+173:about which wallet or key the permit actually belongs to. Everything else in
+174:the table describes the caller's *own* permit, which it can already read at
+175:`GET /v1/permits/{permit_id}`.
+176:
+177:**Forbidden fields echo the name, never the value.** The value is the thing the
+178:permit forbade carrying.
+179:
+180:Reading a denial still requires being authorized for the permit: a foreign
+181:wallet key is refused at `POST /v1/permits/verify` (403) before any verdict is
+182:computed. Details enrich a refusal you were already entitled to see; they do
+183:not widen who can ask.
+184:
+185:## Example
+186:
+187:```json
+188:{
+189:  "detail": {
+190:    "error": "permit_budget_exceeded",
+191:    "receipt": { "outcome": "denied", "...": "..." },

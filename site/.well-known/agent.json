@@ -63,8 +63,8 @@
   ],
   "canonical_api": "https://api.thisisatest.tech",
   "human_site": "https://www.thisisatest.tech/",
-  "github": "https://github.com/PetrefiedThunder/agent-middleware-api",
-  "github_access": "private",
+  "github": "https://github.com/agentmiddleware/agent-middleware-api",
+  "github_access": "public",
   "discovery": {
     "agent_manifest": "https://api.thisisatest.tech/.well-known/agent.json",
     "llm_txt": "https://api.thisisatest.tech/llm.txt",
@@ -83,8 +83,8 @@
   "simulation_and_dependency_truth": "https://api.thisisatest.tech/health/dependencies",
   "try_it": {
     "mode": "local_self_hosted",
-    "repository": "https://github.com/PetrefiedThunder/agent-middleware-api",
-    "repository_access": "private",
+    "repository": "https://github.com/agentmiddleware/agent-middleware-api",
+    "repository_access": "public",
     "command": "make prove-trust-plane",
     "live_access": "operator_issued",
     "requires_live_credentials": false,
@@ -96,7 +96,7 @@
       "out_of_scope_denial",
       "offline_receipt_verification"
     ],
-    "note": "Runs the real FastAPI transaction-integrity path against a throwaway local SQLite database. This is a reproducible proof, not a production or settlement claim. The source repository is private during the design-partner phase and is shared with pilot partners on request. Partners who already have the source need Python 3.11+, git, make, curl, and uv before running the command from the repository root."
+    "note": "Runs the real FastAPI transaction-integrity path against a throwaway local SQLite database. This is a reproducible proof, not a production or settlement claim. The source repository is public and can be cloned to run the proof locally without live API credentials."
   },
   "authentication": {
     "type": "api_key",

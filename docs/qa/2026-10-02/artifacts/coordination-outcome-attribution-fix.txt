@@ -1,0 +1,1 @@
+Command outcomes now name their group-label explicitly. Aggregate SESSION-LOG also annotates old outcome lines from their artifact stem, preserving source group logs and preventing long/parallel command completion ambiguity.

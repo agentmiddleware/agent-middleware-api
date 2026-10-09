@@ -34,8 +34,12 @@ def upgrade() -> None:
         sa.Column("payload_hash", sa.String(length=64), nullable=True),
     )
     op.create_index("ix_optimizer_telemetry_ts", "optimizer_telemetry", ["ts"])
-    op.create_index("ix_optimizer_telemetry_wallet_id", "optimizer_telemetry", ["wallet_id"])
-    op.create_index("ix_optimizer_telemetry_agent_id", "optimizer_telemetry", ["agent_id"])
+    op.create_index(
+        "ix_optimizer_telemetry_wallet_id", "optimizer_telemetry", ["wallet_id"]
+    )
+    op.create_index(
+        "ix_optimizer_telemetry_agent_id", "optimizer_telemetry", ["agent_id"]
+    )
 
 
 def downgrade() -> None:

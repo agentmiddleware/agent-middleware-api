@@ -74,6 +74,7 @@ def _build_signed_permit(
     recipient_domain: str | None = None,
     allow_identical_repeats: bool = False,
     repeat_window_seconds: int | None = None,
+    action_binding: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return (api-shaped permit dict, trust-keys document), genuinely signed.
 
@@ -118,6 +119,7 @@ def _build_signed_permit(
         signing_payload["allow_identical_repeats"] = True
     if repeat_window_seconds is not None:
         signing_payload["repeat_window_seconds"] = repeat_window_seconds
+    signing_payload.update(action_binding or {})
     signing_payload["payload_hash"] = hashlib.sha256(
         _canonical(signing_payload).encode()
     ).hexdigest()
@@ -135,6 +137,7 @@ def _build_signed_permit(
         repeat_window_seconds=repeat_window_seconds,
         signature=base64.b64encode(signature).decode(),
     )
+    permit.update(action_binding or {})
     key_document = {
         "schema_version": "1.0",
         "alg": "Ed25519",
@@ -573,3 +576,58 @@ def test_sdk_permit_validator_rebuilds_new_fields():
     rebuilt = validator.permit_signing_payload(permit)
     assert rebuilt["allow_identical_repeats"] is True
     assert rebuilt["repeat_window_seconds"] == 7200
+
+
+ACTION_BINDING = {
+    "action_contract_version": 1,
+    "action_payload_hash": "a" * 64,
+    "action_schema_id": "partner.search",
+    "action_schema_version": "1",
+    "action_public_tool_id": TOOL,
+    "action_upstream_binding_hash": "b" * 64,
+}
+
+
+def test_action_bound_permit_signature_and_each_field_tamper():
+    permit, keys = _build_signed_permit(action_binding=ACTION_BINDING)
+    assert _validator(permit, keys).verify_permit()
+    for name, value in ACTION_BINDING.items():
+        changed = dict(permit)
+        changed[name] = 2 if isinstance(value, int) else "c" * 64
+        assert not _validator(changed, keys).verify_permit(), name
+        del changed[name]
+        assert not _validator(changed, keys).verify_permit(), name
+    for name in ACTION_BINDING:
+        permit.pop(name)
+    assert not _validator(permit, keys).verify_permit(), "stripping the binding must fail"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("action_contract_version", True),
+        ("action_contract_version", "1"),
+        ("action_contract_version", 1.0),
+        ("action_contract_version", 2),
+        ("action_payload_hash", "A" * 64),
+        ("action_payload_hash", "a" * 63),
+        ("action_upstream_binding_hash", "g" * 64),
+        ("action_schema_id", ""),
+        ("action_schema_version", 1),
+        ("action_public_tool_id", None),
+    ],
+)
+def test_malformed_action_binding_is_rejected_even_with_a_genuine_signature(field, value):
+    # Sign independently: signature validity must not turn a malformed binding
+    # into a supported or legacy permit.
+    binding = {**ACTION_BINDING, field: value}
+    permit, keys = _build_signed_permit(action_binding=binding)
+    assert not _validator(permit, keys).verify_permit()
+
+
+def test_absent_or_null_action_binding_preserves_legacy_signed_bytes():
+    permit, keys = _build_signed_permit()
+    original = LocalPermitValidator.permit_signing_payload(permit)
+    permit.update(dict.fromkeys(ACTION_BINDING))
+    assert LocalPermitValidator.permit_signing_payload(permit) == original
+    assert _validator(permit, keys).verify_permit()

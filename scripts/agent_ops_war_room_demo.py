@@ -293,7 +293,10 @@ async def run_war_room(
             headers=agent_headers,
         )
         _require(
-            any(row["permit_id"] == permit["permit_id"] for row in self_permits["permits"]),
+            any(
+                row["permit_id"] == permit["permit_id"]
+                for row in self_permits["permits"]
+            ),
             f"self permit inspection missed permit: {self_permits}",
         )
         self_receipts = await _get_json(
@@ -302,7 +305,10 @@ async def run_war_room(
             headers=agent_headers,
         )
         _require(
-            any(row["receipt_id"] == receipt["receipt_id"] for row in self_receipts["receipts"]),
+            any(
+                row["receipt_id"] == receipt["receipt_id"]
+                for row in self_receipts["receipts"]
+            ),
             f"self receipt inspection missed receipt: {self_receipts}",
         )
 

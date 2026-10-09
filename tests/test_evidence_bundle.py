@@ -290,8 +290,6 @@ async def test_evidence_bundle_denies_cross_wallet_access(client, clean_database
 async def test_evidence_bundle_requires_authentication(
     client, clean_database, headers, expected_status
 ):
-    resp = await client.get(
-        "/v1/evidence/rcpt-does-not-exist", headers=headers
-    )
+    resp = await client.get("/v1/evidence/rcpt-does-not-exist", headers=headers)
     assert resp.status_code == expected_status, resp.text
     assert resp.status_code != 404, resp.text

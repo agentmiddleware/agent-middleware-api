@@ -1,0 +1,16 @@
+{
+  "mode": "permit",
+  "command": [
+    "/Users/sellers/Projects/agent-middleware-api/.venv/bin/python",
+    "-m",
+    "pytest",
+    "tests/test_permit_postgres_concurrency.py::test_permit_request_lock_wait_crossing_deadline_rolls_back_all_mint_claims",
+    "-x",
+    "-q",
+    "-ra"
+  ],
+  "head": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+  "started": "2026-10-03T03:39:18.731324+00:00",
+  "finished": "2026-10-03T03:39:20.649272+00:00",
+  "exit_code": 0
+}

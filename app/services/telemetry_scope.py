@@ -34,9 +34,11 @@ logger = logging.getLogger(__name__)
 # Pipeline Models
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class TelemetryPipeline:
     """A tenant-scoped telemetry pipeline."""
+
     pipeline_id: str
     tenant_id: str
     service_name: str
@@ -52,6 +54,7 @@ class TelemetryPipeline:
 @dataclass
 class ScopedAnomaly:
     """Anomaly detected in a tenant's telemetry stream."""
+
     anomaly_id: str
     pipeline_id: str
     event_type: str
@@ -65,6 +68,7 @@ class ScopedAnomaly:
 # ---------------------------------------------------------------------------
 # Telemetry Scope Engine
 # ---------------------------------------------------------------------------
+
 
 class TelemetryScope:
     """
@@ -208,9 +212,7 @@ class TelemetryScope:
             raise ValueError(f"Pipeline {pipeline_id} not found")
         return pipeline.anomalies
 
-    async def generate_auto_pr(
-        self, pipeline_id: str, anomaly_id: str
-    ) -> dict:
+    async def generate_auto_pr(self, pipeline_id: str, anomaly_id: str) -> dict:
         """Generate an auto-PR for an anomaly (simulated)."""
         pipeline = self._pipelines.get(pipeline_id)
         if not pipeline:
@@ -278,9 +280,9 @@ class TelemetryScope:
             "total_events": len(events),
             "error_events": error_count,
             "error_rate": round(error_count / len(events), 3) if events else 0,
-            "avg_latency_ms": round(
-                sum(latencies) / len(latencies), 1
-            ) if latencies else 0,
+            "avg_latency_ms": round(sum(latencies) / len(latencies), 1)
+            if latencies
+            else 0,
             "max_latency_ms": max(latencies) if latencies else 0,
             "anomalies_detected": len(pipeline.anomalies),
             "auto_prs_generated": len(pipeline.auto_prs),

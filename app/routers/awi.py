@@ -41,17 +41,27 @@ async def _require_session_access(session_id: str, auth: AuthContext) -> AWISess
     """Authorize access to an AWI session before exposing or mutating state."""
     manager = get_awi_session_manager()
     session = await manager.get_session(session_id)
+    not_found = HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail={"error": "not_found", "message": f"Session {session_id} not found"},
+    )
 
     if not session:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "not_found", "message": f"Session {session_id} not found"},
-        )
+        raise not_found
 
-    if session.wallet_id:
-        auth.require_wallet_access(session.wallet_id)
-    else:
-        auth.require_bootstrap_admin()
+    # A session the caller may not see answers exactly like a missing one. The
+    # wallet check's 403 names the *owning* wallet, so raising it after a 404
+    # for unknown ids let any wallet-scoped key confirm a session id exists and
+    # learn which wallet owns it.
+    try:
+        if session.wallet_id:
+            auth.require_wallet_access(session.wallet_id)
+        else:
+            auth.require_bootstrap_admin()
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_403_FORBIDDEN:
+            raise not_found from None
+        raise
 
     return session
 
@@ -158,14 +168,7 @@ async def execute_action(
     gov = None
     try:
         session = await _require_session_access(request.session_id, auth)
-        request_payload = {
-            "session_id": request.session_id,
-            "action": (
-                request.action.value
-                if hasattr(request.action, "value")
-                else str(request.action)
-            ),
-        }
+        request_payload = request.model_dump(mode="json")
         gov = await begin_awi_http_governed(
             auth=auth,
             wallet_id=session.wallet_id,
@@ -180,6 +183,7 @@ async def execute_action(
             return replayed
 
         manager = get_awi_session_manager()
+        gov.dispatch_started = True
         result = await manager.execute_action(request)
         body = (
             result.model_dump(mode="json")
@@ -191,7 +195,15 @@ async def execute_action(
             request_payload=request_payload,
             response_payload=body,
         )
-    except HTTPException:
+    except HTTPException as exc:
+        if gov is not None and gov.replay_response is None:
+            await raise_awi_http_error(
+                gov,
+                status_code=exc.status_code,
+                detail=exc.detail
+                if isinstance(exc.detail, dict)
+                else {"error": "execution_failed"},
+            )
         raise
     except Exception as e:
         logger.exception(f"AWI execution failed: {request.session_id}")

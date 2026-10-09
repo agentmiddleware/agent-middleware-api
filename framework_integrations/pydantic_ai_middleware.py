@@ -67,9 +67,7 @@ def as_pydantic_ai_tool(
     # detects async tools via inspect.iscoroutinefunction, which a callable
     # wrapper object would defeat.
     target = (
-        wrapped.governed_call
-        if isinstance(wrapped, GovernedToolWrapper)
-        else wrapped
+        wrapped.governed_call if isinstance(wrapped, GovernedToolWrapper) else wrapped
     )
     return Tool(
         target,

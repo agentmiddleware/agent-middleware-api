@@ -40,9 +40,25 @@ BACKTICK_REF = re.compile(r"``([A-Za-z_][A-Za-z0-9_.]*)(?:\(\))?``")
 KNOWN_EXTERNAL = frozenset(
     {
         # Python builtins / typing vocabulary used descriptively in prose.
-        "true", "false", "none", "null", "int", "str", "bool", "float",
-        "dict", "list", "set", "bytes", "object", "Any", "Decimal", "datetime",
-        "None", "True", "False",
+        "true",
+        "false",
+        "none",
+        "null",
+        "int",
+        "str",
+        "bool",
+        "float",
+        "dict",
+        "list",
+        "set",
+        "bytes",
+        "object",
+        "Any",
+        "Decimal",
+        "datetime",
+        "None",
+        "True",
+        "False",
         # HTTP header name, not a repo symbol.
         "Origin",
         # pytest/setuptools configuration key, not a repo symbol.
@@ -215,7 +231,9 @@ def _reference_resolves(
 def main(argv: list[str] | None = None) -> int:
     _ = argv  # no options; the check is all-or-nothing by design
     files = _python_files()
-    sources = {path: path.read_text(encoding="utf-8", errors="replace") for path in files}
+    sources = {
+        path: path.read_text(encoding="utf-8", errors="replace") for path in files
+    }
     defined = _defined_names(sources)
     members = _qualified_members(sources)
 

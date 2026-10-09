@@ -1,0 +1,4 @@
+EXPECTED PRE-FIX FAILURE: test_be100_self_credentialing_scopes_retry_guarantees
+EXPECTED PRE-FIX FAILURE: test_be100_tool_interface_scopes_retry_guarantees
+EXPECTED PRE-FIX FAILURE: test_be100_pitch_scopes_retry_guarantees
+3/3 regression assertions fail against unchanged documentation; no pytest or DB fixture was started.

@@ -45,9 +45,7 @@ async def test_head_matches_get_status_with_empty_body(client, path):
 async def test_head_carries_get_headers(client):
     get_resp = await client.get("/health")
     head_resp = await client.head("/health")
-    assert head_resp.headers.get("content-type") == get_resp.headers.get(
-        "content-type"
-    )
+    assert head_resp.headers.get("content-type") == get_resp.headers.get("content-type")
     # Content-Length reflects the body the corresponding GET would return —
     # exactly what RFC 9110 permits for HEAD.
     assert head_resp.headers.get("content-length") == get_resp.headers.get(

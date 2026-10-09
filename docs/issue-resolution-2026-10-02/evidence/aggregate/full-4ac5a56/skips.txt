@@ -1,0 +1,45 @@
+SKIPPED [1] tests/test_action_migrations.py:167: requires fresh disposable local action migration DB
+SKIPPED [1] tests/test_action_multiprocess.py:213: set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness
+SKIPPED [6] tests/test_action_multiprocess.py:254: set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness
+SKIPPED [1] tests/test_action_multiprocess.py:362: set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness
+SKIPPED [1] tests/test_action_multiprocess.py:386: set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness
+SKIPPED [1] tests/test_action_multiprocess.py:406: set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness
+SKIPPED [2] tests/test_action_postgres.py:58: requires explicitly opted-in disposable local amw_action PostgreSQL database
+SKIPPED [1] tests/test_action_postgres.py:65: requires explicitly opted-in disposable local amw_action PostgreSQL database
+SKIPPED [1] tests/test_action_postgres.py:69: requires explicitly opted-in disposable local amw_action PostgreSQL database
+SKIPPED [2] tests/test_action_postgres.py:96: requires explicitly opted-in disposable local amw_action PostgreSQL database
+SKIPPED [1] tests/test_action_postgres.py:181: requires explicitly opted-in disposable local amw_action PostgreSQL database
+SKIPPED [5] tests/test_action_postgres.py:185: requires explicitly opted-in disposable local amw_action PostgreSQL database
+SKIPPED [1] tests/test_awi_phase9.py:708: Playwright not installed
+SKIPPED [1] tests/test_ci_second_tool_denial.py:165: CI workflow test only runs on Linux (GitHub Actions environment)
+SKIPPED [1] tests/test_constant_test_loop.py:345: Set RUN_CONSTANT_TEST_LOOP_INTEGRATION=1 to run full integration test
+SKIPPED [1] tests/test_dispatch_call_slot_migration.py:28: requires fresh disposable migration PostgreSQL
+SKIPPED [3] tests/test_duplicate_guard_postgres_concurrency.py:37: requires a PostgreSQL DATABASE_URL for real row-lock semantics
+SKIPPED [6] tests/test_framework_legacy_tools.py:260: could not import 'langchain_core.tools': No module named 'langchain_core'
+SKIPPED [1] tests/test_framework_legacy_tools.py:273: could not import 'langchain_core.tools': No module named 'langchain_core'
+SKIPPED [6] tests/test_framework_legacy_tools.py:285: could not import 'llama_index.core.tools': No module named 'llama_index'
+SKIPPED [1] tests/test_mcp_postgres_multiprocess.py:1065: set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness
+SKIPPED [1] tests/test_mcp_postgres_multiprocess.py:1124: set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness
+SKIPPED [1] tests/test_mcp_postgres_multiprocess.py:1174: set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness
+SKIPPED [1] tests/test_mcp_postgres_multiprocess.py:1261: set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness
+SKIPPED [1] tests/test_mcp_postgres_multiprocess.py:1350: set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness
+SKIPPED [1] tests/test_mcp_postgres_multiprocess.py:1419: set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness
+SKIPPED [1] tests/test_mcp_postgres_multiprocess.py:1534: set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness
+SKIPPED [1] tests/test_mcp_postgres_multiprocess.py:1601: set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness
+SKIPPED [1] tests/test_mcp_postgres_multiprocess.py:1662: set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness
+SKIPPED [7] tests/test_mcp_postgres_multiprocess.py:1933: set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL multiprocess harness
+SKIPPED [1] tests/test_permit_postgres_concurrency.py:396: requires a PostgreSQL DATABASE_URL for real row-lock semantics
+SKIPPED [1] tests/test_permit_postgres_concurrency.py:474: requires a PostgreSQL DATABASE_URL for real row-lock semantics
+SKIPPED [1] tests/test_permit_postgres_concurrency.py:578: requires a PostgreSQL DATABASE_URL for real row-lock semantics
+SKIPPED [1] tests/test_permit_postgres_concurrency.py:637: requires a PostgreSQL DATABASE_URL for real row-lock semantics
+SKIPPED [1] tests/test_permit_postgres_concurrency.py:689: requires a PostgreSQL DATABASE_URL for real row-lock semantics
+SKIPPED [1] tests/test_permit_postgres_concurrency.py:746: requires a PostgreSQL DATABASE_URL for real row-lock semantics
+SKIPPED [1] tests/test_permit_postgres_concurrency.py:902: requires a PostgreSQL DATABASE_URL for real row-lock semantics
+SKIPPED [1] tests/test_permit_postgres_concurrency.py:955: requires a PostgreSQL DATABASE_URL for real row-lock semantics
+SKIPPED [12] tests/test_permit_postgres_concurrency.py:147: requires a PostgreSQL DATABASE_URL for real row-lock semantics
+SKIPPED [1] tests/test_postgres_datetime_binding.py:203: TEST_POSTGRES_URL not set; Postgres-dialect coverage skipped
+SKIPPED [1] tests/test_postgres_datetime_binding.py:225: TEST_POSTGRES_URL not set; Postgres-dialect coverage skipped
+SKIPPED [1] tests/test_postgres_datetime_binding.py:263: TEST_POSTGRES_URL not set; Postgres-dialect coverage skipped
+SKIPPED [1] tests/test_postgres_datetime_binding.py:323: TEST_POSTGRES_URL not set; Postgres-dialect coverage skipped
+SKIPPED [1] tests/test_postgres_datetime_binding.py:346: TEST_POSTGRES_URL not set; Postgres-dialect coverage skipped
+SKIPPED [1] tests/test_security_fuzz_battery.py:705: requires PostgreSQL for accurate concurrent budget accounting

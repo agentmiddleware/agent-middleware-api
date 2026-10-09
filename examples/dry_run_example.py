@@ -116,7 +116,9 @@ async def demo_simulation():
         print(f"Would succeed: {sim.would_succeed}")
 
         if sim.would_succeed:
-            print("\n✅ Agent decides: Budget is sufficient. Proceeding with real execution!")
+            print(
+                "\n✅ Agent decides: Budget is sufficient. Proceeding with real execution!"
+            )
         else:
             print("\n❌ Agent decides: Insufficient budget. Need to top up first.")
 

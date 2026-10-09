@@ -8,9 +8,8 @@ Swarm arbitrage silently books margin on every transaction.
 This is how the API generates revenue autonomously.
 """
 
-from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, ClassVar, cast
+from typing import ClassVar, cast
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -18,6 +17,9 @@ from pydantic import BaseModel, Field
 from ..core.auth import AuthContext, get_auth_context, verify_api_key
 from ..core.config import get_settings
 from ..core.dependencies import get_agent_money
+from .http_idempotency import (
+    begin_http_idempotency as _begin_idempotency,
+)
 from ..services.agent_money import (
     AgentMoney,
     DEFAULT_PRICING,
@@ -28,7 +30,6 @@ from ..services.governance import record_governed_action
 from ..services.idempotency import (
     IdempotencyConflictError,
     IdempotencyInProgressError,
-    IdempotencyService,
     get_idempotency_service,
 )
 from ..services.policies import evaluate_wallet_policy
@@ -61,6 +62,7 @@ from ..schemas.billing import (
     RegisterServiceRequest,
     ServiceRegistration,
     ExactDecimalFieldsMixin,
+    MAX_STORABLE_AMOUNT,
 )
 
 
@@ -107,78 +109,6 @@ async def _load_owned_dry_run_session(
             raise _session_not_found(session_id) from None
         raise
     return session
-
-
-@dataclass
-class _IdempotencyGuard:
-    """Opt-in replay protection for a state-changing money endpoint.
-
-    Mirrors the flow already used inline by ``/v1/billing/charge``: begin a
-    record on the way in (replaying a stored response, or 409-ing on a
-    conflicting reuse), and complete it with the terminal outcome so a retry
-    with the same ``Idempotency-Key`` gets the original result instead of
-    charging/crediting/transferring twice.
-    """
-
-    service: IdempotencyService | None
-    wallet_id: str
-    endpoint: str
-    key: str | None
-
-    async def complete(
-        self,
-        response_json: dict,
-        status_code: int,
-        *,
-        response_reference: str | None = None,
-    ) -> None:
-        if not self.service or not self.key:
-            return
-        await self.service.complete(
-            wallet_id=self.wallet_id,
-            endpoint=self.endpoint,
-            idempotency_key=self.key,
-            response_reference=response_reference,
-            response_json=response_json,
-            status_code=status_code,
-        )
-
-
-async def _begin_idempotency(
-    *,
-    idempotency_key: str | None,
-    wallet_id: str,
-    endpoint: str,
-    request_payload: dict[str, Any],
-) -> tuple[_IdempotencyGuard, JSONResponse | None]:
-    """Start (or replay) an idempotent operation. Returns the guard plus an
-    optional replay response to return immediately."""
-    if not idempotency_key:
-        return _IdempotencyGuard(None, wallet_id, endpoint, None), None
-    idem = get_idempotency_service()
-    try:
-        replay = await idem.begin(
-            wallet_id=wallet_id,
-            endpoint=endpoint,
-            idempotency_key=idempotency_key,
-            request_payload=request_payload,
-        )
-    except IdempotencyConflictError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"error": "idempotency_key_reused", "message": str(exc)},
-        ) from exc
-    except IdempotencyInProgressError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"error": "idempotency_in_progress", "message": str(exc)},
-        ) from exc
-    guard = _IdempotencyGuard(idem, wallet_id, endpoint, idempotency_key)
-    if replay is not None:
-        return guard, JSONResponse(
-            status_code=replay.status_code, content=replay.response_json
-        )
-    return guard, None
 
 
 async def _record_billing_governance(
@@ -348,12 +278,35 @@ async def create_sponsor_wallet(
 )
 async def create_agent_wallet(
     request: CreateAgentWalletRequest,
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     auth: AuthContext = Depends(get_auth_context),
     money: AgentMoney = Depends(get_agent_money),
 ):
     _require_wallet_access(auth, request.sponsor_wallet_id)
+    # Resolve the sponsor before opening an idempotency record: the record's
+    # wallet_id references wallets, so beginning one for an unknown sponsor
+    # would fail the foreign key and answer 500 where the unkeyed path answers
+    # 404. Same message as the engine's WalletNotFoundError so keyed and
+    # unkeyed callers see one body.
+    if await money.get_wallet(request.sponsor_wallet_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail=str(WalletNotFoundError(request.sponsor_wallet_id)),
+        )
+    # Opt-in idempotency, keyed on the sponsor (the debited side): a client
+    # whose provisioning call timed out after the sponsor was debited retries
+    # with the same Idempotency-Key and gets the original wallet back instead
+    # of funding a second one and paying twice.
+    guard, replay = await _begin_idempotency(
+        idempotency_key=idempotency_key,
+        wallet_id=request.sponsor_wallet_id,
+        endpoint="/v1/billing/wallets/agent",
+        request_payload=request.model_dump(mode="json"),
+    )
+    if replay is not None:
+        return replay
     try:
-        return await money.create_agent_wallet(
+        wallet = await money.create_agent_wallet(
             sponsor_wallet_id=request.sponsor_wallet_id,
             agent_id=request.agent_id,
             budget_credits=Decimal(str(request.budget_credits)),
@@ -370,27 +323,39 @@ async def create_agent_wallet(
             auto_refill_amount=Decimal(str(request.auto_refill_amount)),
         )
     except WalletNotFoundError as e:
+        # Every terminal branch must complete the record, or the key stays
+        # in-progress and a retry answers 409 until the stale-record sweep.
+        await guard.complete({"detail": str(e)}, 404)
         raise HTTPException(status_code=404, detail=str(e))
     except InsufficientFundsError as e:
+        insufficient_detail = {
+            "error": "insufficient_funds",
+            "message": (
+                f"Insufficient funds in sponsor wallet: "
+                f"balance={e.current_balance}, required={e.required_amount}"
+            ),
+            "wallet_id": e.wallet_id,
+            "current_balance": float(e.current_balance),
+            "required_amount": float(e.required_amount),
+            "shortfall": float(e.shortfall),
+        }
+        # Terminal for this key: nothing was created or debited, and a replay
+        # should tell the caller the same thing rather than retry blindly.
+        await guard.complete({"detail": insufficient_detail}, 400)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "error": "insufficient_funds",
-                "message": (
-                    f"Insufficient funds in sponsor wallet: "
-                    f"balance={e.current_balance}, required={e.required_amount}"
-                ),
-                "wallet_id": e.wallet_id,
-                "current_balance": float(e.current_balance),
-                "required_amount": float(e.required_amount),
-                "shortfall": float(e.shortfall),
-            },
+            detail=insufficient_detail,
         )
     except ValueError as e:
+        wallet_error = {"error": "wallet_error", "message": str(e)}
+        await guard.complete({"detail": wallet_error}, 400)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "wallet_error", "message": str(e)},
+            detail=wallet_error,
         )
+    body = wallet.model_dump(mode="json")
+    await guard.complete(body, 201, response_reference=body.get("wallet_id"))
+    return wallet
 
 
 @expansion_router.post(
@@ -585,15 +550,18 @@ async def get_ledger(
     _require_wallet_access(auth, wallet_id)
     entries = await money.get_ledger(wallet_id, limit)
 
-    period_credits = sum(e.amount for e in entries if e.amount > 0)
-    period_debits = sum(abs(e.amount) for e in entries if e.amount < 0)
+    amounts = [Decimal(e.amount_exact or str(e.amount)) for e in entries]
+    period_credits = sum((amount for amount in amounts if amount > 0), Decimal("0"))
+    period_debits = sum((-amount for amount in amounts if amount < 0), Decimal("0"))
 
     return LedgerResponse(
         entries=entries,
         total=len(entries),
         wallet_id=wallet_id,
-        period_credits=period_credits,
-        period_debits=period_debits,
+        period_credits=float(period_credits),
+        period_credits_exact=str(period_credits),
+        period_debits=float(period_debits),
+        period_debits_exact=str(period_debits),
     )
 
 
@@ -649,6 +617,28 @@ async def charge_wallet(
     request_id = request.headers.get("X-Request-ID")
     endpoint = "/v1/billing/charge"
 
+    # Resolve after tenant authorization and before the idempotency row's FK.
+    if not await money.get_wallet(wallet_id):
+        await _record_billing_governance(
+            event="billing.charge",
+            auth=auth,
+            wallet_id=wallet_id,
+            service_category=category.value,
+            endpoint=endpoint,
+            request_id=request_id,
+            ok=False,
+            error="wallet_not_found",
+            metadata={"units": units, "request_path": request_path},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": "wallet_not_found",
+                "wallet_id": wallet_id,
+                "message": str(WalletNotFoundError(wallet_id)),
+            },
+        )
+
     # Idempotency is opt-in via the Idempotency-Key header: a client that
     # retries a charge (e.g. after a timeout) with the same key gets the
     # original outcome replayed instead of being billed twice.
@@ -697,19 +687,23 @@ async def charge_wallet(
             status_code=status_code,
         )
 
-    (
-        policy_estimated_cost,
-        policy_id,
-        evaluated_constraints,
-    ) = await _enforce_billing_policy(
-        auth=auth,
-        wallet_id=wallet_id,
-        category=category,
-        units=units,
-        endpoint=endpoint,
-        request_id=request_id,
-        money=money,
-    )
+    try:
+        (
+            policy_estimated_cost,
+            policy_id,
+            evaluated_constraints,
+        ) = await _enforce_billing_policy(
+            auth=auth,
+            wallet_id=wallet_id,
+            category=category,
+            units=units,
+            endpoint=endpoint,
+            request_id=request_id,
+            money=money,
+        )
+    except HTTPException as exc:
+        await _complete_idempotency({"detail": exc.detail}, exc.status_code)
+        raise
     try:
         result = await money.charge(
             wallet_id=wallet_id,
@@ -926,7 +920,13 @@ async def top_up_wallet(
 )
 async def prepare_top_up(
     wallet_id: str,
-    amount_fiat: float = Query(..., gt=0, description="Amount in fiat currency (USD)"),
+    amount_fiat: float = Query(
+        ...,
+        gt=0,
+        lt=MAX_STORABLE_AMOUNT,
+        allow_inf_nan=False,
+        description="Amount in fiat currency (USD)",
+    ),
     currency: str = Query("USD", description="Fiat currency code"),
     auth: AuthContext = Depends(get_auth_context),
 ):
@@ -1004,7 +1004,15 @@ async def prepare_top_up(
 async def transfer_wallets(
     from_wallet_id: str = Query(..., description="Source wallet ID"),
     to_wallet_id: str = Query(..., description="Destination wallet ID"),
-    amount: float = Query(..., gt=0, description="Amount of credits to transfer"),
+    # ``gt=0`` alone admits Infinity, which reached the engine and then broke
+    # rendering its own 402 (an infinite shortfall is not JSON): a 500.
+    amount: float = Query(
+        ...,
+        gt=0,
+        lt=MAX_STORABLE_AMOUNT,
+        allow_inf_nan=False,
+        description="Amount of credits to transfer",
+    ),
     description: str | None = Query(None, description="Optional transfer description"),
     correlation_id: str | None = Query(
         None,
@@ -1313,9 +1321,11 @@ async def get_pricing(
     summary="Get arbitrage report",
 )
 async def get_arbitrage_report(
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     money: AgentMoney = Depends(get_agent_money),
 ):
+    """Operator profitability across wallets for the preceding 24 hours."""
+    auth.require_bootstrap_admin()
     return await money.get_arbitrage_report()
 
 

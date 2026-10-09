@@ -1,0 +1,1 @@
+PLAN refined after source inspection: app/routers path and static operator index; stateful browser charters apply to calculator/proof panels, not nonexistent dashboard auth flow.

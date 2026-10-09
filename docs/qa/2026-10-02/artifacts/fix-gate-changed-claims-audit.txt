@@ -1,0 +1,10 @@
+static/dashboard.html:396:        <li>The public proof demonstrates one gateway-controlled action, not end-to-end exactly-once behavior for arbitrary upstream side effects.</li>
+docs/tool-interface-authority.md:39:one debit. This does not guarantee delivery or a downstream effect.
+docs/agent-self-credentialing.md:67:| 1 | charge-once | one governed invoke → exactly one debit |
+docs/agent-self-credentialing.md:69:| 3 | concurrency | 5 identical in-flight calls → one success, one debit, one side effect |
+docs/agent-self-credentialing.md:105:  and at most one debit. This does not guarantee delivery or a downstream
+ELEVATOR_PITCH.md:19:> One agent action, at most one debit — no matter how many times the agent
+ELEVATOR_PITCH.md:65:differentiating primitive is **exactly-once economic authorization at the
+ELEVATOR_PITCH.md:115:| Enterprise authz for MCP | Who may call | Meter, receipt, and charge exactly once |
+ELEVATOR_PITCH.md:164:one gateway dispatch and at most one debit. This does not guarantee delivery or
+ELEVATOR_PITCH.md:228:- Distributed exactly-once side effects in arbitrary upstream MCP servers.

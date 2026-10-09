@@ -1,0 +1,2 @@
+[qa/2026-10-02-fixes 0440fdb] fix(FE-002): preserve explicit SDK session step limits
+ 2 files changed, 23 insertions(+), 4 deletions(-)

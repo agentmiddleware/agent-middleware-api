@@ -1,0 +1,3 @@
+# Optional QA-only checks; no runtime dependency change.
+hypothesis==6.168.3
+openapi-spec-validator==0.9.0

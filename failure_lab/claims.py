@@ -52,7 +52,9 @@ class UnsupportedClaimError(AssertionError):
     already treats assertion failures as build failures needs no special case.
     """
 
-    def __init__(self, claim_text: str, reason: str, *, candidates: Sequence[str] = ()) -> None:
+    def __init__(
+        self, claim_text: str, reason: str, *, candidates: Sequence[str] = ()
+    ) -> None:
         self.claim_text = claim_text
         self.reason = reason
         self.candidates = list(candidates)
@@ -77,6 +79,18 @@ def normalize_claim(text: str) -> str:
     """
     collapsed = " ".join(str(text).split())
     return collapsed.rstrip(".").casefold()
+
+
+def _observed_status(status: str, observed: Mapping[str, str]) -> tuple[str, list[str]]:
+    """A PASS summary cannot outrank the negative configuration rows it reports."""
+    worst_row = next((v for v in ("ERROR", "FAIL") if v in observed.values()), "")
+    if status == SUPPORTING_STATUS and worst_row:
+        return worst_row, [
+            f"The result document reported {SUPPORTING_STATUS} while a "
+            f"configuration row observed {worst_row}; the row is used as the "
+            "status, because a scenario verdict is the worst of its rows."
+        ]
+    return status, []
 
 
 @dataclass
@@ -137,22 +151,30 @@ class ClaimRecord:
         true while the rows beside it diverge, the rows win, as they do when
         the record is built.
         """
-        expected = {str(k): str(v) for k, v in (document.get("documented_expectation") or {}).items()}
-        observed = {str(k): str(v) for k, v in (document.get("configurations") or {}).items()}
+        expected = {
+            str(k): str(v)
+            for k, v in (document.get("documented_expectation") or {}).items()
+        }
+        observed = {
+            str(k): str(v) for k, v in (document.get("configurations") or {}).items()
+        }
         rows_diverge = bool(_divergence_limitations(expected, observed))
         reported = document.get("matches_documented_expectation")
         if reported is None:
             matches = bool(expected) and not rows_diverge
         else:
             matches = bool(reported) and not rows_diverge
+        status, status_lines = _observed_status(
+            str(document.get("status", "")), observed
+        )
         return cls(
             claim=str(document.get("claim", "")),
             test_id=str(document.get("test_id", "")),
             version=str(document.get("version", "")),
-            status=str(document.get("status", "")),
+            status=status,
             environment=str(document.get("environment", "")),
             tested_at=str(document.get("tested_at", "")),
-            limitations=list(document.get("limitations") or []),
+            limitations=list(document.get("limitations") or []) + status_lines,
             definition_hash=str(document.get("definition_hash", "")),
             definition_version=str(
                 document.get("definition_version", TEST_DEFINITION_VERSION)
@@ -194,7 +216,9 @@ class ClaimsManifest:
     def divergences(self) -> list[ClaimRecord]:
         """Records whose observation disagrees with the documentation."""
         return [
-            record for record in self.records if not record.matches_documented_expectation
+            record
+            for record in self.records
+            if not record.matches_documented_expectation
         ]
 
     def as_dict(self) -> dict[str, Any]:
@@ -208,7 +232,10 @@ class ClaimsManifest:
         }
 
     def to_json(self) -> str:
-        return json.dumps(self.as_dict(), indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+        return (
+            json.dumps(self.as_dict(), indent=2, sort_keys=True, ensure_ascii=False)
+            + "\n"
+        )
 
     @classmethod
     def from_dict(cls, document: Mapping[str, Any]) -> ClaimsManifest:
@@ -328,16 +355,9 @@ def build_claims_manifest(
         # The observed verdict, copied -- but never a summary that outranks the
         # rows it summarises. ScenarioResult.verdict is the worst row, so a
         # document reading PASS over a FAIL row did not come from a run.
-        status = str(document.get("verdict", ""))
-        worst_row = next((v for v in ("ERROR", "FAIL") if v in observed.values()), "")
-        status_lines: list[str] = []
-        if status == SUPPORTING_STATUS and worst_row:
-            status_lines.append(
-                f"The result document reported {SUPPORTING_STATUS} while a "
-                f"configuration row observed {worst_row}; the row is used as the "
-                "status, because a scenario verdict is the worst of its rows."
-            )
-            status = worst_row
+        status, status_lines = _observed_status(
+            str(document.get("verdict", "")), observed
+        )
 
         limitations = list(document.get("limitations") or [])
         limitations.extend(status_lines)
@@ -389,7 +409,11 @@ def build_claims_manifest(
 
 
 def _as_manifest(manifest: ClaimsManifest | Mapping[str, Any]) -> ClaimsManifest:
-    return manifest if isinstance(manifest, ClaimsManifest) else ClaimsManifest.from_dict(manifest)
+    return (
+        manifest
+        if isinstance(manifest, ClaimsManifest)
+        else ClaimsManifest.from_dict(manifest)
+    )
 
 
 def find_claim(
@@ -448,8 +472,13 @@ def assert_claim_is_supported(
                 "documented expectation to have matched, so nothing here says the "
                 "run behaved as documented. Rebuild the manifest from the run",
             )
-        divergences = [line for line in record.limitations if line.startswith("DIVERGENCE")]
-        detail = " ".join(divergences) or "the observed verdicts differ from the documented ones"
+        divergences = [
+            line for line in record.limitations if line.startswith("DIVERGENCE")
+        ]
+        detail = (
+            " ".join(divergences)
+            or "the observed verdicts differ from the documented ones"
+        )
         raise UnsupportedClaimError(
             claim_text,
             f"{record.test_id} observed PASS but diverged from its documented "
@@ -486,7 +515,9 @@ def render_markdown(manifest: ClaimsManifest | Mapping[str, Any]) -> str:
         lines.append("## Divergences from documented expectations")
         lines.append("")
         for record in divergences:
-            lines.append(f"- **{record.test_id}** ({record.status}) — {record.title or record.claim}")
+            lines.append(
+                f"- **{record.test_id}** ({record.status}) — {record.title or record.claim}"
+            )
             for limitation in record.limitations:
                 if limitation.startswith("DIVERGENCE"):
                     lines.append(f"  - {limitation}")
@@ -501,7 +532,11 @@ def render_markdown(manifest: ClaimsManifest | Mapping[str, Any]) -> str:
     for record in resolved.records:
         evidence = "—"
         if record.evidence:
-            path = record.evidence.get("path") or record.evidence.get("directory") or "bundle"
+            path = (
+                record.evidence.get("path")
+                or record.evidence.get("directory")
+                or "bundle"
+            )
             digest = str(record.evidence.get("manifest_sha256") or "")
             evidence = f"`{path}`" + (f" ({digest[:12]}…)" if digest else "")
         lines.append(
@@ -529,7 +564,9 @@ def render_markdown(manifest: ClaimsManifest | Mapping[str, Any]) -> str:
             lines.append(f"- {_cell(limitation)}")
         lines.append("")
     if not any(record.limitations for record in resolved.records):
-        lines.append("No scenario recorded a limitation. That is itself worth checking.")
+        lines.append(
+            "No scenario recorded a limitation. That is itself worth checking."
+        )
         lines.append("")
     return "\n".join(lines)
 

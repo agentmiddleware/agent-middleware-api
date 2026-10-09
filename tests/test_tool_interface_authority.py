@@ -544,9 +544,7 @@ async def test_me_authority_requires_credentials(client, clean_database):
 
 
 @pytest.mark.anyio
-async def test_me_authority_missing_wallet_is_404(
-    client, clean_database, monkeypatch
-):
+async def test_me_authority_missing_wallet_is_404(client, clean_database, monkeypatch):
     provisioned = await provision_agent_wallet(client)
 
     async def _no_wallet(self, wallet_id):
@@ -731,9 +729,7 @@ def test_valid_zero_price_is_still_not_an_economic_action():
         ]
         is False
     )
-    assert (
-        _priced_tool(credits_per_unit=0.0)["annotations"]["economicAction"] is False
-    )
+    assert _priced_tool(credits_per_unit=0.0)["annotations"]["economicAction"] is False
 
 
 def _strict_json(payload) -> str:
@@ -785,9 +781,9 @@ def test_public_manifest_stays_strict_json_for_malformed_prices(price_fields):
         # The whole manifest must serialize for a strict RFC 8259 client.
         _strict_json(manifest)
 
-        ann = {t["name"]: t for t in manifest["tools"]}[
-            "authority-malformed-price"
-        ]["annotations"]
+        ann = {t["name"]: t for t in manifest["tools"]}["authority-malformed-price"][
+            "annotations"
+        ]
         # The advertised price is the conservative fallback specifically —
         # not merely "some finite number". Pinning the value catches a
         # regression that reuses a declared 2.0 alongside a corrupt exact

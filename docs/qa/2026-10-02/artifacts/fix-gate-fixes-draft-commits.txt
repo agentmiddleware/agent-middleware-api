@@ -1,0 +1,8 @@
+3297eb3 fix(BE-100): remove remaining receipt completion overclaims
+eb02ac1 fix(BE-002): declare supported Bearer [REDACTED] in OpenAPI
+ef29d58 fix(UX-003): keep operator inspection on the served origin
+30ff418 fix(BE-003): reject multicast outbound destinations
+0440fdb fix(FE-002): preserve explicit SDK session step limits
+8238663 fix(UX-002): make operator commands keyboard focusable
+1a98a30 fix(UX-001): use readable fit text on paper comparison cards
+cfc1291 fix(BE-100): scope retry and receipt completion guidance

@@ -104,9 +104,7 @@ class TestACPCheckout:
     @pytest.mark.asyncio
     async def test_acp_checkout_blank_idempotency_key_rejected(self, client):
         """A blank idempotency key is refused before any request is sent."""
-        with patch.object(
-            client._client, "request", new_callable=AsyncMock
-        ) as mock_request:
+        with patch.object(client._client, "request", new_callable=AsyncMock) as mock_request:
             with pytest.raises(ValueError):
                 await client.acp_checkout(
                     self._request(),
@@ -127,9 +125,7 @@ class TestACPCheckout:
         mock_response.is_error = True
         mock_response.json.return_value = {"detail": "invalid_api_key"}
 
-        with patch.object(
-            bearer_client._client, "request", new_callable=AsyncMock
-        ) as mock_request:
+        with patch.object(bearer_client._client, "request", new_callable=AsyncMock) as mock_request:
             mock_request.return_value = mock_response
             with pytest.raises(AuthenticationError):
                 await bearer_client.acp_checkout(
@@ -155,9 +151,7 @@ class TestACPCheckout:
             "status": "settled",
         }
 
-        with patch.object(
-            client._client, "request", new_callable=AsyncMock
-        ) as mock_request:
+        with patch.object(client._client, "request", new_callable=AsyncMock) as mock_request:
             mock_request.return_value = mock_response
             with pytest.raises(APIError):
                 await client.acp_checkout(
@@ -410,9 +404,7 @@ class TestSettleAmountPrecedence:
     @pytest.mark.asyncio
     async def test_amount_usd_wins_over_legacy_amount(self, x402_client):
         """When both keys are present and differ, amount_usd is settled."""
-        with patch.object(
-            x402_client._client, "post", new_callable=AsyncMock
-        ) as mock_post:
+        with patch.object(x402_client._client, "post", new_callable=AsyncMock) as mock_post:
             mock_post.return_value = self._settled_response()
             await x402_client.settle_402(
                 permit_id="pmt-1",
@@ -431,9 +423,7 @@ class TestSettleAmountPrecedence:
     @pytest.mark.asyncio
     async def test_legacy_amount_used_when_amount_usd_absent(self, x402_client):
         """An older requirement carrying only `amount` still settles."""
-        with patch.object(
-            x402_client._client, "post", new_callable=AsyncMock
-        ) as mock_post:
+        with patch.object(x402_client._client, "post", new_callable=AsyncMock) as mock_post:
             mock_post.return_value = self._settled_response()
             await x402_client.settle_402(
                 permit_id="pmt-1",
@@ -479,9 +469,7 @@ class TestParseResponseValidation:
             "asset": "usdc",
         }
         del body[missing]
-        with patch.object(
-            x402_client._client, "post", new_callable=AsyncMock
-        ) as mock_post:
+        with patch.object(x402_client._client, "post", new_callable=AsyncMock) as mock_post:
             mock_post.return_value = self._response(body)
             with pytest.raises(APIError, match=missing):
                 await x402_client.parse_402(402, {"X-402-Amount": "1.50"})
@@ -494,18 +482,14 @@ class TestParseResponseValidation:
             "pay_to": "0x1111111111111111111111111111111111111111",
             "network": "base",
         }
-        with patch.object(
-            x402_client._client, "post", new_callable=AsyncMock
-        ) as mock_post:
+        with patch.object(x402_client._client, "post", new_callable=AsyncMock) as mock_post:
             mock_post.return_value = self._response(body)
             assert await x402_client.parse_402(402, {"X-402-Amount": "1.50"}) == body
 
     @pytest.mark.asyncio
     async def test_malformed_asset_still_rejected(self, x402_client):
         """Optional does not mean unchecked: a present `asset` must be usable."""
-        with patch.object(
-            x402_client._client, "post", new_callable=AsyncMock
-        ) as mock_post:
+        with patch.object(x402_client._client, "post", new_callable=AsyncMock) as mock_post:
             mock_post.return_value = self._response(
                 {
                     "amount_usd": "1.50",
@@ -520,9 +504,7 @@ class TestParseResponseValidation:
     @pytest.mark.asyncio
     async def test_wrong_type_field_raises(self, x402_client):
         """A non-string amount must not reach settlement."""
-        with patch.object(
-            x402_client._client, "post", new_callable=AsyncMock
-        ) as mock_post:
+        with patch.object(x402_client._client, "post", new_callable=AsyncMock) as mock_post:
             mock_post.return_value = self._response(
                 {
                     "amount_usd": 1.50,  # number, not the documented string
@@ -543,12 +525,9 @@ class TestParseResponseValidation:
             "network": "base",
             "asset": "usdc",
         }
-        with patch.object(
-            x402_client._client, "post", new_callable=AsyncMock
-        ) as mock_post:
+        with patch.object(x402_client._client, "post", new_callable=AsyncMock) as mock_post:
             mock_post.return_value = self._response(body)
             assert await x402_client.parse_402(402, {"X-402-Amount": "1.50"}) == body
-
 
 
 class TestACPLineItemBounds:
@@ -579,9 +558,7 @@ class TestACPLineItemBounds:
     @pytest.mark.parametrize("unit_amount", [0, 10_000_000])
     def test_boundary_unit_amounts_accepted(self, unit_amount):
         """A zero-cost or max-cost line is legal; the bounds are inclusive."""
-        item = ACPLineItem(
-            name="Widget", quantity=1, unit_amount=unit_amount, currency="usd"
-        )
+        item = ACPLineItem(name="Widget", quantity=1, unit_amount=unit_amount, currency="usd")
         assert item.to_payload()["unit_amount"] == unit_amount
 
 
@@ -592,9 +569,7 @@ class TestBearerTokenValidation:
     def test_blank_bearer_token_rejected(self, blank):
         """An unset env var fails here, not silently at the server."""
         with pytest.raises(ValueError, match="bearer_token"):
-            AgentMiddlewareClient(
-                api_key="test-key", base_url="http://test", bearer_token=blank
-            )
+            AgentMiddlewareClient(api_key="test-key", base_url="http://test", bearer_token=blank)
 
     def test_bearer_token_is_stripped(self):
         """Surrounding whitespace never reaches the header value."""

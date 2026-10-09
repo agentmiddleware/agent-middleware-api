@@ -114,7 +114,8 @@
             "inLanguage": "en",
             "totalTime": "PT5M",
             "tool": [
-              { "@type": "HowToTool", "name": "Python 3.11 or newer" }
+              { "@type": "HowToTool", "name": "Python 3.9 or newer" },
+              { "@type": "HowToTool", "name": "curl" }
             ],
             "supply": [
               {
@@ -126,6 +127,11 @@
                 "@type": "HowToSupply",
                 "name": "trust-keys.json",
                 "url": "https://www.thisisatest.tech/proof/trust-keys.json"
+              },
+              {
+                "@type": "HowToSupply",
+                "name": "verify_receipt.py",
+                "url": "https://www.thisisatest.tech/proof/verify_receipt.py"
               }
             ],
             "step": [
@@ -133,21 +139,21 @@
                 "@type": "HowToStep",
                 "position": 1,
                 "name": "Download the signed bundle and the key snapshot",
-                "text": "Save receipt.json and trust-keys.json from this page. Both stay downloadable by anyone, with no credentials.",
+                "text": "Save receipt.json, trust-keys.json, and verify_receipt.py from this page with curl. All three stay downloadable by anyone, with no account and no key.",
                 "url": "https://www.thisisatest.tech/proof/#artifact-title"
               },
               {
                 "@type": "HowToStep",
                 "position": 2,
-                "name": "Install the verifier",
-                "text": "The source repository is private during the design-partner phase and is shared with pilot partners on request. The verifier is included there. A partner who already has the source installs it from that checkout's repository root with python -m pip install \"./b2a_sdk[verify]\". Save both downloaded files in the repository root before running b2a-verify-receipt.",
+                "name": "Install the verifier dependency",
+                "text": "Install only the cryptography package with pip. The verifier itself is the standalone script downloaded in step 1.",
                 "url": "https://www.thisisatest.tech/proof/#verify-title"
               },
               {
                 "@type": "HowToStep",
                 "position": 3,
                 "name": "Verify the signed bytes with networking disabled",
-                "text": "Run b2a-verify-receipt with the bundle, the key snapshot, and the expected issuer. Exit 0 proves the receipt matches the supplied key snapshot; it does not independently authenticate who supplied that snapshot, so pin the key through a trusted channel first.",
+                "text": "Run python3 verify_receipt.py with the bundle, the key snapshot, and the expected issuer. Exit 0 proves the receipt matches the supplied key snapshot; it does not independently authenticate who supplied that snapshot, so pin the key through a trusted channel first.",
                 "url": "https://www.thisisatest.tech/proof/#verify-title"
               }
             ]
@@ -161,11 +167,11 @@
     <!-- Blocking on purpose: saved accessibility preferences must apply before
          first paint. Kept in a file rather than inline so the Content-Security-
          Policy can be script-src 'self' with no 'unsafe-inline'. -->
-    <script src="/a11y-preload.js?v=gateway-18"></script>
+    <script src="/a11y-preload.js?v=gateway-19"></script>
     @@VERCEL_ANALYTICS_SCRIPTS@@
-    <script defer src="/analytics.js?v=gateway-18"></script>
-    <script defer src="/proof/proof.js?v=gateway-18"></script>
-    <script defer src="/a11y.js?v=gateway-18"></script>
+    <script defer src="/analytics.js?v=gateway-19"></script>
+    <script defer src="/proof/proof.js?v=gateway-19"></script>
+    <script defer src="/a11y.js?v=gateway-19"></script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -226,7 +232,7 @@
               href="/proof/receipt.json"
               download
               data-analytics-event="proof_click"
-              aria-label="Download receipt.json — sample Ed25519 receipt"
+              aria-label="Download receipt.json: sample Ed25519 receipt"
               >Download receipt.json</a
             >
             <a
@@ -234,8 +240,16 @@
               href="/proof/trust-keys.json"
               download
               data-analytics-event="proof_click"
-              aria-label="Download trust-keys.json — Ed25519 public keys"
+              aria-label="Download trust-keys.json: Ed25519 public keys"
               >Download trust-keys.json</a
+            >
+            <a
+              class="button button-secondary"
+              href="/proof/verify_receipt.py"
+              download
+              data-analytics-event="proof_click"
+              aria-label="Download verify_receipt.py: standalone offline verifier"
+              >Download verify_receipt.py</a
             >
           </article>
         </div>
@@ -246,33 +260,52 @@
           <p class="section-kicker section-kicker-inverse">02 / Offline verification</p>
           <h2 id="verify-title">Check the signed bytes fully offline.</h2>
           <p>
-            Install the repository SDK, then verify the two downloaded files
-            with networking disabled. Exit 0 means verified, 1 means the
-            signature is invalid, and 2 means the verifier cannot determine.
-            Exit 0 proves that the receipt matches the supplied key snapshot;
-            it does not independently authenticate who supplied that snapshot.
-            Pin the key through a trusted channel before relying on issuer
-            identity. <code>--expect-issuer</code> checks the claimed origin as
-            an additional consistency guard.
+            Download the receipt, the key snapshot, and the standalone
+            verifier below. The downloads need no account and no key. After
+            the downloads, run the verification with networking disabled.
+            Exit 0 means verified, 1 means the signature is invalid, and 2
+            means the verifier cannot determine. Exit 0 proves that the
+            receipt matches the supplied key snapshot; it does not
+            independently authenticate who supplied that snapshot. Pin the
+            key through a trusted channel before relying on issuer identity.
+            <code>--expect-issuer</code> checks the claimed origin as an
+            additional consistency guard.
           </p>
-          <p>
-            <code>b2a</code> in the package and command names is short for
-            business-to-agent — it is the SDK's name, not a separate product.
-          </p>
-          <p>
-            The source repository is private during the design-partner phase
-            and is shared with pilot partners on request. The verifier is
-            included there. A partner who already has the source installs it
-            from that checkout's repository root. Save both downloaded files
-            there before running the commands below. The receipt and trust-keys
-            files stay downloadable by anyone, with no credentials.
-          </p>
-          <pre tabindex="0"><code>python -m pip install "./b2a_sdk[verify]"
-b2a-verify-receipt \
+          <pre tabindex="0"><code>curl -fsSLO https://www.thisisatest.tech/proof/receipt.json
+curl -fsSLO https://www.thisisatest.tech/proof/trust-keys.json
+curl -fsSLO https://www.thisisatest.tech/proof/verify_receipt.py
+python3 -m pip install cryptography
+python3 verify_receipt.py \
   --bundle receipt.json \
   --keys trust-keys.json \
   --expect-issuer https://api.thisisatest.tech</code></pre>
+          <p>
+            The verifier is a standalone script published on this page: it
+            checks the signature over the receipt's hashes using the supplied
+            key snapshot, with no account and no call back to the gateway.
+            Anyone with a source checkout can use the SDK CLI
+            <code>b2a-verify-receipt</code> instead. The same public key set
+            is also served live, with no key needed, at
+            <code>https://api.thisisatest.tech/.well-known/trust-keys.json</code>
+            (and
+            <code>https://api.thisisatest.tech/.well-known/jwks.json</code>).
+          </p>
         </div>
+      </section>
+
+      <section class="section proof-live-section" aria-labelledby="live-title">
+        <div>
+          <p class="section-kicker">Try the API</p>
+          <h2 id="live-title">Two calls that need no key.</h2>
+        </div>
+        <p>
+          These read-only calls work with no account and no key. Issuing
+          permits and calling tools needs a wallet-scoped API key provisioned
+          by an operator, because production has no self-serve key mint: use
+          the pilot email below to ask for one.
+        </p>
+        <pre tabindex="0"><code>curl -sS https://api.thisisatest.tech/health
+curl -sS https://api.thisisatest.tech/.well-known/trust-keys.json</code></pre>
       </section>
 
       <section class="section pilot-section proof-contact" aria-labelledby="proof-contact-title">

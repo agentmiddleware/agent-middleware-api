@@ -46,9 +46,9 @@ dependencies = [
 verify = [
     "cryptography>=50.0.0",
 ]
-# Serving the marketplace over MCP (`python -m b2a_sdk.mcp serve`) and the
-# generated standalone server both import FastMCP, which mcp 2.x renamed to
-# MCPServer. Bound matches the application's requirements.txt.
+# Legacy serving (`python -m b2a_sdk.mcp serve`) imports FastMCP, which
+# mcp 2.x renamed to MCPServer. Standalone generation is retired.
+# Bound matches the application's requirements.txt.
 mcp = [
     "mcp>=1.29.0,<2",
 ]
@@ -85,6 +85,7 @@ include = [
     "src/b2a_sdk",
     "tests",
     "CHANGELOG.md",
+    "LICENSE",
     "README.md",
     "pyproject.toml",
 ]

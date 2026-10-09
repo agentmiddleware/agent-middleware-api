@@ -1,0 +1,2 @@
+?? docs/qa/
+?? tests/test_qa_20261002_backend.py

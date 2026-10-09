@@ -363,15 +363,84 @@ async def test_sentinel_health_failure_is_sanitized_in_full_report(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_run_check_captures_error():
+async def test_run_check_captures_error(caplog):
     async def broken():
         raise ValueError("boom")
 
-    result = await _run_check("t", broken)
+    with caplog.at_level("WARNING", logger=health_module.logger.name):
+        result = await _run_check("t", broken)
     assert result["status"] == "down"
-    assert "ValueError" in result["error"]
-    assert "boom" in result["error"]
+    # Only the exception class reaches the (unauthenticated) report; the
+    # message text stays in the operator log.
+    assert result["error"] == "ValueError"
+    assert "boom" not in json.dumps(result)
     assert result["latency_ms"] >= 0
+    assert "boom" in caplog.text
+
+
+# Driver messages a real outage produces: they name internal hosts, ports, and
+# database roles that an anonymous caller must not learn.
+_INTERNAL_REDIS_ERROR = "Error 111 connecting to redis.railway.internal:6379"
+_INTERNAL_POSTGRES_ERROR = (
+    'connection to server at "10.0.4.17", port 5432 failed: FATAL: '
+    'password authentication failed for user "gateway_owner"'
+)
+
+
+def _break_redis_and_postgres(monkeypatch):
+    async def redis_down():
+        raise ConnectionError(_INTERNAL_REDIS_ERROR)
+
+    async def postgres_down():
+        raise OSError(_INTERNAL_POSTGRES_ERROR)
+
+    monkeypatch.setattr(health_module, "_check_redis", redis_down)
+    monkeypatch.setattr(health_module, "_check_postgres", postgres_down)
+
+
+@pytest.mark.anyio
+async def test_public_dependency_report_does_not_echo_exception_text(
+    client, monkeypatch, caplog
+):
+    """The unauthenticated wedge projection reports status + exception class
+    only; driver text (internal hostnames, IPs, DB roles) is logged, not served."""
+    assert get_settings().ENABLE_PROOF_SURFACES is False
+    _break_redis_and_postgres(monkeypatch)
+
+    with caplog.at_level("WARNING", logger=health_module.logger.name):
+        resp = await client.get("/health/dependencies")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "degraded"
+    assert {"postgres", "redis"} <= set(body["unhealthy"])
+    assert body["dependencies"]["redis"]["status"] == "down"
+    assert body["dependencies"]["redis"]["error"] == "ConnectionError"
+    assert body["dependencies"]["postgres"]["status"] == "down"
+    assert body["dependencies"]["postgres"]["error"] == "OSError"
+    for leaked in ("railway.internal", "6379", "10.0.4.17", "gateway_owner"):
+        assert leaked not in resp.text
+    # Operators still get the full driver message server-side.
+    assert "redis.railway.internal:6379" in caplog.text
+    assert "gateway_owner" in caplog.text
+
+
+@pytest.mark.anyio
+async def test_full_dependency_report_does_not_echo_exception_text(client, monkeypatch):
+    """With proof surfaces mounted the full report is served instead, and it is
+    just as unauthenticated — it must not carry the driver text either."""
+    monkeypatch.setattr(get_settings(), "ENABLE_PROOF_SURFACES", True)
+    _break_redis_and_postgres(monkeypatch)
+
+    resp = await client.get("/health/dependencies")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "simulation_modes" in body
+    assert body["dependencies"]["redis"]["error"] == "ConnectionError"
+    assert body["dependencies"]["postgres"]["error"] == "OSError"
+    for leaked in ("railway.internal", "6379", "10.0.4.17", "gateway_owner"):
+        assert leaked not in resp.text
 
 
 @pytest.mark.anyio

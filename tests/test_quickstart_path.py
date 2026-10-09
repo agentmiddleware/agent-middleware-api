@@ -103,7 +103,15 @@ def _prepend_pythonpath(path: Path) -> dict:
 def _verify_cli(bundle_path: Path, keys_path: Path) -> subprocess.CompletedProcess:
     """Run the offline verifier exactly as the doc does: CLI, branchable exit."""
     return subprocess.run(
-        [sys.executable, "-m", "b2a_sdk.verify_cli", "--bundle", str(bundle_path), "--keys", str(keys_path)],
+        [
+            sys.executable,
+            "-m",
+            "b2a_sdk.verify_cli",
+            "--bundle",
+            str(bundle_path),
+            "--keys",
+            str(keys_path),
+        ],
         env=_prepend_pythonpath(REPO_ROOT / "b2a_sdk" / "src"),
         capture_output=True,
         text=True,
@@ -111,7 +119,9 @@ def _verify_cli(bundle_path: Path, keys_path: Path) -> subprocess.CompletedProce
     )
 
 
-def _invoke_body(wallet_id: str, permit_id: str, idempotency_key: str, text: str, call_id: str) -> dict:
+def _invoke_body(
+    wallet_id: str, permit_id: str, idempotency_key: str, text: str, call_id: str
+) -> dict:
     return {
         "jsonrpc": "2.0",
         "id": call_id,
@@ -142,7 +152,11 @@ def test_documented_quickstart_path(quickstart_server, tmp_path):
     )
     assert provision.status_code in (200, 201), provision.text
     minted = provision.json()
-    agent_key, wallet_id, key_id = minted["api_key"], minted["wallet_id"], minted["key_id"]
+    agent_key, wallet_id, key_id = (
+        minted["api_key"],
+        minted["wallet_id"],
+        minted["key_id"],
+    )
     auth = {"X-API-Key": agent_key}
 
     # Step 4 — self-issued permit: 7 credits at 2/call = 3 calls, 4th denied.
@@ -169,7 +183,9 @@ def test_documented_quickstart_path(quickstart_server, tmp_path):
     first = client.post(
         "/mcp/messages",
         headers=auth,
-        json=_invoke_body(wallet_id, permit_id, "quickstart-ci-note-1", "first note", "call-1"),
+        json=_invoke_body(
+            wallet_id, permit_id, "quickstart-ci-note-1", "first note", "call-1"
+        ),
     ).json()
     receipt = first["result"]["receipt"]
     assert receipt["outcome"] == "success"
@@ -182,7 +198,9 @@ def test_documented_quickstart_path(quickstart_server, tmp_path):
     replay = client.post(
         "/mcp/messages",
         headers=auth,
-        json=_invoke_body(wallet_id, permit_id, "quickstart-ci-note-1", "first note", "call-1"),
+        json=_invoke_body(
+            wallet_id, permit_id, "quickstart-ci-note-1", "first note", "call-1"
+        ),
     ).json()
     assert replay["result"]["receipt"]["receipt_id"] == receipt_id
 
@@ -190,7 +208,9 @@ def test_documented_quickstart_path(quickstart_server, tmp_path):
     conflict = client.post(
         "/mcp/messages",
         headers=auth,
-        json=_invoke_body(wallet_id, permit_id, "quickstart-ci-note-1", "DIFFERENT text", "call-x"),
+        json=_invoke_body(
+            wallet_id, permit_id, "quickstart-ci-note-1", "DIFFERENT text", "call-x"
+        ),
     ).json()
     assert conflict["error"]["message"] == "idempotency_key_reused"
 
@@ -199,7 +219,13 @@ def test_documented_quickstart_path(quickstart_server, tmp_path):
         ok = client.post(
             "/mcp/messages",
             headers=auth,
-            json=_invoke_body(wallet_id, permit_id, f"quickstart-ci-note-{n}", f"note {n}", f"call-{n}"),
+            json=_invoke_body(
+                wallet_id,
+                permit_id,
+                f"quickstart-ci-note-{n}",
+                f"note {n}",
+                f"call-{n}",
+            ),
         ).json()
         assert ok["result"]["receipt"]["credits_charged"] == TOOL_COST
 
@@ -207,7 +233,9 @@ def test_documented_quickstart_path(quickstart_server, tmp_path):
     overrun = client.post(
         "/mcp/messages",
         headers=auth,
-        json=_invoke_body(wallet_id, permit_id, "quickstart-ci-note-4", "note 4", "call-4"),
+        json=_invoke_body(
+            wallet_id, permit_id, "quickstart-ci-note-4", "note 4", "call-4"
+        ),
     ).json()
     assert overrun["error"]["message"] == "permit_budget_exceeded"
     denial = overrun["error"]["data"]["receipt"]
@@ -281,7 +309,11 @@ def test_documented_quickstart_path(quickstart_server, tmp_path):
         "/mcp/messages",
         headers=auth,
         json=_invoke_body(
-            wallet_id, deny_permit["permit_id"], "quickstart-ci-denied-1", "should be denied", "deny-1"
+            wallet_id,
+            deny_permit["permit_id"],
+            "quickstart-ci-denied-1",
+            "should be denied",
+            "deny-1",
         ),
     ).json()
     assert denied["error"]["message"] == "permit_tool_not_allowed"
@@ -334,8 +366,10 @@ def test_live_loop_proof_reports_unreachable_server(tmp_path):
     from a broken invariant (exit 1); the codes must stay distinguishable."""
     dead_port = _free_port()
     result = _run_proof_script(
-        "--api-url", f"http://127.0.0.1:{dead_port}",
-        "--output-dir", str(tmp_path / "out"),
+        "--api-url",
+        f"http://127.0.0.1:{dead_port}",
+        "--output-dir",
+        str(tmp_path / "out"),
     )
     assert result.returncode == 2, result.stdout + result.stderr
     assert "make quickstart" in result.stderr
@@ -354,8 +388,14 @@ def test_live_loop_proof_ignores_ambient_proxy(quickstart_server, tmp_path):
     dead_proxy = f"http://127.0.0.1:{_free_port()}"
     proxy_env = {
         var: dead_proxy
-        for var in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
-                    "http_proxy", "https_proxy", "all_proxy")
+        for var in (
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+        )
     }
     # Clear any ambient loopback exclusion so the proxy vars would otherwise bite.
     proxy_env["NO_PROXY"] = ""
@@ -363,8 +403,10 @@ def test_live_loop_proof_ignores_ambient_proxy(quickstart_server, tmp_path):
 
     output_dir = tmp_path / "handoff"
     result = _run_proof_script(
-        "--api-url", quickstart_server,
-        "--output-dir", str(output_dir),
+        "--api-url",
+        quickstart_server,
+        "--output-dir",
+        str(output_dir),
         timeout=180,
         extra_env=proxy_env,
     )

@@ -1,0 +1,96 @@
+    endpoints: dict[str, str]
+    representation_types: list[AWIRepresentationType]
+    actions: list[AWIActionDefinitionResponse]
+    safety_capabilities: AWIManifestSafetyCapabilities
+    known_limitations: list[str]
+
+
+class AWISessionCreate(BaseModel):
+    """Request to create an AWI session."""
+
+    target_url: str = Field(..., description="Target website URL")
+    wallet_id: str | None = Field(None, description="Wallet for billing")
+    max_steps: int = Field(
+        default=100, ge=1, le=1000, description="Max steps per session"
+    )
+    timeout_seconds: int = Field(
+        default=300, ge=10, le=3600, description="Session timeout"
+    )
+    allow_human_pause: bool = Field(
+        default=True, description="Allow human intervention"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    PAUSED = "paused"
+    CANCELLED = "cancelled"
+
+
+class AWITaskCreate(BaseModel):
+    """Create a new AWI task in the queue."""
+
+    task_type: str = Field(..., description="Type of AWI task")
+    target_url: str = Field(..., description="Target URL")
+    action_sequence: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Sequence of AWI actions to execute",
+    )
+    priority: int = Field(
+        default=5, ge=1, le=10, description="Task priority (1=highest)"
+    )
+    max_concurrent: int = Field(
+        default=1, ge=1, le=10, description="Max concurrent steps"
+    )
+    callback_url: str | None = Field(
+        None, description="Webhook for completion notification"
+    )
+
+
+  async steer(
+    sessionId: string,
+    instructions: string
+  ): Promise<unknown> {
+    const response: AxiosResponse = await this.client.post("/v1/awi/intervene", {
+      session_id: sessionId,
+      action: "steer",
+      steer_instructions: instructions,
+    });
+    return response.data;
+  }
+
+  async getSession(sessionId: string): Promise<AWISession> {
+    const response: AxiosResponse = await this.client.get(
+      `/v1/awi/sessions/${sessionId}`
+    );
+    return response.data;
+  }
+
+  async destroySession(sessionId: string): Promise<void> {
+    await this.client.delete(`/v1/awi/sessions/${sessionId}`);
+  }
+
+  async createTask(
+    taskType: string,
+    targetUrl: string,
+    actionSequence: Array<Record<string, unknown>>,
+    priority?: number
+  ): Promise<unknown> {
+    const response: AxiosResponse = await this.client.post("/v1/awi/tasks", {
+      task_type: taskType,
+      target_url: targetUrl,
+      action_sequence: actionSequence,
+      priority: priority || 5,
+    });
+    return response.data;
+  }
+
+  async getTaskStatus(taskId: string): Promise<unknown> {
+    const response: AxiosResponse = await this.client.get(
+      `/v1/awi/tasks/${taskId}`
+    );
+    return response.data;
+  }
+
+132:- 700743, codex-backlog-2026-09-27.md, team-worktree, git remote get-url origin, agent-middleware-api, RegEngine, Dollarloop, test.db, SQLite, one pytest per worktree
+163:- Parallel pytest processes in one AMW checkout corrupt shared relative `./test.db`; run one pytest process per worktree/CWD or give concurrent tests separate worktrees. [Task 1]
+1139:- rollout_summaries/2026-09-05T11-23-50-FlKw-awi_idempotency_contract_merged_pr_401.md (cwd=/Users/sellers/Documents/GitHub/agent-middleware-api/.claude/worktrees/jovial-mirzakhani-bea1d3, rollout_path=/Users/sellers/.codex/sessions/2026/09/05/rollout-2026-09-05T04-23-50-01a0714f-7dea-7d61-b24d-9f5ad5b9df70.jsonl, updated_at=2026-09-05T06:44:57+00:00, thread_id=01a0714f-7dea-7d61-b24d-9f5ad5b9df70, merged PR #401)
+1140:- rollout_summaries/2026-09-05T11-23-50-0WLO-awi_idempotency_header_parity_merged.md (cwd=/Users/sellers/Documents/GitHub/agent-middleware-api/.claude/worktrees/relaxed-greider-89aae0, rollout_path=/Users/sellers/.codex/sessions/2026/09/05/rollout-2026-09-05T04-23-50-01a0714f-7dac-7901-9db7-d2c6ddf5a23c.jsonl, updated_at=2026-09-05T06:46:13+00:00, thread_id=01a0714f-7dac-7901-9db7-d2c6ddf5a23c, merged PR #401)
+1141:- rollout_summaries/2026-09-05T11-23-50-jRwv-fix_awi_unkeyed_debit_assertion_and_merge.md (cwd=/Users/sellers/Documents/GitHub/agent-middleware-api/.claude/worktrees/strange-lalande-c78df0, rollout_path=/Users/sellers/.codex/sessions/2026/09/05/rollout-2026-09-05T04-23-50-01a0714f-7de5-7a83-ab30-f7df8fd7ae4b.jsonl, updated_at=2026-09-05T06:03:02+00:00, thread_id=01a0714f-7de5-7a83-ab30-f7df8fd7ae4b, merged PR #399)

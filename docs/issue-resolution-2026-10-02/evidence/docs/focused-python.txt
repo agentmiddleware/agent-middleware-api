@@ -1,0 +1,19 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/sellers/.openclaw/worktrees/amw-issues-20261002-docs
+configfile: pyproject.toml
+plugins: cov-7.1.0, asyncio-1.4.0, anyio-4.15.1
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 69 items
+
+tests/test_sdk_action_permit_contract.py ...                             [  4%]
+tests/test_wrapper_permit_retry_contract.py .................            [ 28%]
+tests/test_framework_legacy_client.py .................                  [ 53%]
+tests/test_discovery_honesty.py .....                                    [ 60%]
+tests/test_onboarding_doc_contracts.py ......                            [ 69%]
+tests/test_operator_doc_contracts.py .....                               [ 76%]
+tests/test_historical_probe_retirement.py ...                            [ 81%]
+tests/test_receipt_write_contention_surface.py ...........               [ 97%]
+tests/test_site_agent_interface.py ..                                    [100%]
+
+============================= 69 passed in 16.10s ==============================

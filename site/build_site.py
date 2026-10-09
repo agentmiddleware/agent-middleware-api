@@ -80,7 +80,7 @@ ANALYTICS_FLAG_DISABLED = frozenset({"", "false"})
 # The queue shim lives in /va-init.js rather than an inline <script> so the
 # deployed Content-Security-Policy can stay script-src 'self' with no
 # 'unsafe-inline'. It must load before the insights script reads window.vaq.
-ANALYTICS_SCRIPTS = """<script src="/va-init.js?v=gateway-18"></script>
+ANALYTICS_SCRIPTS = """<script src="/va-init.js?v=gateway-19"></script>
     <script defer src="/_vercel/insights/script.js"></script>"""
 # Shared chrome is rendered at build time so it also works without JavaScript.
 SITE_PARTIALS = {
@@ -150,6 +150,11 @@ REQUIRED_PUBLIC_ASSETS = (
     "proof/receipt.json",
     "proof/trust-keys.json",
     "proof/transcript.json",
+    # The standalone offline verifier ships with the page that documents it.
+    # COPY_ASSETS already copies the whole proof/ directory; listing the file
+    # here fails the build if it ever goes missing instead of publishing a
+    # page whose download link 404s.
+    "proof/verify_receipt.py",
 )
 PROVISIONAL_TERMS = (
     "change me",

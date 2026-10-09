@@ -20,6 +20,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import ClassVar
 
+from app.schemas.billing import MAX_STORABLE_AMOUNT
 from pydantic import BaseModel, Field, field_validator
 
 from .billing import ExactDecimalFieldsMixin
@@ -40,6 +41,8 @@ class PodMemberRequest(BaseModel):
     budget_credits: float | None = Field(
         default=None,
         ge=0,
+        lt=MAX_STORABLE_AMOUNT,
+        allow_inf_nan=False,
         description=(
             "This member's share of the pod budget. Omit to split the pod's "
             "total budget evenly across all members with no explicit share."
@@ -60,6 +63,8 @@ class CreatePodRequest(BaseModel):
     budget_credits: float = Field(
         ...,
         gt=0,
+        lt=MAX_STORABLE_AMOUNT,
+        allow_inf_nan=False,
         description="Total shared budget for the pod, in ecosystem credits.",
     )
     members: list[PodMemberRequest] = Field(

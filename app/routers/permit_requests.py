@@ -42,15 +42,11 @@ _IN_FLIGHT = {REQUEST_STATUS_PENDING, REQUEST_STATUS_MINTING}
 def _status_code(model: PermitRequestModel) -> int:
     """202 while the decision is outstanding, 200 once it is settled."""
     return (
-        status.HTTP_202_ACCEPTED
-        if model.status in _IN_FLIGHT
-        else status.HTTP_200_OK
+        status.HTTP_202_ACCEPTED if model.status in _IN_FLIGHT else status.HTTP_200_OK
     )
 
 
-def _authorize_inspection(
-    *, auth: AuthContext, model: PermitRequestModel
-) -> None:
+def _authorize_inspection(*, auth: AuthContext, model: PermitRequestModel) -> None:
     if auth.is_bootstrap_admin:
         return
     if auth.wallet_id in {model.issuer_wallet_id, model.subject_wallet_id}:

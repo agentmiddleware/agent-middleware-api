@@ -21,7 +21,7 @@ import runpy
 import pytest
 
 from app.core.product_positioning import get_product_positioning
-from app.routers.well_known import get_agent_first_metadata
+from app.routers.well_known import _local_try_it_manifest, get_agent_first_metadata
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -251,9 +251,8 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
     # abstraction, and "refund" is the action the calculator's example prices.
     failure = (
         "An agent issues a customer refund through an internal MCP tool. The "
-        "call times out, the agent retries, and without a boundary the refund "
-        "runs twice. Someone pays in lost money, recovery time, or a customer "
-        "problem. Put a number on that cost. If preventing it cannot justify "
+        "call times out, the agent retries, and the refund runs "
+        "twice. If preventing it cannot justify "
         "this boundary, we will tell you."
     )
     # What a credit is, in one place, because the page meters calls while its
@@ -278,26 +277,26 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
     credit = (
         "A credit is a closed-loop metering unit for the pilot on an "
         "operator-provisioned wallet, not payment rails. The gateway reserves "
-        "the tool's registered credit price against the permit before "
+        "the tool's credit price against the permit before "
         "anything runs, and writes at most one ledger debit per accepted "
-        "idempotency key. A denied call is never charged. A call the gateway "
-        "can prove never reached the tool is refunded. But once it has "
-        "committed to sending on the configured upstream path, it can no "
-        "longer prove the tool did not run: a timeout or a crash from that "
-        "point stays charged, and is never retried for you — refunding an "
-        "ambiguous call automatically would pay a caller to induce timeouts "
-        "against a tool that had already done the work. Turning credits into "
-        "invoices, settlement, or payment rails is out of scope by design, "
+        "idempotency key. A denied call is never charged; a call the gateway "
+        "can prove never reached the tool is refunded. Once committed to "
+        "sending on the configured upstream path, it cannot prove the tool "
+        "did not run: a timeout or a crash from that "
+        "point stays charged, and is never retried for you. "
+        "Refunding an ambiguous call automatically would pay a caller to "
+        "induce timeouts against a tool that already did the work. "
+        "Credits never become invoices, settlement, or payment rails, "
         "and the pilot is priced separately, in writing."
     )
     # The recording uses a stand-in tool. Naming a refund in the hero without
     # saying so would let the transcript be read as a customer's refund.
     stand_in = "The tool in the recording is a stand-in echo tool, not a refund tool"
     boundary = (
-        "Agent Middleware API is a transaction boundary between your autonomous "
-        "agents and your consequential MCP (Model Context Protocol) tools. The "
-        "first call executes and is charged once; a retry carrying the same "
-        "idempotency key cannot dispatch again or debit again. Every completed "
+        "Agent Middleware API is a transaction boundary between your "
+        "agents and your consequential MCP tools. The "
+        "first call executes and is charged once; a same-key retry cannot "
+        "dispatch or debit again. Every completed "
         "call returns a signed receipt you can verify offline."
     )
     wedge = (
@@ -305,8 +304,7 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
         "authority for machine actions."
     )
     only_path = (
-        "The gateway sits between the agent and one tool, and becomes the only "
-        "path to that tool once you close the tool's other routes."
+        "The gateway becomes the only path once you close the tool's other routes."
     )
 
     assert headline in text
@@ -344,7 +342,10 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
     assert "Who owns the budget and when they decide." in text
     assert "synthetic or redacted examples only" in text.casefold()
     assert "Never send production secrets" in text
-    assert "a call is available only when a scenario needs one" in text.casefold()
+    # The pilot scope line no longer carries the call-availability clause; the
+    # optional booking link below is now its only carrier, and it is asserted
+    # alongside the CTA order below.
+    assert "one tool, one operator, one action" in text.casefold()
     # One label for the primary CTA everywhere; earlier variants drifted.
     assert "Book a pilot" not in text
     assert "Discuss fit" not in text
@@ -504,27 +505,6 @@ def test_rendered_site_has_truthful_proof_and_no_browser_secret_storage(
     assert "does not independently authenticate" in proof
     assert "without trusting this page" not in proof
 
-    howto = next(
-        node
-        for node in _json_ld_graph(proof, "proof/index.html")
-        if node["@type"] == "HowTo"
-    )
-    install = 'python -m pip install "./b2a_sdk[verify]"'
-    for instructions in (_visible_text(proof), howto["step"][1]["text"]):
-        assert (
-            "The source repository is private during the design-partner phase "
-            "and is shared with pilot partners on request."
-        ) in instructions
-        assert "partner who already has the source" in instructions
-        assert "repository root" in instructions
-        assert install in instructions
-        assert "clone" not in instructions.casefold()
-    assert _visible_text(proof).index(install) < _visible_text(proof).index(
-        "b2a-verify-receipt"
-    )
-    assert "no credentials" in _visible_text(proof)
-    assert "no credentials" in howto["step"][0]["text"]
-
 
 def test_marketing_manifest_points_to_custom_origins_and_local_proof() -> None:
     manifest = json.loads(
@@ -545,31 +525,9 @@ def test_marketing_manifest_points_to_custom_origins_and_local_proof() -> None:
     # Compatibility-only v1 aliases remain while clients migrate.
     assert manifest["product_wedge"] == "governed_mcp_trust_plane"
     assert manifest["product_loop"] == get_agent_first_metadata()["product_loop"]
-    assert manifest["try_it"] == {
-        "mode": "local_self_hosted",
-        "repository": "https://github.com/PetrefiedThunder/agent-middleware-api",
-        "repository_access": "private",
-        "command": "make prove-trust-plane",
-        "live_access": "operator_issued",
-        "requires_live_credentials": False,
-        "proves": [
-            "scoped_permit",
-            "metered_mcp_invoke",
-            "signed_receipt",
-            "replay_without_second_charge",
-            "out_of_scope_denial",
-            "offline_receipt_verification",
-        ],
-        "note": (
-            "Runs the real FastAPI transaction-integrity path against a throwaway "
-            "local SQLite database. This is a reproducible proof, not a production "
-            "or settlement claim. The source repository is private during the "
-            "design-partner phase and is shared with pilot partners on request. "
-            "Partners who already have the source need Python 3.11+, git, make, "
-            "curl, and uv before running the command from the repository root."
-        ),
-    }
-    assert manifest["github_access"] == "private"
+    assert manifest["try_it"] == _local_try_it_manifest()
+    assert manifest["try_it"]["repository_access"] == "public"
+    assert manifest["github_access"] == "public"
     assert manifest["discovery"]["llms_txt"] == f"{CANONICAL_API}/llms.txt"
     assert f"{CANONICAL_API}/llms.txt" in manifest["bootstrap_sequence"]
     assert "transaction-integrity boundary" in manifest["description"]
@@ -583,30 +541,16 @@ def test_machine_pointer_copies_match_and_state_live_access_boundary() -> None:
     api_llm_txt = (ROOT / "static" / "llm.txt").read_text(encoding="utf-8")
 
     assert llm_txt == llms_txt
-    bootstrap = " ".join(
-        llm_txt.split("## Bootstrap", 1)[1].split("## Authority", 1)[0].split()
-    )
-    catalog_notice = (
-        "GET /mcp/tools.json on https://api.thisisatest.tech requires an "
-        "operator-issued key and returns 401 without one."
-    )
-    assert catalog_notice in bootstrap
-    assert bootstrap.index(
-        "4. GET https://api.thisisatest.tech/openapi.json"
-    ) < bootstrap.index(catalog_notice)
-    assert (
-        "The other bootstrap GETs (/.well-known/agent.json, /llms.txt, and "
-        "/openapi.json) are unauthenticated."
-    ) in bootstrap
     assert "human design-partner site" in llm_txt
     assert "teams operating consequential autonomous actions are the buyers" in llm_txt
     assert "Transaction integrity" in llm_txt
     assert "delivery_uncertain" in llm_txt
     assert "at most one gateway dispatch and debit" in " ".join(llm_txt.split())
-    assert (
-        "The source repository is private during the design-partner phase "
-        "and is shared with pilot partners on request."
-    ) in " ".join(llm_txt.split())
+    assert "public source" in llm_txt
+    assert "GET /mcp/tools.json requires an" in llm_txt
+    assert "returns 401 without one" in llm_txt
+    assert "The local quickstart exposes the catalog without a key" in llm_txt
+    assert "Python 3.11+" in llm_txt
     assert "make prove-trust-plane" in llm_txt
     assert "operator-issued" in llm_txt
     assert "no public self-serve key mint" in llm_txt
@@ -652,63 +596,124 @@ def test_customer_facing_outputs_do_not_publish_provider_origins(tmp_path) -> No
             assert suffix not in content, f"{path} publishes {suffix}"
 
 
-REPO_URL = "https://github.com/PetrefiedThunder/agent-middleware-api"
+PUBLIC_ORG_URL = "https://github.com/agentmiddleware"
+PUBLIC_REPO_URL = "https://github.com/agentmiddleware/agent-middleware-api"
+OLD_REPO_URL = "https://github.com/PetrefiedThunder/agent-middleware-api"
+GITHUB_URL_PATTERN = re.compile(r"https://github\.com[^\s\"'<>)\]]*")
 
 
-def test_public_surfaces_state_private_source_access_and_partner_prerequisites(
+def test_machine_discovery_names_keyed_catalog_and_scoped_tool_invoke(tmp_path) -> None:
+    output = tmp_path / "site"
+    result = _render_site(output, VALID_TEST_CONTACTS)
+    assert result.returncode == 0, result.stderr
+
+    home = (output / "index.html").read_text(encoding="utf-8")
+    machine = home.split('id="machine-discovery"', 1)[1].split("</section>", 1)[0]
+    normalized = " ".join(machine.split())
+    assert "Three unauthenticated GETs" in normalized
+    assert "/mcp/tools.json</code> returns 401" in normalized
+    assert "governed tool invocation requires an operator-issued key" in normalized
+    assert "and a scoped permit" in normalized
+    assert "protected actions need" not in normalized
+
+
+def test_public_surfaces_link_public_source_without_requiring_credentials(
     tmp_path,
 ) -> None:
-    """A stranger must see the source-access gate before local-run instructions."""
+    """Published copy and manifest point at the public source repository."""
     output = tmp_path / "site"
     result = _render_site(output, VALID_TEST_CONTACTS)
     assert result.returncode == 0, result.stderr
 
     public_paths = (
         output / "index.html",
-        output / "proof" / "index.html",
         output / "compare" / "index.html",
+        output / "proof" / "index.html",
         output / "llm.txt",
         output / "llms.txt",
         output / "llms-full.txt",
         output / ".well-known" / "agent.json",
         output / ".well-known" / "security.txt",
+        ROOT / "static" / "llm.txt",
     )
     for path in public_paths:
-        raw = path.read_text(encoding="utf-8")
-        content = " ".join((_page_text(raw) if path.suffix == ".html" else raw).split())
-        assert (
-            "The source repository is private during the design-partner phase "
-            "and is shared with pilot partners on request."
-        ) in content, path
-        assert "source repository is public" not in content.casefold(), path
-        assert not re.search(r"\bclone\b", content, re.I), (
-            f"{path} still directs an anonymous reader to clone the private source"
-        )
+        content = path.read_text(encoding="utf-8").casefold()
+        normalized = " ".join(content.split())
+        assert "source repository is private" not in normalized, path
+        assert "source access on request" not in normalized, path
+        assert "partners with source access" not in normalized, path
+        assert "open source" not in normalized, path
+        assert "open-source repository" not in normalized, path
+        assert OLD_REPO_URL.casefold() not in content, path
 
-    for pointer in ("llm.txt", "llms.txt", "llms-full.txt"):
-        content = " ".join((output / pointer).read_text(encoding="utf-8").split())
-        prerequisites = "Python 3.11+, git, make, curl, and uv"
-        assert "partners who already have the source" in content.casefold()
-        assert content.index(prerequisites) < content.index("make quickstart")
-        assert content.index(prerequisites) < content.index("make prove-trust-plane")
+    source_paths = (
+        output / "index.html",
+        output / "compare" / "index.html",
+        output / "llm.txt",
+        output / "llms.txt",
+        output / "llms-full.txt",
+        output / ".well-known" / "agent.json",
+        ROOT / "static" / "llm.txt",
+    )
+    for path in source_paths:
+        content = path.read_text(encoding="utf-8")
+        assert PUBLIC_REPO_URL in content, path
+        assert "petrefiedthunder" not in content.casefold(), path
+
+    manifest = json.loads(
+        (output / ".well-known" / "agent.json").read_text(encoding="utf-8")
+    )
+    assert manifest["github"] == PUBLIC_REPO_URL
+    assert manifest["github_access"] == "public"
+    assert manifest["try_it"]["repository"] == PUBLIC_REPO_URL
+    assert manifest["try_it"]["repository_access"] == "public"
+
+    quickstart = (ROOT / "docs" / "quickstart.md").read_text(encoding="utf-8")
+    assert f"git clone {PUBLIC_REPO_URL}.git" in quickstart
+    compare = (output / "compare" / "index.html").read_text(encoding="utf-8")
+    assert "docs/market-research-2026-08.md</code> in the public source" in compare
+
+    # The shared footer still links the organization page.
+    footer = (SITE / "partials" / "footer.html").read_text(encoding="utf-8")
+    assert PUBLIC_ORG_URL in footer
+    assert OLD_REPO_URL not in footer
 
 
-def test_machine_discovery_distinguishes_public_gets_from_keyed_catalog(tmp_path):
+OWN_GITHUB_OWNERS = ("petrefiedthunder", "agentmiddleware")
+
+
+def _github_url_uses_current_owner(url: str) -> bool:
+    """Our own GitHub links use the current organization, not the old owner."""
+    url = url.rstrip(".,;:")
+    path = url[len("https://github.com") :].strip("/")
+    owner = path.split("/", 1)[0].casefold() if path else ""
+    if owner not in OWN_GITHUB_OWNERS:
+        return True
+    return owner == "agentmiddleware"
+
+
+def test_built_site_github_links_use_current_owner(tmp_path) -> None:
+    """Published links avoid the old owner; third-party links are allowed."""
     output = tmp_path / "site"
     result = _render_site(output, VALID_TEST_CONTACTS)
     assert result.returncode == 0, result.stderr
-    page = (output / "index.html").read_text(encoding="utf-8")
-    section = page.split('id="machine-discovery"', 1)[1].split("</section>", 1)[0]
-    text = _page_text(section)
-    assert "Four unauthenticated GETs" not in text
-    assert "Three unauthenticated GETs" in text
-    for path in ("/.well-known/agent.json", "/llms.txt", "/health/dependencies"):
-        assert f'href="{CANONICAL_API}{path}"' in section
-    assert f'href="{CANONICAL_API}/mcp/tools.json"' in section
-    assert (
-        "The catalog at https://api.thisisatest.tech/mcp/tools.json requires "
-        "an operator-issued key and returns 401 without one."
-    ) in text
+
+    text_suffixes = {".html", ".txt", ".json", ".xml", ".js", ".md", ".css"}
+    checked = 0
+    offenders: list[str] = []
+    for path in sorted(output.rglob("*")):
+        if not path.is_file() or path.suffix not in text_suffixes:
+            continue
+        relative = path.relative_to(output)
+        if relative.parts and relative.parts[0] == "concept":
+            continue
+        content = path.read_text(encoding="utf-8", errors="replace")
+        for url in GITHUB_URL_PATTERN.findall(content):
+            checked += 1
+            if not _github_url_uses_current_owner(url):
+                offenders.append(f"{relative}: {url}")
+    assert checked > 0, "expected at least the footer GitHub link"
+    assert offenders == []
 
 
 def test_dynamic_routes_and_noncanonical_hosts_redirect_correctly() -> None:
@@ -780,7 +785,7 @@ def test_search_social_and_analytics_contracts(tmp_path) -> None:
         for node in _json_ld_graph(page, "index.html")
         if node["@type"] == "Organization"
     )
-    assert organization["sameAs"] == [REPO_URL]
+    assert organization["sameAs"] == [PUBLIC_ORG_URL]
     software = next(
         node
         for node in _json_ld_graph(page, "index.html")
@@ -831,7 +836,7 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
         assert "/_vercel/insights/script.js" not in page
         assert "/va-init.js" not in page
         assert "@@VERCEL_ANALYTICS_SCRIPTS@@" not in page
-        assert '<script defer src="/analytics.js?v=gateway-18"></script>' in page
+        assert '<script defer src="/analytics.js?v=gateway-19"></script>' in page
 
     enabled_output = tmp_path / "enabled"
     enabled_contacts = dict(VALID_TEST_CONTACTS)
@@ -841,7 +846,7 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
     for relative_path in pages:
         page = (enabled_output / relative_path).read_text(encoding="utf-8")
         assert '<script defer src="/_vercel/insights/script.js"></script>' in page
-        assert '<script src="/va-init.js?v=gateway-18"></script>' in page
+        assert '<script src="/va-init.js?v=gateway-19"></script>' in page
         assert (
             page.index("/va-init.js?")
             < page.index("/_vercel/insights/script.js")
@@ -1218,12 +1223,11 @@ def test_faq_structured_data_is_generated_from_the_visible_answers(tmp_path) -> 
 
     expected_production_answer = (
         "Production beta, not production complete. The supported beta is "
-        "vendor-managed and dedicated per customer: each customer receives "
-        "separate API, PostgreSQL, Redis, signing material, and administrator "
+        "vendor-managed and dedicated per customer: separate API, "
+        "PostgreSQL, Redis, signing material, and administrator "
         "resources. It is not a shared multi-tenant SaaS, and optional "
         "proof-surface routers are outside the supported production posture. "
-        "There are no replicas or consensus. Read the security limitations "
-        "before deciding."
+        "There are no replicas or consensus."
     )
     production_answer = next(
         entry["acceptedAnswer"]["text"]
@@ -1242,14 +1246,34 @@ def test_faq_structured_data_is_generated_from_the_visible_answers(tmp_path) -> 
     exactly_once_answer = next(
         entry["acceptedAnswer"]["text"]
         for entry in questions
-        if entry["name"] == "Does exactly-once hold all the way to my tool?"
+        if entry["name"] == "Does once-only hold all the way to my tool?"
     )
     canonical_boundary = (
         "At our boundary: one accepted idempotency key maps to at most one "
-        "gateway dispatch and debit plus one terminal receipt."
+        "gateway dispatch and debit, and to one terminal receipt on the "
+        "upstream path and every reconcilable outcome."
     )
     assert canonical_boundary in text
     assert canonical_boundary in exactly_once_answer
+    # A local governed tool that crashes after its side effect leaves one debit
+    # and no receipt (TRUST_MODEL.md; test_mcp_postgres_multiprocess asserts
+    # receipt_ids == ()), so neither the FAQ nor the CONTEXT.md vocabulary it
+    # is drawn from may promise a receipt unconditionally.
+    local_crash_exception = (
+        "The exception is a local governed tool that crashes after its side "
+        "effect: that leaves one execution and one debit with no receipt, "
+        "pending manual review."
+    )
+    assert local_crash_exception in exactly_once_answer
+    context = " ".join((ROOT / "CONTEXT.md").read_text(encoding="utf-8").split())
+    unqualified_receipt_claim = "gateway dispatch and debit plus one terminal receipt"
+    assert unqualified_receipt_claim not in text
+    assert unqualified_receipt_claim not in context
+    assert (
+        "at most one gateway dispatch and debit, and to one terminal receipt on "
+        "the upstream path and every reconcilable outcome" in context
+    )
+    assert "a local governed tool that crashes after its side effect" in context
     assert "produces one dispatch, one debit, one receipt" not in text
     assert "produces one dispatch, one debit, one receipt" not in exactly_once_answer
 

@@ -1,0 +1,3 @@
+Enumerated 343 occurrences in 133 tracked files.
+Excluded credential/environment-named paths: 5; absent tracked files: 0.
+Wrote CLAIMS-INVENTORY.md and artifacts/claims-inventory.json; content scrubbed.

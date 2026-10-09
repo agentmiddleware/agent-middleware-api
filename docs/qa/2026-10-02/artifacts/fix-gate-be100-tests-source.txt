@@ -1,0 +1,187 @@
+ M ELEVATOR_PITCH.md
+ M app/core/url_guard.py
+ M app/services/upstream_mcp.py
+ M awi_sdk/typescript/index.ts
+ M docs/agent-self-credentialing.md
+ M docs/qa/2026-10-02/frontend-components.test.cjs
+ M docs/qa/2026-10-02/ux-regressions.spec.cjs
+ M docs/tool-interface-authority.md
+ M site/styles.css
+ M tests/test_qa_20261002_backend.py
+?? docs/qa/2026-10-02/FIX-CLAIMS-SESSION.md
+?? docs/qa/2026-10-02/FIX-GATE-SESSION.md
+?? docs/qa/2026-10-02/FIX-SDK-SESSION.md
+?? docs/qa/2026-10-02/FIX-SESSION.md
+?? docs/qa/2026-10-02/FIX-UX-SESSION.md
+?? docs/qa/2026-10-02/artifacts/fix-add-multicast-regressions.txt
+?? docs/qa/2026-10-02/artifacts/fix-auth-and-related-tests.txt
+?? docs/qa/2026-10-02/artifacts/fix-backend-sources.txt
+?? docs/qa/2026-10-02/artifacts/fix-backend-test-selection.txt
+?? docs/qa/2026-10-02/artifacts/fix-be003-before.txt
+?? docs/qa/2026-10-02/artifacts/fix-browser-install.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-add-regression.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-apply-doc-correction.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-claims-evidence-retry.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-claims-evidence.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-docs-context.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-final-regression-evidence.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-final-review.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-implementation-context.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-initial-context.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-instructions-findings.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-negative-control.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-regression-conventions.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-targeted-docs.txt
+?? docs/qa/2026-10-02/artifacts/fix-claims-verify-doc-correction.txt
+?? docs/qa/2026-10-02/artifacts/fix-first-diffs.txt
+?? docs/qa/2026-10-02/artifacts/fix-fix-multicast.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-be002-context.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-be002-decision.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-be002-dependencies.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-be002-search.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-be100-diff.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-candidate-diff-stat.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-findings-full.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-guard-source-context.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-identity.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-initial-diff.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-instructions-findings.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-nested-agents-memory.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-openapi-context-retry.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-review-skill.txt
+?? docs/qa/2026-10-02/artifacts/fix-gate-ux-sdk-diff.txt
+?? docs/qa/2026-10-02/artifacts/fix-install-guard-hook.txt
+?? docs/qa/2026-10-02/artifacts/fix-install-python.txt
+?? docs/qa/2026-10-02/artifacts/fix-new-tests-review.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-after-fe002.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-before-fe002.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-bounds-freeze.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-context.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-explicit-typecheck.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-final-diff.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-fix-fe002.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-focused-read.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-identity.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-regression-tests.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-related-components.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-skill-findings.txt
+?? docs/qa/2026-10-02/artifacts/fix-sdk-source-bounds-memory.txt
+?? docs/qa/2026-10-02/artifacts/fix-setup-node.txt
+?? docs/qa/2026-10-02/artifacts/fix-setup-python.txt
+?? docs/qa/2026-10-02/artifacts/fix-test-guard-hook.txt
+?? docs/qa/2026-10-02/artifacts/fix-tooling-and-safety.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-context.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-create-contrast-test.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-dashboard-related-tests.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-dom-color-probe.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-focused-context.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-initial-inspect.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-palette-and-focus.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-related-source.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-source-read.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux-testing-tools.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux001-after.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux001-before.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux001-edit.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux001-result-decision.txt
+?? docs/qa/2026-10-02/artifacts/fix-ux-ux001-review.txt
+?? docs/qa/2026-10-02/ux-contracts.test.cjs
+?? tests/test_qa_be100_documentation.py
+app/routers/mcp.py:260:        "error": "manual_review_required",
+app/routers/mcp.py:2275:                receipt_payload, reconciliation = await _finalize_unrefunded_failure(
+app/routers/mcp.py:2989:        receipt_payload, reconciliation = await _finalize_unrefunded_failure(
+docs/failure-semantics.md:52:| `failed_refunded` | A **confirmed** failure: local tool raised; upstream returned `isError: true`; DNS/TLS/`initialize` failed before the remote dispatch claim; charge refused on the upstream path; or a crash before dispatch, finalized by the reconciler | Debit refunded (or never taken). The receipt signs `credits_charged = 0`; the ledger separately proves the correlated refund | An `isError` response may have reached the gateway; pre-claim cases were not dispatched; no downstream effect is independently proven | 500 or 502 / `-32006` (402/403 for refused charges) | Pre-claim failure, guarded completion, and reconciliation tests in `tests/test_mcp_upstream_governed.py`, `tests/test_mcp_dispatch_router_claim.py`, and `tests/test_mcp_dispatch_reconciliation.py` |
+docs/failure-semantics.md:55:| `failed_unrefunded` | A refund was owed and the refund **itself** failed | Charged; a durable operator work item is created atomically with the receipt | Depends on the underlying failure | 500 / `-32603` | `test_governed_refund_failure_keeps_permit_budget_reserved`, `test_refund_reconciliation_retries_exactly_once_and_preserves_agent_replay` |
+docs/failure-semantics.md:80:One state produces neither a receipt nor an unclassified failure: the audit
+docs/failure-semantics.md:146:| **D3. lost ack on the final completion** (receipt exists, idempotency record empty) | Receipt-present / response-`NULL` sweep, which runs **before** the generic sweep | The replay record is rebuilt from the signed receipt; an existing `failed_refunded` receipt **blocks** a second budget release | Unchanged |
+tests/test_mcp_upstream_governed.py:661:        # A receipt-store crash is an unclassified failure: the caller gets the
+tests/test_mcp_upstream_governed.py:667:        assert "simulated_receipt_crash" not in failed.text
+tests/test_mcp_upstream_governed.py:1048:        assert receipt_payload["outcome"] == "failed_refunded"
+tests/test_mcp_upstream_governed.py:1379:        assert error["data"]["receipt"]["outcome"] == "failed_refunded"
+tests/test_mcp_upstream_governed.py:2248:        assert receipt["outcome"] == "failed_refunded"
+tests/test_mcp_upstream_governed.py:2314:        assert receipt_payload["outcome"] == "failed_refunded"
+tests/test_mcp_upstream_governed.py:2427:        assert receipt_payload["outcome"] == "failed_refunded"
+tests/test_mcp_upstream_governed.py:2988:    the receipt, so recording it here is the only way to pin the fail-open
+tests/test_qa_be100_documentation.py:1:"""BE-100: integration guidance must disclose incomplete terminal evidence."""
+tests/test_qa_be100_documentation.py:14:    assert "manual_review_required" in text
+tests/test_upstream_retry_cap_enforcement.py:965:        assert body1["error"]["data"]["receipt"]["outcome"] == "failed_refunded"
+tests/test_awi_http_governance.py:748:        assert data["receipt"]["outcome"] == "failed"
+tests/test_awi_http_governance.py:756:        assert receipt["outcome"] == "failed"
+tests/test_awi_http_governance.py:758:        assert receipt["reason_code"] == "dom_bridge_failed"
+tests/test_security_fuzz_battery.py:173:async def test_tampered_receipt_payload_fails_verification(client, clean_database):
+tests/test_security_fuzz_battery.py:174:    """Modify a receipt's stored payload_hash after signing; verify must fail."""
+tests/test_security_fuzz_battery.py:205:        assert ok is False, "Expected tampered receipt to fail verification"
+tests/test_security_fuzz_battery.py:213:    """Sign a receipt payload with a different Ed25519 key; verify must fail."""
+tests/test_security_fuzz_battery.py:273:async def test_signature_from_different_receipt_fails(client, clean_database):
+tests/test_security_fuzz_battery.py:274:    """Copy a valid signature from receipt A onto receipt B's payload; verify must fail."""
+tests/test_security_fuzz_battery.py:314:        assert ok is False, "Expected cross-receipt signature to fail verification"
+tests/test_evidence_bundle.py:200:        receipt = failed.json()["error"]["data"]["receipt"]
+tests/test_evidence_bundle.py:201:        assert receipt["outcome"] == "failed_refunded"
+tests/test_mcp_internal_error_disclosure.py:315:    assert error["data"]["receipt"]["outcome"] == "failed_unrefunded"
+tests/test_site_agent_interface.py:3457:    # Now the guard: a transcript for another receipt must fail the build.
+tests/test_mcp_postgres_multiprocess.py:1690:    assert after.receipt_outcomes == ("failed_refunded",)
+tests/test_mcp_postgres_multiprocess.py:1693:        receipt_outcome="failed_refunded",
+tests/test_refund_reconciliation.py:108:    assert data["receipt"]["outcome"] == "failed_unrefunded"
+tests/test_refund_reconciliation.py:324:    assert verified_receipt.json()["receipt"]["outcome"] == "failed_unrefunded"
+tests/test_refund_reconciliation.py:619:    with patch.object(ReceiptService, "create_receipt", fail_after_receipt_flush):
+tests/test_refund_reconciliation_contention_surface.py:391:    assert data["receipt"]["outcome"] == "failed_unrefunded", data
+tests/test_refund_reconciliation_contention_surface.py:460:    assert data["receipt"]["outcome"] == "failed_unrefunded", data
+tests/test_refund_reconciliation_contention_surface.py:518:    assert data["receipt"]["outcome"] == "failed_unrefunded", data
+tests/test_refund_reconciliation_contention_surface.py:625:    assert data["error"] == "manual_review_required", data
+tests/test_refund_reconciliation_contention_surface.py:721:    assert data["error"] == "manual_review_required", data
+tests/test_refund_reconciliation_contention_surface.py:773:    assert detail["error"] == "manual_review_required", detail
+tests/test_signing_key_lifecycle.py:393:# which public key signed a receipt. They must fail closed for every
+tests/test_x402.py:155:    async def _induced_receipt_failure(self, **kwargs):
+tests/test_x402.py:156:        raise RuntimeError("induced receipt failure")
+tests/test_x402.py:158:    monkeypatch.setattr(ReceiptService, "create_receipt", _induced_receipt_failure)
+tests/test_x402.py:918:    async def _induced_receipt_failure(self, **kwargs):
+tests/test_x402.py:919:        raise RuntimeError("induced receipt failure")
+tests/test_x402.py:921:    monkeypatch.setattr(ReceiptService, "create_receipt", _induced_receipt_failure)
+tests/test_x402.py:977:    async def _induced_receipt_failure(self, **kwargs):
+tests/test_x402.py:978:        raise RuntimeError("induced receipt failure")
+tests/test_x402.py:980:    monkeypatch.setattr(ReceiptService, "create_receipt", _induced_receipt_failure)
+tests/test_constant_loop_receipt_signature.py:8:receipt whose signature has been tampered with, proving the check would fail.
+tests/test_permit_write_contention_surface.py:525:    assert detail["receipt"]["outcome"] == "failed_refunded", detail
+tests/test_permit_write_contention_surface.py:695:    assert detail["receipt"]["outcome"] == "failed_refunded", detail
+tests/test_failure_lab_verifier.py:119:def test_a_success_receipt_contradicted_by_the_world_fails_that_claim(signed_bundle):
+tests/test_trust_negative_security.py:6:- a receipt stripped of its signature fails verification.
+tests/test_trust_negative_security.py:356:async def test_unsigned_receipt_fails_verification(client, clean_database):
+tests/test_mcp_dispatch_evidence.py:464:    receipt.outcome = "failed_refunded"
+tests/test_mcp_dispatch_evidence.py:468:    receipt.outcome = "failed_unrefunded"
+tests/test_mcp_dispatch_reconciliation.py:361:    assert receipt.outcome == "failed_refunded"
+tests/test_mcp_dispatch_reconciliation.py:1017:    assert receipt is not None and receipt.outcome == "failed_refunded"
+tests/test_mcp_dispatch_reconciliation.py:1057:    assert receipt.outcome == "failed_refunded"
+tests/test_mcp_dispatch_reconciliation.py:1221:    assert receipt.outcome == "failed_refunded"
+tests/test_mcp_trust.py:724:    assert receipt["outcome"] == "failed_refunded"
+tests/test_mcp_trust.py:813:    assert receipt["outcome"] == "failed_unrefunded"
+tests/test_mcp_trust.py:866:async def test_governed_mcp_finalize_retries_on_transient_receipt_failure(
+tests/test_mcp_trust.py:1086:        with patch.object(ReceiptService, "create_receipt", always_fail_create_receipt):
+tests/test_acp_bridge.py:702:    # Budget released, no receipt — same atomicity as every charge failure.
+tests/test_acp_bridge.py:929:    async def _receipt_failure(self, **receipt_kwargs):
+tests/test_acp_bridge.py:930:        raise RuntimeError("induced receipt failure")
+tests/test_acp_bridge.py:938:    monkeypatch.setattr(ReceiptService, "create_receipt", _receipt_failure)
+tests/test_late_debit_reconciliation.py:120:    assert receipt.outcome == "failed_refunded"
+tests/test_late_debit_reconciliation.py:415:    assert receipt.outcome == "failed_refunded"
+tests/test_late_debit_reconciliation.py:535:    assert receipt.outcome == "failed_refunded"
+tests/test_permit_budget_drift_visibility.py:168:    assert resp.json()["detail"]["receipt"]["outcome"] == "failed_refunded"
+tests/test_permit_budget_drift_visibility.py:221:    assert detail["receipt"]["outcome"] == "failed_refunded", detail
+tests/test_receipt_write_contention_surface.py:112:def _lose_receipt_commits(monkeypatch, *, failures: int | None) -> dict[str, int]:
+tests/test_receipt_write_contention_surface.py:275:        state = _lose_receipt_commits(monkeypatch, failures=5)
+tests/test_receipt_write_contention_surface.py:330:        _lose_receipt_commits(monkeypatch, failures=5)
+tests/test_receipt_write_contention_surface.py:383:        state = _lose_receipt_commits(monkeypatch, failures=None)
+tests/test_receipt_write_contention_surface.py:450:        _lose_receipt_commits(monkeypatch, failures=None)
+tests/test_receipt_write_contention_surface.py:525:            _lose_receipt_commits(monkeypatch, failures=None)
+tests/test_receipt_write_contention_surface.py:569:        _lose_receipt_commits(monkeypatch, failures=None)
+tests/test_receipt_write_contention_surface.py:592:    assert data["error"] == "manual_review_required", data
+tests/test_receipt_write_contention_surface.py:647:        state = _lose_receipt_commits(monkeypatch, failures=None)
+tests/test_receipt_write_contention_surface.py:713:        _lose_receipt_commits(monkeypatch, failures=None)
+tests/test_receipt_write_contention_surface.py:733:    assert detail["error"] == "manual_review_required", detail
+tests/test_receipt_write_contention_surface.py:797:            _lose_receipt_commits(monkeypatch, failures=None)
+tests/test_receipt_write_contention_surface.py:892:            _lose_receipt_commits(inner, failures=None)
+tests/test_receipt_write_contention_surface.py:1002:            _lose_receipt_commits(inner, failures=None)
+tests/test_permit_postgres_concurrency.py:832:    assert receipt.outcome == "failed_unrefunded"
+tests/test_permit_postgres_concurrency.py:1455:    assert receipts[0].outcome == "failed_refunded"
+tests/test_permit_postgres_concurrency.py:1674:    assert reconciled_receipts[0].outcome == "failed_refunded"
+tests/test_adversarial_five_claims.py:760:        assert receipt["outcome"] == "failed_refunded"
+tests/test_receipt_wallet_linkage.py:9:A broken wallet_id field in receipts would be a critical audit/billing failure.
+tests/test_audit_chain_contention_surface.py:702:    assert data["error"] == "manual_review_required", data

@@ -40,6 +40,9 @@ class RTaaSTarget:
 
     url: str
     method: str = "GET"
+    # A live credential for a third-party endpoint. The simulation never
+    # contacts the target, so it is never forwarded and never persisted (see
+    # _job_to_models); create_job does not even retain it.
     auth_header: str | None = None
     description: str = ""
 
@@ -112,7 +115,15 @@ class RTaaSEngine:
             scan_id=job.job_id,
             scan_type="rtaas",
             tenant_id=job.tenant_id,
-            targets_json=json.dumps([asdict(t) for t in job.targets], default=str),
+            # Drop auth_header: a target credential must never land in the
+            # database in plaintext, and nothing ever reads it back.
+            targets_json=json.dumps(
+                [
+                    {k: v for k, v in asdict(t).items() if k != "auth_header"}
+                    for t in job.targets
+                ],
+                default=str,
+            ),
             attack_categories_json=json.dumps([c.value for c in job.attack_categories]),
             intensity=job.intensity,
             status=job.status,
@@ -158,10 +169,11 @@ class RTaaSEngine:
             except json.JSONDecodeError:
                 target_records = []
         targets = [
+            # auth_header is deliberately not rehydrated, even from a row
+            # written before it stopped being persisted.
             RTaaSTarget(
                 url=t.get("url", ""),
                 method=t.get("method", "GET"),
-                auth_header=t.get("auth_header"),
                 description=t.get("description", ""),
             )
             for t in target_records
@@ -270,10 +282,11 @@ class RTaaSEngine:
         job_id = f"rtaas-{uuid.uuid4().hex[:12]}"
 
         parsed_targets = [
+            # Any caller-supplied auth_header is discarded: the simulation
+            # contacts no target, so there is nothing to forward it to.
             RTaaSTarget(
                 url=t["url"],
                 method=t.get("method", "GET"),
-                auth_header=t.get("auth_header"),
                 description=t.get("description", ""),
             )
             for t in targets
@@ -331,13 +344,20 @@ class RTaaSEngine:
         num_tests = tests_per_target.get(intensity, 15)
         total_tests = len(targets) * len(categories) * num_tests
 
-        # Deterministic simulation based on target URLs
+        # Deterministic simulation based on target URLs. Use a stable digest
+        # for the category too: the builtin hash() of a str is salted per
+        # process (PYTHONHASHSEED), so it would give different findings for the
+        # same URL after a restart or on another worker.
+        cat_hashes = {
+            cat: int(hashlib.md5(cat.value.encode()).hexdigest()[:8], 16)
+            for cat in categories
+        }
         for target in targets:
             url_hash = int(hashlib.md5(target.url.encode()).hexdigest()[:8], 16)
 
             for cat in categories:
                 # Simulate finding vulnerabilities probabilistically
-                if (url_hash + hash(cat.value)) % 7 == 0:
+                if (url_hash + cat_hashes[cat]) % 7 == 0:
                     severity = Severity.HIGH if url_hash % 3 == 0 else Severity.MEDIUM
                     vulns.append(
                         RTaaSVulnerability(
@@ -358,7 +378,7 @@ class RTaaSEngine:
                         )
                     )
 
-                if (url_hash + hash(cat.value)) % 11 == 0:
+                if (url_hash + cat_hashes[cat]) % 11 == 0:
                     vulns.append(
                         RTaaSVulnerability(
                             vuln_id=f"v-{uuid.uuid4().hex[:8]}",

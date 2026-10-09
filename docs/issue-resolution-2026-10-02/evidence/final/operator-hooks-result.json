@@ -1,0 +1,13 @@
+{
+  "command": [
+    "pre-commit",
+    "run",
+    "--files",
+    "tests/test_human_accessibility.py"
+  ],
+  "head": "0db19631f8a2de879e77d9b57246c41fb261c243",
+  "uncommitted_test_contract_change": true,
+  "exit_code": 0,
+  "started": "2026-10-03T03:47:26.597545+00:00",
+  "finished": "2026-10-03T03:47:27.337928+00:00"
+}

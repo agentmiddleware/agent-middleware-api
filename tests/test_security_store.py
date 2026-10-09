@@ -142,6 +142,40 @@ async def test_scan_store_list_all_returns_every_internal_scan():
     assert {r.scan_id for r in reports} == {"scan-old", "scan-new"}
 
 
+@pytest.mark.anyio
+async def test_scan_store_reads_scoped_to_owning_wallet():
+    """An owner-scoped read sees only that wallet's scans; an unscoped
+    (bootstrap-admin) read sees all, including ownerless admin scans."""
+    store = ScanStore()
+    await store.save(_make_report(scan_id="scan-a"), owner_wallet_id="wallet-a")
+    await store.save(_make_report(scan_id="scan-b"), owner_wallet_id="wallet-b")
+    await store.save(_make_report(scan_id="scan-admin"))
+
+    assert (await store.get("scan-a", "wallet-a")) is not None
+    assert await store.get("scan-a", "wallet-b") is None
+    assert await store.get("scan-admin", "wallet-a") is None
+    assert (await store.get("scan-admin")) is not None
+
+    assert [r.scan_id for r in await store.list_all("wallet-a")] == ["scan-a"]
+    assert [r.scan_id for r in await store.list_all("wallet-b")] == ["scan-b"]
+    assert await store.list_all("wallet-c") == []
+    assert {r.scan_id for r in await store.list_all()} == {
+        "scan-a",
+        "scan-b",
+        "scan-admin",
+    }
+
+
+@pytest.mark.anyio
+async def test_scan_store_resave_never_reassigns_owner():
+    store = ScanStore()
+    await store.save(_make_report(scan_id="scan-a"), owner_wallet_id="wallet-a")
+    await store.save(_make_report(scan_id="scan-a"), owner_wallet_id="wallet-b")
+
+    assert await store.get("scan-a", "wallet-b") is None
+    assert (await store.get("scan-a", "wallet-a")) is not None
+
+
 # ---------------------------------------------------------------------------
 # Discriminator isolation — the shared-schema property
 # ---------------------------------------------------------------------------
@@ -253,8 +287,16 @@ async def test_rtaas_job_round_trip_preserves_targets_and_vulns():
     assert got.tenant_id == "tenant-x"
     assert got.intensity == "thorough"
     assert len(got.targets) == 2
-    assert got.targets[0].auth_header == "Bearer x"
+    # The target credential is never forwarded, so it is never persisted.
+    assert got.targets[0].auth_header is None
     assert got.targets[0].method == "POST"
+    assert got.targets[0].description == "primary"
+    factory = get_session_factory()
+    async with factory() as session:
+        row = await session.get(SecurityScanModel, "rtaas-rt")
+    assert row is not None
+    assert "Bearer x" not in (row.targets_json or "")
+    assert "auth_header" not in (row.targets_json or "")
     assert {c for c in got.attack_categories} == {
         AttackCategory.INJECTION,
         AttackCategory.RATE_LIMIT_EVASION,

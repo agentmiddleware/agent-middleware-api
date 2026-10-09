@@ -1,0 +1,26 @@
+@playwright/test version= 1.63.0 resolved= /private/tmp/amw-fix-node/node_modules/@playwright/test/package.json
+playwright version= 1.63.0 resolved= /private/tmp/amw-fix-node/node_modules/playwright/package.json
+playwright-core version= 1.63.0 resolved= /private/tmp/amw-fix-node/node_modules/playwright-core/package.json
+Expected browser revisions:
+{"browserVersion": "153.0.8010.12", "installByDefault": true, "name": "chromium", "revision": "1243", "title": "Chrome for Testing"}
+{"browserVersion": "153.0.8010.12", "installByDefault": true, "name": "chromium-headless-shell", "revision": "1243", "title": "Chrome Headless Shell"}
+{"browserVersion": "155.0", "installByDefault": true, "name": "firefox", "revision": "1543", "title": "Firefox"}
+{"browserVersion": "26.6", "installByDefault": true, "name": "webkit", "revision": "2359", "revisionOverrides": {"mac14": "2251", "mac14-arm64": "2251"}, "title": "WebKit"}
+Installed root resolved: /private/tmp/amw-fix-browsers
+Entry: .links directory= True symlink= False mtime= 2026-10-03T03:47:02.418702+00:00
+Entry: chromium-1243 directory= True symlink= False mtime= 2026-10-03T03:47:19.960564+00:00
+Children: ['DEPENDENCIES_VALIDATED', 'INSTALLATION_COMPLETE', 'chrome-mac-arm64']
+Entry: chromium_headless_shell-1243 directory= True symlink= False mtime= 2026-10-03T03:47:19.960849+00:00
+Children: ['chrome-headless-shell-mac-arm64', 'DEPENDENCIES_VALIDATED', 'INSTALLATION_COMPLETE']
+Entry: ffmpeg-1011 directory= True symlink= False mtime= 2026-10-03T03:47:19.960706+00:00
+Children: ['DEPENDENCIES_VALIDATED', 'COPYING.LGPLv2.1', 'INSTALLATION_COMPLETE', 'ffmpeg-mac']
+Entry: firefox-1543.disabled-crashes directory= True symlink= False mtime= 2026-10-03T03:47:19.960950+00:00
+Children: ['firefox', 'DEPENDENCIES_VALIDATED', 'INSTALLATION_COMPLETE']
+Entry: webkit-2359.disabled-crashes directory= True symlink= False mtime= 2026-10-03T03:47:19.961040+00:00
+Children: ['libwebrtc.dylib', 'WebCore.framework', 'WebInspectorUI.framework', 'com.apple.WebKit.Networking.xpc', 'com.apple.WebKit.WebContent.CaptivePortal.xpc', 'WebKitLegacy.framework', 'DEPENDENCIES_VALIDATED', 'com.apple.WebKit.WebContent.xpc', 'WebGPU.framework', 'com.apple.WebKit.WebContent.Development.xpc', 'libswiftCompatibilitySpan.dylib', 'INSTALLATION_COMPLETE', 'WebKit.framework', 'libANGLE-shared.dylib', 'com.apple.WebKit.Model.xpc', 'pw_run.sh', 'protocol.json', 'Playwright.app', 'com.apple.WebKit.GPU.xpc', 'JavaScriptCore.framework', 'com.apple.WebKit.WebContent.EnhancedSecurity.xpc']
+Expected executable: /private/tmp/amw-fix-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell exists= True symlink= False
+Expected executable: /private/tmp/amw-fix-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox exists= False symlink= False
+Expected executable: /private/tmp/amw-fix-browsers/webkit-2359/pw_run.sh exists= False symlink= False
+Final logged invocation:
+Command (argv): `['env', 'QA_NODE_MODULES=/private/tmp/amw-fix-node/node_modules', 'PLAYWRIGHT_BROWSERS_PATH=/private/tmp/amw-fix-browsers', 'node', '/private/tmp/amw-fix-node/node_modules/@playwright/test/cli.js', 'test', '--config', '/private/tmp/amw-fix-playwright.config.cjs']`
+Command (argv): `['env', 'QA_NODE_MODULES=/private/tmp/amw-fix-node/node_modules', 'PLAYWRIGHT_BROWSERS_PATH=/private/tmp/amw-fix-browsers', 'node', '/private/tmp/amw-fix-node/node_modules/@playwright/test/cli.js', 'test', '--config', '/private/tmp/amw-fix-playwright.config.cjs']`

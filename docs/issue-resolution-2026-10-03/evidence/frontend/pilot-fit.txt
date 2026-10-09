@@ -1,0 +1,1 @@
+{"passed":true,"calculatorScenarios":25,"viewports":[1440,390,320],"noJavaScript":true,"inputPrivacy":true,"browserErrors":[]}

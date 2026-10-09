@@ -1,0 +1,9 @@
+PostgreSQL: 040 -> 041 -> 042 and 041 -> 042; content owners scrubbed; legacy permit/receipt bytes retained; every partial authority and owner downgrade blocked
+.
+=============================== warnings summary ===============================
+tests/test_action_migrations.py::test_postgres_legacy_roundtrip_and_fail_closed_downgrade
+  /Users/sellers/Projects/agent-middleware-api/.venv/lib/python3.12/site-packages/asyncpg/connect_utils.py:104: UserWarning: password file PosixPath('/dev/null') is not a plain file
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1 passed, 1 warning in 6.99s

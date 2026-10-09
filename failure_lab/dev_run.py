@@ -79,9 +79,7 @@ async def _run(args: argparse.Namespace, run_dir: Path) -> int:
     from failure_lab.configurations import Configuration, LabEnvironment
     from failure_lab.scenarios import get_scenario
 
-    options = dict(
-        _coerce_pair(pair) for pair in args.option
-    )
+    options = dict(_coerce_pair(pair) for pair in args.option)
     scenario = get_scenario(args.test_id, **options)
     selected = (
         tuple(Configuration(name) for name in args.configuration)
@@ -128,9 +126,7 @@ def _summarize(document: dict[str, Any], *, filtered: bool = False) -> dict[str,
         "test_id": document["test_id"],
         "title": document["title"],
         "verdict": document["verdict"],
-        "matches_expectation": (
-            None if filtered else document["matches_expectation"]
-        ),
+        "matches_expectation": (None if filtered else document["matches_expectation"]),
         "configurations": [
             {
                 "configuration": entry["configuration"],

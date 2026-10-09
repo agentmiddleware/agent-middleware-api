@@ -21,6 +21,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
+import logging
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text
@@ -1187,3 +1189,36 @@ async def test_transient_create_with_different_price_gets_separate_approval(
         "20.0",
     ]
     assert len({created[0] for created in dedup.creates}) == 2, dedup.creates
+
+
+@pytest.mark.anyio
+async def test_malformed_sentinel_create_never_logs_the_approval_url(
+    clean_database, fresh_service, monkeypatch, client, caplog
+):
+    """A malformed create response is logged by shape, never by value."""
+    _sentinel_env(monkeypatch, simulated=False)
+    fake = FakeSentinel(status="pending")
+    token = "SENTINEL-MAGIC-LINK-TOKEN-9c1d"
+
+    async def malformed_create(**kwargs):
+        return {"status": "pending", "approval_url": f"https://sentinel.test/a/{token}"}
+
+    monkeypatch.setattr(fake, "create_approval", malformed_create)
+    monkeypatch.setattr(fresh_service, "_sentinel", lambda: fake)
+
+    provisioned = await provision_agent_wallet(client)
+    permit = await _approval_permit(client, provisioned, idem_key="malformed-permit-1")
+    with caplog.at_level(logging.ERROR, logger="app.services.human_approval"):
+        with pytest.raises(HumanApprovalUnavailableError):
+            await fresh_service.ensure_approval(
+                wallet_id=provisioned["agent_wallet_id"],
+                permit_id=permit["permit_id"],
+                tool_name=TOOL,
+                idempotency_key="malformed-key-1",
+                arguments={},
+                estimated_credits=Decimal("2"),
+            )
+    assert "sentinel_create_malformed_response" in caplog.text
+    assert "approval_url" in caplog.text
+    assert token not in caplog.text
+    assert "sentinel.test" not in caplog.text

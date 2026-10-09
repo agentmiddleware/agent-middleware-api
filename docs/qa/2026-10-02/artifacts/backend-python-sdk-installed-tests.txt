@@ -1,0 +1,21 @@
+........................................................................ [ 55%]
+.........................................................                [100%]
+================================ tests coverage ================================
+______________ coverage: platform darwin, python 3.13.14-final-0 _______________
+
+Name                                                                                  Stmts   Miss  Cover
+---------------------------------------------------------------------------------------------------------
+/private/tmp/amw-qa-python/lib/python3.13/site-packages/b2a_sdk/__init__.py              19      1    95%
+/private/tmp/amw-qa-python/lib/python3.13/site-packages/b2a_sdk/client.py               324    104    68%
+/private/tmp/amw-qa-python/lib/python3.13/site-packages/b2a_sdk/decorators.py           151     56    63%
+/private/tmp/amw-qa-python/lib/python3.13/site-packages/b2a_sdk/edge_client.py          203     55    73%
+/private/tmp/amw-qa-python/lib/python3.13/site-packages/b2a_sdk/errors.py                33      0   100%
+/private/tmp/amw-qa-python/lib/python3.13/site-packages/b2a_sdk/mcp.py                  134    134     0%
+/private/tmp/amw-qa-python/lib/python3.13/site-packages/b2a_sdk/models.py               176      8    95%
+/private/tmp/amw-qa-python/lib/python3.13/site-packages/b2a_sdk/receipt_verifier.py     196     44    78%
+/private/tmp/amw-qa-python/lib/python3.13/site-packages/b2a_sdk/verify_cli.py            77     30    61%
+/private/tmp/amw-qa-python/lib/python3.13/site-packages/b2a_sdk/x402.py                 105     26    75%
+---------------------------------------------------------------------------------------------------------
+TOTAL                                                                                  1418    458    68%
+Coverage JSON written to file /Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api/docs/qa/2026-10-02/artifacts/backend-sdk-coverage.json
+129 passed in 1.55s

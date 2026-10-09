@@ -1,0 +1,53 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/sellers/.openclaw/worktrees/amw-issues-20261002-infra
+configfile: pyproject.toml
+plugins: cov-7.1.0, asyncio-1.4.0, anyio-4.15.1
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 745 items
+
+tests/test_repo_guardian.py ......                                       [  0%]
+tests/test_stress_test_live_verdicts.py ................................ [  5%]
+.....................                                                    [  7%]
+tests/test_adversarial_transport.py .................................    [ 12%]
+tests/test_failure_lab_report.py ..................                      [ 14%]
+tests/test_failure_lab_diagnostic.py ................................... [ 19%]
+.................                                                        [ 21%]
+tests/test_live_script_target_safety.py ................................ [ 26%]
+.........................................                                [ 31%]
+tests/test_mcp_catalog_contract.py .                                     [ 31%]
+tests/test_rate_limit_threshold.py ....................                  [ 34%]
+tests/test_discovery.py .                                                [ 34%]
+tests/test_discovery_tools_consistency.py .                              [ 34%]
+tests/test_failure_lab_ci.py ..........                                  [ 35%]
+tests/test_failure_lab_portable_keys.py ....                             [ 36%]
+tests/test_failure_lab_evidence.py .........................             [ 39%]
+tests/test_failure_lab_verifier.py ..................                    [ 42%]
+tests/test_railway_preflight.py ........................................ [ 47%]
+........................................................................ [ 57%]
+........................................................................ [ 66%]
+........................................................................ [ 76%]
+........................................................................ [ 86%]
+.............................                                            [ 90%]
+tests/test_docker_entrypoint.py ....                                     [ 90%]
+tests/test_partner_mcp.py ..                                             [ 91%]
+tests/test_schema_boot.py .                                              [ 91%]
+tests/test_crash_proof_make.py ..............                            [ 93%]
+tests/test_rotate_api_keys.py ..................                         [ 95%]
+tests/test_partner_bootstrap_flags.py .....                              [ 96%]
+tests/test_load_battery.py .............                                 [ 97%]
+tests/test_failure_lab_claims.py ...........                             [ 99%]
+tests/test_railway_iac_config.py .....                                   [100%]
+
+=============================== warnings summary ===============================
+tests/test_failure_lab_diagnostic.py:32
+  /Users/sellers/.openclaw/worktrees/amw-issues-20261002-infra/tests/test_failure_lab_diagnostic.py:32: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient
+
+../../../Projects/agent-middleware-api/.venv/lib/python3.12/site-packages/starlette/testclient.py:53
+  /Users/sellers/Projects/agent-middleware-api/.venv/lib/python3.12/site-packages/starlette/testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+------ generated xml file: /tmp/amw-all-issues-20261002/infra/focused.xml ------
+======================= 745 passed, 2 warnings in 48.01s =======================

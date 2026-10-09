@@ -14,6 +14,7 @@ and wire the PR generator to an actual LLM + git integration.
 """
 
 import asyncio
+import hashlib
 import uuid
 import logging
 from collections import defaultdict
@@ -24,6 +25,7 @@ from typing import Any, cast
 from sqlalchemy import select, delete, func
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.sql.elements import ColumnElement
+from sqlmodel import col
 
 from ..core.durable_state import get_durable_state
 from ..core.runtime_mode import require_simulation
@@ -42,6 +44,72 @@ from ..schemas.telemetry import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Tenant ownership
+# ---------------------------------------------------------------------------
+#
+# Telemetry is tenant-scoped: the tenant is the wallet that ingested the
+# events. The owner travels in the server-generated ``event_id``, so no schema
+# change is needed. A wallet's events are stored as ``<owner>.<uuid4 hex>``,
+# where ``<owner>`` is ``owner_for_wallet(wallet_id)``. That is a fixed-length
+# digest, so the id always fits the 50-char column and never exposes the
+# wallet id. Events ingested by a bootstrap admin, and rows written before
+# scoping existed, keep a bare UUID with no separator. They form the unowned
+# partition (owner ``None``), which only bootstrap admins can read. Clients
+# never choose event ids, so a caller cannot place an event in another
+# tenant's partition.
+
+_OWNER_SEPARATOR = "."
+
+
+class _AnyOwner:
+    """Owner-scope sentinel: no tenant filter (bootstrap-admin reads)."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "ANY_OWNER"
+
+
+ANY_OWNER = _AnyOwner()
+
+# A read is scoped to one owner partition (a wallet's owner key, or None for
+# the unowned partition) or to ANY_OWNER, meaning every partition.
+OwnerScope = str | None | _AnyOwner
+
+
+def owner_for_wallet(wallet_id: str) -> str:
+    """Telemetry partition key for a wallet: ``w`` plus 16 hex digest chars."""
+    digest = hashlib.sha256(wallet_id.encode("utf-8")).hexdigest()[:16]
+    return f"w{digest}"
+
+
+def event_owner(event_id: str) -> str | None:
+    """Owner partition of a stored event id (``None`` = unowned)."""
+    owner, separator, _ = event_id.partition(_OWNER_SEPARATOR)
+    return owner if separator else None
+
+
+def _new_event_id(owner: str | None) -> str:
+    if owner is None:
+        return str(uuid.uuid4())
+    return f"{owner}{_OWNER_SEPARATOR}{uuid.uuid4().hex}"
+
+
+def _owner_visible(owner: str | None, scope: OwnerScope) -> bool:
+    return isinstance(scope, _AnyOwner) or owner == scope
+
+
+def _owner_clauses(scope: OwnerScope) -> list[ColumnElement[bool]]:
+    """SQL filter restricting telemetry rows to ``scope``'s partition."""
+    if isinstance(scope, _AnyOwner):
+        return []
+    event_id = col(TelemetryEventModel.event_id)
+    if scope is None:
+        return [~event_id.contains(_OWNER_SEPARATOR, autoescape=True)]
+    return [event_id.startswith(f"{scope}{_OWNER_SEPARATOR}", autoescape=True)]
 
 
 # ---------------------------------------------------------------------------
@@ -93,8 +161,10 @@ class EventStore:
         self,
         events: list[TelemetryEvent],
         batch_id: str,
+        owner: str | None = None,
     ) -> tuple[int, list[dict]]:
-        """Persist a batch of events. Returns (ingested_count, errors)."""
+        """Persist a batch of events into ``owner``'s partition (``None`` =
+        unowned). Returns (ingested_count, errors)."""
         self._require_db()
         factory = get_session_factory()
 
@@ -106,7 +176,7 @@ class EventStore:
             try:
                 rows.append(
                     telemetry_event_to_model(
-                        event_id=str(uuid.uuid4()),
+                        event_id=_new_event_id(owner),
                         batch_id=batch_id,
                         event=event,
                         ingested_at=now,
@@ -132,12 +202,17 @@ class EventStore:
         since: datetime | None = None,
         until: datetime | None = None,
         limit: int = 1000,
+        owner: OwnerScope = ANY_OWNER,
     ) -> list[StoredEvent]:
-        """Query events with optional filters, newest first."""
+        """Query events with optional filters, newest first.
+
+        ``owner`` limits the result to one tenant's partition; the default
+        ``ANY_OWNER`` reads every partition.
+        """
         self._require_db()
         factory = get_session_factory()
 
-        stmt = select(TelemetryEventModel)
+        stmt = select(TelemetryEventModel).where(*_owner_clauses(owner))
         since = to_naive_utc(since) if since else None
         until = to_naive_utc(until) if until else None
         if event_type:
@@ -192,15 +267,45 @@ class EventStore:
 
         return [_row_to_stored(r) for r in rows]
 
-    async def stats(self) -> dict:
-        """Aggregate stats by type / severity / source over the full store."""
+    async def owners(
+        self,
+        event_type: TelemetryEventType | None = None,
+        since: datetime | None = None,
+    ) -> list[str | None]:
+        """Distinct owner partitions holding matching events (``None`` =
+        unowned), so detection can run once per tenant."""
         self._require_db()
         factory = get_session_factory()
+
+        stmt = select(col(TelemetryEventModel.event_id))
+        if event_type:
+            stmt = stmt.where(col(TelemetryEventModel.event_type) == event_type.value)
+        if since:
+            stmt = stmt.where(
+                func.coalesce(
+                    TelemetryEventModel.event_timestamp,
+                    TelemetryEventModel.ingested_at,
+                )
+                >= to_naive_utc(since)
+            )
+
+        async with factory() as session:
+            event_ids = (await session.execute(stmt)).scalars().all()
+
+        found = {event_owner(event_id) for event_id in event_ids}
+        return sorted(found, key=lambda o: (o is not None, o or ""))
+
+    async def stats(self, owner: OwnerScope = ANY_OWNER) -> dict:
+        """Aggregate stats by type / severity / source over ``owner``'s
+        partition (every partition by default)."""
+        self._require_db()
+        factory = get_session_factory()
+        scoped = _owner_clauses(owner)
 
         async with factory() as session:
             total = (
                 await session.scalar(
-                    select(func.count()).select_from(TelemetryEventModel)
+                    select(func.count()).select_from(TelemetryEventModel).where(*scoped)
                 )
                 or 0
             )
@@ -215,7 +320,9 @@ class EventStore:
                     cast(ColumnElement[str], TelemetryEventModel.severity),
                     cast(ColumnElement[str], TelemetryEventModel.source),
                     func.count().label("n"),
-                ).group_by(
+                )
+                .where(*scoped)
+                .group_by(
                     TelemetryEventModel.event_type,
                     TelemetryEventModel.severity,
                     TelemetryEventModel.source,
@@ -279,11 +386,18 @@ class AnomalyDetector:
     - Latency regression: p95 latency >2x baseline
     - Missing feature signal: repeated 404s on non-existent endpoints
     - Source concentration: >80% of errors from a single source
+
+    Detection runs per owner partition (tenant = ingesting wallet): each
+    anomaly is derived from one tenant's events only and is recorded with that
+    owner, so it is visible to that tenant and to bootstrap admins alone.
     """
 
     def __init__(self, event_store: EventStore):
         self._store = event_store
         self._anomalies: dict[str, AnomalyReport] = {}
+        # anomaly_id -> owner partition (None = unowned: bootstrap-admin
+        # telemetry, or an anomaly persisted before tenant scoping).
+        self._owners: dict[str, str | None] = {}
         self._lock = asyncio.Lock()
         self._init_lock = asyncio.Lock()
         self._hydrated = False
@@ -300,6 +414,7 @@ class AnomalyDetector:
             payload = await self._state.load_json("telemetry.anomalies")
             if isinstance(payload, dict):
                 loaded: dict[str, AnomalyReport] = {}
+                owners: dict[str, str | None] = {}
                 for anomaly_id, record in payload.items():
                     try:
                         loaded[anomaly_id] = AnomalyReport.model_validate(record)
@@ -308,7 +423,13 @@ class AnomalyDetector:
                             "Skipping corrupt telemetry anomaly: %s",
                             anomaly_id,
                         )
+                        continue
+                    # A record without a valid owner fails closed to the
+                    # unowned (bootstrap-admin-only) partition.
+                    owner = record.get("owner") if isinstance(record, dict) else None
+                    owners[anomaly_id] = owner if isinstance(owner, str) else None
                 self._anomalies = loaded
+                self._owners = owners
 
             self._hydrated = True
 
@@ -317,68 +438,74 @@ class AnomalyDetector:
             return
         await self._state.save_json(
             "telemetry.anomalies",
-            {k: v.model_dump(mode="json") for k, v in self._anomalies.items()},
+            {
+                k: {**v.model_dump(mode="json"), "owner": self._owners.get(k)}
+                for k, v in self._anomalies.items()
+            },
         )
 
     async def analyze(self) -> list[AnomalyReport]:
         """
         Run all detection strategies and return new/updated anomalies.
 
+        Strategies run separately over each owner partition with recent
+        errors, so one tenant's events never feed another tenant's anomaly.
+
         Call this periodically (e.g., every 60 seconds).
         """
         await self._hydrate_if_needed()
         reports: list[AnomalyReport] = []
 
-        # Strategy 1: Error rate spike
-        error_candidate = await self._detect_error_spike()
-        if error_candidate:
-            anomaly_id = f"anom-{uuid.uuid4().hex[:8]}"
-            report = AnomalyReport(
-                anomaly_id=anomaly_id,
-                severity=error_candidate.severity,
-                category=error_candidate.category,
-                summary=error_candidate.summary,
-                affected_endpoints=error_candidate.affected_endpoints,
-                event_count=len(error_candidate.event_ids),
-                first_seen=error_candidate.first_seen,
-                last_seen=error_candidate.last_seen,
-            )
-            async with self._lock:
-                self._anomalies[anomaly_id] = report
-                await self._persist_locked()
-            logger.warning(f"Anomaly detected: [{report.severity}] {report.summary}")
-            reports.append(report)
-
-        # Strategy 2: Source concentration
-        source_candidate = await self._detect_source_concentration()
-        if source_candidate:
-            anomaly_id = f"anom-{uuid.uuid4().hex[:8]}"
-            report = AnomalyReport(
-                anomaly_id=anomaly_id,
-                severity=source_candidate.severity,
-                category=source_candidate.category,
-                summary=source_candidate.summary,
-                affected_endpoints=source_candidate.affected_endpoints,
-                event_count=len(source_candidate.event_ids),
-                first_seen=source_candidate.first_seen,
-                last_seen=source_candidate.last_seen,
-            )
-            async with self._lock:
-                self._anomalies[anomaly_id] = report
-                await self._persist_locked()
-            logger.warning(f"Anomaly detected: [{report.severity}] {report.summary}")
-            reports.append(report)
+        owners = await self._store.owners(
+            event_type=TelemetryEventType.ERROR,
+            since=utc_now() - timedelta(hours=1),
+        )
+        for owner in owners:
+            # Strategy 1: Error rate spike; Strategy 2: Source concentration
+            for detect in (
+                self._detect_error_spike,
+                self._detect_source_concentration,
+            ):
+                candidate = await detect(owner)
+                if candidate:
+                    reports.append(await self._record(candidate, owner))
 
         return reports
+
+    async def _record(
+        self, candidate: AnomalyCandidate, owner: str | None
+    ) -> AnomalyReport:
+        anomaly_id = f"anom-{uuid.uuid4().hex[:8]}"
+        report = AnomalyReport(
+            anomaly_id=anomaly_id,
+            severity=candidate.severity,
+            category=candidate.category,
+            summary=candidate.summary,
+            affected_endpoints=candidate.affected_endpoints,
+            event_count=len(candidate.event_ids),
+            first_seen=candidate.first_seen,
+            last_seen=candidate.last_seen,
+        )
+        async with self._lock:
+            self._anomalies[anomaly_id] = report
+            self._owners[anomaly_id] = owner
+            await self._persist_locked()
+        logger.warning(f"Anomaly detected: [{report.severity}] {report.summary}")
+        return report
 
     async def get_anomalies(
         self,
         severity: Severity | None = None,
         page: int = 1,
         per_page: int = 50,
+        owner: OwnerScope = ANY_OWNER,
     ) -> tuple[list[AnomalyReport], int]:
         await self._hydrate_if_needed()
-        anomalies = list(self._anomalies.values())
+        anomalies = [
+            a
+            for anomaly_id, a in self._anomalies.items()
+            if _owner_visible(self._owners.get(anomaly_id), owner)
+        ]
         if severity:
             anomalies = [a for a in anomalies if a.severity == severity]
         anomalies.sort(key=lambda a: a.last_seen, reverse=True)
@@ -386,12 +513,28 @@ class AnomalyDetector:
         start = (page - 1) * per_page
         return anomalies[start : start + per_page], total
 
-    async def get_anomaly(self, anomaly_id: str) -> AnomalyReport | None:
-        await self._hydrate_if_needed()
-        return self._anomalies.get(anomaly_id)
+    async def get_anomaly(
+        self, anomaly_id: str, owner: OwnerScope = ANY_OWNER
+    ) -> AnomalyReport | None:
+        found = await self.get_owned_anomaly(anomaly_id, owner)
+        return found[0] if found else None
 
-    async def _detect_error_spike(self) -> AnomalyCandidate | None:
-        """Detect if error rate exceeds 3x the baseline in the last 5 minutes."""
+    async def get_owned_anomaly(
+        self, anomaly_id: str, owner: OwnerScope = ANY_OWNER
+    ) -> tuple[AnomalyReport, str | None] | None:
+        """Return ``(report, anomaly_owner)`` when the anomaly exists and is
+        visible to ``owner``; otherwise ``None``, so a foreign anomaly is
+        indistinguishable from a missing one."""
+        await self._hydrate_if_needed()
+        report = self._anomalies.get(anomaly_id)
+        anomaly_owner = self._owners.get(anomaly_id)
+        if report is None or not _owner_visible(anomaly_owner, owner):
+            return None
+        return report, anomaly_owner
+
+    async def _detect_error_spike(self, owner: str | None) -> AnomalyCandidate | None:
+        """Detect if ``owner``'s error rate exceeds 3x its baseline in the
+        last 5 minutes."""
         now = utc_now()
         window = timedelta(minutes=5)
         baseline_window = timedelta(hours=1)
@@ -399,11 +542,13 @@ class AnomalyDetector:
         recent_errors = await self._store.query(
             event_type=TelemetryEventType.ERROR,
             since=now - window,
+            owner=owner,
         )
         baseline_errors = await self._store.query(
             event_type=TelemetryEventType.ERROR,
             since=now - baseline_window,
             until=now - window,
+            owner=owner,
         )
 
         if not recent_errors:
@@ -431,12 +576,15 @@ class AnomalyDetector:
             )
         return None
 
-    async def _detect_source_concentration(self) -> AnomalyCandidate | None:
-        """Detect if >80% of errors come from a single source."""
+    async def _detect_source_concentration(
+        self, owner: str | None
+    ) -> AnomalyCandidate | None:
+        """Detect if >80% of ``owner``'s errors come from a single source."""
         now = utc_now()
         recent_errors = await self._store.query(
             event_type=TelemetryEventType.ERROR,
             since=now - timedelta(hours=1),
+            owner=owner,
         )
 
         if len(recent_errors) < 10:  # Need minimum sample
@@ -473,13 +621,16 @@ class AnomalyDetector:
 
 class AutoPRGenerator:
     """
-    Generates code fixes and optionally pushes them as pull requests.
+    Generates a placeholder code fix for an anomaly (simulated proof surface).
 
-    In production, this:
-    1. Gathers context from the anomaly + related telemetry
-    2. Sends context to an LLM to generate a fix
-    3. Runs the test suite against the fix
-    4. Pushes a PR if tests pass and dry_run=False
+    A real adapter would:
+    1. Gather context from the anomaly + related telemetry
+    2. Send context to an LLM to generate a fix
+    3. Run the test suite against the fix
+    4. Push a PR if tests pass and dry_run=False
+
+    Only step 1 exists. Steps 2-4 are not implemented, so results never
+    report a created PR or a test outcome.
     """
 
     def __init__(self, git_remote: str = "", branch_prefix: str = "auto-pm/"):
@@ -493,8 +644,9 @@ class AutoPRGenerator:
         dry_run: bool = True,
     ) -> dict:
         """
-        Generate a code fix for an anomaly.
-        Returns diff, files_changed, test results, and optionally a PR URL.
+        Generate a placeholder code fix for an anomaly.
+        Returns diff and files_changed; pr_url and tests_passed are always
+        None, and status is "dry_run" or (when dry_run=False) "simulated".
         """
         require_simulation("telemetry_pm")
         # Build context for the LLM
@@ -505,23 +657,27 @@ class AutoPRGenerator:
         diff = self._generate_placeholder_diff(anomaly)
         files = self._infer_affected_files(anomaly)
 
+        # Nothing here runs a test suite, pushes a branch, or opens a PR, so
+        # the result must never claim otherwise: tests_passed stays unknown,
+        # pr_url stays null, and a non-dry-run request is marked "simulated"
+        # rather than "pr_created" with a fabricated URL.
         result = {
             "anomaly_id": anomaly.anomaly_id,
             "diff": diff,
             "files_changed": files,
-            "tests_passed": True,  # In production: actually run tests
+            "tests_passed": None,
             "context_events": len(related_events),
+            "pr_url": None,
+            "status": "dry_run" if dry_run else "simulated",
         }
 
-        if not dry_run and self.git_remote:
-            _branch = f"{self.branch_prefix}{anomaly.anomaly_id}"
-            # Production: git checkout -b, apply diff, commit, push, create PR
-            result["pr_url"] = f"{self.git_remote}/pull/auto-{uuid.uuid4().hex[:6]}"
-            result["status"] = "pr_created"
-            logger.info(f"Auto-PR created for {anomaly.anomaly_id}: {result['pr_url']}")
-        else:
-            result["pr_url"] = None
-            result["status"] = "dry_run"
+        if not dry_run:
+            logger.info(
+                "Auto-PR simulated for %s: no PR opened (would-be branch %s%s)",
+                anomaly.anomaly_id,
+                self.branch_prefix,
+                anomaly.anomaly_id,
+            )
 
         return result
 

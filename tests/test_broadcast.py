@@ -6,6 +6,7 @@ Validates multi-directory broadcasting and discovery metrics.
 import pytest
 from httpx import AsyncClient, ASGITransport
 from app.main import app
+from tests.test_trust_helpers import provision_agent_wallet
 
 
 @pytest.fixture
@@ -19,6 +20,7 @@ HEADERS = {"X-API-Key": "test-key"}
 
 
 # --- Broadcast ---
+
 
 @pytest.mark.anyio
 async def test_broadcast_api(client):
@@ -204,3 +206,181 @@ async def test_broadcast_requires_api_key(client):
     """Broadcast requires authentication."""
     resp = await client.post("/v1/broadcast", json={})
     assert resp.status_code in (401, 403)
+
+
+# --- Tenant isolation ---
+#
+# Broadcast jobs belong to the wallet whose key created them. Another wallet's
+# key must not be able to read, enumerate, or inject discovery events into a
+# job it does not own, and a foreign job must be indistinguishable from a
+# missing one (no existence oracle, no owner wallet id in the response).
+
+
+def _broadcast_body(service_name: str, base_url: str) -> dict:
+    return {
+        "service_name": service_name,
+        "base_url": base_url,
+        "generation_id": f"gen-{service_name}",
+        "llm_txt": f"# {service_name}",
+        "openapi_spec": {"openapi": "3.1.0", "info": {"title": service_name}},
+        "agent_json": {"name": service_name, "capabilities": []},
+    }
+
+
+@pytest.mark.proof
+@pytest.mark.anyio
+async def test_broadcast_job_not_readable_or_mutable_across_tenants(
+    client, clean_database
+):
+    a = await provision_agent_wallet(client)
+    b = await provision_agent_wallet(client)
+
+    create = await client.post(
+        "/v1/broadcast",
+        json=_broadcast_body("tenant-a-secret-api", "https://a-private.example"),
+        headers=a["agent_headers"],
+    )
+    assert create.status_code == 201
+    job_id = create.json()["job_id"]
+
+    baseline = await client.get(
+        f"/v1/broadcast/jobs/{job_id}/metrics", headers=a["agent_headers"]
+    )
+    assert baseline.status_code == 200
+    base_metrics = baseline.json()
+
+    missing_id = "bcast-doesnotexist"
+    missing = await client.get(
+        f"/v1/broadcast/jobs/{missing_id}", headers=b["agent_headers"]
+    )
+    assert missing.status_code == 404
+    expected_body = missing.text.replace(missing_id, job_id)
+
+    foreign = [
+        await client.get(f"/v1/broadcast/jobs/{job_id}", headers=b["agent_headers"]),
+        await client.get(
+            f"/v1/broadcast/jobs/{job_id}/metrics", headers=b["agent_headers"]
+        ),
+        await client.post(
+            f"/v1/broadcast/jobs/{job_id}/events",
+            json={"event_type": "integration", "source": "tenant-b-forged"},
+            headers=b["agent_headers"],
+        ),
+    ]
+    for resp in foreign:
+        # Same status and body as a job that does not exist: no existence
+        # oracle, and nothing of A's job (or A's wallet id) leaks to B.
+        assert resp.status_code == 404
+        assert resp.text == expected_body
+        assert a["agent_wallet_id"] not in resp.text
+        assert "tenant-a-secret-api" not in resp.text
+        assert "a-private.example" not in resp.text
+
+    # B's forged event must not have touched A's metrics.
+    after = await client.get(
+        f"/v1/broadcast/jobs/{job_id}/metrics", headers=a["agent_headers"]
+    )
+    assert after.status_code == 200
+    assert after.json() == base_metrics
+    assert "tenant-b-forged" not in after.json()["referral_sources"]
+
+    # Owner keeps full access.
+    owned = await client.get(f"/v1/broadcast/jobs/{job_id}", headers=a["agent_headers"])
+    assert owned.status_code == 200
+    assert owned.json()["service_name"] == "tenant-a-secret-api"
+    event = await client.post(
+        f"/v1/broadcast/jobs/{job_id}/events",
+        json={"event_type": "impression", "source": "tenant-a-source"},
+        headers=a["agent_headers"],
+    )
+    assert event.status_code == 200
+    assert event.json()["impressions"] == base_metrics["impressions"] + 1
+    assert "tenant-a-source" in event.json()["referral_sources"]
+
+    # Bootstrap admin keeps access to every tenant's job.
+    admin = await client.get(f"/v1/broadcast/jobs/{job_id}", headers=HEADERS)
+    assert admin.status_code == 200
+    admin_metrics = await client.get(
+        f"/v1/broadcast/jobs/{job_id}/metrics", headers=HEADERS
+    )
+    assert admin_metrics.status_code == 200
+
+
+@pytest.mark.proof
+@pytest.mark.anyio
+async def test_broadcast_list_jobs_scoped_to_caller(client, clean_database):
+    a = await provision_agent_wallet(client)
+    b = await provision_agent_wallet(client)
+
+    a_job = (
+        await client.post(
+            "/v1/broadcast",
+            json=_broadcast_body("list-tenant-a-api", "https://list-a.example"),
+            headers=a["agent_headers"],
+        )
+    ).json()["job_id"]
+    b_job = (
+        await client.post(
+            "/v1/broadcast",
+            json=_broadcast_body("list-tenant-b-api", "https://list-b.example"),
+            headers=b["agent_headers"],
+        )
+    ).json()["job_id"]
+    admin_job = (
+        await client.post(
+            "/v1/broadcast",
+            json=_broadcast_body("list-admin-api", "https://list-admin.example"),
+            headers=HEADERS,
+        )
+    ).json()["job_id"]
+
+    b_list = await client.get("/v1/broadcast/jobs", headers=b["agent_headers"])
+    assert b_list.status_code == 200
+    assert {j["job_id"] for j in b_list.json()["jobs"]} == {b_job}
+    assert b_list.json()["total"] == 1
+    assert "list-tenant-a-api" not in b_list.text
+    assert "list-admin-api" not in b_list.text
+
+    # Filtering by another tenant's service name does not reveal its jobs.
+    spoof = await client.get(
+        "/v1/broadcast/jobs",
+        params={"service_name": "list-tenant-a-api"},
+        headers=b["agent_headers"],
+    )
+    assert spoof.status_code == 200
+    assert spoof.json() == {"jobs": [], "total": 0}
+
+    a_list = await client.get("/v1/broadcast/jobs", headers=a["agent_headers"])
+    assert a_list.status_code == 200
+    assert {j["job_id"] for j in a_list.json()["jobs"]} == {a_job}
+
+    # Bootstrap admin still sees every tenant's jobs.
+    admin_list = await client.get("/v1/broadcast/jobs", headers=HEADERS)
+    assert admin_list.status_code == 200
+    admin_ids = {j["job_id"] for j in admin_list.json()["jobs"]}
+    assert {a_job, b_job, admin_job} <= admin_ids
+
+
+@pytest.mark.proof
+@pytest.mark.anyio
+async def test_broadcast_job_endpoints_require_auth(client):
+    create = await client.post(
+        "/v1/broadcast",
+        json=_broadcast_body("auth-check-api", "https://auth-check.example"),
+        headers=HEADERS,
+    )
+    assert create.status_code == 201
+    job_id = create.json()["job_id"]
+
+    for resp in (
+        await client.get("/v1/broadcast/jobs"),
+        await client.get(f"/v1/broadcast/jobs/{job_id}"),
+        await client.get(f"/v1/broadcast/jobs/{job_id}/metrics"),
+        await client.post(
+            f"/v1/broadcast/jobs/{job_id}/events",
+            json={"event_type": "impression", "source": "anon"},
+        ),
+        await client.get("/v1/broadcast/directories"),
+    ):
+        assert resp.status_code == 401
+        assert "auth-check-api" not in resp.text

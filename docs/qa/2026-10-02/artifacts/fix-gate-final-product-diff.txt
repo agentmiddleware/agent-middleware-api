@@ -1,0 +1,178 @@
+diff --git a/app/core/auth.py b/app/core/auth.py
+index f58b6d0..350038c 100644
+--- a/app/core/auth.py
++++ b/app/core/auth.py
+@@ -12,7 +12,7 @@ from dataclasses import dataclass, replace
+ from typing import Annotated
+
+ from fastapi import Depends, Header, HTTPException, Request, Security, status
+-from fastapi.security import APIKeyHeader
++from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
+ [REDACTED] .config import get_settings
+ from .oidc_iga import EnterprisePrincipal, IGADecision, IGAError, is_iga_issuer_token
+ from .trust_mode import is_production_like_environment
+@@ -32,6 +32,12 @@ api_key_header = APIKeyHeader(
+ )
+
+
++bearer_header = HTTPBearer(
++    auto_error=False,
++    description="Bearer [REDACTED] via Authorization; this header takes precedence over X-API-Key.",
++)
++
++
+ @dataclass(frozen=True)
+ class AuthContext:
+     """Authenticated caller details used for tenant-scoped authorization."""
+@@ -124,6 +130,7 @@ CREDENTIAL_ACCEPTANCE: ContextVar[CredentialAcceptance | None] = ContextVar(
+ async def get_auth_context(
+     api_key: [REDACTED] | None = Security(api_key_header),
+     authorization: Annotated[str | None, Header()] = None,
++    _bearer: HTTPAuthorizationCredentials | None = Security(bearer_header),
+ ) -> AuthContext:
+     """
+     Validate credentials and return caller context.
+@@ -137,6 +144,8 @@ async def get_auth_context(
+     this module is already imported, and a captured `settings` would keep
+     serving the stale key list.
+     """
++    # HTTPBearer [REDACTED] the OpenAPI alternative; raw Authorization stays
++    # authoritative so malformed headers cannot fall back to an API key.
+     context = await _resolve_auth_context(api_key, authorization)
+     acceptance = CREDENTIAL_ACCEPTANCE.get()
+     if acceptance is not None:
+diff --git a/app/core/url_guard.py b/app/core/url_guard.py
+index 8d57e55..6a5bfd4 100644
+--- a/app/core/url_guard.py
++++ b/app/core/url_guard.py
+@@ -44,9 +44,9 @@ def _address_blocked(address: str) -> bool:
+     except ValueError:
+         return False
+     # is_global is False for loopback, RFC1918/ULA, link-local (including
+-    # 169.254.169.254 metadata), CGNAT shared space, multicast, reserved,
+-    # and unspecified addresses.
+-    return not ip.is_global
++    # 169.254.169.254 metadata), CGNAT shared space, reserved, and unspecified
++    # addresses. Multicast needs an explicit check: it can be classified global.
++    return ip.is_multicast or not ip.is_global
+
+
+ async def _resolve_host(host: str):
+diff --git a/app/services/upstream_mcp.py b/app/services/upstream_mcp.py
+index 2f864f8..b97643f 100644
+--- a/app/services/upstream_mcp.py
++++ b/app/services/upstream_mcp.py
+@@ -404,7 +404,7 @@ async def validate_upstream_url(
+             "MCP_UPSTREAM_URL must use https except for loopback local/test servers"
+         )
+     if not loopback_exception and any(
+-        not address.is_global for address in parsed_addresses
++        address.is_multicast or not address.is_global for address in parsed_addresses
+     ):
+         raise UpstreamMcpConfigurationError(
+             "MCP_UPSTREAM_URL must not resolve to private, loopback, link-local, metadata, or reserved addresses"
+diff --git a/awi_sdk/typescript/index.ts b/awi_sdk/typescript/index.ts
+index a8c64ed..840402a 100644
+--- a/awi_sdk/typescript/index.ts
++++ b/awi_sdk/typescript/index.ts
+@@ -154,7 +154,7 @@ export class AWIClient {
+   ): Promise<AWISession> {
+     const response: AxiosResponse = await this.client.post("/v1/awi/sessions", {
+       target_url: targetUrl,
+-      max_steps: options?.maxSteps || 100,
++      max_steps: options?.maxSteps ?? 100,
+       allow_human_pause: options?.allowHumanPause ?? true,
+       wallet_id: this.config.walletId,
+     });
+diff --git a/site/styles.css b/site/styles.css
+index 2392132..2203677 100644
+--- a/site/styles.css
++++ b/site/styles.css
+@@ -1803,6 +1803,10 @@ html[data-a11y-motion="reduce"].arcade-open .site-footer {
+   line-height: 1.65;
+ }
+
++.proof-col:not(.replay) .fit-list li {
++  color: var(--paper-dim);
++}
++
+ .faq-list {
+   margin-top: 2rem;
+   display: grid;
+diff --git a/static/dashboard.html b/static/dashboard.html
+index 39c0566..1a2ead8 100644
+--- a/static/dashboard.html
++++ b/static/dashboard.html
+@@ -336,16 +336,16 @@
+       </p>
+       <div class="links">
+         <a href="https://www.thisisatest.tech/proof/">
+-          <strong>Portable receipt proof</strong>
++          <strong>Hosted portable receipt proof</strong>
+           <span>Artifact, matching key snapshot, and offline verification command.</span>
+         </a>
+-        <a href="https://api.thisisatest.tech/health/dependencies">
++        <a href="/health/dependencies">
+           <strong>Runtime truth</strong>
+           <span>Dependency posture, feature flags, build SHA, and metric scope metadata.</span>
+         </a>
+-        <a href="https://api.thisisatest.tech/.well-known/trust-keys.json">
++        <a href="/.well-known/trust-keys.json">
+           <strong>Current trust keys</strong>
+-          <span>Public issuer keys exposed by the live API.</span>
++          <span>Public issuer keys exposed by this API.</span>
+         </a>
+       </div>
+     </section>
+@@ -353,11 +353,11 @@
+     <section aria-labelledby="discovery-heading">
+       <h2 id="discovery-heading">Machine discovery</h2>
+       <div class="links">
+-        <a href="https://api.thisisatest.tech/.well-known/agent.json">
++        <a href="/.well-known/agent.json">
+           <strong>Agent manifest</strong>
+           <span>Bootstrap metadata. Tool lists on this origin require a key.</span>
+         </a>
+-        <a href="https://api.thisisatest.tech/llms.txt">
++        <a href="/llms.txt">
+           <strong>llms.txt</strong>
+           <span>Machine-readable integration guidance.</span>
+         </a>
+@@ -369,20 +369,22 @@
+       <p class="section-copy">
+         Inspect your own permits, receipts, and audit events from a trusted terminal.
+         Keep the key in your environment; do not paste it into a public web page.
++        Set <code>API_URL</code> to this server's origin; the example below uses a local server.
+       </p>
+-      <pre><code>export AGENT_MIDDLEWARE_API_KEY=[REDACTED]
++      <pre tabindex="0" role="region" aria-label="Authenticated inspection commands"><code>export API_URL="http://127.0.0.1:8000"
++export AGENT_MIDDLEWARE_API_KEY=[REDACTED]
+
+ curl --fail-with-body \
+   -H "X-API-Key: [REDACTED] \
+-  "https://api.thisisatest.tech/v1/me/permits"
++  "${API_URL}/v1/me/permits"
+
+ curl --fail-with-body \
+   -H "X-API-Key: [REDACTED] \
+-  "https://api.thisisatest.tech/v1/me/receipts"
++  "${API_URL}/v1/me/receipts"
+
+ curl --fail-with-body \
+   -H "X-API-Key: [REDACTED] \
+-  "https://api.thisisatest.tech/v1/me/audit/events"</code></pre>
++  "${API_URL}/v1/me/audit/events"</code></pre>
+     </section>
+
+     <section aria-labelledby="limits-heading">
+@@ -398,8 +400,8 @@ curl --fail-with-body \
+
+   <footer>
+     <a href="https://www.thisisatest.tech/">Agent Middleware API</a>
+-    <a href="https://www.thisisatest.tech/proof/">Proof</a>
+-    <a href="https://api.thisisatest.tech/health/dependencies">Runtime truth</a>
++    <a href="https://www.thisisatest.tech/proof/">Hosted proof</a>
++    <a href="/health/dependencies">Runtime truth</a>
+   </footer>
+ </body>
+ </html>

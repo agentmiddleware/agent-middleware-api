@@ -412,7 +412,11 @@ async def _wait_for_partner(
     )
 
 
-async def _start_remote_partner(harness: StressHarness) -> RemotePartner:
+async def _start_remote_partner(
+    harness: StressHarness,
+    *,
+    app_module: str = "tests.support.mcp_remote_partner_app:app",
+) -> RemotePartner:
     port = _unused_loopback_port()
     bearer_token = secrets.token_urlsafe(32)
     database_path = harness.temp_root / "remote-partner.sqlite3"
@@ -437,7 +441,7 @@ async def _start_remote_partner(harness: StressHarness) -> RemotePartner:
                 sys.executable,
                 "-m",
                 "uvicorn",
-                "tests.support.mcp_remote_partner_app:app",
+                app_module,
                 "--host",
                 "127.0.0.1",
                 "--port",
@@ -502,6 +506,7 @@ async def _start_worker(
     name: str,
     fault_point: str = "",
     remote_partner: RemotePartner | None = None,
+    action_mode: bool = False,
 ) -> StressWorker:
     port = _unused_loopback_port()
     marker_path = harness.temp_root / f"{name}.marker.json"
@@ -511,6 +516,7 @@ async def _start_worker(
     environment = os.environ.copy()
     environment.update(
         {
+            "MCP_STRESS_ACTION_MODE": "1" if action_mode else "0",
             "ALLOW_LEGACY_UNPERMITTED_MCP": "false",
             "ALLOW_METADATA_CREATE_ALL": "false",
             "DATABASE_URL": harness.database_url,
@@ -557,6 +563,8 @@ async def _start_worker(
             "VALID_API_KEYS": "test-key",
         }
     )
+    if action_mode:
+        environment["ENABLE_STANDARD_MCP_ENDPOINT"] = "true"
     try:
         process = subprocess.Popen(
             [
@@ -1294,13 +1302,16 @@ async def test_two_gateway_processes_share_one_remote_execution_and_replay(
 
         competing = await _invoke(remote_steady_worker, seeded)
         _assert_in_progress(competing)
-        assert len(
-            await _partner_executions(
-                stress_harness,
-                remote_partner,
-                seeded.call_token,
+        assert (
+            len(
+                await _partner_executions(
+                    stress_harness,
+                    remote_partner,
+                    seeded.call_token,
+                )
             )
-        ) == 1
+            == 1
+        )
 
         _release_worker(owner_worker)
         owner_response = await asyncio.wait_for(owner_task, timeout=20)

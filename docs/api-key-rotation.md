@@ -70,6 +70,10 @@ credibility is the product.
 
 ## Rotation procedure (Railway)
 
+Before changing keys, qualify the exact-SHA release and a schema-compatible
+recovery image under [the current rollout](schema-042-rollout.md) and the
+[operator release procedure](deploy-railway.md#canonical-deploy-path).
+
 1. **Generate replacements** (never reuse or hand-write keys):
 
    ```bash
@@ -83,17 +87,14 @@ credibility is the product.
    redeploys the service on variable change; `get_settings()` is cached
    per process, so the new list only takes effect with that restart.
 
-   > **Warning:** a variable change is only live once a *healthy*
-   > deployment cuts over. A restart is not enough — restarts reuse the
-   > deployment's env snapshot from creation time. And as of 2026-08-07
-   > the service's GitHub trigger builds the stale `master` branch, which
-   > fails `alembic upgrade head` (missing revision `3988bd05deca`), so a
-   > variable-triggered rebuild crash-loops and the old replica — with
-   > the old keys — keeps serving. Until that trigger is fixed (point it
-   > at `main`, or disconnect it per `docs/deploy-railway.md` and use the
-   > Deploy to Railway workflow), cut over by clicking **Redeploy** on
-   > the last successful deployment in the dashboard, which reuses its
-   > image with freshly resolved variables.
+   > A variable change is live only after a healthy deployment cuts over.
+   > Follow the [canonical operator release](deploy-railway.md#canonical-deploy-path)
+   > from a clean exact-SHA checkout and its stamped release context, resolving
+   > the new variables into that deployment. Qualify a schema-compatible release
+   > or recovery image under [the current rollback boundary](schema-042-rollout.md)
+   > before changing the key list. A restart alone can reuse an old environment
+   > snapshot. The 2026-08-07 stale-source/redeploy workaround in the incident
+   > table is historical and superseded by this release procedure.
 
 3. **Verify** once the deploy is live:
 
@@ -129,11 +130,23 @@ audit trail says otherwise:
   key's expiry and *remaining* `max_uses` budget (rotating a use-budgeted
   key requires `revoke_old: true`, otherwise the remaining budget would
   exist twice), and an emergency replacement takes both its bounds from
-  one donor credential: the active, non-expired key (exhausted ones
-  included, so a key spending its final use on the emergency call cannot
-  mint itself an unbounded replacement) with the largest remaining
-  budget, tie-broken by latest expiry. To issue a
-  key with fresh bounds, mint one explicitly with `POST /v1/api-keys`.
+  one donor credential. For a wallet-scoped caller the donor is the
+  caller's own key (exhausted included, so a key spending its final use on
+  the emergency call cannot mint itself an unbounded replacement); if that
+  key is no longer a non-expired active key, every key is still revoked but
+  no replacement is minted. For a bootstrap admin the donor is the active,
+  non-expired key with the largest remaining budget, tie-broken by latest
+  expiry. A wallet key that is itself bounded
+  (it has a `max_uses` budget or an expiry), or a JWT derived from one,
+  cannot mint fresh keys at all: `POST /v1/api-keys`, and `POST
+  /v1/api-keys/rotate` without `key_id` or with any `key_id` other than its
+  own, answer 403 `bounded_key_cannot_mint`, because the new key would take
+  only the bounds its request names, or those of a looser sibling key it
+  never held. Such a key can still rotate itself (with its `key_id`,
+  plus `revoke_old: true` when it has a `max_uses` budget), which carries
+  its expiry and remaining budget over. To issue a
+  key with fresh bounds, mint one explicitly with `POST /v1/api-keys` as a
+  bootstrap admin or with an unbounded wallet key.
 - The trust-plane signing key (`TRUST_SIGNING_PRIVATE_KEY_B64`) is a
   separate secret that has never been committed; it does not need rotation
   for an API-key leak. If you suspect it anyway, follow the compromise

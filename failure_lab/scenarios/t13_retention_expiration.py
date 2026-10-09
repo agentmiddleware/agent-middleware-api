@@ -374,10 +374,14 @@ class RetentionExpiration(Scenario):
     # orchestration                                                       #
     # ------------------------------------------------------------------ #
 
-    async def run_configuration(self, target: Target, log: EventLog) -> ConfigurationResult:
+    async def run_configuration(
+        self, target: Target, log: EventLog
+    ) -> ConfigurationResult:
         target.require_gateway()
         age_seconds = int(self.options.get("age_seconds", DEFAULT_AGE_SECONDS))
-        timeout_seconds = float(self.options.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS))
+        timeout_seconds = float(
+            self.options.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)
+        )
 
         attempts: list[AttemptOutcome] = []
         operation_ids: list[str] = []
@@ -432,7 +436,9 @@ class RetentionExpiration(Scenario):
         identity = OperationIdentity.first_attempt(operation_id)
         before = await gateway.snapshot(tenant)
 
-        first = await target.agent.submit(identity, refund, timeout_seconds=timeout_seconds)
+        first = await target.agent.submit(
+            identity, refund, timeout_seconds=timeout_seconds
+        )
         after_first = await gateway.snapshot(tenant)
         dispatches_after_first = target.injector.dispatch_count(operation_id)
         executions_after_first = target.ledger.execution_count(operation_id)
@@ -524,7 +530,9 @@ class RetentionExpiration(Scenario):
             and first.refund is not None
             and replay.refund.get("refund_id") == first.refund.get("refund_id")
         )
-        new_receipts = _added(after_reconcile.receipts, after_retry.receipts, "receipt_id")
+        new_receipts = _added(
+            after_reconcile.receipts, after_retry.receipts, "receipt_id"
+        )
         new_debits = _added(after_reconcile.debits, after_retry.debits, "entry_id")
 
         log.emit(
@@ -791,7 +799,9 @@ class RetentionExpiration(Scenario):
         identity = OperationIdentity.first_attempt(operation_id)
         before = await gateway.snapshot(tenant)
 
-        first = await target.agent.submit(identity, refund, timeout_seconds=timeout_seconds)
+        first = await target.agent.submit(
+            identity, refund, timeout_seconds=timeout_seconds
+        )
         after_first = await gateway.snapshot(tenant)
         dispatches_after_first = target.injector.dispatch_count(operation_id)
         executions_after_first = target.ledger.execution_count(operation_id)
@@ -1018,9 +1028,10 @@ class RetentionExpiration(Scenario):
                 "effect_free_release: the crashed call returned "
                 f"'{release['crash_status']}', want 'gateway_process_died'"
             )
-        if release["record_released_by_sweep"] and release[
-            "crash_left_an_effect_to_compensate"
-        ]:
+        if (
+            release["record_released_by_sweep"]
+            and release["crash_left_an_effect_to_compensate"]
+        ):
             failures.append(
                 "effect_free_release: the sweep released the key although the "
                 f"crash had left {release['attempt_rows_left_by_crash']} "
@@ -1269,11 +1280,7 @@ class RetentionExpiration(Scenario):
             "The replay guarantee lasts exactly as long as the idempotency "
             "record does. This run aged a completed record "
             f"{aged['age_days']} days and the sweep "
-            + (
-                "left it alone"
-                if aged["record_survived_sweep"]
-                else "removed it"
-            )
+            + ("left it alone" if aged["record_survived_sweep"] else "removed it")
             + ", so the lifetime observed here is a property of a database "
             "row, not of a published retention policy. Nothing in the product "
             "states how long that row is kept, and the day an operator adds a "

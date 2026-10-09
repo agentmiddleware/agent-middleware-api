@@ -1,0 +1,185 @@
+# QA findings — 2026-10-02
+
+PR: opened by orchestrator
+
+CI status: pending at time of writing
+
+This is the consolidated defect register. Source-verified limitations and correct claim findings are tracked separately below, without inflating defect severity counts. No product fixes were applied.
+
+## Confirmed defects
+
+| ID | Severity | Group | Title | Exact reproduction | Expected versus actual | Evidence | Suggested fix |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| BE-100 | Medium | Backend | Integration guidance overstates receipt completion and local/upstream equivalence | Read `docs/agent-self-credentialing.md:101-108`, `docs/tool-interface-authority.md:35-37`, and `ELEVATOR_PITCH.md:162-165`; compare with `app/routers/mcp.py:235-271,2185-2223` and `README.md:144-162`. | Expected: scoped at-most-one guarantees and disclosure of committed effects with missing receipts/manual review. Actual: unconditional one-debit/one-finalized-receipt wording and identical local/upstream governance despite distinct implementations. | [Claims report](CLAIMS-REPORT.md), [source trace](artifacts/claims-dispatch-and-autopermit-details.txt); receipt-contention tests named in the report. | Align integration pages with README/WEDGE; name the upstream-only dispatch state machine and manual-review/no-receipt outcomes. |
+| FE-001 | Medium | Frontend | Checked-in TypeScript SDK cannot run its declared build | Copy `awi_sdk/typescript/{package.json,index.ts,LICENSE}` to a temporary directory, install its declared dependencies with scripts disabled, then run `npm run build`; the retained FE-001 Node TODO test does this without a network call using installed QA tooling. | Expected: exit 0 and the advertised `dist/index.js` and `dist/index.d.ts`. Actual: `tsc` prints help and exits 1 because no tsconfig or source argument exists. Explicit-source typechecking passes. | `awi_sdk/typescript/package.json:5-8`; [build output](artifacts/frontend-sdk-isolated-build.txt); [Node tests](artifacts/frontend-component-contract-gate-rerun.txt). | If an active pilot needs this currently unshipped SDK, add a minimal source/output/declaration tsconfig and validate packed entrypoints; otherwise keep it frozen and labeled unshipped. |
+| FE-002 | Medium | Frontend | Explicit zero SDK action limit becomes 100 | Call `AWIClient.createSession('http://127.0.0.1:8769/synthetic', {maxSteps: 0})` with the retained fake Axios transport; inspect the submitted body. Run the FE-002 Node TODO test. | Expected: local rejection or transmission of zero for the API's minimum-one validation. Actual: `max_steps: 100` is submitted. This is a mock-only contract reproduction, not 100 real tool actions. | `awi_sdk/typescript/index.ts:157`; API bound `app/schemas/awi.py:157`; [contract source](artifacts/frontend-sdk-contract-lines.txt); [test result](artifacts/frontend-component-contract-gate-rerun.txt). | Replace truthy defaults with nullish defaults and validate bounds where appropriate; preserve explicit invalid input for rejection. |
+| UX-001 | Medium | UX | Comparison text fails WCAG AA contrast | Build and serve the local site per [frontend report](FRONTEND-REPORT.md); open `/compare/#who-title` at 390×844 with default colors and run axe. | Expected: normal text contrast at least 4.5:1. Actual: four good-fit list items use `#9ca8cb` on `#f6f3e9`, measured at 2.13:1. | `site/styles.css:1802` and paper background at `:779`; `site/compare/index.html:365`; [axe](artifacts/ux-axe-compare-mobile.json); [screenshot](artifacts/ux-cua-compare-low-contrast.jpg); UX-001 expected-failure browser test. | Use the existing paper-surface text color for this list while preserving the dark-card colors; rerun contrast checks. |
+| UX-002 | Medium | UX | Scrolling operator commands lack explicit keyboard access | Serve `static/dashboard.html` on loopback, open at 390×844, inspect “Authenticated inspection” and run axe. | Expected: any scrolling command region is reachable and operable by keyboard. Actual: 512px content overflows a 348px `<pre>` with `tabIndex=-1` and no focusable descendants; axe flags a Safari keyboard-accessibility risk. Physical Safari behavior was not tested. | `static/dashboard.html:373`, overflow rule `:215`; [axe](artifacts/ux-axe-dashboard-mobile.json); [screenshot](artifacts/ux-cua-dashboard-scroll-region.jpg); UX-002 expected-failure browser test. | Add focusability and a concise accessible name/region association, or remove horizontal overflow; verify arrow keys and focus appearance across browsers. |
+| BE-002 | Low | Backend | OpenAPI omits supported Bearer [REDACTED] | Generate fresh `app.openapi()`, inspect `components.securitySchemes`, and compare with `get_auth_context` accepting `Authorization`. Run `test_openapi_declares_supported_bearer_authentication`. | Expected: supported HTTP Bearer [REDACTED] API-key alternatives are discoverable to generated clients. Actual: only APIKeyHeader is declared; runtime authentication is not bypassed. | `app/core/auth.py:28,119`; [schema probe](artifacts/backend-openapi-contract-probe.txt); strict BE-002 xfail in `tests/test_qa_20261002_backend.py`. | Declare optional HTTP Bearer [REDACTED] API-key schemes with OR semantics while preserving authoritative Authorization precedence. |
+| BE-003 | Low | Backend | Outbound URL guards accept multicast destinations | With private targets disabled, call `check_outbound_url` on `http://224.0.0.1/` and `http://[ff02::1]/`; call `validate_upstream_url` on corresponding HTTPS targets under production-mode configuration. No connection is made. | Expected: reject multicast before connection. Actual: `is_global` classifies these addresses as acceptable and both guards allow them. No successful SSRF, remote access or tool execution was demonstrated. | `app/core/url_guard.py:41-49`; `app/services/upstream_mcp.py:406-412`; [boundary probe](artifacts/backend-ssrf-address-boundaries-retry.txt); six strict BE-003 xfail cases. | Explicitly reject `is_multicast` in both guards and test literal plus resolved addresses. |
+| UX-003 | Low | UX | Local operator links and examples target production | Open the local dashboard; inspect runtime, trust-key and agent-manifest link destinations plus authenticated curl examples. Do not follow links or run examples. | Expected: inspect the served runtime or clearly label a separately hosted sample. Actual: fixed production-origin links/examples appear unchanged on loopback. | `app/routers/static.py:159`; `static/dashboard.html:342,346,356,377-385`; [screenshot](artifacts/ux-cua-dashboard-scroll-region.jpg); UX-003 expected-failure browser test. | Use same-origin runtime links, an explicit `API_URL` in examples, and a separate label for hosted public proof. |
+
+Counts: **Critical=0, High=0, Medium=5, Low=3**. Frontend SDK findings concern the checked-in, explicitly unshipped SDK; they are not evidence of a broken published package. Every finding remains unfixed in product code. Backend xfails and frontend Node TODOs are executed separately from the browser xfails, whose runtime is blocked by native browser launch failures; see [coverage](COVERAGE.md).
+
+## Rejected candidate and environmental failures
+
+BE-001 was an investigated Unicode-surrogate candidate, **not a defect**: the public MCP transport's strict JSON parsing returns HTTP 400 before effects, charges or identity records change. Its retained negative-path test is expected to pass. The original validator-only suspicion and route disproof are preserved in the backend log.
+app/routers/awi.py:79:async def create_session(
+app/routers/awi.py:96:        return await manager.create_session(request)
+tests/test_awi_phase9.py:492:    async def test_create_session(self, bridge):
+tests/test_awi_phase9.py:494:        session = await bridge.create_session("https://example.com")
+tests/test_awi_phase9.py:503:    async def test_create_session_enforces_max_sessions(self):
+tests/test_awi_phase9.py:506:        session = await bridge.create_session("https://example.com")
+tests/test_awi_phase9.py:509:            await bridge.create_session("https://example.org")
+tests/test_awi_phase9.py:521:        session = await bridge.create_session("https://example.com")
+tests/test_awi_phase9.py:524:        replacement = await bridge.create_session("https://example.org")
+tests/test_awi_phase9.py:535:        session = await bridge.create_session("https://example.com")
+tests/test_awi_phase9.py:547:        session = await bridge.create_session("https://example.com")
+tests/test_awi_phase9.py:562:        session = await bridge.create_session("https://example.com")
+tests/test_awi_phase9.py:578:        session = await bridge.create_session("https://example.com")
+tests/test_awi_phase9.py:598:        session = await bridge.create_session("https://example.com/login")
+tests/test_awi_phase9.py:613:        session = await bridge.create_session("https://example.com")
+tests/test_awi_phase9.py:629:        session = await bridge.create_session("https://example.com")
+tests/test_awi_phase9.py:645:        session = await bridge.create_session("https://example.com")
+tests/test_awi_phase9.py:680:        session = await bridge.create_session("https://example.com")
+tests/test_awi_phase9.py:710:        session = await bridge.create_session("https://example.com")
+tests/test_awi_phase9.py:796:            await bridge.create_session("https://example.com", viewport=viewport)
+tests/test_awi_adoption.py:145:            max_steps: int = 100
+tests/test_awi_adoption.py:156:        assert session.max_steps == 100
+tests/test_awi.py:356:    async def test_create_session(self):
+tests/test_awi.py:361:            max_steps=50,
+tests/test_awi.py:364:        session = await manager.create_session(request)
+tests/test_awi.py:369:        assert session.max_steps == 50
+tests/test_awi.py:375:        session = await manager.create_session(
+tests/test_awi.py:396:        session = await manager.create_session(
+tests/test_awi.py:438:        session = await manager.create_session(
+tests/test_awi.py:474:            session = await manager.create_session(
+tests/test_awi.py:504:        session = await manager.create_session(
+tests/test_awi.py:525:        session = await manager.create_session(
+tests/test_awi.py:554:        session = await manager.create_session(
+tests/test_awi.py:597:        session = await manager.create_session(
+tests/test_awi.py:620:    async def test_create_session_endpoint(self):
+tests/test_awi.py:629:                    "max_steps": 100,
+tests/test_awi_dom_bridge_integration.py:98:        session = await manager.create_session(
+tests/test_awi_dom_bridge_integration.py:151:        session = await manager.create_session(
+tests/test_awi_dom_bridge_integration.py:183:        session = await manager.create_session(
+tests/test_awi_dom_bridge_integration.py:210:        session = await manager.create_session(
+tests/test_awi_dom_bridge_integration.py:215:            manager._playwright_bridge, "create_session", new_callable=AsyncMock
+tests/test_awi_dom_bridge_integration.py:246:        session = await manager.create_session(
+tests/test_awi_dom_bridge_integration.py:270:        session = await manager.create_session(
+tests/test_awi_dom_bridge_integration.py:286:        session = await manager.create_session(
+app/routers/awi_enhanced.py:560:        session = await bridge.create_session(
+tests/test_awi_adapter_sdk_hardening.py:138:    "body_status", ["paused", "passkey_required", "max_steps_reached", "error"]
+tests/test_awi_adapter_sdk_hardening.py:271:async def test_fallback_create_session_does_not_fabricate_session_id(
+tests/test_awi_adapter_sdk_hardening.py:282:        session = await adapter.create_session("https://shop.example", "wallet-a")
+tests/test_awi_adapter_sdk_hardening.py:305:            await adapter.create_session("https://shop.example", "wallet-a")
+tests/test_awi_adapter_sdk_hardening.py:631:        session = await owner_sdk.create_session("https://example.com")
+## Evidence Log
+
+For every conversation, record:
+
+- Date, company type, and role.
+- Consequential tool and action.
+- Failure consequence and current workaround.
+- Authorization, retry, budget, and evidence gaps.
+- Inline-dependency objections.
+- Existing vendor considered sufficient or insufficient.
+- Next committed action, owner, and date.
+- Commercial evidence level.
+- Requested capability and whether it blocks the one-tool pilot.
+
+Keep confidential names in the private customer system, not this repository;
+use a stable prospect identifier here if evidence must be referenced. Never
+record secrets, customer payloads, or sensitive production data.
+
+## Day-30 Decision
+
+- **Continue:** one partner-owned pilot passes technically and produces credible
+  commercial pull.
+- **Narrow or reframe:** repeated pain exists, but buyers demand a different
+  primitive or deployment boundary.
+- **Stop core expansion:** prospects will not deploy, do not value portable
+  receipts, or consider existing controls sufficient.
+
+Do not create another feature roadmap until one of these decisions is recorded
+with its evidence.
+
+### Recorded decision: Narrow (2026-09-16)
+
+**Choice:** Narrow. Stop new features. Keep the existing one-tool loop
+correct and locked. Treat `https://api.thisisatest.tech` as a private
+experiment until one trusted team is on it, with C.Lee watching.
+
+**Why this is not Continue.** Continue required a partner-owned pilot: partner
+agent, partner staging tool, partner engineer, and a receipt that engineer
+verified independently, plus paid or written commercial pull. This repository
+has none of that.
+
+**Evidence actually in this repository (as of 2026-09-16):**
+
+- Sprint window ended **2026-09-11**. This write-up is five days late.
+- **No interview log** in this repository. The Evidence Log section above
+  remains a template. Confidential names belong in the private customer
+  system; even prospect identifiers are absent here.
+- **No named partner-owned tool.** Live upstream is the operator-owned echo
+  fixture `partner.echo`, not a design-partner tool.
+- Local proofs, CI's trust gate, and self-issued public proof remain real as
+  *gateway* evidence. They are not customer validation. `AGENTS.md` already
+  says local demos, self-issued public proof, and the stranger test do not
+  count.
+
+**What Narrow means for engineering:**
+
+- Security, correctness, reliability of the existing one-tool loop,
+  documentation needed for a real pilot, and keeping release gates green.
+- No new core capability, including pods, extra MCP tools, standard `/mcp`
+  auto-mint, proof surfaces, public anonymous MCP, wrap-and-anchor evidence,
+  a receipt-style permit envelope, a portable audit-chain export, or
+  out-of-band key distribution, until a named prospect, one consequential
+  tool, a workflow blocker, an owner, and a date exist. Key distribution
+  also requires naming a trust root that is not this origin.
+
+**Live origin lockdown (code in this change; apply on Railway after merge):**
+anonymous callers must not list tools, invoke tools, or mint keys. Receipt
+verification keys at `/.well-known/trust-keys.json` stay public. Operator
+`VALID_API_KEYS` and wallet-scoped keys keep working. Exact Railway clicks:
+[`deploy-railway.md`](deploy-railway.md#applying-the-narrow-lockdown-to-the-live-origin).
+GitHub visibility is **not** changed by this change; C.Lee makes the
+repository private themselves.
+
+**Live origin check (2026-09-19):** `https://api.thisisatest.tech` still
+serves unauthenticated `/mcp/tools.json` and `/v1/discover` (HTTP 200) and
+answers `POST /mcp/public` (HTTP 200). `/health` reports
+`commit_sha=091dcd641bb25583319c1daee833cc60df7e2a0b` (`#425`), not the
+Narrow lockdown merge. `/.well-known/trust-keys.json` remains 200. Product
+CI (`CI — Agent Middleware API`) last succeeded on `fc7243e` (2026-09-15);
+later main pushes including #444/#445/#446 `startup_failure` before jobs
+start. When CI did run (2026-09-19, #447), `mcp>=1.29.0,<3` installed
+mcp 2.2 and collection failed on `McpError`. This change re-pins `<2`.
+This repository's agents do not deploy that origin.
+
+## Existing Implementation Documents
+
+rg: awi_sdk/typescript/*.md: No such file or directory (os error 2)
+README.md:6:![License](https://img.shields.io/badge/license-BUSL--1.1%20core%20%2F%20MIT%20SDKs-blue)
+README.md:147:| **Offline-verifiable receipts** | Ed25519-signed; verifiable with no credentials and no network access to the issuer, using the SDK verifier or any JOSE tooling. | `GET /v1/receipts/{id}/portable`, `/.well-known/jwks.json` |
+README.md:236:the official MCP SDK; it is opt-in today (`ENABLE_STANDARD_MCP_ENDPOINT=true`,
+README.md:260:### Python SDK
+README.md:266:releases. **It is not published to PyPI, and there is no TypeScript package** —
+README.md:299:| [`b2a_sdk/`](b2a_sdk/) | Python trust SDK (historical package name; the product is Agent Middleware) |
+README.md:333:SDKs, framework integrations, wrappers, and examples are
+docs/qa/2026-10-02/FRONTEND-REPORT.md:9:The repository has a static marketing site (`site/`), a static operator index (`static/dashboard.html`), and an unshipped AWI TypeScript SDK (`awi_sdk/typescript/`). There is no React application or authenticated dashboard workflow. README.md:260–267 explicitly says there is no published TypeScript package; SDK findings therefore concern the checked-in integration surface, not an established public package release.
+docs/qa/2026-10-02/FRONTEND-REPORT.md:11:Risk order: (1) credentials/receipt claims and retry boundaries, (2) calculator correctness and public proof failure states, (3) SDK build and API ergonomics, (4) mobile/accessibility and asset performance. Runtime backend routes and Python suites belong to the backend pass; accessibility and screenshot fallback belong to the UX pass.
+docs/qa/2026-10-02/FRONTEND-REPORT.md:19:| FE-C1: bootstrap and build | 10 minutes | Can a clean consumer build the static site and SDK without production settings? | Site builds with synthetic contact fixture; SDK declared build fails (FE-001). |
+docs/qa/2026-10-02/FRONTEND-REPORT.md:21:| FE-C3: component and SDK boundaries | 10 minutes | Do invalid/empty/overflow inputs fail safely; does the SDK preserve authorization and retry identity? | 8 passing tests, 2 expected failures. Calculator and proof error cases pass; SDK zero step limit is promoted to 100 (FE-002). |
+docs/qa/2026-10-02/FRONTEND-REPORT.md:29:| FE-001 | Medium | Frontend / SDK DX | Declared TypeScript SDK build cannot produce its advertised entrypoints | Copy `awi_sdk/typescript/{package.json,index.ts,LICENSE}` into an isolated directory; install the declared dependencies with scripts disabled; run `npm run build`. The retained test `FE-001: declared SDK build produces its advertised entrypoints` reproduces this without network using already installed temporary tooling. | Expected: exit 0, `dist/index.js` and `dist/index.d.ts`. Actual: `tsc` prints help and exits 1 because no project config or source arguments exist. | `awi_sdk/typescript/package.json:5`, `:6`, `:8`; [isolated build output](artifacts/frontend-sdk-isolated-build.txt); [expected failure](artifacts/frontend-component-contract-final.txt). Explicit-source strict typecheck passes, narrowing this to packaging/build configuration. | Before unfreezing this SDK, add a minimal tsconfig with source include, output directory and declaration emission, and verify the packed entrypoints. Keep it documented as unshipped until then. |
+docs/qa/2026-10-02/FRONTEND-REPORT.md:30:| FE-002 | Medium | Frontend / SDK DX | A zero session step limit silently becomes 100 | Invoke `AWIClient.createSession('http://127.0.0.1:8769/synthetic', {maxSteps: 0})` with a stubbed Axios transport; inspect the submitted `max_steps`. Run the retained `FE-002: maxSteps=0 is not silently promoted to 100 actions` expected-failure test. | Expected: reject invalid zero locally or transmit zero so the API's `ge=1` validator rejects it. Actual: SDK submits `max_steps: 100`, granting a larger action limit than requested. `priority: 0` is similarly normalized to 5, though the session step limit is the consequential case. | `awi_sdk/typescript/index.ts:157`, `:279`; API validator `app/schemas/awi.py:157` and `:275`; [source lines](artifacts/frontend-sdk-contract-lines.txt); [mock-only regression output](artifacts/frontend-component-contract-final.txt). | Use nullish defaults (`??`) and optionally validate the documented bounds before transport. Preserve explicit invalid input for validation rather than replacing it. |
+docs/qa/2026-10-02/FRONTEND-REPORT.md:32:No confirmed secret exposure was found in this pass. The mock SDK uses a runtime-generated random fixture that is never printed or submitted to a server. Production addresses appearing in source were inspected as text; none was requested.
+docs/qa/2026-10-02/FRONTEND-REPORT.md:41:| SDK declared build | FAIL, reproduced after installing its own declared TypeScript 5.9.3 and Axios 1.20.0 dependencies | [output](artifacts/frontend-sdk-isolated-build.txt) |
+docs/qa/2026-10-02/FRONTEND-REPORT.md:42:| SDK strict explicit-source typecheck | PASS with ES2020/Node16 configuration; does not repair its declared build | [output](artifacts/frontend-sdk-explicit-typecheck.txt) |
+docs/qa/2026-10-02/FRONTEND-REPORT.md:43:| npm vulnerability audits | PASS: zero known vulnerabilities in the resolved SDK dependency tree; site has zero dependencies | [SDK](artifacts/frontend-sdk-dependency-audit.txt), [site](artifacts/frontend-site-dependency-audit.txt) |
+docs/qa/2026-10-02/FRONTEND-REPORT.md:47:| Added DOM/SDK contract tests | PASS overall: 8 pass, 0 unexpected failures, 2 expected failures (Node TODO); exit 0 after gate review changes | [output](artifacts/frontend-component-contract-gate-rerun.txt) |
+docs/qa/2026-10-02/FRONTEND-REPORT.md:66:This is neither a whole-frontend percentage nor a measured before/after delta. V8 did not report source-level coverage for the transpiled SDK. Animation, arcade gameplay, accessibility preference scripts, analytics, visual layout, rendered keyboard behavior, browser download/mail handlers, production headers, real API integration and network timing remain untested by this pass. No customer or live-production proof is implied.
+docs/qa/2026-10-02/FRONTEND-REPORT.md:70:All added files are under `docs/qa/2026-10-02/`. Install QA dependencies outside the repository (verified versions: Node 26.7.0; `@playwright/test`/`playwright` 1.63.0, `axe-core` 4.13.0, `jsdom` 30.1.1, TypeScript 5.9.3, Axios 1.20.0, `@types/node` 26.6.4). These are QA tool dependencies, not product dependencies. `QA_NODE_MODULES` can override the default temporary module path.
+docs/qa/2026-10-02/FRONTEND-REPORT.md:73:python3 docs/qa/2026-10-02/run_logged.py --group frontend --label reinstall-tools -- npm install --prefix /private/tmp/amw-qa-browser --cache /private/tmp/amw-qa-npm-cache --ignore-scripts --no-audit --no-fund @playwright/test@1.63.0 axe-core@4.13.0 jsdom@30.1.1 typescript@5.9.3 axios@1.20.0 @types/node@26.6.4
+docs/qa/2026-10-02/FRONTEND-REPORT.md:79:Expected failures intentionally remain documented as TODO tests so the component command stays green. Product fixes are not included. Recommended next step: fix SDK packaging and zero-boundary semantics if that SDK is retained, then rerun the retained browser suite in a permitted local browser environment before claiming frontend compatibility or visual quality.

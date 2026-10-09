@@ -1,0 +1,74 @@
+[
+  {
+    "revision": "release",
+    "delay": 0,
+    "before": {
+      "focus": true,
+      "scroll": 0,
+      "width": 348,
+      "scrollWidth": 512,
+      "outline": "2px"
+    },
+    "after": 0
+  },
+  {
+    "revision": "release",
+    "delay": 100,
+    "before": {
+      "focus": true,
+      "scroll": 0,
+      "width": 348,
+      "scrollWidth": 512,
+      "outline": "2px"
+    },
+    "after": 64
+  },
+  {
+    "revision": "release",
+    "delay": 1000,
+    "before": {
+      "focus": true,
+      "scroll": 0,
+      "width": 348,
+      "scrollWidth": 512,
+      "outline": "2px"
+    },
+    "after": 164
+  },
+  {
+    "revision": "origin/main",
+    "delay": 0,
+    "before": {
+      "focus": true,
+      "scroll": 0,
+      "width": 348,
+      "scrollWidth": 512,
+      "outline": "2px"
+    },
+    "after": 0
+  },
+  {
+    "revision": "origin/main",
+    "delay": 100,
+    "before": {
+      "focus": true,
+      "scroll": 0,
+      "width": 348,
+      "scrollWidth": 512,
+      "outline": "2px"
+    },
+    "after": 64
+  },
+  {
+    "revision": "origin/main",
+    "delay": 1000,
+    "before": {
+      "focus": true,
+      "scroll": 0,
+      "width": 348,
+      "scrollWidth": 512,
+      "outline": "2px"
+    },
+    "after": 164
+  }
+]

@@ -1,0 +1,12 @@
+{
+  "branch": [
+    "qa/2026-10-02-sweep"
+  ],
+  "head": [
+    "d45754e"
+  ],
+  "tracked_changed": [],
+  "staged_paths": [],
+  "untracked_count": 301,
+  "unexpected_untracked": []
+}

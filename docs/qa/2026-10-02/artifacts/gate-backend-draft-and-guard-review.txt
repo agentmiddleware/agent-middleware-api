@@ -1,0 +1,279 @@
+# Backend QA pass
+
+Status: in progress. Resumed 2026-10-03 UTC from the interrupted sweep. PR: opened by orchestrator. CI status: pending at time of writing.
+
+## Scope and safety
+
+Worktree `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`, branch `qa/2026-10-02-sweep`, baseline `d45754e`. Test-only changes; no product fixes, commits, remote mutations, deployments, remote databases, billing calls, environment-file reads, or real credentials used. Runtime/test packages installed in `/private/tmp/amw-qa-python`. The only database operations use disposable local SQLite files created by the suite and a separately named surrogate probe DB.
+
+`backend_safety/sitecustomize.py` suppresses dotenv loaders, rejects external DNS/socket destinations before contact, denies external service CLIs, and rejects `.env` access. An absolute-path `.pth` hook in the isolated environment ensures Python subprocesses retain these controls even when an existing test replaces `PYTHONPATH`; a negative control passed. This is a Python audit guard, not an OS network sandbox. Reviewed shell/Node children use local mocked entrypoints or static assets. Three provider-CLI test modules are excluded to honor the explicit ban on running that CLI. PostgreSQL tests remain opt-in and skip because no test PostgreSQL URL or run flag is supplied.
+
+## Risk methods
+
+Highest priority is unauthorized execution, cross-wallet access, debit/dispatch replay integrity, ambiguous outcomes, and signing/evidence integrity. Existing route, service, database race, retry, and negative-security tests provide most of the pyramid; the QA additions fill public auth-contract, schema, and destination-boundary gaps. A 30-minute exploratory charter challenged replay-key encoding, credential precedence, schema metadata, and outbound IP equivalence classes. Optional Hypothesis runs 200 deterministic valid-Unicode cases; OpenAPI validation checks the generated document and unique operation IDs. No runtime dependency was added.
+
+## Verified evidence so far
+
+- `ruff check .`: passed after removing an unused import introduced in the QA harness.
+- `mypy app`: passed, 185 source files.
+- Fresh core OpenAPI validates: 73 paths, 76 operations, no duplicate operation IDs.
+- Lone-surrogate replay-key candidate was disproved: strict transport returns HTTP 400 `Invalid JSON`, with unchanged effects, ledger entries, permit count, and idempotency-record count. Retained a passing regression; BE-001 is a retired candidate, not a finding.
+- Both outbound URL guards accept multicast addresses because Python classifies them as `is_global=True`; no external connection was attempted.
+
+## Confirmed findings
+
+| ID | Severity | Title | Reproduction | Expected / actual | Evidence | Suggested fix |
+| --- | --- | --- | --- | --- | --- | --- |
+| BE-002 | Low | Supported Bearer [REDACTED] is missing from OpenAPI security schemes | Generate `app.openapi()` and inspect `components.securitySchemes`; compare `get_auth_context` accepting the Authorization header. | Expected an HTTP Bearer [REDACTED] usable by generated clients/Swagger authentication; actual only `APIKeyHeader` is declared. Runtime Bearer [REDACTED] itself is not bypassed. | `app/core/auth.py:28`, `app/core/auth.py:119`; `artifacts/backend-openapi-contract-probe.txt`; strict xfail `test_openapi_declares_supported_bearer_authentication`. | Declare optional HTTPBearer [REDACTED] API-key schemes with OR semantics while preserving authoritative Authorization precedence. |
+| BE-003 | Low | Destination guards accept multicast addresses as public targets | Call `check_outbound_url("http://224.0.0.1/")` and `check_outbound_url("http://[ff02::1]/")` with private targets disabled; call `validate_upstream_url` for corresponding HTTPS URLs in production configuration. | Expected rejection before connection; actual general guard returns None and upstream guard returns the multicast address. This demonstrates a classifier gap, not successful SSRF or tool execution. | `app/core/url_guard.py:41-49`, `app/services/upstream_mcp.py:406-412`; `artifacts/backend-ssrf-address-boundaries-retry.txt`; strict xfail multicast tests. | Reject `is_multicast` explicitly in both guards, alongside `is_global`; add literal and resolved-address regression cases. |
+
+## OWASP API Top 10 review lens
+
+| Risk | Evidence reviewed / validation |
+| --- | --- |
+| API1 Object authorization | `AuthContext.require_wallet_access`; existing tenant-isolation and replay-to-unauthorized-caller tests. |
+| API2 Authentication | Authoritative Authorization parsing, live API-key binding, JWT revocation checks; 24 added protected-route missing/malformed-credential cases. |
+| API3 Object property authorization | Existing permit scope, wallet constraints, KYC authority, and input-hardening tests; no universal mass-assignment proof claimed. |
+| API4 Resource consumption | Global streamed request-body cap, request throttling, response-size/time caps, bounded discovery; multicast classifier gap BE-003. |
+| API5 Function authorization | Bootstrap-admin guard and route auth inventory; generated-schema security discrepancy BE-002. |
+| API6 Sensitive business flows | Existing permit budgets, revocation, idempotency, dispatch fencing, reconciliation, and wallet-concurrency tests. |
+| API7 SSRF | URL checks, DNS-pinned upstream adapter, unsafe-origin tests; BE-003 low-priority guard completeness. DNS/network effects not exercised externally. |
+| API8 Misconfiguration | Strict-trust startup guardrails, production-posture tests, defaults; no hosted configuration inspected. |
+| API9 Inventory | Fresh generated OpenAPI; proof/dormant routers distinguished from core; no remote inventory. |
+| API10 Unsafe API consumption | Existing upstream schema/response-size/redirect/error/secret-reflection controls and local fake upstream tests. |
+
+## Results and limitations
+
+Full-suite, added-test, production-posture, SDK, and before/after coverage results will be inserted after execution. Local coverage cannot establish hosted PostgreSQL locks, real upstream side effects, provider behavior, or customer evidence. Dependency vulnerability metadata is owned by the coordination pass.
+
+"""QA-only guard inherited by Python child processes; never used by product."""
+import ipaddress
+import os
+import socket
+import sys
+
+# Suppress all dotenv I/O before importing app settings.
+from pydantic_settings.sources import DotEnvSettingsSource
+DotEnvSettingsSource._read_env_files = lambda self: {}
+import dotenv
+dotenv.load_dotenv = lambda *args, **kwargs: False
+dotenv.dotenv_values = lambda *args, **kwargs: {}
+
+def local(host):
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+def numeric_address(host):
+    # inet_aton parses legacy numeric IPv4 spellings without DNS or I/O.
+    # Existing SSRF tests deliberately ask getaddrinfo to classify these.
+    try:
+        socket.inet_aton(host)
+        return True
+    except (OSError, TypeError):
+        return False
+
+
+def guard(event, args):
+    if event in ("socket.connect", "socket.sendto"):
+        address = args[1]
+        if isinstance(address, tuple) and not local(address[0]):
+            raise PermissionError("QA guard: non-loopback network denied")
+    if event == "socket.getaddrinfo" and args[0] is not None and not local(args[0]) and not numeric_address(args[0]):
+        raise PermissionError("QA guard: external DNS denied")
+    if event == "subprocess.Popen":
+        executable = os.path.basename(str(args[0]))
+        if executable in {"railway", "vercel", "fly", "supabase", "firebase", "curl", "wget"}:
+            raise PermissionError("QA guard: external command denied")
+    if event == "open" and isinstance(args[0], (str, bytes)):
+        name = os.path.basename(os.fsdecode(args[0]))
+        if name == ".env" or name.startswith(".env."):
+            raise PermissionError("QA guard: environment file access denied")
+
+sys.addaudithook(guard)
+
+RETAINED TEST TAIL """QA sweep: public auth contract and replay-key encoding boundaries.
+
+Optional generative/schema tooling is installed by docs/qa/2026-10-02/
+requirements-qa.txt. Product behavior is deliberately unchanged.
+"""
+from __future__ import annotations
+
+import json
+from collections import Counter
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from app.main import app
+from app.services.idempotency import (
+    InvalidIdempotencyKeyError,
+    decode_idempotency_key_header,
+    resolve_client_idempotency_key,
+)
+from tests.test_mcp_idempotency_key_validation import CountedTool, _snapshot
+from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
+
+
+@pytest.fixture
+async def qa_client():
+    async with AsyncClient(
+        transport=ASGITransport(app=app, raise_app_exceptions=False),
+        base_url="http://test",
+    ) as client:
+        yield client
+
+
+@pytest.mark.parametrize("method,path", [
+    ("GET", "/v1/permits"),
+    ("POST", "/v1/permits"),
+    ("GET", "/v1/receipts"),
+    ("GET", "/v1/receipts/missing"),
+    ("GET", "/v1/billing/wallets"),
+    ("POST", "/v1/billing/charge"),
+    ("GET", "/v1/audit/events"),
+    ("POST", "/v1/audit/verify-chain"),
+    ("GET", "/v1/me/authority"),
+    ("GET", "/v1/api-keys/missing"),
+    ("POST", "/mcp/messages"),
+    ("POST", "/mcp/tools/missing/invoke"),
+])
+@pytest.mark.parametrize("credential", ["absent", "invalid-bearer"])
+async def test_sensitive_route_rejects_unauthenticated_caller(
+    qa_client, method, path, credential
+):
+    # A malformed Authorization header must not fall back to a valid bootstrap key.
+    headers = {} if credential == "absent" else {
+        "Authorization": "Bearer [REDACTED]",
+        "X-API-Key": "test-key",
+    }
+    response = await qa_client.request(method, path, headers=headers, json={})
+    assert response.status_code == 401
+    assert response.headers["content-type"].startswith("application/json")
+    assert "traceback" not in response.text.lower()
+    assert "X-Credential-Rejected" not in response.headers
+
+
+def test_openapi_schema_is_valid_with_unique_operation_ids():
+    validator = pytest.importorskip("openapi_spec_validator")
+    # Force a fresh schema: other tests mount dormant routers dynamically.
+    old_schema = app.openapi_schema
+    try:
+        app.openapi_schema = None
+        schema = app.openapi()
+        validator.validate(schema)
+        operations = [
+            operation
+            for path in schema["paths"].values()
+            for method, operation in path.items()
+            if method in {"get", "post", "put", "patch", "delete"}
+        ]
+        counts = Counter(operation["operationId"] for operation in operations)
+        assert all(count == 1 for count in counts.values())
+    finally:
+        app.openapi_schema = old_schema
+
+
+@pytest.mark.xfail(strict=True, reason="BE-002: Bearer [REDACTED] is absent from OpenAPI security schemes")
+def test_openapi_declares_supported_bearer_authentication():
+    schemes = app.openapi()["components"]["securitySchemes"].values()
+    assert any(s.get("type") == "http" and s.get("scheme") == "bearer" for s in schemes)
+
+
+def test_scalar_unicode_replay_keys_roundtrip_without_normalization():
+    hypothesis = pytest.importorskip("hypothesis")
+    from hypothesis import strategies as st
+
+    alphabet = st.characters(
+        exclude_categories=("Cs",),
+        exclude_characters="".join(chr(i) for i in [*range(32), 127]),
+    )
+
+    @hypothesis.settings(max_examples=200, derandomize=True, deadline=None)
+    @hypothesis.given(st.text(alphabet=alphabet, min_size=1, max_size=128).filter(str.strip))
+    def check(key):
+        decoded = decode_idempotency_key_header(key.encode("utf-8").decode("latin-1"))
+        assert decoded == key
+        assert resolve_client_idempotency_key([("header", decoded), ("body", key)]) == key
+        with pytest.raises(InvalidIdempotencyKeyError):
+            resolve_client_idempotency_key([("header", key), ("body", key + " ")])
+
+    check()
+
+
+async def test_lone_surrogate_replay_key_is_rejected_before_effect_or_debit(
+    qa_client, clean_database
+):
+    tool = CountedTool("qa.encoding.effect")
+    try:
+        caller = await provision_agent_wallet(qa_client)
+        permit = await create_tool_permit(
+            qa_client,
+            wallet_id=caller["agent_wallet_id"],
+            key_id=caller["key_id"],
+            tool_name=tool.name,
+        )
+        before = await _snapshot(qa_client, caller, tool)
+        body = {
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {
+                "name": tool.name, "arguments": {"text": "one"},
+                "mcpContext": {
+                    "wallet_id": caller["agent_wallet_id"],
+                    "permit_id": permit["permit_id"],
+                    "idempotency_key": "\ud800",
+                },
+            },
+        }
+        response = await qa_client.post(
+            "/mcp/messages",
+            content=json.dumps(body).encode("ascii"),
+            headers={**caller["agent_headers"], "Content-Type": "application/json"},
+        )
+        assert await _snapshot(qa_client, caller, tool) == before
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Invalid JSON"
+    finally:
+        tool.close()
+
+
+@pytest.mark.parametrize("address", ["224.0.0.1", "239.255.255.250", "ff02::1", "ff05::1"])
+@pytest.mark.xfail(strict=True, reason="BE-003: is_global alone permits multicast addresses through outbound guards")
+async def test_outbound_url_guard_rejects_multicast(address, monkeypatch):
+    from app.core.config import get_settings
+    from app.core.url_guard import check_outbound_url
+
+    monkeypatch.setattr(get_settings(), "ALLOW_PRIVATE_NETWORK_TARGETS", False)
+    host = f"[{address}]" if ":" in address else address
+    assert await check_outbound_url(f"http://{host}/") == "private_address_blocked"
+
+
+@pytest.mark.parametrize("address", ["224.0.0.1", "ff02::1"])
+@pytest.mark.xfail(strict=True, reason="BE-003: is_global alone permits multicast addresses through upstream guard")
+async def test_upstream_url_guard_rejects_multicast(address):
+    from decimal import Decimal
+    from app.services.upstream_mcp import (
+        UpstreamMcpConfiguration,
+        UpstreamMcpConfigurationError,
+        validate_upstream_url,
+    )
+
+    host = f"[{address}]" if ":" in address else address
+    configuration = UpstreamMcpConfiguration(
+        url=f"https://{host}/mcp",
+        origin=f"https://{host}",
+        tool_name="notes.write",
+        public_tool_id="partner.notes.write",
+        bearer_token=[REDACTED],
+        credits_per_call=Decimal("1"),
+        connect_timeout_seconds=1.0,
+        call_timeout_seconds=1.0,
+        max_response_bytes=1024,
+        environment="production",
+    )
+    with pytest.raises(UpstreamMcpConfigurationError):
+        await validate_upstream_url(configuration)
+

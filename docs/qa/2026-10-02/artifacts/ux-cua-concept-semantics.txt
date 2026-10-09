@@ -1,0 +1,55 @@
+- link "Skip to content":
+  - /url: "#main"
+- navigation "Primary":
+  - link "Agent Middleware API home":
+    - /url: /
+    - generic: Agent Middleware API
+  - link "Pilot":
+    - /url: /#pilot
+  - link "Proof":
+    - /url: /proof/
+  - link "Compare":
+    - /url: /compare/
+  - link "Machine discovery":
+    - /url: /#machine-discovery
+  - link "Start a pilot by email (opens your mail app)":
+    - /url: mailto:qa@qa-sweep-build.dev?subject=One-tool%20paid%20pilot%20enquiry&body=One-tool%20paid%20pilot%20enquiry%0A%0A1.%20Tool%20or%20action%20%28synthetic%20or%20redacted%20only%29%3A%0A2.%20What%20goes%20wrong%20on%20retry%3A%0A3.%20How%20we%20check%20whether%20the%20action%20ran%3A%0A4.%20Cost%20of%20one%20duplicate%20or%20unproven%20call%20%28money%2C%20recovery%20hours%2C%20or%20customer%20consequence%3B%20measured%20or%20estimated%29%3A%0A5.%20Budget%20owner%20and%20target%20decision%20date%3A%0A%0AOptional%20workflow%20assumptions%3A%20monthly%20actions%2C%20baseline%20duplicate%20rate%2C%20expected%20reduction%2C%20and%20total%20monthly%20cost.%0A%0ADo%20not%20include%20production%20secrets%2C%20credentials%2C%20or%20customer%20data.%0A
+    - text: Start a pilot by email
+- main:
+  - paragraph: Archived design study
+  - heading "Unlock your future growth" [level=1]
+  - paragraph: Through perpetual investment strategies that outperform the market
+  - link "Contact us by email (opens your mail app)":
+    - /url: mailto:qa@qa-sweep-build.dev
+    - text: Contact us
+  - paragraph: 573,440 PARTICLES · WEBGL2 · HDR
+- contentinfo:
+  - generic: Agent Middleware API
+  - paragraph: Authorize one agent action. Charge it once. Prove what happened.
+  - paragraph: Human contact
+  - link "Start a pilot by email (opens your mail app)":
+    - /url: mailto:qa@qa-sweep-build.dev?subject=One-tool%20paid%20pilot%20enquiry&body=One-tool%20paid%20pilot%20enquiry%0A%0A1.%20Tool%20or%20action%20%28synthetic%20or%20redacted%20only%29%3A%0A2.%20What%20goes%20wrong%20on%20retry%3A%0A3.%20How%20we%20check%20whether%20the%20action%20ran%3A%0A4.%20Cost%20of%20one%20duplicate%20or%20unproven%20call%20%28money%2C%20recovery%20hours%2C%20or%20customer%20consequence%3B%20measured%20or%20estimated%29%3A%0A5.%20Budget%20owner%20and%20target%20decision%20date%3A%0A%0AOptional%20workflow%20assumptions%3A%20monthly%20actions%2C%20baseline%20duplicate%20rate%2C%20expected%20reduction%2C%20and%20total%20monthly%20cost.%0A%0ADo%20not%20include%20production%20secrets%2C%20credentials%2C%20or%20customer%20data.%0A
+    - text: Start a pilot by email
+  - link "Email qa@qa-sweep-build.dev":
+    - /url: mailto:qa@qa-sweep-build.dev
+    - text: qa@qa-sweep-build.dev
+  - generic: "Accountable contact: QA-Sweep"
+  - paragraph: Evidence and discovery
+  - link "Receipt proof":
+    - /url: /proof/
+  - link "Agent manifest":
+    - /url: https://api.thisisatest.tech/.well-known/agent.json
+  - link "OpenAPI":
+    - /url: https://api.thisisatest.tech/openapi.json
+  - link "Live dependency status":
+    - /url: https://api.thisisatest.tech/health/dependencies
+  - paragraph: Source and policy
+  - link "Source repository":
+    - /url: https://github.com/PetrefiedThunder/agent-middleware-api
+  - link "Design partner guide":
+    - /url: https://api.thisisatest.tech/DESIGN_PARTNER_GUIDE.md
+  - link "Security limitations":
+    - /url: https://api.thisisatest.tech/SECURITY_LIMITATIONS.md
+  - link "Report a vulnerability":
+    - /url: /.well-known/security.txt
+- button "Accessibility options": Aa
