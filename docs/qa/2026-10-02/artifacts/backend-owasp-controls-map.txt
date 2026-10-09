@@ -1,0 +1,142 @@
+app/core/url_guard.py:41:def _address_blocked(address: str) -> bool:
+app/core/url_guard.py:52:async def _resolve_host(host: str):
+app/core/url_guard.py:60:async def check_outbound_url(url: str) -> str | None:
+app/middleware/request_body_limit.py:27:from starlette.responses import JSONResponse
+app/middleware/request_body_limit.py:35:def _too_large(limit: int) -> JSONResponse:
+app/middleware/request_body_limit.py:37:    return JSONResponse(
+app/middleware/request_body_limit.py:38:        status_code=413,
+app/middleware/request_body_limit.py:49:    def __init__(self, app: ASGIApp, max_body_size: int) -> None:
+app/middleware/request_body_limit.py:53:    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+app/middleware/request_body_limit.py:106:        async def replay() -> Message:
+app/core/rate_limiter.py:18:from fastapi import Request, Response
+app/core/rate_limiter.py:20:from starlette.responses import JSONResponse
+app/core/rate_limiter.py:36:_PUBLIC_MCP_GLOBAL_LIMIT_MULTIPLIER = 10
+app/core/rate_limiter.py:47:_PREAUTH_LIMIT_MULTIPLIER = 10
+app/core/rate_limiter.py:60:def rate_limit_discovery() -> dict[str, Any]:
+app/core/rate_limiter.py:65:    allowance and no per-partner override; ``RATE_LIMIT_PER_MINUTE`` is the
+app/core/rate_limiter.py:87:        "requests_per_minute": cfg.RATE_LIMIT_PER_MINUTE,
+app/core/rate_limiter.py:93:        "rejected_credentials_multiplier": _PREAUTH_LIMIT_MULTIPLIER,
+app/core/rate_limiter.py:104:def _client_id(request: Request) -> str:
+app/core/rate_limiter.py:130:def _api_key_bucket(presented_key: str | None) -> str:
+app/core/rate_limiter.py:151:def _credentials_were_rejected(response: Response) -> bool:
+app/core/rate_limiter.py:164:    return marked or response.status_code == 401
+app/core/rate_limiter.py:167:def _rate_limited_response(limit: int, reset_in: int, message: str) -> JSONResponse:
+app/core/rate_limiter.py:169:    return JSONResponse(
+app/core/rate_limiter.py:170:        status_code=429,
+app/core/rate_limiter.py:197:    def __init__(self, app, requests_per_minute: int | None = None):
+app/core/rate_limiter.py:199:        self.limit = requests_per_minute or settings.RATE_LIMIT_PER_MINUTE
+app/core/rate_limiter.py:200:        self.preauth_limit = self.limit * _PREAUTH_LIMIT_MULTIPLIER
+app/core/rate_limiter.py:212:    def _fail_closed_on_redis_outage(self) -> bool:
+app/core/rate_limiter.py:218:    async def _get_redis(self) -> redis.Redis | None:
+app/core/rate_limiter.py:250:    async def _check_limit_with_redis(
+app/core/rate_limiter.py:286:    def _preauth_bucket(self, request: Request) -> str:
+app/core/rate_limiter.py:293:    async def _reserve(
+app/core/rate_limiter.py:350:    async def _release(
+app/core/rate_limiter.py:386:    async def _give_back(client: redis.Redis, key: str) -> None:
+app/core/rate_limiter.py:396:    async def _preauth_reserve(
+app/core/rate_limiter.py:402:    ) -> tuple[JSONResponse | None, bool]:
+app/core/rate_limiter.py:428:    def _sweep_expired_buckets(self, window_start: float) -> None:
+app/core/rate_limiter.py:443:    async def _check_limit_in_memory(
+app/core/rate_limiter.py:485:    async def dispatch(self, request: Request, call_next) -> Response:
+app/core/rate_limiter.py:505:                        self.limit * _PUBLIC_MCP_GLOBAL_LIMIT_MULTIPLIER,
+app/core/rate_limiter.py:532:            "/SECURITY_LIMITATIONS.md",
+app/core/rate_limiter.py:596:                return JSONResponse(
+app/core/rate_limiter.py:597:                    status_code=503,
+app/core/rate_limiter.py:617:                    return JSONResponse(
+app/core/rate_limiter.py:618:                        status_code=503,
+app/services/upstream_mcp.py:39:    MAX_UPSTREAM_CALL_TIMEOUT_SECONDS,
+app/services/upstream_mcp.py:40:    MAX_UPSTREAM_CONNECT_TIMEOUT_SECONDS,
+app/services/upstream_mcp.py:56:_MAX_DISCOVERY_PAGES = 100
+app/services/upstream_mcp.py:57:_MAX_DISCOVERY_TOOLS = 1024
+app/services/upstream_mcp.py:59:_MAX_NUMERIC_20_8 = Decimal("999999999999.99999999")
+app/services/upstream_mcp.py:82:    async def initialize(self) -> Any: ...
+app/services/upstream_mcp.py:84:    async def list_tools(self, cursor: str | None = None) -> Any: ...
+app/services/upstream_mcp.py:86:    async def call_tool(
+app/services/upstream_mcp.py:103:    def __init__(self, code: str, *, dispatch_started: bool) -> None:
+app/services/upstream_mcp.py:112:    def __init__(self, code: str = "upstream_pre_dispatch_failed") -> None:
+app/services/upstream_mcp.py:119:    def __init__(self) -> None:
+app/services/upstream_mcp.py:126:    def __init__(self, detail: str) -> None:
+app/services/upstream_mcp.py:134:    def __init__(self) -> None:
+app/services/upstream_mcp.py:138:class UpstreamMcpResponseRejectedError(UpstreamMcpError):
+app/services/upstream_mcp.py:141:    def __init__(self, code: str = "upstream_response_rejected") -> None:
+app/services/upstream_mcp.py:159:    def __init__(self, result: UpstreamMcpResult) -> None:
+app/services/upstream_mcp.py:186:    def from_settings(cls, settings: Settings) -> UpstreamMcpConfiguration:
+app/services/upstream_mcp.py:232:        if credits > _MAX_NUMERIC_20_8:
+app/services/upstream_mcp.py:252:            > MAX_UPSTREAM_CONNECT_TIMEOUT_SECONDS
+app/services/upstream_mcp.py:256:                f"and no greater than {MAX_UPSTREAM_CONNECT_TIMEOUT_SECONDS} seconds"
+app/services/upstream_mcp.py:262:            > MAX_UPSTREAM_CALL_TIMEOUT_SECONDS
+app/services/upstream_mcp.py:266:                f"and no greater than {MAX_UPSTREAM_CALL_TIMEOUT_SECONDS} seconds"
+app/services/upstream_mcp.py:268:        if settings.MCP_UPSTREAM_MAX_RESPONSE_BYTES <= 0:
+app/services/upstream_mcp.py:270:                "MCP_UPSTREAM_MAX_RESPONSE_BYTES must be greater than zero"
+app/services/upstream_mcp.py:287:            max_response_bytes=settings.MCP_UPSTREAM_MAX_RESPONSE_BYTES,
+app/services/upstream_mcp.py:292:def _parse_url_shape(url: str) -> SplitResult:
+app/services/upstream_mcp.py:320:def _sanitized_origin(parts: SplitResult) -> str:
+app/services/upstream_mcp.py:329:async def _default_resolver(host: str, port: int | None) -> Sequence[str]:
+app/services/upstream_mcp.py:343:async def validate_upstream_url(
+app/services/upstream_mcp.py:416:class _ResponseGuardState:
+app/services/upstream_mcp.py:420:    def reject(self, code: str) -> None:
+app/services/upstream_mcp.py:426:class _GuardedResponseRejected(RuntimeError):
+app/services/upstream_mcp.py:430:class _BoundedResponseStream(httpx.AsyncByteStream):
+app/services/upstream_mcp.py:431:    def __init__(
+app/services/upstream_mcp.py:436:        state: _ResponseGuardState,
+app/services/upstream_mcp.py:442:    async def __aiter__(self) -> AsyncIterator[bytes]:
+app/services/upstream_mcp.py:449:                raise _GuardedResponseRejected("upstream_response_too_large")
+app/services/upstream_mcp.py:452:    async def aclose(self) -> None:
+app/services/upstream_mcp.py:456:class _DelegatedResponseStream(httpx.AsyncByteStream):
+app/services/upstream_mcp.py:459:    def __init__(self, response: httpx.Response) -> None:
+app/services/upstream_mcp.py:462:    async def __aiter__(self) -> AsyncIterator[bytes]:
+app/services/upstream_mcp.py:470:    async def aclose(self) -> None:
+app/services/upstream_mcp.py:475:    def __init__(self, client: httpx.AsyncClient) -> None:
+app/services/upstream_mcp.py:478:    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+app/services/upstream_mcp.py:484:        return httpx.Response(
+app/services/upstream_mcp.py:485:            response.status_code,
+app/services/upstream_mcp.py:487:            stream=_DelegatedResponseStream(response),
+app/services/upstream_mcp.py:495:    def __init__(
+app/services/upstream_mcp.py:500:        response_guard: _ResponseGuardState,
+app/services/upstream_mcp.py:516:    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+app/services/upstream_mcp.py:540:            raise _GuardedResponseRejected("upstream_response_invalid")
+app/services/upstream_mcp.py:549:                raise _GuardedResponseRejected("upstream_response_invalid") from None
+app/services/upstream_mcp.py:553:                raise _GuardedResponseRejected("upstream_response_invalid")
+app/services/upstream_mcp.py:557:                raise _GuardedResponseRejected("upstream_response_too_large")
+app/services/upstream_mcp.py:562:        return httpx.Response(
+app/services/upstream_mcp.py:563:            response.status_code,
+app/services/upstream_mcp.py:565:            stream=_BoundedResponseStream(
+app/services/upstream_mcp.py:573:    async def aclose(self) -> None:
+app/services/upstream_mcp.py:577:async def _await_guarded_response(
+app/services/upstream_mcp.py:580:    response_guard: _ResponseGuardState,
+app/services/upstream_mcp.py:591:            raise _GuardedResponseRejected(response_guard.rejection_code)
+app/services/upstream_mcp.py:600:def _contains_exact_secret(value: Any, secret: [REDACTED] -> bool:
+app/services/upstream_mcp.py:614:def _bounded_json_size(value: Any, *, limit: int) -> int:
+app/services/upstream_mcp.py:635:def _record_call_metric(*, outcome: str, latency_seconds: float) -> None:
+app/services/upstream_mcp.py:646:def get_upstream_mcp_metrics_snapshot() -> dict[str, Any]:
+app/services/upstream_mcp.py:666:    def __init__(
+app/services/upstream_mcp.py:679:    def discovered_tool(self) -> DiscoveredUpstreamTool | None:
+app/services/upstream_mcp.py:683:    async def _http_client(
+app/services/upstream_mcp.py:686:        response_guard: _ResponseGuardState | None = None,
+app/services/upstream_mcp.py:688:        active_guard = response_guard or _ResponseGuardState()
+app/services/upstream_mcp.py:743:    async def _session(
+app/services/upstream_mcp.py:746:        response_guard: _ResponseGuardState | None = None,
+app/services/upstream_mcp.py:757:    async def _initialize_session(
+app/services/upstream_mcp.py:761:        response_guard: _ResponseGuardState,
+app/services/upstream_mcp.py:769:    async def discover_tool(self) -> DiscoveredUpstreamTool:
+app/services/upstream_mcp.py:777:        response_guard = _ResponseGuardState()
+app/services/upstream_mcp.py:784:                for _page in range(_MAX_DISCOVERY_PAGES):
+app/services/upstream_mcp.py:808:                    if discovered_tool_count > _MAX_DISCOVERY_TOOLS:
+app/services/upstream_mcp.py:872:    def _canonicalize_result(self, result: Any) -> UpstreamMcpResult:
+app/services/upstream_mcp.py:874:            raise UpstreamMcpResponseRejectedError("upstream_response_invalid")
+app/services/upstream_mcp.py:881:                raise UpstreamMcpResponseRejectedError()
+app/services/upstream_mcp.py:894:            raise UpstreamMcpResponseRejectedError(
+app/services/upstream_mcp.py:899:            raise UpstreamMcpResponseRejectedError("upstream_response_too_large")
+app/services/upstream_mcp.py:908:    async def _call_tool_once(
+app/services/upstream_mcp.py:933:        response_rejected: UpstreamMcpResponseRejectedError | None = None
+app/services/upstream_mcp.py:934:        response_guard = _ResponseGuardState()
+app/services/upstream_mcp.py:968:                except UpstreamMcpResponseRejectedError as exc:
+app/services/upstream_mcp.py:978:                    raise UpstreamMcpResponseRejectedError(
+app/services/upstream_mcp.py:1002:                    raise UpstreamMcpResponseRejectedError(
+app/services/upstream_mcp.py:1009:                raise UpstreamMcpResponseRejectedError(
+app/services/upstream_mcp.py:1028:                    raise UpstreamMcpResponseRejectedError(
+app/services/upstream_mcp.py:1060:    async def call_tool(
+app/services/upstream_mcp.py:1084:        except UpstreamMcpResponseRejectedError:
+app/services/upstream_mcp.py:1102:async def register_configured_upstream_mcp(
+ROUTERS ['red_team.py', 'auth.py', 'mcp_standard.py', 'planner.py', 'media.py', 'me.py', 'receipts.py', 'awi_enhanced.py', 'rtaas.py', 'audit.py', 'billing.py', 'comms.py', 'dev_keys.py', 'kyc.py', 'discover.py', 'protocol.py', 'http_idempotency.py', 'ai.py', 'telemetry_scope.py', '__init__.py', 'docs.py', 'agent_comms_durable.py', 'telemetry.py', 'keys.py', 'x402.py', 'factory.py', 'sandbox.py', 'mcp.py', 'awi.py', 'permit_requests.py', 'static.py', 'sandbox_behavioral.py', 'api_keys.py', 'quotes.py', 'oracle.py', 'well_known.py', 'webhooks.py', 'broadcast.py', 'evidence.py', 'policies.py', 'iot.py', 'content_generation.py', 'preflight.py', 'permits.py', 'pods.py', 'mcp_public.py']
+CLAUSES ['test_request_body_limit.py', 'test_tool_interface_authority.py', 'test_duplicate_guard_config.py', 'test_jwt_auth.py', 'test_duplicate_guard_postgres_concurrency.py', 'test_route_auth_inventory.py', 'test_trust_coverage_gate_scope.py', 'test_kyc_status_authority.py', 'test_agent_url_and_input_hardening.py', 'test_db_urls_durable_state.py', 'test_rate_limit_threshold.py', 'test_trust_mode_guardrails.py', 'test_telemetry_scope.py']

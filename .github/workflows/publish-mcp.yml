@@ -18,6 +18,13 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # Pinned mcp-publisher release. Bump VERSION together with both hashes
+    # (taken from registry_<version>_checksums.txt on the release page).
+    # The install step verifies the hash and fails closed on mismatch.
+    env:
+      MCP_PUBLISHER_VERSION: v1.8.1
+      MCP_PUBLISHER_SHA256_AMD64: a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc
+      MCP_PUBLISHER_SHA256_ARM64: 8dd75a6cf6845688b5d4e46df58d3ca26d5c8d233bb0626606e1db82c5e883e4
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -37,7 +44,16 @@ jobs:
           import urllib.error
           import urllib.request
 
-          url = json.load(open("server.json"))["remotes"][0]["url"]
+          remotes = json.load(open("server.json")).get("remotes") or []
+          if not remotes:
+              print(
+                  "::error::Preflight failed: server.json declares no remote."
+                  " The standard /mcp endpoint stays disabled under the"
+                  " production SOP, so there is nothing to publish"
+                  " (docs/mcp-registry-submission.md)."
+              )
+              sys.exit(1)
+          url = remotes[0]["url"]
 
           def post(payload, session_id=None):
               headers = {
@@ -146,7 +162,21 @@ jobs:
       - name: Install mcp-publisher
         run: |
           set -euo pipefail
-          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+          OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+          ARCH="$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
+          case "${ARCH}" in
+            amd64) EXPECTED_SHA="${MCP_PUBLISHER_SHA256_AMD64}" ;;
+            arm64) EXPECTED_SHA="${MCP_PUBLISHER_SHA256_ARM64}" ;;
+            *)
+              echo "::error::Unsupported architecture ${ARCH}: no pinned checksum" >&2
+              exit 1
+              ;;
+          esac
+          ASSET="mcp-publisher_${OS}_${ARCH}.tar.gz"
+          curl -fsSL -o "${ASSET}" "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/${ASSET}"
+          echo "${EXPECTED_SHA}  ${ASSET}" | sha256sum -c -
+          tar xzf "${ASSET}" mcp-publisher
+          rm -f "${ASSET}"
 
       - name: Authenticate to MCP Registry (GitHub OIDC)
         run: ./mcp-publisher login github-oidc

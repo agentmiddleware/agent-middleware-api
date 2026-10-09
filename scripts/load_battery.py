@@ -34,11 +34,12 @@ os.environ.setdefault("ALLOW_LEGACY_UNPERMITTED_MCP", "true")
 # These must be set before importing app modules
 DB_URL = os.environ.get("DATABASE_URL")
 PG_CONTAINER = "agent-middleware-load-test"
+_OWNED_CONTAINER_ID: str | None = None
 
 
 def _ensure_postgres() -> str:
     """Start a local Postgres container if DATABASE_URL not set."""
-    global DB_URL
+    global DB_URL, _OWNED_CONTAINER_ID
     if DB_URL:
         return DB_URL
 
@@ -52,7 +53,7 @@ def _ensure_postgres() -> str:
         print(f"[load] Reusing existing container {PG_CONTAINER}")
     else:
         print(f"[load] Starting Postgres container {PG_CONTAINER}...")
-        subprocess.run(
+        started = subprocess.run(
             [
                 "docker",
                 "run",
@@ -72,11 +73,13 @@ def _ensure_postgres() -> str:
             ],
             check=True,
             capture_output=True,
+            text=True,
         )
+        _OWNED_CONTAINER_ID = started.stdout.strip()
         # Wait for Postgres to be ready
         for _ in range(30):
             check = subprocess.run(
-                ["docker", "exec", PG_CONTAINER, "pg_isready", "-U", "postgres"],
+                ["docker", "exec", _OWNED_CONTAINER_ID, "pg_isready", "-U", "postgres"],
                 capture_output=True,
             )
             if check.returncode == 0:
@@ -94,13 +97,16 @@ def _ensure_postgres() -> str:
 
 def _stop_postgres() -> None:
     """Stop the container we started."""
-    if os.environ.get("DATABASE_URL") != DB_URL:
-        return  # User-provided DB, don't touch
-    print(f"[load] Stopping container {PG_CONTAINER}...")
-    subprocess.run(
-        ["docker", "stop", "-t", "5", PG_CONTAINER],
+    global _OWNED_CONTAINER_ID
+    if not _OWNED_CONTAINER_ID:
+        return
+    print(f"[load] Stopping container {_OWNED_CONTAINER_ID}...")
+    stopped = subprocess.run(
+        ["docker", "stop", "-t", "5", _OWNED_CONTAINER_ID],
         capture_output=True,
     )
+    if stopped.returncode == 0:
+        _OWNED_CONTAINER_ID = None
 
 
 def _run_migrations() -> None:
@@ -130,6 +136,17 @@ class LoadResult:
     latencies_ms: list[float] = field(default_factory=list)
     idempotency_violations: list[str] = field(default_factory=list)
     budget_anomalies: list[str] = field(default_factory=list)
+
+    @property
+    def passed(self) -> bool:
+        return (
+            self.total_requests > 0
+            and self.success_count == self.total_requests
+            and self.error_count == 0
+            and self.denied_count == 0
+            and not self.idempotency_violations
+            and not self.budget_anomalies
+        )
 
     @property
     def throughput_rps(self) -> float:
@@ -383,14 +400,15 @@ Database: PostgreSQL
 
 ## Results
 
-| Concurrency | Requests | Success | Denied | Errors | Throughput (req/s) | p50 (ms) | p95 (ms) | p99 (ms) | Mean (ms) |
-|-------------|----------|---------|--------|--------|-------------------|----------|----------|----------|-----------|
+| Concurrency | Requests | Success | Denied | Errors | Throughput (req/s) | p50 (ms) | p95 (ms) | p99 (ms) | Mean (ms) | Status |
+|-------------|----------|---------|--------|--------|-------------------|----------|----------|----------|-----------|--------|
 """
     for r in results:
         report += (
             f"| {r.concurrency} | {r.total_requests} | {r.success_count} | "
             f"{r.denied_count} | {r.error_count} | {r.throughput_rps:.1f} | "
-            f"{r.p50_ms:.1f} | {r.p95_ms:.1f} | {r.p99_ms:.1f} | {r.mean_ms:.1f} |\n"
+            f"{r.p50_ms:.1f} | {r.p95_ms:.1f} | {r.p99_ms:.1f} | {r.mean_ms:.1f} | "
+            f"{'PASS' if r.passed else 'FAIL'} |\n"
         )
 
     report += "\n## Anomalies\n\n"
@@ -418,18 +436,10 @@ Database: PostgreSQL
     print("SUMMARY")
     print("=" * 60)
     for r in results:
-        status = (
-            "✅ PASS"
-            if not (r.idempotency_violations or r.budget_anomalies)
-            else "⚠️ ANOMALIES"
-        )
+        status = "✅ PASS" if r.passed else "⚠️ FAIL"
         print(f"  {r.concurrency:3d} concurrent: {status}")
 
-    return (
-        0
-        if all(not (r.idempotency_violations or r.budget_anomalies) for r in results)
-        else 1
-    )
+    return 0 if all(r.passed for r in results) else 1
 
 
 if __name__ == "__main__":

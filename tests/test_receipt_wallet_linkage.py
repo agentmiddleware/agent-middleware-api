@@ -109,8 +109,7 @@ async def test_success_receipt_links_to_invoking_wallet(
         )
         model = result.scalar_one()
         assert model.wallet_id == agent["agent_wallet_id"], (
-            f"Stored wallet_id {model.wallet_id} != "
-            f"expected {agent['agent_wallet_id']}"
+            f"Stored wallet_id {model.wallet_id} != expected {agent['agent_wallet_id']}"
         )
 
     # Step 3: Verify the receipt signature is valid (includes wallet_id)
@@ -120,9 +119,7 @@ async def test_success_receipt_links_to_invoking_wallet(
         headers=agent["agent_headers"],
     )
     assert verify_resp.status_code == 200
-    assert verify_resp.json()["valid"] is True, (
-        "Receipt signature should be valid"
-    )
+    assert verify_resp.json()["valid"] is True, "Receipt signature should be valid"
 
     # Step 4: Verify wallet_id linkage via GET endpoint
     read_resp = await client.get(

@@ -1,0 +1,1 @@
+PASS: external DNS blocked before any lookup; dotenv file loading suppressed even with replaced PYTHONPATH

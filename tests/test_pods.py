@@ -5,6 +5,8 @@ pods router is mounted without flipping ENABLE_PROOF_SURFACES globally,
 mirroring how production would mount it for a specific pilot.
 """
 
+import json
+
 import pytest
 from httpx import AsyncClient, ASGITransport
 
@@ -64,9 +66,7 @@ async def test_pod_member_keys_are_independently_usable(client):
     resp = await _create_pod(client)
     member = resp.json()["members"][0]
 
-    me = await client.get(
-        "/v1/me/authority", headers={"X-API-Key": member["api_key"]}
-    )
+    me = await client.get("/v1/me/authority", headers={"X-API-Key": member["api_key"]})
     assert me.status_code == 200
     assert me.json()["wallet_id"] == member["wallet_id"]
 
@@ -310,3 +310,46 @@ def test_pods_router_is_registered_as_dormant():
 
     assert pods_router_module in DORMANT_TRUST_ROUTERS
     assert pods_router_module not in CORE_TRUST_ROUTERS
+
+
+UNSTORABLE_BUDGETS = [float("inf"), float("-inf"), float("nan"), 1e20]
+UNSTORABLE_BUDGET_IDS = ["Infinity", "-Infinity", "NaN", "1e20"]
+
+
+def _raw_json(payload: dict) -> dict:
+    """httpx kwargs that send Infinity/NaN as the bare JSON literals."""
+    return {
+        "content": json.dumps(payload),
+        "headers": {**ADMIN_HEADERS, "Content-Type": "application/json"},
+    }
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("value", UNSTORABLE_BUDGETS, ids=UNSTORABLE_BUDGET_IDS)
+async def test_pod_budgets_refuse_unstorable_values(client, value):
+    """Infinity, NaN and over-scale budgets are a 422, not a wallet-engine 500.
+
+    Pod budgets become wallet balances (Numeric(20, 8)); the other money
+    fields already refuse what that column cannot hold, and the pod fields
+    used to let it through to an unhandled decimal error.
+    """
+    member = {"agent_id": "member-1", "key_name": "member-1-key"}
+    resp = await client.post(
+        "/v1/pods",
+        **_raw_json(
+            {"pod_name": "research", "budget_credits": value, "members": [member]}
+        ),
+    )
+    assert resp.status_code == 422, resp.text
+
+    resp = await client.post(
+        "/v1/pods",
+        **_raw_json(
+            {
+                "pod_name": "research",
+                "budget_credits": 100.0,
+                "members": [{**member, "budget_credits": value}],
+            }
+        ),
+    )
+    assert resp.status_code == 422, resp.text

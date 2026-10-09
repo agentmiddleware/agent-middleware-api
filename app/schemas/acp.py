@@ -27,9 +27,7 @@ _INTENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9_\-\.]{1,128}$")
 # scheme/port/path. Uppercase is rejected rather than folded so the value that
 # lands in the permit's recipient_domain is byte-identical to the input.
 _HOSTNAME_LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
-_MERCHANT_DOMAIN_PATTERN = re.compile(
-    rf"^{_HOSTNAME_LABEL}(?:\.{_HOSTNAME_LABEL})+$"
-)
+_MERCHANT_DOMAIN_PATTERN = re.compile(rf"^{_HOSTNAME_LABEL}(?:\.{_HOSTNAME_LABEL})+$")
 
 _MAX_SPT_TOKEN_LENGTH = 512
 

@@ -32,14 +32,10 @@ def upgrade() -> None:
             "intensity", sa.String(20), nullable=False, server_default="standard"
         ),
         sa.Column("status", sa.String(20), nullable=False, index=True),
-        sa.Column(
-            "total_tests_run", sa.Integer(), nullable=False, server_default="0"
-        ),
+        sa.Column("total_tests_run", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("total_passed", sa.Integer(), nullable=True),
         sa.Column("total_failed", sa.Integer(), nullable=True),
-        sa.Column(
-            "security_score", sa.Float(), nullable=False, server_default="0"
-        ),
+        sa.Column("security_score", sa.Float(), nullable=False, server_default="0"),
         sa.Column("recommendations_json", sa.Text(), nullable=True),
         sa.Column("started_at", sa.DateTime(), nullable=True),
         sa.Column("completed_at", sa.DateTime(), nullable=True),
@@ -65,15 +61,11 @@ def upgrade() -> None:
         sa.Column("category", sa.String(50), nullable=False, index=True),
         sa.Column("severity", sa.String(20), nullable=False, index=True),
         sa.Column("title", sa.String(500), nullable=False),
-        sa.Column(
-            "description", sa.String(4000), nullable=False, server_default=""
-        ),
+        sa.Column("description", sa.String(4000), nullable=False, server_default=""),
         sa.Column("endpoint", sa.String(2048), nullable=False),
         sa.Column("method", sa.String(10), nullable=True),
         sa.Column("evidence_json", sa.Text(), nullable=True),
-        sa.Column(
-            "remediation", sa.String(4000), nullable=False, server_default=""
-        ),
+        sa.Column("remediation", sa.String(4000), nullable=False, server_default=""),
         sa.Column(
             "remediation_status",
             sa.String(30),

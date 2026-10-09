@@ -33,7 +33,9 @@ The governed path cannot be silently disabled in production. `app/core/trust_mod
 refuses to boot a production-like environment (`prod`, `staging`, `preview`, …)
 unless **all** of these hold: `TRUST_MODE_ENABLED=true`, a valid 32-byte Ed25519
 signing key is configured, `ALLOW_LEGACY_UNPERMITTED_MCP=false`, `DEBUG=false`,
-`WEBAUTHN_ALLOW_MOCK=false`, and proof surfaces are off. A permissive posture is
+`WEBAUTHN_ALLOW_MOCK=false`, `ALLOW_PRIVATE_NETWORK_TARGETS=false`,
+`ALLOW_UNSAFE_HOST_PYTHON_SANDBOX=false`, no host `BEHAVIORAL_SANDBOX_PYTHON_BACKEND`,
+and proof surfaces are off. A permissive posture is
 only reachable in local/dev/test, and it logs a loud startup warning.
 
 ---
@@ -122,10 +124,12 @@ All monetary comparisons are done in `Decimal` end-to-end (thresholds stored as
 | Bundle requires human approval | `human_approval_required` — satisfied instead of denied when the invoke's permit carries `requires_human_approval` (the Layer D gate provides the demanded decision; every other check below still runs) |
 | Tool not in the bundle allow-list | `tool_not_allowed` |
 | Service category not in the bundle allow-list | `service_category_not_allowed` |
+| An allow-list column is present but is not a JSON array of strings | `policy_constraint_corrupt` (denied; never read as unrestricted) |
 | `estimated > max_cost_per_action` | `max_cost_per_action_exceeded` |
 | `daily_spend_used + estimated > daily_spend_limit` | `daily_spend_limit_exceeded` |
+| Bundle sets `daily_spend_limit` but `daily_spend_used` is unknown | `daily_spend_unknown` (denied; an unproven cap is never skipped) |
 | Bundle requires real effects but the call is in simulation mode | `real_effects_required` |
-| `risk_tier` mismatch | *recorded on the decision, does not deny* |
+| Requested `risk_tier` sits above the bundle's `risk_tier` ceiling (`low < medium < high`) or is an unknown tier | `risk_tier_not_allowed` (the requested tier is recorded on the decision as `requested_risk_tier`) |
 
 Layer B (permit) and Layer C (wallet policy) are complementary: the permit is a
 per-delegation capability issued to one agent for one job; policy bundles are
@@ -230,7 +234,24 @@ windows can be configured via `repeat_window_seconds` to override the global
 
 Observability: `/health/duplicate-guard` reports the current mode, configured
 window, and counters for log-mode detections (`log_mode_blocks`) and enforce-mode
-denials (`enforce_mode_blocks`).
+denials (`enforce_mode_blocks`). Those two counters are process-local and reset
+on restart. `enforce_mode_denials_durable` counts the denied receipts carrying
+`duplicate_request_new_key` across the service lifetime; it is `null` when no
+database is configured or the count fails or times out, with
+`enforce_mode_denials_durable_unavailable` naming why, and the process-local
+counters are still served. `metric_scopes` labels each metric's durability so a
+monitor never infers it from the values.
+
+### Optional probabilistic risk advice
+
+[`JEV_RISK_GUARD`](jev-risk-guard.md) is **off by default**. Operators may opt
+in to send redacted, truncated arguments and tool/permit descriptions to
+TypeSafe for probabilistic advice. It runs only after deterministic policy
+allows the call, never loosens authorization, and fails open on vendor errors.
+`log` records advice; `enforce` routes escalations through the existing human
+approval gate or denies calls without a governed permit. Advice is labelled
+advisory in the signed audit and receipt. It is outside the deterministic
+authorization guarantee.
 
 ---
 
@@ -258,6 +279,7 @@ denials (`enforce_mode_blocks`).
 | `human_approval_required` | C | Wallet policy demands approval |
 | `tool_not_allowed` | C | Tool outside wallet policy allow-list |
 | `service_category_not_allowed` | C | Category outside wallet policy allow-list |
+| `policy_constraint_corrupt` | C | A wallet policy allow-list column is corrupt; denied rather than read as unrestricted |
 | `max_cost_per_action_exceeded` | C | Per-action cost cap hit |
 | `daily_spend_limit_exceeded` | C | Daily spend cap hit |
 | `real_effects_required` | C | Real-effects policy vs simulation mode |

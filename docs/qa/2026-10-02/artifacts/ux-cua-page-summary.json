@@ -1,0 +1,96 @@
+[
+  {
+    "label": "proof",
+    "dimensions": {
+      "documentWidth": 390,
+      "width": 390
+    },
+    "violations": [],
+    "passes": 22,
+    "incomplete": 1
+  },
+  {
+    "label": "compare",
+    "dimensions": {
+      "documentWidth": 390,
+      "width": 390
+    },
+    "violations": [
+      {
+        "id": "color-contrast",
+        "impact": "serious",
+        "nodes": [
+          {
+            "target": [
+              "article:nth-child(1) > ul > li:nth-child(1)"
+            ],
+            "summary": "Fix any of the following:\n  Element has insufficient color contrast of 2.13 (foreground color: #9ca8cb, background color: #f6f3e9, font size: 12.8pt (17px), font weight: normal). Expected contrast ratio of 4.5:1"
+          },
+          {
+            "target": [
+              "article:nth-child(1) > ul > li:nth-child(2)"
+            ],
+            "summary": "Fix any of the following:\n  Element has insufficient color contrast of 2.13 (foreground color: #9ca8cb, background color: #f6f3e9, font size: 12.8pt (17px), font weight: normal). Expected contrast ratio of 4.5:1"
+          },
+          {
+            "target": [
+              "article:nth-child(1) > ul > li:nth-child(3)"
+            ],
+            "summary": "Fix any of the following:\n  Element has insufficient color contrast of 2.13 (foreground color: #9ca8cb, background color: #f6f3e9, font size: 12.8pt (17px), font weight: normal). Expected contrast ratio of 4.5:1"
+          },
+          {
+            "target": [
+              "article:nth-child(1) > ul > li:nth-child(4)"
+            ],
+            "summary": "Fix any of the following:\n  Element has insufficient color contrast of 2.13 (foreground color: #9ca8cb, background color: #f6f3e9, font size: 12.8pt (17px), font weight: normal). Expected contrast ratio of 4.5:1"
+          }
+        ]
+      }
+    ],
+    "passes": 29,
+    "incomplete": 1
+  },
+  {
+    "label": "404",
+    "dimensions": {
+      "documentWidth": 390,
+      "width": 390
+    },
+    "violations": [],
+    "passes": 18,
+    "incomplete": 0
+  },
+  {
+    "label": "concept",
+    "dimensions": {
+      "documentWidth": 390,
+      "width": 390
+    },
+    "violations": [],
+    "passes": 19,
+    "incomplete": 1
+  },
+  {
+    "label": "dashboard",
+    "dimensions": {
+      "documentWidth": 390,
+      "width": 390
+    },
+    "violations": [
+      {
+        "id": "scrollable-region-focusable",
+        "impact": "serious",
+        "nodes": [
+          {
+            "target": [
+              "pre"
+            ],
+            "summary": "Fix any of the following:\n  Element should have focusable content\n  Element should be focusable"
+          }
+        ]
+      }
+    ],
+    "passes": 18,
+    "incomplete": 0
+  }
+]

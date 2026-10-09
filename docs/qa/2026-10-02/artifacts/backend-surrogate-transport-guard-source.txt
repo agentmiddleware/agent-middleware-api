@@ -1,0 +1,56 @@
+487-    Supports:
+488-    - tools/list: List available tools
+489-    - tools/call: Execute a tool
+490-
+491-    The request body is a JSON-RPC 2.0 request.
+492-    """
+493-    raw_body = await request.body()
+494-    if _json_nesting_depth_exceeds(raw_body, _MAX_JSON_NESTING_DEPTH):
+495-        # Python 3.11's parser raises RecursionError, not JSONDecodeError, on
+496-        # deep nesting; the standard endpoint already pre-screens raw bytes.
+497-        raise HTTPException(
+498-            status_code=400,
+499:            detail="Invalid JSON: nesting depth exceeds the supported limit",
+500-        )
+501-    try:
+502-        body = _loads_strict_json(raw_body)
+503-    except ValueError:
+504-        # Malformed JSON, a non-UTF-8 body, a non-finite number, or an
+505-        # unpaired surrogate: all are ValueErrors, and none may reach the
+506-        # pipeline — the last two would fail the reply after the charge.
+507:        raise HTTPException(status_code=400, detail="Invalid JSON")
+508-
+509-    # The envelope is validated before any member is read. A body that parsed
+510-    # but is not an object (``[]``, ``null``, a string, a number) used to reach
+511-    # ``.get`` and surface as HTTP 500; it is a client error, answered with the
+512-    # JSON-RPC invalid-request shape and a null id because no id can be
+513-    # trusted from a non-object body.
+514-    if not isinstance(body, dict):
+515-        return _jsonrpc_error_response(
+516-            None, -32600, "Invalid Request: JSON-RPC envelope must be an object"
+517-        )
+518-    request_id = _safe_jsonrpc_id(body.get("id"))
+519-    # A version member that is present must be exactly "2.0": a "1.0" envelope
+520-    # used to reach dispatch and execute a governed action. The member is not
+521-    # required here — this route has always accepted version-less envelopes
+522-    # and the standard endpoint is the strict transport — so only a stated,
+523-    # wrong version is refused.
+524-    if "jsonrpc" in body and body["jsonrpc"] != "2.0":
+525-        return _jsonrpc_error_response(
+526-            request_id, -32600, 'Invalid Request: jsonrpc must be "2.0"'
+527-        )
+528-    method = body.get("method")
+529-    if not isinstance(method, str) or not method:
+530-        return _jsonrpc_error_response(
+531-            request_id, -32600, "Invalid Request: method must be a non-empty string"
+532-        )
+533-    params = body.get("params")
+534-    if params is None:
+535-        params = {}
+536-    elif not isinstance(params, dict):
+537-        # JSON-RPC allows positional params in general; this server's methods
+538-        # take named params only, and ``[]`` must not turn into ``{}``.
+539-        return _jsonrpc_error_response(
+540-            request_id, -32602, "Invalid params: params must be an object"
+541-        )
+542-

@@ -1,0 +1,14 @@
+{
+  "mode": "migrate-permit",
+  "command": [
+    "/Users/sellers/Projects/agent-middleware-api/.venv/bin/python",
+    "-m",
+    "alembic",
+    "upgrade",
+    "head"
+  ],
+  "head": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+  "started": "2026-10-03T03:39:18.118869+00:00",
+  "finished": "2026-10-03T03:39:18.731016+00:00",
+  "exit_code": 0
+}

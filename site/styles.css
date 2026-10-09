@@ -1696,7 +1696,8 @@ html[data-a11y-motion="reduce"].arcade-open .site-footer {
   margin-top: 0.75rem;
 }
 
-.verify-section pre {
+.verify-section pre,
+.proof-live-section pre {
   background: rgba(11, 16, 32, 0.7);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -1709,7 +1710,8 @@ html[data-a11y-motion="reduce"].arcade-open .site-footer {
   max-width: 100%;
 }
 
-.verify-section pre:focus-visible {
+.verify-section pre:focus-visible,
+.proof-live-section pre:focus-visible {
   outline: var(--focus-ring);
 }
 
@@ -1717,6 +1719,11 @@ html[data-a11y-motion="reduce"].arcade-open .site-footer {
   background: none;
   border: none;
   padding: 0;
+  overflow-wrap: anywhere;
+}
+
+.proof-live-section code {
+  overflow-wrap: anywhere;
 }
 
 /* Comparison page ------------------------------------------------------------------------- */
@@ -1801,6 +1808,10 @@ html[data-a11y-motion="reduce"].arcade-open .site-footer {
 .fit-list li {
   color: var(--text-dim);
   line-height: 1.65;
+}
+
+.proof-col:not(.replay) .fit-list li {
+  color: var(--paper-dim);
 }
 
 .faq-list {
@@ -2386,6 +2397,7 @@ html[data-a11y-motion="reduce"] .arcade-launch:active {
   .compare-scroll,
   .boundary-scroll,
   .verify-section pre,
+  .proof-live-section pre,
   .protocol-section {
     background: #fff;
   }

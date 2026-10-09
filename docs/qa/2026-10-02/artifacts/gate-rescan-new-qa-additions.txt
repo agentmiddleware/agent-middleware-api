@@ -1,0 +1,10 @@
+{
+  "scope": "current tracked and untracked nonignored files",
+  "files_scanned": 1111,
+  "excluded_files": [
+    ".env.example"
+  ],
+  "scanner_exit": 1,
+  "total_detections": 55,
+  "new_file_detections": []
+}

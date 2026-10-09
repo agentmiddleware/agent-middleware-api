@@ -4,6 +4,15 @@
 > the supported one-tool MCP pilot and may refer to unmounted or simulated
 > routes. Do not use this page for product evaluation or integration; start with
 > the [documentation guide](README.md).
+>
+> Agent comms, AI decide/heal, telemetry, and AWI sessions are frozen proof
+> surfaces, not the product wedge (see [WEDGE.md](../WEDGE.md)). Their routers
+> mount only with `ENABLE_PROOF_SURFACES=true`, which production-like deploys
+> refuse at boot, so these routes do not exist on a production instance. See
+> [PROOF_SURFACES.md](PROOF_SURFACES.md). The snippets are also illustrative
+> pseudocode: most `client.*` calls shown (for example `decide`, `heal`,
+> `emit_telemetry`, `send_message`, `register_service`, `set_memory`) are not
+> methods of `b2a_sdk.AgentMiddlewareClient`.
 
 Practical examples for building autonomous agents with the Agent Middleware API.
 
@@ -343,18 +352,14 @@ result = await client.call_mcp_tool(
 )
 ```
 
-### Generate Standalone MCP Server
+### Retired standalone MCP generator
 
-```bash
-# Generate MCP server from registered tools
-cd b2a_sdk && pip install -e ".[mcp]"
-python -m b2a_sdk.mcp standalone --output my_server.py
-
-# Run server
-export B2A_API_KEY=your-key
-export B2A_WALLET_ID=your-wallet
-python my_server.py
-```
+`python -m b2a_sdk.mcp standalone` and
+`McpGenerator.generate_standalone_server` now refuse without fetching tools or
+writing files. Their generated billing proxies never implemented governed
+permit authorization or signed receipts. Use the supported
+[governed quickstart](quickstart.md) and `POST /mcp/messages` with a wallet,
+permit, and caller-owned idempotency key.
 
 ---
 

@@ -304,7 +304,9 @@ async def run_red_team(json_output: bool = False) -> dict[str, Any]:
 
     try:
         transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://red-team") as client:
+        async with AsyncClient(
+            transport=transport, base_url="http://red-team"
+        ) as client:
             step("provisioning sponsor, victim agent, and attacker agent")
             sponsor = await post_json(
                 client,

@@ -53,8 +53,12 @@ def test_effect_ledger_native_idempotency_is_atomic_and_conflict_aware(tmp_path)
         payment_id="pay",
         configuration="test",
     )
-    first = ledger.execute(operation_id="refund:pay", native_fingerprint="fp-a", **common)
-    replay = ledger.execute(operation_id="refund:pay", native_fingerprint="fp-a", **common)
+    first = ledger.execute(
+        operation_id="refund:pay", native_fingerprint="fp-a", **common
+    )
+    replay = ledger.execute(
+        operation_id="refund:pay", native_fingerprint="fp-a", **common
+    )
     assert first.replayed is False and replay.replayed is True
     assert replay.result == first.result
     assert ledger.execution_count("refund:pay") == 1
@@ -64,8 +68,12 @@ def test_effect_ledger_native_idempotency_is_atomic_and_conflict_aware(tmp_path)
 
 
 def test_identity_distinguishes_restart_policies():
-    business = OperationIdentity.first_attempt("refund:pay_1", key_policy=KeyPolicy.BUSINESS)
-    attempt = OperationIdentity.first_attempt("refund:pay_1", key_policy=KeyPolicy.ATTEMPT)
+    business = OperationIdentity.first_attempt(
+        "refund:pay_1", key_policy=KeyPolicy.BUSINESS
+    )
+    attempt = OperationIdentity.first_attempt(
+        "refund:pay_1", key_policy=KeyPolicy.ATTEMPT
+    )
     assert business.retry().idempotency_key == business.idempotency_key
     assert business.after_restart().idempotency_key == business.idempotency_key
     assert attempt.retry().idempotency_key == attempt.idempotency_key
@@ -82,15 +90,31 @@ def test_refund_request_is_strict_about_representation():
     )
     with pytest.raises(ValueError):
         RefundRequest.from_mapping(
-            {"operation_id": "o", "customer_id": "c", "payment_id": "p", "amount": "5000"}
+            {
+                "operation_id": "o",
+                "customer_id": "c",
+                "payment_id": "p",
+                "amount": "5000",
+            }
         )
     with pytest.raises(ValueError):
         RefundRequest.from_mapping(
-            {"operation_id": "o", "customer_id": "c", "payment_id": "p", "amount": 5000.0}
+            {
+                "operation_id": "o",
+                "customer_id": "c",
+                "payment_id": "p",
+                "amount": 5000.0,
+            }
         )
     with pytest.raises(ValueError):
         RefundRequest.from_mapping(
-            {"operation_id": "o", "customer_id": "c", "payment_id": "p", "amount": 50, "x": 1}
+            {
+                "operation_id": "o",
+                "customer_id": "c",
+                "payment_id": "p",
+                "amount": 50,
+                "x": 1,
+            }
         )
 
 
@@ -118,9 +142,17 @@ async def test_lost_response_workload_across_configurations(tmp_path, clean_data
                     hold_seconds=20,
                 )
             )
-            first = await target.agent.submit(identity, refund, timeout_seconds=1.0 if not configuration.uses_gateway else 8.0)
-            retry = await target.agent.submit(identity.retry(), refund, timeout_seconds=8.0)
-            snapshot = await target.gateway.snapshot(target.tenant) if target.gateway else None
+            first = await target.agent.submit(
+                identity,
+                refund,
+                timeout_seconds=1.0 if not configuration.uses_gateway else 8.0,
+            )
+            retry = await target.agent.submit(
+                identity.retry(), refund, timeout_seconds=8.0
+            )
+            snapshot = (
+                await target.gateway.snapshot(target.tenant) if target.gateway else None
+            )
             observed[configuration] = {
                 "first": first,
                 "retry": retry,
@@ -146,7 +178,9 @@ async def test_lost_response_workload_across_configurations(tmp_path, clean_data
         assert governed["retry"].status == "delivery_uncertain", governed["retry"]
         assert governed["retry"].receipt_id == governed["first"].receipt_id
         assert governed["effects"] == 1
-        assert governed["crossings"] == 1  # observed at the fault layer, not read from the gateway
+        assert (
+            governed["crossings"] == 1
+        )  # observed at the fault layer, not read from the gateway
         snapshot = governed["snapshot"]
         assert snapshot.sent_attempt_count == 1
         assert snapshot.debit_count == 1

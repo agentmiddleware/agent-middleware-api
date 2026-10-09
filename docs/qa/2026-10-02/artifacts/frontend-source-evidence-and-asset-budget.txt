@@ -1,0 +1,108 @@
+{
+  "scope": "Static byte inventory only. No Lighthouse or runtime Web Vitals measured.",
+  "total_bytes": 1324673,
+  "assets": [
+    {
+      "path": "arcade.js",
+      "bytes": 610364,
+      "gzip_bytes": 143737
+    },
+    {
+      "path": "social-card.png",
+      "bytes": 158388,
+      "gzip_bytes": 156050
+    },
+    {
+      "path": "index.html",
+      "bytes": 58631,
+      "gzip_bytes": 13568
+    },
+    {
+      "path": "styles.css",
+      "bytes": 51901,
+      "gzip_bytes": 12373
+    },
+    {
+      "path": "wave.js",
+      "bytes": 42015,
+      "gzip_bytes": 13400
+    },
+    {
+      "path": "arcade.css",
+      "bytes": 34290,
+      "gzip_bytes": 9404
+    },
+    {
+      "path": "compare/index.html",
+      "bytes": 31604,
+      "gzip_bytes": 7764
+    },
+    {
+      "path": "fonts/libre-franklin-latin.52e60585.woff2",
+      "bytes": 29292,
+      "gzip_bytes": 29320
+    },
+    {
+      "path": "fonts/public-sans-latin.5ed4d31c.woff2",
+      "bytes": 26832,
+      "gzip_bytes": 26860
+    },
+    {
+      "path": "fonts/libre-franklin-latin-ext.61216d8e.woff2",
+      "bytes": 25692,
+      "gzip_bytes": 25720
+    }
+  ]
+}
+FILE awi_sdk/typescript/package.json
+1: {
+2:   "name": "@agent-middleware/awi-sdk",
+3:   "version": "0.1.0",
+4:   "description": "TypeScript SDK for Agentic Web Interface (AWI)",
+5:   "main": "dist/index.js",
+6:   "types": "dist/index.d.ts",
+7:   "scripts": {
+8:     "build": "tsc",
+9:     "publish": "npm publish"
+10:   },
+11:   "dependencies": {
+12:     "axios": "^1.18.0"
+13:   },
+14:   "devDependencies": {
+15:     "typescript": "^5.3.0",
+16:     "@types/node": "^20.0.0"
+17:   },
+18:   "keywords": [
+19:     "awi",
+20:     "agent",
+21:     "web-automation",
+22:     "mcp",
+23:     "agentic"
+24:   ],
+25:   "license": "MIT"
+26: }
+FILE awi_sdk/typescript/index.ts
+148:   async createSession(
+149:     targetUrl: string,
+150:     options?: {
+151:       maxSteps?: number;
+152:       allowHumanPause?: boolean;
+153:     }
+154:   ): Promise<AWISession> {
+155:     const response: AxiosResponse = await this.client.post("/v1/awi/sessions", {
+156:       target_url: targetUrl,
+157:       max_steps: options?.maxSteps || 100,
+158:       allow_human_pause: options?.allowHumanPause ?? true,
+159:       wallet_id: this.config.walletId,
+160:     });
+270:     taskType: string,
+271:     targetUrl: string,
+272:     actionSequence: Array<Record<string, unknown>>,
+273:     priority?: number
+274:   ): Promise<unknown> {
+275:     const response: AxiosResponse = await this.client.post("/v1/awi/tasks", {
+276:       task_type: taskType,
+277:       target_url: targetUrl,
+278:       action_sequence: actionSequence,
+279:       priority: priority || 5,
+280:     });

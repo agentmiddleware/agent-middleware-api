@@ -85,8 +85,8 @@ def test_fails_when_database_behind_tree(migrated_db):
     assert preflight.check_db(async_url) is False
 
 
-def test_fails_on_unstamped_create_all_bootstrap(migrated_db):
-    """Tables present, no alembic_version row — needs `alembic stamp head`."""
+def test_fails_on_unstamped_create_all_bootstrap(migrated_db, capsys):
+    """Table presence cannot establish schema or data-migration equivalence."""
     async_url, sync_url = migrated_db
     engine = create_engine(sync_url)
     with engine.begin() as conn:
@@ -94,6 +94,11 @@ def test_fails_on_unstamped_create_all_bootstrap(migrated_db):
     engine.dispose()
 
     assert preflight.check_db(async_url) is False
+    output = capsys.readouterr().out
+    assert "manual review" in output
+    assert "schema and data-migration history" in output
+    assert "proven matching historical revision" in output
+    assert "Run `alembic stamp head`" not in output
 
 
 def test_public_db_mode_fails_closed_without_public_url(
@@ -232,9 +237,15 @@ def test_private_pilot_sop_runs_schema_check_inside_api_container() -> None:
     assert 'test "$sentinel_count" -eq 1' in sop
     assert 'test "$post_ready" = "true"' in sop
     assert sop.count('--manifest "$MANIFEST" --url "$API_URL"') == 2
-    assert 'RELEASE_CONTEXT="$(python3 scripts/prepare_railway_release.py --ref "$DEPLOY_SHA")"' in private_release
+    assert (
+        'RELEASE_CONTEXT="$(python3 scripts/prepare_railway_release.py --ref "$DEPLOY_SHA")"'
+        in private_release
+    )
     assert 'railway up "$RELEASE_CONTEXT" --path-as-root' in private_release
-    assert 'test "$(cat "$RELEASE_CONTEXT/.build_commit_sha")" = "$DEPLOY_SHA"' in private_release
+    assert (
+        'test "$(cat "$RELEASE_CONTEXT/.build_commit_sha")" = "$DEPLOY_SHA"'
+        in private_release
+    )
     assert "railway variable set COMMIT_SHA" not in private_release
     assert "--build-arg COMMIT_SHA" not in private_release
     source_gate = private_release.index(
@@ -247,9 +258,11 @@ def test_private_pilot_sop_runs_schema_check_inside_api_container() -> None:
         'RELEASE_CONTEXT="$(python3 scripts/prepare_railway_release.py --ref "$DEPLOY_SHA")"'
     )
     deploy = private_release.index('railway up "$RELEASE_CONTEXT" --path-as-root')
-    private_deploy = private_release[deploy : private_release.index(
-        "# Resolve and wait for the uniquely marked deployment"
-    )]
+    private_deploy = private_release[
+        deploy : private_release.index(
+            "# Resolve and wait for the uniquely marked deployment"
+        )
+    ]
     assert "--no-gitignore" in private_deploy
     post_gate = private_release.rindex(
         "python3 scripts/railway_preflight.py --live --strict"
@@ -272,7 +285,9 @@ def test_private_pilot_sop_runs_schema_check_inside_api_container() -> None:
 def test_verification_checklist_pairs_public_gate_with_private_posture() -> None:
     """Step 5's --live gate is public-only; the step must say so and give the
     in-container command that verifies the dogfood posture."""
-    checklist = (REPO_ROOT / "docs" / "deployment-verification-checklist.md").read_text()
+    checklist = (
+        REPO_ROOT / "docs" / "deployment-verification-checklist.md"
+    ).read_text()
     step5 = checklist[
         checklist.index("5. **Run the strict live preflight**") : checklist.index(
             "6. **List what is still not live.**"
@@ -282,7 +297,9 @@ def test_verification_checklist_pairs_public_gate_with_private_posture() -> None
     assert "python3 scripts/railway_preflight.py --live --strict" in step5
     assert "public-only" in step5
     assert '--deployment-instance "$INSTANCE_ID"' in step5
-    assert "python scripts/railway_preflight.py --db --runtime-posture --strict" in step5
+    assert (
+        "python scripts/railway_preflight.py --db --runtime-posture --strict" in step5
+    )
     assert "#rolling-back-to-an-image-without---runtime-posture" in step5
 
 
@@ -363,9 +380,9 @@ def test_rollback_live_gates_verify_the_signing_key_from_a_gate_checkout() -> No
     still checked by the tool, from the manifest, not by hand."""
     sop = (REPO_ROOT / "docs" / "deploy-railway.md").read_text()
     rollback = sop[
-        sop.index("#### Rolling back to an image without `--runtime-posture`") : sop.index(
-            "### Customer operations manifest"
-        )
+        sop.index(
+            "#### Rolling back to an image without `--runtime-posture`"
+        ) : sop.index("### Customer operations manifest")
     ]
 
     assert 'GATE_SHA="$(git rev-parse origin/main)"' in rollback
@@ -376,7 +393,7 @@ def test_rollback_live_gates_verify_the_signing_key_from_a_gate_checkout() -> No
     ) in rollback
     assert '''SIGNING_KEY_ID="$(jq -er '.signing_key_id' "$MANIFEST")"''' in rollback
     assert (
-        '''SIGNING_PUBLIC_KEY_SHA256="$(jq -er '.signing_public_key_sha256' '''
+        """SIGNING_PUBLIC_KEY_SHA256="$(jq -er '.signing_public_key_sha256' """
         '''"$MANIFEST")"'''
     ) in rollback
     # The jq fields are the manifest's own field names.
@@ -479,9 +496,9 @@ def test_railway_cli_version_guard_fails_closed(
 def _rollback_section() -> str:
     sop = (REPO_ROOT / "docs" / "deploy-railway.md").read_text()
     return sop[
-        sop.index("#### Rolling back to an image without `--runtime-posture`") : sop.index(
-            "### Customer operations manifest"
-        )
+        sop.index(
+            "#### Rolling back to an image without `--runtime-posture`"
+        ) : sop.index("### Customer operations manifest")
     ]
 
 
@@ -529,7 +546,9 @@ def _first_party_block() -> str:
 
 def test_first_party_rollback_variant_replaces_every_manifest_input() -> None:
     rollback = _rollback_section()
-    variant = rollback[rollback.index("##### First-party stack without a customer manifest") :]
+    variant = rollback[
+        rollback.index("##### First-party stack without a customer manifest") :
+    ]
     block = _first_party_block()
 
     # The manifest-derived variables all have a named, non-live source.
@@ -537,7 +556,9 @@ def test_first_party_rollback_variant_replaces_every_manifest_input() -> None:
     assert 'ENVIRONMENT="production"' in block
     assert 'PROJECT_ID="${FIRST_PARTY_PROJECT_ID:?' in block
     assert 'SIGNING_KEY_ID="${FIRST_PARTY_SIGNING_KEY_ID:?' in block
-    assert 'SIGNING_PUBLIC_KEY_SHA256="${FIRST_PARTY_SIGNING_PUBLIC_KEY_SHA256:?' in block
+    assert (
+        'SIGNING_PUBLIC_KEY_SHA256="${FIRST_PARTY_SIGNING_PUBLIC_KEY_SHA256:?' in block
+    )
     assert "first-party operations record" in block
     assert "first-party key-generation record" in block
     assert "stop and escalate" in block
@@ -764,7 +785,9 @@ def test_documented_runtime_posture_check_fails_closed(tmp_path, environment) ->
     assert result.stdout == "[preflight] FAIL runtime posture\n"
 
 
-@pytest.mark.parametrize("marker_value", [None, "", "   "], ids=["unset", "empty", "blank"])
+@pytest.mark.parametrize(
+    "marker_value", [None, "", "   "], ids=["unset", "empty", "blank"]
+)
 def test_documented_runtime_posture_check_requires_railway_marker(
     tmp_path,
     marker_value,
@@ -825,10 +848,16 @@ def test_canonical_railway_sop_uses_immutable_release_context() -> None:
         )
     ]
 
-    assert 'RELEASE_CONTEXT="$(python3 scripts/prepare_railway_release.py --ref "$DEPLOY_SHA")"' in canonical
+    assert (
+        'RELEASE_CONTEXT="$(python3 scripts/prepare_railway_release.py --ref "$DEPLOY_SHA")"'
+        in canonical
+    )
     assert "set -euo pipefail" in canonical
     assert 'test -d "$RELEASE_CONTEXT"' in canonical
-    assert 'test "$(cat "$RELEASE_CONTEXT/.build_commit_sha")" = "$DEPLOY_SHA"' in canonical
+    assert (
+        'test "$(cat "$RELEASE_CONTEXT/.build_commit_sha")" = "$DEPLOY_SHA"'
+        in canonical
+    )
     assert 'railway up "$RELEASE_CONTEXT" --path-as-root' in canonical
     canonical_deploy = canonical[canonical.index('railway up "$RELEASE_CONTEXT"') :]
     assert "--no-gitignore" in canonical_deploy
@@ -1490,6 +1519,44 @@ def test_live_fails_on_bad_posture(monkeypatch, override):
     assert preflight.check_live("https://api.example.com") is False
 
 
+@pytest.mark.parametrize("field", ["enable_proof_surfaces", "runtime_degradation"])
+def test_live_rejects_missing_public_posture_field(monkeypatch, capsys, field):
+    payload = {key: value for key, value in HEALTHY.items() if key != field}
+    _patch_get(monkeypatch, payload)
+    assert preflight.check_live("https://api.example.com") is False
+    assert "[preflight] PASS" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("value", [None, 0, "", [], {}, "false", True])
+def test_live_requires_boolean_false_for_proof_surfaces(monkeypatch, value):
+    _patch_get(monkeypatch, {**HEALTHY, "enable_proof_surfaces": value})
+    assert preflight.check_live("https://api.example.com") is False
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        0,
+        [],
+        "false",
+        {},
+        {"durable_state": None},
+        {"durable_state": []},
+        {"durable_state": "false"},
+        {"durable_state": {}},
+        {"durable_state": {"fell_back_to_memory": None}},
+        {"durable_state": {"fell_back_to_memory": 0}},
+        {"durable_state": {"fell_back_to_memory": "false"}},
+        {"durable_state": {"fell_back_to_memory": []}},
+        {"durable_state": {"fell_back_to_memory": {}}},
+    ],
+)
+def test_live_requires_explicit_durable_posture(monkeypatch, value):
+    _patch_get(monkeypatch, {**HEALTHY, "runtime_degradation": value})
+    assert preflight.check_live("https://api.example.com") is False
+
+
 # ---------------------------------------------------------------------------
 # Locked-down tool catalogs and the private dogfood posture.
 #
@@ -2080,8 +2147,7 @@ def test_runtime_image_never_contains_a_dotenv_file():
     """Ignoring .env equals what the service resolves only because the image
     build context never includes one."""
     patterns = {
-        line.strip()
-        for line in (REPO_ROOT / ".dockerignore").read_text().splitlines()
+        line.strip() for line in (REPO_ROOT / ".dockerignore").read_text().splitlines()
     }
 
     assert {".env", ".env.*"} <= patterns
@@ -2213,10 +2279,15 @@ def test_cli_public_db_checks_the_public_url_alongside_other_checks(
 )
 @pytest.mark.parametrize(
     "selectors",
-    [["--runtime-posture"], ["--db", "--runtime-posture"]],
-    ids=["runtime_posture", "db_and_runtime_posture"],
+    [
+        ["--runtime-posture"],
+        ["--db", "--runtime-posture"],
+        ["--db"],
+        ["--db", "--public-db"],
+    ],
+    ids=["runtime_posture", "db_and_runtime_posture", "db", "db_and_public_db"],
 )
-def test_cli_runtime_posture_rejects_live_only_options_without_live(
+def test_cli_selectors_reject_live_only_options_without_live(
     tmp_path,
     monkeypatch,
     capsys,
@@ -2238,8 +2309,13 @@ def test_cli_runtime_posture_rejects_live_only_options_without_live(
     assert "apply only to --live" in capsys.readouterr().out
 
 
-def test_cli_runtime_posture_with_live_keeps_release_expectations(monkeypatch):
+@pytest.mark.parametrize(
+    "selectors", [[], ["--db", "--live"], ["--live", "--runtime-posture"]]
+)
+def test_cli_selected_live_check_keeps_release_expectations(monkeypatch, selectors):
     seen = []
+    monkeypatch.setenv("DATABASE_URL", "sqlite+aiosqlite:///unused.db")
+    monkeypatch.setattr(preflight, "check_db", lambda _url: seen.append("db") is None)
     monkeypatch.setattr(
         preflight,
         "check_runtime_posture",
@@ -2252,13 +2328,14 @@ def test_cli_runtime_posture_with_live_keeps_release_expectations(monkeypatch):
 
     monkeypatch.setattr(preflight, "check_live", check_live)
 
-    arguments = ["--live", "--runtime-posture", "--strict"]
+    arguments = [*selectors, "--strict"]
     arguments += ["--url", "https://api.example.com"]
     arguments += ["--expected-version", "1.3.0"]
     arguments += ["--expected-commit-sha", EXPECTED_COMMIT_SHA]
     assert preflight.main(arguments) == 0
+    expected_checks = ["runtime"] if "--runtime-posture" in selectors else ["db"]
     assert seen == [
-        "runtime",
+        *expected_checks,
         ("https://api.example.com", "1.3.0", EXPECTED_COMMIT_SHA),
     ]
 

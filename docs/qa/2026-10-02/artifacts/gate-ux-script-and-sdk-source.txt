@@ -1,0 +1,110 @@
+1: /* Local-only exploratory UX evidence. No product code is modified. */
+2: process.env.PLAYWRIGHT_BROWSERS_PATH = '/private/tmp/amw-qa-playwright-browsers';
+3: const { chromium } = require('/private/tmp/amw-qa-browser/node_modules/playwright');
+4: const axe = require('/private/tmp/amw-qa-browser/node_modules/axe-core');
+5: const fs = require('node:fs');
+6: const path = require('node:path');
+7: const out = path.join(__dirname, 'artifacts');
+8: const report = { started: new Date().toISOString(), axeVersion: axe.version, pages: [], interactions: {}, outboundBlocked: [] };
+9: 
+10: async function layout(page) {
+11:   return page.evaluate(() => ({
+12:     viewport: window.innerWidth,
+13:     documentWidth: document.documentElement.scrollWidth,
+14:     headings: Array.from(document.querySelectorAll('h1,h2,h3')).map(e => ({tag: e.tagName, text: e.textContent.trim()})),
+15:     landmarks: Array.from(document.querySelectorAll('main,nav,header,footer')).map(e => ({tag: e.tagName, name: e.getAttribute('aria-label')})),
+16:     overflow: Array.from(document.querySelectorAll('main,nav,button,input,a,h1,h2,h3,pre,table')).filter(e => {
+17:       const r = e.getBoundingClientRect();
+18:       return r.width > 0 && (r.right > window.innerWidth + 1 || r.left < -1);
+19:     }).map(e => ({tag: e.tagName, id: e.id, cls: e.className, text: e.textContent.trim().slice(0,80), width: e.getBoundingClientRect().width})),
+20:   }));
+21: }
+22: 
+23: async function scan(page, label) {
+24:   await page.addScriptTag({content: axe.source});
+25:   const result = await page.evaluate(async () => window.axe.run(document, {
+26:     runOnly: {type: 'tag', values: ['wcag2a','wcag2aa','wcag21a','wcag21aa','wcag22aa']},
+27:   }));
+28:   fs.writeFileSync(path.join(out, `ux-axe-${label}.json`), JSON.stringify(result, null, 2));
+29:   return {violations: result.violations.map(v => ({id:v.id,impact:v.impact,help:v.help,nodes:v.nodes.map(n=>({target:n.target,summary:n.failureSummary}))})), passes:result.passes.length, incomplete:result.incomplete.length};
+30: }
+31: 
+32: async function main() {
+33:   const browser = await chromium.launch({headless:true});
+34:   const context = await browser.newContext({viewport:{width:1440,height:1000},reducedMotion:'reduce',serviceWorkers:'block'});
+35:   await context.route('**/*', route => {
+36:     const url = new URL(route.request().url());
+37:     if (['127.0.0.1','localhost','[::1]'].includes(url.hostname)) return route.continue();
+38:     report.outboundBlocked.push({host:url.hostname,type:route.request().resourceType()});
+39:     return route.abort('blockedbyclient');
+40:   });
+41:   const page = await context.newPage();
+42:   const pages = [
+43:     ['home','http://127.0.0.1:8765/'],
+44:     ['proof','http://127.0.0.1:8765/proof/'],
+45:     ['compare','http://127.0.0.1:8765/compare/'],
+46:     ['concept','http://127.0.0.1:8765/concept/'],
+47:     ['404','http://127.0.0.1:8765/404.html'],
+48:     ['dashboard','http://127.0.0.1:8766/dashboard.html'],
+49:   ];
+50:   for (const [label,url] of pages) {
+51:     await page.setViewportSize({width:1440,height:1000});
+52:     await page.goto(url,{waitUntil:'networkidle'});
+53:     const item = {label,url,title:await page.title(),desktop:await layout(page),axe:await scan(page,label)};
+54:     fs.writeFileSync(path.join(out, `ux-semantics-${label}.yml`), await page.locator('body').ariaSnapshot());
+55:     await page.screenshot({path:path.join(out,`ux-${label}-desktop.png`),fullPage:false});
+56:     await page.keyboard.press('Tab');
+57:     item.firstTab = await page.evaluate(()=>({tag:document.activeElement.tagName,text:document.activeElement.textContent.trim(),href:document.activeElement.getAttribute('href')}));
+58:     await page.keyboard.press('Enter');
+59:     item.skipTarget = await page.evaluate(()=>({hash:location.hash,active:document.activeElement.tagName,id:document.activeElement.id,scrollY:window.scrollY}));
+60:     await page.setViewportSize({width:390,height:844});
+61:     await page.goto(url,{waitUntil:'networkidle'});
+62:     item.mobile = await layout(page);
+63:     await page.screenshot({path:path.join(out,`ux-${label}-mobile.png`),fullPage:label !== 'home' && label !== 'compare'});
+64:     await page.setViewportSize({width:320,height:900});
+65:     item.reflow320 = await layout(page);
+66:     report.pages.push(item);
+67:   }
+68:   await page.setViewportSize({width:390,height:844});
+69:   await page.goto(pages[0][1],{waitUntil:'networkidle'});
+70:   const calculator = page.locator('.pilot-fit');
+71:   await calculator.scrollIntoViewIfNeeded();
+72:   report.interactions.calculatorEmpty = await calculator.innerText();
+73:   await calculator.screenshot({path:path.join(out,'ux-calculator-empty.png')});
+74:   await page.locator('#fit-actions').fill('-1');
+75:   report.interactions.calculatorInvalid = {text:await calculator.innerText(),fields:await calculator.locator('input').evaluateAll(es=>es.map(e=>({id:e.id,invalid:e.getAttribute('aria-invalid'),description:e.getAttribute('aria-describedby')})))};
+76:   await calculator.screenshot({path:path.join(out,'ux-calculator-invalid.png')});
+77:   for (const [id,value] of [['fit-actions','100000'],['fit-rate','0.1'],['fit-loss','50'],['fit-reduction','80'],['fit-cost','2800']]) await page.locator(`#${id}`).fill(value);
+78:   report.interactions.calculatorValid = await calculator.innerText();
+79:   await calculator.screenshot({path:path.join(out,'ux-calculator-valid.png')});
+80:   report.interactions.calculatorAxe = await scan(page,'calculator-valid');
+81:   const toggle = page.getByRole('button',{name:'Accessibility options',exact:true});
+82:   await toggle.focus();
+83:   await page.keyboard.press('Enter');
+84:   report.interactions.accessibilityOpen = {focus:await page.evaluate(()=>document.activeElement.outerHTML.slice(0,300)),snapshot:await page.getByRole('dialog').ariaSnapshot()};
+85:   report.interactions.accessibilityAxe = await scan(page,'accessibility-dialog');
+86:   await page.getByRole('dialog').screenshot({path:path.join(out,'ux-accessibility-panel-mobile.png')});
+87:   await page.keyboard.press('Escape');
+88:   report.interactions.accessibilityEscape = {focus:await page.evaluate(()=>document.activeElement.getAttribute('aria-label')),hidden:await page.getByRole('dialog').count() === 0};
+89:   await toggle.click();
+90:   for (let i=0;i<10;i++) await page.getByRole('button',{name:'Increase text size',exact:true}).click();
+91:   await page.keyboard.press('Escape');
+92:   await page.setViewportSize({width:320,height:900});
+93:   await page.evaluate(()=>scrollTo(0,0));
+94:   report.interactions.enlargedText320 = await layout(page);
+95:   report.interactions.enlargedText320.scale = await page.evaluate(()=>getComputedStyle(document.documentElement).fontSize);
+96:   await page.screenshot({path:path.join(out,'ux-enlarged-text-320.png'),fullPage:false});
+97:   report.finished = new Date().toISOString();
+98:   fs.writeFileSync(path.join(out,'ux-browser-report.json'),JSON.stringify(report,null,2));
+99:   await browser.close();
+100:   console.log(JSON.stringify({pages:report.pages.map(p=>({label:p.label,violations:p.axe.violations,desktopWidth:p.desktop.documentWidth,mobileWidth:p.mobile.documentWidth,reflowWidth:p.reflow320.documentWidth,firstTab:p.firstTab,skipTarget:p.skipTarget})),calculatorAxe:report.interactions.calculatorAxe,accessibilityAxe:report.interactions.accessibilityAxe,enlargedText320:report.interactions.enlargedText320,outboundBlocked:report.outboundBlocked},null,2));
+101: }
+102: main().catch(error=>{console.error(error.stack);process.exitCode=1;});
+SDK
+21:   max_steps: number;
+116:  * const session = await client.createSession("https://shop.example.com");
+148:   async createSession(
+151:       maxSteps?: number;
+157:       max_steps: options?.maxSteps || 100,
+273:     priority?: number
+279:       priority: priority || 5,

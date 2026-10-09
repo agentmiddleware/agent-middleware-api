@@ -1,0 +1,1 @@
+PASS: entire generated OpenAPI equals baseline after removal of added HTTPBearer [REDACTED] and 52 separate OR requirements.

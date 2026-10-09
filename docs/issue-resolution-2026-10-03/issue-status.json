@@ -1,0 +1,1226 @@
+{
+  "date_local": "2026-10-03",
+  "repository": "PetrefiedThunder/agent-middleware-api",
+  "upstream_commit": "e0b5fd6cc8792b76233df7b016a3ff303d5144cd",
+  "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7",
+  "branch": "openclaw/amw-issues-20261003-release",
+  "open_issues": 87,
+  "findings": 82,
+  "fixed": 79,
+  "retired_with_explicit_refusal": 3,
+  "tracking_issues": [
+    499,
+    553,
+    554,
+    555,
+    556
+  ],
+  "issues": [
+    {
+      "number": 499,
+      "title": "Comprehensive AMW QA audit and local remediation",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/499",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "disposition": "partial_audit_acceptance",
+      "remaining": "See ../issue-resolution-2026-10-02/charter-coverage.md; hosted, live, comprehensive matrix and human acceptance remain unverified."
+    },
+    {
+      "number": 500,
+      "title": "[QA ACCT-002] P1: New client request keys can reuse one human approval to mint additional permits",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/500",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "ACCT-002",
+      "disposition": "local_fixed",
+      "behavior_correction": "Bind the provider approval identity to the logical local request; a new client key cannot reuse one approval to mint another permit.",
+      "fix_commits": [
+        "ee54ae16e635e6a4c66dc73f57db1a5539514619"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 501,
+      "title": "[QA ACCT-003] P2: Permit-request approval can cross its local deadline while polling and still mint",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/501",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "ACCT-003",
+      "disposition": "local_fixed",
+      "behavior_correction": "Recheck approval expiry through polling and transaction contention; roll back mint claims crossing the deadline.",
+      "fix_commits": [
+        "ee54ae16e635e6a4c66dc73f57db1a5539514619",
+        "0e2d2f1c92909fb3db9eee6e8f275d960ed6936d"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 502,
+      "title": "[QA ACCT-001] P2: Accepted sub-credit tool prices produce unverifiable quotes and receipts",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/502",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "ACCT-001",
+      "disposition": "local_fixed",
+      "behavior_correction": "Reject unsupported precision before signing/pricing and preserve exact stored credit amounts.",
+      "fix_commits": [
+        "d978982c615d84a5c597c350c47f3d823eadeef0",
+        "0620f6f45ea5c272f6c5819d4d86527c16e1ee0d"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 503,
+      "title": "[QA SEC-001] P2: Refresh widens an attenuated JWT scope set",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/503",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "SEC-001",
+      "disposition": "local_fixed",
+      "behavior_correction": "Preserve attenuated or empty JWT scopes across refresh and reject unbound/malformed refresh authority.",
+      "fix_commits": [
+        "cd9440c62d8a2e7540e161e7522fcec6e72b8c43"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 504,
+      "title": "[QA SEC-002] P2: Scoped access tokens can mint unrestricted wallet API keys",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/504",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "SEC-002",
+      "disposition": "local_fixed",
+      "behavior_correction": "Reject JWT callers that attempt to mint or replace unrestricted persistent API credentials.",
+      "fix_commits": [
+        "cd9440c62d8a2e7540e161e7522fcec6e72b8c43"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 505,
+      "title": "[QA SEC-003] P2: Derived JWT authentication bypasses the originating key use budget",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/505",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "SEC-003",
+      "disposition": "local_fixed",
+      "behavior_correction": "Atomically consume the originating live key use budget when authenticating derived JWTs.",
+      "fix_commits": [
+        "cd9440c62d8a2e7540e161e7522fcec6e72b8c43"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 506,
+      "title": "[QA SEC-004] P2: Bearer callers choose fresh rate buckets with ignored API-key headers",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/506",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "SEC-004",
+      "disposition": "local_fixed",
+      "behavior_correction": "Select rate buckets from the accepted authentication path, ignoring spoofed unused key headers and stabilizing JWT rotation identity.",
+      "fix_commits": [
+        "cd9440c62d8a2e7540e161e7522fcec6e72b8c43"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 507,
+      "title": "[QA SEC-005] P2: Readiness probe returns healthy HTTP status during dependency failure",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/507",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "SEC-005",
+      "disposition": "local_fixed",
+      "behavior_correction": "Probe required ORM and durable-state dependencies with bounded waits; return HTTP 503 when unavailable.",
+      "fix_commits": [
+        "4a4fc75089e323d2d413874cce4108558d2a7ba2"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 508,
+      "title": "[QA SEC-006] P2: Late IGA compensation erases a different invocation velocity reservation",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/508",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "SEC-006",
+      "disposition": "local_fixed",
+      "behavior_correction": "Compensate the exact identity-bearing IGA velocity reservation once; never remove a newer invocation reservation.",
+      "fix_commits": [
+        "13c709711f06ee28ca848c75212d2ff3503ab6ed"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 509,
+      "title": "[QA QA-CLIENT-001] P2: SDK local permit verification rejects valid action-bound permits",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/509",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "QA-CLIENT-001",
+      "disposition": "local_fixed",
+      "behavior_correction": "Include all six signed action-binding fields in SDK canonical permit verification; preserve legacy envelope bytes.",
+      "fix_commits": [
+        "02622db97980975d26377235c1ce4d606a0c0774"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 510,
+      "title": "[QA QA-CLIENT-002] P2: Framework wrapper retry changes permit body after a lost creation response",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/510",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "QA-CLIENT-002",
+      "disposition": "local_fixed",
+      "behavior_correction": "Retain the original permit issuance body before the first await in framework wrappers, including expiry, across ambiguous same-key retries.",
+      "fix_commits": [
+        "0bf6151eb94bbb35562e3d2f856fa16bc259b153"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 511,
+      "title": "[QA QA-CLIENT-003] P2: Legacy SDK standalone MCP command and generated scripts are unusable",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/511",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "QA-CLIENT-003",
+      "disposition": "retired_with_explicit_refusal",
+      "behavior_correction": "Retire standalone SDK generation with explicit refusal before tool discovery or output writes; accept existing CLI/callable arguments and return controlled CLI exit 2.",
+      "fix_commits": [
+        "e4a046bc65c833c9765315355be0c4c1fd99e08b"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 512,
+      "title": "[QA AE-001] P3: Release exact issuance ownership after a proven pre-persistence rejection",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/512",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "AE-001",
+      "disposition": "local_fixed",
+      "behavior_correction": "Release only the exact issuance owner after an explicit proven pre-signing/pre-persistence rejection; retain ambiguous post-mint ownership.",
+      "fix_commits": [
+        "0e4b1411d494722fb4f592d13eb3764503c7fbce"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 513,
+      "title": "[QA IP-001] P2: Rehydrate durable AI decisions and heals before exposing them through typed routes",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/513",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "IP-001",
+      "disposition": "local_fixed",
+      "behavior_correction": "Rehydrate durable decision/heal records and timestamps and initialize read routes after restart.",
+      "fix_commits": [
+        "88828e8f4b963305a0233ab5f5aea237f5e6070c"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 514,
+      "title": "[QA IP-002] P2: Use the configured API root once when building OpenAI chat URLs",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/514",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "IP-002",
+      "disposition": "local_fixed",
+      "behavior_correction": "Treat the configured OpenAI URL as the API root and append the chat path only once.",
+      "fix_commits": [
+        "f20abec84ee618b55af15506a486144f2d017a2d"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 515,
+      "title": "[QA IP-003] P2: Propagate structured DOM execution failure to AWI top-level status before accounting",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/515",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "IP-003",
+      "disposition": "local_fixed",
+      "behavior_correction": "Propagate structured browser failure as uncertain effect status and truthful governed accounting; preserve precharge/owner semantics from SEC-008.",
+      "fix_commits": [
+        "19fe8c2ff2d0ff2fa498556fb348ea9f4ac8cdfe",
+        "cb8d2f816badf7f504c6cb51153f91cf94ab15ed"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 516,
+      "title": "[QA IP-004] P2: Prevent browser dispatch when AWI callers explicitly request a dry run",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/516",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "IP-004",
+      "disposition": "local_fixed",
+      "behavior_correction": "Reject unsupported dry run without browser commands or step mutation; final AWI precharge is refunded only on trusted not-dispatched evidence.",
+      "fix_commits": [
+        "19fe8c2ff2d0ff2fa498556fb348ea9f4ac8cdfe",
+        "cb8d2f816badf7f504c6cb51153f91cf94ab15ed"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 517,
+      "title": "[QA IP-005] P2: Bind all effect-bearing AWI arguments into the idempotency identity",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/517",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "IP-005",
+      "disposition": "local_fixed",
+      "behavior_correction": "Bind all normalized effect-bearing arguments plus wallet/tool/permit to AWI request identity; changed same-key semantics conflict.",
+      "fix_commits": [
+        "19fe8c2ff2d0ff2fa498556fb348ea9f4ac8cdfe",
+        "cb8d2f816badf7f504c6cb51153f91cf94ab15ed"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 518,
+      "title": "[QA IP-006] P2: Enforce signed AWI argument prohibitions and atomic per-tool call limits before execution",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/518",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "IP-006",
+      "disposition": "local_fixed",
+      "behavior_correction": "Enforce signed forbidden-field constraints and refuse unsupported per-tool call-limit authority before callbacks.",
+      "fix_commits": [
+        "19fe8c2ff2d0ff2fa498556fb348ea9f4ac8cdfe",
+        "cb8d2f816badf7f504c6cb51153f91cf94ab15ed"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 519,
+      "title": "[QA AE-002] P2: Reuse the preparation transaction for action signature verification",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/519",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "AE-002",
+      "disposition": "local_fixed",
+      "behavior_correction": "Reuse the action preparation transaction for signature verification rather than acquiring a second pooled connection.",
+      "fix_commits": [
+        "59d24e24df94bd0a59ea641c8164e59308343e3e"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 520,
+      "title": "[QA ACCT-004] P2: Startup schema verification misses every required single-action column",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/520",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "ACCT-004",
+      "disposition": "local_fixed",
+      "behavior_correction": "Startup validates all required action-binding columns rather than only table presence.",
+      "fix_commits": [
+        "ea73b3c76491aa6e64dc3aaa9e29f0fe770fb792"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 521,
+      "title": "[QA ACCT-005] P2: Concurrent Stripe top-ups lose settled credits on SQLite",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/521",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "ACCT-005",
+      "disposition": "local_fixed",
+      "behavior_correction": "Apply settled Stripe top-up credits atomically so concurrent SQLite updates do not lose credits.",
+      "fix_commits": [
+        "1cd4d0c31ed2873f370b65f20d6a52fc3af30e6d"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 522,
+      "title": "[QA ACCT-006] P2: Concurrent Stripe cumulative refunds double-claw back on SQLite",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/522",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "ACCT-006",
+      "disposition": "local_fixed",
+      "behavior_correction": "Serialize cumulative Stripe refund deltas and apply each newly observed amount once.",
+      "fix_commits": [
+        "1cd4d0c31ed2873f370b65f20d6a52fc3af30e6d"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 523,
+      "title": "[QA ACCT-007] P2: PostgreSQL migration 038 cannot recover after concurrent-index interruption",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/523",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "ACCT-007",
+      "disposition": "local_fixed",
+      "behavior_correction": "Recover interrupted PostgreSQL concurrent-index construction safely on migration 038 retry.",
+      "fix_commits": [
+        "6387945279ac7254c672ff7010975f0de57f5cbd"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 524,
+      "title": "[QA QA-ACTION-TRANSPORT-002] P2: A valid no-argument local tool breaks standard MCP discovery",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/524",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "QA-ACTION-TRANSPORT-002",
+      "disposition": "local_fixed",
+      "behavior_correction": "Normalize absent/null no-argument tool schemas to an object schema for standard MCP discovery, preserving explicit schemas.",
+      "fix_commits": [
+        "1f47952b302eaa89256af41ff4f358b2b7eda87f"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 525,
+      "title": "[QA SEC-007] P2: Concurrent valid append makes audit verification falsely report truncation",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/525",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "SEC-007",
+      "disposition": "local_fixed",
+      "behavior_correction": "Read audit head and bounded event stream from one SQL statement snapshot, retaining real truncation detection.",
+      "fix_commits": [
+        "ee32061580c6ac70b7a0e78cb9f8f95550b4925c"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 526,
+      "title": "[QA SEC-008] P2: AWI performs effects before budget/debit and repeats them after reservation contention",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/526",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "SEC-008",
+      "disposition": "local_fixed",
+      "behavior_correction": "Reserve permit authority and checkpoint an operation-key debit before any of six AWI callbacks. Preserve owners across ambiguous errors/process death; refund only proven non-dispatch, and replay receipts without redispatch.",
+      "fix_commits": [
+        "cb8d2f816badf7f504c6cb51153f91cf94ab15ed",
+        "2c6f4291a042bbf88ffbe9cb891c61aa516ae68c"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 527,
+      "title": "[QA IP-007] P2: Honor write-only and explicit-deny IoT topic ACLs",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/527",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "IP-007",
+      "disposition": "local_fixed",
+      "behavior_correction": "Enforce READ/WRITE direction and precedence of every matching IoT DENY rule.",
+      "fix_commits": [
+        "9b26b35b17aaa1196892dd31604cc14f500e0508"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 528,
+      "title": "[QA IP-008] P2: Persist completed content campaigns and their pipeline links",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/528",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "IP-008",
+      "disposition": "local_fixed",
+      "behavior_correction": "Persist campaign pipeline links and terminal status, including failed render state, across restart.",
+      "fix_commits": [
+        "527f3b7fc2e69042fa642266f871a28786efa65f"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 529,
+      "title": "[QA QA-ACTION-TRANSPORT-001] P3: Standalone MCP generator emits Python that cannot start",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/529",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "QA-ACTION-TRANSPORT-001",
+      "disposition": "retired_with_explicit_refusal",
+      "behavior_correction": "Retire the server standalone generator with explicit refusal before registry traversal or output writes; retain callable argument compatibility and active metadata generation.",
+      "fix_commits": [
+        "e4a046bc65c833c9765315355be0c4c1fd99e08b"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 530,
+      "title": "[QA QA-CLIENT-004] P2: Legacy framework client omits current discovery authentication and AWI governance inputs",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/530",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "QA-CLIENT-004",
+      "disposition": "local_fixed",
+      "behavior_correction": "Forward credentials for discovery and require caller-owned AWI permit/idempotency arguments.",
+      "fix_commits": [
+        "8e5e684d3d2fcae9a53330b45be4e467e80fba64"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 531,
+      "title": "[QA QA-CLIENT-005] P3: AWI discovery still denies permit enforcement on governed HTTP routes",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/531",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "QA-CLIENT-005",
+      "disposition": "local_fixed",
+      "behavior_correction": "Advertise the six actual governed AWI HTTP routes and their permit requirements accurately.",
+      "fix_commits": [
+        "740098d11c30e04f3f6fb534ed627e8865f6e44a"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 532,
+      "title": "[QA QA-CLIENT-006] P3: Public site and bootstrap manifests claim private source repository is public",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/532",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "QA-CLIENT-006",
+      "disposition": "local_fixed",
+      "behavior_correction": "Describe private source access separately from publicly downloadable proof artifacts.",
+      "fix_commits": [
+        "817ccd52e3efde57b8be3ebdbf171e674663ec30"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 533,
+      "title": "[QA INFRA-001] P2: Failure Lab negative-control CI promotes judge crashes to success",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/533",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "INFRA-001",
+      "disposition": "local_fixed",
+      "behavior_correction": "Require valid completed observed-duplicate evidence for the CI negative control; a judge crash cannot count as success.",
+      "fix_commits": [
+        "043705c822b22afa685fdde713e48d9d09a94816"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 534,
+      "title": "[QA INFRA-002] P2: Downloaded Failure Lab ZIP omits keys needed by its offline verifier",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/534",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "INFRA-002",
+      "disposition": "local_fixed",
+      "behavior_correction": "Include receipt public keys in integrity-covered offline archives so extracted bundles can be signature-checked.",
+      "fix_commits": [
+        "dd25465b2c19342c2ba983b576cdb9e1303ce181"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 535,
+      "title": "[QA INFRA-003] P2: Live release preflight certifies missing posture fields as safe",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/535",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "INFRA-003",
+      "disposition": "local_fixed",
+      "behavior_correction": "Require explicit safe public posture fields; missing/malformed nested evidence fails live preflight.",
+      "fix_commits": [
+        "24b955dfb20f343f3d67c6de056aae6fc3a740d3"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 536,
+      "title": "[QA INFRA-004] P2: Database-only preflight silently drops explicit release identity expectations",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/536",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "INFRA-004",
+      "disposition": "local_fixed",
+      "behavior_correction": "Refuse DB-only selections that would silently discard requested live release-identity expectations.",
+      "fix_commits": [
+        "93b3ee722f7c6025accf7ab76bd9e8b98d07ad9f"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 537,
+      "title": "[QA INFRA-005] P3: Development Compose hot reload command is ignored by the entrypoint",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/537",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "INFRA-005",
+      "disposition": "local_fixed",
+      "behavior_correction": "Honor explicit container command overrides after the migration gate.",
+      "fix_commits": [
+        "56e6cecf1ef6c5c0ef58924b16dfcf31dcf9258a"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 538,
+      "title": "[QA QA-CLIENT-007] P3: Agent self-credentialing guide writes unevaluated shell substitution into dotenv signing key",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/538",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "QA-CLIENT-007",
+      "disposition": "local_fixed",
+      "behavior_correction": "Generate the local signing seed in the invoking shell rather than storing unevaluated shell substitution in dotenv.",
+      "fix_commits": [
+        "028e36e8cf66a0b80ce0d232b724e3df483db92e"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 539,
+      "title": "[QA ACCT-008] P2: Zero-price tools receive signed quotes but cannot execute",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/539",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "ACCT-008",
+      "disposition": "local_fixed",
+      "behavior_correction": "Refuse unsupported zero-price governed quotes before issuing an unusable signed quote.",
+      "fix_commits": [
+        "ef64d0291cbf50c8f00fbf5d2e4be22d2c781916"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 540,
+      "title": "[QA AE-003] P2: Retry local call-counter contention instead of caching false budget denial",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/540",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "AE-003",
+      "disposition": "local_fixed",
+      "behavior_correction": "Distinguish optimistic local permit counter contention from genuine authority/budget denial and retry before debit/effect.",
+      "fix_commits": [
+        "61cb0ca630993f11bb0818a87bad07a8020ab21c"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 541,
+      "title": "[QA ACCT-009] P2: Terminal billing-policy denial leaves its idempotency key in progress",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/541",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "ACCT-009",
+      "disposition": "local_fixed",
+      "behavior_correction": "Complete/release keyed terminal billing denial correctly instead of leaving the key in progress.",
+      "fix_commits": [
+        "edfd71a8088cc1aabaa42ba88a1fba94e46a3eec"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 542,
+      "title": "[QA ACCT-010] P2: Keyed billing charge for unknown wallet returns500 instead of404",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/542",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "ACCT-010",
+      "disposition": "local_fixed",
+      "behavior_correction": "Preserve the unknown-wallet 404 at the keyed billing boundary instead of converting it to 500.",
+      "fix_commits": [
+        "edfd71a8088cc1aabaa42ba88a1fba94e46a3eec"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 543,
+      "title": "[QA ACCT-011] P3: Ledger period exact totals are calculated from binary floats",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/543",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "ACCT-011",
+      "disposition": "local_fixed",
+      "behavior_correction": "Calculate exact ledger period totals with decimal arithmetic rather than binary floats.",
+      "fix_commits": [
+        "edfd71a8088cc1aabaa42ba88a1fba94e46a3eec"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 544,
+      "title": "[QA IP-009] P2: Generate valid Python literals in the behavioral sandbox wrapper",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/544",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "IP-009",
+      "disposition": "local_fixed",
+      "behavior_correction": "Generate valid Python values in behavioral runner wrappers while preserving captured output.",
+      "fix_commits": [
+        "8d3ed08b053ca9c9a9e09972f39db3f0f9d358b7"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 545,
+      "title": "[QA IP-010] P3: Validate RTaaS attack categories at the request boundary",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/545",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "IP-010",
+      "disposition": "local_fixed",
+      "behavior_correction": "Validate RTaaS attack category values at the request boundary and return 422 before engine execution.",
+      "fix_commits": [
+        "f6e9f51947ca18587ec399493f5569f2d48b1db1"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 546,
+      "title": "[QA IP-011] P3 documentation concern: Remove live security-testing and CI-gate claims from simulated scan route metadata",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/546",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "IP-011",
+      "disposition": "local_fixed",
+      "behavior_correction": "Describe simulated security-scan behavior accurately in route metadata while keeping execution gates.",
+      "fix_commits": [
+        "636f8cf3d37fef6a007f3d7c4e4bdefbfdeccc87"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 547,
+      "title": "[QA INFRA-006] P2: Make crash-proof wrapper migrates before isolation checks",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/547",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "INFRA-006",
+      "disposition": "local_fixed",
+      "behavior_correction": "Run crash-proof isolation guards before any database operation; Make no longer migrates first.",
+      "fix_commits": [
+        "aa96e51596490bb0f960cd94bcc88fef28488d8c"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 548,
+      "title": "[QA INFRA-007] P2: Rotation verification transmits bootstrap keys over remote HTTP",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/548",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "INFRA-007",
+      "disposition": "local_fixed",
+      "behavior_correction": "Validate rotation-verifier origins before sending keys and refuse redirects/remote plaintext HTTP.",
+      "fix_commits": [
+        "037e590086c2b1807979dba759a89991f786d20b"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 549,
+      "title": "[QA INFRA-008] P2: Partner bootstrap ignores successful --key-only output mode",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/549",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "INFRA-008",
+      "disposition": "local_fixed",
+      "behavior_correction": "Emit only the minted key plus newline for successful --key-only bootstrap output.",
+      "fix_commits": [
+        "2efbc36cd12b57cd17a2035c60af37897e02b023"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 550,
+      "title": "[QA INFRA-009] P2: Load battery stops a container it did not create",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/550",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "INFRA-009",
+      "disposition": "local_fixed",
+      "behavior_correction": "Stop only containers created by the load script itself, including failed-readiness cleanup.",
+      "fix_commits": [
+        "902893fdf20d08797b9876c549e38aa404bb1839"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 551,
+      "title": "[QA INFRA-010] P2: Load battery labels an all-error run PASS and exits zero",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/551",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "INFRA-010",
+      "disposition": "local_fixed",
+      "behavior_correction": "Require complete successful workload and no error/denial/accounting anomaly for load PASS and zero exit.",
+      "fix_commits": [
+        "ad6330cb1d3869bb12a073a9019b37e2b7c527c4"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 552,
+      "title": "[QA INFRA-011] P2: Loaded claim manifest promotes a PASS summary over FAIL/ERROR rows",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/552",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "INFRA-011",
+      "disposition": "local_fixed",
+      "behavior_correction": "Preserve negative FAIL/ERROR observations when loading manifests rather than trusting a contradictory PASS summary.",
+      "fix_commits": [
+        "da8ffd3a684c5ec320cca917ace355267efb2f08"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 553,
+      "title": "[QA-UX] UX QA charter \u2014 first-10-minutes, trust-signal audit, error empathy",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/553",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "disposition": "partial_audit_acceptance",
+      "remaining": "See ../issue-resolution-2026-10-02/charter-coverage.md; hosted, live, comprehensive matrix and human acceptance remain unverified."
+    },
+    {
+      "number": 554,
+      "title": "[QA-FE] Frontend QA charter \u2014 site e2e, live-claim verification, a11y, responsive",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/554",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "disposition": "partial_audit_acceptance",
+      "remaining": "See ../issue-resolution-2026-10-02/charter-coverage.md; hosted, live, comprehensive matrix and human acceptance remain unverified."
+    },
+    {
+      "number": 555,
+      "title": "[QA-PRO] Enterprise QA charter \u2014 release gates, OWASP, performance baseline",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/555",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "disposition": "partial_audit_acceptance",
+      "remaining": "See ../issue-resolution-2026-10-02/charter-coverage.md; hosted, live, comprehensive matrix and human acceptance remain unverified."
+    },
+    {
+      "number": 556,
+      "title": "[QA-BE] Backend QA charter \u2014 API contract, idempotency, migrations, fault injection",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/556",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "disposition": "partial_audit_acceptance",
+      "remaining": "See ../issue-resolution-2026-10-02/charter-coverage.md; hosted, live, comprehensive matrix and human acceptance remain unverified."
+    },
+    {
+      "number": 557,
+      "title": "[QA ACCT-012] P2: Wallet-scoped credentials can read global profitability and other tenants' ledger details",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/557",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "ACCT-012",
+      "disposition": "local_fixed",
+      "behavior_correction": "Require administrator authority for global profitability and cross-tenant ledger detail.",
+      "fix_commits": [
+        "d446f0b554307040654526f318699873d1b2e305"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 558,
+      "title": "[QA ACCT-013] P3: Profitability report labels all-history totals as a one-day period",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/558",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "ACCT-013",
+      "disposition": "local_fixed",
+      "behavior_correction": "Restrict profitability rows and totals to the stated report interval.",
+      "fix_commits": [
+        "d446f0b554307040654526f318699873d1b2e305"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 559,
+      "title": "[QA ACCT-014] P2: Receiptless x402 crash recovery consumes permit budget twice",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/559",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "ACCT-014",
+      "disposition": "local_fixed",
+      "behavior_correction": "Retain ambiguous receiptless x402 owners and reservations for review; recovery cannot consume authority twice.",
+      "fix_commits": [
+        "2cc557d69172df14d369167899fb81e50adcdda7"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 560,
+      "title": "[QA QA-CLIENT-008] P3: Key Rotation can consume multiple lives in one update despite granting invulnerability",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/560",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "QA-CLIENT-008",
+      "disposition": "local_fixed",
+      "behavior_correction": "Honor collision invulnerability inside each sweeper iteration; one update cannot deduct multiple lives after respawn. Bust cached script references so deployed clients receive the corrected arcade code.",
+      "fix_commits": [
+        "3e6d52e404f724d62a3b8d52e5a9ee3172afa2d0",
+        "dd834f0c80d8d77cf5ac62165801657fd3f1ae93"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 561,
+      "title": "[QA QA-CLIENT-009] P3: Happy Path draws the player twelve pixels above its collision position",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/561",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "QA-CLIENT-009",
+      "disposition": "local_fixed",
+      "behavior_correction": "Align the rendered player body with its ground/platform collision origin. Bust cached script references so deployed clients receive the corrected arcade code.",
+      "fix_commits": [
+        "3e6d52e404f724d62a3b8d52e5a9ee3172afa2d0",
+        "dd834f0c80d8d77cf5ac62165801657fd3f1ae93"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 562,
+      "title": "[QA QA-CLIENT-010] P3: Tap Forge discards passive quota earnings on every animation frame",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/562",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "QA-CLIENT-010",
+      "disposition": "local_fixed",
+      "behavior_correction": "Carry fractional passive quota earnings across animation frames and clear the carry on reset. Bust cached script references so deployed clients receive the corrected arcade code.",
+      "fix_commits": [
+        "3e6d52e404f724d62a3b8d52e5a9ee3172afa2d0",
+        "dd834f0c80d8d77cf5ac62165801657fd3f1ae93"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 563,
+      "title": "[QA QA-CLIENT-011] P3: Security reviewer claim omits local invocations that cannot produce a receipt",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/563",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "QA-CLIENT-011",
+      "disposition": "local_fixed",
+      "behavior_correction": "Qualify receipt guarantees for terminalized/reconciled paths and identify local crashes requiring manual review without a receipt.",
+      "fix_commits": [
+        "ed6b396d0290de8904b9ac6db6e90626ad0ad1aa"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 564,
+      "title": "[QA QA-CLIENT-012] P2: Golden-path dogfood substitution leaves incompatible message arguments",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/564",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "QA-CLIENT-012",
+      "disposition": "local_fixed",
+      "behavior_correction": "Use the dogfood tool text argument for both first invocation and replay.",
+      "fix_commits": [
+        "ed6b396d0290de8904b9ac6db6e90626ad0ad1aa"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 565,
+      "title": "[QA QA-CLIENT-013] P2: Partner offline-verification install command omits required verify extra",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/565",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "QA-CLIENT-013",
+      "disposition": "local_fixed",
+      "behavior_correction": "Install the SDK verify extra for source and wheel offline-verifier recipes.",
+      "fix_commits": [
+        "ed6b396d0290de8904b9ac6db6e90626ad0ad1aa"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 566,
+      "title": "[QA QA-CLIENT-014] P2: CI bootstrap recipe combines credentials from three separate provisioning runs",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/566",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "QA-CLIENT-014",
+      "disposition": "local_fixed",
+      "behavior_correction": "Extract API key, wallet and key ID from one provisioning response.",
+      "fix_commits": [
+        "ed6b396d0290de8904b9ac6db6e90626ad0ad1aa"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 567,
+      "title": "[QA QA-CLIENT-015] P2: Legacy database guidance recommends stamping current head without schema equivalence",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/567",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "QA-CLIENT-015",
+      "disposition": "local_fixed",
+      "behavior_correction": "Require physical schema/data-history review for unstamped existing databases; stamp only a proven matching historical revision.",
+      "fix_commits": [
+        "7cb38a46581ae6f172f8e21e349c87b5afa83699"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7",
+      "followup_fix_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 568,
+      "title": "[QA QA-CLIENT-016] P3: Lockdown and key-rotation runbooks retain deployment paths contradicted by current immutable release SOP",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/568",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "QA-CLIENT-016",
+      "disposition": "local_fixed",
+      "behavior_correction": "Use qualified exact-SHA release contexts and schema-compatible recovery in lockdown/key-rotation runbooks.",
+      "fix_commits": [
+        "7cb38a46581ae6f172f8e21e349c87b5afa83699"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 569,
+      "title": "[QA QA-CLIENT-017] P2: Local demo Compose recipe omits DATABASE_URL required for its key and trust workflow",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/569",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "QA-CLIENT-017",
+      "disposition": "local_fixed",
+      "behavior_correction": "Replace the broken local Compose example with the supported persistent SQLite/signing-seed quickstart.",
+      "fix_commits": [
+        "7cb38a46581ae6f172f8e21e349c87b5afa83699"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 570,
+      "title": "[QA QA-CLIENT-018] P3: Historical external diagnostic harness reports zero findings for unauthenticated200 responses",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/570",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "QA-CLIENT-018",
+      "disposition": "retired_with_explicit_refusal",
+      "behavior_correction": "Retire historical gauntlet CLI and raw transport with explicit refusal; preserve archived raw output and label counts non-gating.",
+      "fix_commits": [
+        "9edad00dfcde0a1daa79b2da47faadd9221f46f5"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 571,
+      "title": "[QA QA-CLIENT-019] P3: Partner checklist uses GET for the POST-only receipt verification operation",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/571",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "QA-CLIENT-019",
+      "disposition": "local_fixed",
+      "behavior_correction": "Use authenticated POST with receipt_id for receipt verification.",
+      "fix_commits": [
+        "ed6b396d0290de8904b9ac6db6e90626ad0ad1aa"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 572,
+      "title": "[QA QA-CLIENT-020] P3: Failure-lab suite quick commands select the older lab instead of the advertised fast tier",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/572",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "QA-CLIENT-020",
+      "disposition": "local_fixed",
+      "behavior_correction": "Point the advertised fast-tier Failure Lab command to the actual suite target.",
+      "fix_commits": [
+        "ed6b396d0290de8904b9ac6db6e90626ad0ad1aa"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 573,
+      "title": "[QA INFRA-012] P2: Repo guardian caches failed full lint as a successful sweep",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/573",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "INFRA-012",
+      "disposition": "local_fixed",
+      "behavior_correction": "Cache guardian full sweeps only when both tests and lint succeed; invalidate older cached success after a forced failure.",
+      "fix_commits": [
+        "4aa33e9b461dc5fa90c065be6c0bf5617e4111cd"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 574,
+      "title": "[QA INFRA-013] P2: Live stress checks accept HTTP failures and absent receipt IDs",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/574",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "INFRA-013",
+      "disposition": "local_fixed",
+      "behavior_correction": "Require successful HTTP/JSON-RPC responses and nonblank receipt IDs from every stress result; use identical same-key payloads and checks that survive -O.",
+      "fix_commits": [
+        "2009fdf1c2b7369e57f3df0284d878dddb8bf2db"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 575,
+      "title": "[QA INFRA-014] P2: Adversarial battery forwards API keys across redirect origins",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/575",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "INFRA-014",
+      "disposition": "local_fixed",
+      "behavior_correction": "Refuse redirects for authenticated adversarial requests so credentials and mutations stay at the chosen destination.",
+      "fix_commits": [
+        "03372935385202c277d31956c618eb7d753e719d"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 576,
+      "title": "[QA INFRA-015] P2: Comparison report interprets configuration errors as successful measurements",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/576",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "INFRA-015",
+      "disposition": "local_fixed",
+      "behavior_correction": "Exclude ERROR configuration counters from prevention/latency arithmetic while rendering errors and retaining valid partial baseline comparisons.",
+      "fix_commits": [
+        "98cd3eed11908a44cce77b3c6c4c481a23e20811"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 577,
+      "title": "[QA INFRA-016] P2: Diagnostic request size limit applies only after full buffering",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/577",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "INFRA-016",
+      "disposition": "local_fixed",
+      "behavior_correction": "Enforce the diagnostic body limit while consuming ASGI chunks, including absent/false Content-Length.",
+      "fix_commits": [
+        "322be7f522dca93c4cddba00b6427abf36ba2765"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 578,
+      "title": "[QA INFRA-017] P3: Agent-facing documentation advertises a nonexistent rate-limit burst",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/578",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "INFRA-017",
+      "disposition": "local_fixed",
+      "behavior_correction": "Document the configurable default 120/min, zero extra burst and fixed Redis versus rolling local windows.",
+      "fix_commits": [
+        "ad108fb0b88fc9e2627ce1089224741d209f6461"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 579,
+      "title": "[QA INFRA-018] P3: Agent endpoint table labels production discovery authentication optional",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/579",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "INFRA-018",
+      "disposition": "local_fixed",
+      "behavior_correction": "Document production-like discovery authentication and anonymous local-compatible quickstart accurately.",
+      "fix_commits": [
+        "ad108fb0b88fc9e2627ce1089224741d209f6461"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 580,
+      "title": "[QA INFRA-019] P3: Troubleshooting treats an uncertain-delivery receipt as proof of acceptance",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/580",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "INFRA-019",
+      "disposition": "local_fixed",
+      "behavior_correction": "Explain that delivery_uncertain proves neither acceptance nor execution and requires authoritative downstream reconciliation.",
+      "fix_commits": [
+        "ad108fb0b88fc9e2627ce1089224741d209f6461"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 581,
+      "title": "[QA IP-012] P2: Delete every memory before removing the AWI session index",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/581",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "IP-012",
+      "disposition": "local_fixed",
+      "behavior_correction": "Iterate a snapshot of session memory IDs so deletion removes every owned record without skipping mutated-index entries.",
+      "fix_commits": [
+        "c3385e9c87bd65d841015ce6602eb382383877bd"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 582,
+      "title": "[QA IP-013] P3: Reject or safely handle empty AWI RAG queries",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/582",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "IP-013",
+      "disposition": "local_fixed",
+      "behavior_correction": "Reject blank RAG queries at the HTTP schema boundary and safely return no results for direct empty search without embedding/access mutations.",
+      "fix_commits": [
+        "c3385e9c87bd65d841015ce6602eb382383877bd"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 583,
+      "title": "[QA IP-014] P2: Do not report malformed or failed Python runner output as success",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/583",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "IP-014",
+      "disposition": "local_fixed",
+      "behavior_correction": "Reject malformed, nonobject or failed Python runner output and process errors instead of reporting success.",
+      "fix_commits": [
+        "8d3ed08b053ca9c9a9e09972f39db3f0f9d358b7"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 584,
+      "title": "[QA SEC-009] P2: SQLite permit issuance signs values that change during persistence",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/584",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "SEC-009",
+      "disposition": "local_fixed",
+      "behavior_correction": "Reject permit max_credits/aggregate caps that cannot survive exact storage before signing; preserve the numeric bounds in generated schemas.",
+      "fix_commits": [
+        "f27c213cd2e48c2fd1c9927a8fea85d4af5479ee",
+        "34040b3ad1e574445ad1ead70622967b58e3240a"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    },
+    {
+      "number": 585,
+      "title": "[QA ACCT-015] P2: Failed x402 compensation deletes ownership and allows duplicate permit reservation",
+      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/issues/585",
+      "github_state": "OPEN",
+      "release_status": "not_published_or_deployed",
+      "finding_id": "ACCT-015",
+      "disposition": "local_fixed",
+      "behavior_correction": "Retain x402 request ownership when settlement compensation is uncertain or incomplete; do not release authority for another retry.",
+      "fix_commits": [
+        "d9275789138a1f22e3adb9c62a1e6868f3dce650",
+        "9d8c962301a35705c184534979ec7f8c06da9af0"
+      ],
+      "tested_source_commit": "079bb7290f6ed86c6762baec02827305b5cb9da7"
+    }
+  ]
+}

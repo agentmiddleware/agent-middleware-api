@@ -1,0 +1,7 @@
+{
+  "pid": 30259,
+  "command": "/opt/homebrew/Cellar/postgresql@17/17.11/bin/postgres -D /tmp/amw-release-postgres-final-20261003/cluster -h 127.0.0.1 -p 55439 -k /tmp/amw-release-postgres-final-20261003/socket",
+  "data_directory": "/tmp/amw-release-postgres-final-20261003/cluster",
+  "port": 55439,
+  "verified": "2026-10-04T02:02:23.686731+00:00"
+}

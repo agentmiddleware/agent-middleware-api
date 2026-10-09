@@ -6,6 +6,7 @@ Returns standard rate limit headers on every response.
 """
 
 import asyncio
+import hashlib
 import ipaddress
 import logging
 import os
@@ -14,31 +15,77 @@ from collections import defaultdict
 from typing import Any
 
 import redis.asyncio as redis
-from fastapi import Request, Response
+from fastapi import HTTPException, Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
-from .auth import CREDENTIAL_REJECTED_HEADER
+from .auth import (
+    CREDENTIAL_ACCEPTANCE,
+    CREDENTIAL_REJECTED_HEADER,
+    CredentialAcceptance,
+    _parse_bearer_authorization,
+)
 from .config import get_settings
+from .jwt import JWTError, get_jwt_service
+from .oidc_iga import is_iga_issuer_token
 from .runtime_degradation import mark_rate_limiter_memory_fallback
 from .trust_mode import is_production_like_environment
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
+# Bound every Redis round trip. Without these, a connection left half-open by a
+# Redis restart blocks commands indefinitely, and the cached client is never
+# replaced. health_check_interval makes redis-py PING an idle connection before
+# reusing it, so a dead socket is noticed before a request depends on it.
+REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS: float = 2.0
+REDIS_SOCKET_TIMEOUT_SECONDS: float = 2.0
+REDIS_HEALTH_CHECK_INTERVAL_SECONDS: int = 15
+
+
+def enforce_redis_timeouts(
+    client: Any,
+    *,
+    connect_timeout: float = REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS,
+    read_timeout: float = REDIS_SOCKET_TIMEOUT_SECONDS,
+    health_check_interval: int = REDIS_HEALTH_CHECK_INTERVAL_SECONDS,
+) -> Any:
+    """Apply the timeouts even when REDIS_URL carries its own.
+
+    redis-py lets ``?socket_timeout=`` / ``?socket_connect_timeout=`` query
+    parameters in the URL override the keyword arguments given to
+    ``from_url``, which would silently lift the bound on a hung command. The
+    pool builds every new connection from ``connection_kwargs``.
+    """
+    pool = getattr(client, "connection_pool", None)
+    kwargs = getattr(pool, "connection_kwargs", None)
+    if isinstance(kwargs, dict):
+        kwargs.update(
+            socket_connect_timeout=connect_timeout,
+            socket_timeout=read_timeout,
+            health_check_interval=health_check_interval,
+        )
+    return client
+
+
 _PUBLIC_MCP_PATH = "/mcp/public"
 _PUBLIC_MCP_BUCKET_PREFIX = "route:mcp-public"
 _PUBLIC_MCP_GLOBAL_LIMIT_MULTIPLIER = 10
 
-# Shared ceiling on requests whose credentials the app refused. The per-key
-# bucket is chosen from a caller-supplied header before the key has been
-# verified, so without this a caller rotating a fresh invalid X-API-Key per
+# Shared ceiling on requests whose credentials the app did not accept —
+# refused, or never checked because the route does not authenticate. The
+# per-key bucket is chosen from a caller-supplied header before the key has
+# been verified, so without this a caller rotating a fresh X-API-Key per
 # request would mint a fresh budget every time. Ten times the per-key limit,
 # matching the public-MCP global bucket: wide enough that a partner whose key
 # is briefly wrong is not throttled by it, narrow enough that key rotation is
 # bounded.
 _PREAUTH_BUCKET_PREFIX = "preauth:rejected-credentials"
 _PREAUTH_LIMIT_MULTIPLIER = 10
+
+# Prefix hashed with a presented X-API-Key to name its bucket; see
+# _api_key_bucket.
+_API_KEY_BUCKET_DOMAIN = b"agent-middleware-api:rate-limit-bucket:v1\x00"
 
 # In-memory fallback bookkeeping: bucket keys are caller-controlled, so the
 # dict is swept (at most once per window) once it grows past this many
@@ -65,9 +112,10 @@ def rate_limit_discovery() -> dict[str, Any]:
     ``window_accounting`` names that difference rather than letting a reader
     infer one algorithm from ``window_seconds``.
 
-    Requests whose credentials the app refuses — a ``401``, or the ``403`` an
-    unknown API key is answered with — are additionally charged to a shared
-    per-client bucket (``rejected_credentials_scope``); see
+    Requests whose credentials the app does not accept — a ``401``, the
+    ``403`` an unknown API key is answered with, or any request to a route
+    that never authenticates — are additionally charged to a shared per-client
+    bucket (``rejected_credentials_scope``); see
     ``RateLimitMiddleware.dispatch``. An authenticated caller denied on scope
     is not: in a trust plane, denials are ordinary traffic.
     """
@@ -88,6 +136,36 @@ def rate_limit_discovery() -> dict[str, Any]:
             "X-RateLimit-Reset",
         ],
     }
+
+
+def _presented_rate_identity(request: Request) -> str | None:
+    """Mirror credential precedence without consuming authentication budgets.
+
+    Internal JWTs share their originating key's bucket across token rotation.
+    An enterprise bearer is attribution only; its accompanying API key remains
+    the credential. Invalid credentials remain subject to the preauth ceiling.
+    """
+    api_key = request.headers.get(settings.API_KEY_HEADER, "").strip() or None
+    authorization = request.headers.get("authorization")
+    token = None
+    if authorization is not None:
+        try:
+            token = _parse_bearer_authorization(authorization)
+        except HTTPException:
+            return f"invalid-authorization:{authorization}"
+        if api_key and is_iga_issuer_token(token):
+            return api_key
+    elif api_key is not None:
+        candidate = api_key.removeprefix("Bearer ").strip()
+        if candidate.count(".") == 2:
+            token = candidate
+    if token is None:
+        return api_key
+    try:
+        payload = get_jwt_service().verify_access_token(token)
+    except JWTError:
+        return f"invalid-jwt:{token}"
+    return f"jwt:{payload.key_id}"
 
 
 def _client_id(request: Request) -> str:
@@ -114,6 +192,23 @@ def _client_id(request: Request) -> str:
         return ipaddress.ip_address(raw).compressed
     except ValueError:
         return peer_host
+
+
+def _api_key_bucket(presented_key: str | None) -> str:
+    """Name a presented key's bucket without putting the key itself in it.
+
+    Bucket names become Redis key names, so the raw header value would write
+    every API key that called in the last minute into the limiter's store in
+    plaintext. A digest still gives each distinct value its own bucket. It is
+    domain-separated so the name is not also the ``key_hash`` the API-key
+    table stores for the same key.
+    """
+    if presented_key is None:
+        return "anonymous"
+    digest = hashlib.sha256(
+        _API_KEY_BUCKET_DOMAIN + presented_key.encode("utf-8")
+    ).hexdigest()
+    return f"api_key_sha256:{digest}"
 
 
 class RateLimiterUnavailable(RuntimeError):
@@ -156,6 +251,14 @@ def _rate_limited_response(limit: int, reset_in: int, message: str) -> JSONRespo
     )
 
 
+async def _close_quietly(client: redis.Redis) -> None:
+    """Close a Redis client without letting a dead socket block or raise."""
+    try:
+        await asyncio.wait_for(client.aclose(), timeout=REDIS_SOCKET_TIMEOUT_SECONDS)
+    except Exception:
+        logger.debug("Closing a Redis rate-limiter client failed.", exc_info=True)
+
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """
     Sliding window rate limiter keyed by API key.
@@ -196,15 +299,27 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         async with self._redis_lock:
             if self._redis is not None:
                 return self._redis
+            client = None
             try:
-                client = redis.from_url(
-                    self._redis_url,
-                    encoding="utf-8",
-                    decode_responses=True,
+                client = enforce_redis_timeouts(
+                    redis.from_url(
+                        self._redis_url,
+                        encoding="utf-8",
+                        decode_responses=True,
+                        socket_connect_timeout=REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS,
+                        socket_timeout=REDIS_SOCKET_TIMEOUT_SECONDS,
+                        health_check_interval=REDIS_HEALTH_CHECK_INTERVAL_SECONDS,
+                    )
                 )
                 await client.ping()
                 self._redis = client
+                if self._redis_warned:
+                    logger.info("Redis rate limiter reconnected.")
+                # Re-arm the warning so the next outage is logged too.
+                self._redis_warned = False
             except Exception:
+                if client is not None:
+                    await _close_quietly(client)
                 mark_rate_limiter_memory_fallback()
                 if not self._redis_warned:
                     logger.exception(
@@ -218,6 +333,38 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     self._redis_warned = True
                 self._redis = None
             return self._redis
+
+    async def _reset_redis(self, failed: redis.Redis) -> None:
+        """Drop the cached client a command just failed on.
+
+        Called when a command fails on an already-established connection: a
+        Redis restart leaves the cached client pointing at a dead (or hung)
+        socket, and without a reset every later request keeps failing on it
+        long after Redis itself has recovered.
+
+        Only ``failed`` is dropped. During a restart, requests still in flight
+        on the old client fail at different times; by then another request
+        may already have reconnected, and that healthy client must survive.
+        """
+        async with self._redis_lock:
+            if self._redis is failed:
+                self._redis = None
+        await _close_quietly(failed)
+
+    async def _incr_window(self, client: redis.Redis, key: str) -> int:
+        """INCR a window counter (setting its TTL on first use).
+
+        A failure here means the connection we already had is broken: drop
+        that client before re-raising so the next request reconnects.
+        """
+        try:
+            count = int(await client.incr(key))
+            if count == 1:
+                await client.expire(key, int(self.window) + 2)
+            return count
+        except Exception:
+            await self._reset_redis(client)
+            raise
 
     async def _check_limit_with_redis(
         self,
@@ -247,16 +394,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         reset_in = max(1, (bucket_start + window_size) - int(now))
         key = f"rate_limit:{bucket_key}:{bucket_start}"
 
-        count = await client.incr(key)
-        if count == 1:
-            await client.expire(key, window_size + 2)
+        count = await self._incr_window(client, key)
 
         remaining = max(0, effective_limit - int(count))
         limited = int(count) > effective_limit
         return limited, remaining, reset_in
 
     def _preauth_bucket(self, request: Request) -> str:
-        """Name the shared bucket that rejected credentials are charged to."""
+        """Name the shared bucket that unaccepted credentials are charged to."""
         namespace = (
             f"{settings.STATE_NAMESPACE}:{settings.PUBLIC_URL or settings.APP_NAME}"
         )
@@ -308,14 +453,16 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         bucket_start = int(now // window_size) * window_size
         reset_in = max(1, (bucket_start + window_size) - int(now))
         key = f"rate_limit:{bucket_key}:{bucket_start}"
-        count = await client.incr(key)
-        if count == 1:
-            await client.expire(key, window_size + 2)
+        count = await self._incr_window(client, key)
         if count > limit:
             # Refused, so hand the unit straight back: the counter has to keep
             # meaning "reservations currently held", or a caller that keeps
             # knocking would inflate it past any hope of draining.
-            await self._give_back(client, key)
+            try:
+                await self._give_back(client, key)
+            except Exception:
+                await self._reset_redis(client)
+                raise
             return True, reset_in
         return False, reset_in
 
@@ -346,7 +493,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                             pass
                 return
             bucket_start = int(now // window_size) * window_size
-            await self._give_back(client, f"rate_limit:{bucket_key}:{bucket_start}")
+            try:
+                await self._give_back(client, f"rate_limit:{bucket_key}:{bucket_start}")
+            except Exception:
+                await self._reset_redis(client)
+                raise
         except Exception:
             logger.warning(
                 "Could not release the rate-limit reservation on %s.",
@@ -372,7 +523,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         *,
         force_memory: bool = False,
     ) -> tuple[JSONResponse | None, bool]:
-        """Take a rejected-credential reservation, or the 429 that refuses it."""
+        """Take a pre-auth reservation, or the 429 that refuses it."""
         if preauth_bucket is None:
             return None, False
         exhausted, reset_in = await self._reserve(
@@ -389,7 +540,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 reset_in,
                 (
                     "Rate limit exceeded. "
-                    f"{self.preauth_limit} requests per minute with rejected "
+                    f"{self.preauth_limit} requests per minute without accepted "
                     "credentials allowed per client; presenting a different API "
                     "key does not reset it."
                 ),
@@ -479,8 +630,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 ),
             ]
         else:
-            bucket_key = request.headers.get(settings.API_KEY_HEADER, "anonymous")
-            bucket_limits = [(bucket_key, self.limit)]
+            # Canonicalize the way auth does (app.core.auth strips before
+            # lookup): otherwise "key" and "key " count as separate buckets and
+            # one accepted credential can sidestep the per-key limit. A blank
+            # header is no credential at all, so it shares the anonymous
+            # bucket. The bucket is then named by a digest, never the key.
+            presented_key = _presented_rate_identity(request)
+            bucket_limits = [(_api_key_bucket(presented_key), self.limit)]
 
         # Skip rate limiting for docs, health, and test clients
         skip_paths = (
@@ -507,7 +663,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # so that large test suites don't self-throttle.
         if (
             not public_mcp_request
-            and bucket_key == "test-key"
+            and presented_key == "test-key"
             and not is_production_like_environment(settings.ENVIRONMENT)
         ):
             response = await call_next(request)
@@ -524,12 +680,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         # Pre-authentication ceiling. The per-key bucket above is selected from
         # a header the caller controls, before verify_api_key has had a chance
-        # to reject it, so a caller sending a fresh invalid X-API-Key on every
-        # request would otherwise be handed a fresh 120-request budget each
-        # time — an unbounded amount of authenticated-route traffic from one
-        # client. One shared per-client bucket bounds that instead: every
-        # request reserves from it before running, and hands the reservation
-        # back unless the app refused the credentials. Rotation buys nothing
+        # to reject it, so a caller sending a fresh X-API-Key on every request
+        # would otherwise be handed a fresh 120-request budget each time — an
+        # unbounded amount of traffic from one client. One shared per-client
+        # bucket bounds that instead: every request reserves from it before
+        # running, and hands the reservation back only if get_auth_context
+        # accepted the credentials. Keying that on acceptance rather than on
+        # refusal matters: a route that never authenticates (a public route,
+        # a 404) never refuses an invented key either. Rotation buys nothing
         # past the bucket, and a request whose credentials the app accepts
         # leaves it exactly as it found it.
         preauth_bucket = None if public_mcp_request else self._preauth_bucket(request)
@@ -575,8 +733,23 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     },
                 )
             except Exception:
+                # A command failed on a connection we already had (connect
+                # failures surface as RateLimiterUnavailable above). The call
+                # site has already dropped that client (_incr_window), so the
+                # next request reconnects instead of failing on the same dead
+                # socket until the process restarts.
+                fail_closed = self._fail_closed_on_redis_outage()
+                logger.exception(
+                    "Redis rate limiter command failed; reset the cached "
+                    "connection and %s.",
+                    (
+                        "refused the request (production-like)"
+                        if fail_closed
+                        else "used the in-memory limiter for this request"
+                    ),
+                )
                 mark_rate_limiter_memory_fallback()
-                if self._fail_closed_on_redis_outage():
+                if fail_closed:
                     return JSONResponse(
                         status_code=503,
                         content={
@@ -595,10 +768,6 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                             "Retry-After": "30",
                         },
                     )
-                logger.exception(
-                    "Redis rate limiter failed; using in-memory rate limiter "
-                    "for this request."
-                )
                 if not preauth_reserved:
                     # Redis failed before the reservation landed; take it from
                     # memory so the ceiling does not vanish for the outage.
@@ -632,14 +801,25 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     ),
                 )
 
-            # Process request
-            response = await call_next(request)
+            # Process request, recording whether it authenticated. Once the app
+            # has run, the reservation is kept unless it accepted credentials
+            # — decided in the finally, so a request that raised on its way
+            # through is held to the same rule as one that answered.
+            acceptance = CredentialAcceptance()
+            acceptance_token = CREDENTIAL_ACCEPTANCE.set(acceptance)
+            try:
+                response = await call_next(request)
+            finally:
+                CREDENTIAL_ACCEPTANCE.reset(acceptance_token)
+                keep_reservation = not acceptance.accepted
 
-            # Keep the reservation only when the app refused these credentials
-            # — a 401, or the 403 it answers an unknown API key with. An
-            # authenticated caller denied on scope hands its reservation back:
-            # in a trust plane, denials are ordinary traffic, not abuse.
-            keep_reservation = _credentials_were_rejected(response)
+            # Also keep it when the app refused credentials — a 401, or the 403
+            # it answers an unknown API key with — even if another credential
+            # on the request was accepted. An authenticated caller denied on
+            # scope hands its reservation back: in a trust plane, denials are
+            # ordinary traffic, not abuse.
+            if _credentials_were_rejected(response):
+                keep_reservation = True
 
             response.headers["X-RateLimit-Limit"] = str(self.limit)
             response.headers["X-RateLimit-Remaining"] = str(header_remaining)
@@ -647,9 +827,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
             return response  # type: ignore[no-any-return]
         finally:
-            # Every exit that is not a refused credential — the per-key 429,
-            # a limiter 503, an answered request, an exception on the way
-            # through — gives the reservation back.
+            # Every other exit — accepted credentials, or a request refused
+            # before it ran (the per-key 429, a limiter 503) — gives the
+            # reservation back.
             if preauth_bucket is not None and preauth_reserved and not keep_reservation:
                 await self._release(
                     preauth_bucket,

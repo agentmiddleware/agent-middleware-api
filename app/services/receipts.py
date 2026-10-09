@@ -10,11 +10,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
+from app.core.config import DuplicateGuardMode, get_settings
 from app.core.resilience import run_with_write_conflict_retry
 from app.core.time import utc_now
 from app.db.database import get_session_factory
-from app.db.models import IdempotencyRecordModel, ReceiptModel
-from app.schemas.trust import ReceiptResponse
+from app.db.models import IdempotencyRecordModel, PermitModel, ReceiptModel
+from app.schemas.trust import ActionPermitFields, ReceiptResponse
+from app.services.jev_guard_metadata import load_jev_guard_metadata
+from app.services.pricing import credit_amount_fits_storage
 from app.services.signing_keys import (
     canonical_json,
     get_signing_key_service,
@@ -61,8 +64,15 @@ def _loads_dict(value: str | None) -> dict[str, Any]:
     return decoded if isinstance(decoded, dict) else {}
 
 
+def _action_binding(model: PermitModel | ReceiptModel) -> dict[str, Any]:
+    values = {name: getattr(model, name) for name in ActionPermitFields.model_fields}
+    # Reject partial/unknown bindings. Unset legacy fields contribute no bytes.
+    return ActionPermitFields.model_validate(values).model_dump(exclude_none=True)
+
+
 def receipt_model_to_response(model: ReceiptModel) -> ReceiptResponse:
     return ReceiptResponse(
+        **_action_binding(model),
         receipt_id=model.receipt_id,
         idempotency_record_id=model.idempotency_record_id,
         dispatch_attempt_id=model.dispatch_attempt_id,
@@ -128,6 +138,7 @@ class ReceiptService:
                     payload["constraints_evaluated"] = ce
             except json.JSONDecodeError:
                 pass
+        payload.update(_action_binding(model))
         payload["payload_hash"] = sha256_hex(payload)
         return payload
 
@@ -196,6 +207,7 @@ class ReceiptService:
         audit_event_id: str | None,
         approval_id: str | None,
         constraints_evaluated: dict[str, Any] | None = None,
+        action_binding: dict[str, Any] | None = None,
     ) -> None:
         """Reject reuse of one idempotency record for different evidence."""
         expected = {
@@ -215,6 +227,8 @@ class ReceiptService:
             "audit_event_id": audit_event_id,
             "approval_id": approval_id,
         }
+        if _action_binding(model) != (action_binding or {}):
+            raise ReceiptError("receipt_action_binding_conflict")
         if any(getattr(model, name) != value for name, value in expected.items()):
             raise ReceiptError("receipt_idempotency_conflict")
 
@@ -233,6 +247,26 @@ class ReceiptService:
                 )
             )
         ).scalar_one_or_none()
+
+    async def action_binding_for_permit(
+        self, permit_id: str, *, session: AsyncSession | None = None
+    ) -> dict[str, Any]:
+        if session is None:
+            async with get_session_factory()() as owned_session:
+                return await self.action_binding_for_permit(
+                    permit_id, session=owned_session
+                )
+        permit = await session.get(PermitModel, permit_id)
+        return _action_binding(permit) if permit is not None else {}
+
+    async def assert_action_receipt_binding(self, receipt: ReceiptResponse) -> None:
+        expected = await self.action_binding_for_permit(receipt.permit_id)
+        actual = {name: getattr(receipt, name) for name in expected}
+        if actual != expected or any(
+            getattr(receipt, name) is not None and name not in expected
+            for name in ActionPermitFields.model_fields
+        ):
+            raise ReceiptError("receipt_action_binding_conflict")
 
     async def create_receipt(
         self,
@@ -258,6 +292,22 @@ class ReceiptService:
         constraints_evaluated: dict[str, Any] | None = None,
         prepared_signing_key_id: str | None = None,
     ) -> ReceiptResponse:
+        if not all(
+            credit_amount_fits_storage(amount)
+            for amount in (credits_authorized, credits_charged)
+        ):
+            raise ReceiptError("receipt_credits_invalid")
+        # Reuse the existing signed JSON field; no receipt schema/migration.
+        # The audit link also covers denial/refund/reconciliation helpers.
+        if get_settings().JEV_RISK_GUARD != DuplicateGuardMode.OFF:
+            jev = await load_jev_guard_metadata(
+                audit_event_id, wallet_id, session=session
+            )
+            if jev is not None:
+                constraints_evaluated = {
+                    **(constraints_evaluated or {}),
+                    "jev_risk_guard": jev,
+                }
         if reason_code is not None:
             if outcome == "success" or not _REASON_CODE_PATTERN.fullmatch(reason_code):
                 raise ReceiptError("receipt_reason_code_invalid")
@@ -299,6 +349,10 @@ class ReceiptService:
                 sha256_hex(response_payload) if response_payload is not None else None
             )
 
+        action_binding = await self.action_binding_for_permit(
+            permit_id, session=session
+        )
+
         async def existing_response(
             target_session: AsyncSession,
         ) -> ReceiptResponse | None:
@@ -328,6 +382,7 @@ class ReceiptService:
                 audit_event_id=audit_event_id,
                 approval_id=approval_id,
                 constraints_evaluated=constraints_evaluated,
+                action_binding=action_binding,
             )
             return receipt_model_to_response(existing)
 
@@ -368,6 +423,7 @@ class ReceiptService:
             payload["approval_id"] = approval_id
         if constraints_evaluated:
             payload["constraints_evaluated"] = constraints_evaluated
+        payload.update(action_binding)
         signing_keys = get_signing_key_service()
         if prepared_signing_key_id is None:
             signature, signature_key_id, _ = await signing_keys.sign_payload(payload)
@@ -394,6 +450,7 @@ class ReceiptService:
             describes the identical row.
             """
             return ReceiptModel(
+                **action_binding,
                 receipt_id=receipt_id,
                 idempotency_record_id=idempotency_record_id,
                 dispatch_attempt_id=dispatch_attempt_id,

@@ -7,12 +7,14 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, cast
+from urllib.parse import urlparse
 
 from sqlalchemy import case, func, or_, select, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.config import get_settings
+from app.core.credits import credit_amount_fits_storage
 from app.core.resilience import (
     WRITE_CONFLICT_MAX_ATTEMPTS,
     run_with_write_conflict_retry,
@@ -27,7 +29,7 @@ from app.db.models import (
     WalletModel,
 )
 from app.schemas.billing import AlertType
-from app.schemas.trust import PermitCreateRequest, PermitResponse
+from app.schemas.trust import ActionPermitFields, PermitCreateRequest, PermitResponse
 from app.services.signing_keys import get_signing_key_service, sha256_hex
 
 logger = logging.getLogger(__name__)
@@ -37,6 +39,15 @@ class PermitError(RuntimeError):
     def __init__(self, reason: str) -> None:
         self.reason = reason
         super().__init__(reason)
+
+
+class PermitCreationRejectedError(PermitError):
+    """Issuance validation rejected before permit signing or persistence.
+
+    Only raise at explicit pre-write validation boundaries. Generic signing,
+    database, commit acknowledgement and response failures may have minted a
+    permit and must retain their issuance idempotency owner.
+    """
 
 
 class PermitWriteContendedError(PermitError):
@@ -197,8 +208,37 @@ def _find_forbidden_field(arguments: Any, forbidden: set[str]) -> str | None:
     return None
 
 
+def extract_recipient_identity(target: str) -> str:
+    """Reduce one recipient value to the identity the permit binds.
+
+    A URL contributes its hostname; a bare value with no host part (an
+    x402 pay_to chain address, a registered origin without a scheme) counts
+    as itself. This is the same reduction the upstream MCP path has always
+    applied before comparing against the permit's recipient constraint.
+    """
+    return urlparse(target).hostname or target
+
+
+def recipient_binding_matches(recipient_domain: str | None, target: str) -> bool:
+    """Check one recipient value against a permit's recipient constraint.
+
+    An unset constraint allows everything. Otherwise the target is reduced
+    with extract_recipient_identity and must equal the bound value
+    exactly. x402 callers pass the demand's pay_to address: x402 demands
+    name no resource host, so the payee address is the only recipient the
+    demand names, and a permit that binds x402 spending must carry that
+    address exactly as the demand presents it.
+    """
+    if not recipient_domain:
+        return True
+    return extract_recipient_identity(target) == recipient_domain
+
+
 def permit_model_to_response(model: PermitModel) -> PermitResponse:
     return PermitResponse(
+        **ActionPermitFields.model_validate(
+            {name: getattr(model, name) for name in ActionPermitFields.model_fields}
+        ).model_dump(),
         permit_id=model.permit_id,
         issuer_wallet_id=model.issuer_wallet_id,
         subject_wallet_id=model.subject_wallet_id,
@@ -321,13 +361,33 @@ class PermitService:
         it, so a retried mint collides on the primary key instead of issuing a
         second permit carrying the same authority.
         """
-        if request.max_credits <= Decimal("0"):
-            raise PermitError("max_credits_must_be_positive")
+        if any(
+            getattr(request, field) is not None
+            for field in ActionPermitFields.model_fields
+        ):
+            raise PermitCreationRejectedError("action_permit_requires_trusted_issuance")
+        return await self._persist_permit(request, subject_key_id, permit_id)
+
+    async def _persist_permit(
+        self,
+        request: PermitCreateRequest,
+        subject_key_id: str | None = None,
+        permit_id: str | None = None,
+    ) -> PermitResponse:
+        if request.max_credits.is_finite() and request.max_credits <= Decimal("0"):
+            raise PermitCreationRejectedError("max_credits_must_be_positive")
+        if not credit_amount_fits_storage(request.max_credits):
+            raise PermitCreationRejectedError("max_credits_not_storable")
+        if request.aggregate_value_cap is not None and (
+            not credit_amount_fits_storage(request.aggregate_value_cap)
+            or request.aggregate_value_cap == 0
+        ):
+            raise PermitCreationRejectedError("aggregate_value_cap_not_storable")
         if (
             request.repeat_window_seconds is not None
             and not get_settings().ENABLE_PERMIT_REPEAT_WINDOW_ISSUANCE
         ):
-            raise PermitError("repeat_window_issuance_disabled")
+            raise PermitCreationRejectedError("repeat_window_issuance_disabled")
         # Normalize to naive UTC before any comparison, signing, or persistence.
         # Guarantees the signed timestamp and persisted timestamp are identical
         # on every dialect (SQLite, PostgreSQL, asyncpg).
@@ -335,7 +395,7 @@ class PermitService:
         now = utc_now()
 
         if expires_at <= now:
-            raise PermitError("permit_expired_at_creation")
+            raise PermitCreationRejectedError("permit_expired_at_creation")
 
         if request.requires_human_approval:
             # Fail at creation rather than minting a permit every invoke of
@@ -345,7 +405,9 @@ class PermitService:
 
             available, reason = human_approval_available()
             if not available:
-                raise PermitError(reason or "human_approval_not_configured")
+                raise PermitCreationRejectedError(
+                    reason or "human_approval_not_configured"
+                )
 
         scopes = request.scopes or [
             f"tool:{tool}:invoke" for tool in request.allowed_tools
@@ -358,11 +420,13 @@ class PermitService:
             issuer = await session.get(WalletModel, request.issuer_wallet_id)
             subject = await session.get(WalletModel, request.subject_wallet_id)
             if not issuer:
-                raise PermitError("issuer_wallet_not_found")
+                raise PermitCreationRejectedError("issuer_wallet_not_found")
             if not subject:
-                raise PermitError("subject_wallet_not_found")
+                raise PermitCreationRejectedError("subject_wallet_not_found")
             if subject.balance < request.max_credits:
-                raise PermitError("permit_budget_exceeds_wallet_balance")
+                raise PermitCreationRejectedError(
+                    "permit_budget_exceeds_wallet_balance"
+                )
 
         permit_id = permit_id or f"permit-{uuid.uuid4().hex[:16]}"
         nonce = request.nonce or uuid.uuid4().hex
@@ -395,6 +459,12 @@ class PermitService:
             recipient_domain=request.recipient_domain,
             allow_identical_repeats=request.allow_identical_repeats,
             repeat_window_seconds=request.repeat_window_seconds,
+            action_contract_version=request.action_contract_version,
+            action_payload_hash=request.action_payload_hash,
+            action_schema_id=request.action_schema_id,
+            action_schema_version=request.action_schema_version,
+            action_public_tool_id=request.action_public_tool_id,
+            action_upstream_binding_hash=request.action_upstream_binding_hash,
         )
         # Sign the same dict verify reconstructs. Building it twice let a
         # field added on one path only keep verifying in tests that never
@@ -650,7 +720,7 @@ class PermitService:
                         # A concurrent reservation consumed the remaining budget,
                         # flipped the status, or (when max_calls_per_tool is set)
                         # incremented the call counter, breaking the optimistic
-                        # lock. Re-read for an accurate reason and deny.
+                        # lock. Re-read to distinguish denial from contention.
                         await session.refresh(model)
                         if model.status != "active":
                             return PermitValidation(
@@ -717,19 +787,24 @@ class PermitService:
                                     floor_excess=floor_excess,
                                 ),
                             )
-                        return PermitValidation(
-                            False,
-                            "permit_budget_exceeded",
-                            model,
-                            {
-                                "required_credits": _num(estimated_credits),
-                                "remaining_credits": _num(
-                                    model.max_credits - model.spent_credits
-                                ),
-                                "spent_credits": _num(model.spent_credits),
-                                "max_credits": _num(model.max_credits),
-                            },
-                        )
+                        if model.spent_credits + estimated_credits > model.max_credits:
+                            return PermitValidation(
+                                False,
+                                "permit_budget_exceeded",
+                                model,
+                                {
+                                    "required_credits": _num(estimated_credits),
+                                    "remaining_credits": _num(
+                                        model.max_credits - model.spent_credits
+                                    ),
+                                    "spent_credits": _num(model.spent_credits),
+                                    "max_credits": _num(model.max_credits),
+                                },
+                            )
+                        # A stale call counter can lose its comparison while
+                        # authority remains. Restart the whole reservation;
+                        # no debit or invocation has occurred at this boundary.
+                        raise PermitWriteContendedError()
                     # Reflect the committed reservation on the returned model.
                     await session.refresh(model)
                 return validation
@@ -1917,6 +1992,10 @@ class PermitService:
             payload["allow_identical_repeats"] = True
         if model.repeat_window_seconds is not None:
             payload["repeat_window_seconds"] = model.repeat_window_seconds
+        action = ActionPermitFields.model_validate(
+            {name: getattr(model, name) for name in ActionPermitFields.model_fields}
+        )
+        payload.update(action.model_dump(exclude_none=True))
         return payload
 
     @staticmethod

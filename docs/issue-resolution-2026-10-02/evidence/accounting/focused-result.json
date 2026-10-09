@@ -1,0 +1,22 @@
+{
+  "head": "f82700f750862b6e51566a46dfc559e5b81e0a95",
+  "command": [
+    "/Users/sellers/Projects/agent-middleware-api/.venv/bin/python",
+    "-m",
+    "pytest",
+    "tests/test_permit_request_flow.py",
+    "tests/test_permits.py",
+    "tests/test_x402.py",
+    "tests/test_stripe_accounting_concurrency.py",
+    "tests/test_billing_boundary_regressions.py",
+    "tests/test_schema_boot.py",
+    "tests/test_billing.py",
+    "tests/test_wallet_ledger_integrity.py",
+    "-x",
+    "-q",
+    "-ra"
+  ],
+  "started": "2026-10-03T03:37:15.446717+00:00",
+  "finished": "2026-10-03T03:37:26.421948+00:00",
+  "exit_code": 0
+}

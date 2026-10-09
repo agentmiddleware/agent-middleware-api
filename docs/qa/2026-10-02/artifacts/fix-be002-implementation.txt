@@ -1,0 +1,1 @@
+Added non-enforcing Bearer [REDACTED] dependency; existing raw-header auth resolver untouched.

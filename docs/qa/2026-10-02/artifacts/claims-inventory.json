@@ -1,0 +1,2802 @@
+[
+  {
+    "id": "BE-C001",
+    "file": ".github/workflows/ci.yml",
+    "line": 504,
+    "text": "pytest tests/test_duplicate_guard_postgres_concurrency.py -v --tb=short",
+    "finding_family": "BE-109",
+    "status": "Supporting/configuration/historical/game reference"
+  },
+  {
+    "id": "BE-C002",
+    "file": ".github/workflows/failure-lab.yml",
+    "line": 233,
+    "text": "echo \"::error::The judge passed an integration that retries with a fresh idempotency key. It is not discriminating.\"",
+    "finding_family": "BE-109",
+    "status": "Supporting/configuration/historical/game reference"
+  },
+  {
+    "id": "BE-C003",
+    "file": ".railway/check.mjs",
+    "line": 13,
+    "text": "\"MCP_UPSTREAM_DUPLICATE_GUARD\",",
+    "finding_family": "BE-109",
+    "status": "Supporting/configuration/historical/game reference"
+  },
+  {
+    "id": "BE-C004",
+    "file": ".railway/railway.ts",
+    "line": 33,
+    "text": "MCP_UPSTREAM_DUPLICATE_GUARD: preserve(),",
+    "finding_family": "BE-109",
+    "status": "Supporting/configuration/historical/game reference"
+  },
+  {
+    "id": "BE-C005",
+    "file": "AGENTS.md",
+    "line": 62,
+    "text": "1. **exactly-once economic authorization at the gateway boundary** \u2014 one",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C006",
+    "file": "AGENTS.md",
+    "line": 66,
+    "text": "reconciles. (Local governed tools have no dispatch state machine.) This is the wedge. (\"Exactly-once\" is the",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C007",
+    "file": "CHANGELOG.md",
+    "line": 14,
+    "text": "### Changed \u2014 duplicate guard observability and release gates",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C008",
+    "file": "CHANGELOG.md",
+    "line": 16,
+    "text": "- **Durable duplicate-denial count**: `/health/duplicate-guard` now also",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C009",
+    "file": "CHANGELOG.md",
+    "line": 18,
+    "text": "carrying `duplicate_request_new_key` across the service lifetime, and labels",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C010",
+    "file": "CHANGELOG.md",
+    "line": 32,
+    "text": "- **Railway IaC preserves `MCP_UPSTREAM_DUPLICATE_GUARD`**: production now sets",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C011",
+    "file": "CHANGELOG.md",
+    "line": 174,
+    "text": "defaults to empty; new tests pin the `permit_required` idempotency",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C012",
+    "file": "CHANGELOG.md",
+    "line": 205,
+    "text": "- **Duplicate guard hardening**: The cross-key duplicate guard (`MCP_UPSTREAM_DUPLICATE_GUARD`) now validates its mode at startup using a strict enum (`off`, `log`, `enforce`). Typos such as \"enforced\" are rejected at boot rather than silently falling back to permissive behavior. Invalid modes raise `ValidationError` during config construction.",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C013",
+    "file": "CHANGELOG.md",
+    "line": 206,
+    "text": "- **Duplicate guard observability**: Added `/health/duplicate-guard` endpoint (admin-only) exposing the current mode, configured window, and counters tracking how often log mode would have blocked a request (`log_mode_blocks`) and how often enforce mode actually blocked one (`enforce_mode_blocks`). Does not expose request contents or secrets. Requires bootstrap admin authentication.",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C014",
+    "file": "CHANGELOG.md",
+    "line": 208,
+    "text": "- **PostgreSQL concurrency proof**: Parallel identical new-key calls under `enforce` mode now produce exactly one dispatch and one charge, verified by a new concurrency test (`test_duplicate_guard_postgres_concurrency.py`) running in the `postgres_permit_concurrency` CI job. The test proves N racing calls yield 1 success receipt, N-1 `duplicate_request_new_key` denials, 1 ledger debit, and 1 upstream dispatch.",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C015",
+    "file": "CHANGELOG.md",
+    "line": 213,
+    "text": "- **Default duplicate guard mode unchanged**: The default remains `log` (observe-only). Operators wishing to enforce duplicate blocking must explicitly set `MCP_UPSTREAM_DUPLICATE_GUARD=enforce`.",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C016",
+    "file": "CHANGELOG.md",
+    "line": 219,
+    "text": "- **Migration required**: Alembic revision `040_permit_repeat_window` adds the nullable integer column `permits.repeat_window_seconds`. Upgrade the database with `alembic upgrade head` before starting the API. For an unstamped legacy database, first verify and stamp its exact existing revision; do not stamp `head` to bypass migration. The duplicate guard reads the persisted column, and permit signing includes its value only when set; existing permits with `NULL` retain their previous signed payload. Startup rejects existing schemas missing this column, including unstamped legacy databases.",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C017",
+    "file": "CHANGELOG.md",
+    "line": 347,
+    "text": "- **A contended remote charge releases its reservation exactly once.** The",
+    "finding_family": "BE-102",
+    "status": "Remote-effect qualifier or negation; upstream support remains required"
+  },
+  {
+    "id": "BE-C018",
+    "file": "CHANGELOG.md",
+    "line": 848,
+    "text": "the same governed permit \u2192 meter \u2192 exactly-once dispatch \u2192 signed receipt",
+    "finding_family": "BE-109",
+    "status": "Historical/result reference; historical pass count not refreshed"
+  },
+  {
+    "id": "BE-C019",
+    "file": "CHANGELOG.md",
+    "line": 858,
+    "text": "server-minted permit, charged exactly once for an idempotency key, replay",
+    "finding_family": "BE-109",
+    "status": "Historical/result reference; historical pass count not refreshed"
+  },
+  {
+    "id": "BE-C020",
+    "file": "CHANGELOG.md",
+    "line": 1026,
+    "text": "an `Idempotency-Key` with different terms is a `409`, not a second page.",
+    "finding_family": "BE-109",
+    "status": "Historical/result reference; historical pass count not refreshed"
+  },
+  {
+    "id": "BE-C021",
+    "file": "CHANGELOG.md",
+    "line": 1027,
+    "text": "- **Minting happens exactly once.** The `pending \u2192 minting` transition is a",
+    "finding_family": "BE-109",
+    "status": "Historical/result reference; historical pass count not refreshed"
+  },
+  {
+    "id": "BE-C022",
+    "file": "CHANGELOG.md",
+    "line": 1071,
+    "text": "replay contract, exactly-once refunds, and \u2014 deliberately \u2014 the list of",
+    "finding_family": "BE-107",
+    "status": "Scoped refund/reservation property; runtime proof not rerun here"
+  },
+  {
+    "id": "BE-C023",
+    "file": "CHANGELOG.md",
+    "line": 1125,
+    "text": "by the attempt's null pointer, refund it exactly once, release the",
+    "finding_family": "BE-107",
+    "status": "Scoped refund/reservation property; runtime proof not rerun here"
+  },
+  {
+    "id": "BE-C024",
+    "file": "CONTEXT.md",
+    "line": 19,
+    "text": "effect occurred nor that it occurred exactly once; remote effect-once behavior",
+    "finding_family": "BE-102",
+    "status": "Remote-effect qualifier or negation; upstream support remains required"
+  },
+  {
+    "id": "BE-C025",
+    "file": "DEMO_SCRIPT.md",
+    "line": 33,
+    "text": "`TRUST_SIGNING_KEY_ID` to new key material is rejected with",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C026",
+    "file": "DEMO_SCRIPT.md",
+    "line": 148,
+    "text": "- \"Watch the wallet. This call charges it exactly once, and the ledger entry is",
+    "finding_family": "BE-106/102",
+    "status": "Controlled proof or downstream limitation; not general delivery"
+  },
+  {
+    "id": "BE-C027",
+    "file": "DESIGN_PARTNER_GUIDE.md",
+    "line": 142,
+    "text": "and that a final valid call still charges exactly once.",
+    "finding_family": "BE-106/102",
+    "status": "Controlled proof or downstream limitation; not general delivery"
+  },
+  {
+    "id": "BE-C028",
+    "file": "DESIGN_PARTNER_GUIDE.md",
+    "line": 204,
+    "text": "- \"Exactly-once gateway authorization, debit, and receipt finalization for",
+    "finding_family": "BE-106/102",
+    "status": "Controlled proof or downstream limitation; not general delivery"
+  },
+  {
+    "id": "BE-C029",
+    "file": "DESIGN_PARTNER_GUIDE.md",
+    "line": 218,
+    "text": "- Claiming an arbitrary remote tool's side effect is exactly once when that",
+    "finding_family": "BE-106/102",
+    "status": "Controlled proof or downstream limitation; not general delivery"
+  },
+  {
+    "id": "BE-C030",
+    "file": "ELEVATOR_PITCH.md",
+    "line": 65,
+    "text": "differentiating primitive is **exactly-once economic authorization at the",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C031",
+    "file": "ELEVATOR_PITCH.md",
+    "line": 115,
+    "text": "| Enterprise authz for MCP | Who may call | Meter, receipt, and charge exactly once |",
+    "finding_family": "BE-100",
+    "status": "Integration guidance: read BE-100 context and defect"
+  },
+  {
+    "id": "BE-C032",
+    "file": "ELEVATOR_PITCH.md",
+    "line": 162,
+    "text": "**\"Does exactly-once really hold across the network?\"** For one accepted",
+    "finding_family": "BE-100",
+    "status": "Integration guidance: read BE-100 context and defect"
+  },
+  {
+    "id": "BE-C033",
+    "file": "ELEVATOR_PITCH.md",
+    "line": 164,
+    "text": "A *remote* tool's own side effect is exactly once only if that tool also honors",
+    "finding_family": "BE-100",
+    "status": "Integration guidance: read BE-100 context and defect"
+  },
+  {
+    "id": "BE-C034",
+    "file": "ELEVATOR_PITCH.md",
+    "line": 221,
+    "text": "- Distributed exactly-once side effects in arbitrary upstream MCP servers.",
+    "finding_family": "BE-102",
+    "status": "Remote-effect qualifier or negation; upstream support remains required"
+  },
+  {
+    "id": "BE-C035",
+    "file": "README.md",
+    "line": 157,
+    "text": "- **Not universal exactly-once.** Gateway replay safety makes the *remote* side",
+    "finding_family": "BE-102",
+    "status": "Remote-effect qualifier or negation; upstream support remains required"
+  },
+  {
+    "id": "BE-C036",
+    "file": "README.md",
+    "line": 158,
+    "text": "effect exactly once only if the upstream tool also honors the forwarded",
+    "finding_family": "BE-102",
+    "status": "Remote-effect qualifier or negation; upstream support remains required"
+  },
+  {
+    "id": "BE-C037",
+    "file": "SECURITY_LIMITATIONS.md",
+    "line": 83,
+    "text": "- Gateway exactly-once behavior does not make a remote side effect exactly",
+    "finding_family": "BE-102",
+    "status": "Remote-effect qualifier or negation; upstream support remains required"
+  },
+  {
+    "id": "BE-C038",
+    "file": "TROUBLESHOOTING.md",
+    "line": 91,
+    "text": "You reused an `Idempotency-Key` with different payload. Use a fresh UUID for each distinct request, or replay the exact same payload.",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C039",
+    "file": "TROUBLESHOOTING.md",
+    "line": 95,
+    "text": "- `idempotency_key_reused` (`-32603`; REST `400`): the `idempotency_key` in `mcpContext` was already used for a different payload. Use a fresh key per distinct invocation (not the same as the permit's idempotency key).",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C040",
+    "file": "TRUST_MODEL.md",
+    "line": 34,
+    "text": "## Exactly-Once Debit, Bound To The Idempotency Record",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C041",
+    "file": "WEDGE.md",
+    "line": 1,
+    "text": "# Wedge: Replay-safe MCP permits and exactly-once debits",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C042",
+    "file": "WEDGE.md",
+    "line": 6,
+    "text": "> Exactly-once gateway authorization, debit, and receipt finalization for",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C043",
+    "file": "WEDGE.md",
+    "line": 16,
+    "text": "**What \"exactly-once\" means here, precisely.** It is the distributed-systems",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C044",
+    "file": "WEDGE.md",
+    "line": 47,
+    "text": "differentiating primitive is exactly-once economic authorization at the",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C045",
+    "file": "WEDGE.md",
+    "line": 283,
+    "text": "- Distributed exactly-once side effects in arbitrary upstream MCP servers.",
+    "finding_family": "BE-102",
+    "status": "Remote-effect qualifier or negation; upstream support remains required"
+  },
+  {
+    "id": "BE-C046",
+    "file": "app/core/config.py",
+    "line": 147,
+    "text": "# - \"enforce\": refuse duplicate requests with duplicate_request_new_key",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C047",
+    "file": "app/core/config.py",
+    "line": 148,
+    "text": "MCP_UPSTREAM_DUPLICATE_GUARD: DuplicateGuardMode = DuplicateGuardMode.LOG",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C048",
+    "file": "app/core/resilience.py",
+    "line": 183,
+    "text": "# waits and the helpers below run their operation exactly once. SQLite in WAL",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C049",
+    "file": "app/db/models.py",
+    "line": 812,
+    "text": "# under different idempotency keys are allowed.",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C050",
+    "file": "app/main.py",
+    "line": 55,
+    "text": "from .services.mcp_dispatch_attempts import get_duplicate_guard_metrics",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C051",
+    "file": "app/main.py",
+    "line": 505,
+    "text": "\"the downstream effect. A remote side effect is exactly once only when \"",
+    "finding_family": "BE-102",
+    "status": "Remote-effect qualifier or negation; upstream support remains required"
+  },
+  {
+    "id": "BE-C052",
+    "file": "app/main.py",
+    "line": 1237,
+    "text": "\"/health/duplicate-guard\",",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C053",
+    "file": "app/main.py",
+    "line": 1239,
+    "text": "summary=\"Duplicate guard observability (admin-only)\",",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C054",
+    "file": "app/main.py",
+    "line": 1241,
+    "text": "\"Returns the current duplicate guard mode and observability metrics. \"",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C055",
+    "file": "app/main.py",
+    "line": 1246,
+    "text": "\"duplicate_request_new_key across the service lifetime) and the scope \"",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C056",
+    "file": "app/main.py",
+    "line": 1251,
+    "text": "async def health_duplicate_guard(",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C057",
+    "file": "app/main.py",
+    "line": 1255,
+    "text": "return await get_duplicate_guard_metrics()",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C058",
+    "file": "app/routers/api_keys.py",
+    "line": 52,
+    "text": "\"\"\"Refuse to mint a fresh key for a caller whose own key is bounded.",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C059",
+    "file": "app/routers/mcp.py",
+    "line": 232,
+    "text": "\"internal error\" as \"try again\", which with a *fresh* idempotency key runs",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C060",
+    "file": "app/routers/mcp.py",
+    "line": 266,
+    "text": "\"Do not retry with a new idempotency key: that would run and \"",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C061",
+    "file": "app/schemas/iot.py",
+    "line": 159,
+    "text": "\"2=exactly once).\"",
+    "finding_family": "BE-109",
+    "status": "QoS vocabulary or local registration; not gateway delivery"
+  },
+  {
+    "id": "BE-C062",
+    "file": "app/schemas/trust.py",
+    "line": 49,
+    "text": "# under different idempotency keys are allowed (for tools that legitimately",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C063",
+    "file": "app/schemas/trust.py",
+    "line": 53,
+    "text": "# When set, identical requests under new keys are blocked for this duration",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C064",
+    "file": "app/schemas/trust.py",
+    "line": 54,
+    "text": "# after an effectful prior attempt. Only enforced when duplicate guard is",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C065",
+    "file": "app/services/acp_bridge.py",
+    "line": 125,
+    "text": "idempotency_error (different parameters). The order id itself stays the",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C066",
+    "file": "app/services/billing_engine.py",
+    "line": 1164,
+    "text": "# daily_spent is incremented exactly once per charge (by the",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C067",
+    "file": "app/services/human_approval.py",
+    "line": 118,
+    "text": "invoke that reuses the same idempotency key with different arguments or a",
+    "finding_family": "BE-108",
+    "status": "Permit/approval issuance identity; external notification not proved"
+  },
+  {
+    "id": "BE-C068",
+    "file": "app/services/human_approval.py",
+    "line": 145,
+    "text": "single approval and page the human exactly once.",
+    "finding_family": "BE-108",
+    "status": "Permit/approval issuance identity; external notification not proved"
+  },
+  {
+    "id": "BE-C069",
+    "file": "app/services/human_approval.py",
+    "line": 148,
+    "text": "of the key so a retry with the same idempotency key but different reviewed",
+    "finding_family": "BE-108",
+    "status": "Permit/approval issuance identity; external notification not proved"
+  },
+  {
+    "id": "BE-C070",
+    "file": "app/services/idempotency.py",
+    "line": 35,
+    "text": "\"\"\"Raised when an idempotency key is reused for a different request.\"\"\"",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C071",
+    "file": "app/services/mcp_dispatch_attempts.py",
+    "line": 48,
+    "text": "# In-memory duplicate guard metrics for observability. Both counters are",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C072",
+    "file": "app/services/mcp_dispatch_attempts.py",
+    "line": 52,
+    "text": "_duplicate_guard_metrics = {",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C073",
+    "file": "app/services/mcp_dispatch_attempts.py",
+    "line": 57,
+    "text": "DUPLICATE_DENIAL_REASON_CODE = \"duplicate_request_new_key\"",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C074",
+    "file": "app/services/mcp_dispatch_attempts.py",
+    "line": 59,
+    "text": "DUPLICATE_GUARD_METRIC_SCOPES: dict[str, dict[str, Any]] = {",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C075",
+    "file": "app/services/mcp_dispatch_attempts.py",
+    "line": 80,
+    "text": "\"Denied receipts with reason_code duplicate_request_new_key across \"",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C076",
+    "file": "app/services/mcp_dispatch_attempts.py",
+    "line": 95,
+    "text": "\"\"\"Count denied receipts whose reason is the duplicate guard.",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C077",
+    "file": "app/services/mcp_dispatch_attempts.py",
+    "line": 142,
+    "text": "async def get_duplicate_guard_metrics() -> dict[str, Any]:",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C078",
+    "file": "app/services/mcp_dispatch_attempts.py",
+    "line": 143,
+    "text": "\"\"\"Return the effective duplicate guard mode and its metrics.",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C079",
+    "file": "app/services/mcp_dispatch_attempts.py",
+    "line": 151,
+    "text": "mode = settings.MCP_UPSTREAM_DUPLICATE_GUARD",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C080",
+    "file": "app/services/mcp_dispatch_attempts.py",
+    "line": 156,
+    "text": "\"log_mode_blocks\": _duplicate_guard_metrics[\"log_mode_blocks\"],",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C081",
+    "file": "app/services/mcp_dispatch_attempts.py",
+    "line": 157,
+    "text": "\"enforce_mode_blocks\": _duplicate_guard_metrics[\"enforce_mode_blocks\"],",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C082",
+    "file": "app/services/mcp_dispatch_attempts.py",
+    "line": 160,
+    "text": "\"metric_scopes\": DUPLICATE_GUARD_METRIC_SCOPES,",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C083",
+    "file": "app/services/mcp_dispatch_attempts.py",
+    "line": 735,
+    "text": "duplicate_mode = settings.MCP_UPSTREAM_DUPLICATE_GUARD",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C084",
+    "file": "app/services/mcp_dispatch_attempts.py",
+    "line": 821,
+    "text": "f\"Duplicate request detected: new idempotency key with \"",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C085",
+    "file": "app/services/mcp_dispatch_attempts.py",
+    "line": 829,
+    "text": "_duplicate_guard_metrics[\"log_mode_blocks\"] += 1",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C086",
+    "file": "app/services/mcp_dispatch_attempts.py",
+    "line": 832,
+    "text": "_duplicate_guard_metrics[\"enforce_mode_blocks\"] += 1",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C087",
+    "file": "app/services/mcp_dispatch_attempts.py",
+    "line": 836,
+    "text": "\"duplicate_request_new_key\",",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C088",
+    "file": "app/services/mcp_dispatch_attempts.py",
+    "line": 1478,
+    "text": "\"\"\"Acquire the durable, non-reacquirable right to send exactly once.",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C089",
+    "file": "app/services/mcp_phase9_tools.py",
+    "line": 340,
+    "text": "\"\"\"Ensure Phase 9 tools are registered exactly once when proof surfaces are on.\"\"\"",
+    "finding_family": "BE-109",
+    "status": "QoS vocabulary or local registration; not gateway delivery"
+  },
+  {
+    "id": "BE-C090",
+    "file": "app/services/permit_requests.py",
+    "line": 23,
+    "text": "**Minting happens exactly once.** The ``pending -> minting`` transition is a",
+    "finding_family": "BE-108",
+    "status": "Permit/approval issuance identity; external notification not proved"
+  },
+  {
+    "id": "BE-C091",
+    "file": "app/services/permit_requests.py",
+    "line": 118,
+    "text": "\"\"\"The idempotency key was reused with different requested terms.\"\"\"",
+    "finding_family": "BE-108",
+    "status": "Permit/approval issuance identity; external notification not proved"
+  },
+  {
+    "id": "BE-C092",
+    "file": "app/services/permits.py",
+    "line": 1313,
+    "text": "\"\"\"Release one remote attempt's reservation exactly once.",
+    "finding_family": "BE-107",
+    "status": "Scoped refund/reservation property; runtime proof not rerun here"
+  },
+  {
+    "id": "BE-C093",
+    "file": "app/services/pods.py",
+    "line": 21,
+    "text": "commits exactly once. ``WalletEngine.create_sponsor_wallet``,",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C094",
+    "file": "app/services/receipts.py",
+    "line": 200,
+    "text": "\"\"\"Reject reuse of one idempotency record for different evidence.\"\"\"",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C095",
+    "file": "app/services/signing_keys.py",
+    "line": 155,
+    "text": "\"\"\"Reject attempts to bind existing key metadata to new key material.\"\"\"",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C096",
+    "file": "app/services/upstream_mcp.py",
+    "line": 846,
+    "text": "\"configured upstream tool must appear exactly once in tools/list\"",
+    "finding_family": "BE-102",
+    "status": "Remote-effect qualifier or negation; upstream support remains required"
+  },
+  {
+    "id": "BE-C097",
+    "file": "awi_sdk/typescript/index.ts",
+    "line": 185,
+    "text": "throw new Error(\"idempotencyKey must not be blank\");",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C098",
+    "file": "b2a_sdk/src/b2a_sdk/decorators.py",
+    "line": 335,
+    "text": "IdempotencyConflictError: If the key was used for a different charge",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C099",
+    "file": "docs/30-day-customer-validation.md",
+    "line": 101,
+    "text": "effect is exactly once only when the upstream tool also honors the forwarded",
+    "finding_family": "BE-102",
+    "status": "Remote-effect qualifier or negation; upstream support remains required"
+  },
+  {
+    "id": "BE-C100",
+    "file": "docs/COMPETITIVE_ANALYSIS.md",
+    "line": 150,
+    "text": "- Same key + different payload \u2192 `idempotency_key_reused` error",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C101",
+    "file": "docs/POLICY_ENFORCEMENT.md",
+    "line": 192,
+    "text": "`critical` billing alerts exactly once per threshold.",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C102",
+    "file": "docs/POLICY_ENFORCEMENT.md",
+    "line": 215,
+    "text": "For upstream (`upstream_mcp`) tools, an optional duplicate guard detects when a",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C103",
+    "file": "docs/POLICY_ENFORCEMENT.md",
+    "line": 216,
+    "text": "**new** idempotency key carries the same request body as a prior effectful call",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C104",
+    "file": "docs/POLICY_ENFORCEMENT.md",
+    "line": 222,
+    "text": "blocks the new key.",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C105",
+    "file": "docs/POLICY_ENFORCEMENT.md",
+    "line": 224,
+    "text": "The guard runs in **watch-only mode** by default (`MCP_UPSTREAM_DUPLICATE_GUARD=log`):",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C106",
+    "file": "docs/POLICY_ENFORCEMENT.md",
+    "line": 226,
+    "text": "warnings. Operators can enable enforcement (`MCP_UPSTREAM_DUPLICATE_GUARD=enforce`)",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C107",
+    "file": "docs/POLICY_ENFORCEMENT.md",
+    "line": 227,
+    "text": "to deny duplicates with `duplicate_request_new_key`, or disable detection",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C108",
+    "file": "docs/POLICY_ENFORCEMENT.md",
+    "line": 228,
+    "text": "entirely (`MCP_UPSTREAM_DUPLICATE_GUARD=off`). Invalid mode values (e.g.,",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C109",
+    "file": "docs/POLICY_ENFORCEMENT.md",
+    "line": 234,
+    "text": "Observability: `/health/duplicate-guard` reports the current mode, configured",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C110",
+    "file": "docs/POLICY_ENFORCEMENT.md",
+    "line": 238,
+    "text": "`duplicate_request_new_key` across the service lifetime; it is `null` when no",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C111",
+    "file": "docs/POLICY_ENFORCEMENT.md",
+    "line": 264,
+    "text": "| `duplicate_request_new_key` | B | Cross-key duplicate detection denied an identical new-key retry (remote tools, enforce mode only) |",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C112",
+    "file": "docs/PROOF_MATRIX.md",
+    "line": 22,
+    "text": "| `make dogfood-trust-plane` | Exactly-once against a **real durable side effect** (a file on disk), not just a ledger row | Throwaway SQLite |",
+    "finding_family": "BE-106/102",
+    "status": "Controlled proof or downstream limitation; not general delivery"
+  },
+  {
+    "id": "BE-C113",
+    "file": "docs/PROOF_MATRIX.md",
+    "line": 242,
+    "text": "- **Exactly-once is gateway-scoped.** A remote tool's side effect is exactly",
+    "finding_family": "BE-106/102",
+    "status": "Controlled proof or downstream limitation; not general delivery"
+  },
+  {
+    "id": "BE-C114",
+    "file": "docs/PROOF_SURFACES.md",
+    "line": 80,
+    "text": "exactly-once MCP permit wedge. It is superseded by this freeze decision:",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C115",
+    "file": "docs/README.md",
+    "line": 37,
+    "text": "receipt. A remote side effect is exactly once only if the upstream tool honors",
+    "finding_family": "BE-102",
+    "status": "Remote-effect qualifier or negation; upstream support remains required"
+  },
+  {
+    "id": "BE-C116",
+    "file": "docs/aegis/work/2026-08-27-pre-demo-audit-hardening/20-checkpoint.md",
+    "line": 61,
+    "text": "- Aggregate review questioned whether the mandated 401 wording describes malformed `X-API-Key` input precisely enough and found an adjacent exactly-once sentence that overstated the gateway boundary.",
+    "finding_family": "BE-109",
+    "status": "Historical/result reference; historical pass count not refreshed"
+  },
+  {
+    "id": "BE-C117",
+    "file": "docs/aegis/work/2026-08-27-pre-demo-audit-hardening/20-checkpoint.md",
+    "line": 63,
+    "text": "- The exactly-once paragraph now states the actual boundary: one accepted idempotency key maps to at most one gateway dispatch and debit plus one terminal receipt. Visible FAQ and generated JSON-LD equality are pinned by a focused regression.",
+    "finding_family": "BE-109",
+    "status": "Historical/result reference; historical pass count not refreshed"
+  },
+  {
+    "id": "BE-C118",
+    "file": "docs/agent-self-credentialing.md",
+    "line": 68,
+    "text": "| 2 | replay | same idempotency key \u2192 cached receipt, no new debit, no second side effect |",
+    "finding_family": "BE-100",
+    "status": "Integration guidance: read BE-100 context and defect"
+  },
+  {
+    "id": "BE-C119",
+    "file": "docs/agent-self-credentialing.md",
+    "line": 92,
+    "text": "Proven against this code: exactly-once gateway authorization, debit, and",
+    "finding_family": "BE-100",
+    "status": "Integration guidance: read BE-100 context and defect"
+  },
+  {
+    "id": "BE-C120",
+    "file": "docs/agent-self-credentialing.md",
+    "line": 101,
+    "text": "- **Remote exactly-once.** The gateway guarantees one authorization, one",
+    "finding_family": "BE-100",
+    "status": "Integration guidance: read BE-100 context and defect"
+  },
+  {
+    "id": "BE-C121",
+    "file": "docs/agent-self-credentialing.md",
+    "line": 102,
+    "text": "debit, one finalized receipt. A remote side effect is exactly-once only if",
+    "finding_family": "BE-100",
+    "status": "Integration guidance: read BE-100 context and defect"
+  },
+  {
+    "id": "BE-C122",
+    "file": "docs/agentmarket-listing.md",
+    "line": 13,
+    "text": "Credible wedge: exactly-once gateway debit, dispatch checkpoint, and receipt",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C123",
+    "file": "docs/agentmarket-listing.md",
+    "line": 14,
+    "text": "finalization for metered MCP calls. Remote side effects are exactly once only",
+    "finding_family": "BE-102",
+    "status": "Remote-effect qualifier or negation; upstream support remains required"
+  },
+  {
+    "id": "BE-C124",
+    "file": "docs/articles/intent-is-not-authority.md",
+    "line": 9,
+    "text": "AMW provides an operator-controlled boundary for consequential tool calls. Scoped permits constrain gateway-authorized actions; idempotency controls deduplicate tested same-key requests; signed receipts provide verifiable records of gateway decisions and observed outcomes. These controls do not guarantee exactly-once downstream effects. Their effectiveness depends on deployment configuration, protected signing keys, closed bypass routes, durable state and upstream reconciliation.",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C125",
+    "file": "docs/articles/intent-is-not-authority.md",
+    "line": 17,
+    "text": "**\"Exactly-once downstream.\"** No. The gateway guarantees at most one dispatch and at most one wallet debit per accepted idempotency key. The dispatch claim is committed before the network send, so it records the authority to send, not that a send happened, and never that the tool acted. The remote effect is once only if the upstream tool also honours the forwarded key (README.md:157-162; WEDGE.md:16-23).",
+    "finding_family": "BE-102",
+    "status": "Remote-effect qualifier or negation; upstream support remains required"
+  },
+  {
+    "id": "BE-C126",
+    "file": "docs/articles/intent-is-not-authority.md",
+    "line": 19,
+    "text": "**\"Any retry is safe from duplicating a refund or payout.\"** No. Same-key retries are deduplicated, and that is tested. A fresh-key retry with identical arguments is dispatched again and receipted as a success under the shipped default, which is log mode (tests/test_upstream_retry_cap_enforcement.py:527-528; app/core/config.py:148), and the failure lab measures it as two dispatches and two debits (tests/test_failure_lab.py:188-192). The single-run lab's agent-restart case pays twice in both configurations it runs that case under, native and gateway; behind the gateway that is two dispatches, two debits and two receipts (tests/test_failure_lab.py:183-199; docs/failure-lab.md:110-111, 128-133). A signed receipt records what the gateway observed; it does not independently prove downstream payment completion.",
+    "finding_family": "BE-107",
+    "status": "Scoped refund/reservation property; runtime proof not rerun here"
+  },
+  {
+    "id": "BE-C127",
+    "file": "docs/articles/intent-is-not-authority.md",
+    "line": 45,
+    "text": "**Fresh key, identical arguments, default LOG mode.** `MCP_UPSTREAM_DUPLICATE_GUARD` defaults to `log`, which detects and allows. The second call dispatches and receives a success receipt; the unit test asserts the outcome and `dispatch_count == 2`, not the debit. The failure lab, running the unmodified default, measures the same case as two dispatches and two debits. Proof: app/core/config.py:144-148; tests/test_upstream_retry_cap_enforcement.py:467-528; tests/test_failure_lab.py:188-191.",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C128",
+    "file": "docs/articles/intent-is-not-authority.md",
+    "line": 47,
+    "text": "**Fresh key, identical arguments, ENFORCE mode.** Refused before dispatch with `duplicate_request_new_key`; `dispatch_count == 1`. On PostgreSQL, five concurrent identical new-key calls yield one dispatch, one debit, one success receipt and four denials. Detection runs by default in log mode; enforcement is opt-in. The guard covers upstream tools only (documented, not tested on local tools) and matches on permit id, tool and argument hash. It is bypassed by a permit's `allow_identical_repeats`, by OFF mode (measured on PostgreSQL only), and by the detection window expiring. The default window is 24 hours; the only expiry test uses a 60-second per-permit override, so the 24-hour window itself is not exercised. Proof: tests/test_upstream_retry_cap_enforcement.py:460-461, 534-597, 843-847; tests/test_duplicate_guard_postgres_concurrency.py:210-279, 286-468; app/core/config.py:144-151; docs/POLICY_ENFORCEMENT.md:212-227.",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C129",
+    "file": "docs/articles/intent-is-not-authority.md",
+    "line": 67,
+    "text": "- Enforce mode might refuse the lab's exact agent-restart rows, because both labs reuse the permit and resend byte-identical arguments under a new key inside the window, and unit tests refuse identical-argument new keys there (tests/test_upstream_retry_cap_enforcement.py:460-461). Neither lab ever ran under enforce; enforce applies only to the configured upstream tool and not to permits with `allow_identical_repeats` (app/services/mcp_dispatch_attempts.py:633-636; docs/POLICY_ENFORCEMENT.md:214-227); and a restart that re-requests a permit or changes any argument (a timestamp, a request id, or the native `idempotency_key` field the native-plus-gateway rows carry in the arguments) produces a new request hash that no mode detects.",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C130",
+    "file": "docs/articles/intent-is-not-authority.md",
+    "line": 94,
+    "text": "2. **Decide the guard mode.** Default `log` only observes. `MCP_UPSTREAM_DUPLICATE_GUARD=enforce` refuses identical-argument fresh-key retries on the configured upstream tool, under the same permit, inside the window (24 hours by default), with PostgreSQL for the concurrent case. It does not cover changed arguments, and by code reading it does not cover the standard `POST /mcp` surface.",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C131",
+    "file": "docs/denial-details.md",
+    "line": 67,
+    "text": "| `permit_budget_exceeded` | `required_credits`, `remaining_credits`, `spent_credits`, `max_credits` | Request a permit with enough remaining credits, then retry with a new idempotency key. |",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C132",
+    "file": "docs/denial-details.md",
+    "line": 69,
+    "text": "| `permit_max_calls_exceeded` | `tool`, `limit`, `calls_made` | Request a replacement permit with a higher per-tool call limit, then retry with a new idempotency key. Replaying the denied key returns the stored denial receipt. |",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C133",
+    "file": "docs/denial-details.md",
+    "line": 70,
+    "text": "| `permit_constraint_unsupported_for_upstream` | `execution_backend`, `unsupported_constraints` | Returned only for `aggregate_value_cap` on remote tools. Request a replacement permit that omits the aggregate cap constraint and uses `max_credits` as the atomic ceiling, then invoke with a new idempotency key. Replaying the denied key returns the stored denial. |",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C134",
+    "file": "docs/denial-details.md",
+    "line": 71,
+    "text": "| `duplicate_request_new_key` | `prior_attempt_id`, `prior_state`, `request_hash` | A new idempotency key carried arguments identical to a prior effectful call on the same permit and tool within the duplicate window (global `MCP_UPSTREAM_DUPLICATE_WINDOW_SECONDS` or permit-specific `repeat_window_seconds`). Returned only when `MCP_UPSTREAM_DUPLICATE_GUARD=enforce` and the permit does not set `allow_identical_repeats`; in the default `log` mode the call is logged and dispatched. Repeating the identical request under another new key is denied again while the prior attempt is in the window, and replaying this denied key returns the stored denial. To get the prior call's result, replay the prior call's own idempotency key; to run the call again on purpose, change the arguments or use a permit with `allow_identical_repeats`. |",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C135",
+    "file": "docs/denial-details.md",
+    "line": 95,
+    "text": "| `wallet_frozen` | The wallet is frozen and cannot be debited. | Resolve the freeze with an administrator; retry with a new idempotency key only after the wallet is spendable. |",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C136",
+    "file": "docs/denial-details.md",
+    "line": 97,
+    "text": "| `insufficient_funds` | Balance or a wallet spending cap cannot cover the action. | Top up the wallet, reduce the action cost, or change the applicable cap, then use a new idempotency key. |",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C137",
+    "file": "docs/denial-details.md",
+    "line": 112,
+    "text": "| `human_approval_request_mismatch` | The stored approval is bound to different tool arguments or cost. | Start a new invocation and approval with a new idempotency key for the exact request. |",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C138",
+    "file": "docs/denial-details.md",
+    "line": 116,
+    "text": "| `human_approval_consumed` | The single-use approval already authorized another invocation. | Start a new invocation with a new idempotency key and approval. |",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C139",
+    "file": "docs/denial-details.md",
+    "line": 128,
+    "text": "| `upstream_prepare_failed` | Atomic authorization/dispatch preparation failed before an upstream call could start. | Repair the gateway or database preparation failure, then retry with a new idempotency key. |",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C140",
+    "file": "docs/denial-details.md",
+    "line": 129,
+    "text": "| `upstream_pre_dispatch_failed` | Charging or checkpointing failed before confirmed upstream dispatch; any discovered debit was refunded. | Fix the gateway or upstream configuration, then retry with a new idempotency key. |",
+    "finding_family": "BE-107",
+    "status": "Scoped refund/reservation property; runtime proof not rerun here"
+  },
+  {
+    "id": "BE-C141",
+    "file": "docs/denial-details.md",
+    "line": 133,
+    "text": "| `tool_execution_failed` | A local registered tool raised and the debit was refunded. | Fix the tool or arguments, then retry with a new idempotency key. |",
+    "finding_family": "BE-107",
+    "status": "Scoped refund/reservation property; runtime proof not rerun here"
+  },
+  {
+    "id": "BE-C142",
+    "file": "docs/denial-details.md",
+    "line": 163,
+    "text": "duplicate guard (`MCP_UPSTREAM_DUPLICATE_GUARD`, validated at startup to be `off`, `log`, or `enforce`) runs in log-only mode by default",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C143",
+    "file": "docs/deploy-railway.md",
+    "line": 478,
+    "text": "`/.well-known/trust-keys.json` must always publish that id exactly once as an",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C144",
+    "file": "docs/deploy-railway.md",
+    "line": 814,
+    "text": "`$API_URL` issuer, to publish the manifest's key id exactly once as an active",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C145",
+    "file": "docs/failure-lab-suite.md",
+    "line": 187,
+    "text": "- **It does not prove exactly-once downstream execution.** The gateway's",
+    "finding_family": "BE-102",
+    "status": "Remote-effect qualifier or negation; upstream support remains required"
+  },
+  {
+    "id": "BE-C146",
+    "file": "docs/failure-lab-suite.md",
+    "line": 189,
+    "text": "effect is exactly once only if that tool honours the forwarded idempotency",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C147",
+    "file": "docs/failure-lab-suite.md",
+    "line": 332,
+    "text": "An agent that restarts and replans may mint a **new** idempotency key for the",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C148",
+    "file": "docs/failure-semantics.md",
+    "line": 101,
+    "text": "and the caller must not mint a fresh idempotency key. A governed record, where",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C149",
+    "file": "docs/failure-semantics.md",
+    "line": 120,
+    "text": "`retries=0`, the adapter invokes the tool exactly once, the claim transition",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C150",
+    "file": "docs/failure-semantics.md",
+    "line": 140,
+    "text": "| **A\u2032. A, proved by an actual process kill** (worker killed the instant the debit commits, before `attach_charge`) | Stale-active sweep, after a real `SIGKILL` across two OS processes | `failed_refunded`; the orphaned debit is adopted by operation identity and the upstream is never contacted | **Refunded** exactly once, budget released |",
+    "finding_family": "BE-107",
+    "status": "Scoped refund/reservation property; runtime proof not rerun here"
+  },
+  {
+    "id": "BE-C151",
+    "file": "docs/failure-semantics.md",
+    "line": 179,
+    "text": "`refund-{ledger_entry_id}`, budget release is exactly-once, and receipts are",
+    "finding_family": "BE-107",
+    "status": "Scoped refund/reservation property; runtime proof not rerun here"
+  },
+  {
+    "id": "BE-C152",
+    "file": "docs/failure-semantics.md",
+    "line": 217,
+    "text": "- **`idempotency_key_reused`** \u2014 the same key arrived with a *different*",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C153",
+    "file": "docs/failure-semantics.md",
+    "line": 259,
+    "text": "different keys) is HTTP 400 `invalid_idempotency_key` with the same",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C154",
+    "file": "docs/failure-semantics.md",
+    "line": 289,
+    "text": "## Exactly-once refunds",
+    "finding_family": "BE-107",
+    "status": "Scoped refund/reservation property; runtime proof not rerun here"
+  },
+  {
+    "id": "BE-C155",
+    "file": "docs/failure-semantics.md",
+    "line": 296,
+    "text": "later. That retry is exactly-once under concurrency: the refund entry id is",
+    "finding_family": "BE-107",
+    "status": "Scoped refund/reservation property; runtime proof not rerun here"
+  },
+  {
+    "id": "BE-C156",
+    "file": "docs/failure-semantics.md",
+    "line": 310,
+    "text": "2. **Remote exactly-once and downstream-effect proof are not claimed.** The gateway forwards",
+    "finding_family": "BE-102",
+    "status": "Remote-effect qualifier or negation; upstream support remains required"
+  },
+  {
+    "id": "BE-C157",
+    "file": "docs/failure-semantics.md",
+    "line": 312,
+    "text": "in the MCP call metadata; a remote side effect is exactly-once only if the",
+    "finding_family": "BE-102",
+    "status": "Remote-effect qualifier or negation; upstream support remains required"
+  },
+  {
+    "id": "BE-C158",
+    "file": "docs/hard-run-report-2026-08-12.md",
+    "line": 338,
+    "text": "| Idempotency / exactly-once | replay of an invoke with a fixed `Idempotency-Key` | requires a live invoke (gated) |",
+    "finding_family": "BE-109",
+    "status": "Historical/result reference; historical pass count not refreshed"
+  },
+  {
+    "id": "BE-C159",
+    "file": "docs/hard-run-report-2026-08-12.md",
+    "line": 349,
+    "text": "3. **Idempotency & metering**: replay the identical invoke and assert the receipt ID is unchanged with no second ledger debit (`GET /v1/billing/ledger/{wallet}`); then fire a small handful (3\u20135) of concurrent duplicates with the same `Idempotency-Key` and confirm exactly-once (single debit, single receipt) \u2014 the small-count race check the brief allows.",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C160",
+    "file": "docs/invariant-attack-report.md",
+    "line": 545,
+    "text": "- `tests/test_permit_postgres_concurrency.py` (attack 2 row-lock + exactly-once receipts/refunds/dispatch) \u2014 **11/11 passed**",
+    "finding_family": "BE-107",
+    "status": "Scoped refund/reservation property; runtime proof not rerun here"
+  },
+  {
+    "id": "BE-C161",
+    "file": "docs/market-research-2026-08.md",
+    "line": 440,
+    "text": "different property from debit-to-idempotency \u2014 supporting context, not",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C162",
+    "file": "docs/openapi.json",
+    "line": 5,
+    "text": "\"description\": \"## Agent Transaction Integrity\\n\\n**Make consequential agent actions transactional.**\\n\\nTransaction-integrity boundary for consequential autonomous actions on the configured upstream-MCP path: one logical action binds scoped authority and configured consumption to at most one gateway dispatch and debit, records delivery_uncertain instead of automatically redispatching, and links gateway evidence for required external reconciliation.\\n\\nIt is not a full agent middleware platform. This is a durable gateway state machine, not one distributed ACID transaction and not proof of the downstream effect. A remote side effect is exactly once only when the upstream honors the forwarded idempotency key. See `/WEDGE.md` and `/SECURITY_LIMITATIONS.md`.\\n\\n### Canonical Loop\\n\\n`logical action -> authorize -> reserve allowance -> debit -> claim dispatch -> confirmed outcome | delivery_uncertain -> receipt/audit -> authoritative external reconciliation required`\\n\\n### Product Surface\\n\\n- **Logical action identity** \u2014 accepted key bound to one payload\\n- **Bounded authority consumption** \u2014 scoped permit and configured allowance\\n- **One-shot gateway dispatch/debit** \u2014 at most once per accepted action\\n- **Explicit uncertainty** \u2014 `delivery_uncertain` is not auto-redispatched\\n- **Linked gateway evidence** \u2014 receipt and audit data for reconciliation\\n- **Discovery** \u2014 `.well-known/agent.json`, `/mcp/tools.json`, `/llms.txt`, `/v1/discover`\\n\\n### Proof Surfaces\\n\\nAgentic-web, browser, content, oracle, sandbox, media, IoT, red-team, and telemetry demos are labeled scaffolding. They mount only when `ENABLE_PROOF_SURFACES=true` and do not define the product.\\n\\n### Authentication\\n\\nProtected endpoints require an API key via the `X-API-Key` header.\\n\\n### For Agents\\n\\nStart at `/.well-known/agent.json`, then `/llms.txt` and `/mcp/tools.json`. Prefer `PUBLIC_URL` over any localhost server entry.\",",
+    "finding_family": "BE-102",
+    "status": "Remote-effect qualifier or negation; upstream support remains required"
+  },
+  {
+    "id": "BE-C163",
+    "file": "docs/openapi.json",
+    "line": 5222,
+    "text": "\"/health/duplicate-guard\": {",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C164",
+    "file": "docs/openapi.json",
+    "line": 5227,
+    "text": "\"summary\": \"Duplicate guard observability (admin-only)\",",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C165",
+    "file": "docs/openapi.json",
+    "line": 5228,
+    "text": "\"description\": \"Returns the current duplicate guard mode and observability metrics. Exposes log_mode_blocks (how many times log mode detected but allowed a duplicate) and enforce_mode_blocks (how many times enforce mode blocked a duplicate) for this process, plus enforce_mode_denials_durable (denial receipts with reason_code duplicate_request_new_key across the service lifetime) and the scope of each metric. Does not expose request contents or secrets. Requires bootstrap admin authentication.\",",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C166",
+    "file": "docs/openapi.json",
+    "line": 5229,
+    "text": "\"operationId\": \"health_duplicate_guard_health_duplicate_guard_get\",",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C167",
+    "file": "docs/owasp-agentic-top10-mapping.md",
+    "line": 154,
+    "text": "- Gap: exactly-once at the gateway does not make the remote side effect",
+    "finding_family": "BE-102",
+    "status": "Remote-effect qualifier or negation; upstream support remains required"
+  },
+  {
+    "id": "BE-C168",
+    "file": "docs/owasp-agentic-top10-mapping.md",
+    "line": 155,
+    "text": "exactly-once unless the upstream honors the forwarded idempotency key.",
+    "finding_family": "BE-102",
+    "status": "Remote-effect qualifier or negation; upstream support remains required"
+  },
+  {
+    "id": "BE-C169",
+    "file": "docs/partner-first-tool-runbook.md",
+    "line": 105,
+    "text": "exactly-once side effects.",
+    "finding_family": "BE-102",
+    "status": "Remote-effect qualifier or negation; upstream support remains required"
+  },
+  {
+    "id": "BE-C170",
+    "file": "docs/partner-first-tool-runbook.md",
+    "line": 174,
+    "text": "side effect is exactly once only if the partner tool honors the forwarded",
+    "finding_family": "BE-102",
+    "status": "Remote-effect qualifier or negation; upstream support remains required"
+  },
+  {
+    "id": "BE-C171",
+    "file": "docs/partner-interview-script.md",
+    "line": 27,
+    "text": "exactly-once, or audit until they do. Note verbatim which words *they*",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C172",
+    "file": "docs/permit-requests.md",
+    "line": 40,
+    "text": "the decision. A retry of the same `Idempotency-Key` with different terms is a",
+    "finding_family": "BE-108",
+    "status": "Permit/approval issuance identity; external notification not proved"
+  },
+  {
+    "id": "BE-C173",
+    "file": "docs/permit-requests.md",
+    "line": 67,
+    "text": "## Minting happens exactly once",
+    "finding_family": "BE-108",
+    "status": "Permit/approval issuance identity; external notification not proved"
+  },
+  {
+    "id": "BE-C174",
+    "file": "docs/permit-validation-rerun-2026-08-25.md",
+    "line": 41,
+    "text": "| Receipt \u2194 ledger linkage | PASS | receipt's `ledger_entry_id` present exactly once in the wallet ledger |",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C175",
+    "file": "docs/quickstart.md",
+    "line": 197,
+    "text": "Now try the sharper attack: **same idempotency key, different payload** \u2014",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C176",
+    "file": "docs/related-work.md",
+    "line": 45,
+    "text": "| Problem evidence | [stripe/ai#402 \u2014 agent-level retry creates duplicate charges](https://github.com/stripe/ai/issues/402) | Third-party issue report, with a reproduction, of the exact failure this wedge exists to prevent: agent frameworks retry as a new invocation with a fresh idempotency key, so SDK-level keys do not cover it. Concludes the guard belongs above the tool layer. | Verified external source; read directly 2026-08-15. It is a reported reproduction, **not** evidence that a duplicate charge reached production, and it establishes the problem rather than demand for this product. |",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C177",
+    "file": "docs/security-review-kit.md",
+    "line": 98,
+    "text": "- Gateway exactly-once does not make the upstream side effect exactly-once",
+    "finding_family": "BE-102",
+    "status": "Remote-effect qualifier or negation; upstream support remains required"
+  },
+  {
+    "id": "BE-C178",
+    "file": "docs/tech-debt-remediation-plan.md",
+    "line": 4,
+    "text": "**Product lens:** [`AGENTS.md`](../AGENTS.md) + [`WEDGE.md`](../WEDGE.md) \u2014 exactly-once MCP permits",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C179",
+    "file": "docs/tech-debt-remediation-plan.md",
+    "line": 274,
+    "text": "1. Rewrite or freeze `docs/agentmarket-listing.md` / MCP registry submission text to exactly-once permits (no AWI/RAG/sandbox as product).",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C180",
+    "file": "docs/tool-interface-authority.md",
+    "line": 37,
+    "text": "permit \u2192 meter \u2192 exactly-once dispatch \u2192 signed receipt pipeline.",
+    "finding_family": "BE-100",
+    "status": "Integration guidance: read BE-100 context and defect"
+  },
+  {
+    "id": "BE-C181",
+    "file": "docs/trust-release-gate-branch-protection.md",
+    "line": 41,
+    "text": "| `postgres_permit_concurrency` | `postgres_permit_concurrency` | Two-process exactly-once / permit row-lock concurrency regressed |",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C182",
+    "file": "failure_lab/diagnostic/runs.py",
+    "line": 264,
+    "text": "before ``app.main`` is imported, which happens exactly once per process, so",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C183",
+    "file": "failure_lab/scenarios/t01_concurrent_identical_retry.py",
+    "line": 110,
+    "text": "5. The observation string MUST NOT use the words \"exactly once\" about the",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C184",
+    "file": "failure_lab/scenarios/t01_concurrent_identical_retry.py",
+    "line": 137,
+    "text": "\"exactly-once downstream execution in general.\",",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C185",
+    "file": "failure_lab/scenarios/t02_same_key_different_arguments.py",
+    "line": 38,
+    "text": "idempotency key, same business operation id, different amount.",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C186",
+    "file": "failure_lab/scenarios/t02_same_key_different_arguments.py",
+    "line": 58,
+    "text": "\"A reused idempotency key carrying a different payload is refused \"",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C187",
+    "file": "failure_lab/scenarios/t02_same_key_different_arguments.py",
+    "line": 100,
+    "text": "\"one business operation, one idempotency key, two different payloads\",",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C188",
+    "file": "failure_lab/scenarios/t02_same_key_different_arguments.py",
+    "line": 217,
+    "text": "else \"the amount did not execute even under a fresh key; the refusal \"",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C189",
+    "file": "failure_lab/scenarios/t03_execute_then_lose_response.py",
+    "line": 524,
+    "text": "f\"operation with the same idempotency key and a new request id; the \"",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C190",
+    "file": "failure_lab/scenarios/t04_crash_before_dispatch.py",
+    "line": 415,
+    "text": "f\"idempotency key) -> status={fresh_key.status} \"",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C191",
+    "file": "failure_lab/scenarios/t04_crash_before_dispatch.py",
+    "line": 422,
+    "text": "idempotency_key=fresh_identity.idempotency_key,",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C192",
+    "file": "failure_lab/scenarios/t06_agent_restart_new_key.py",
+    "line": 1,
+    "text": "\"\"\"Test 6 -- Agent restart with a new idempotency key.\"\"\"",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C193",
+    "file": "failure_lab/scenarios/t06_agent_restart_new_key.py",
+    "line": 74,
+    "text": "under ``KeyPolicy.ATTEMPT`` mints a NEW idempotency key and a new",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C194",
+    "file": "failure_lab/scenarios/t06_agent_restart_new_key.py",
+    "line": 103,
+    "text": "title = \"Agent restart with a new idempotency key\"",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C195",
+    "file": "failure_lab/scenarios/t06_agent_restart_new_key.py",
+    "line": 227,
+    "text": "new_idempotency_key=restarted.idempotency_key,",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C196",
+    "file": "failure_lab/scenarios/t06_agent_restart_new_key.py",
+    "line": 443,
+    "text": "f\"presented a new one ({extra['first_idempotency_key']} -> \"",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C197",
+    "file": "failure_lab/scenarios/t06_agent_restart_new_key.py",
+    "line": 531,
+    "text": "f\"({extra['operation_id']}) under a brand-new idempotency key \"",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C198",
+    "file": "failure_lab/scenarios/t07_concurrent_budget_race.py",
+    "line": 549,
+    "text": "f\"operations for it -- different payment ids, different idempotency keys, \"",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C199",
+    "file": "failure_lab/scenarios/t08_permit_revocation_race.py",
+    "line": 246,
+    "text": "charge; or (b) admitted exactly once -- at most one dispatch, at most",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C200",
+    "file": "failure_lab/scenarios/t14_standard_mcp_client.py",
+    "line": 583,
+    "text": "# -- the retry: new session, same Idempotency-Key -------------",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C201",
+    "file": "failure_lab/stateful.py",
+    "line": 1438,
+    "text": "idempotency_key=f\"idem:{self.primary_operation}:k{self.new_key_ordinal}\",",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C202",
+    "file": "migrations/versions/026_governed_mcp_persistence.py",
+    "line": 1,
+    "text": "\"\"\"Add exactly-once ledger, receipt, and remote dispatch persistence.",
+    "finding_family": "BE-109",
+    "status": "Supporting/configuration/historical/game reference"
+  },
+  {
+    "id": "BE-C203",
+    "file": "migrations/versions/038_dispatch_call_slot_dup_idx.py",
+    "line": 28,
+    "text": "cross-key repeat detection: when a new idempotency key arrives with the",
+    "finding_family": "BE-109",
+    "status": "Supporting/configuration/historical/game reference"
+  },
+  {
+    "id": "BE-C204",
+    "file": "migrations/versions/039_permit_allow_ident_repeats.py",
+    "line": 23,
+    "text": "When true, identical requests under different idempotency keys are allowed,",
+    "finding_family": "BE-109",
+    "status": "Supporting/configuration/historical/game reference"
+  },
+  {
+    "id": "BE-C205",
+    "file": "scripts/agent_self_credential_proof.py",
+    "line": 11,
+    "text": "1. charge-once      one governed invoke debits exactly once",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C206",
+    "file": "scripts/agent_self_credential_proof.py",
+    "line": 12,
+    "text": "2. replay           same idempotency key -> cached receipt, no new debit,",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C207",
+    "file": "scripts/agent_self_credential_proof.py",
+    "line": 167,
+    "text": "step(\"1. first governed invoke charges exactly once\")",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C208",
+    "file": "scripts/demo_trust_plane.py",
+    "line": 242,
+    "text": "Every call carries a new idempotency key, so each one is a real permit",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C209",
+    "file": "scripts/failure_lab.py",
+    "line": 474,
+    "text": "\"idempotency_error: key already used with different parameters\"",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C210",
+    "file": "scripts/invariant_attacks/attack1_double_charge.py",
+    "line": 11,
+    "text": "1b. Reuse that idempotency key with a DIFFERENT payload. Expect: fail-closed",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C211",
+    "file": "scripts/invariant_attacks/attack1_double_charge.py",
+    "line": 12,
+    "text": "`idempotency_key_reused`, no new charge, no new note.",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C212",
+    "file": "scripts/quickstart.py",
+    "line": 84,
+    "text": "The app refuses to rebind an existing key id to new key material",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C213",
+    "file": "scripts/railway_preflight.py",
+    "line": 39,
+    "text": "id exactly once as an active Ed25519 key with that public-key fingerprint.",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C214",
+    "file": "scripts/railway_preflight.py",
+    "line": 735,
+    "text": "\"expected signing key id is not published exactly once as an \"",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C215",
+    "file": "scripts/railway_preflight.py",
+    "line": 901,
+    "text": "\"signing key id --live requires to be published exactly once as an \"",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C216",
+    "file": "scripts/stress_test_live.py",
+    "line": 35,
+    "text": "# Every idempotency key is namespaced with a fresh per-run prefix. Without this",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C217",
+    "file": "scripts/stress_test_live.py",
+    "line": 219,
+    "text": "\"\"\"20 parallel invokes with fresh idempotency keys.\"\"\"",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C218",
+    "file": "scripts/test_asyncpg_offset.py",
+    "line": 139,
+    "text": "# 8. Fresh idempotency key with different payload \u2192 new receipt",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C219",
+    "file": "scripts/test_asyncpg_offset.py",
+    "line": 145,
+    "text": "\"id\": 99,  # different id \u2192 different hash \u2192 idempotency_key_reused",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C220",
+    "file": "scripts/test_asyncpg_offset.py",
+    "line": 157,
+    "text": "print(\"\u2705 different payload with same idempotency key correctly rejected\")",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C221",
+    "file": "scripts/test_asyncpg_offset.py",
+    "line": 158,
+    "text": "print(\"\u2705 different payload with same idempotency key correctly rejected\")",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C222",
+    "file": "scripts/trust_plane_conformance.py",
+    "line": 12,
+    "text": "* Exactly-once: a completed replay returns the *same* receipt; concurrent",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C223",
+    "file": "scripts/trust_plane_conformance.py",
+    "line": 218,
+    "text": "# ---- Exactly-once (sequential) --------------------------------------",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C224",
+    "file": "scripts/trust_plane_conformance.py",
+    "line": 256,
+    "text": "# ---- Exactly-once (concurrent) --------------------------------------",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C225",
+    "file": "scripts/trust_plane_conformance.py",
+    "line": 315,
+    "text": "\"concurrent replays charged exactly once\",",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C226",
+    "file": "site/arcade.js",
+    "line": 2385,
+    "text": "A grid of nonces, each good exactly once and only until it expires. Move",
+    "finding_family": "BE-109",
+    "status": "Supporting/configuration/historical/game reference"
+  },
+  {
+    "id": "BE-C227",
+    "file": "site/arcade.js",
+    "line": 9811,
+    "text": "exactly once, the camera only goes up, and falling past the bottom of the",
+    "finding_family": "BE-109",
+    "status": "Supporting/configuration/historical/game reference"
+  },
+  {
+    "id": "BE-C228",
+    "file": "site/arcade.js",
+    "line": 15959,
+    "text": "tagline: \"Cross the settlement lanes. Get charged exactly once.\",",
+    "finding_family": "BE-109",
+    "status": "Supporting/configuration/historical/game reference"
+  },
+  {
+    "id": "BE-C229",
+    "file": "site/arcade.js",
+    "line": 16429,
+    "text": "tagline: \"Every release holds your weight exactly once.\",",
+    "finding_family": "BE-109",
+    "status": "Supporting/configuration/historical/game reference"
+  },
+  {
+    "id": "BE-C230",
+    "file": "site/compare/index.html",
+    "line": 177,
+    "text": "its own side effect exactly once depends on that tool honouring",
+    "finding_family": "BE-102",
+    "status": "Remote-effect qualifier or negation; upstream support remains required"
+  },
+  {
+    "id": "BE-C231",
+    "file": "site/compare/index.html",
+    "line": 429,
+    "text": "<dt>Does exactly-once hold all the way to my tool?</dt>",
+    "finding_family": "BE-101/109",
+    "status": "Same-key scoped claim or reference; inspect linked family evidence"
+  },
+  {
+    "id": "BE-C232",
+    "file": "site/compare/index.html",
+    "line": 436,
+    "text": "Whether your <em>upstream</em> tool's own side effect happens exactly once depends",
+    "finding_family": "BE-102",
+    "status": "Remote-effect qualifier or negation; upstream support remains required"
+  },
+  {
+    "id": "BE-C233",
+    "file": "site/index.html",
+    "line": 724,
+    "text": "<li>Exactly-once upstream side effects without upstream support</li>",
+    "finding_family": "BE-102",
+    "status": "Remote-effect qualifier or negation; upstream support remains required"
+  },
+  {
+    "id": "BE-C234",
+    "file": "site/llms-full.txt",
+    "line": 105,
+    "text": "- No exactly-once upstream side effects without upstream support. The",
+    "finding_family": "BE-102",
+    "status": "Remote-effect qualifier or negation; upstream support remains required"
+  },
+  {
+    "id": "BE-C235",
+    "file": "static/dashboard.html",
+    "line": 394,
+    "text": "<li>The public proof demonstrates one gateway-controlled action, not end-to-end exactly-once behavior for arbitrary upstream side effects.</li>",
+    "finding_family": "BE-102",
+    "status": "Remote-effect qualifier or negation; upstream support remains required"
+  },
+  {
+    "id": "BE-C236",
+    "file": "static/llm.txt",
+    "line": 23,
+    "text": "with different tool input fails closed with an idempotency conflict; use a new",
+    "finding_family": "BE-103/104/105",
+    "status": "Cross-key/default/enforce scope; see report for exact boundaries"
+  },
+  {
+    "id": "BE-C237",
+    "file": "tests/test_acp_bridge.py",
+    "line": 302,
+    "text": "# The SPT rail was hit exactly once, no second permit budget was",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C238",
+    "file": "tests/test_acp_bridge.py",
+    "line": 338,
+    "text": "# The settlement rail was hit exactly once, by the original checkout.",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C239",
+    "file": "tests/test_acp_bridge.py",
+    "line": 971,
+    "text": "params) nor draw a Stripe idempotency_error (different params). It stays",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C240",
+    "file": "tests/test_acp_bridge.py",
+    "line": 1251,
+    "text": "On retry with different cart but same intent_id, idempotency conflict",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C241",
+    "file": "tests/test_adversarial_five_claims.py",
+    "line": 301,
+    "text": "effect* ran exactly once \u2014 not merely that the ledger shows one debit.",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C242",
+    "file": "tests/test_adversarial_five_claims.py",
+    "line": 422,
+    "text": "denied. Distinct idempotency keys make each call a genuine new charge.",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C243",
+    "file": "tests/test_audit_chain_contention_surface.py",
+    "line": 465,
+    "text": "# The partner ran exactly once; nothing may invite a second send.",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C244",
+    "file": "tests/test_billing.py",
+    "line": 981,
+    "text": "async def test_charge_reused_idempotency_key_with_different_payload_conflicts(",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C245",
+    "file": "tests/test_billing.py",
+    "line": 2389,
+    "text": "counted exactly once without relying on after-the-fact compensation.",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C246",
+    "file": "tests/test_constant_loop_permit_budget.py",
+    "line": 229,
+    "text": "# Invoke multiple times with different idempotency keys",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C247",
+    "file": "tests/test_demo_ambiguous_retry.py",
+    "line": 47,
+    "text": "# The tool body ran exactly once: this counts executions, not intentions.",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C248",
+    "file": "tests/test_duplicate_guard_config.py",
+    "line": 1,
+    "text": "\"\"\"Unit tests for duplicate guard configuration validation.\"\"\"",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C249",
+    "file": "tests/test_duplicate_guard_config.py",
+    "line": 21,
+    "text": "def test_duplicate_guard_mode_enum_values():",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C250",
+    "file": "tests/test_duplicate_guard_config.py",
+    "line": 22,
+    "text": "\"\"\"Duplicate guard mode enum has expected values.\"\"\"",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C251",
+    "file": "tests/test_duplicate_guard_config.py",
+    "line": 30,
+    "text": "def test_duplicate_guard_mode_invalid_value_rejected():",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C252",
+    "file": "tests/test_duplicate_guard_config.py",
+    "line": 31,
+    "text": "\"\"\"Invalid duplicate guard mode values are rejected at startup.\"\"\"",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C253",
+    "file": "tests/test_duplicate_guard_config.py",
+    "line": 35,
+    "text": "MCP_UPSTREAM_DUPLICATE_GUARD=\"enforced\",  # typo",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C254",
+    "file": "tests/test_duplicate_guard_config.py",
+    "line": 38,
+    "text": "assert \"MCP_UPSTREAM_DUPLICATE_GUARD\" in error",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C255",
+    "file": "tests/test_duplicate_guard_config.py",
+    "line": 41,
+    "text": "def test_duplicate_guard_mode_default_is_log():",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C256",
+    "file": "tests/test_duplicate_guard_config.py",
+    "line": 42,
+    "text": "\"\"\"Default duplicate guard mode is log (observe-only).\"\"\"",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C257",
+    "file": "tests/test_duplicate_guard_config.py",
+    "line": 44,
+    "text": "assert settings.MCP_UPSTREAM_DUPLICATE_GUARD == DuplicateGuardMode.LOG",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C258",
+    "file": "tests/test_duplicate_guard_config.py",
+    "line": 47,
+    "text": "def test_duplicate_guard_mode_off_accepted():",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C259",
+    "file": "tests/test_duplicate_guard_config.py",
+    "line": 51,
+    "text": "MCP_UPSTREAM_DUPLICATE_GUARD=\"off\",",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C260",
+    "file": "tests/test_duplicate_guard_config.py",
+    "line": 53,
+    "text": "assert settings.MCP_UPSTREAM_DUPLICATE_GUARD == DuplicateGuardMode.OFF",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C261",
+    "file": "tests/test_duplicate_guard_config.py",
+    "line": 56,
+    "text": "def test_duplicate_guard_mode_enforce_accepted():",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C262",
+    "file": "tests/test_duplicate_guard_config.py",
+    "line": 60,
+    "text": "MCP_UPSTREAM_DUPLICATE_GUARD=\"enforce\",",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C263",
+    "file": "tests/test_duplicate_guard_config.py",
+    "line": 62,
+    "text": "assert settings.MCP_UPSTREAM_DUPLICATE_GUARD == DuplicateGuardMode.ENFORCE",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C264",
+    "file": "tests/test_duplicate_guard_config.py",
+    "line": 65,
+    "text": "def test_duplicate_guard_window_default():",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C265",
+    "file": "tests/test_duplicate_guard_config.py",
+    "line": 103,
+    "text": "async def test_duplicate_guard_health_endpoint_requires_admin_auth(client):",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C266",
+    "file": "tests/test_duplicate_guard_config.py",
+    "line": 104,
+    "text": "\"\"\"GET /health/duplicate-guard requires bootstrap admin authentication.\"\"\"",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C267",
+    "file": "tests/test_duplicate_guard_config.py",
+    "line": 106,
+    "text": "r = await client.get(\"/health/duplicate-guard\")",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C268",
+    "file": "tests/test_duplicate_guard_config.py",
+    "line": 112,
+    "text": "r = await client.get(\"/health/duplicate-guard\", headers=BOOTSTRAP_HEADERS)",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C269",
+    "file": "tests/test_duplicate_guard_config.py",
+    "line": 129,
+    "text": "async def test_duplicate_guard_metrics_without_database_report_null(monkeypatch):",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C270",
+    "file": "tests/test_duplicate_guard_config.py",
+    "line": 135,
+    "text": "body = await module.get_duplicate_guard_metrics()",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C271",
+    "file": "tests/test_duplicate_guard_config.py",
+    "line": 144,
+    "text": "async def test_duplicate_guard_metrics_survive_a_failing_count(monkeypatch):",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C272",
+    "file": "tests/test_duplicate_guard_config.py",
+    "line": 153,
+    "text": "body = await module.get_duplicate_guard_metrics()",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C273",
+    "file": "tests/test_duplicate_guard_config.py",
+    "line": 160,
+    "text": "async def test_duplicate_guard_metrics_bound_the_count_with_a_timeout(monkeypatch):",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C274",
+    "file": "tests/test_duplicate_guard_config.py",
+    "line": 172,
+    "text": "body = await module.get_duplicate_guard_metrics()",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C275",
+    "file": "tests/test_duplicate_guard_config.py",
+    "line": 178,
+    "text": "async def test_duplicate_guard_health_endpoint_rejects_non_admin_keys(client):",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C276",
+    "file": "tests/test_duplicate_guard_config.py",
+    "line": 184,
+    "text": "\"/health/duplicate-guard\", headers=provisioned[\"agent_headers\"]",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C277",
+    "file": "tests/test_duplicate_guard_postgres_concurrency.py",
+    "line": 1,
+    "text": "\"\"\"PostgreSQL concurrency proof for duplicate guard enforcement.",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C278",
+    "file": "tests/test_duplicate_guard_postgres_concurrency.py",
+    "line": 4,
+    "text": "and N-1 duplicate_request_new_key denials under enforce mode.",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C279",
+    "file": "tests/test_duplicate_guard_postgres_concurrency.py",
+    "line": 82,
+    "text": "name=\"Duplicate Guard Test Tool\",",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C280",
+    "file": "tests/test_duplicate_guard_postgres_concurrency.py",
+    "line": 83,
+    "text": "description=\"Controlled upstream duplicate guard test tool\",",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C281",
+    "file": "tests/test_duplicate_guard_postgres_concurrency.py",
+    "line": 122,
+    "text": "different idempotency keys but identical arguments produce exactly one",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C282",
+    "file": "tests/test_duplicate_guard_postgres_concurrency.py",
+    "line": 132,
+    "text": "settings, \"MCP_UPSTREAM_DUPLICATE_GUARD\", DuplicateGuardMode.ENFORCE",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C283",
+    "file": "tests/test_duplicate_guard_postgres_concurrency.py",
+    "line": 203,
+    "text": "assert body[\"error\"][\"message\"] == \"duplicate_request_new_key\"",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C284",
+    "file": "tests/test_duplicate_guard_postgres_concurrency.py",
+    "line": 258,
+    "text": "# All denial receipts have reason_code duplicate_request_new_key",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C285",
+    "file": "tests/test_duplicate_guard_postgres_concurrency.py",
+    "line": 260,
+    "text": "assert dr.reason_code == \"duplicate_request_new_key\"",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C286",
+    "file": "tests/test_duplicate_guard_postgres_concurrency.py",
+    "line": 286,
+    "text": "async def test_duplicate_guard_respects_permit_window_override(monkeypatch):",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C287",
+    "file": "tests/test_duplicate_guard_postgres_concurrency.py",
+    "line": 294,
+    "text": "settings, \"MCP_UPSTREAM_DUPLICATE_GUARD\", DuplicateGuardMode.ENFORCE",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C288",
+    "file": "tests/test_duplicate_guard_postgres_concurrency.py",
+    "line": 364,
+    "text": "# Immediate second call with new key, identical args - should be blocked",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C289",
+    "file": "tests/test_duplicate_guard_postgres_concurrency.py",
+    "line": 378,
+    "text": "assert r2.json()[\"error\"][\"message\"] == \"duplicate_request_new_key\"",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C290",
+    "file": "tests/test_duplicate_guard_postgres_concurrency.py",
+    "line": 409,
+    "text": "async def test_duplicate_guard_off_mode_allows_duplicates(monkeypatch):",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C291",
+    "file": "tests/test_duplicate_guard_postgres_concurrency.py",
+    "line": 417,
+    "text": "settings, \"MCP_UPSTREAM_DUPLICATE_GUARD\", DuplicateGuardMode.OFF",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C292",
+    "file": "tests/test_failure_lab_claims.py",
+    "line": 59,
+    "text": "limitations=[\"does not prove exactly-once downstream execution\"],",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C293",
+    "file": "tests/test_failure_lab_claims.py",
+    "line": 78,
+    "text": "assert_claim_is_supported(manifest, \"The gateway guarantees exactly-once refunds.\")",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C294",
+    "file": "tests/test_failure_lab_scenarios.py",
+    "line": 162,
+    "text": "An agent that restarts and mints a fresh idempotency key for the same",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C295",
+    "file": "tests/test_framework_legacy_client.py",
+    "line": 131,
+    "text": "# 2 units x 2 credits, debited exactly once despite the retry.",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C296",
+    "file": "tests/test_human_approval_gate.py",
+    "line": 725,
+    "text": "# Same idempotency key, DIFFERENT arguments \u2014 must be denied before any",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C297",
+    "file": "tests/test_human_approval_gate.py",
+    "line": 954,
+    "text": "k3 = sentinel_idempotency_key(\"w\", \"p\", \"t\", \"different\", hx)",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C298",
+    "file": "tests/test_human_approval_gate.py",
+    "line": 955,
+    "text": "# Same idempotency key + DIFFERENT args must diverge, so a differing-args",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C299",
+    "file": "tests/test_human_approval_gate.py",
+    "line": 988,
+    "text": "\"\"\"Unit: an approved, unexpired approval consumes exactly once; an expired",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C300",
+    "file": "tests/test_idempotency.py",
+    "line": 17,
+    "text": "async def test_idempotency_replays_same_payload_and_rejects_different_payload(",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C301",
+    "file": "tests/test_mcp_dispatch_reconciliation.py",
+    "line": 302,
+    "text": "idempotency_key = \"local-reservation-order-is-different\"",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C302",
+    "file": "tests/test_mcp_dispatch_reconciliation.py",
+    "line": 849,
+    "text": "idempotency_key=\"different-idempotency-key\",",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C303",
+    "file": "tests/test_mcp_dispatch_reconciliation.py",
+    "line": 1476,
+    "text": "# And the budget moved exactly once, not twice.",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C304",
+    "file": "tests/test_mcp_idempotency_key_validation.py",
+    "line": 157,
+    "text": "pytest.param(\"abc\\ndef\", \"idempotency_key_control_characters\", id=\"newline\"),",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C305",
+    "file": "tests/test_mcp_idempotency_key_validation.py",
+    "line": 168,
+    "text": "# Control: the same wallet and tool execute exactly once under a valid key.",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C306",
+    "file": "tests/test_mcp_trust.py",
+    "line": 821,
+    "text": "# permit reservation must remain consumed. A fresh idempotency key cannot",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C307",
+    "file": "tests/test_mcp_trust_mode.py",
+    "line": 231,
+    "text": "denial while nothing changed, and executes exactly once after the caller",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C308",
+    "file": "tests/test_openai_wrapper_trust_loop.py",
+    "line": 7,
+    "text": "debited exactly once. The mock-transport tests in the wrapper pin the wire",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C309",
+    "file": "tests/test_openai_wrapper_trust_loop.py",
+    "line": 100,
+    "text": "assert calls == [\"hi\", \"again\"], \"each distinct tool call executed exactly once\"",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C310",
+    "file": "tests/test_permit_postgres_concurrency.py",
+    "line": 2199,
+    "text": "\"\"\"Three concurrent reclaims of one child credit the parent exactly once.\"\"\"",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C311",
+    "file": "tests/test_permit_repeat_window_rollout.py",
+    "line": 140,
+    "text": "headers = {**wallet[\"agent_headers\"], \"Idempotency-Key\": \"new-windowless\"}",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C312",
+    "file": "tests/test_permit_request_flow.py",
+    "line": 12,
+    "text": "- Minting happens exactly once: concurrent pollers, and a mint claim abandoned",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C313",
+    "file": "tests/test_permit_request_flow.py",
+    "line": 375,
+    "text": "async def test_same_idempotency_key_with_different_terms_conflicts(",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C314",
+    "file": "tests/test_permit_reservation_unwind.py",
+    "line": 321,
+    "text": "# The tool ran exactly once: the refused call did not execute.",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C315",
+    "file": "tests/test_permit_write_contention_surface.py",
+    "line": 260,
+    "text": "\"\"\"The reserve survives lock losses and reserves exactly once.",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C316",
+    "file": "tests/test_railway_iac_config.py",
+    "line": 33,
+    "text": "\"MCP_UPSTREAM_DUPLICATE_GUARD\",",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C317",
+    "file": "tests/test_railway_preflight.py",
+    "line": 2340,
+    "text": "assert \"not published exactly once as an active Ed25519 key\" in output",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C318",
+    "file": "tests/test_receipt_write_contention_surface.py",
+    "line": 561,
+    "text": "leaves the caller to guess, and the wrong guess -- a fresh idempotency key --",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C319",
+    "file": "tests/test_red_team_trust_plane.py",
+    "line": 55,
+    "text": "# The one valid call still works and charges exactly once.",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C320",
+    "file": "tests/test_refund_reconciliation.py",
+    "line": 694,
+    "text": "headers={**BOOTSTRAP_HEADERS, \"Idempotency-Key\": \"different-key\"},",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C321",
+    "file": "tests/test_refund_reconciliation_contention_surface.py",
+    "line": 463,
+    "text": "# The debt is recorded exactly once, signed under a key that was active",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C322",
+    "file": "tests/test_repeat_window_compatibility.py",
+    "line": 30,
+    "text": "monkeypatch.setattr(settings, \"MCP_UPSTREAM_DUPLICATE_GUARD\", \"enforce\")",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C323",
+    "file": "tests/test_repeat_window_compatibility.py",
+    "line": 83,
+    "text": "assert \"duplicate_request_new_key\" in str(duplicate), duplicate",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C324",
+    "file": "tests/test_site_agent_interface.py",
+    "line": 1183,
+    "text": "if entry[\"name\"] == \"Does exactly-once hold all the way to my tool?\"",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C325",
+    "file": "tests/test_site_agent_interface.py",
+    "line": 1513,
+    "text": "\"exactly-once upstream side effects\",",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C326",
+    "file": "tests/test_site_agent_interface.py",
+    "line": 2755,
+    "text": "checked to exist exactly once, to carry all six fields, and to point at a",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C327",
+    "file": "tests/test_standard_mcp_endpoint.py",
+    "line": 6,
+    "text": "validation, server-minted permits, exactly-once replay, and signed receipts.",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C328",
+    "file": "tests/test_trust_coverage_gate_scope.py",
+    "line": 39,
+    "text": "# invoke: exactly-once dispatch",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C329",
+    "file": "tests/test_upstream_retry_cap_enforcement.py",
+    "line": 262,
+    "text": "\"\"\"Remote tool with cap=1: delivery_uncertain \u2192 new key \u2192 refused.",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C330",
+    "file": "tests/test_upstream_retry_cap_enforcement.py",
+    "line": 401,
+    "text": "monkeypatch.setattr(settings, \"MCP_UPSTREAM_DUPLICATE_GUARD\", \"enforce\")",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C331",
+    "file": "tests/test_upstream_retry_cap_enforcement.py",
+    "line": 460,
+    "text": "assert body2[\"error\"][\"message\"] == \"duplicate_request_new_key\"",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C332",
+    "file": "tests/test_upstream_retry_cap_enforcement.py",
+    "line": 467,
+    "text": "\"/health/duplicate-guard\", headers=BOOTSTRAP_HEADERS",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C333",
+    "file": "tests/test_upstream_retry_cap_enforcement.py",
+    "line": 482,
+    "text": "monkeypatch.setattr(settings, \"MCP_UPSTREAM_DUPLICATE_GUARD\", \"log\")",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C334",
+    "file": "tests/test_upstream_retry_cap_enforcement.py",
+    "line": 549,
+    "text": "monkeypatch.setattr(settings, \"MCP_UPSTREAM_DUPLICATE_GUARD\", \"enforce\")",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C335",
+    "file": "tests/test_upstream_retry_cap_enforcement.py",
+    "line": 744,
+    "text": "monkeypatch.setattr(settings, \"MCP_UPSTREAM_DUPLICATE_GUARD\", \"enforce\")",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C336",
+    "file": "tests/test_upstream_retry_cap_enforcement.py",
+    "line": 819,
+    "text": "idempotency_record_id=newer_record_id,",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C337",
+    "file": "tests/test_upstream_retry_cap_enforcement.py",
+    "line": 855,
+    "text": "assert body3[\"error\"][\"message\"] == \"duplicate_request_new_key\"",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C338",
+    "file": "tests/test_upstream_retry_cap_enforcement.py",
+    "line": 1186,
+    "text": "the slot still come back, and still exactly once.",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C339",
+    "file": "tests/test_wallet_ledger_integrity.py",
+    "line": 160,
+    "text": "\"\"\"A child's balance may be reclaimed to its parent exactly once.",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C340",
+    "file": "tests/test_wedge_honesty.py",
+    "line": 169,
+    "text": "assert \"different tool input fails closed with an idempotency conflict\" in \" \".join(",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C341",
+    "file": "tests/test_wedge_honesty.py",
+    "line": 217,
+    "text": "assert \"exactly-once\" in text",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C342",
+    "file": "tests/test_x402.py",
+    "line": 695,
+    "text": "\"\"\"Reusing an idempotency key with a different payload is refused, not",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C343",
+    "file": "wrappers/autogen-agent-middleware/tests/test_permit_cache.py",
+    "line": 60,
+    "text": "but different expires_at would cause 409 IdempotencyConflictError.",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C344",
+    "file": "wrappers/autogen-agent-middleware/tests/test_permit_cache.py",
+    "line": 106,
+    "text": "idempotency_key=\"invoke-2\",  # different invoke key",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C345",
+    "file": "wrappers/crewai-agent-middleware/tests/test_permit_cache.py",
+    "line": 60,
+    "text": "but different expires_at would cause 409 IdempotencyConflictError.",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C346",
+    "file": "wrappers/crewai-agent-middleware/tests/test_permit_cache.py",
+    "line": 108,
+    "text": "idempotency_key=\"invoke-2\",  # different invoke key",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C347",
+    "file": "wrappers/langchain-agent-middleware/src/langchain_b2a/_tools.py",
+    "line": 31,
+    "text": "# Sending different expires_at with same key \u2192 409 IdempotencyConflictError.",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C348",
+    "file": "wrappers/langchain-agent-middleware/src/langchain_b2a/_tools.py",
+    "line": 53,
+    "text": "This avoids 409 IdempotencyConflictError from different expires_at timestamps.",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C349",
+    "file": "wrappers/langchain-agent-middleware/tests/test_governed_flow.py",
+    "line": 328,
+    "text": "but different expires_at would cause 409 IdempotencyConflictError.",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  },
+  {
+    "id": "BE-C350",
+    "file": "wrappers/langchain-agent-middleware/tests/test_governed_flow.py",
+    "line": 379,
+    "text": "\"idempotency_key\": \"invoke-2\",  # different invoke key",
+    "finding_family": "BE-109",
+    "status": "Test, scenario or helper reference; not a universal guarantee"
+  }
+]

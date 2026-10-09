@@ -365,3 +365,168 @@ def test_scripts_import_without_configuration_or_network(
         imported = importlib.import_module(module_name)
         assert imported.API_URL == ""
         assert imported.API_KEY == ""
+
+
+# scripts/adversarial_battery.py sends the operator's BOOTSTRAP_KEY on every
+# request, so it gets the same target guard: an explicit target, HTTPS for
+# anything off loopback, and confirmation for the production origin.
+BATTERY_MODULE = "scripts.adversarial_battery"
+BATTERY_TARGET_ENV = "API_URL"
+BATTERY_KEY_ENV = "BOOTSTRAP_KEY"
+
+
+class _RequestAttempted(Exception):
+    """Raised by the fake urlopen once the battery tries to send a request."""
+
+
+def _load_battery(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    environment_target: str | None,
+    argv: list[str],
+    bootstrap_key: str | None = CANARY_KEY,
+) -> tuple[object, list[tuple[str, dict[str, str]]]]:
+    """Import the battery fresh under the given environment and argv.
+
+    The module is re-imported so a script that captures its target at import
+    time is exercised the way an operator's shell would exercise it.
+    """
+    monkeypatch.delenv(BATTERY_TARGET_ENV, raising=False)
+    monkeypatch.delenv(BATTERY_KEY_ENV, raising=False)
+    if environment_target is not None:
+        monkeypatch.setenv(BATTERY_TARGET_ENV, environment_target)
+    if bootstrap_key is not None:
+        monkeypatch.setenv(BATTERY_KEY_ENV, bootstrap_key)
+    monkeypatch.setattr(sys, "argv", ["adversarial_battery.py", *argv])
+    sys.modules.pop(BATTERY_MODULE, None)
+    module = importlib.import_module(BATTERY_MODULE)
+
+    sent: list[tuple[str, dict[str, str]]] = []
+
+    def fake_urlopen(request: object, timeout: float | None = None) -> object:
+        sent.append((request.full_url, dict(request.header_items())))  # type: ignore[attr-defined]
+        raise _RequestAttempted
+
+    monkeypatch.setattr(
+        module.urllib.request.OpenerDirector,
+        "open",
+        lambda _self, request, timeout=None: fake_urlopen(request, timeout),
+    )
+    return module, sent
+
+
+@pytest.mark.parametrize(
+    ("environment_target", "argv"),
+    [
+        pytest.param(None, [], id="missing-target"),
+        pytest.param("", [], id="empty-target"),
+        pytest.param("http://staging.example.test", [], id="remote-cleartext"),
+        pytest.param(
+            "https://api.thisisatest.tech", [], id="production-without-confirmation"
+        ),
+        pytest.param(
+            "https://API.THISISATEST.TECH./", [], id="production-alias-unconfirmed"
+        ),
+        pytest.param(
+            "https://user:password@staging.example.test",
+            [],
+            id="embedded-credentials",
+        ),
+        pytest.param("https://staging.example.test/v1", [], id="non-root-path"),
+        pytest.param(
+            "https://staging.example.test",
+            ["--api-url", "http://staging.example.test"],
+            id="cli-remote-cleartext",
+        ),
+    ],
+)
+def test_adversarial_battery_rejects_unsafe_target_before_any_request(
+    environment_target: str | None,
+    argv: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module, sent = _load_battery(
+        monkeypatch, environment_target=environment_target, argv=argv
+    )
+
+    assert module.main() == 2
+    assert sent == []
+    output = capsys.readouterr()
+    assert CANARY_KEY not in output.out
+    assert CANARY_KEY not in output.err
+
+
+def test_adversarial_battery_requires_bootstrap_key_before_any_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module, sent = _load_battery(
+        monkeypatch,
+        environment_target="https://staging.example.test",
+        argv=[],
+        bootstrap_key=None,
+    )
+
+    assert module.main() == 2
+    assert sent == []
+
+
+@pytest.mark.parametrize(
+    ("environment_target", "argv", "origin"),
+    [
+        pytest.param(
+            "https://STAGING.example.test:443/",
+            [],
+            "https://staging.example.test",
+            id="https-staging",
+        ),
+        pytest.param(
+            "http://127.0.0.1:8000/", [], "http://127.0.0.1:8000", id="loopback-http"
+        ),
+        pytest.param(
+            "https://environment.example.test",
+            ["--api-url", "https://cli.example.test:8443"],
+            "https://cli.example.test:8443",
+            id="cli-overrides-environment",
+        ),
+        pytest.param(
+            "https://api.thisisatest.tech",
+            ["--confirm-production"],
+            "https://api.thisisatest.tech",
+            id="confirmed-production",
+        ),
+    ],
+)
+def test_adversarial_battery_sends_to_the_normalized_accepted_target(
+    environment_target: str,
+    argv: list[str],
+    origin: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module, sent = _load_battery(
+        monkeypatch, environment_target=environment_target, argv=argv
+    )
+
+    with pytest.raises(_RequestAttempted):
+        module.main()
+
+    first_url, first_headers = sent[0]
+    assert first_url == f"{origin}/v1/billing/wallets/sponsor"
+    assert first_headers["X-api-key"] == CANARY_KEY
+    output = capsys.readouterr()
+    assert CANARY_KEY not in output.out
+    assert CANARY_KEY not in output.err
+
+
+def test_adversarial_battery_import_reads_no_target_or_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module, _sent = _load_battery(
+        monkeypatch,
+        environment_target="http://staging.example.test",
+        argv=[],
+    )
+
+    assert module.API_URL == ""
+    assert module.BOOTSTRAP_KEY is None

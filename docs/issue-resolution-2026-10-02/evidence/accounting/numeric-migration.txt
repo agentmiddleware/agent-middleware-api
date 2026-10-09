@@ -1,0 +1,6 @@
+........................................................................ [ 49%]
+.....s.................................................................. [ 98%]
+..                                                                       [100%]
+=========================== short test summary info ============================
+SKIPPED [1] tests/test_dispatch_call_slot_migration.py:28: requires fresh disposable migration PostgreSQL
+145 passed, 1 skipped in 2.77s

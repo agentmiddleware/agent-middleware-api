@@ -110,13 +110,11 @@ async def get_my_authority(
         limit=50,
         offset=0,
     )
-    pending_requests, requests_total = (
-        await get_permit_request_service().list_requests(
-            subject_wallet_id=wallet_id,
-            status="pending",
-            limit=50,
-            offset=0,
-        )
+    pending_requests, requests_total = await get_permit_request_service().list_requests(
+        subject_wallet_id=wallet_id,
+        status="pending",
+        limit=50,
+        offset=0,
     )
     return AuthoritySummaryResponse(
         wallet_id=wallet_id,

@@ -1,0 +1,2 @@
+Recorded first full app and all package results; final confirmation still running.
+{'covered_lines': 21250, 'num_statements': 24267, 'percent_covered': 87.56747846870235, 'missing_lines': 3017}

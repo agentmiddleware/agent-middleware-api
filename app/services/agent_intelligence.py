@@ -18,9 +18,25 @@ from .llm import get_llm_service
 logger = logging.getLogger(__name__)
 
 
+def _agent_key(agent_id: str, owner_wallet_id: str | None) -> str:
+    """Storage key for one agent's decisions and memory.
+
+    ``agent_id`` is a caller-asserted label, not an identity, so the same id
+    sent by two wallets must never share state. Wallet-scoped callers are
+    namespaced under their wallet id; ``None`` (bootstrap admin) keeps the
+    legacy un-namespaced key. Wallet ids are system-generated
+    (``spn-``/``agt-``/``chd-`` + hex) and never contain ``:``, so one
+    wallet's namespaced key can never equal another wallet's.
+    """
+    if owner_wallet_id is None:
+        return agent_id
+    return f"{owner_wallet_id}:{agent_id}"
+
+
 @dataclass
 class AgentDecision:
     """A decision made by the AI agent."""
+
     decision_id: str
     agent_id: str
     context: dict[str, Any]
@@ -33,6 +49,7 @@ class AgentDecision:
 @dataclass
 class SelfHealResult:
     """Result of a self-healing operation."""
+
     heal_id: str
     issue: str
     diagnosis: str
@@ -41,6 +58,9 @@ class SelfHealResult:
     verification: str | None
     success: bool
     error: str | None
+    # Wallet that requested the heal; None for bootstrap-admin heals, which
+    # only bootstrap admins may read back.
+    owner_wallet_id: str | None = None
 
 
 class AgentIntelligence:
@@ -68,12 +88,30 @@ class AgentIntelligence:
         # Load decisions
         decisions_data = await self._state.load_json("agent_intelligence.decisions")
         if decisions_data:
-            self._decisions = decisions_data
+            self._decisions = {
+                key: [
+                    item
+                    if isinstance(item, AgentDecision)
+                    else AgentDecision(
+                        **{
+                            **item,
+                            "timestamp": datetime.fromisoformat(item["timestamp"]),
+                        }
+                    )
+                    for item in items
+                ]
+                for key, items in decisions_data.items()
+            }
 
         # Load heals
         heals_data = await self._state.load_json("agent_intelligence.heals")
         if heals_data:
-            self._heals = heals_data
+            self._heals = {
+                key: item
+                if isinstance(item, SelfHealResult)
+                else SelfHealResult(**item)
+                for key, item in heals_data.items()
+            }
 
         # Load memory
         memory_data = await self._state.load_json("agent_intelligence.memory")
@@ -91,6 +129,7 @@ class AgentIntelligence:
         agent_id: str,
         context: dict[str, Any],
         options: list[str] | None = None,
+        owner_wallet_id: str | None = None,
     ) -> AgentDecision:
         """
         Make an autonomous decision based on context.
@@ -153,13 +192,14 @@ Respond with:
         )
 
         # Store decision
-        if agent_id not in self._decisions:
-            self._decisions[agent_id] = []
-        self._decisions[agent_id].append(decision)
+        store_key = _agent_key(agent_id, owner_wallet_id)
+        if store_key not in self._decisions:
+            self._decisions[store_key] = []
+        self._decisions[store_key].append(decision)
 
         # Keep only last 100 decisions per agent
-        if len(self._decisions[agent_id]) > 100:
-            self._decisions[agent_id] = self._decisions[agent_id][-100:]
+        if len(self._decisions[store_key]) > 100:
+            self._decisions[store_key] = self._decisions[store_key][-100:]
 
         await self._persist()
 
@@ -170,6 +210,7 @@ Respond with:
         self,
         issue: str,
         context: dict[str, Any],
+        owner_wallet_id: str | None = None,
     ) -> SelfHealResult:
         """
         Automatically diagnose and attempt to heal an issue.
@@ -215,6 +256,7 @@ Analyze this issue and:
             verification=None,
             success=False,
             error=None,
+            owner_wallet_id=owner_wallet_id,
         )
 
         self._heals[heal_id] = result_obj
@@ -241,10 +283,12 @@ If you don't know something, say so."""
 
         if data_context:
             context_json = json.dumps(data_context, indent=2, default=str)
-            messages.append({
-                "role": "system",
-                "content": f"System data context:\n{context_json}",
-            })
+            messages.append(
+                {
+                    "role": "system",
+                    "content": f"System data context:\n{context_json}",
+                }
+            )
 
         messages.append({"role": "user", "content": question})
 
@@ -256,20 +300,24 @@ If you don't know something, say so."""
         agent_id: str,
         key: str,
         value: Any,
+        owner_wallet_id: str | None = None,
     ) -> None:
         """Store a memory for an agent."""
-        if agent_id not in self._memory:
-            self._memory[agent_id] = []
+        store_key = _agent_key(agent_id, owner_wallet_id)
+        if store_key not in self._memory:
+            self._memory[store_key] = []
 
-        self._memory[agent_id].append({
-            "key": key,
-            "value": value,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        })
+        self._memory[store_key].append(
+            {
+                "key": key,
+                "value": value,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        )
 
         # Keep only last 1000 memories
-        if len(self._memory[agent_id]) > 1000:
-            self._memory[agent_id] = self._memory[agent_id][-1000:]
+        if len(self._memory[store_key]) > 1000:
+            self._memory[store_key] = self._memory[store_key][-1000:]
 
         await self._persist()
 
@@ -278,12 +326,14 @@ If you don't know something, say so."""
         agent_id: str,
         key: str | None = None,
         limit: int = 10,
+        owner_wallet_id: str | None = None,
     ) -> list[dict]:
         """Recall memories for an agent."""
-        if agent_id not in self._memory:
+        store_key = _agent_key(agent_id, owner_wallet_id)
+        if store_key not in self._memory:
             return []
 
-        memories = self._memory[agent_id]
+        memories = self._memory[store_key]
 
         if key:
             memories = [m for m in memories if m.get("key") == key]
@@ -294,6 +344,7 @@ If you don't know something, say so."""
         self,
         agent_id: str,
         experience: dict[str, Any],
+        owner_wallet_id: str | None = None,
     ) -> str:
         """
         Learn from an experience.
@@ -318,18 +369,29 @@ and extract key patterns or lessons. Respond with a brief summary."""
                 "insight": response.content,
                 "learned_at": datetime.now(timezone.utc).isoformat(),
             },
+            owner_wallet_id=owner_wallet_id,
         )
 
         return str(response.content)
 
-    def get_decisions(self, agent_id: str, limit: int = 20) -> list[AgentDecision]:
+    def get_decisions(
+        self,
+        agent_id: str,
+        limit: int = 20,
+        owner_wallet_id: str | None = None,
+    ) -> list[AgentDecision]:
         """Get recent decisions for an agent."""
-        if agent_id not in self._decisions:
+        store_key = _agent_key(agent_id, owner_wallet_id)
+        if store_key not in self._decisions:
             return []
-        return self._decisions[agent_id][-limit:]
+        return self._decisions[store_key][-limit:]
 
     def get_heal(self, heal_id: str) -> SelfHealResult | None:
-        """Get a specific self-heal result."""
+        """Get a specific self-heal result.
+
+        Unscoped lookup: callers must check ``owner_wallet_id`` before
+        exposing the result to a non-admin caller.
+        """
         return self._heals.get(heal_id)
 
 

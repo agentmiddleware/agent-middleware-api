@@ -79,8 +79,7 @@ class PodProvisioningFailedError(PodError):
         self.original_error = original_error
         where = f" while provisioning {failed_agent_id!r}" if failed_agent_id else ""
         super().__init__(
-            f"Pod creation failed{where} and was rolled back in full: "
-            f"{original_error}"
+            f"Pod creation failed{where} and was rolled back in full: {original_error}"
         )
 
 

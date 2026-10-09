@@ -1,0 +1,5 @@
+224.0.0.1 global= True multicast= True mapped= None predicate_blocks= True
+::ffff:224.0.0.1 global= True multicast= True mapped= 224.0.0.1 predicate_blocks= True
+::ffff:239.255.255.250 global= True multicast= True mapped= 239.255.255.250 predicate_blocks= True
+::ffff:8.8.8.8 global= True multicast= False mapped= 8.8.8.8 predicate_blocks= False
+ff02::1 global= True multicast= True mapped= None predicate_blocks= True

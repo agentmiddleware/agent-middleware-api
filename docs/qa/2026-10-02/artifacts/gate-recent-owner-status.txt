@@ -1,0 +1,91 @@
+REPORTS ['UX-REPORT.md', 'FRONTEND-REPORT.md', 'GATE-REPORT.md', 'CLAIMS-REPORT.md']
+REQUIRED {'PLAN.md': True, 'SESSION-LOG.md': True, 'FINDINGS.md': False, 'COVERAGE.md': False, 'SUMMARY.md': False}
+ARTIFACT_COUNT 206
+BACKEND-SESSION.md
+d-isolation-negative-control
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['env', 'PYTHONPATH=.', '/private/tmp/amw-qa-python/bin/python', '-']`
+
+Outcome: exit 0; 0.2s; ended 2026-10-03T00:40:17Z. [Output](artifacts/backend-child-isolation-negative-control.txt).
+
+### 2026-10-03T00:40:44Z — add-multicast-boundaries
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', '-']`
+
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:40:44Z. [Output](artifacts/backend-add-multicast-boundaries.txt).
+
+### 2026-10-03T00:41:12Z — surrogate-route-repro
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['env', 'PYTHONPATH=docs/qa/2026-10-02/backend_safety:.', 'DATABASE_URL=sqlite+aiosqlite:////private/tmp/amw-qa-surrogate-repro.db', 'STATE_BACKEND=memory', 'ALLOW_METADATA_CREATE_ALL=true', 'TRUST_MODE_ENABLED=false', 'ALLOW_LEGACY_UNPERMITTED_MCP=true', '/private/tmp/amw-qa-python/bin/python', '-']`
+
+Outcome: exit 0; 2.3s; ended 2026-10-03T00:41:15Z. [Output](artifacts/backend-surrogate-route-repro.txt).
+
+### 2026-10-03T00:41:37Z — surrogate-transport-guard-source
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['rg', '-n', '-A', '35', '-B', '12', 'Invalid JSON|await request.json|MCPContext', 'app/routers/mcp.py']`
+
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:41:37Z. [Output](artifacts/backend-surrogate-transport-guard-source.txt).
+
+### 2026-10-03T00:41:57Z — retire-disproved-surrogate-finding
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['python3', '-']`
+
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:41:57Z. [Output](artifacts/backend-retire-disproved-surrogate-finding.txt).
+
+FRONTEND-SESSION.md
+og remains intact.")']`
+
+
+### 2026-10-03T00:42:07Z — pass notes and retrospective bootstrap accounting
+
+Resumed the interrupted sweep; reused prior COORDINATION-SESSION.md, artifacts and run_logged.py without deleting or resetting prior work. First tool command, before reading the logger, was: `pwd && git branch --show-current && git remote get-url origin && git worktree list && git status --short && sed -n 1,220p docs/qa/2026-10-02/COORDINATION-SESSION.md && sed -n 1,240p docs/qa/2026-10-02/run_logged.py`. Outcome: expected checkout, branch qa/2026-10-02-sweep, PetrefiedThunder/agent-middleware-api remote, only untracked docs/qa; existing coordinator log and wrapper read. Exact start time was not persisted; occurred before the first timestamped frontend inventory entry. This is a disclosed logging gap.
+
+Applied QA-only file edits using apply_patch: browser-loopback.mjs, playwright.config.cjs, frontend.spec.cjs, frontend-components.test.cjs and FRONTEND-REPORT.md. No shell commands were hidden in those patch calls. FE-C1/C2/C3 used 10-minute charters described in report; overlapping installs/builds were independent. Browser attempts failed before page navigation; switched to jsdom/transport mocks. Gate requested runtime-generated synthetic key fixture and exact loopback mock URLs; both applied. All subsequent execution commands were wrapped by run_logged.py. Tool/session output polling does not execute new commands.
+Outcome: exit 0; 0.0s; ended 2026-10-03T00:42:07Z. [Output](artifacts/frontend-frontend-resume-notes.txt).
+
+### 2026-10-03T00:42:07Z — component-contract-gate-rerun
+
+CWD: `/Users/sellers/Projects/qa-sweep-2026-10-02/agent-middleware-api`
+
+Command (argv): `['node', '--test', '--experimental-test-coverage', 'docs/qa/2026-10-02/frontend-components.test.cjs']`
+
+
+UX-SESSION.md
+injected":b"/__qa_axe.js" in r.read()})) for u in ["http://127.0.0.1:8769/","http://127.0.0.1:8770/dashboard.html"]]; print(json.dumps(reports,indent=2)); assert all(r["status"]==200 and "connect-src" in r["csp"] and "https:" not in r["csp"] and r["axe_injected"] for r in reports)']`
+
+Outcome: exit 0; 0.1s; ended 2026-10-03T00:40:21Z. [Output](artifacts/ux-verify-axe-csp.txt).
+
+### 2026-10-03T00:41:04.651Z — cua-axe-home
+
+Tool: CUA. Action: Navigate to CSP+axe loopback 8769, read generated axe DOM report.
+
+Outcome: Saved ux-axe-home-mobile.json; axe WCAG 2.2 A/AA scan completed in Chrome fallback at 390x844.
+
+### 2026-10-03T00:41:39.924Z — keyboard-and-invalid-calculator
+
+Tool: CUA. Action: Press Tab/Return from page start; fill actions with -1; inspect result; save screenshot/semantics. Initial getByRole(status) was ambiguous due 1Password extension live region; scoped to product data-fit-result.
+
+Outcome: First Tab selected Skip to content; Return updated #main but activeElement was BODY. Calculator reports input guidance and actions aria-invalid=true. Files ux-cua-calculator-invalid.jpg and semantics.txt.
+
+### 2026-10-03T00:41:40.080Z — calculator-valid
+
+Tool: CUA. Action: Fill 100000 actions, 0.1% rate, $50 loss, 80% reduction, $2800 cost.
+
+Outcome: Displayed avoided loss $4000/month, excess $1200, break-even $35 and assumption warning. Screenshot ux-cua-calculator-valid.jpg.
+
+### 2026-10-03T00:41:54.070Z — accessibility-keyboard-text-resize
+
+Tool: CUA. Action: Keyboard-open Accessibility options; click Increase text size four times; Escape; set viewport 320x900 and navigate to #main.
+
+Outcome: Dialog was focused on open; Escape closed it and returned focus to Accessibility options. 140% text at 320px: inspect screenshot ux-cua-home-enlarged-320.jpg and DOM widths.
+

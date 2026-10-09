@@ -115,9 +115,15 @@ class UnprotectedRefundAgent:
         for _ in range(attempts):
             try:
                 return await self.issue_refund(intent)
-            except (httpx.TimeoutException, httpx.TransportError, httpx.HTTPStatusError) as exc:
+            except (
+                httpx.TimeoutException,
+                httpx.TransportError,
+                httpx.HTTPStatusError,
+            ) as exc:
                 last_error = exc
-        raise RuntimeError(f"refund {intent.operation_id} never came back") from last_error
+        raise RuntimeError(
+            f"refund {intent.operation_id} never came back"
+        ) from last_error
 
 
 __all__ = ["DEFAULT_TOOL_PATH", "RefundIntent", "UnprotectedRefundAgent"]

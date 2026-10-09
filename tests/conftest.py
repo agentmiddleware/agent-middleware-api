@@ -249,6 +249,25 @@ def anyio_backend():
     return "asyncio"
 
 
+@pytest.fixture
+def action_permit_route():
+    """Opt action fixtures into frozen issuance without changing app startup."""
+    from app.main import app
+    from app.routers.permits import action_router
+
+    original_routes = list(app.router.routes)
+    app.include_router(action_router)
+    mounted_routes = app.router.routes[len(original_routes) :]
+    app.openapi_schema = None
+    try:
+        yield
+    finally:
+        app.router.routes[:] = [
+            route for route in app.router.routes if route not in mounted_routes
+        ]
+        app.openapi_schema = None
+
+
 def _mount_dormant_test_routes() -> None:
     """Mount dormant trust surfaces (+ Stripe webhooks) on the shared app once.
 
@@ -345,6 +364,39 @@ async def setup_database():
     await close_durable_state()
 
 
+#: Tables ``clean_database`` empties, in delete order: every table is listed
+#: before any table it holds a foreign key to, so a bulk DELETE succeeds with
+#: PRAGMA foreign_keys=ON (Postgres-parity for SQLite tests). ``wallets`` comes
+#: last, after its self-FK on parent_wallet_id is cleared. A table in
+#: SQLModel.metadata that is neither listed here nor named in
+#: tests/test_clean_database_coverage.py's exemption set fails that test, so a
+#: new trust-plane table cannot silently escape per-test cleanup.
+CLEAN_DATABASE_TABLES = (
+    "receipts",
+    "mcp_dispatch_attempts",
+    "human_approvals",
+    "permit_requests",
+    "quotes",
+    "idempotency_records",
+    "permits",
+    "agent_comms_messages",
+    "content_factory_generations",
+    "ledger_entries",
+    "billing_alerts",
+    "policy_bundles",
+    "daily_balance_snapshots",
+    "kyc_verifications",
+    "refresh_tokens",
+    "api_keys",
+    "key_rotation_logs",
+    "service_registry",
+    "control_plane_audit_events",
+    "audit_chain_heads",
+    "signing_keys",
+    "wallets",
+)
+
+
 @pytest_asyncio.fixture(scope="function")
 async def clean_database():
     """Clean database tables between tests."""
@@ -352,32 +404,12 @@ async def clean_database():
 
     factory = get_session_factory()
     async with factory() as session:
-        # Child tables that FK to wallets must go before wallets. Self-FK on
-        # wallets.parent_wallet_id is cleared so a bulk DELETE succeeds with
-        # PRAGMA foreign_keys=ON (Postgres-parity for SQLite tests).
-        await session.execute(text("DELETE FROM receipts"))
-        await session.execute(text("DELETE FROM mcp_dispatch_attempts"))
-        await session.execute(text("DELETE FROM human_approvals"))
-        await session.execute(text("DELETE FROM permit_requests"))
-        await session.execute(text("DELETE FROM quotes"))
-        await session.execute(text("DELETE FROM idempotency_records"))
-        await session.execute(text("DELETE FROM permits"))
-        await session.execute(text("DELETE FROM agent_comms_messages"))
-        await session.execute(text("DELETE FROM content_factory_generations"))
-        await session.execute(text("DELETE FROM ledger_entries"))
-        await session.execute(text("DELETE FROM billing_alerts"))
-        await session.execute(text("DELETE FROM policy_bundles"))
-        await session.execute(text("DELETE FROM daily_balance_snapshots"))
-        await session.execute(text("DELETE FROM kyc_verifications"))
-        await session.execute(text("DELETE FROM refresh_tokens"))
-        await session.execute(text("DELETE FROM api_keys"))
-        await session.execute(text("DELETE FROM key_rotation_logs"))
-        await session.execute(text("DELETE FROM service_registry"))
-        await session.execute(text("DELETE FROM control_plane_audit_events"))
-        await session.execute(text("DELETE FROM audit_chain_heads"))
-        await session.execute(text("DELETE FROM signing_keys"))
-        await session.execute(text("UPDATE wallets SET parent_wallet_id = NULL"))
-        await session.execute(text("DELETE FROM wallets"))
+        for table in CLEAN_DATABASE_TABLES:
+            if table == "wallets":
+                await session.execute(
+                    text("UPDATE wallets SET parent_wallet_id = NULL")
+                )
+            await session.execute(text(f"DELETE FROM {table}"))
         await session.commit()
 
     yield

@@ -15,7 +15,9 @@ DB-created key scoped to its own wallet.
 > which exists only where an operator (or the test/battery harness) has
 > registered it. On a stock local server, set `ENABLE_DOGFOOD_TOOL=true`
 > and substitute `partner.notes.write` (2 credits/call) everywhere
-> `golden-path-echo` appears — the governance path is identical.
+> `golden-path-echo` appears. Also replace the echo arguments
+> `{"message": "hello"}` with `{"text": "hello"}` in both the first invoke and its replay.
+> Keep the same permit and invocation idempotency keys when replaying.
 
 ## Prerequisites
 

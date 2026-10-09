@@ -212,9 +212,9 @@ async def test_negative_paths_all_deny_without_charge(
     factory = get_session_factory()
     async with factory() as session:
         model = await session.get(QuoteModel, expired_quote["quote_id"])
-        model.expires_at = datetime.now(timezone.utc).replace(
-            tzinfo=None
-        ) - timedelta(seconds=1)
+        model.expires_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+            seconds=1
+        )
         session.add(model)
         await session.commit()
 

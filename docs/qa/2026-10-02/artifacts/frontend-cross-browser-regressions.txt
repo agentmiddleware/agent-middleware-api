@@ -1,0 +1,719 @@
+
+Running 24 tests using 1 worker
+
+(node:23750) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘   1 [chromium] › docs/qa/2026-10-02/frontend.spec.cjs:9:1 › main public pages load without browser or resource errors (0ms)
+(node:23764) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘   2 [chromium] › docs/qa/2026-10-02/frontend.spec.cjs:21:1 › calculator valid, boundary, invalid and cleared states stay local (0ms)
+(node:23771) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘   3 [chromium] › docs/qa/2026-10-02/frontend.spec.cjs:48:1 › receipt evidence loads without claiming cryptographic verification (1ms)
+(node:23800) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘   4 [chromium] › docs/qa/2026-10-02/frontend.spec.cjs:54:1 › receipt load failure removes published data and verification claims (1ms)
+(node:23808) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘   5 [chromium] › docs/qa/2026-10-02/frontend.spec.cjs:62:1 › malformed receipt payload fails closed (1ms)
+(node:23812) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘   6 [chromium] › docs/qa/2026-10-02/frontend.spec.cjs:68:1 › mobile pages do not overflow (0ms)
+(node:23825) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘   7 [chromium] › docs/qa/2026-10-02/frontend.spec.cjs:77:1 › operator index is static and does not ask for credentials (0ms)
+(node:23830) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘   8 [chromium] › docs/qa/2026-10-02/frontend.spec.cjs:84:1 › no JavaScript retains the pilot and proof entry path (0ms)
+(node:24307) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘   9 [firefox] › docs/qa/2026-10-02/frontend.spec.cjs:9:1 › main public pages load without browser or resource errors (0ms)
+(node:24320) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  10 [firefox] › docs/qa/2026-10-02/frontend.spec.cjs:21:1 › calculator valid, boundary, invalid and cleared states stay local (1ms)
+(node:24324) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  11 [firefox] › docs/qa/2026-10-02/frontend.spec.cjs:48:1 › receipt evidence loads without claiming cryptographic verification (0ms)
+(node:24327) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  12 [firefox] › docs/qa/2026-10-02/frontend.spec.cjs:54:1 › receipt load failure removes published data and verification claims (0ms)
+(node:24333) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  13 [firefox] › docs/qa/2026-10-02/frontend.spec.cjs:62:1 › malformed receipt payload fails closed (0ms)
+(node:24347) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  14 [firefox] › docs/qa/2026-10-02/frontend.spec.cjs:68:1 › mobile pages do not overflow (0ms)
+(node:24813) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  15 [firefox] › docs/qa/2026-10-02/frontend.spec.cjs:77:1 › operator index is static and does not ask for credentials (0ms)
+(node:24823) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  16 [firefox] › docs/qa/2026-10-02/frontend.spec.cjs:84:1 › no JavaScript retains the pilot and proof entry path (0ms)
+(node:24828) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  17 [webkit] › docs/qa/2026-10-02/frontend.spec.cjs:9:1 › main public pages load without browser or resource errors (0ms)
+(node:25033) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  18 [webkit] › docs/qa/2026-10-02/frontend.spec.cjs:21:1 › calculator valid, boundary, invalid and cleared states stay local (0ms)
+(node:25053) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  19 [webkit] › docs/qa/2026-10-02/frontend.spec.cjs:48:1 › receipt evidence loads without claiming cryptographic verification (0ms)
+(node:25060) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  20 [webkit] › docs/qa/2026-10-02/frontend.spec.cjs:54:1 › receipt load failure removes published data and verification claims (0ms)
+(node:25071) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  21 [webkit] › docs/qa/2026-10-02/frontend.spec.cjs:62:1 › malformed receipt payload fails closed (0ms)
+(node:25080) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  22 [webkit] › docs/qa/2026-10-02/frontend.spec.cjs:68:1 › mobile pages do not overflow (0ms)
+(node:25095) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  23 [webkit] › docs/qa/2026-10-02/frontend.spec.cjs:77:1 › operator index is static and does not ask for credentials (0ms)
+(node:25103) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  24 [webkit] › docs/qa/2026-10-02/frontend.spec.cjs:84:1 › no JavaScript retains the pilot and proof entry path (0ms)
+
+
+  1) [chromium] › docs/qa/2026-10-02/frontend.spec.cjs:9:1 › main public pages load without browser or resource errors 
+
+    Error: browserType.launch: Target page, context or browser has been closed
+    Browser logs:
+
+    <launching> /private/tmp/amw-qa-playwright-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-Ku6FVe --remote-debugging-pipe --no-startup-window
+    <launched> pid=23758
+    [pid=23758][err] [1002/173804.495387:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+    [pid=23758][err] [1002/173804.496906:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+    [pid=23758][err] [1002/173804.497381:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.23758: Permission denied (1100)
+    Call log:
+      - <launching> /private/tmp/amw-qa-playwright-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-Ku6FVe --remote-debugging-pipe --no-startup-window
+      - <launched> pid=23758
+      - [pid=23758][err] [1002/173804.495387:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+      - [pid=23758][err] [1002/173804.496906:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+      - [pid=23758][err] [1002/173804.497381:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.23758: Permission denied (1100)
+      - [pid=23758] <gracefully close start>
+      - [pid=23758] <kill>
+      - [pid=23758] <will force kill>
+      - [pid=23758] exception while trying to kill process: Error: kill EPERM
+      - [pid=23758] <process did exit: exitCode=null, signal=SIGTRAP>
+      - [pid=23758] starting temporary directories cleanup
+      - [pid=23758] finished temporary directories cleanup
+      - [pid=23758] <gracefully close end>
+
+
+    Error Context: docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-main-public-pages-92902--browser-or-resource-errors-chromium/error-context.md
+
+  2) [chromium] › docs/qa/2026-10-02/frontend.spec.cjs:21:1 › calculator valid, boundary, invalid and cleared states stay local 
+
+    Error: browserType.launch: Target page, context or browser has been closed
+    Browser logs:
+
+    <launching> /private/tmp/amw-qa-playwright-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-fCc743 --remote-debugging-pipe --no-startup-window
+    <launched> pid=23767
+    [pid=23767][err] [1002/173804.962520:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+    [pid=23767][err] [1002/173804.963870:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+    [pid=23767][err] [1002/173804.964284:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.23767: Permission denied (1100)
+    Call log:
+      - <launching> /private/tmp/amw-qa-playwright-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-fCc743 --remote-debugging-pipe --no-startup-window
+      - <launched> pid=23767
+      - [pid=23767][err] [1002/173804.962520:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+      - [pid=23767][err] [1002/173804.963870:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+      - [pid=23767][err] [1002/173804.964284:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.23767: Permission denied (1100)
+      - [pid=23767] <gracefully close start>
+      - [pid=23767] <kill>
+      - [pid=23767] <will force kill>
+      - [pid=23767] exception while trying to kill process: Error: kill EPERM
+      - [pid=23767] <process did exit: exitCode=null, signal=SIGTRAP>
+      - [pid=23767] starting temporary directories cleanup
+      - [pid=23767] finished temporary directories cleanup
+      - [pid=23767] <gracefully close end>
+
+
+    Error Context: docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-calculator-valid--07074-d-cleared-states-stay-local-chromium/error-context.md
+
+  3) [chromium] › docs/qa/2026-10-02/frontend.spec.cjs:48:1 › receipt evidence loads without claiming cryptographic verification 
+
+    Error: browserType.launch: Target page, context or browser has been closed
+    Browser logs:
+
+    <launching> /private/tmp/amw-qa-playwright-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-RaKamC --remote-debugging-pipe --no-startup-window
+    <launched> pid=23775
+    [pid=23775][err] [1002/173805.421239:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+    [pid=23775][err] [1002/173805.422653:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+    [pid=23775][err] [1002/173805.423281:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.23775: Permission denied (1100)
+    [pid=23775] <process did exit: exitCode=null, signal=SIGTRAP>
+    [pid=23775] starting temporary directories cleanup
+    Call log:
+      - <launching> /private/tmp/amw-qa-playwright-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-RaKamC --remote-debugging-pipe --no-startup-window
+      - <launched> pid=23775
+      - [pid=23775][err] [1002/173805.421239:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+      - [pid=23775][err] [1002/173805.422653:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+      - [pid=23775][err] [1002/173805.423281:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.23775: Permission denied (1100)
+      - [pid=23775] <process did exit: exitCode=null, signal=SIGTRAP>
+      - [pid=23775] starting temporary directories cleanup
+      - [pid=23775] <gracefully close start>
+      - [pid=23775] <kill>
+      - [pid=23775] <skipped force kill spawnedProcess.killed=false processClosed=true>
+      - [pid=23775] finished temporary directories cleanup
+      - [pid=23775] <gracefully close end>
+
+
+    Error Context: docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-receipt-evidence--4ee34--cryptographic-verification-chromium/error-context.md
+
+  4) [chromium] › docs/qa/2026-10-02/frontend.spec.cjs:54:1 › receipt load failure removes published data and verification claims 
+
+    Error: browserType.launch: Target page, context or browser has been closed
+    Browser logs:
+
+    <launching> /private/tmp/amw-qa-playwright-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-SLn3aC --remote-debugging-pipe --no-startup-window
+    <launched> pid=23805
+    [pid=23805][err] [1002/173806.029677:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+    [pid=23805][err] [1002/173806.031237:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+    [pid=23805][err] [1002/173806.031695:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.23805: Permission denied (1100)
+    Call log:
+      - <launching> /private/tmp/amw-qa-playwright-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-SLn3aC --remote-debugging-pipe --no-startup-window
+      - <launched> pid=23805
+      - [pid=23805][err] [1002/173806.029677:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+      - [pid=23805][err] [1002/173806.031237:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+      - [pid=23805][err] [1002/173806.031695:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.23805: Permission denied (1100)
+      - [pid=23805] <gracefully close start>
+      - [pid=23805] <kill>
+      - [pid=23805] <will force kill>
+      - [pid=23805] exception while trying to kill process: Error: kill EPERM
+      - [pid=23805] <process did exit: exitCode=null, signal=SIGTRAP>
+      - [pid=23805] starting temporary directories cleanup
+      - [pid=23805] finished temporary directories cleanup
+      - [pid=23805] <gracefully close end>
+
+
+    Error Context: docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-receipt-load-fail-c9de9-ata-and-verification-claims-chromium/error-context.md
+
+  5) [chromium] › docs/qa/2026-10-02/frontend.spec.cjs:62:1 › malformed receipt payload fails closed 
+
+    Error: browserType.launch: Target page, context or browser has been closed
+    Browser logs:
+
+    <launching> /private/tmp/amw-qa-playwright-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-1atku9 --remote-debugging-pipe --no-startup-window
+    <launched> pid=23809
+    [pid=23809][err] [1002/173806.548724:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+    [pid=23809][err] [1002/173806.549980:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+    [pid=23809][err] [1002/173806.550386:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.23809: Permission denied (1100)
+    Call log:
+      - <launching> /private/tmp/amw-qa-playwright-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-1atku9 --remote-debugging-pipe --no-startup-window
+      - <launched> pid=23809
+      - [pid=23809][err] [1002/173806.548724:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+      - [pid=23809][err] [1002/173806.549980:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+      - [pid=23809][err] [1002/173806.550386:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.23809: Permission denied (1100)
+      - [pid=23809] <gracefully close start>
+      - [pid=23809] <kill>
+      - [pid=23809] <will force kill>
+      - [pid=23809] exception while trying to kill process: Error: kill EPERM
+      - [pid=23809] <process did exit: exitCode=null, signal=SIGTRAP>
+      - [pid=23809] starting temporary directories cleanup
+      - [pid=23809] finished temporary directories cleanup
+      - [pid=23809] <gracefully close end>
+
+
+    Error Context: docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-malformed-receipt-payload-fails-closed-chromium/error-context.md
+
+  6) [chromium] › docs/qa/2026-10-02/frontend.spec.cjs:68:1 › mobile pages do not overflow ─────────
+
+    Error: browserType.launch: Target page, context or browser has been closed
+    Browser logs:
+
+    <launching> /private/tmp/amw-qa-playwright-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-RAR1My --remote-debugging-pipe --no-startup-window
+    <launched> pid=23815
+    [pid=23815][err] [1002/173807.021940:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+    [pid=23815][err] [1002/173807.023256:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+    [pid=23815][err] [1002/173807.023695:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.23815: Permission denied (1100)
+    Call log:
+      - <launching> /private/tmp/amw-qa-playwright-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-RAR1My --remote-debugging-pipe --no-startup-window
+      - <launched> pid=23815
+      - [pid=23815][err] [1002/173807.021940:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+      - [pid=23815][err] [1002/173807.023256:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+      - [pid=23815][err] [1002/173807.023695:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.23815: Permission denied (1100)
+      - [pid=23815] <gracefully close start>
+      - [pid=23815] <kill>
+      - [pid=23815] <will force kill>
+      - [pid=23815] exception while trying to kill process: Error: kill EPERM
+      - [pid=23815] <process did exit: exitCode=null, signal=SIGTRAP>
+      - [pid=23815] starting temporary directories cleanup
+      - [pid=23815] finished temporary directories cleanup
+      - [pid=23815] <gracefully close end>
+
+
+    Error Context: docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-mobile-pages-do-not-overflow-chromium/error-context.md
+
+  7) [chromium] › docs/qa/2026-10-02/frontend.spec.cjs:77:1 › operator index is static and does not ask for credentials 
+
+    Error: browserType.launch: Target page, context or browser has been closed
+    Browser logs:
+
+    <launching> /private/tmp/amw-qa-playwright-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-2g5AvV --remote-debugging-pipe --no-startup-window
+    <launched> pid=23829
+    [pid=23829][err] [1002/173807.461026:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+    [pid=23829][err] [1002/173807.462348:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+    [pid=23829][err] [1002/173807.462736:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.23829: Permission denied (1100)
+    Call log:
+      - <launching> /private/tmp/amw-qa-playwright-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-2g5AvV --remote-debugging-pipe --no-startup-window
+      - <launched> pid=23829
+      - [pid=23829][err] [1002/173807.461026:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+      - [pid=23829][err] [1002/173807.462348:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+      - [pid=23829][err] [1002/173807.462736:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.23829: Permission denied (1100)
+      - [pid=23829] <gracefully close start>
+      - [pid=23829] <kill>
+      - [pid=23829] <will force kill>
+      - [pid=23829] exception while trying to kill process: Error: kill EPERM
+      - [pid=23829] <process did exit: exitCode=null, signal=SIGTRAP>
+      - [pid=23829] starting temporary directories cleanup
+      - [pid=23829] finished temporary directories cleanup
+      - [pid=23829] <gracefully close end>
+
+
+    Error Context: docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-operator-index-is-00d11-oes-not-ask-for-credentials-chromium/error-context.md
+
+  8) [chromium] › docs/qa/2026-10-02/frontend.spec.cjs:84:1 › no JavaScript retains the pilot and proof entry path 
+
+    Error: browserType.launch: Target page, context or browser has been closed
+    Browser logs:
+
+    <launching> /private/tmp/amw-qa-playwright-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-B8zhp9 --remote-debugging-pipe --no-startup-window
+    <launched> pid=23834
+    [pid=23834][err] [1002/173807.896181:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+    [pid=23834][err] [1002/173807.897704:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+    [pid=23834][err] [1002/173807.898087:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.23834: Permission denied (1100)
+    Call log:
+      - <launching> /private/tmp/amw-qa-playwright-browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_chromiumdev_profile-B8zhp9 --remote-debugging-pipe --no-startup-window
+      - <launched> pid=23834
+      - [pid=23834][err] [1002/173807.896181:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+      - [pid=23834][err] [1002/173807.897704:ERROR:net/dns/dns_config_service_posix.cc:138] DNS config watch failed to start.
+      - [pid=23834][err] [1002/173807.898087:FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS. bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer.23834: Permission denied (1100)
+      - [pid=23834] <gracefully close start>
+      - [pid=23834] <kill>
+      - [pid=23834] <will force kill>
+      - [pid=23834] exception while trying to kill process: Error: kill EPERM
+      - [pid=23834] <process did exit: exitCode=null, signal=SIGTRAP>
+      - [pid=23834] starting temporary directories cleanup
+      - [pid=23834] finished temporary directories cleanup
+      - [pid=23834] <gracefully close end>
+
+
+    Error Context: docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-no-JavaScript-ret-1671c--pilot-and-proof-entry-path-chromium/error-context.md
+
+  9) [firefox] › docs/qa/2026-10-02/frontend.spec.cjs:9:1 › main public pages load without browser or resource errors 
+
+    Error: browserType.launch: Failed to launch the browser process.
+    Browser logs:
+
+    <launching> /private/tmp/amw-qa-playwright-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox -no-remote -headless -profile /var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_firefoxdev_profile-xPXXEd -juggler-pipe -silent
+    <launched> pid=24308
+    [pid=24308][err] *** You are running in headless mode.
+    [pid=24308] <process did exit: exitCode=null, signal=SIGABRT>
+    [pid=24308] starting temporary directories cleanup
+    Call log:
+      - <launching> /private/tmp/amw-qa-playwright-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox -no-remote -headless -profile /var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_firefoxdev_profile-xPXXEd -juggler-pipe -silent
+      - <launched> pid=24308
+      - [pid=24308][err] *** You are running in headless mode.
+      - [pid=24308] <process did exit: exitCode=null, signal=SIGABRT>
+      - [pid=24308] starting temporary directories cleanup
+      - [pid=24308] <gracefully close start>
+      - [pid=24308] <kill>
+      - [pid=24308] <skipped force kill spawnedProcess.killed=false processClosed=true>
+      - [pid=24308] finished temporary directories cleanup
+      - [pid=24308] <gracefully close end>
+
+
+    Error Context: docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-main-public-pages-92902--browser-or-resource-errors-firefox/error-context.md
+
+  10) [firefox] › docs/qa/2026-10-02/frontend.spec.cjs:21:1 › calculator valid, boundary, invalid and cleared states stay local 
+
+    Error: browserType.launch: Failed to launch the browser process.
+    Browser logs:
+
+    <launching> /private/tmp/amw-qa-playwright-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox -no-remote -headless -profile /var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_firefoxdev_profile-hjwDkV -juggler-pipe -silent
+    <launched> pid=24323
+    [pid=24323][err] *** You are running in headless mode.
+    [pid=24323] <process did exit: exitCode=null, signal=SIGABRT>
+    [pid=24323] starting temporary directories cleanup
+    Call log:
+      - <launching> /private/tmp/amw-qa-playwright-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox -no-remote -headless -profile /var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_firefoxdev_profile-hjwDkV -juggler-pipe -silent
+      - <launched> pid=24323
+      - [pid=24323][err] *** You are running in headless mode.
+      - [pid=24323] <process did exit: exitCode=null, signal=SIGABRT>
+      - [pid=24323] starting temporary directories cleanup
+      - [pid=24323] <gracefully close start>
+      - [pid=24323] <kill>
+      - [pid=24323] <skipped force kill spawnedProcess.killed=false processClosed=true>
+      - [pid=24323] finished temporary directories cleanup
+      - [pid=24323] <gracefully close end>
+
+
+    Error Context: docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-calculator-valid--07074-d-cleared-states-stay-local-firefox/error-context.md
+
+  11) [firefox] › docs/qa/2026-10-02/frontend.spec.cjs:48:1 › receipt evidence loads without claiming cryptographic verification 
+
+    Error: browserType.launch: Failed to launch the browser process.
+    Browser logs:
+
+    <launching> /private/tmp/amw-qa-playwright-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox -no-remote -headless -profile /var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_firefoxdev_profile-q4mKwm -juggler-pipe -silent
+    <launched> pid=24325
+    [pid=24325][err] *** You are running in headless mode.
+    [pid=24325] <process did exit: exitCode=null, signal=SIGABRT>
+    [pid=24325] starting temporary directories cleanup
+    Call log:
+      - <launching> /private/tmp/amw-qa-playwright-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox -no-remote -headless -profile /var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_firefoxdev_profile-q4mKwm -juggler-pipe -silent
+      - <launched> pid=24325
+      - [pid=24325][err] *** You are running in headless mode.
+      - [pid=24325] <process did exit: exitCode=null, signal=SIGABRT>
+      - [pid=24325] starting temporary directories cleanup
+      - [pid=24325] <gracefully close start>
+      - [pid=24325] <kill>
+      - [pid=24325] <skipped force kill spawnedProcess.killed=false processClosed=true>
+      - [pid=24325] finished temporary directories cleanup
+      - [pid=24325] <gracefully close end>
+
+
+    Error Context: docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-receipt-evidence--4ee34--cryptographic-verification-firefox/error-context.md
+
+  12) [firefox] › docs/qa/2026-10-02/frontend.spec.cjs:54:1 › receipt load failure removes published data and verification claims 
+
+    Error: browserType.launch: Failed to launch the browser process.
+    Browser logs:
+
+    <launching> /private/tmp/amw-qa-playwright-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox -no-remote -headless -profile /var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_firefoxdev_profile-kEMNii -juggler-pipe -silent
+    <launched> pid=24330
+    [pid=24330][err] *** You are running in headless mode.
+    [pid=24330] <process did exit: exitCode=null, signal=SIGABRT>
+    [pid=24330] starting temporary directories cleanup
+    Call log:
+      - <launching> /private/tmp/amw-qa-playwright-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox -no-remote -headless -profile /var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_firefoxdev_profile-kEMNii -juggler-pipe -silent
+      - <launched> pid=24330
+      - [pid=24330][err] *** You are running in headless mode.
+      - [pid=24330] <process did exit: exitCode=null, signal=SIGABRT>
+      - [pid=24330] starting temporary directories cleanup
+      - [pid=24330] <gracefully close start>
+      - [pid=24330] <kill>
+      - [pid=24330] <skipped force kill spawnedProcess.killed=false processClosed=true>
+      - [pid=24330] finished temporary directories cleanup
+      - [pid=24330] <gracefully close end>
+
+
+    Error Context: docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-receipt-load-fail-c9de9-ata-and-verification-claims-firefox/error-context.md
+
+  13) [firefox] › docs/qa/2026-10-02/frontend.spec.cjs:62:1 › malformed receipt payload fails closed 
+
+    Error: browserType.launch: Failed to launch the browser process.
+    Browser logs:
+
+    <launching> /private/tmp/amw-qa-playwright-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox -no-remote -headless -profile /var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_firefoxdev_profile-5znwg9 -juggler-pipe -silent
+    <launched> pid=24335
+    [pid=24335][err] *** You are running in headless mode.
+    [pid=24335] <process did exit: exitCode=null, signal=SIGABRT>
+    [pid=24335] starting temporary directories cleanup
+    Call log:
+      - <launching> /private/tmp/amw-qa-playwright-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox -no-remote -headless -profile /var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_firefoxdev_profile-5znwg9 -juggler-pipe -silent
+      - <launched> pid=24335
+      - [pid=24335][err] *** You are running in headless mode.
+      - [pid=24335] <process did exit: exitCode=null, signal=SIGABRT>
+      - [pid=24335] starting temporary directories cleanup
+      - [pid=24335] <gracefully close start>
+      - [pid=24335] <kill>
+      - [pid=24335] <skipped force kill spawnedProcess.killed=false processClosed=true>
+      - [pid=24335] finished temporary directories cleanup
+      - [pid=24335] <gracefully close end>
+
+
+    Error Context: docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-malformed-receipt-payload-fails-closed-firefox/error-context.md
+
+  14) [firefox] › docs/qa/2026-10-02/frontend.spec.cjs:68:1 › mobile pages do not overflow ─────────
+
+    Error: browserType.launch: Failed to launch the browser process.
+    Browser logs:
+
+    <launching> /private/tmp/amw-qa-playwright-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox -no-remote -headless -profile /var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_firefoxdev_profile-rp7ThL -juggler-pipe -silent
+    <launched> pid=24812
+    [pid=24812][err] *** You are running in headless mode.
+    [pid=24812] <process did exit: exitCode=null, signal=SIGABRT>
+    [pid=24812] starting temporary directories cleanup
+    Call log:
+      - <launching> /private/tmp/amw-qa-playwright-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox -no-remote -headless -profile /var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_firefoxdev_profile-rp7ThL -juggler-pipe -silent
+      - <launched> pid=24812
+      - [pid=24812][err] *** You are running in headless mode.
+      - [pid=24812] <process did exit: exitCode=null, signal=SIGABRT>
+      - [pid=24812] starting temporary directories cleanup
+      - [pid=24812] <gracefully close start>
+      - [pid=24812] <kill>
+      - [pid=24812] <skipped force kill spawnedProcess.killed=false processClosed=true>
+      - [pid=24812] finished temporary directories cleanup
+      - [pid=24812] <gracefully close end>
+
+
+    Error Context: docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-mobile-pages-do-not-overflow-firefox/error-context.md
+
+  15) [firefox] › docs/qa/2026-10-02/frontend.spec.cjs:77:1 › operator index is static and does not ask for credentials 
+
+    Error: browserType.launch: Failed to launch the browser process.
+    Browser logs:
+
+    <launching> /private/tmp/amw-qa-playwright-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox -no-remote -headless -profile /var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_firefoxdev_profile-4DaDd6 -juggler-pipe -silent
+    <launched> pid=24822
+    [pid=24822][err] *** You are running in headless mode.
+    [pid=24822] <process did exit: exitCode=null, signal=SIGABRT>
+    [pid=24822] starting temporary directories cleanup
+    Call log:
+      - <launching> /private/tmp/amw-qa-playwright-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox -no-remote -headless -profile /var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_firefoxdev_profile-4DaDd6 -juggler-pipe -silent
+      - <launched> pid=24822
+      - [pid=24822][err] *** You are running in headless mode.
+      - [pid=24822] <process did exit: exitCode=null, signal=SIGABRT>
+      - [pid=24822] starting temporary directories cleanup
+      - [pid=24822] <gracefully close start>
+      - [pid=24822] <kill>
+      - [pid=24822] <skipped force kill spawnedProcess.killed=false processClosed=true>
+      - [pid=24822] finished temporary directories cleanup
+      - [pid=24822] <gracefully close end>
+
+
+    Error Context: docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-operator-index-is-00d11-oes-not-ask-for-credentials-firefox/error-context.md
+
+  16) [firefox] › docs/qa/2026-10-02/frontend.spec.cjs:84:1 › no JavaScript retains the pilot and proof entry path 
+
+    Error: browserType.launch: Failed to launch the browser process.
+    Browser logs:
+
+    <launching> /private/tmp/amw-qa-playwright-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox -no-remote -headless -profile /var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_firefoxdev_profile-61MkA5 -juggler-pipe -silent
+    <launched> pid=24827
+    [pid=24827][err] *** You are running in headless mode.
+    [pid=24827] <process did exit: exitCode=null, signal=SIGABRT>
+    [pid=24827] starting temporary directories cleanup
+    Call log:
+      - <launching> /private/tmp/amw-qa-playwright-browsers/firefox-1543/firefox/Nightly.app/Contents/MacOS/firefox -no-remote -headless -profile /var/folders/jq/nbt0s6qs6njf4yfc0w30wmxh0000gn/T/playwright_firefoxdev_profile-61MkA5 -juggler-pipe -silent
+      - <launched> pid=24827
+      - [pid=24827][err] *** You are running in headless mode.
+      - [pid=24827] <process did exit: exitCode=null, signal=SIGABRT>
+      - [pid=24827] starting temporary directories cleanup
+      - [pid=24827] <gracefully close start>
+      - [pid=24827] <kill>
+      - [pid=24827] <skipped force kill spawnedProcess.killed=false processClosed=true>
+      - [pid=24827] finished temporary directories cleanup
+      - [pid=24827] <gracefully close end>
+
+
+    Error Context: docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-no-JavaScript-ret-1671c--pilot-and-proof-entry-path-firefox/error-context.md
+
+  17) [webkit] › docs/qa/2026-10-02/frontend.spec.cjs:9:1 › main public pages load without browser or resource errors 
+
+    Error: browserType.launch: Target page, context or browser has been closed
+    Browser logs:
+
+    <launching> /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh --inspector-pipe --headless --no-startup-window
+    <launched> pid=24833
+    [pid=24833][err] /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh: line 7: 24840 Abort trap: 6              DYLD_FRAMEWORK_PATH="$DYLIB_PATH" DYLD_LIBRARY_PATH="$DYLIB_PATH" "$PLAYWRIGHT" "$@"
+    Call log:
+      - <launching> /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh --inspector-pipe --headless --no-startup-window
+      - <launched> pid=24833
+      - [pid=24833][err] /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh: line 7: 24840 Abort trap: 6              DYLD_FRAMEWORK_PATH="$DYLIB_PATH" DYLD_LIBRARY_PATH="$DYLIB_PATH" "$PLAYWRIGHT" "$@"
+      - [pid=24833] <gracefully close start>
+      - [pid=24833] <kill>
+      - [pid=24833] <will force kill>
+      - [pid=24833] exception while trying to kill process: Error: kill EPERM
+      - [pid=24833] <process did exit: exitCode=134, signal=null>
+      - [pid=24833] starting temporary directories cleanup
+      - [pid=24833] finished temporary directories cleanup
+      - [pid=24833] <gracefully close end>
+
+
+    Error Context: docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-main-public-pages-92902--browser-or-resource-errors-webkit/error-context.md
+
+  18) [webkit] › docs/qa/2026-10-02/frontend.spec.cjs:21:1 › calculator valid, boundary, invalid and cleared states stay local 
+
+    Error: browserType.launch: Target page, context or browser has been closed
+    Browser logs:
+
+    <launching> /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh --inspector-pipe --headless --no-startup-window
+    <launched> pid=25037
+    [pid=25037][err] /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh: line 7: 25042 Abort trap: 6              DYLD_FRAMEWORK_PATH="$DYLIB_PATH" DYLD_LIBRARY_PATH="$DYLIB_PATH" "$PLAYWRIGHT" "$@"
+    Call log:
+      - <launching> /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh --inspector-pipe --headless --no-startup-window
+      - <launched> pid=25037
+      - [pid=25037][err] /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh: line 7: 25042 Abort trap: 6              DYLD_FRAMEWORK_PATH="$DYLIB_PATH" DYLD_LIBRARY_PATH="$DYLIB_PATH" "$PLAYWRIGHT" "$@"
+      - [pid=25037] <gracefully close start>
+      - [pid=25037] <kill>
+      - [pid=25037] <will force kill>
+      - [pid=25037] exception while trying to kill process: Error: kill EPERM
+      - [pid=25037] <process did exit: exitCode=134, signal=null>
+      - [pid=25037] starting temporary directories cleanup
+      - [pid=25037] finished temporary directories cleanup
+      - [pid=25037] <gracefully close end>
+
+
+    Error Context: docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-calculator-valid--07074-d-cleared-states-stay-local-webkit/error-context.md
+
+  19) [webkit] › docs/qa/2026-10-02/frontend.spec.cjs:48:1 › receipt evidence loads without claiming cryptographic verification 
+
+    Error: browserType.launch: Target page, context or browser has been closed
+    Browser logs:
+
+    <launching> /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh --inspector-pipe --headless --no-startup-window
+    <launched> pid=25054
+    [pid=25054][err] /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh: line 7: 25059 Abort trap: 6              DYLD_FRAMEWORK_PATH="$DYLIB_PATH" DYLD_LIBRARY_PATH="$DYLIB_PATH" "$PLAYWRIGHT" "$@"
+    Call log:
+      - <launching> /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh --inspector-pipe --headless --no-startup-window
+      - <launched> pid=25054
+      - [pid=25054][err] /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh: line 7: 25059 Abort trap: 6              DYLD_FRAMEWORK_PATH="$DYLIB_PATH" DYLD_LIBRARY_PATH="$DYLIB_PATH" "$PLAYWRIGHT" "$@"
+      - [pid=25054] <gracefully close start>
+      - [pid=25054] <kill>
+      - [pid=25054] <will force kill>
+      - [pid=25054] exception while trying to kill process: Error: kill EPERM
+      - [pid=25054] <process did exit: exitCode=134, signal=null>
+      - [pid=25054] starting temporary directories cleanup
+      - [pid=25054] finished temporary directories cleanup
+      - [pid=25054] <gracefully close end>
+
+
+    Error Context: docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-receipt-evidence--4ee34--cryptographic-verification-webkit/error-context.md
+
+  20) [webkit] › docs/qa/2026-10-02/frontend.spec.cjs:54:1 › receipt load failure removes published data and verification claims 
+
+    Error: browserType.launch: Target page, context or browser has been closed
+    Browser logs:
+
+    <launching> /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh --inspector-pipe --headless --no-startup-window
+    <launched> pid=25065
+    [pid=25065][err] /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh: line 7: 25070 Abort trap: 6              DYLD_FRAMEWORK_PATH="$DYLIB_PATH" DYLD_LIBRARY_PATH="$DYLIB_PATH" "$PLAYWRIGHT" "$@"
+    Call log:
+      - <launching> /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh --inspector-pipe --headless --no-startup-window
+      - <launched> pid=25065
+      - [pid=25065][err] /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh: line 7: 25070 Abort trap: 6              DYLD_FRAMEWORK_PATH="$DYLIB_PATH" DYLD_LIBRARY_PATH="$DYLIB_PATH" "$PLAYWRIGHT" "$@"
+      - [pid=25065] <gracefully close start>
+      - [pid=25065] <kill>
+      - [pid=25065] <will force kill>
+      - [pid=25065] exception while trying to kill process: Error: kill EPERM
+      - [pid=25065] <process did exit: exitCode=134, signal=null>
+      - [pid=25065] starting temporary directories cleanup
+      - [pid=25065] finished temporary directories cleanup
+      - [pid=25065] <gracefully close end>
+
+
+    Error Context: docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-receipt-load-fail-c9de9-ata-and-verification-claims-webkit/error-context.md
+
+  21) [webkit] › docs/qa/2026-10-02/frontend.spec.cjs:62:1 › malformed receipt payload fails closed 
+
+    Error: browserType.launch: Target page, context or browser has been closed
+    Browser logs:
+
+    <launching> /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh --inspector-pipe --headless --no-startup-window
+    <launched> pid=25072
+    [pid=25072][err] /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh: line 7: 25077 Abort trap: 6              DYLD_FRAMEWORK_PATH="$DYLIB_PATH" DYLD_LIBRARY_PATH="$DYLIB_PATH" "$PLAYWRIGHT" "$@"
+    Call log:
+      - <launching> /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh --inspector-pipe --headless --no-startup-window
+      - <launched> pid=25072
+      - [pid=25072][err] /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh: line 7: 25077 Abort trap: 6              DYLD_FRAMEWORK_PATH="$DYLIB_PATH" DYLD_LIBRARY_PATH="$DYLIB_PATH" "$PLAYWRIGHT" "$@"
+      - [pid=25072] <gracefully close start>
+      - [pid=25072] <kill>
+      - [pid=25072] <will force kill>
+      - [pid=25072] exception while trying to kill process: Error: kill EPERM
+      - [pid=25072] <process did exit: exitCode=134, signal=null>
+      - [pid=25072] starting temporary directories cleanup
+      - [pid=25072] finished temporary directories cleanup
+      - [pid=25072] <gracefully close end>
+
+
+    Error Context: docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-malformed-receipt-payload-fails-closed-webkit/error-context.md
+
+  22) [webkit] › docs/qa/2026-10-02/frontend.spec.cjs:68:1 › mobile pages do not overflow ──────────
+
+    Error: browserType.launch: Target page, context or browser has been closed
+    Browser logs:
+
+    <launching> /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh --inspector-pipe --headless --no-startup-window
+    <launched> pid=25088
+    [pid=25088][err] /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh: line 7: 25093 Abort trap: 6              DYLD_FRAMEWORK_PATH="$DYLIB_PATH" DYLD_LIBRARY_PATH="$DYLIB_PATH" "$PLAYWRIGHT" "$@"
+    Call log:
+      - <launching> /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh --inspector-pipe --headless --no-startup-window
+      - <launched> pid=25088
+      - [pid=25088][err] /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh: line 7: 25093 Abort trap: 6              DYLD_FRAMEWORK_PATH="$DYLIB_PATH" DYLD_LIBRARY_PATH="$DYLIB_PATH" "$PLAYWRIGHT" "$@"
+      - [pid=25088] <gracefully close start>
+      - [pid=25088] <kill>
+      - [pid=25088] <will force kill>
+      - [pid=25088] exception while trying to kill process: Error: kill ESRCH
+      - [pid=25088] <process did exit: exitCode=134, signal=null>
+      - [pid=25088] starting temporary directories cleanup
+      - [pid=25088] finished temporary directories cleanup
+      - [pid=25088] <gracefully close end>
+
+
+    Error Context: docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-mobile-pages-do-not-overflow-webkit/error-context.md
+
+  23) [webkit] › docs/qa/2026-10-02/frontend.spec.cjs:77:1 › operator index is static and does not ask for credentials 
+
+    Error: browserType.launch: Target page, context or browser has been closed
+    Browser logs:
+
+    <launching> /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh --inspector-pipe --headless --no-startup-window
+    <launched> pid=25096
+    [pid=25096][err] /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh: line 7: 25101 Abort trap: 6              DYLD_FRAMEWORK_PATH="$DYLIB_PATH" DYLD_LIBRARY_PATH="$DYLIB_PATH" "$PLAYWRIGHT" "$@"
+    Call log:
+      - <launching> /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh --inspector-pipe --headless --no-startup-window
+      - <launched> pid=25096
+      - [pid=25096][err] /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh: line 7: 25101 Abort trap: 6              DYLD_FRAMEWORK_PATH="$DYLIB_PATH" DYLD_LIBRARY_PATH="$DYLIB_PATH" "$PLAYWRIGHT" "$@"
+      - [pid=25096] <gracefully close start>
+      - [pid=25096] <kill>
+      - [pid=25096] <will force kill>
+      - [pid=25096] exception while trying to kill process: Error: kill ESRCH
+      - [pid=25096] <process did exit: exitCode=134, signal=null>
+      - [pid=25096] starting temporary directories cleanup
+      - [pid=25096] finished temporary directories cleanup
+      - [pid=25096] <gracefully close end>
+
+
+    Error Context: docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-operator-index-is-00d11-oes-not-ask-for-credentials-webkit/error-context.md
+
+  24) [webkit] › docs/qa/2026-10-02/frontend.spec.cjs:84:1 › no JavaScript retains the pilot and proof entry path 
+
+    Error: browserType.launch: Target page, context or browser has been closed
+    Browser logs:
+
+    <launching> /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh --inspector-pipe --headless --no-startup-window
+    <launched> pid=25104
+    [pid=25104][err] /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh: line 7: 25109 Abort trap: 6              DYLD_FRAMEWORK_PATH="$DYLIB_PATH" DYLD_LIBRARY_PATH="$DYLIB_PATH" "$PLAYWRIGHT" "$@"
+    Call log:
+      - <launching> /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh --inspector-pipe --headless --no-startup-window
+      - <launched> pid=25104
+      - [pid=25104][err] /private/tmp/amw-qa-playwright-browsers/webkit-2359/pw_run.sh: line 7: 25109 Abort trap: 6              DYLD_FRAMEWORK_PATH="$DYLIB_PATH" DYLD_LIBRARY_PATH="$DYLIB_PATH" "$PLAYWRIGHT" "$@"
+      - [pid=25104] <gracefully close start>
+      - [pid=25104] <kill>
+      - [pid=25104] <will force kill>
+      - [pid=25104] exception while trying to kill process: Error: kill EPERM
+      - [pid=25104] <process did exit: exitCode=134, signal=null>
+      - [pid=25104] starting temporary directories cleanup
+      - [pid=25104] finished temporary directories cleanup
+      - [pid=25104] <gracefully close end>
+
+
+    Error Context: docs/qa/2026-10-02/artifacts/frontend-playwright/frontend-no-JavaScript-ret-1671c--pilot-and-proof-entry-path-webkit/error-context.md
+
+  24 failed
+    [chromium] › docs/qa/2026-10-02/frontend.spec.cjs:9:1 › main public pages load without browser or resource errors 
+    [chromium] › docs/qa/2026-10-02/frontend.spec.cjs:21:1 › calculator valid, boundary, invalid and cleared states stay local 
+    [chromium] › docs/qa/2026-10-02/frontend.spec.cjs:48:1 › receipt evidence loads without claiming cryptographic verification 
+    [chromium] › docs/qa/2026-10-02/frontend.spec.cjs:54:1 › receipt load failure removes published data and verification claims 
+    [chromium] › docs/qa/2026-10-02/frontend.spec.cjs:62:1 › malformed receipt payload fails closed 
+    [chromium] › docs/qa/2026-10-02/frontend.spec.cjs:68:1 › mobile pages do not overflow ──────────
+    [chromium] › docs/qa/2026-10-02/frontend.spec.cjs:77:1 › operator index is static and does not ask for credentials 
+    [chromium] › docs/qa/2026-10-02/frontend.spec.cjs:84:1 › no JavaScript retains the pilot and proof entry path 
+    [firefox] › docs/qa/2026-10-02/frontend.spec.cjs:9:1 › main public pages load without browser or resource errors 
+    [firefox] › docs/qa/2026-10-02/frontend.spec.cjs:21:1 › calculator valid, boundary, invalid and cleared states stay local 
+    [firefox] › docs/qa/2026-10-02/frontend.spec.cjs:48:1 › receipt evidence loads without claiming cryptographic verification 
+    [firefox] › docs/qa/2026-10-02/frontend.spec.cjs:54:1 › receipt load failure removes published data and verification claims 
+    [firefox] › docs/qa/2026-10-02/frontend.spec.cjs:62:1 › malformed receipt payload fails closed ─
+    [firefox] › docs/qa/2026-10-02/frontend.spec.cjs:68:1 › mobile pages do not overflow ───────────
+    [firefox] › docs/qa/2026-10-02/frontend.spec.cjs:77:1 › operator index is static and does not ask for credentials 
+    [firefox] › docs/qa/2026-10-02/frontend.spec.cjs:84:1 › no JavaScript retains the pilot and proof entry path 
+    [webkit] › docs/qa/2026-10-02/frontend.spec.cjs:9:1 › main public pages load without browser or resource errors 
+    [webkit] › docs/qa/2026-10-02/frontend.spec.cjs:21:1 › calculator valid, boundary, invalid and cleared states stay local 
+    [webkit] › docs/qa/2026-10-02/frontend.spec.cjs:48:1 › receipt evidence loads without claiming cryptographic verification 
+    [webkit] › docs/qa/2026-10-02/frontend.spec.cjs:54:1 › receipt load failure removes published data and verification claims 
+    [webkit] › docs/qa/2026-10-02/frontend.spec.cjs:62:1 › malformed receipt payload fails closed ──
+    [webkit] › docs/qa/2026-10-02/frontend.spec.cjs:68:1 › mobile pages do not overflow ────────────
+    [webkit] › docs/qa/2026-10-02/frontend.spec.cjs:77:1 › operator index is static and does not ask for credentials 
+    [webkit] › docs/qa/2026-10-02/frontend.spec.cjs:84:1 › no JavaScript retains the pilot and proof entry path 

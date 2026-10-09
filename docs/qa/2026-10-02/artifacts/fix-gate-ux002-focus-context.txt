@@ -1,0 +1,164 @@
+30:       --radius-sm: 6px;
+31:       --radius-xs: 3px;
+32:       --measure: 62ch;
+33:       --page-max: 1120px;
+34:       --pad-x: clamp(1.25rem, 4vw, 2.5rem);
+35:       --focus-ring: 2px solid var(--brass);
+36:     }
+37:
+38:     *, *::before, *::after { box-sizing: border-box; }
+39:     html { scroll-padding-top: 5.5rem; }
+40:
+41:     body {
+42:       margin: 0;
+43:       min-height: 100vh;
+44:       background: var(--ink);
+45:       color: var(--text);
+46:       font: 1.0625rem/1.65 var(--font-body);
+47:       -webkit-font-smoothing: antialiased;
+48:       text-rendering: optimizeLegibility;
+49:     }
+50:
+51:     ::selection { background: var(--brass); color: var(--ink); }
+52:
+53:     a { color: var(--brass); text-decoration: none; text-underline-offset: 0.18em; }
+54:     a:hover { color: var(--brass-bright); text-decoration: underline; }
+55:     p a { text-decoration: underline; }
+56:
+57:     main, footer {
+58:       width: 100%;
+59:       max-width: var(--page-max);
+60:       margin-inline: auto;
+61:     }
+62:
+63:     header {
+64:       position: sticky;
+65:       top: 0;
+66:       z-index: 40;
+67:       display: flex;
+68:       justify-content: space-between;
+69:       align-items: center;
+70:       gap: 1rem;
+71:       padding: 0.85rem max(var(--pad-x), calc((100% - var(--page-max)) / 2 + var(--pad-x)));
+72:       background: rgba(11, 16, 32, 0.86);
+73:       backdrop-filter: blur(14px);
+74:       -webkit-backdrop-filter: blur(14px);
+75:       border-bottom: 1px solid var(--line);
+76:     }
+77:
+78:     .brand {
+79:       display: inline-flex;
+80:       align-items: center;
+81:       gap: 0.6rem;
+82:       color: var(--text);
+83:       min-height: 44px;
+84:       font-family: var(--font-mono);
+85:       font-size: 0.92rem;
+195:       transition: border-color 140ms ease, background 140ms ease;
+196:     }
+197:
+198:     .links a:hover {
+199:       border-color: var(--line-strong);
+200:       background: var(--rule-soft);
+201:       text-decoration: none;
+202:     }
+203:
+204:     .links strong {
+205:       display: block;
+206:       margin-bottom: 0.3rem;
+207:       color: var(--text);
+208:       font-family: var(--font-title);
+209:       font-size: 1rem;
+210:       font-weight: 700;
+211:     }
+212:     .links span { color: var(--text-dim); font-size: 0.88rem; }
+213:
+214:     pre {
+215:       overflow-x: auto;
+216:       margin: 1rem 0 0;
+217:       padding: 1rem 1.15rem;
+218:       border: 1px solid var(--line);
+219:       border-radius: var(--radius);
+220:       background: var(--panel);
+221:       color: var(--text);
+222:       font: 0.85rem/1.7 var(--font-mono);
+223:     }
+224:
+225:     code {
+226:       font-family: var(--font-mono);
+227:       font-size: 0.9em;
+228:       background: var(--panel);
+229:       border: 1px solid var(--line);
+230:       border-radius: var(--radius-xs);
+231:       padding: 0.1em 0.4em;
+232:       overflow-wrap: anywhere;
+233:     }
+234:     pre code { font-size: inherit; border: 0; padding: 0; overflow-wrap: normal; }
+235:     ul { margin: 1rem 0 0; padding-left: 1.25rem; }
+236:     li + li { margin-top: 0.5rem; }
+237:
+238:     footer {
+239:       display: flex;
+240:       flex-wrap: wrap;
+330:     </section>
+331:
+332:     <section aria-labelledby="evidence-heading">
+333:       <h2 id="evidence-heading">Status and evidence</h2>
+334:       <p class="section-copy">
+335:         The proof is self-issued live gateway proof, not customer traction.
+336:       </p>
+337:       <div class="links">
+338:         <a href="https://www.thisisatest.tech/proof/">
+339:           <strong>Portable receipt proof</strong>
+340:           <span>Artifact, matching key snapshot, and offline verification command.</span>
+341:         </a>
+342:         <a href="https://api.thisisatest.tech/health/dependencies">
+343:           <strong>Runtime truth</strong>
+344:           <span>Dependency posture, feature flags, build SHA, and metric scope metadata.</span>
+345:         </a>
+346:         <a href="https://api.thisisatest.tech/.well-known/trust-keys.json">
+347:           <strong>Current trust keys</strong>
+348:           <span>Public issuer keys exposed by the live API.</span>
+349:         </a>
+350:       </div>
+351:     </section>
+352:
+353:     <section aria-labelledby="discovery-heading">
+354:       <h2 id="discovery-heading">Machine discovery</h2>
+355:       <div class="links">
+356:         <a href="https://api.thisisatest.tech/.well-known/agent.json">
+357:           <strong>Agent manifest</strong>
+358:           <span>Bootstrap metadata. Tool lists on this origin require a key.</span>
+359:         </a>
+360:         <a href="https://api.thisisatest.tech/llms.txt">
+361:           <strong>llms.txt</strong>
+362:           <span>Machine-readable integration guidance.</span>
+363:         </a>
+364:       </div>
+365:     </section>
+366:
+367:     <section aria-labelledby="inspection-heading">
+368:       <h2 id="inspection-heading">Authenticated inspection</h2>
+369:       <p class="section-copy">
+370:         Inspect your own permits, receipts, and audit events from a trusted terminal.
+371:         Keep the key in your environment; do not paste it into a public web page.
+372:       </p>
+373:       <pre tabindex="0" role="region" aria-label="Authenticated inspection commands"><code>export AGENT_MIDDLEWARE_API_KEY=[REDACTED]
+374:
+375: curl --fail-with-body \
+376:   -H "X-API-Key: [REDACTED] \
+377:   "https://api.thisisatest.tech/v1/me/permits"
+378:
+379: curl --fail-with-body \
+380:   -H "X-API-Key: [REDACTED] \
+381:   "https://api.thisisatest.tech/v1/me/receipts"
+382:
+383: curl --fail-with-body \
+384:   -H "X-API-Key: [REDACTED] \
+385:   "https://api.thisisatest.tech/v1/me/audit/events"</code></pre>
+386:     </section>
+387:
+388:     <section aria-labelledby="limits-heading">
+389:       <h2 id="limits-heading">How to read the runtime data</h2>
+390:       <ul>
+OUTCOME: inspected focus CSS and preceding tab stop for UX-002; no execution.

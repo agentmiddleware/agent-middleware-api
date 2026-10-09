@@ -26,9 +26,9 @@ from typing import Any, Mapping
 from app.core.config import get_settings
 from app.schemas.billing import ServiceCategory
 from app.services.audit_log import record_audit_event
-from app.services.permits import get_permit_service
+from app.services.permits import get_permit_service, recipient_binding_matches
 from app.services.pricing import charge_units_for
-from app.services.receipts import get_receipt_service
+from app.services.receipts import ReceiptWriteContendedError, get_receipt_service
 from app.services.shadow_ledger import get_shadow_ledger
 from app.services.signing_keys import get_signing_key_service
 
@@ -42,6 +42,10 @@ class X402Error(RuntimeError):
         self.reason = reason
         self.details = details
         super().__init__(reason)
+
+
+class X402SettlementUncertainError(X402Error):
+    """Settlement or compensation may be durable; retain the original owner."""
 
 
 # The tool name every x402 settlement is authorized and receipted under. A
@@ -232,9 +236,7 @@ class X402PaymentHandler:
         byte-identical authorization instead of minting a second, differently
         nonced transfer the payer wallet might also sign.
         """
-        return hashlib.sha256(
-            f"{permit_id}:{idempotency_key}".encode()
-        ).hexdigest()
+        return hashlib.sha256(f"{permit_id}:{idempotency_key}".encode()).hexdigest()
 
     def build_transfer_authorization(
         self,
@@ -273,9 +275,7 @@ class X402PaymentHandler:
             payer = payer.strip()
             if not _EVM_ADDRESS_RE.fullmatch(payer):
                 raise X402Error("x402_payer_invalid")
-            chain_id, usdc_contract, domain_name = _EVM_NETWORKS[
-                requirement.network
-            ]
+            chain_id, usdc_contract, domain_name = _EVM_NETWORKS[requirement.network]
             return {
                 "types": {
                     "EIP712Domain": [
@@ -341,17 +341,17 @@ class X402PaymentHandler:
         key_id: str | None,
         requirement: X402PaymentRequirement,
         idempotency_key: str,
+        idempotency_record_id: str,
         payer: str | None = None,
-        idempotency_record_id: str | None = None,
     ) -> X402Settlement:
         """Authorize a 402 demand against a permit and record the settlement.
 
         Sequence: reserve permit budget atomically, build the transfer
         authorization, sign the facilitator attestation, meter the amount in a
         shadow-ledger dry-run session, append an audit event, emit the signed
-        receipt. Compensation invariant: any failure after the reservation
-        releases the exact reserved amount and leaves no live shadow session
-        and no receipt — no partial settlement may persist.
+        receipt. Known unreceipted failures compensate the reservation;
+        uncertain receipt writes or incomplete compensation retain ownership
+        for review so retries cannot reserve the same authority again.
         """
         settings = get_settings()
         # settings.EXCHANGE_RATE is the single credits-per-USD source of truth
@@ -370,6 +370,18 @@ class X402PaymentHandler:
             raise X402Error("x402_payer_invalid")
 
         permits = get_permit_service()
+        # A permit bound to one recipient must never fund another payee.
+        # x402 demands name no resource host, only the pay_to chain address,
+        # so that address is the recipient compared here, with the same
+        # hostname-or-raw comparison the upstream MCP path enforces. This
+        # runs before authorize_and_reserve, so a mismatched demand is
+        # denied with no budget reserved. A missing permit is left for
+        # authorize_and_reserve to report as permit_not_found.
+        bound = await permits.get_permit(permit_id)
+        if bound is not None and not recipient_binding_matches(
+            bound.recipient_domain, requirement.pay_to
+        ):
+            raise X402Error("permit_recipient_domain_mismatch")
         validation = await permits.authorize_and_reserve(
             permit_id=permit_id,
             wallet_id=wallet_id,
@@ -377,7 +389,7 @@ class X402PaymentHandler:
             estimated_credits=credits,
             key_id=key_id,
             # pay_to / network / amount ride along so permit v2 constraints
-            # (forbidden_fields, and recipient checks where enforced) can bite.
+            # (forbidden_fields) can bite.
             arguments={
                 "pay_to": requirement.pay_to,
                 "network": requirement.network,
@@ -394,8 +406,9 @@ class X402PaymentHandler:
         permit_model = validation.permit
         assert permit_model is not None  # allowed=True always carries the row
 
-        # Budget is now reserved. From here on every failure must compensate.
+        # Budget is reserved; compensate only when receipt absence is proven.
         shadow_session_id: str | None = None
+        receipt_attempted = False
         try:
             authorization = self.build_transfer_authorization(
                 requirement,
@@ -476,6 +489,7 @@ class X402PaymentHandler:
             # credits_charged feeds _validate_model_for_action's aggregate sum
             # (SUM of ReceiptModel.credits_charged), so these receipts count
             # toward the permit's aggregate_value_cap like any governed spend.
+            receipt_attempted = True
             receipt = await get_receipt_service().create_receipt(
                 permit_id=permit_id,
                 wallet_id=wallet_id,
@@ -508,32 +522,51 @@ class X402PaymentHandler:
                 idempotency_record_id=idempotency_record_id,
             )
         except Exception as exc:
-            # No partial settlement may persist: release the exact reserved
-            # amount. The shadow session either never charged, was already
-            # terminally ended, or (best effort) is discarded here; nothing
-            # durable was written before the receipt except the audit event,
-            # which the compensating failure event below corrects.
+            if receipt_attempted and not isinstance(exc, ReceiptWriteContendedError):
+                # An insert/commit acknowledgement can fail after persistence.
+                # Presence proves settlement; absence or a failed read cannot
+                # prove rollback. Only the typed exhaustion above guarantees
+                # that no receipt was written and compensation is safe.
+                reason = "x402_settlement_needs_review"
+                try:
+                    persisted = await get_receipt_service().get_receipt_by_idempotency_record_id(
+                        idempotency_record_id
+                    )
+                    if persisted is not None:
+                        reason = "x402_settled_unrecoverable_replay"
+                except Exception:
+                    logger.exception(
+                        "x402 receipt lookup failed for %s", idempotency_record_id
+                    )
+                raise X402SettlementUncertainError(reason) from exc
+
+            compensation_complete = True
+            budget_released = False
+            tool_call_released = False
             if shadow_session_id is not None:
                 try:
                     await get_shadow_ledger().revert_session(shadow_session_id)
                 except Exception:
+                    compensation_complete = False
                     logger.exception(
                         "x402 shadow session discard failed for %s",
                         shadow_session_id,
                     )
             try:
                 await permits.release_budget(permit_id, credits)
+                budget_released = True
             except Exception:
-                logger.exception(
-                    "x402 budget release failed for permit %s", permit_id
-                )
+                compensation_complete = False
+                logger.exception("x402 budget release failed for permit %s", permit_id)
             # authorize_and_reserve consumed one max_calls_per_tool use along
             # with the budget; a compensated failure must give both back or a
             # one-call permit's legitimate retry is denied
             # permit_max_calls_exceeded with no receipt to show for it.
             try:
                 await permits.release_tool_call(permit_id, X402_TOOL_NAME)
+                tool_call_released = True
             except Exception:
+                compensation_complete = False
                 logger.exception(
                     "x402 tool-call release failed for permit %s", permit_id
                 )
@@ -541,7 +574,11 @@ class X402PaymentHandler:
             # the last word on an attempt that did not settle: append a
             # compensating failure event so the chain records what actually
             # happened instead of a success with no receipt.
-            reason = exc.reason if isinstance(exc, X402Error) else "x402_settlement_failed"
+            reason = (
+                exc.reason if isinstance(exc, X402Error) else "x402_settlement_failed"
+            )
+            if not compensation_complete:
+                reason = "x402_settlement_needs_review"
             try:
                 await record_audit_event(
                     event="x402.settlement_failed",
@@ -555,7 +592,9 @@ class X402PaymentHandler:
                     metadata={
                         "permit_id": permit_id,
                         "idempotency_key": idempotency_key,
-                        "credits_released": str(credits),
+                        "credits_released": str(credits) if budget_released else None,
+                        "tool_call_released": tool_call_released,
+                        "compensation_complete": compensation_complete,
                     },
                 )
             except Exception:
@@ -563,6 +602,8 @@ class X402PaymentHandler:
                     "x402 compensating audit event failed for permit %s",
                     permit_id,
                 )
+            if not compensation_complete:
+                raise X402SettlementUncertainError(reason) from exc
             if isinstance(exc, X402Error):
                 raise
             raise X402Error("x402_settlement_failed") from exc

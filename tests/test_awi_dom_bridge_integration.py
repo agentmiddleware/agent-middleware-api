@@ -104,6 +104,11 @@ class TestDOMBridgeRouting:
             current_url="https://example.com",
         )
         manager._dom_sessions[session.session_id] = dom_session.session_id
+        # The bridge must actually know the session: previously a missing
+        # bridge session raised inside _execute_via_dom_bridge and the manager
+        # silently fell back to the mock logic, which is what this test was
+        # (unknowingly) asserting on.
+        manager._playwright_bridge._sessions[dom_session.session_id] = dom_session
 
         with patch.object(
             manager._playwright_bridge, "translate_action", new_callable=AsyncMock
@@ -131,6 +136,37 @@ class TestDOMBridgeRouting:
                 assert response.status == "success"
                 mock_translate.assert_called_once()
                 mock_execute.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_execute_returns_typed_failure_when_dom_bridge_fails(self):
+        """A raising DOM bridge yields status="error", never mock success."""
+        from app.services.awi_session import AWISessionManager
+        from app.schemas.awi import (
+            AWISessionCreate,
+            AWIStandardAction,
+            AWIExecutionRequest,
+        )
+
+        manager = AWISessionManager()
+        session = await manager.create_session(
+            AWISessionCreate(target_url="https://example.com")
+        )
+        # Attached in the manager's eyes, but unknown to the bridge: the
+        # bridge call raises.
+        manager._dom_sessions[session.session_id] = "dom-missing"
+
+        response = await manager.execute_action(
+            AWIExecutionRequest(
+                session_id=session.session_id,
+                action=AWIStandardAction.NAVIGATE_TO,
+                parameters={"url": "https://example.com/page2"},
+            )
+        )
+
+        assert response.status == "error"
+        assert response.error is not None
+        assert response.error.startswith("dom_bridge_failed")
+        assert response.result is None
 
     @pytest.mark.asyncio
     async def test_execute_uses_mock_when_not_attached(self):

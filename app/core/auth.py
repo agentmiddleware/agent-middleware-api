@@ -7,11 +7,12 @@ Agents pass credentials via:
 """
 
 import hmac
+from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, Request, Security, status
-from fastapi.security import APIKeyHeader
+from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 from .config import get_settings
 from .oidc_iga import EnterprisePrincipal, IGADecision, IGAError, is_iga_issuer_token
 from .trust_mode import is_production_like_environment
@@ -28,6 +29,12 @@ api_key_header = APIKeyHeader(
     name=settings.API_KEY_HEADER,
     auto_error=False,
     description="API key for agent authentication. Pass in the X-API-Key header.",
+)
+
+
+bearer_header = HTTPBearer(
+    auto_error=False,
+    description="Bearer authentication via Authorization; this header takes precedence over X-API-Key.",
 )
 
 
@@ -99,9 +106,31 @@ CREDENTIAL_REJECTED_HEADER = "X-Credential-Rejected"
 _CREDENTIAL_REJECTED = {CREDENTIAL_REJECTED_HEADER: "1"}
 
 
+@dataclass
+class CredentialAcceptance:
+    """Whether ``get_auth_context`` accepted credentials during one request."""
+
+    accepted: bool = False
+
+
+# The converse signal, for RateLimitMiddleware's shared pre-auth bucket. A
+# request that never authenticates — a public route, a 404 — is never refused
+# either, so the rejected marker alone let a caller pick a fresh per-key
+# bucket by inventing an X-API-Key value per request; the limiter therefore
+# keeps the reservation unless this comes back accepted. A ContextVar rather
+# than request state because get_auth_context is also called without a
+# Request; a mutable holder rather than a flag because call_next runs the app
+# in a child task whose context is a copy, so only a shared object carries the
+# answer back out.
+CREDENTIAL_ACCEPTANCE: ContextVar[CredentialAcceptance | None] = ContextVar(
+    "credential_acceptance", default=None
+)
+
+
 async def get_auth_context(
     api_key: str | None = Security(api_key_header),
     authorization: Annotated[str | None, Header()] = None,
+    _bearer: HTTPAuthorizationCredentials | None = Security(bearer_header),
 ) -> AuthContext:
     """
     Validate credentials and return caller context.
@@ -115,6 +144,20 @@ async def get_auth_context(
     this module is already imported, and a captured `settings` would keep
     serving the stale key list.
     """
+    # HTTPBearer declares the OpenAPI alternative; raw Authorization stays
+    # authoritative so malformed headers cannot fall back to an API key.
+    context = await _resolve_auth_context(api_key, authorization)
+    acceptance = CREDENTIAL_ACCEPTANCE.get()
+    if acceptance is not None:
+        acceptance.accepted = True
+    return context
+
+
+async def _resolve_auth_context(
+    api_key: str | None,
+    authorization: str | None,
+) -> AuthContext:
+    """Authenticate the caller; ``get_auth_context`` records the acceptance."""
     settings = get_settings()
 
     # A presented Authorization header is authoritative. Never fall back to a
@@ -138,7 +181,7 @@ async def get_auth_context(
         # API key is not an API credential: it falls through to
         # _auth_from_jwt and fails with 401 exactly as before.
         if api_key and is_iga_issuer_token(token):
-            context = await get_auth_context(api_key=api_key, authorization=None)
+            context = await _resolve_auth_context(api_key, None)
             return replace(context, enterprise_bearer_token=token)
         return await _auth_from_jwt(token)
 
@@ -181,14 +224,14 @@ async def get_auth_context(
             },
         )
 
-    # Try JWT first (token might not start with "Bearer " but be a raw JWT)
+    # A JWT-shaped value (a raw token without "Bearer ") is verified exactly as
+    # the Authorization header would verify it, and never falls through to
+    # API-key lookup: a token that fails to parse is already a 401, and an
+    # unexpected failure (a liveness check that could not run) must surface
+    # here as it does there, not be retried as a key — or, in DEBUG open
+    # mode, as a bootstrap admin.
     if stripped.count(".") == 2 and len(stripped) > 50:
-        try:
-            return await _auth_from_jwt(stripped)
-        except HTTPException:
-            raise
-        except Exception:
-            pass  # Not a valid JWT, fall through to API key
+        return await _auth_from_jwt(stripped)
 
     valid_keys = [k.strip() for k in settings.VALID_API_KEYS.split(",") if k.strip()]
 
@@ -346,7 +389,9 @@ async def _auth_from_jwt(token: str) -> AuthContext:
 
     from ..services.api_key_service import get_api_key_service
 
-    if not await get_api_key_service().is_key_live(payload.key_id):
+    if not await get_api_key_service().consume_derived_key_use(
+        payload.key_id, payload.sub
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={
@@ -359,7 +404,10 @@ async def _auth_from_jwt(token: str) -> AuthContext:
 
     return AuthContext(
         source="jwt",
-        raw_key=token[:20] + "...",
+        # Not a credential: a stable, non-secret handle for the API key that
+        # minted this token. A truncated token cannot serve: every EdDSA JWT
+        # opens with the same encoded header, so all JWT callers shared it.
+        raw_key=f"jwt:{payload.key_id}",
         wallet_id=payload.sub,
         key_id=payload.key_id,
         is_bootstrap_admin=False,

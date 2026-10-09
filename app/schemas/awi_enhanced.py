@@ -86,7 +86,7 @@ class PasskeyChallengeResponse(BaseModel):
     rp_name: str = Field(..., description="Relying Party name")
     timeout: int = Field(..., description="Challenge timeout in milliseconds")
     user_verification: str = Field(
-        default="preferred", description="User verification requirement"
+        default="required", description="User verification requirement"
     )
     public_key_cred_params: list[dict[str, Any]] = Field(
         ..., description="Supported public key algorithms"
@@ -151,8 +151,15 @@ class DOMBridgeSessionRequest(BaseModel):
     )
     wallet_id: Optional[str] = Field(None, description="Wallet that owns this session")
     headless: bool = Field(default=True, description="Run browser in headless mode")
-    viewport_width: int = Field(default=1280, description="Viewport width in pixels")
-    viewport_height: int = Field(default=720, description="Viewport height in pixels")
+    # Bounded: the size feeds a real browser context, and an unbounded one
+    # lets a caller exhaust memory on render/screenshot. Keep in step with
+    # the bridge-side check in AWIPlaywrightBridge.create_session.
+    viewport_width: int = Field(
+        default=1280, ge=320, le=3840, description="Viewport width in pixels"
+    )
+    viewport_height: int = Field(
+        default=720, ge=240, le=2160, description="Viewport height in pixels"
+    )
 
 
 class DOMBridgeSessionResponse(BaseModel):
@@ -207,6 +214,8 @@ class DOMSyncRequest(BaseModel):
 class DOMSyncResponse(BaseModel):
     """Response from DOM sync execution."""
 
+    status: str = "success"
+    effect_status: str | None = None
     session_id: str = Field(..., description="Browser session ID")
     execution_id: str = Field(..., description="Unique execution ID")
     action: str = Field(..., description="Action that was executed")
@@ -314,7 +323,9 @@ class RAGQueryRequest(BaseModel):
 
     query: str = Field(
         ...,
-        description="Natural language query",
+        min_length=1,
+        pattern=r"\S",
+        description="Natural language query containing at least one non-whitespace character",
         examples=[
             "shopping for laptops last week",
             "form submissions involving addresses",

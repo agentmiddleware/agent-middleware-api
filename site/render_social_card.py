@@ -67,7 +67,9 @@ def find_chromium(explicit: str | None = None) -> str:
         root = Path(browsers_path)
         candidates += sorted(
             str(path)
-            for path in root.glob("chromium_headless_shell-*/chrome-linux/headless_shell")
+            for path in root.glob(
+                "chromium_headless_shell-*/chrome-linux/headless_shell"
+            )
         )
         candidates.append(str(root / "chromium"))
         candidates += sorted(
@@ -86,9 +88,7 @@ def find_chromium(explicit: str | None = None) -> str:
         )
         if resolved:
             return resolved
-    raise RenderError(
-        "no Chromium binary found; set $CHROMIUM or install chromium"
-    )
+    raise RenderError("no Chromium binary found; set $CHROMIUM or install chromium")
 
 
 def local_font_css() -> str:
@@ -106,9 +106,7 @@ def local_font_css() -> str:
         raise RenderError(
             f"fonts.css is missing; run vendor_fonts.py first ({error})"
         ) from error
-    return stylesheet.replace(
-        'url("/fonts/', f'url("{(SITE_ROOT / "fonts").as_uri()}/'
-    )
+    return stylesheet.replace('url("/fonts/', f'url("{(SITE_ROOT / "fonts").as_uri()}/')
 
 
 def shim_document() -> str:
@@ -146,9 +144,7 @@ def _png_bottom_row(payload: bytes) -> list[tuple[int, int, int]]:
 
     if payload[:8] != b"\x89PNG\r\n\x1a\n" or payload[12:16] != b"IHDR":
         raise RenderError("Chromium did not produce a PNG")
-    width, height, bit_depth, color_type = struct.unpack(
-        ">IIBB", payload[16:26]
-    )
+    width, height, bit_depth, color_type = struct.unpack(">IIBB", payload[16:26])
     if bit_depth != 8 or color_type not in (2, 6):
         # Not the truecolor output Chromium emits; skip the probe rather
         # than misread an exotic encoding.
@@ -157,9 +153,10 @@ def _png_bottom_row(payload: bytes) -> list[tuple[int, int, int]]:
     idat = bytearray()
     offset = 8
     while offset < len(payload):
-        (length,), kind = struct.unpack(">I", payload[offset : offset + 4]), payload[
-            offset + 4 : offset + 8
-        ]
+        (length,), kind = (
+            struct.unpack(">I", payload[offset : offset + 4]),
+            payload[offset + 4 : offset + 8],
+        )
         if kind == b"IDAT":
             idat += payload[offset + 8 : offset + 8 + length]
         offset += length + 12
@@ -204,9 +201,7 @@ def _png_bottom_row(payload: bytes) -> list[tuple[int, int, int]]:
         else:
             raise RenderError(f"unsupported PNG filter type {filter_type}")
         previous[:] = row
-    return [
-        (row[i], row[i + 1], row[i + 2]) for i in range(0, stride, channels)
-    ]
+    return [(row[i], row[i + 1], row[i + 2]) for i in range(0, stride, channels)]
 
 
 def validate_card(payload: bytes) -> None:
@@ -214,8 +209,7 @@ def validate_card(payload: bytes) -> None:
     width, height = struct.unpack(">II", payload[16:24])
     if (width, height) != CARD_SIZE:
         raise RenderError(
-            f"rendered {width}x{height}, expected "
-            f"{CARD_SIZE[0]}x{CARD_SIZE[1]}"
+            f"rendered {width}x{height}, expected {CARD_SIZE[0]}x{CARD_SIZE[1]}"
         )
     bottom = _png_bottom_row(payload)
     if bottom and INK_RGB not in bottom:

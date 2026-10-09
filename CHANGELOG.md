@@ -7,9 +7,244 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — planned v1.3.0
 
+### Changed — standard `/mcp` returns `delivery_uncertain` as a tool result
+
+- On `POST /mcp`, a lost upstream response (`delivery_uncertain`) is now a
+  `tools/call` result with `isError: true`: text telling the model the
+  outcome is unknown, that the gateway will not resend, and not to call the
+  tool again before checking the downstream system; the signed receipt
+  (top-level `receipt` and `_meta["io.agentmiddleware/receipt"]`); and
+  `_meta["io.agentmiddleware/outcome"]` (`status: "unknown"`, the dispatch
+  attempt, `idempotency_key_supplied`, `remediation`). It was a JSON-RPC
+  `-32005` error, which is this surface's retryable code and commonly
+  reaches the model as its message alone. A call sent without a client
+  Idempotency-Key is told, in both the text and the remediation, that
+  calling again is a new, separately charged call. Same-key replay is
+  identical and never redispatches. `/mcp/messages`, REST, and the Python
+  SDK are unchanged.
+
+### Added — optional Jev risk advice
+
+- `JEV_RISK_GUARD=off|log|enforce` (default `off`): pinned TypeSafe Jev
+  `jev-1.13.0` advice after deterministic policy allows an invoke. Log mode
+  never blocks; enforce mode reuses human approval for escalations and denies
+  ungoverned calls with `jev_risk_review_required`. Vendor failures fail open.
+  Redacted/truncated state leaves the gateway only after operator opt-in.
+  Model/version/status evidence is retained in signed audit and receipt
+  metadata, including upstream reconciliation. See
+  [`docs/jev-risk-guard.md`](docs/jev-risk-guard.md).
+
 The next release consolidates the accumulated trust-plane and public-product
 work as `v1.3.0`. Create that tag only from the exact commit that passes the
 full release gate; do not backfill a final `v1.2.0` tag.
+
+### Added — SDK build config and TypeSafe research record
+
+Follow-up to the 2026-10-02 QA fixes merged in #587, which deferred FE-001.
+
+- **FE-001 — the unshipped TypeScript SDK builds as declared.**
+  `awi_sdk/typescript/tsconfig.json` emits `dist/index.js` and
+  `dist/index.d.ts`, the entrypoints `package.json` already advertised. The QA
+  contract test for it now runs as an ordinary regression.
+- **Upstream URL guard message names multicast.** The refusal text of
+  `validate_upstream_url` now lists multicast addresses, matching the check that
+  rejects them.
+- **TypeSafe System One research record.**
+  `docs/research/typesafe-system-one-2026-10-03.md` records the TypeSafe
+  contract and where bounded model judgments do and do not fit this repository.
+  `AGENTS.md` points implementers at it. Research only: no product code or
+  dependency changes, and no new capability without the evidence `AGENTS.md`
+  requires.
+
+### Changed — duplicate guard observability and release gates
+
+- **Durable duplicate-denial count**: `/health/duplicate-guard` now also
+  reports `enforce_mode_denials_durable`, the number of denial receipts
+  carrying `duplicate_request_new_key` across the service lifetime, and labels
+  every metric's scope. The two existing counters stay process-local and still
+  reset on restart. The count is `null`, with a reason, when no database is
+  configured or the query fails, so the endpoint never drops the process-local
+  counters it already served.
+- **Rollout note required per migration**: a test fails when a migration at or
+  after 040 ships without `docs/schema-NNN-rollout.md` naming the revision id it
+  declares and carrying a rollback heading, and when any migration file is
+  named outside the `NNN_name.py` convention. Boot refuses a database whose
+  revision differs from the packaged head, so every migration retires the
+  previously serving image; 040 crossed that boundary without a plan and needed
+  a same-night compatibility release. `docs/schema-041-rollout.md` records that
+  no image packaged at 040, including `34fbdb9` and the compatibility release
+  `e18b0df`, can start once 041 is applied.
+- **Railway IaC preserves `MCP_UPSTREAM_DUPLICATE_GUARD`**: production now sets
+  the guard to `enforce`, so `.railway/railway.ts` lists it as `preserve()` and
+  a `railway config apply` no longer proposes deleting it. `.env.example`
+  documents the guard mode and window.
+
+### Security — 2026-08-27 audit follow-up
+
+Findings from the 2026-08-27 repository audit, each re-verified against the
+current code before fixing. Every fix ships with a regression test that fails
+on the previous code.
+
+- **Production boots refuse the remaining local-only escape hatches**
+  (#485, #486): `ALLOW_PRIVATE_NETWORK_TARGETS=true` (disables the outbound-URL
+  guard's private-address checks), `ALLOW_UNSAFE_HOST_PYTHON_SANDBOX=true`, and
+  a host `BEHAVIORAL_SANDBOX_PYTHON_BACKEND` (`unsafe_host`/`host`).
+- **API keys**: `validate_key` looks keys up by the indexed `key_hash` instead
+  of the non-unique 8-character prefix, so two live keys sharing a prefix no
+  longer fail every request with a 500. A wallet key with `max_uses` or
+  `expires_at` gets `403 bounded_key_cannot_mint` on `POST /v1/api-keys` and on
+  rotate without `key_id` or naming any key other than its own, so a capped
+  key cannot mint an uncapped sibling or adopt one's bounds. An emergency
+  replacement requested by a wallet-scoped caller takes only that caller's
+  own key's bounds.
+  Liveness (status, use budget, expiry) is one rule everywhere; auto-rotation
+  no longer mints an unbounded key when the wallet has no live key.
+- **Preflight is operator-only**: `POST /v1/launch/preflight` requires a
+  bootstrap admin key and no longer echoes a placeholder admin key's prefix.
+- **`/health/dependencies`** returns only the exception class for a failed
+  probe; driver messages (hosts, ports, roles) go to the server log.
+- **Policies fail closed**: a corrupt `allowed_tools_json` /
+  `allowed_service_categories_json` denies with `policy_constraint_corrupt`
+  instead of reading as "unrestricted" (wallet policy and the IGA bridge).
+- **Tool prices** must be finite and non-negative; a negative or infinite
+  registration price is refused before any permit, quote, or ledger state is
+  touched (`tool_price_invalid`).
+- **Proof surfaces scoped to the owning wallet** (unmounted by default and
+  refused in production, fixed anyway): media videos/clips, IoT devices,
+  telemetry events/anomalies/auto-PR context, and RTaaS jobs/vulnerabilities.
+  Foreign resources answer like missing ones (404, no owner id). RTaaS no
+  longer stores target `auth_header` values.
+
+- **Rate limiting and JWTs**: rotating a fresh `X-API-Key` per request no
+  longer buys a new rate-limit budget on routes that never authenticate
+  (public discovery, `/health/dependencies`, 404s): the shared per-client
+  pre-auth reservation is handed back only when the auth layer accepted the
+  credentials. Redis bucket keys are a domain-separated SHA-256 of the key,
+  never the raw key. Internal JWTs must carry `exp`, `iat`, `iss`, `aud`,
+  `sub` and `jti`, and a JWT in `X-API-Key` that fails verification no longer
+  falls back to API-key lookup.
+- **Notifications**: a failed Slack alert no longer writes the webhook URL
+  (the credential) to the log; Slack and Resend failures log only the HTTP
+  status and exception type. Permit-request approval cards link only an
+  absolute `https` Sentinel `approval_url`; `javascript:`, `data:`, plain
+  `http:` and relative values are dropped on store and never rendered.
+- **Request bounds match storage**: permit and permit-request `max_credits`
+  and `aggregate_value_cap` must be positive with at most 8 decimals and 12
+  whole digits (a 9th decimal used to mint a permit whose signature never
+  verified); `max_calls_per_tool` values must be integers of 1 or more; the
+  permit nonce is at most 64 characters; float money fields (wallets, child
+  wallets, service prices, top-ups, `/transfer`, policy limits) refuse
+  Infinity/NaN and stay under their column limits; policy `risk_tier` must be
+  low, medium or high and `name` at most 255 characters. An Infinity/NaN
+  input now gets a 422 instead of a 500.
+- **Quotes and child wallets**: `GET /v1/quotes/{quote_id}` answers 404 for
+  another wallet's quote, the same as an unknown id, instead of a 403 naming
+  the owner's wallet. New negative tests pin that a wallet key cannot spawn a
+  child from, reclaim from, or read the swarm of another tenant's wallet.
+- **Trust coverage gate** now measures `app.core.auth`, the API-key service,
+  the audit chain, policy evaluation, governed metering, dev-key provisioning
+  and every `CORE_TRUST_ROUTERS` module except the static and docs routers
+  (83% locally against the 80% floor); a scope test fails when a core trust
+  module is neither measured nor exempted with a written reason.
+- **Proof surfaces scoped to the owning wallet** (unmounted by default,
+  refused in production; a foreign resource answers like a missing one and
+  bootstrap admins keep full access): protocol generations, with Oracle
+  registration and discovery writes admin-only and `/crawl/batch` capped at
+  25 URLs; content factory pipelines, pieces and campaigns, with the owner
+  stored as the wallet id instead of the raw API key, `source_clip_id` and
+  `source_url` mutually exclusive, and pipeline status persisted;
+  `/v1/content` reads, which also refuse models other than the configured
+  `LLM_MODEL` and return an audited 502 on provider failure; broadcast jobs;
+  `/v1/ai` decisions, memory and heals; `/v1/sandbox` puzzle environments,
+  whose two GETs now require authentication; red-team scans; agent comms,
+  with ownership tied to the wallet or a key digest, no raw keys in durable
+  state, and JWT callers no longer sharing one identity; AWI sessions, DOM
+  sessions and RAG memories, with the owner filter applied before `top_k`
+  and the `awi_rag_query` MCP tool reduced to a pointer at the scoped route.
+- **AWI DOM bridge**: page-state extraction and action previews redact
+  credential values, caller text in selectors is quoted, `page.evaluate` runs
+  only a fixed scroll script with integer offsets, DOM session viewports are
+  bounded to 320-3840 x 240-2160, and the outbound URL guard fails closed
+  (`dns_resolution_failed`) when a hostname cannot be resolved. The external
+  adapter runs the governed `/v1/awi/execute` call before the website's
+  side-effecting call, never sends the middleware key to mapped routes, and
+  refuses absolute route URLs. A governed `200` whose `status` is not
+  `success` (`paused` by a human, `passkey_required`, `max_steps_reached`,
+  `error`) returns `success: false` and the website route is never called.
+- **Dormant auth and KYC**: WebAuthn checks for high-risk AWI actions require
+  user verification; `/v1/auth/refresh` claims the old token with one atomic
+  conditional UPDATE, so concurrent refreshes cannot fork the chain; KYC GET
+  returns 404 for another wallet's verification; KYC sessions accept only
+  Stripe's document types and an `https` `return_url` (`http` for localhost).
+- **Auto-PR, sandbox and planner**: the auto-PR runner and workflow fail when
+  the API key is missing or rejected (the `dev-key` fallback is gone) and the
+  endpoint reports `simulated` instead of a fake PR URL; behavioral-sandbox
+  environments refuse loader, interpreter and PATH-like env vars and
+  over-long names; planner requests reject NaN and Infinity, including
+  numbers nested anywhere in the untyped `task_context` (the
+  `candidate_actions` costs, latencies and risks the planner budgets with).
+- **Webhooks and audit summaries**: `POST /v1/webhooks/stripe/identity`
+  returns 400 instead of 500 on a forged, stale or unparseable
+  `Stripe-Signature` (`stripe.SignatureVerificationError` is not a
+  `ValueError`; it was fail-closed either way). `GET /v1/audit/summary` and
+  `GET /v1/audit/events?summary=true` count in SQL over every matching event
+  instead of tallying a 10,000-row read, so `total`, `by_event`,
+  `by_outcome`, `by_wallet`, `ok` and `failed` are exact at any table size;
+  the one bucket read from metadata JSON, `by_policy_reason`, carries an
+  additive `by_policy_reason_truncated` flag whenever its row cap left
+  events out.
+- **Proof scripts exit non-zero on the failures they detect**:
+  `attack2_budget_postgres.py`, `attack2_mechanism_sqlite.py`,
+  `stress_test_live.py`, `agent_self_credential_proof.py` (the scope-denial
+  invariant is no longer skipped by default) and `adversarial_battery.py`
+  (now behind the same live-target guard as the other live scripts: HTTPS
+  required, the production origin needs `--confirm-production`) fail the
+  process on their own measurement instead of printing and exiting 0.
+- **Migration 041** (`041_scrub_content_owner_keys`, data-only): blanks
+  `content_pipelines.owner_key` and `content_campaigns.owner_key` values that
+  are not a known wallet id, which is what legacy rows stored the raw API key
+  as. Run `alembic upgrade head`; the downgrade is a no-op.
+
+### Documentation
+- Root and strategy docs reconciled with the code: the version badge marks
+  v1.3.0 as unreleased, `PRODUCT_STRATEGY.md` corrects the x402 statement
+  (dormant facilitation router, not a settlement rail), `key-management.md` no
+  longer describes a nonexistent signing-key rotation route as current, and
+  stale plans/reviews/PR artifacts carry a dated "historical" banner.
+
+- Operator docs (failure semantics, troubleshooting, demo instance, threat
+  model, OWASP ASI04, Railway CORS, MCP registry) now match the code.
+  `server.json` no longer advertises the disabled `/mcp` remote, so the
+  publish preflight fails closed until the SOP changes; `ALERT_FROM_EMAIL`
+  defaults to empty; new tests pin the `permit_required` idempotency
+  semantics, the troubleshooting error headings and the registry manifest.
+
+### SDKs and integrations
+- **b2a_sdk**: replay-safe `charge()` and `@billable` through idempotency
+  keys, `daily_limit=0` honored, `@monitored` no longer ships exception text
+  or tracebacks by default, read-only `api_key`, and `execute_awi_action()`
+  sends the required permit and idempotency headers. Details in
+  `b2a_sdk/CHANGELOG.md`.
+- **framework_integrations**: the legacy LangGraph and LlamaIndex tool
+  factories now await the async client and send real requests;
+  `get_crewai_tools` raises `NotImplementedError` pointing at the governed
+  wrappers. Breaking: `B2AClient.charge(amount, description)`, which always
+  got a 422, is replaced by `charge(service_category, units=1.0,
+  description="", *, idempotency_key, request_path=None)`.
+- **Wrappers**: the replay tests run against an idempotent mock gateway and
+  assert one permit, one charge and a conflict on changed arguments;
+  `ast.literal_eval` replaces `eval`; every wrapper pins `b2a-sdk>=0.4.0`,
+  the first release with the trust-loop API they use.
+
+### Tests
+- Core trust tests now fail on a broken implementation: a barriered
+  `max_calls_per_tool` CAS race, behavioral `/mcp/tools` pagination, a
+  `clean_database` schema-drift guard, a trust-boundary guard that also
+  scans function-body imports (`mcp.py` now imports
+  `permit_constraints_snapshot` through the `app.trust` facade), pinned
+  key-confusion, wildcard `recipient_domain` and tampered-permit outcomes,
+  proof-on discovery tests that no longer skip, and the Postgres rapid-fire
+  accounting test running in `postgres_trust` CI.
 
 ### Fixed
 - **Duplicate guard hardening**: The cross-key duplicate guard (`MCP_UPSTREAM_DUPLICATE_GUARD`) now validates its mode at startup using a strict enum (`off`, `log`, `enforce`). Typos such as "enforced" are rejected at boot rather than silently falling back to permissive behavior. Invalid modes raise `ValidationError` during config construction.
@@ -19,7 +254,11 @@ full release gate; do not backfill a final `v1.2.0` tag.
 - **SECURITY_LIMITATIONS.md correction**: Corrected the claim that remote tools refuse `max_calls_per_tool`. That constraint has been supported since 8c95229 (PR #476). Only `aggregate_value_cap` is still rejected on the upstream path.
 
 ### Changed
+- **License change**: the core (everything outside `b2a_sdk/`, `awi_sdk/`, `framework_integrations/`, `wrappers/`, and `examples/`) moves from MIT to the Business Source License 1.1 with a four-year change date back to MIT; the SDK directories stay MIT. Versions published before this change remain MIT. See `LICENSING.md`.
 - **Default duplicate guard mode unchanged**: The default remains `log` (observe-only). Operators wishing to enforce duplicate blocking must explicitly set `MCP_UPSTREAM_DUPLICATE_GUARD=enforce`.
+
+### Removed
+- **Internal IP and deal-room documents** (`docs/ip/`, `docs/invention-inventory.md`, `docs/data-room-corrections-2026-08-26.md`, `docs/reality-check-2026-09-01.md`) are no longer part of the public tree.
 
 ### Technical Note
 - **Migration required**: Alembic revision `040_permit_repeat_window` adds the nullable integer column `permits.repeat_window_seconds`. Upgrade the database with `alembic upgrade head` before starting the API. For an unstamped legacy database, first verify and stamp its exact existing revision; do not stamp `head` to bypass migration. The duplicate guard reads the persisted column, and permit signing includes its value only when set; existing permits with `NULL` retain their previous signed payload. Startup rejects existing schemas missing this column, including unstamped legacy databases.

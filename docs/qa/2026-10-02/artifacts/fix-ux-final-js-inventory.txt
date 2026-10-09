@@ -1,0 +1,16 @@
+docs/qa/2026-10-02/ux-contracts.test.cjs
+docs/qa/2026-10-02/ux-regressions.spec.cjs
+docs/qa/2026-10-02/playwright.config.cjs
+docs/qa/2026-10-02/browser-loopback.mjs
+docs/qa/2026-10-02/ux_browser_qa.cjs
+docs/qa/2026-10-02/frontend.spec.cjs
+docs/qa/2026-10-02/frontend-components.test.cjs
+site/pilot-fit.js
+site/va-init.js
+site/a11y-preload.js
+site/arcade-boot.js
+site/analytics.js
+site/a11y.js
+site/wave.js
+site/proof/proof.js
+site/arcade.js

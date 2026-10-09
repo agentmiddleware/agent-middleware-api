@@ -261,6 +261,34 @@ async def test_tool_outside_bundle_allowlist_is_blocked(
     assert decision.policy_id == policy_id
 
 
+@pytest.mark.parametrize("corrupt", ["not-json", '{"a": 1}', "null", f'"{TOOL}"'])
+async def test_corrupt_bundle_allowlist_blocks_instead_of_allowing_everything(
+    iga_config, clean_database, rsa_key, corrupt
+):
+    """A stored allowlist that is present but not a JSON array of strings must
+    not read as an unset (unrestricted) one -- not even for the tool the
+    bundle was written to allow. NULL keeps meaning "no restriction"."""
+    wallet_id = await _make_wallet()
+    policy_id = await _make_bundle(wallet_id, allowed_tools=[TOOL])
+    factory = get_session_factory()
+    async with factory() as session:
+        row = await session.get(PolicyBundleModel, policy_id)
+        assert row is not None
+        row.allowed_tools_json = corrupt
+        session.add(row)
+        await session.commit()
+    iga_config(_okta_issuers(rsa_key), {"payments-ops": {"policy_id": policy_id}})
+
+    principal = parse_enterprise_token(
+        _mint(rsa_key, extra={"groups": ["payments-ops"]})
+    )
+    for tool_name in (TOOL, "some.other.tool"):
+        decision = await enforce_tool_call(principal, tool_name)
+        assert decision.allowed is False, tool_name
+        assert decision.reason == "iga_tool_not_allowed", tool_name
+        assert decision.policy_id == policy_id
+
+
 async def test_unauthorized_principal_without_required_role_is_blocked(
     iga_config, clean_database, rsa_key
 ):
@@ -636,7 +664,10 @@ async def test_velocity_windows_are_tracked_per_grant(
     assert blocked.allowed is False
     assert blocked.reason == "iga_velocity_exceeded"
     long_key = (OKTA_ISS, "user-1", TOOL, "ops-long", long_policy)
-    assert list(oidc_iga._window_calls[long_key]) == [1002.0, 1003.0]
+    assert [use.recorded_at for use in oidc_iga._window_calls[long_key]] == [
+        1002.0,
+        1003.0,
+    ]
 
 
 async def test_max_uses_are_tracked_per_grant(iga_config, clean_database, rsa_key):
@@ -688,12 +719,20 @@ async def test_release_tool_use_compensates_exactly_and_clamps_at_zero(
     first = await enforce_tool_call(principal, TOOL)
     assert first.allowed is True
     await oidc_iga.release_tool_use(
-        principal, TOOL, group="payments-ops", policy_id=policy_id
+        principal,
+        TOOL,
+        group="payments-ops",
+        policy_id=policy_id,
+        reservation=first.reservation,
     )
     assert oidc_iga._lifetime_uses == {}
     # Over-release must not create negative budget.
     await oidc_iga.release_tool_use(
-        principal, TOOL, group="payments-ops", policy_id=policy_id
+        principal,
+        TOOL,
+        group="payments-ops",
+        policy_id=policy_id,
+        reservation=first.reservation,
     )
     assert oidc_iga._lifetime_uses == {}
 

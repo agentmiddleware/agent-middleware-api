@@ -32,6 +32,17 @@ plus, where a next step exists, a ``remediation`` block naming it
 (fund the wallet, ask a human via ``POST /v1/permit-requests``, retry the
 same call once an approval is decided).
 
+One governed outcome is not a denial and does not use the JSON-RPC error
+channel: ``delivery_uncertain``. The upstream call may have been delivered
+and taken effect, and the charge stands, so the model itself must read that
+it should not call the tool again. Clients commonly hand the model only a
+JSON-RPC error's message, and ``-32005`` is this surface's retryable code,
+so the outcome is returned as a tool result instead: ``isError: true``, a
+text explanation carrying the do-not-resend instruction, the receipt, and
+``_meta["io.agentmiddleware/outcome"]`` with ``status: "unknown"``. The
+governed endpoints (``/mcp/messages`` and REST) keep their ``-32005``
+contract.
+
 Replay safety: a client-supplied ``Idempotency-Key`` header (or the
 ``io.agentmiddleware/idempotency_key`` entry in ``params._meta``) is honored
 exactly like the governed endpoints. A key that is *present but unusable* —
@@ -125,6 +136,8 @@ router = APIRouter(prefix="/mcp", tags=["MCP Standard Endpoint"])
 
 _IDEMPOTENCY_META_KEY = "io.agentmiddleware/idempotency_key"
 _RECEIPT_META_KEY = "io.agentmiddleware/receipt"
+_OUTCOME_META_KEY = "io.agentmiddleware/outcome"
+_DELIVERY_UNCERTAIN = "delivery_uncertain"
 _META_KEY_SOURCE = 'params._meta["io.agentmiddleware/idempotency_key"]'
 # A legacy-transport client may send its key in params.mcpContext; the
 # source label names that location in the conflict/refusal payload.
@@ -218,6 +231,22 @@ def _meta_idempotency_key_source(
     if value is None:
         return None
     return (_META_KEY_SOURCE, value)
+
+
+def _action_permit_reference(params: mcp_types.CallToolRequestParams) -> str | None:
+    meta = getattr(params.meta, "model_extra", None) or {}
+    extra = params.model_extra or {}
+    legacy = extra.get("mcpContext", {})
+    values = []
+    if "io.agentmiddleware/permit_id" in meta:
+        values.append(meta["io.agentmiddleware/permit_id"])
+    if isinstance(legacy, dict) and "permit_id" in legacy:
+        values.append(legacy["permit_id"])
+    if any(type(value) is not str or not value.strip() for value in values):
+        raise _mcp_error(-32602, "invalid_permit_reference")
+    if len(set(values)) > 1:
+        raise _mcp_error(-32602, "permit_reference_conflict")
+    return values[0] if values else None
 
 
 def _client_idempotency_key(
@@ -348,6 +377,86 @@ async def _mint_auto_permit(
     return permit.permit_id
 
 
+def _delivery_uncertain_tool_result(
+    error: GovernedToolError, *, client_key_supplied: bool
+) -> dict[str, Any]:
+    """Return ``delivery_uncertain`` as a tool result the model can read.
+
+    Every other governed refusal on this surface stays a JSON-RPC error. This
+    outcome is different: the upstream call may already have been delivered
+    and taken effect, and the charge stands. A JSON-RPC error commonly
+    reaches the model as its message alone, and ``-32005`` is this surface's
+    retryable code, so a model told only "delivery_uncertain" tends to call
+    the tool again. Without a client Idempotency-Key that is a new, charged
+    dispatch: the duplicate this gateway exists to prevent. The MCP spec
+    routes errors the model must see into the result (``isError: true``).
+    ``isError`` stays true because ``false`` tells clients the call
+    succeeded, which is not known here.
+
+    The evidence is unchanged: the same signed receipt rides ``receipt`` and
+    ``_meta["io.agentmiddleware/receipt"]`` as on a successful call, and the
+    dispatch attempt rides ``_meta["io.agentmiddleware/outcome"]``. The shape
+    is a pure function of the error, so a same-key replay is identical.
+    """
+    receipt = error.receipt or {}
+    receipt_id = receipt.get("receipt_id")
+    # A keyless call's key was generated here and never returned, so the
+    # caller cannot replay it: both the text and the structured remediation
+    # must say a new attempt is a new charge rather than promise a replay.
+    if client_key_supplied:
+        retry_guidance = (
+            "Repeating this request with the same Idempotency-Key returns this "
+            "same result without running the tool again."
+        )
+        remediation_detail = (
+            "Check the downstream system of record for this action before any "
+            "new attempt. A same-key replay returns this result and never "
+            "redispatches."
+        )
+    else:
+        retry_guidance = (
+            "This request carried no Idempotency-Key, so calling the tool again "
+            "would run it again as a new, separately charged call."
+        )
+        remediation_detail = (
+            "Check the downstream system of record for this action before any "
+            "new attempt. This call carried no Idempotency-Key, so any new "
+            "attempt is a new dispatch and a new charge."
+        )
+    sentences = [
+        "delivery_uncertain: outcome unknown.",
+        "This call may have reached the upstream tool, but no trustworthy "
+        "response came back, so the action may or may not have happened.",
+        "The gateway will not resend it.",
+        "Do not call this tool again for the same action until you have checked "
+        "whether it took effect in the system the tool acts on.",
+        retry_guidance,
+    ]
+    if receipt_id:
+        sentences.append(f"Receipt: {receipt_id}.")
+    outcome: dict[str, Any] = {
+        "status": "unknown",
+        "reason": _DELIVERY_UNCERTAIN,
+        "redispatched": False,
+        "idempotency_key_supplied": client_key_supplied,
+        "remediation": {
+            "type": "verify_before_new_attempt",
+            "detail": remediation_detail,
+        },
+    }
+    dispatch = error.extra_data.get("dispatch")
+    if isinstance(dispatch, dict):
+        outcome["dispatch"] = dispatch
+    payload: dict[str, Any] = {
+        "content": [{"type": "text", "text": " ".join(sentences)}],
+        "isError": True,
+        "_meta": {_OUTCOME_META_KEY: outcome},
+    }
+    if error.receipt:
+        payload["receipt"] = error.receipt
+    return payload
+
+
 async def _governed_tools_call(
     *,
     auth: AuthContext,
@@ -355,6 +464,7 @@ async def _governed_tools_call(
     arguments: dict[str, Any],
     client_idempotency_key: str | None,
     request_id: str | None,
+    permit_id: str | None = None,
 ) -> dict[str, Any]:
     """Auto-mint the permit, then run the single governed invoke pipeline."""
     if not tool_name:
@@ -371,12 +481,15 @@ async def _governed_tools_call(
     if record is None:
         raise _mcp_error(-32001, f"Tool not found: {tool_name}")
 
+    if get_service_registry().get_action_binding(record) is not None and not permit_id:
+        raise _mcp_error(-32003, "action_permit_required")
+
     # Wallet policy shapes the permit this surface mints. A policy demanding a
     # human decision is materialized as an approval-gated permit rather than
     # surfacing as an unsatisfiable denial: the agent calls the tool normally
     # and the middleware runs the approval workflow.
     requires_human_approval = await wallet_human_approval_required(auth.wallet_id)
-    if requires_human_approval and not client_idempotency_key:
+    if requires_human_approval and not client_idempotency_key and not permit_id:
         # Without a client key every retry would mint a fresh permit and page
         # a human again instead of polling the pending decision.
         raise _mcp_error(
@@ -398,7 +511,7 @@ async def _governed_tools_call(
         )
 
     idempotency_key = client_idempotency_key or f"mcp-auto-{uuid.uuid4().hex}"
-    permit_id = await _mint_auto_permit(
+    permit_id = permit_id or await _mint_auto_permit(
         auth=auth,
         tool_name=tool_name,
         record=record,
@@ -503,6 +616,14 @@ async def _governed_tools_call(
             denial_data["details"] = e.details
         raise _mcp_error(-32003, str(e), denial_data or None) from e
     except GovernedToolError as e:
+        if str(e) == _DELIVERY_UNCERTAIN:
+            # First call and same-key replay both arrive here (replay rebuilds
+            # the error from the stored terminal record), so both get the same
+            # result shape. See _delivery_uncertain_tool_result for why this
+            # one outcome leaves the JSON-RPC error channel.
+            return _delivery_uncertain_tool_result(
+                e, client_key_supplied=bool(client_idempotency_key)
+            )
         data = dict(e.extra_data)
         if e.receipt:
             data["receipt"] = e.receipt
@@ -576,6 +697,7 @@ def _build_standard_mcp_server() -> Server:
                 tool_name=req.params.name,
                 arguments=req.params.arguments or {},
                 client_idempotency_key=client_key,
+                permit_id=_action_permit_reference(req.params),
                 request_id=request_id,
             )
 

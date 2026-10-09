@@ -44,12 +44,12 @@ def test_server(tmp_path_factory):
     """Boot a minimal test server with a static dev key for bootstrap tests."""
     import base64
     import secrets
-    
+
     state_dir = tmp_path_factory.mktemp("bootstrap-test-state")
     port = _free_port()
     static_dev_key = f"amw_dev_{secrets.token_urlsafe(32)}"
     signing_seed = base64.b64encode(secrets.token_bytes(32)).decode()
-    
+
     # Boot uvicorn directly with minimal env for testing
     test_env = {
         **os.environ,
@@ -69,7 +69,7 @@ def test_server(tmp_path_factory):
         "ALLOW_LEGACY_UNPERMITTED_MCP": "false",
         "ENABLE_PROOF_SURFACES": "false",
     }
-    
+
     log_path = state_dir / "server.log"
     with log_path.open("wb") as log_file:
         process = subprocess.Popen(
@@ -89,7 +89,7 @@ def test_server(tmp_path_factory):
             stderr=subprocess.STDOUT,
             start_new_session=True,
         )
-    
+
     base_url = f"http://127.0.0.1:{port}"
     try:
         deadline = time.monotonic() + 120
@@ -115,6 +115,7 @@ def test_server(tmp_path_factory):
         except subprocess.TimeoutExpired:
             os.killpg(process.pid, signal.SIGKILL)
             process.wait(timeout=10)
+
 
 def test_constant_test_loop_refuses_cleartext_http_non_loopback():
     """Configuration error (exit 2) when API_URL uses HTTP for non-loopback host."""
@@ -156,34 +157,39 @@ def test_constant_test_loop_allows_http_loopback():
     # The point is that URL validation didn't reject http://localhost
     assert result.returncode != 0
     # Should NOT contain the cleartext refusal message
-    assert "refusing to send CI_SMOKE_AGENT_KEY over cleartext HTTP" not in result.stderr
+    assert (
+        "refusing to send CI_SMOKE_AGENT_KEY over cleartext HTTP" not in result.stderr
+    )
 
 
 def test_constant_test_loop_validates_malformed_key():
     """Validate that malformed key check exists in the code.
-    
+
     The actual validation happens during API fetch, so we can't easily test
     it end-to-end without a running server. This test verifies the validation
     logic exists by importing the module and checking the key derivation path.
     """
     import importlib.util
 
-    spec = importlib.util.spec_from_file_location("constant_test_loop", CONSTANT_TEST_LOOP)
+    spec = importlib.util.spec_from_file_location(
+        "constant_test_loop", CONSTANT_TEST_LOOP
+    )
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    
+
     # The validation is in run_constant_test when deriving key_prefix
     # Verify the code path exists by checking the function signature
     import inspect
+
     source = inspect.getsource(module.run_constant_test)
     assert "malformed API key" in source
     assert "expected format <prefix>_<suffix>" in source
-    
+
     # Verify the key is not logged anywhere in the source
     full_source = CONSTANT_TEST_LOOP.read_text()
     # The key variable should never be printed or logged directly
-    assert 'print(agent_key)' not in full_source
+    assert "print(agent_key)" not in full_source
     assert 'print(f"{agent_key}' not in full_source
 
 
@@ -194,10 +200,12 @@ def test_constant_test_loop_never_logs_keys():
     # that the script imports cleanly and the key-reading functions don't print.
     import importlib.util
 
-    spec = importlib.util.spec_from_file_location("constant_test_loop", CONSTANT_TEST_LOOP)
+    spec = importlib.util.spec_from_file_location(
+        "constant_test_loop", CONSTANT_TEST_LOOP
+    )
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
-    
+
     # Set a canary key
     canary_key = "canary_key_must_not_appear_in_logs"
     test_env = {
@@ -206,22 +214,22 @@ def test_constant_test_loop_never_logs_keys():
         "CI_SMOKE_WALLET_ID": "wallet_id",
         "CI_SMOKE_KEY_ID": "key_id",
     }
-    
+
     # Temporarily override os.environ
     original_environ = os.environ.copy()
     os.environ.update(test_env)
-    
+
     try:
         spec.loader.exec_module(module)
         agent_key, wallet_id, key_id = module._get_agent_key()
         assert agent_key == canary_key
         assert wallet_id == "wallet_id"
         assert key_id == "key_id"
-        
+
         # The _get_agent_key function should not print the key
         # (We can't fully test this without capturing stdout, but the function
         # is designed to never print/log the key - code review confirms this.)
-        
+
     finally:
         os.environ.clear()
         os.environ.update(original_environ)
@@ -231,14 +239,18 @@ def test_constant_test_loop_self_provision_signal():
     """When no credentials provided, _get_agent_key signals self-provision."""
     import importlib.util
 
-    spec = importlib.util.spec_from_file_location("constant_test_loop", CONSTANT_TEST_LOOP)
+    spec = importlib.util.spec_from_file_location(
+        "constant_test_loop", CONSTANT_TEST_LOOP
+    )
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
-    
+
     original_environ = os.environ.copy()
     os.environ.clear()
-    os.environ.update({k: v for k, v in original_environ.items() if not k.startswith("CI_SMOKE_")})
-    
+    os.environ.update(
+        {k: v for k, v in original_environ.items() if not k.startswith("CI_SMOKE_")}
+    )
+
     try:
         spec.loader.exec_module(module)
         agent_key, wallet_id, key_id = module._get_agent_key()
@@ -255,10 +267,12 @@ def test_constant_test_loop_partial_credentials_fetch_from_api():
     """When key provided but wallet_id/key_id missing, signals API fetch."""
     import importlib.util
 
-    spec = importlib.util.spec_from_file_location("constant_test_loop", CONSTANT_TEST_LOOP)
+    spec = importlib.util.spec_from_file_location(
+        "constant_test_loop", CONSTANT_TEST_LOOP
+    )
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
-    
+
     test_env = {
         **os.environ,
         "CI_SMOKE_AGENT_KEY": "test_key",
@@ -266,11 +280,11 @@ def test_constant_test_loop_partial_credentials_fetch_from_api():
     # Explicitly unset wallet_id and key_id
     test_env.pop("CI_SMOKE_WALLET_ID", None)
     test_env.pop("CI_SMOKE_KEY_ID", None)
-    
+
     original_environ = os.environ.copy()
     os.environ.clear()
     os.environ.update(test_env)
-    
+
     try:
         spec.loader.exec_module(module)
         agent_key, wallet_id, key_id = module._get_agent_key()
@@ -286,22 +300,24 @@ def test_constant_test_loop_partial_credentials_fetch_from_api():
 def test_partner_api_key_bootstrap_json_output():
     """Bootstrap script produces JSON-parseable output and never prints the key."""
     import json
-    
+
     BOOTSTRAP = ROOT / "scripts" / "partner_api_key_bootstrap.py"
-    
+
     # Run with --json flag
     result = subprocess.run(
         [sys.executable, str(BOOTSTRAP), "--json"],
-        input=json.dumps({
-            "api_url": "http://127.0.0.1:8000",
-            "sponsor_name": "test-sponsor",
-            "agent_id": "test-agent"
-        }),
+        input=json.dumps(
+            {
+                "api_url": "http://127.0.0.1:8000",
+                "sponsor_name": "test-sponsor",
+                "agent_id": "test-agent",
+            }
+        ),
         capture_output=True,
         text=True,
         timeout=5,
     )
-    
+
     # Should fail (no server), but output should still be JSON-parseable
     # The important part is that --json produces parseable JSON even on error
     # and that the key is not in the output
@@ -318,7 +334,7 @@ def test_partner_api_key_bootstrap_json_output():
             # If not JSON, it should be an error message
             # Either way, verify no key leaked in non-JSON output
             pass
-    
+
     # The bootstrap key should never appear in raw stdout/stderr
     # (We can't test the actual key without a server, but we can verify
     # the output is structured and doesn't contain test markers)
@@ -332,7 +348,7 @@ def test_partner_api_key_bootstrap_json_output():
 )
 def test_constant_test_loop_full_integration():
     """Full integration test against a running server (opt-in via env var).
-    
+
     This test is skipped by default. To run it:
     1. Start server: make quickstart (in terminal 1)
     2. Run test: RUN_CONSTANT_TEST_LOOP_INTEGRATION=1 pytest tests/test_constant_test_loop.py -v
@@ -350,7 +366,7 @@ def test_constant_test_loop_full_integration():
 def test_constant_test_loop_never_logs_api_key(test_server):
     """Agent key is never printed or logged during constant test execution."""
     import httpx
-    
+
     base_url, _ = test_server
     # Pre-provision a key to test that it's never logged
     provision_response = httpx.post(
@@ -533,9 +549,7 @@ def test_off_loopback_runs_require_a_pinned_tool_and_approved_payload():
     Derived arguments fill required fields from types, defaults, and the first
     enum member -- which for a consequential tool could be "delete".
     """
-    env = {
-        k: v for k, v in os.environ.items() if not k.startswith("CI_SMOKE")
-    }
+    env = {k: v for k, v in os.environ.items() if not k.startswith("CI_SMOKE")}
     env["PATH"] = os.environ.get("PATH", "/usr/bin:/bin")
     env["CI_SMOKE_AGENT_KEY"] = "b2a_placeholder"
 

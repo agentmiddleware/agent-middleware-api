@@ -1,0 +1,2 @@
+{'PLAN.md': True, 'SESSION-LOG.md': True, 'FINDINGS.md': True, 'COVERAGE.md': True, 'SUMMARY.md': True}
+Interim findings/coverage/summary explicitly marked in progress; final pass evidence pending, no pass implied.

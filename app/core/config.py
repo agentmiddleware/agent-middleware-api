@@ -146,6 +146,13 @@ class Settings(BaseSettings):
     # - "log": detect and log duplicates but allow them (observe mode, default)
     # - "enforce": refuse duplicate requests with duplicate_request_new_key
     MCP_UPSTREAM_DUPLICATE_GUARD: DuplicateGuardMode = DuplicateGuardMode.LOG
+    # Probabilistic advisory check; enabling it sends redacted state to TypeSafe.
+    JEV_RISK_GUARD: DuplicateGuardMode = DuplicateGuardMode.OFF
+    JEV_RISK_GUARD_MODEL: str = "jev-1.13.0"
+    JEV_RISK_GUARD_TIMEOUT_SECONDS: float = 1.5
+    JEV_RISK_GUARD_TIERS: str = "medium,high"
+    TYPESAFE_API_KEY: SecretStr = SecretStr("")
+    TYPESAFE_BASE_URL: str = "https://api.typesafe.ai"
     # Default repeat detection window in seconds. Duplicates outside this window
     # are not detected.
     MCP_UPSTREAM_DUPLICATE_WINDOW_SECONDS: int = 86400  # 24 hours
@@ -243,7 +250,9 @@ class Settings(BaseSettings):
     # --- Notification Service ---
     RESEND_API_KEY: str = ""
     SLACK_WEBHOOK_URL: str = ""
-    ALERT_FROM_EMAIL: str = "alerts@b2a.dev"
+    # Sender for Resend email. Empty by default so no placeholder sender ships;
+    # set it, to an address the operator controls, together with RESEND_API_KEY.
+    ALERT_FROM_EMAIL: str = ""
 
     # --- Sentinel Human Approval (pauseapi.app) ---
     # Backs the per-permit requires_human_approval gate on governed invokes.
@@ -278,6 +287,8 @@ class Settings(BaseSettings):
     # --- Velocity Monitoring ---
     VELOCITY_HOURLY_LIMIT: Decimal = Decimal("1000.0")
     VELOCITY_DAILY_LIMIT: Decimal = Decimal("10000.0")
+    # Reserved: read into VelocityMonitor but used by no check today (there is
+    # no standard-deviation detection). Changing it has no effect.
     VELOCITY_ALERT_THRESHOLD: int = 2
     VELOCITY_FREEZE_THRESHOLD: int = 3
 

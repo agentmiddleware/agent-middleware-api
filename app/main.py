@@ -10,6 +10,7 @@ auditable receipts. Other workloads are labeled proof surfaces.
 
 import asyncio
 import logging
+import math
 from pathlib import Path
 import sys
 import time
@@ -17,8 +18,10 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import Depends, FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from .core.auth import AuthContext, get_auth_context
 from .core.build_metadata import get_build_commit_sha, get_build_provenance
@@ -29,7 +32,10 @@ from .core.durable_state import (
     get_durable_state,
 )
 from .core.health import (
+    CHECK_TIMEOUT_SECONDS,
     build_public_dependency_report,
+    check_redis_liveness,
+    check_database_readiness,
     check_mqtt_readiness,
     gather_dependency_report,
 )
@@ -531,7 +537,8 @@ app = FastAPI(
     # This avoids presenting placeholder support details as a real escalation path.
     contact=public_contact or None,
     license_info={
-        "name": "MIT",
+        "name": "Business Source License 1.1",
+        "url": "https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/LICENSE",
     },
     servers=[
         {
@@ -609,6 +616,36 @@ app.add_middleware(SecurityHeadersMiddleware)
 # layer below — routing included — sees a GET, and the response leaves with
 # the GET's status and headers but no body, per RFC 9110 §9.3.2.
 app.add_middleware(HeadMethodMiddleware)
+
+
+def _json_safe_numbers(value: Any) -> Any:
+    """Spell non-finite floats as strings; strict JSON has no such numbers."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return (
+            "NaN" if math.isnan(value) else ("Infinity" if value > 0 else "-Infinity")
+        )
+    if isinstance(value, dict):
+        return {key: _json_safe_numbers(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_safe_numbers(item) for item in value]
+    return value
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_error_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    """FastAPI's default 422, safe to render for every refused input.
+
+    Starlette's JSON parser accepts the bare literals Infinity, -Infinity and
+    NaN, and a validation error echoes the refused input back. The default
+    handler then failed to serialize its own 422 and answered 500 instead.
+    """
+    return JSONResponse(
+        status_code=422,
+        content={"detail": _json_safe_numbers(jsonable_encoder(exc.errors()))},
+    )
+
 
 # --- Mount service routers ---
 
@@ -701,6 +738,9 @@ PROOF_SURFACE_ROUTERS = (
     awi_enhanced,
 )
 
+# Action issuance stays frozen: the configured upstream has no qualified
+# ActionToolBinding. Only explicit test fixtures mount permits.action_router;
+# production and proof-enabled apps retain recovery without advertising issuance.
 for router_module in CORE_TRUST_ROUTERS:
     app.include_router(
         router_module.router,
@@ -1118,19 +1158,42 @@ async def root(request: Request):
     "/health",
     tags=["Discovery"],
     summary="Liveness check",
-    description="Returns 200 if the API is running. Use for Kubernetes livenessProbe.",
+    responses={
+        503: {
+            "description": (
+                "Degraded: Redis (the shared rate limiter) is configured but "
+                "not answering; production-like deployments refuse /v1 "
+                "requests in this state."
+            )
+        }
+    },
+    description=(
+        "Returns 200 with status `healthy` when the API is running and its "
+        "Redis (shared rate limiter) answers a PING, or when REDIS_URL is not "
+        "configured (no PING is sent). Returns 503 with status `degraded` when "
+        "Redis is configured but does not answer within 1 second; in "
+        "production-like environments the rate limiter then refuses /v1 "
+        "requests, so the API is not serving even though the process is up. "
+        "`checks.redis` is `up`, `down`, or `not_configured`."
+    ),
 )
 async def health():
-    return {
-        "status": "healthy",
-        "version": settings.APP_VERSION,
-        "commit_sha": get_build_commit_sha(),
-        # Same field /health/dependencies publishes, so the liveness probe
-        # alone says whether that SHA came through the documented release
-        # path. A bare SHA cannot be told apart from a stale stamp; a SHA
-        # plus "stamped" can only mean the deployment is behind main.
-        "build_provenance": get_build_provenance(),
-    }
+    redis_status = await check_redis_liveness()
+    healthy = redis_status != "down"
+    return JSONResponse(
+        status_code=200 if healthy else 503,
+        content={
+            "status": "healthy" if healthy else "degraded",
+            "version": settings.APP_VERSION,
+            "commit_sha": get_build_commit_sha(),
+            # Same field /health/dependencies publishes, so the liveness probe
+            # alone says whether that SHA came through the documented release
+            # path. A bare SHA cannot be told apart from a stale stamp; a SHA
+            # plus "stamped" can only mean the deployment is behind main.
+            "build_provenance": get_build_provenance(),
+            "checks": {"redis": redis_status},
+        },
+    )
 
 
 @app.get(
@@ -1143,7 +1206,12 @@ async def health_ready():
     checks: dict[str, dict[str, Any]] = {}
     all_healthy = True
 
-    state_report = await get_durable_state().health_report()
+    try:
+        state_report = await asyncio.wait_for(
+            get_durable_state().health_report(), timeout=CHECK_TIMEOUT_SECONDS
+        )
+    except Exception:
+        state_report = {"ok": False, "backend": "unknown"}
     checks["state_store"] = {
         "status": "up" if state_report.get("ok", False) else "down",
         "backend": state_report.get("backend", "unknown"),
@@ -1160,16 +1228,18 @@ async def health_ready():
     if checks["mqtt"]["status"] == "down":
         all_healthy = False
 
-    if settings.DATABASE_URL:
-        checks["database"] = {"status": "up", "configured": True}
-    else:
-        checks["database"] = {"status": "not_configured", "configured": False}
+    checks["database"] = await check_database_readiness()
+    if checks["database"]["status"] != "up":
+        all_healthy = False
 
-    return {
-        "status": "ready" if all_healthy else "not_ready",
-        "version": settings.APP_VERSION,
-        "checks": checks,
-    }
+    return JSONResponse(
+        status_code=200 if all_healthy else 503,
+        content={
+            "status": "ready" if all_healthy else "not_ready",
+            "version": settings.APP_VERSION,
+            "checks": checks,
+        },
+    )
 
 
 @app.get(
@@ -1179,10 +1249,11 @@ async def health_ready():
     description=(
         "Probes the dependencies this deployment runs on, in parallel with a "
         "short timeout. Each entry reports status, latency_ms, and an error "
-        "message when unreachable. With proof surfaces unmounted (the "
-        "production posture) the payload covers the transaction-integrity "
-        "boundary only: postgres, redis, signing key, upstream MCP, version + "
-        "commit SHA. "
+        "code when unreachable (the exception class or a timeout; driver "
+        "messages are logged server-side, never returned). With proof "
+        "surfaces unmounted (the production posture) the payload covers the "
+        "transaction-integrity boundary only: postgres, redis, signing key, "
+        "upstream MCP, version + commit SHA. "
         "Instances that mount proof surfaces additionally report those "
         "surfaces' dependencies and per-service simulation modes; deps whose "
         "consumers are simulated return `not_used` so the verdict doesn't "
@@ -1208,7 +1279,10 @@ async def health_dependencies():
         "Returns the current duplicate guard mode and observability metrics. "
         "Exposes log_mode_blocks (how many times log mode detected but allowed "
         "a duplicate) and enforce_mode_blocks (how many times enforce mode "
-        "blocked a duplicate). Does not expose request contents or secrets. "
+        "blocked a duplicate) for this process, plus "
+        "enforce_mode_denials_durable (denial receipts with reason_code "
+        "duplicate_request_new_key across the service lifetime) and the scope "
+        "of each metric. Does not expose request contents or secrets. "
         "Requires bootstrap admin authentication."
     ),
 )
@@ -1216,4 +1290,4 @@ async def health_duplicate_guard(
     auth: AuthContext = Depends(get_auth_context),
 ):
     auth.require_bootstrap_admin()
-    return get_duplicate_guard_metrics()
+    return await get_duplicate_guard_metrics()

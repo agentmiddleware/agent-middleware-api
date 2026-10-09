@@ -4,6 +4,11 @@ absent when not requested (so older servers see unchanged payloads)."""
 
 from __future__ import annotations
 
+import json
+import sys
+
+import pytest
+
 import scripts.partner_api_key_bootstrap as bootstrap
 
 
@@ -85,3 +90,35 @@ def test_bounds_default_to_absent(monkeypatch):
     assert "daily_limit" not in posts["/v1/billing/wallets/agent"]
     assert "expires_in_days" not in posts["/v1/api-keys"]
     assert "max_uses" not in posts["/v1/api-keys"]
+
+
+@pytest.mark.parametrize("mode", ["--key-only", "--json", None])
+def test_cli_output_modes_keep_status_and_bootstrap_key_out_of_stdout(
+    monkeypatch, capsys, mode
+):
+    monkeypatch.setenv("BOOTSTRAP_KEY", "synthetic-bootstrap-secret")
+    monkeypatch.setattr(bootstrap.httpx, "Client", _FakeClient)
+    arguments = [
+        "partner_api_key_bootstrap.py",
+        "--api-url",
+        "https://api.example.test",
+        "--sponsor-name",
+        "Synthetic Partner",
+        "--agent-id",
+        "synthetic-agent",
+    ]
+    if mode:
+        arguments.append(mode)
+    monkeypatch.setattr(sys, "argv", arguments)
+    assert bootstrap.main() == 0
+    captured = capsys.readouterr()
+    assert "synthetic-bootstrap-secret" not in captured.out + captured.err
+    assert "[created]" in captured.err
+    assert "[created]" not in captured.out
+    if mode == "--key-only":
+        assert captured.out == "b2a_test\n"
+    elif mode == "--json":
+        assert json.loads(captured.out)["api_key"] == "b2a_test"
+    else:
+        assert captured.out.startswith("Partner API key bootstrap OK\n")
+        assert "api_key (once):     b2a_test\n" in captured.out

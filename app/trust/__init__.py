@@ -46,8 +46,10 @@ from .approvals import (
 from .audit_chain import (
     AuditChainContendedError,
     AuditChainVerification,
+    AuditEventConflictError,
     audit_payload,
     count_audit_events,
+    count_audit_events_grouped,
     list_audit_events,
     record_audit_event,
     sign_audit_model,
@@ -83,12 +85,16 @@ from .metering import (
     get_agent_money,
 )
 from .permits import (
+    PermitCreationRejectedError,
     PermitError,
     PermitService,
     PermitValidation,
     PermitWriteContendedError,
+    extract_recipient_identity,
     get_permit_service,
+    permit_constraints_snapshot,
     permit_model_to_response,
+    recipient_binding_matches,
 )
 from .permit_requests import (
     REQUEST_STATUS_APPROVED,
@@ -163,6 +169,7 @@ from .signing import (
 
 __all__ = [
     "AuditChainContendedError",
+    "AuditEventConflictError",
     # adapters
     "GovernedInvocationAdapter",
     "GovernedRequest",
@@ -184,12 +191,16 @@ __all__ = [
     "human_approval_configured",
     "approval_window_seconds",
     # permits
+    "PermitCreationRejectedError",
     "PermitService",
     "PermitValidation",
     "PermitError",
     "PermitWriteContendedError",
+    "extract_recipient_identity",
     "get_permit_service",
+    "permit_constraints_snapshot",
     "permit_model_to_response",
+    "recipient_binding_matches",
     # permit requests (agent asks, human approves, middleware mints)
     "ApprovalCardView",
     "PermitRequestConflictError",
@@ -267,6 +278,7 @@ __all__ = [
     "record_audit_event",
     "list_audit_events",
     "count_audit_events",
+    "count_audit_events_grouped",
     "summarize_audit_events",
     # policy
     "evaluate_tool_invocation",
