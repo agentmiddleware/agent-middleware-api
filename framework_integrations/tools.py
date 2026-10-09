@@ -4,15 +4,41 @@ Framework-Specific Tool Adapters
 Convert B2A tools to framework-specific formats.
 """
 
+import warnings
 from typing import Any, TypeVar
 from .client import B2AClient
 
 T = TypeVar("T")
 
+_GOVERNED_LANGGRAPH_HINT = (
+    "get_langgraph_tools is deprecated: these tools call the API with no "
+    "permit check and no signed receipt. Use the governed tools instead: "
+    "framework_integrations.langgraph_middleware.LangGraphGovernedTools "
+    "(permit, caller-owned idempotency key, signed receipt)."
+)
+_GOVERNED_AUTOGEN_HINT = (
+    "get_autogen_tools is deprecated: these tools call the API with no "
+    "permit check and no signed receipt. Use the governed tools instead: "
+    "wrappers/autogen-agent-middleware (B2AFunctionTool, permit, "
+    "caller-owned idempotency key, signed receipt)."
+)
+_GOVERNED_LLAMAINDEX_HINT = (
+    "get_llamaindex_tools is deprecated: these tools call the API with no "
+    "permit check and no signed receipt. Use the governed tools instead: "
+    "framework_integrations.langgraph_middleware.LangGraphGovernedTools or "
+    "framework_integrations.pydantic_ai_middleware.PydanticAIGovernedTools "
+    "(permit, caller-owned idempotency key, signed receipt)."
+)
+
 
 def get_langgraph_tools(client: B2AClient) -> list[Any]:
     """
     Get LangGraph-compatible tools from B2A client.
+
+    .. deprecated::
+        These tools call the API with no permit check and no signed
+        receipt. Use ``framework_integrations.langgraph_middleware.
+        LangGraphGovernedTools`` instead.
 
     Usage:
     ```python
@@ -31,6 +57,7 @@ def get_langgraph_tools(client: B2AClient) -> list[Any]:
     ``ainvoke``; LangChain refuses a sync ``invoke`` of an async-only tool
     rather than returning an un-awaited coroutine.
     """
+    warnings.warn(_GOVERNED_LANGGRAPH_HINT, DeprecationWarning, stacklevel=2)
     try:
         from langchain_core.tools import tool
     except ImportError:
@@ -151,6 +178,11 @@ def get_autogen_tools(client: B2AClient) -> list[Any]:
     """
     Get AutoGen-compatible tools from B2A client.
 
+    .. deprecated::
+        These tools call the API with no permit check and no signed
+        receipt. Use the governed ``B2AFunctionTool`` in
+        ``wrappers/autogen-agent-middleware`` instead.
+
     Usage:
     ```python
     import autogen
@@ -168,6 +200,7 @@ def get_autogen_tools(client: B2AClient) -> list[Any]:
 
     Returns a dict mapping function names to functions for AutoGen.
     """
+    warnings.warn(_GOVERNED_AUTOGEN_HINT, DeprecationWarning, stacklevel=2)
     return {
         "emit_telemetry": client.emit_telemetry,
         "get_balance": client.get_balance,
@@ -181,6 +214,12 @@ def get_autogen_tools(client: B2AClient) -> list[Any]:
 def get_llamaindex_tools(client: B2AClient) -> list[Any]:
     """
     Get LlamaIndex-compatible tools from B2A client.
+
+    .. deprecated::
+        These tools call the API with no permit check and no signed
+        receipt. Use the governed middleware in
+        ``framework_integrations.langgraph_middleware`` or
+        ``framework_integrations.pydantic_ai_middleware`` instead.
 
     Usage:
     ```python
@@ -199,6 +238,7 @@ def get_llamaindex_tools(client: B2AClient) -> list[Any]:
     functions (``B2AClient`` is an async client), so ``acall`` awaits the
     request in the caller's event loop.
     """
+    warnings.warn(_GOVERNED_LLAMAINDEX_HINT, DeprecationWarning, stacklevel=2)
     try:
         from llama_index.core.tools import FunctionTool
     except ImportError:
