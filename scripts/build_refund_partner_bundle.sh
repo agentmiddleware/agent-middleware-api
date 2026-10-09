@@ -10,6 +10,33 @@ set -eu
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 out_dir="${1:-${TMPDIR:-/tmp}/refund-partner-bundle}"
+# Strip trailing slashes so the safety comparisons below are exact.
+out_dir="${out_dir%/}"
+
+# Never delete whatever path is given: refuse filesystem roots, the user's
+# home, the shared temp root itself, the repo, and any directory containing it.
+tmp_root="${TMPDIR:-/tmp}"
+tmp_root="${tmp_root%/}"
+case "$out_dir" in
+  ""|"/"|"."|"..")
+    echo "refusing to clear output dir '$out_dir'" >&2
+    exit 1
+    ;;
+esac
+if [ -n "${HOME:-}" ] && [ "$out_dir" = "$HOME" ]; then
+  echo "refusing to clear home directory '$out_dir'" >&2
+  exit 1
+fi
+if [ "$out_dir" = "$tmp_root" ] || [ "$out_dir" = "$repo_root" ]; then
+  echo "refusing to clear protected directory '$out_dir'" >&2
+  exit 1
+fi
+case "$repo_root" in
+  "$out_dir"/*)
+    echo "refusing to clear '$out_dir': it contains the repository" >&2
+    exit 1
+    ;;
+esac
 
 rm -rf "$out_dir"
 mkdir -p "$out_dir"

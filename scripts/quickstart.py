@@ -34,6 +34,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -47,6 +48,67 @@ DEFAULT_STATE_DIR = ROOT / "data" / "quickstart"
 DOGFOOD_NOTES_PATH = ROOT / "data" / "dogfood_partner_notes.jsonl"
 SIGNING_KEY_ID = "quickstart-local-ed25519"
 HEALTH_DEADLINE_SECONDS = 90.0
+# Every file quickstart itself creates inside the state directory. --reset
+# only removes a directory whose top-level entries are all in this set (plus
+# SQLite sidecars), so a mistaken --state-dir never wipes foreign data.
+EXPECTED_STATE_FILE_NAMES = frozenset(
+    {"api.db", "state.db", "signing-seed.b64", "server.log"}
+)
+EXPECTED_STATE_FILE_PREFIXES = ("api.db-", "state.db-")
+
+
+def _is_expected_state_entry(name: str) -> bool:
+    if name in EXPECTED_STATE_FILE_NAMES:
+        return True
+    return name.startswith(EXPECTED_STATE_FILE_PREFIXES)
+
+
+def reset_refusal(state_dir: Path) -> str | None:
+    """Return a reason to refuse ``shutil.rmtree(state_dir)``, else None.
+
+    --state-dir accepts any path, so --reset must not delete whatever it is
+    given: the filesystem root, the temp root, the user's home, the repo
+    itself (or any directory containing it), and directories holding files
+    quickstart did not create are all refused.
+    """
+    resolved = state_dir.expanduser().resolve()
+    if resolved == resolved.parent:
+        return f"refusing to reset filesystem root {resolved}"
+    try:
+        home = Path.home().resolve()
+    except RuntimeError:
+        home = None
+    if home is not None and resolved == home:
+        return f"refusing to reset home directory {resolved}"
+    if resolved == ROOT or resolved in ROOT.parents:
+        return f"refusing to reset {resolved}: it contains the repository"
+    if resolved == Path(tempfile.gettempdir()).resolve():
+        return f"refusing to reset shared temp directory {resolved}"
+    if state_dir.exists():
+        if not state_dir.is_dir():
+            return f"refusing to reset {state_dir}: not a directory"
+        unexpected = sorted(
+            entry.name
+            for entry in state_dir.iterdir()
+            if not _is_expected_state_entry(entry.name)
+        )
+        if unexpected:
+            return (
+                f"refusing to reset {state_dir}: "
+                f"unexpected files present: {', '.join(unexpected)}"
+            )
+    return None
+
+
+def reset_state_dir(state_dir: Path) -> str | None:
+    """Remove the state directory after the safety check; return refusal."""
+    refusal = reset_refusal(state_dir)
+    if refusal is not None:
+        return refusal
+    if state_dir.exists():
+        shutil.rmtree(state_dir)
+        print(f"[quickstart] Reset: removed {state_dir}")
+    return None
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -179,9 +241,10 @@ def main(argv: list[str] | None = None) -> int:
     state_dir: Path = args.state_dir
 
     if args.reset:
-        if state_dir.exists():
-            shutil.rmtree(state_dir)
-            print(f"[quickstart] Reset: removed {state_dir}")
+        refusal = reset_state_dir(state_dir)
+        if refusal is not None:
+            print(f"[quickstart] {refusal}", file=sys.stderr)
+            return 2
         if DOGFOOD_NOTES_PATH.exists():
             DOGFOOD_NOTES_PATH.unlink()
             print(f"[quickstart] Reset: removed {DOGFOOD_NOTES_PATH}")
