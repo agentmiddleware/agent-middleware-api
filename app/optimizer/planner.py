@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from app.optimizer.policy import get_risk_budget, is_admissible
@@ -114,6 +115,23 @@ def _greedy_heuristic(
     return selected
 
 
+def _override_weight(name: str, value: Any) -> float:
+    # The request schema already limits overrides to finite floats, but the
+    # planner can also be called directly with unvalidated input. A bare
+    # float() call would then accept NaN and Infinity (which poison the
+    # scored utility) or raise TypeError and OverflowError (which read as
+    # server errors), so normalize every bad value to one ValueError here.
+    try:
+        weight = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(
+            f"objective_overrides[{name}] must be a finite number"
+        ) from exc
+    if not math.isfinite(weight):
+        raise ValueError(f"objective_overrides[{name}] must be a finite number")
+    return weight
+
+
 def optimize_action_set(
     state: OptimizerState, candidates: list[dict], req: OptimizerRequest
 ) -> dict:
@@ -121,7 +139,7 @@ def optimize_action_set(
     if req.objective_overrides:
         for k in lambdas:
             if k in req.objective_overrides:
-                lambdas[k] = float(req.objective_overrides[k])
+                lambdas[k] = _override_weight(k, req.objective_overrides[k])
 
     risk_budget = get_risk_budget(state.task_context.get("tier", "medium"))
     admissible: list[dict] = []

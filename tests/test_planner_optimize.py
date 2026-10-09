@@ -1,3 +1,5 @@
+import pytest
+
 from app.optimizer.planner import optimize_action_set
 from app.schemas.optimizer import OptimizerRequest, OptimizerState
 
@@ -82,3 +84,50 @@ def test_require_real_effects_filters_simulation_only_actions():
     out = optimize_action_set(req.state, candidates, req)
     assert out["status"] == "Infeasible"
     assert out["rejected_actions"][0]["reason"] == "simulation_only"
+
+
+def _candidate():
+    return {
+        "id": "a",
+        "service": "svc1",
+        "expected_value": 10,
+        "reliability": 1.0,
+        "credit_cost": 1,
+        "latency_ms": 100,
+        "risk_score": 0.01,
+        "scope_allowed": True,
+    }
+
+
+def _request_with_raw_overrides(overrides):
+    # model_construct skips validation, so this reaches the planner with the
+    # raw values an unguarded float() conversion would accept or crash on.
+    state = _state()
+    req = OptimizerRequest.model_construct(
+        state=state,
+        objective_overrides=overrides,
+        max_actions=5,
+        require_real_effects=False,
+    )
+    return state, req
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_planner_rejects_non_finite_override_weights(value):
+    state, req = _request_with_raw_overrides({"cost": value})
+    with pytest.raises(ValueError, match="finite number"):
+        optimize_action_set(state, [_candidate()], req)
+
+
+@pytest.mark.parametrize("value", [None, "abc", object(), 10**1000])
+def test_planner_rejects_non_numeric_override_weights(value):
+    state, req = _request_with_raw_overrides({"risk": value})
+    with pytest.raises(ValueError, match="finite number"):
+        optimize_action_set(state, [_candidate()], req)
+
+
+def test_planner_accepts_finite_override_weights():
+    state, req = _request_with_raw_overrides({"cost": 0.5, "latency": 0.0, "risk": 1.5})
+    out = optimize_action_set(state, [_candidate()], req)
+    assert out["status"] == "HeuristicFallback"
+    assert [a["id"] for a in out["selected_actions"]] == ["a"]
