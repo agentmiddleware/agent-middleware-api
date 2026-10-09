@@ -8,9 +8,10 @@ from decimal import Decimal, InvalidOperation
 import json
 from typing import Any, Literal, cast
 
-from sqlalchemy import select, update as sa_update
+from sqlalchemy import func, or_, select, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
+from sqlmodel import col
 
 from app.core.resilience import run_with_write_conflict_retry
 from app.core.time import utc_now
@@ -415,53 +416,86 @@ class RefundReconciliationService:
         see money owed back to *it* without an operator key. Applied before
         pagination, so a wallet's own totals are its own.
         """
+        join_condition = cast(
+            ColumnElement[bool],
+            ReceiptModel.receipt_id == IdempotencyRecordModel.response_reference,
+        )
+        filters: list[ColumnElement[bool]] = [
+            cast(
+                ColumnElement[bool],
+                ReceiptModel.outcome == "failed_unrefunded",
+            )
+        ]
+        if wallet_id is not None:
+            filters.append(
+                cast(ColumnElement[bool], ReceiptModel.wallet_id == wallet_id)
+            )
+        if status is not None:
+            # The work-item state lives inside the record's serialized
+            # payload, which has no dedicated column, so the database can
+            # only prefilter on the serialized fragment. Both separator
+            # styles are matched because the writers use default json.dumps
+            # spacing today but a compact writer must keep matching. Parsed
+            # items are rechecked below, so a stray match can only cost a
+            # row read, never a wrong item.
+            fragments = (
+                f'"status": "{status}"',
+                f'"status":"{status}"',
+            )
+            filters.append(
+                cast(
+                    ColumnElement[bool],
+                    or_(
+                        *(
+                            col(IdempotencyRecordModel.response_json).like(
+                                f"%{fragment}%"
+                            )
+                            for fragment in fragments
+                        )
+                    ),
+                )
+            )
         factory = get_session_factory()
         async with factory() as session:
+            total = await session.scalar(
+                select(func.count())
+                .select_from(IdempotencyRecordModel)
+                .join(ReceiptModel, join_condition)
+                .where(*filters)
+            )
             rows = (
                 await session.execute(
                     select(IdempotencyRecordModel, ReceiptModel)
-                    .join(
-                        ReceiptModel,
-                        cast(
-                            ColumnElement[bool],
-                            ReceiptModel.receipt_id
-                            == IdempotencyRecordModel.response_reference,
-                        ),
-                    )
-                    .where(
-                        cast(
-                            ColumnElement[bool],
-                            ReceiptModel.outcome == "failed_unrefunded",
-                        )
-                    )
+                    .join(ReceiptModel, join_condition)
+                    .where(*filters)
                     .order_by(
                         cast(
                             ColumnElement[Any], IdempotencyRecordModel.created_at
                         ).desc()
                     )
+                    .limit(limit)
+                    .offset(offset)
                 )
             ).all()
-            items = [
-                self._parse_item(
+            items: list[RefundReconciliationItem] = []
+            for record, receipt in rows:
+                item = self._parse_item(
                     record=record,
                     receipt=receipt,
                     payload=self._decode_response(record),
                 )
-                for record, receipt in rows
-            ]
-            if wallet_id is not None:
-                items = [item for item in items if item.wallet_id == wallet_id]
-            if status is not None:
-                items = [item for item in items if item.status == status]
-            for item in items:
+                if status is not None and item.status != status:
+                    continue
+                if wallet_id is not None and item.wallet_id != wallet_id:
+                    continue
                 if item.status == "resolved":
                     await self.validate_resolved_claim(
                         item=item,
                         session=session,
                     )
+                items.append(item)
 
-        total = len(items)
-        return items[offset : offset + limit], total
+        return items, int(total or 0)
 
     async def _load_item(
         self,

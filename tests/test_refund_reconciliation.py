@@ -8,10 +8,10 @@ from unittest.mock import patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
+from sqlalchemy import event, select
 
 from app.core.config import get_settings
-from app.db.database import get_session_factory
+from app.db.database import get_engine, get_session_factory
 from app.db.models import HumanApprovalModel, IdempotencyRecordModel, ReceiptModel
 from app.main import app
 from app.schemas.billing import ServiceCategory
@@ -830,3 +830,127 @@ async def test_operator_refund_release_cannot_erase_a_concurrent_reservation(
     # refund. An absolute write of the recomputed 0 would erase that 1 and
     # hand the permit a credit of headroom it never actually had returned.
     assert permit_after.spent_credits == Decimal("1")
+
+
+@pytest.mark.anyio
+async def test_refund_listing_paginates_wallet_and_status_slices(
+    client,
+    clean_database,
+):
+    """Each wallet, status and page slice carries its own items and totals."""
+    first = await _create_unrefunded_failure(client)
+    second = await _create_unrefunded_failure(client)
+    third = await _create_unrefunded_failure(client)
+
+    resolved = await client.post(
+        f"/v1/receipts/reconciliation/refunds/{third['receipt']['receipt_id']}/retry",
+        headers=BOOTSTRAP_HEADERS,
+    )
+    assert resolved.status_code == 200, resolved.text
+
+    pending_ids = {
+        first["receipt"]["receipt_id"],
+        second["receipt"]["receipt_id"],
+    }
+
+    pending = await client.get(
+        "/v1/receipts/reconciliation/refunds",
+        headers=BOOTSTRAP_HEADERS,
+    )
+    assert pending.status_code == 200
+    assert pending.json()["total"] == 2
+    assert {item["receipt_id"] for item in pending.json()["items"]} == pending_ids
+
+    done = await client.get(
+        "/v1/receipts/reconciliation/refunds?status=resolved",
+        headers=BOOTSTRAP_HEADERS,
+    )
+    assert done.status_code == 200
+    assert done.json()["total"] == 1
+    assert done.json()["items"][0]["receipt_id"] == third["receipt"]["receipt_id"]
+
+    page_one = await client.get(
+        "/v1/receipts/reconciliation/refunds?limit=1&offset=0",
+        headers=BOOTSTRAP_HEADERS,
+    )
+    page_two = await client.get(
+        "/v1/receipts/reconciliation/refunds?limit=1&offset=1",
+        headers=BOOTSTRAP_HEADERS,
+    )
+    assert page_one.status_code == 200
+    assert page_two.status_code == 200
+    assert page_one.json()["total"] == 2
+    assert page_two.json()["total"] == 2
+    assert len(page_one.json()["items"]) == 1
+    assert len(page_two.json()["items"]) == 1
+    assert {
+        page_one.json()["items"][0]["receipt_id"],
+        page_two.json()["items"][0]["receipt_id"],
+    } == pending_ids
+
+    mine = await client.get(
+        "/v1/receipts/reconciliation/refunds",
+        headers=first["provisioned"]["agent_headers"],
+    )
+    assert mine.status_code == 200
+    assert mine.json()["total"] == 1
+    assert mine.json()["items"][0]["receipt_id"] == first["receipt"]["receipt_id"]
+
+    everything, everything_total = await RefundReconciliationService().list_items(
+        status=None
+    )
+    assert everything_total == 3
+    assert len(everything) == 3
+
+
+@pytest.mark.anyio
+async def test_refund_listing_filters_and_pages_in_sql(
+    client,
+    clean_database,
+):
+    """The listing must not load the failed-refund history to filter it.
+
+    Captures the SQL emitted by one wallet-scoped page and requires the
+    wallet predicate and the row limit to sit in the statement itself. The
+    previous implementation loaded every failed-unrefunded row and filtered
+    in Python, so its statements carry neither and this test fails on it.
+    """
+    case = await _create_unrefunded_failure(client)
+    wallet_id = case["provisioned"]["agent_wallet_id"]
+
+    engine = get_engine()
+    assert engine is not None
+    statements: list[str] = []
+
+    def _capture(  # noqa: ANN001, ANN202
+        conn, cursor, statement, parameters, context, executemany
+    ):
+        if "idempotency_records" in statement.lower():
+            statements.append(statement)
+
+    event.listen(engine.sync_engine, "before_cursor_execute", _capture)
+    try:
+        service = RefundReconciliationService()
+        items, total = await service.list_items(
+            status="pending",
+            wallet_id=wallet_id,
+            limit=1,
+            offset=0,
+        )
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", _capture)
+
+    assert total == 1
+    assert [item.receipt_id for item in items] == [case["receipt"]["receipt_id"]]
+    row_selects = [
+        statement
+        for statement in statements
+        if not statement.strip().lower().startswith("select count")
+    ]
+    assert row_selects, "expected the page query to touch idempotency_records"
+    for statement in row_selects:
+        lowered = statement.lower()
+        assert "limit" in lowered, f"page query has no row limit: {statement}"
+        assert "wallet_id" in lowered, (
+            f"page query has no wallet predicate: {statement}"
+        )
