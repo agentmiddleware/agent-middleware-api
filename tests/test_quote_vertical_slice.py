@@ -349,3 +349,61 @@ async def test_price_cut_also_honored(client, clean_database, registered_tool):
 
     # Charged the quoted amount, not the lower current price
     assert charged == INITIAL_PRICE
+
+
+@pytest.mark.asyncio
+async def test_quote_lost_midflight_denies_with_true_reason(
+    client, clean_database, registered_tool, monkeypatch
+):
+    """A quote that lapses between validation and spend denies as expired.
+
+    The invoke validates the quote early (to price the permit check) but
+    spends it atomically just before the charge. When the window lapses in
+    between, the spend fails and the call must be denied with the true
+    reason (expired), not misreported as already consumed, and nothing may
+    be charged at any price.
+    """
+    from app.services.quotes import get_quote_service
+
+    agent = await provision_agent_wallet(client)
+    permit = await create_tool_permit(
+        client,
+        wallet_id=agent["agent_wallet_id"],
+        key_id=agent["key_id"],
+        tool_name=TOOL,
+        idem_key="permit-quote-midflight",
+    )
+    quote = (
+        await _quote(client, agent["agent_headers"], agent["agent_wallet_id"])
+    ).json()
+
+    service = get_quote_service()
+    real_consume = service.consume
+
+    async def consume_after_window_lapses(quote_id, *, idempotency_key=None):
+        factory = get_session_factory()
+        async with factory() as session:
+            model = await session.get(QuoteModel, quote_id)
+            assert model is not None
+            model.expires_at = datetime.now(timezone.utc).replace(
+                tzinfo=None
+            ) - timedelta(seconds=1)
+            session.add(model)
+            await session.commit()
+        return await real_consume(quote_id, idempotency_key=idempotency_key)
+
+    monkeypatch.setattr(service, "consume", consume_after_window_lapses)
+
+    before = await _balance(agent["agent_wallet_id"])
+    resp = await _invoke(
+        client,
+        agent["agent_headers"],
+        wallet_id=agent["agent_wallet_id"],
+        permit_id=permit["permit_id"],
+        quote_id=quote["quote_id"],
+        idem="midflight-expiry",
+    )
+    assert resp.status_code == 403
+    assert "quote_expired" in resp.text
+    assert "quote_already_consumed" not in resp.text
+    assert await _balance(agent["agent_wallet_id"]) == before
