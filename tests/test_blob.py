@@ -98,9 +98,12 @@ def test_default_backend_is_local(monkeypatch):
     assert isinstance(backend, LocalFilesystemBlob)
 
 
-def test_unknown_backend_falls_back_to_local(monkeypatch):
-    monkeypatch.setenv("BLOB_BACKEND", "moonbase")
-    assert isinstance(get_blob_backend(), LocalFilesystemBlob)
+@pytest.mark.parametrize("backend_name", ["moonbase", "", "  ", "s3-backup"])
+def test_unknown_backend_raises(monkeypatch, backend_name):
+    """A typo or blank setting must not store files on local disk."""
+    monkeypatch.setenv("BLOB_BACKEND", backend_name)
+    with pytest.raises(ValueError, match="Unknown BLOB_BACKEND"):
+        get_blob_backend()
 
 
 def test_s3_and_vercel_stubs_raise_not_implemented(monkeypatch):

@@ -14,6 +14,8 @@ Pluggable via ``BLOB_BACKEND`` env var:
 - ``s3``                — AWS S3 (not yet implemented)
 - ``vercel``            — Vercel Blob (not yet implemented)
 
+Any other value raises ``ValueError`` before a backend is created.
+
 The interface is intentionally small:
 
     put(key, data, content_type) -> url
@@ -158,8 +160,12 @@ class _UnimplementedBlob(BlobBackend):
 
 @lru_cache()
 def get_blob_backend() -> BlobBackend:
-    """Resolve the configured blob backend. Cached per-process."""
-    backend_name = os.environ.get("BLOB_BACKEND", "local").strip().lower()
+    """Resolve the configured blob backend. Cached per-process.
+
+    Raises ValueError when BLOB_BACKEND is not local, s3, or vercel.
+    """
+    configured = os.environ.get("BLOB_BACKEND", "local")
+    backend_name = configured.strip().lower()
 
     if backend_name == "local":
         root = os.environ.get("BLOB_ROOT")
@@ -177,10 +183,9 @@ def get_blob_backend() -> BlobBackend:
         )
         return _UnimplementedBlob("vercel")
 
-    logger.warning(
-        "Unknown BLOB_BACKEND=%r, falling back to local filesystem", backend_name
+    raise ValueError(
+        f"Unknown BLOB_BACKEND={configured!r}. Expected one of: local, s3, vercel."
     )
-    return LocalFilesystemBlob()
 
 
 # Surface settings for debugging.
