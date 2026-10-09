@@ -151,6 +151,109 @@ class TestOutboundUrlGuard:
         assert await check_outbound_url("http://127.0.0.1:8000/") is None
         assert await check_outbound_url("file:///etc/passwd") == "scheme_not_allowed"
 
+    @pytest.mark.anyio
+    async def test_address_flag_still_blocks_names_and_metadata(self, monkeypatch):
+        # The address flag used to return before any further check, so one
+        # local-dev switch also opened localhost, internal names, and the
+        # cloud metadata addresses.
+        monkeypatch.setattr(get_settings(), "ALLOW_PRIVATE_NETWORK_TARGETS", True)
+        assert (
+            await check_outbound_url(
+                "http://metadata.google.internal/computeMetadata/v1/"
+            )
+            == "private_host_blocked"
+        )
+        assert (
+            await check_outbound_url("http://localhost:8080/") == "private_host_blocked"
+        )
+        assert (
+            await check_outbound_url("http://foo.internal/") == "private_host_blocked"
+        )
+        assert (
+            await check_outbound_url("http://169.254.169.254/latest/meta-data/")
+            == "private_address_blocked"
+        )
+        assert await check_outbound_url("http://[fd00:ec2::254]/") == (
+            "private_address_blocked"
+        )
+        assert await check_outbound_url("http://100.100.100.200/") == (
+            "private_address_blocked"
+        )
+        assert await check_outbound_url("http://168.63.129.16/") == (
+            "private_address_blocked"
+        )
+        # Literal loopback and RFC1918 stay available for a local mock server.
+        assert await check_outbound_url("http://127.0.0.1:8000/") is None
+        assert await check_outbound_url("http://10.0.0.5/") is None
+
+    @pytest.mark.anyio
+    async def test_metadata_goog_stays_blocked_when_name_checks_are_skipped(
+        self, monkeypatch
+    ):
+        async def resolve(_host):
+            return [(None, None, None, None, ("93.184.216.34", 0))]
+
+        monkeypatch.setattr(url_guard, "_resolve_host", resolve)
+        monkeypatch.setattr(get_settings(), "ALLOW_PRIVATE_NETWORK_NAMES", True)
+        assert (
+            await check_outbound_url("http://metadata.goog/") == "private_host_blocked"
+        )
+
+    @pytest.mark.anyio
+    async def test_address_flag_still_blocks_dns_that_returns_metadata(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(get_settings(), "ALLOW_PRIVATE_NETWORK_TARGETS", True)
+
+        async def resolve(_host):
+            return [(None, None, None, None, ("169.254.169.254", 0))]
+
+        monkeypatch.setattr(url_guard, "_resolve_host", resolve)
+        assert (
+            await check_outbound_url("https://rebind.example/")
+            == "private_address_blocked"
+        )
+
+    @pytest.mark.anyio
+    async def test_name_flag_does_not_skip_address_or_metadata_checks(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(get_settings(), "ALLOW_PRIVATE_NETWORK_NAMES", True)
+
+        async def resolve(_host):
+            return [(None, None, None, None, ("127.0.0.1", 0))]
+
+        monkeypatch.setattr(url_guard, "_resolve_host", resolve)
+        assert (
+            await check_outbound_url("http://localhost/") == "private_address_blocked"
+        )
+        assert (
+            await check_outbound_url("http://127.0.0.1/") == "private_address_blocked"
+        )
+        assert (
+            await check_outbound_url("http://metadata.google.internal/")
+            == "private_host_blocked"
+        )
+
+    @pytest.mark.anyio
+    async def test_both_flags_allow_a_loopback_name_but_not_metadata(self, monkeypatch):
+        monkeypatch.setattr(get_settings(), "ALLOW_PRIVATE_NETWORK_TARGETS", True)
+        monkeypatch.setattr(get_settings(), "ALLOW_PRIVATE_NETWORK_NAMES", True)
+
+        async def resolve(_host):
+            return [(None, None, None, None, ("127.0.0.1", 0))]
+
+        monkeypatch.setattr(url_guard, "_resolve_host", resolve)
+        assert await check_outbound_url("http://localhost:8000/") is None
+        assert (
+            await check_outbound_url("http://metadata.google.internal/")
+            == "private_host_blocked"
+        )
+        assert (
+            await check_outbound_url("http://169.254.169.254/latest/meta-data/")
+            == "private_address_blocked"
+        )
+
 
 class TestAWIScrollInjection:
     @pytest.mark.anyio
