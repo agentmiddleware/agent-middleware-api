@@ -416,10 +416,10 @@ async def test_planner_endpoint_never_plans_with_bare_non_finite_tokens(
     """Bare NaN / Infinity JSON tokens never reach the planner or audit chain.
 
     httpx's json= refuses them, so the raw tokens a client could put on the
-    wire are sent as content. FastAPI's default 422 handler echoes the input
-    and cannot serialize a non-finite float, so that refusal currently
-    surfaces as a 500 instead of a 422 (an app-wide handler issue, not the
-    planner's); what this pins is that no plan is computed or audited.
+    wire are sent as content. The app's validation-error handler spells
+    non-finite floats as strings before rendering, so the refusal surfaces
+    as a 422 (a 500 here would mean the handler regressed); what this pins
+    beyond the status is that no plan is computed or audited.
     """
     calls: list = []
     original = planner_router.optimize_action_set
@@ -446,7 +446,7 @@ async def test_planner_endpoint_never_plans_with_bare_non_finite_tokens(
             headers={"X-API-Key": "test-key", "Content-Type": "application/json"},
         )
 
-    assert response.status_code in (422, 500)
+    assert response.status_code == 422
     assert calls == []
     assert await list_audit_events(request_id=request_id) == []
 
@@ -531,9 +531,10 @@ async def test_planner_endpoint_never_plans_with_non_finite_candidates(
             headers={"X-API-Key": "test-key", "Content-Type": "application/json"},
         )
 
-    # Refused by the schema; as with the bare-token test above, FastAPI's
-    # default 422 handler may surface that as a 500 because it echoes the
-    # non-finite input. Either way nothing is planned or audited.
-    assert response.status_code in (422, 500)
+    # Refused by the schema; the app's validation-error handler renders that
+    # refusal as a 422 with the non-finite input spelled as a string. A 500
+    # here would mean the handler regressed, so only 422 is accepted, and
+    # nothing is planned or audited either way.
+    assert response.status_code == 422
     assert calls == []
     assert await list_audit_events(request_id=request_id) == []
