@@ -43,6 +43,15 @@ done
 if resolved="$(cd "$out_dir_abs" 2>/dev/null && pwd -P)"; then
   out_dir_abs="$resolved"
 fi
+# Never replace an existing non-directory (regular file, symlink to a file,
+# and similar): rm -rf would delete it and mkdir would leave a directory
+# behind, which is data loss outside the documented bundle behavior.
+if [ -e "$out_dir_abs" ] || [ -L "$out_dir_abs" ]; then
+  if [ ! -d "$out_dir_abs" ]; then
+    echo "refusing to clear output dir '$out_dir': not a directory" >&2
+    exit 1
+  fi
+fi
 tmp_root="${TMPDIR:-/tmp}"
 while [ "$tmp_root" != "/" ] && [ "${tmp_root%/}" != "$tmp_root" ]; do
   tmp_root="${tmp_root%/}"

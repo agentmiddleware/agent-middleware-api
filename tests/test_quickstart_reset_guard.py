@@ -142,6 +142,15 @@ def test_bundle_script_builds_with_single_trailing_slash(tmp_path):
     assert (out_dir / "main.py").exists()
 
 
+def test_bundle_script_refuses_existing_file(tmp_path):
+    target = tmp_path / "important.txt"
+    target.write_text("keep", encoding="utf-8")
+    result = _run_bundle_script(str(target))
+    assert result.returncode != 0
+    assert target.is_file()
+    assert target.read_text(encoding="utf-8") == "keep"
+
+
 def test_bundle_script_treats_dash_leading_arg_as_path(tmp_path):
     result = subprocess.run(
         [
