@@ -1,3 +1,13 @@
+"""Mint, validate, and account for action permits.
+
+A permit is signed delegated authority for one wallet to invoke governed
+tools within set scopes, tools, budget, and expiry. Budget mutations use
+guarded atomic UPDATE statements rather than read-modify-write, so the
+database enforces caps and expiry in each write predicate. The reconciler
+only repairs permits that can no longer admit a charge (revoked or
+expired) and only reports drift on live ones.
+"""
+
 from __future__ import annotations
 
 import json
@@ -36,6 +46,8 @@ logger = logging.getLogger(__name__)
 
 
 class PermitError(RuntimeError):
+    """Base permit failure carrying a machine-readable reason string."""
+
     def __init__(self, reason: str) -> None:
         self.reason = reason
         super().__init__(reason)
@@ -235,6 +247,7 @@ def recipient_binding_matches(recipient_domain: str | None, target: str) -> bool
 
 
 def permit_model_to_response(model: PermitModel) -> PermitResponse:
+    """Convert a stored permit row into its API response shape."""
     return PermitResponse(
         **ActionPermitFields.model_validate(
             {name: getattr(model, name) for name in ActionPermitFields.model_fields}
@@ -265,7 +278,10 @@ def permit_model_to_response(model: PermitModel) -> PermitResponse:
 
 
 class PermitService:
+    """Lifecycle for permits: mint, list, validate, reserve, release, reconcile."""
+
     async def get_permit(self, permit_id: str) -> PermitResponse | None:
+        """Fetch one permit by id, or None when it does not exist."""
         factory = get_session_factory()
         async with factory() as session:
             model = await session.get(PermitModel, permit_id)
@@ -284,6 +300,7 @@ class PermitService:
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[PermitResponse], int]:
+        """List permits with optional filters, returning matches and total count."""
         stmt = select(PermitModel)
         count_stmt = select(func.count()).select_from(PermitModel)
 
@@ -481,6 +498,7 @@ class PermitService:
         return permit_model_to_response(model)
 
     async def revoke_permit(self, permit_id: str) -> PermitResponse:
+        """Mark a permit revoked and stamp the revocation time."""
         factory = get_session_factory()
         async with factory() as session:
             model = await session.get(PermitModel, permit_id)
@@ -503,6 +521,7 @@ class PermitService:
         key_id: str | None = None,
         arguments: dict[str, Any] | None = None,
     ) -> PermitValidation:
+        """Check a permit for an action without changing its budget."""
         factory = get_session_factory()
         async with factory() as session:
             model = await session.get(PermitModel, permit_id)
@@ -1075,6 +1094,7 @@ class PermitService:
             return Decimal(str(total)) if total is not None else Decimal("0")
 
     async def reserve_budget(self, permit_id: str, amount: Decimal) -> None:
+        """Reserve budget with a guarded write enforcing status, expiry, and caps."""
         factory = get_session_factory()
 
         async def _once() -> None:
@@ -1201,6 +1221,7 @@ class PermitService:
         await self._run_with_write_retry(_once)
 
     async def release_budget(self, permit_id: str, amount: Decimal) -> None:
+        """Hand budget back with a clamped decrement; a missing permit is a no-op."""
         factory = get_session_factory()
 
         async def _once() -> None:
@@ -2017,6 +2038,7 @@ class PermitService:
         *,
         session: AsyncSession | None = None,
     ) -> bool:
+        """Rebuild the signed payload and check the permit signature."""
         payload = self._verification_payload(model)
         return await get_signing_key_service().verify_payload(
             payload,
@@ -2030,6 +2052,7 @@ _service: PermitService | None = None
 
 
 def get_permit_service() -> PermitService:
+    """Return the shared permit service instance."""
     global _service
     if _service is None:
         _service = PermitService()
