@@ -139,12 +139,14 @@ async def test_trust_keys_service_error_returns_503(client, monkeypatch):
 
 @pytest.mark.anyio
 async def test_trust_keys_publishes_key_with_jwk(client, monkeypatch):
+    from app.core.config import public_api_origin
+
     _fake_service(monkeypatch, keys=[_fake_key()])
     resp = await client.get("/.well-known/trust-keys.json")
     assert resp.status_code == 200
     data = resp.json()
     assert data["alg"] == "Ed25519"
-    assert data["issuer"] != ""
+    assert data["issuer"] == public_api_origin()
     assert len(data["keys"]) == 1
     entry = data["keys"][0]
     assert entry["kid"] == "test-kid-1"
