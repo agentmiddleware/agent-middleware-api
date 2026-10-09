@@ -11,9 +11,13 @@ STATE="${TP_STATE_DIR:-$ROOT/data/quickstart}"
 PORT="${TP_PORT:-8000}"
 mkdir -p "$STATE"
 SEED_FILE="$STATE/signing-seed.b64"
+# The seed file is private signing material; create it unreadable to other
+# local users (a permissive umask would let them read it and forge receipts).
+umask 077
 if [ ! -s "$SEED_FILE" ]; then
   python3 -c "import base64,secrets;print(base64.b64encode(secrets.token_bytes(32)).decode())" > "$SEED_FILE"
 fi
+chmod 600 "$SEED_FILE"
 cd "$ROOT"
 export PYTHONPATH="$ROOT"
 export ENVIRONMENT=local DEBUG=false

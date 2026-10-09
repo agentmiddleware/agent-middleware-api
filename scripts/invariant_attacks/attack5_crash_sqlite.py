@@ -55,6 +55,19 @@ def alive(pid):
         return False
 
 
+def kill_checked(pid):
+    """SIGKILL pid, but only while it still names our test server.
+
+    The pid comes from a pidfile that can go stale across runs; killing a
+    recycled PID would hit an unrelated process, so refuse loudly instead.
+    """
+    if not A.is_server_pid(pid):
+        raise A.UnexpectedServerProcess(
+            f"refusing to kill pid {pid}: not our server process"
+        )
+    os.kill(pid, signal.SIGKILL)
+
+
 def restart_server():
     logf = open(LOG, "ab")
     proc = subprocess.Popen(
@@ -253,7 +266,10 @@ def main():
             debit_count = committed_debits(wallet)
             if debit_count >= THRESHOLD:
                 try:
-                    os.kill(pid_before, signal.SIGKILL)
+                    kill_checked(pid_before)
+                except A.UnexpectedServerProcess as exc:
+                    print(f"HARNESS REFUSED: {exc}", file=sys.stderr)
+                    killed["refused"] = True
                 except OSError:
                     pass
                 else:
@@ -275,6 +291,12 @@ def main():
                     worker_errors["worker_future"] += 1
     stop.set()
     kt.join()
+    if killed.get("refused"):
+        print(
+            "HARNESS FAIL: kill refused, pidfile did not name our server",
+            file=sys.stderr,
+        )
+        return 1
     t0 = time.time()
     while alive(pid_before) and time.time() - t0 < 15:
         time.sleep(0.1)

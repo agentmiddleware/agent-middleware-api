@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import subprocess
 import threading
 import time
 import urllib.error
@@ -38,6 +39,45 @@ NOTES_PATH = os.environ.get(
 def verdict_exit_code(verdict: str) -> int:
     """Return success only when the invariant verdict is exactly HELD."""
     return 0 if verdict == "HELD" else 1
+
+
+class UnexpectedServerProcess(RuntimeError):
+    """Refusal to signal a PID whose command line is not our test server."""
+
+
+# Fragments present in the command line of the server our crash harnesses
+# boot: either the boot_controlled launcher still in front, or uvicorn after
+# the launcher execs into it.
+SERVER_CMDLINE_MARKERS = ("boot_controlled", "uvicorn", "app.main")
+
+
+def process_cmdline(pid: int) -> str:
+    """Return the command line of pid, or "" when it cannot be read."""
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as fh:
+            return fh.read().replace(b"\0", b" ").decode("utf-8", "replace").strip()
+    except OSError:
+        pass
+    try:
+        out = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "args="],
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return ""
+    return out.stdout.strip() if out.returncode == 0 else ""
+
+
+def is_server_pid(pid: int, markers: tuple[str, ...] = SERVER_CMDLINE_MARKERS) -> bool:
+    """True only when pid is alive AND its command line names our server.
+
+    The crash harnesses kill by PID-from-file; a stale pidfile (reused
+    scratch dir, recycled PID) must never point a SIGKILL at an unrelated
+    process. Callers refuse loudly when this returns False.
+    """
+    args = process_cmdline(pid)
+    return bool(args) and any(m in args for m in markers)
 
 
 def redact(key: str | None) -> str:

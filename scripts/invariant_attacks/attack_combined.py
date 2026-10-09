@@ -152,6 +152,28 @@ def restart_server():
     raise RuntimeError("no health after restart")
 
 
+def hard_kill(pid):
+    """SIGKILL the whole process group, but only while pid is our server.
+
+    uv run spawns uvicorn as a child, so the kill targets the group. The pid
+    comes from a pidfile that can go stale across runs; a recycled PID must
+    never point a group kill at unrelated processes, so refuse loudly instead.
+    """
+    if not A.is_server_pid(pid):
+        raise A.UnexpectedServerProcess(
+            f"refusing to kill pid {pid}: not our server process"
+        )
+    try:
+        os.killpg(os.getpgid(pid), signal.SIGKILL)
+        return True
+    except OSError:
+        try:
+            os.kill(pid, signal.SIGKILL)
+            return True
+        except OSError:
+            return False
+
+
 def committed_debits(wallet):
     try:
         return A.db_rows(
@@ -572,24 +594,18 @@ def main():
     pid_before = current_pid()
     killed = {"at_debits": None, "pid": pid_before}
 
-    def hard_kill(pid):
-        # uv run spawns uvicorn as a child, so kill the whole process group.
-        try:
-            os.killpg(os.getpgid(pid), signal.SIGKILL)
-            return True
-        except OSError:
-            try:
-                os.kill(pid, signal.SIGKILL)
-                return True
-            except OSError:
-                return False
-
     def killer():
         while not stop.is_set():
             d = committed_debits(wallet)
             if d >= THRESHOLD:
-                if hard_kill(pid_before):
-                    killed["at_debits"] = d
+                try:
+                    dead = hard_kill(pid_before)
+                except A.UnexpectedServerProcess as exc:
+                    print(f"HARNESS REFUSED: {exc}", file=sys.stderr)
+                    killed["refused"] = True
+                else:
+                    if dead:
+                        killed["at_debits"] = d
                 stop.set()
                 return
             time.sleep(0.002)
@@ -605,6 +621,12 @@ def main():
                 pass
     stop.set()
     kt.join()
+    if killed.get("refused"):
+        print(
+            "HARNESS FAIL: kill refused, pidfile did not name our server",
+            file=sys.stderr,
+        )
+        return 1
     storm_jobs_started = sum(started_by_vector.values())
 
     # wait for the old process to actually die, then restart

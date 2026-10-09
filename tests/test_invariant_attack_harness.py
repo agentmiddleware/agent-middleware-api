@@ -6,6 +6,7 @@ import ast
 import importlib
 import io
 import json
+import signal
 import sys
 import threading
 from collections import Counter
@@ -606,3 +607,56 @@ def test_evidence_redaction_removes_credentials_and_wallets() -> None:
     assert redacted["receipt_id"] == "rcpt-public-proof-reference"
     assert not redactor.contains_full_credential(redacted)
     assert not redactor.contains_wallet_identifier(redacted)
+
+
+def test_is_server_pid_checks_command_line_markers(monkeypatch) -> None:
+    import attacklib
+
+    monkeypatch.setattr(
+        attacklib,
+        "process_cmdline",
+        lambda pid: "bash /tmp/tp-work/boot_controlled.sh",
+    )
+
+    assert attacklib.is_server_pid(4242)
+    assert not attacklib.is_server_pid(4242, ("definitely-not-our-marker-xyz",))
+
+
+def test_is_server_pid_rejects_unreadable_process(monkeypatch) -> None:
+    import attacklib
+
+    monkeypatch.setattr(attacklib, "process_cmdline", lambda pid: "")
+
+    assert not attacklib.is_server_pid(4242)
+    # A recycled PID whose process is long gone has no command line either.
+    assert not attacklib.is_server_pid(2**30)
+
+
+def test_attack5_kill_checked_refuses_foreign_pid(monkeypatch) -> None:
+    monkeypatch.setattr(attack5.A, "is_server_pid", lambda pid: False)
+
+    with pytest.raises(attack5.A.UnexpectedServerProcess, match="refusing to kill"):
+        attack5.kill_checked(123456)
+
+
+def test_attack5_kill_checked_signals_own_server(monkeypatch) -> None:
+    killed = []
+    monkeypatch.setattr(attack5.A, "is_server_pid", lambda pid: True)
+    monkeypatch.setattr(attack5.os, "kill", lambda pid, sig: killed.append((pid, sig)))
+
+    attack5.kill_checked(4242)
+
+    assert killed == [(4242, signal.SIGKILL)]
+
+
+def test_combined_hard_kill_refuses_foreign_pid(monkeypatch) -> None:
+    monkeypatch.setattr(combined.A, "is_server_pid", lambda pid: False)
+
+    def unexpected_kill(*args, **kwargs):
+        raise AssertionError("refused pid must never be signalled")
+
+    monkeypatch.setattr(combined.os, "killpg", unexpected_kill)
+    monkeypatch.setattr(combined.os, "kill", unexpected_kill)
+
+    with pytest.raises(combined.A.UnexpectedServerProcess, match="refusing to kill"):
+        combined.hard_kill(123456)

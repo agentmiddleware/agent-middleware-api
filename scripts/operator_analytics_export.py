@@ -24,11 +24,15 @@ def _require(condition: bool, message: str) -> None:
         raise SystemExit(f"error: {message}")
 
 
+def _is_loopback(api_url: str) -> bool:
+    host = (urlparse(api_url.strip().rstrip("/")).hostname or "").lower()
+    return host in {"localhost", "127.0.0.1", "::1"}
+
+
 def _require_safe_api_url(api_url: str) -> str:
     base = api_url.strip().rstrip("/")
     parsed = urlparse(base)
-    host = (parsed.hostname or "").lower()
-    loopback = host in {"localhost", "127.0.0.1", "::1"}
+    loopback = _is_loopback(api_url)
     if parsed.scheme == "https":
         return base
     if parsed.scheme == "http" and loopback:
@@ -39,11 +43,18 @@ def _require_safe_api_url(api_url: str) -> str:
     )
 
 
-def _bootstrap_key(cli_value: str | None) -> str:
+def _bootstrap_key(cli_value: str | None, *, api_url: str) -> str:
     key = (os.environ.get("BOOTSTRAP_KEY") or "").strip()
     if key:
         return key
     if cli_value:
+        # The flag exists for local-only use; argv is visible to every local
+        # process listing, so refuse it outright for non-loopback targets.
+        if not _is_loopback(api_url):
+            raise SystemExit(
+                "error: --bootstrap-key is local-only; set BOOTSTRAP_KEY "
+                "in the environment for non-loopback targets"
+            )
         print(
             "warning: prefer BOOTSTRAP_KEY env over --bootstrap-key "
             "(argv is visible to local process listings)",
@@ -139,7 +150,7 @@ def main() -> int:
 
     bundle = export_bundle(
         api_url=args.api_url,
-        bootstrap_key=_bootstrap_key(args.bootstrap_key),
+        bootstrap_key=_bootstrap_key(args.bootstrap_key, api_url=args.api_url),
         wallet_id=args.wallet_id,
         audit_limit=args.audit_limit,
         ledger_limit=args.ledger_limit,

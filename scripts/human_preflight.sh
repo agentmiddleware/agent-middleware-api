@@ -7,7 +7,10 @@
 # catalogs behind the same credentials as invoke (#444), so there the catalog
 # routes must answer 401 and the /v1/discover comparison needs an operator key.
 
-set -u
+# pipefail so a failed stage in the python/jq report pipelines cannot hide
+# behind an empty-but-successful tail. No `set -e`: this script accumulates
+# failures across every endpoint into $fail and reports them together.
+set -uo pipefail
 
 API_URL="${API_URL:-http://127.0.0.1:8000}"
 API_URL="${API_URL%/}"

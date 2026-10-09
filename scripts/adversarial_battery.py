@@ -210,8 +210,10 @@ def provision(issued: list[dict]) -> tuple[str, dict, dict, dict, dict]:
     return sponsor_id, a, b, permit, {}
 
 
-def revoke_all(issued: list[dict]) -> None:
+def revoke_all(issued: list[dict]) -> int:
+    """Revoke every minted test key. Returns how many keys failed to revoke."""
     print("\n=== cleanup ===")
+    failures = 0
     for k in issued:
         s, _ = req(
             "DELETE", f"/v1/api-keys/{k['wallet_id']}/{k['key_id']}", BOOTSTRAP_KEY
@@ -222,7 +224,14 @@ def revoke_all(issued: list[dict]) -> None:
             status = "already-gone"
         else:
             status = f"FAILED(status={s}) — revoke manually"
+            failures += 1
         print(f"  {k['label']}: {status}")
+    if failures:
+        print(
+            f"  CLEANUP FAILED: {failures} key(s) left live — revoke manually",
+            file=sys.stderr,
+        )
+    return failures
 
 
 def discover_echo_tool(agent_key: str) -> bool | None:
@@ -435,7 +444,17 @@ def main(argv: list[str] | None = None) -> int:
         sponsor_id, a, b, permit, _ = provision(issued)
         run_checks(sponsor_id, a, b, permit)
     finally:
-        revoke_all(issued)
+        cleanup_failures = revoke_all(issued)
+
+    # A failed revoke leaves a live test key behind, so it fails the run
+    # even when every probe passed.
+    record(
+        "test_key_cleanup",
+        cleanup_failures == 0,
+        "all minted keys revoked"
+        if cleanup_failures == 0
+        else f"{cleanup_failures} key(s) left live — revoke manually",
+    )
 
     print("\n=== SUMMARY ===")
     for name, verdict, _ in RESULTS:

@@ -138,3 +138,43 @@ async def test_summary_report_and_exit_require_complete_success(
 
 def test_empty_workload_cannot_pass(battery):
     assert not battery.LoadResult(10, 0, 0, 0, 0, Decimal(0)).passed
+
+
+def test_created_container_uses_a_fresh_random_password(battery, monkeypatch):
+    runs = []
+
+    def command(argv, **kwargs):
+        operation = argv[1]
+        if operation == "ps":
+            return subprocess.CompletedProcess(argv, 0, "")
+        if operation == "run":
+            runs.append(argv)
+            return subprocess.CompletedProcess(argv, 0, "created-id\n")
+        if operation == "exec":
+            return subprocess.CompletedProcess(argv, 0)
+        assert operation == "stop"
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(battery.subprocess, "run", command)
+
+    urls = []
+    for _ in range(2):
+        monkeypatch.setattr(battery, "DB_URL", None)
+        monkeypatch.setattr(battery, "_OWNED_CONTAINER_ID", None)
+        urls.append(battery._ensure_postgres())
+        battery._stop_postgres()
+
+    assert len(runs) == 2
+    passwords = [
+        next(
+            part.split("=", 1)[1]
+            for part in argv
+            if part.startswith("POSTGRES_PASSWORD=")
+        )
+        for argv in runs
+    ]
+    assert all(password for password in passwords)
+    assert "postgres" not in passwords
+    assert len(set(passwords)) == 2
+    for password, url in zip(passwords, urls):
+        assert f"postgres:{password}@" in url

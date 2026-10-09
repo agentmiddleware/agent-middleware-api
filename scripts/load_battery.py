@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import secrets
 import subprocess
 import sys
 import time
@@ -51,7 +52,14 @@ def _ensure_postgres() -> str:
     )
     if result.stdout.strip():
         print(f"[load] Reusing existing container {PG_CONTAINER}")
+        # A reused container is operator-owned, so its password is the
+        # operator's business; the default URL below only fits a container
+        # that was itself started with the default password.
+        DB_URL = "postgresql+asyncpg://postgres:postgres@localhost:5432/load_test"
     else:
+        # Ephemeral scratch database only: a fresh random password per run,
+        # never the baked-in default, so a stray container is not guessable.
+        pg_password = secrets.token_urlsafe(18)
         print(f"[load] Starting Postgres container {PG_CONTAINER}...")
         started = subprocess.run(
             [
@@ -62,7 +70,7 @@ def _ensure_postgres() -> str:
                 "-e",
                 "POSTGRES_USER=postgres",
                 "-e",
-                "POSTGRES_PASSWORD=postgres",
+                f"POSTGRES_PASSWORD={pg_password}",
                 "-e",
                 "POSTGRES_DB=load_test",
                 "-p",
@@ -88,8 +96,7 @@ def _ensure_postgres() -> str:
         else:
             raise RuntimeError("Postgres failed to start")
         print("[load] Postgres ready")
-
-    DB_URL = "postgresql+asyncpg://postgres:postgres@localhost:5432/load_test"
+        DB_URL = f"postgresql+asyncpg://postgres:{pg_password}@localhost:5432/load_test"
     os.environ["DATABASE_URL"] = DB_URL
     os.environ["STATE_BACKEND"] = "postgres"
     return DB_URL
@@ -253,7 +260,12 @@ async def _run_battery(concurrency: int, total_requests: int) -> LoadResult:
                 "Idempotency-Key": f"load-permit-{concurrency}",
             },
         )
-        assert permit_resp.status_code == 201
+        # Explicit check, not assert: setup failures must fail loudly even
+        # under python -O, where asserts are stripped.
+        if permit_resp.status_code != 201:
+            raise RuntimeError(
+                f"Permit creation failed (status={permit_resp.status_code})"
+            )
         permit_id = permit_resp.json()["permit_id"]
 
         result = LoadResult(

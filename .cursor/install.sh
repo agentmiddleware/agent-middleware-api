@@ -17,7 +17,14 @@ cd "$(dirname "$0")/.."
 #    before the presence check. Otherwise every re-run re-invokes the installer.
 export PATH="$HOME/.local/bin:$PATH"
 if ! command -v uv >/dev/null 2>&1; then
-  curl -LsSf https://astral.sh/uv/install.sh | sh
+  # Fetch first, execute second: piping the installer straight into sh would
+  # run a truncated script as if it were complete if the download is cut
+  # off. Refuse an empty download instead of executing it.
+  uv_installer="$(mktemp)"
+  trap 'rm -f "$uv_installer"' EXIT
+  curl -LsSf https://astral.sh/uv/install.sh -o "$uv_installer"
+  test -s "$uv_installer"
+  sh "$uv_installer"
 fi
 
 # 2. Create the .venv only if missing (keeps re-runs idempotent), then always
