@@ -25,7 +25,7 @@ from app.routers import awi_enhanced as awi_enhanced_router
 from app.services import awi_playwright_bridge as awi_playwright_bridge_module
 from app.services import awi_rag_engine as awi_rag_engine_module
 from app.schemas.awi_enhanced import DOMBridgeSessionRequest
-from app.services.webauthn_provider import WebAuthnProvider
+from app.services.webauthn_provider import VerificationRecord, WebAuthnProvider
 from app.services.awi_playwright_bridge import (
     AWIPlaywrightBridge,
     BridgeSession,
@@ -273,22 +273,37 @@ class TestWebAuthnProvider:
         assert "checkout" in actions
         assert "payment" in actions
 
-    def test_cleanup_expired(self, provider):
-        """Test cleanup of expired challenges."""
-        provider._challenge_expiry = 1
+    @pytest.mark.asyncio
+    async def test_cleanup_expired(self, provider):
+        """Expired challenges and verifications are removed; fresh ones are kept."""
+        provider._challenge_expiry = -1  # already expired at creation
+        expired = await provider.create_challenge("session1", "checkout")
+        provider._challenge_expiry = 60
+        fresh = await provider.create_challenge("session1", "payment")
 
-        import asyncio
-
-        asyncio.run(provider.create_challenge("session1", "checkout"))
-
-        import time
-
-        time.sleep(0.1)
+        now = utc_now()
+        provider._verifications["session1:checkout"] = VerificationRecord(
+            session_id="session1",
+            action="checkout",
+            verified_at=now - timedelta(seconds=120),
+            expires_at=now - timedelta(seconds=60),
+            credential_id="cred-expired",
+        )
+        provider._verifications["session1:payment"] = VerificationRecord(
+            session_id="session1",
+            action="payment",
+            verified_at=now,
+            expires_at=now + timedelta(seconds=60),
+            credential_id="cred-fresh",
+        )
 
         result = provider.cleanup_expired()
 
-        assert "challenges_removed" in result
-        assert "verifications_removed" in result
+        assert result == {"challenges_removed": 1, "verifications_removed": 1}
+        assert expired["challenge_id"] not in provider._challenges
+        assert fresh["challenge_id"] in provider._challenges
+        assert "session1:checkout" not in provider._verifications
+        assert "session1:payment" in provider._verifications
 
 
 @pytest.mark.proof
