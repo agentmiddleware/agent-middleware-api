@@ -1,7 +1,15 @@
 target-version = "py311"
 
 [lint]
-# Pyflakes: unused imports/variables, undefined names, redefinitions.
-# Previously this file selected only E501 and then immediately ignored it,
-# so `ruff check` passed with zero rules actually enforced.
+# Deliberate scope (audit 2026-10): only Pyflakes ("F") is enforced, which
+# catches unused imports/variables, undefined names, and redefinitions, the
+# fault classes that break the trust loop at runtime. Style families ("E",
+# "W", format checks) stay off on purpose: this tree predates them, so
+# enabling them now would flood CI with churn unrelated to correctness.
+# Revisit when a clean baseline exists; until then a PR that wants a style
+# rule should enable that single rule together with a baseline of the
+# current tree.
+# History: a prior version of this file selected only E501 and then
+# immediately ignored it, so `ruff check` passed with zero rules actually
+# enforced. The "F" selection above closed that hole.
 select = ["F"]

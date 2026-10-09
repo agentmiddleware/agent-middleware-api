@@ -14,3 +14,10 @@ updates:
     labels:
       - dependencies
       - ci
+  - package-ecosystem: "npm"
+    directory: "/.railway"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
