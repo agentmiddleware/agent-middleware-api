@@ -484,7 +484,10 @@ async def lifespan(app: FastAPI):
     await close_db()
     await close_durable_state()
 
-    await asyncio.sleep(2)  # Allow in-flight requests to drain
+    # Brief settle delay before shutdown completes. The database and durable
+    # state are already closed and the server has stopped accepting requests,
+    # so this is not request draining.
+    await asyncio.sleep(2)
     logger.info(
         "app_shutdown",
         phase="complete",
@@ -493,6 +496,26 @@ async def lifespan(app: FastAPI):
 
 
 public_contact = _public_contact_metadata(settings)
+
+
+def _openapi_servers(public_url: str, environment: str) -> list[dict[str, str]]:
+    """Server entries for the OpenAPI document without inventing an issuer.
+
+    The public entry appears only when ``public_url`` (PUBLIC_URL) names this
+    deployment. An unset value yields no public entry rather than a baked-in
+    domain the operator may not own; receipts and manifests follow the same
+    rule and stay empty when PUBLIC_URL is unset.
+    """
+    servers = (
+        [{"url": public_url.strip(), "description": "Public API"}]
+        if public_url.strip()
+        else []
+    )
+    if not is_production_like_environment(environment):
+        servers.append(
+            {"url": "http://localhost:8000", "description": "Local Development"}
+        )
+    return servers
 
 
 app = FastAPI(
@@ -540,17 +563,11 @@ app = FastAPI(
         "name": "Business Source License 1.1",
         "url": "https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/LICENSE",
     },
-    servers=[
-        {
-            "url": settings.PUBLIC_URL or "https://api.thisisatest.tech",
-            "description": "Public API (set PUBLIC_URL)",
-        },
-        *(
-            []
-            if is_production_like_environment(settings.ENVIRONMENT)
-            else [{"url": "http://localhost:8000", "description": "Local Development"}]
-        ),
-    ],
+    # The public entry appears only when PUBLIC_URL names this deployment.
+    # A baked-in fallback domain would advertise an origin the operator may
+    # not own, so an unset PUBLIC_URL yields no public entry (or no servers
+    # entry at all in production-like environments).
+    servers=_openapi_servers(settings.PUBLIC_URL, settings.ENVIRONMENT) or None,
 )
 
 # --- Middleware Stack ---
