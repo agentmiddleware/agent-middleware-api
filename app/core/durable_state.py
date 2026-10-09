@@ -37,6 +37,33 @@ from .trust_mode import is_production_like_environment
 
 logger = logging.getLogger(__name__)
 
+# Bound every Redis round trip. Without these, a hung Redis blocks the init
+# ping, every later command, and the readiness ping indefinitely.
+# health_check_interval makes redis-py PING an idle connection before reusing
+# it, so a dead socket is noticed before a request depends on it.
+REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS: float = 2.0
+REDIS_SOCKET_TIMEOUT_SECONDS: float = 2.0
+REDIS_HEALTH_CHECK_INTERVAL_SECONDS: int = 15
+
+
+def _apply_redis_timeouts(client: Any) -> Any:
+    """Re-apply the timeouts even when REDIS_URL carries its own.
+
+    redis-py lets ``?socket_timeout=`` / ``?socket_connect_timeout=`` query
+    parameters in the URL override the keyword arguments given to
+    ``from_url``, which would silently lift the bound on a hung command. The
+    pool builds every new connection from ``connection_kwargs``.
+    """
+    pool = getattr(client, "connection_pool", None)
+    kwargs = getattr(pool, "connection_kwargs", None)
+    if isinstance(kwargs, dict):
+        kwargs.update(
+            socket_connect_timeout=REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS,
+            socket_timeout=REDIS_SOCKET_TIMEOUT_SECONDS,
+            health_check_interval=REDIS_HEALTH_CHECK_INTERVAL_SECONDS,
+        )
+    return client
+
 
 class DurableStateConfigError(RuntimeError):
     """Raised when durable state cannot be configured safely."""
@@ -272,10 +299,15 @@ class DurableStateStore:
                             """
                         )
                 elif self._backend == "redis":
-                    self._redis = redis.from_url(
-                        self._redis_url,
-                        encoding="utf-8",
-                        decode_responses=True,
+                    self._redis = _apply_redis_timeouts(
+                        redis.from_url(
+                            self._redis_url,
+                            encoding="utf-8",
+                            decode_responses=True,
+                            socket_connect_timeout=REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS,
+                            socket_timeout=REDIS_SOCKET_TIMEOUT_SECONDS,
+                            health_check_interval=REDIS_HEALTH_CHECK_INTERVAL_SECONDS,
+                        )
                     )
                     await self._redis.ping()
                 elif self._backend == "sqlite":

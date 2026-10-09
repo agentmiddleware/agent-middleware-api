@@ -723,3 +723,100 @@ def test_auto_backend_refuses_sqlite_in_production_like(monkeypatch):
     get_settings.cache_clear()
     reset_durable_state_for_tests()
     reset_runtime_degradation()
+
+
+@pytest.mark.anyio
+async def test_durable_redis_client_is_built_with_timeouts(monkeypatch):
+    """The durable-state Redis client must bound every round trip.
+
+    Without socket timeouts a hung Redis blocks the init ping, every later
+    command, and the readiness ping with no bound.
+    """
+    from types import SimpleNamespace
+
+    from app.core import durable_state as durable_state_module
+    from app.core.config import get_settings
+
+    reset_runtime_degradation()
+    reset_durable_state_for_tests()
+    monkeypatch.setenv("ENVIRONMENT", "local")
+    monkeypatch.setenv("STATE_BACKEND", "redis")
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    monkeypatch.setenv("DATABASE_URL", "")
+    monkeypatch.setenv("SQLITE_URL", "")
+    get_settings.cache_clear()
+
+    seen: dict = {}
+
+    class _FakeRedis:
+        def __init__(self, kwargs: dict):
+            self.connection_pool = SimpleNamespace(connection_kwargs=dict(kwargs))
+
+        async def ping(self) -> bool:
+            return True
+
+        async def aclose(self) -> None:
+            return None
+
+    def _from_url(url: str, **kwargs):
+        seen.update(kwargs)
+        return _FakeRedis(kwargs)
+
+    monkeypatch.setattr(durable_state_module.redis, "from_url", _from_url)
+    try:
+        store = DurableStateStore()
+        await store._ensure_ready()
+        assert store.backend == "redis"
+        assert (
+            seen["socket_connect_timeout"]
+            == durable_state_module.REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS
+        )
+        assert (
+            seen["socket_timeout"] == durable_state_module.REDIS_SOCKET_TIMEOUT_SECONDS
+        )
+        assert (
+            seen["health_check_interval"]
+            == durable_state_module.REDIS_HEALTH_CHECK_INTERVAL_SECONDS
+        )
+        assert 0 < seen["socket_connect_timeout"] <= 5
+        assert 0 < seen["socket_timeout"] <= 5
+        await store.close()
+    finally:
+        get_settings.cache_clear()
+        reset_durable_state_for_tests()
+        reset_runtime_degradation()
+
+
+@pytest.mark.anyio
+async def test_durable_redis_url_query_cannot_lift_the_timeouts():
+    """REDIS_URL query params must not silently remove the bound.
+
+    redis-py lets ``?socket_timeout=`` / ``?socket_connect_timeout=`` in the
+    URL override the ``from_url`` keyword arguments, so the timeouts are
+    re-applied on the built client.
+    """
+    import redis.asyncio as redis
+
+    from app.core import durable_state as durable_state_module
+
+    url = "redis://localhost:6390/0?socket_timeout=120&socket_connect_timeout=120"
+    client = redis.from_url(url, socket_timeout=2.0, socket_connect_timeout=2.0)
+    try:
+        durable_state_module._apply_redis_timeouts(client)
+        kwargs = client.connection_pool.connection_kwargs
+        assert (
+            kwargs["socket_timeout"]
+            == durable_state_module.REDIS_SOCKET_TIMEOUT_SECONDS
+        )
+        assert (
+            kwargs["socket_connect_timeout"]
+            == durable_state_module.REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS
+        )
+        assert (
+            kwargs["health_check_interval"]
+            == durable_state_module.REDIS_HEALTH_CHECK_INTERVAL_SECONDS
+        )
+        assert 0 < kwargs["socket_timeout"] <= 5
+        assert 0 < kwargs["socket_connect_timeout"] <= 5
+    finally:
+        await client.aclose()
