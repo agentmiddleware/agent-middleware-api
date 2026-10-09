@@ -224,12 +224,14 @@ jobs:
       - name: Judge the reference integration (must pass)
         run: |
           python -m failure_lab.integration_check.judge \
-            --candidate failure_lab/integration_check/reference_candidate.py
+            --candidate failure_lab/integration_check/reference_candidate.py \
+            --i-have-reviewed
 
       - name: Judge the broken integration (must fail)
         run: |
           python -m failure_lab.integration_check.judge \
             --candidate failure_lab/integration_check/broken_candidate.py \
+            --i-have-reviewed \
             --expect fail --json "$RUNNER_TEMP/broken-integration-result.json"
           python - "$RUNNER_TEMP/broken-integration-result.json" <<'PY'
           import json, sys
