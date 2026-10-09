@@ -35,12 +35,16 @@ live-loop-proof:
 
 # Fast inner loop: trust-plane (product) tests only. Proof-surface workloads
 # are skipped here — run them with `make test-all` (what CI runs) or `make test-proof`.
+# Exception: the proof-marked tenant-isolation tests run here too. They guard
+# a security boundary, and skipping them locally while CI runs them (CI uses
+# `-m "not production_trust"`) hid failures until push time.
 # `--with-requirements` makes these self-contained: uv installs the runtime +
 # test deps for the run, so `make test` works on a fresh checkout without a
 # separate `pip install -r requirements.txt` (deps live in requirements.txt,
 # not pyproject [project.dependencies]).
 test:
 	uv run --with-requirements requirements.txt pytest tests/ -q -m "not proof"
+	uv run --with-requirements requirements.txt pytest tests/test_tenant_isolation_hardening.py -q -m "proof"
 
 test-all:
 	uv run --with-requirements requirements.txt pytest tests/ -q

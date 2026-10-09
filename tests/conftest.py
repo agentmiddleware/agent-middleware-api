@@ -19,7 +19,8 @@ from sqlalchemy.orm import Session
 # else is a "proof surface" — example workloads that exercise the spine but are
 # NOT the product (see README "Core platform vs. example workloads"). Tests for
 # these are auto-marked `proof` so the inner dev loop can skip them:
-#     make test       -> fast, core only  (pytest -m "not proof")
+#     make test       -> fast, core only  (pytest -m "not proof", plus the
+#                        proof-marked tenant-isolation tests, which always run)
 #     make test-all   -> full suite       (what CI runs)
 # Conservative by design: when a test's surface is ambiguous, leave it OUT of
 # this set so it stays in the fast (core) loop and is never silently skipped.
@@ -212,7 +213,7 @@ def interleaving_factory(real_factory, hook, state, *, fire_on: int = 1):
         async def __aexit__(self, *exc):
             return await self._cm.__aexit__(*exc)
 
-    return lambda: (lambda: _CM(real_factory()))
+    return lambda: lambda: _CM(real_factory())
 
 
 def running_on_sqlite() -> bool:
