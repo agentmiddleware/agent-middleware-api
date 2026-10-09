@@ -8,7 +8,7 @@ from httpx import ASGITransport, AsyncClient
 from app.core.auth import AuthContext, get_auth_context
 from app.core.config import get_settings
 from app.core.jwt import get_jwt_service
-from app.core.scopes import require_scope
+from tests.support.scope_guard import require_test_scope as require_scope
 from app.db.database import get_session_factory
 from app.db.models import WalletModel, APIKeyModel
 from app.routers import auth, api_keys

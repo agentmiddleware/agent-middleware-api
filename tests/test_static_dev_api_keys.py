@@ -17,7 +17,7 @@ from fastapi import HTTPException
 
 from app.core.auth import AuthContext, STATIC_DEV_KEY_PREFIX, get_auth_context
 from app.core.config import Settings, get_settings
-from app.core.scopes import require_scope
+from tests.support.scope_guard import require_test_scope as require_scope
 from app.core.trust_mode import (
     TrustModeGuardrailError,
     validate_trust_mode_config,

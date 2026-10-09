@@ -1,10 +1,12 @@
-"""Scope enforcement decorator for FastAPI routes.
+"""Test-only scope guard for JWT attenuation tests.
 
-Usage:
-    @router.post("/v1/permits")
-    @require_scope("billing:charge")
-    async def create_permit(...):
-        ...
+This is a test harness, NOT production authorization: no production module
+may import it (see tests/test_scopes_removed.py). It mirrors the scope
+semantics the deleted ``app.core.scopes.require_scope`` helper enforced so
+the JWT authority tests keep a guarded endpoint to exercise:
+
+- API key callers (source "db", "env", or "static-dev") pass through.
+- JWT callers must carry at least one of the required scopes.
 """
 
 from __future__ import annotations
@@ -19,18 +21,12 @@ from app.core.auth import AuthContext
 F = TypeVar("F", bound=Callable)
 
 
-def require_scope(*required_scopes: str) -> Callable[[F], F]:
-    """Decorator that checks JWT scopes on the auth context.
-
-    API key callers (source="db" or "env") bypass scope checks
-    (they have implicit full access). JWT callers must have at least
-    one of the required scopes.
-    """
+def require_test_scope(*required_scopes: str) -> Callable[[F], F]:
+    """Test-only decorator checking JWT scopes on the auth context."""
 
     def decorator(func: F) -> F:
         @wraps(func)
         async def wrapper(*args, **kwargs) -> F:
-            # Find AuthContext in kwargs
             auth: AuthContext | None = kwargs.get("auth")
             if auth is None:
                 for arg in args:
@@ -47,13 +43,9 @@ def require_scope(*required_scopes: str) -> Callable[[F], F]:
                     },
                 )
 
-            # API key callers have implicit full access. "static-dev" is the
-            # local-only static development/training key path; it carries
-            # bootstrap-admin power in local-compatible environments only.
             if auth.source in ("db", "env", "static-dev"):
                 return await func(*args, **kwargs)
 
-            # JWT callers must have at least one required scope
             if not any(scope in auth.scopes for scope in required_scopes):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
