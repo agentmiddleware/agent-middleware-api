@@ -495,6 +495,98 @@ async def test_http_transport_pins_validated_address_and_blocks_endpoint_drift()
 
 
 @pytest.mark.anyio
+async def test_discovery_and_call_share_one_resolved_address() -> None:
+    """Discovery and the later tool call must connect to the same address.
+
+    A second lookup can answer with a different address. The call has to keep
+    the address from the first lookup instead of following that answer.
+    """
+    connected_hosts: list[str] = []
+    resolver_calls = 0
+    first_address = "93.184.216.34"
+    rebound_address = "1.1.1.1"
+
+    async def rebinding_resolver(_host: str, _port: int | None) -> Sequence[str]:
+        nonlocal resolver_calls
+        resolver_calls += 1
+        if resolver_calls == 1:
+            return (first_address,)
+        return (rebound_address,)
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        connected_hosts.append(request.url.host)
+        raw = await request.aread()
+        if not raw:
+            return httpx.Response(202)
+        payload = json.loads(raw.decode("utf-8"))
+        request_id = payload.get("id")
+        method = payload.get("method")
+        if request_id is None:
+            return httpx.Response(202)
+        if method == "initialize":
+            result: dict[str, Any] = {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "serverInfo": {"name": "partner", "version": "1.0"},
+            }
+        elif method == "tools/list":
+            result = {
+                "tools": [
+                    {
+                        "name": "partner.write",
+                        "description": "partner",
+                        "inputSchema": {"type": "object"},
+                    }
+                ]
+            }
+        elif method == "tools/call":
+            result = {
+                "content": [{"type": "text", "text": "ok"}],
+                "isError": False,
+            }
+        else:
+            return httpx.Response(202)
+        body = json.dumps(
+            {"jsonrpc": "2.0", "id": request_id, "result": result},
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return httpx.Response(
+            200,
+            headers={"Content-Type": "application/json"},
+            content=body,
+        )
+
+    injected = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        headers={"Authorization": "Bearer secret-partner-token"},
+        follow_redirects=False,
+    )
+    adapter = UpstreamMcpAdapter(
+        _configuration(MCP_UPSTREAM_URL="https://partner.example/mcp"),
+        http_client=injected,
+        resolver=rebinding_resolver,
+    )
+
+    async def before_dispatch() -> None:
+        return None
+
+    discovered = await adapter.discover_tool()
+    result = await adapter.call_tool(
+        {},
+        invocation_id="inv-pin",
+        idempotency_key="idem-pin",
+        before_dispatch=before_dispatch,
+    )
+
+    assert discovered.name == "partner.write"
+    assert result.is_error is False
+    assert resolver_calls == 1
+    assert connected_hosts
+    assert set(connected_hosts) == {first_address}
+    await injected.aclose()
+
+
+@pytest.mark.anyio
 async def test_pinned_tls_connection_verifies_configured_hostname_and_sni(
     tmp_path,
 ) -> None:

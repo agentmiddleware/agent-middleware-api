@@ -677,16 +677,39 @@ class UpstreamMcpAdapter:
         self._injected_http_client = http_client
         self._resolver = resolver
         self._discovered_tool: DiscoveredUpstreamTool | None = None
+        self._pinned_address: str | None = None
+        self._resolve_lock = asyncio.Lock()
 
     @property
     def discovered_tool(self) -> DiscoveredUpstreamTool | None:
         return self._discovered_tool
+
+    async def _resolved_upstream_address(self) -> str:
+        """Resolve the upstream once and reuse that address for every connection.
+
+        Discovery and a later tool call each open their own connection. Looking
+        the host up again can return a different address under hostile DNS, and
+        the pin on the first connection does not cover the next one.
+        """
+        cached = self._pinned_address
+        if cached is not None:
+            return cached
+        async with self._resolve_lock:
+            cached = self._pinned_address
+            if cached is None:
+                cached = await validate_upstream_url(
+                    self.configuration,
+                    resolver=self._resolver,
+                )
+                self._pinned_address = cached
+            return cached
 
     @asynccontextmanager
     async def _http_client(
         self,
         *,
         response_guard: _ResponseGuardState | None = None,
+        pinned_address: str | None = None,
     ) -> AsyncIterator[httpx.AsyncClient]:
         active_guard = response_guard or _ResponseGuardState()
         if self._injected_http_client is not None and is_production_like_environment(
@@ -695,9 +718,10 @@ class UpstreamMcpAdapter:
             raise UpstreamMcpConfigurationError(
                 "injected upstream MCP HTTP clients are not allowed in production"
             )
-        active_address = await validate_upstream_url(
-            self.configuration,
-            resolver=self._resolver,
+        active_address = (
+            pinned_address
+            if pinned_address is not None
+            else await self._resolved_upstream_address()
         )
         delegated_transport: httpx.AsyncBaseTransport | None = None
         if self._injected_http_client is not None:
@@ -747,8 +771,17 @@ class UpstreamMcpAdapter:
         self,
         *,
         response_guard: _ResponseGuardState | None = None,
+        pinned_address: str | None = None,
     ) -> AsyncIterator[McpSession]:
-        async with self._http_client(response_guard=response_guard) as client:
+        address = (
+            pinned_address
+            if pinned_address is not None
+            else await self._resolved_upstream_address()
+        )
+        async with self._http_client(
+            response_guard=response_guard,
+            pinned_address=address,
+        ) as client:
             async with streamable_http_client(
                 self.configuration.url,
                 http_client=client,
@@ -779,7 +812,11 @@ class UpstreamMcpAdapter:
         secret = self.configuration.bearer_token.get_secret_value()
         response_guard = _ResponseGuardState()
         try:
-            async with self._session(response_guard=response_guard) as session:
+            pinned_address = await self._resolved_upstream_address()
+            async with self._session(
+                response_guard=response_guard,
+                pinned_address=pinned_address,
+            ) as session:
                 await self._initialize_session(
                     session,
                     response_guard=response_guard,
@@ -936,7 +973,11 @@ class UpstreamMcpAdapter:
         response_rejected: UpstreamMcpResponseRejectedError | None = None
         response_guard = _ResponseGuardState()
         try:
-            async with self._session(response_guard=response_guard) as session:
+            pinned_address = await self._resolved_upstream_address()
+            async with self._session(
+                response_guard=response_guard,
+                pinned_address=pinned_address,
+            ) as session:
                 await self._initialize_session(
                     session,
                     response_guard=response_guard,
