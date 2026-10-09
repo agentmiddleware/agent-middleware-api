@@ -5,7 +5,8 @@ Handles API key creation, rotation, and revocation for compromised wallets.
 Supports automatic rotation on suspicious activity detection.
 
 Architecture:
-1. Keys are stored hashed (SHA-256) in the database
+1. Keys are stored hashed (HMAC-SHA256 with a server pepper when
+   API_KEY_PEPPER is set, plain SHA-256 otherwise) in the database
 2. Only the key prefix and masked key are ever shown
 3. Rotation creates new key and optionally revokes old ones
 4. Emergency revocation immediately invalidates all keys
@@ -14,6 +15,7 @@ Architecture:
 import hashlib
 import hmac
 import json
+import os
 import secrets
 import logging
 from datetime import datetime, timedelta
@@ -41,6 +43,36 @@ logger = logging.getLogger(__name__)
 
 API_KEY_LENGTH = 32
 API_KEY_PREFIX_LENGTH = 8
+
+#: Environment variable holding the server-side pepper mixed into API key
+#: digests. Set this to a long random value in every deployment so a stolen
+#: database dump alone is not enough to test candidate keys offline. Empty
+#: (the default) keeps the legacy unsalted SHA-256 digest.
+API_KEY_PEPPER_ENV_VAR = "API_KEY_PEPPER"
+
+
+def get_api_key_pepper() -> bytes:
+    """Return the configured server pepper, or empty bytes when unset."""
+    return os.environ.get(API_KEY_PEPPER_ENV_VAR, "").encode("utf-8")
+
+
+def hash_api_key(full_key: str) -> str:
+    """Digest an API key for storage and lookup.
+
+    With a pepper configured this is HMAC-SHA256 keyed by the pepper;
+    without one it is the legacy unsalted SHA-256 digest, so local dev
+    and existing tests work unchanged.
+    """
+    pepper = get_api_key_pepper()
+    if pepper:
+        return hmac.new(pepper, full_key.encode("utf-8"), hashlib.sha256).hexdigest()
+    return hashlib.sha256(full_key.encode("utf-8")).hexdigest()
+
+
+def _legacy_api_key_hash(full_key: str) -> str:
+    """The pre-pepper digest, kept so rows written before the pepper was
+    configured still validate without a data migration."""
+    return hashlib.sha256(full_key.encode("utf-8")).hexdigest()
 
 
 class APIKeyError(Exception):
@@ -91,7 +123,7 @@ def generate_api_key() -> tuple[str, str, str]:
         tuple: (full_key, key_hash, key_prefix)
     """
     full_key = f"b2a_{secrets.token_urlsafe(API_KEY_LENGTH)}"
-    key_hash = hashlib.sha256(full_key.encode()).hexdigest()
+    key_hash = hash_api_key(full_key)
     key_prefix = full_key[:API_KEY_PREFIX_LENGTH]
     return full_key, key_hash, key_prefix
 
@@ -401,7 +433,7 @@ class APIKeyService:
             return None
 
         key_prefix = api_key[:API_KEY_PREFIX_LENGTH]
-        key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+        key_hash = hash_api_key(api_key)
 
         async with self._session_factory()() as session:
             # Look up by the indexed full digest, not the prefix alone: the
@@ -418,6 +450,23 @@ class APIKeyService:
                 )
             )
             key = result.scalar_one_or_none()
+
+            if key is None and get_api_key_pepper():
+                # Rows written before the pepper was configured carry the
+                # legacy unsalted digest; accept them so enabling the pepper
+                # needs no data migration.
+                legacy_hash = _legacy_api_key_hash(api_key)
+                if not hmac.compare_digest(legacy_hash, key_hash):
+                    result = await session.execute(
+                        select(APIKeyModel).where(
+                            col(APIKeyModel.key_hash) == legacy_hash,
+                            col(APIKeyModel.key_prefix) == key_prefix,
+                            col(APIKeyModel.status) == APIKeyStatus.ACTIVE.value,
+                        )
+                    )
+                    key = result.scalar_one_or_none()
+                    if key is not None:
+                        key_hash = legacy_hash
 
             if not key:
                 return None
