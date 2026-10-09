@@ -271,11 +271,13 @@ async def _resolve_auth_context(
     try:
         from ..services.api_key_service import get_api_key_service
         from ..services.demo_tenant import (
-            DEMO_TENANT_DISABLED,
             DEMO_KEY_ROUTE_FORBIDDEN,
+            DEMO_TENANT_DISABLED,
+            DEMO_TENANT_LABEL,
             current_demo_request,
             demo_route_allowed,
             parse_allowlist,
+            resolve_effective_tenant,
         )
 
         db_key = await get_api_key_service().validate_key(stripped)
@@ -283,8 +285,13 @@ async def _resolve_auth_context(
         db_key = None
 
     if db_key:
-        tenant = getattr(db_key, "tenant", None)
-        if tenant == "demo" and not settings.ENABLE_DEMO_TENANT:
+        # Tenant is a property of the wallet: the credential counts as demo
+        # if the key OR its wallet is demo-tenant (fail closed, so the kill
+        # switch cannot be dodged by a key minted before tenant inheritance).
+        tenant = await resolve_effective_tenant(
+            getattr(db_key, "tenant", None), db_key.wallet_id
+        )
+        if tenant == DEMO_TENANT_LABEL and not settings.ENABLE_DEMO_TENANT:
             # Kill switch: flipping the flag off instantly disables all demo
             # traffic, including keys minted while it was on.
             raise HTTPException(
@@ -294,7 +301,7 @@ async def _resolve_auth_context(
                     "message": "The demo tenant is currently disabled.",
                 },
             )
-        if tenant == "demo":
+        if tenant == DEMO_TENANT_LABEL:
             current = current_demo_request()
             if current is None or not demo_route_allowed(*current):
                 raise HTTPException(
@@ -426,11 +433,13 @@ async def _auth_from_jwt(token: str) -> AuthContext:
 
     from ..services.api_key_service import get_api_key_service
     from ..services.demo_tenant import (
-        DEMO_TENANT_DISABLED,
         DEMO_KEY_ROUTE_FORBIDDEN,
+        DEMO_TENANT_DISABLED,
+        DEMO_TENANT_LABEL,
         current_demo_request,
         demo_route_allowed,
         parse_allowlist,
+        resolve_effective_tenant,
     )
 
     if not await get_api_key_service().consume_derived_key_use(
@@ -460,8 +469,10 @@ async def _auth_from_jwt(token: str) -> AuthContext:
                 ),
             },
         )
-    tenant = getattr(key_row, "tenant", None)
-    if tenant == "demo" and not get_settings().ENABLE_DEMO_TENANT:
+    tenant = await resolve_effective_tenant(
+        getattr(key_row, "tenant", None), key_row.wallet_id
+    )
+    if tenant == DEMO_TENANT_LABEL and not get_settings().ENABLE_DEMO_TENANT:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
@@ -469,7 +480,7 @@ async def _auth_from_jwt(token: str) -> AuthContext:
                 "message": "The demo tenant is currently disabled.",
             },
         )
-    if tenant == "demo":
+    if tenant == DEMO_TENANT_LABEL:
         current = current_demo_request()
         if current is None or not demo_route_allowed(*current):
             raise HTTPException(

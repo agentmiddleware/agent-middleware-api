@@ -71,6 +71,7 @@ PROOF_SURFACE_TEST_MODULES = frozenset(
 DORMANT_SURFACE_TEST_MODULES = frozenset(
     {
         "test_acp_bridge",
+        "test_demo_tenant",
         "test_api_keys",
         "test_audit_routes",
         "test_billing",

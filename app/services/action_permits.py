@@ -266,6 +266,90 @@ async def authorize_action_issuer(
         raise HTTPException(status_code=403, detail="action_issuer_authority_required")
 
 
+async def _enforce_key_and_demo_bounds_for_action(
+    request: ActionPermitCreateRequest, auth: AuthContext
+) -> None:
+    """Apply the shared allowlist + demo-containment policy to action mints.
+
+    Action permits persist via ``PermitService._persist_permit`` directly,
+    bypassing ``create_permit`` (and the router pre-check), so this path
+    enforces the same policy explicitly. Denials are 403 carrying
+    ``key_tool_not_allowed`` / ``demo_permit_out_of_bounds``.
+    """
+    from datetime import timedelta
+
+    from fastapi import HTTPException, status
+
+    from app.core.config import get_settings
+    from app.core.time import utc_now
+    from app.db.database import get_session_factory
+    from app.db.models import WalletModel
+    from app.services.demo_tenant import (
+        DEMO_TENANT_LABEL,
+        DemoPermitDenied,
+        KeyAllowlistDenied,
+        check_demo_permit_bounds,
+        check_key_allowlist_for_permit,
+    )
+
+    try:
+        check_key_allowlist_for_permit(
+            key_allowlist=getattr(auth, "allowed_tools", None),
+            allowed_tools=[request.tool_name],
+            scopes=[],
+        )
+    except KeyAllowlistDenied as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"error": exc.error, "message": exc.message},
+        )
+    caller_tenant = getattr(auth, "tenant", None)
+    issuer_tenant: str | None = None
+    subject_tenant: str | None = None
+    factory = get_session_factory()
+    async with factory() as session:
+        issuer = await session.get(WalletModel, request.issuer_wallet_id)
+        subject = await session.get(WalletModel, request.subject_wallet_id)
+        issuer_tenant = getattr(issuer, "tenant", None) if issuer else None
+        subject_tenant = getattr(subject, "tenant", None) if subject else None
+    if not (
+        issuer_tenant == DEMO_TENANT_LABEL
+        or subject_tenant == DEMO_TENANT_LABEL
+        or caller_tenant == DEMO_TENANT_LABEL
+    ):
+        return
+    settings = get_settings()
+    caller_key_expires_at = None
+    if auth.key_id is not None:
+        from app.services.api_key_service import get_api_key_service
+
+        row = await get_api_key_service().get_key_record(auth.key_id)
+        caller_key_expires_at = row.expires_at if row is not None else None
+    try:
+        check_demo_permit_bounds(
+            issuer_tenant=issuer_tenant,
+            subject_tenant=subject_tenant,
+            caller_tenant=caller_tenant,
+            allowed_tools=[request.tool_name],
+            max_credits=request.max_credits,
+            expires_at=request.expires_at,
+            caller_key_expires_at=caller_key_expires_at,
+            demo_allowed_tools=settings.demo_allowed_tools_list,
+            max_permit_credits=settings.DEMO_MAX_PERMIT_CREDITS,
+            max_permit_ttl=(
+                timedelta(minutes=settings.DEMO_MAX_PERMIT_TTL_MINUTES)
+                if settings.DEMO_MAX_PERMIT_TTL_MINUTES is not None
+                else None
+            ),
+            now=utc_now(),
+        )
+    except DemoPermitDenied as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"error": exc.error, "message": exc.message},
+        )
+
+
 async def create_action_permit(
     request: ActionPermitCreateRequest, auth: AuthContext
 ) -> PermitResponse:
@@ -274,6 +358,7 @@ async def create_action_permit(
     from app.services.service_registry import get_service_registry
 
     await authorize_action_issuer(request, auth)
+    await _enforce_key_and_demo_bounds_for_action(request, auth)
     registry = get_service_registry()
     record = await registry.get(request.tool_name)
     try:

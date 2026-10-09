@@ -85,22 +85,35 @@ class Settings(BaseSettings):
     ENABLE_DEV_KEY_SELF_PROVISION: bool = False
 
     # --- Self-serve demo tenant (POST /v1/demo/keys) ---
-    # Lets an anonymous visitor mint a short-lived, tightly capped demo key
-    # (tenant="demo" wallets + wallet-scoped key with a per-key tool
-    # allowlist) with no pre-shared secret. Default off: the issuance route
-    # answers 404 and every existing demo-tenant key is refused at
-    # authentication. Unlike dev keys this IS allowed in production-like
+    # Lets an anonymous visitor mint a demo key (tenant="demo" wallets +
+    # wallet-scoped key) with no pre-shared secret. Default off: the issuance
+    # route answers 404 and every existing demo-tenant credential is refused
+    # at authentication. Unlike dev keys this IS allowed in production-like
     # environments, but then REDIS_URL is required at boot so issuance
     # limits are shared across replicas. See docs/demo-tenant.md.
+    #
+    # Demo keys hold FULL permissions inside the demo tenant: by default they
+    # are minted with no tool allowlist, no permit caps, no key expiry, no
+    # use cap, and no wallet daily limit. Each limit below is Optional — None
+    # (the default) means that limit is off; setting it turns that one limit
+    # back on with no code change. Tenant containment (same-tenant permits,
+    # same-tenant money movement, the demo route denylist) always applies.
     ENABLE_DEMO_TENANT: bool = False
-    # Comma-separated list of tools a demo key may use. Default is the
-    # side-effect-free echo tool.
-    DEMO_ALLOWED_TOOLS: str = "partner.echo"
-    DEMO_KEY_TTL_DAYS: int = 3
-    DEMO_KEY_MAX_USES: int = 40
-    DEMO_WALLET_CREDITS: Decimal = Decimal("10")
-    DEMO_MAX_PERMIT_CREDITS: Decimal = Decimal("5")
-    DEMO_MAX_PERMIT_TTL_MINUTES: int = 30
+    # Comma-separated tools a demo key may use. Default empty = all tools
+    # (unrestricted, like a normal wallet-scoped key). When set, it is
+    # applied both as the minted keys' allowlist and as the demo permit tool
+    # cap.
+    DEMO_ALLOWED_TOOLS: str = ""
+    DEMO_KEY_TTL_DAYS: int | None = None
+    DEMO_KEY_MAX_USES: int | None = None
+    # Synthetic, out-of-thin-air demo-tenant credit granted to each fresh
+    # demo sponsor/agent wallet pair. This funds demo calls; it is NOT a cap
+    # on real money (demo wallets never touch real funds). Bounded by the
+    # dev-keys ceiling.
+    DEMO_WALLET_CREDITS: Decimal = Decimal("1000")
+    DEMO_WALLET_DAILY_LIMIT: Decimal | None = None
+    DEMO_MAX_PERMIT_CREDITS: Decimal | None = None
+    DEMO_MAX_PERMIT_TTL_MINUTES: int | None = None
     DEMO_ISSUE_PER_IP_PER_DAY: int = 3
     DEMO_ISSUE_GLOBAL_PER_HOUR: int = 30
     DEMO_ISSUE_GLOBAL_PER_DAY: int = 200
@@ -123,13 +136,22 @@ class Settings(BaseSettings):
         "DEMO_ALERT_ISSUES_PER_HOUR",
     )
     @classmethod
-    def _validate_demo_ints(cls, value: int, info) -> int:
+    def _validate_demo_ints(cls, value: int | None, info) -> int | None:
         """Keep demo budgets positive and bounded.
 
-        These bound unauthenticated issuance and demo authority, so a zero
-        would disable the control and an absurd value would neuter it. Fail
-        at construction rather than at the first visitor.
+        The issuance guards (per-IP, global, live-key cap, alert threshold)
+        always apply, so a zero would disable the control and an absurd
+        value would neuter it. The authority limits are Optional: None
+        means that limit is off.
         """
+        if value is None:
+            if info.field_name in (
+                "DEMO_KEY_TTL_DAYS",
+                "DEMO_KEY_MAX_USES",
+                "DEMO_MAX_PERMIT_TTL_MINUTES",
+            ):
+                return None
+            raise ValueError(f"{info.field_name} is required")
         bounds = {
             "DEMO_KEY_TTL_DAYS": (1, 30),
             "DEMO_KEY_MAX_USES": (1, 10_000),
@@ -145,27 +167,32 @@ class Settings(BaseSettings):
             raise ValueError(f"{info.field_name} must be between {low} and {high}")
         return value
 
-    @field_validator("DEMO_WALLET_CREDITS", "DEMO_MAX_PERMIT_CREDITS")
+    @field_validator(
+        "DEMO_WALLET_CREDITS", "DEMO_MAX_PERMIT_CREDITS", "DEMO_WALLET_DAILY_LIMIT"
+    )
     @classmethod
-    def _validate_demo_credits(cls, value: Decimal, info) -> Decimal:
+    def _validate_demo_credits(cls, value: Decimal | None, info) -> Decimal | None:
         """Demo credits must be positive, finite, and bounded."""
-        if not value.is_finite() or value <= 0 or value > Decimal("1000000"):
+        if value is None:
+            if info.field_name in (
+                "DEMO_MAX_PERMIT_CREDITS",
+                "DEMO_WALLET_DAILY_LIMIT",
+            ):
+                return None
+            raise ValueError(f"{info.field_name} is required")
+        if not value.is_finite() or value <= 0 or value > Decimal("100000"):
             raise ValueError(
-                f"{info.field_name} must be a positive amount up to 1000000"
+                f"{info.field_name} must be a positive amount up to 100000"
             )
-        return value
-
-    @field_validator("DEMO_ALLOWED_TOOLS")
-    @classmethod
-    def _validate_demo_allowed_tools(cls, value: str) -> str:
-        """A demo tenant with no usable tool is a misconfiguration."""
-        if not [t.strip() for t in value.split(",") if t.strip()]:
-            raise ValueError("DEMO_ALLOWED_TOOLS must name at least one tool")
         return value
 
     @property
     def demo_allowed_tools_list(self) -> list[str]:
-        """Parsed DEMO_ALLOWED_TOOLS (comma-separated env string)."""
+        """Parsed DEMO_ALLOWED_TOOLS (comma-separated env string).
+
+        Empty = no tool cap: demo keys are minted unrestricted, like a
+        normal wallet-scoped key.
+        """
         return [t.strip() for t in self.DEMO_ALLOWED_TOOLS.split(",") if t.strip()]
 
     # --- Enterprise IGA bridge (OIDC -> PolicyBundle) ---

@@ -172,19 +172,30 @@ class APIKeyService:
                 "max_uses": int | None,
             }
         """
+        # Tenant is a property of the wallet: any key created on a
+        # demo-tenant wallet is a demo key, whoever mints it (demo issuance,
+        # /v1/api-keys create/rotate, emergency replacements, auto-rotate).
+        # An explicit tenant that disagrees with the wallet fails closed to
+        # the wallet's tenant.
         if session is not None:
             result = await session.execute(
                 select(WalletModel).where(col(WalletModel.wallet_id) == wallet_id)
             )
-            if result.scalar_one_or_none() is None:
+            wallet = result.scalar_one_or_none()
+            if wallet is None:
                 raise WalletNotFoundError(wallet_id)
+            if getattr(wallet, "tenant", None):
+                tenant = wallet.tenant
         else:
             async with self._session_factory()() as check_session:
                 result = await check_session.execute(
                     select(WalletModel).where(col(WalletModel.wallet_id) == wallet_id)
                 )
-                if result.scalar_one_or_none() is None:
+                wallet = result.scalar_one_or_none()
+                if wallet is None:
                     raise WalletNotFoundError(wallet_id)
+                if getattr(wallet, "tenant", None):
+                    tenant = wallet.tenant
 
         full_key, key_hash, key_prefix = generate_api_key()
         key_id = f"key_{uuid4().hex[:12]}"

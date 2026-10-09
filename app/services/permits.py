@@ -406,16 +406,16 @@ class PermitService:
                 subject_tenant=subject_tenant,
                 caller_tenant=caller_tenant,
                 allowed_tools=list(request.allowed_tools or []),
-                scopes=list(request.scopes or []),
                 max_credits=request.max_credits,
                 expires_at=request.expires_at,
                 caller_key_expires_at=caller_key_expires_at,
-                requires_human_approval=request.requires_human_approval,
-                repeat_window_seconds=request.repeat_window_seconds,
-                action_contract_version=request.action_contract_version,
                 demo_allowed_tools=settings.demo_allowed_tools_list,
                 max_permit_credits=settings.DEMO_MAX_PERMIT_CREDITS,
-                max_permit_ttl=timedelta(minutes=settings.DEMO_MAX_PERMIT_TTL_MINUTES),
+                max_permit_ttl=(
+                    timedelta(minutes=settings.DEMO_MAX_PERMIT_TTL_MINUTES)
+                    if settings.DEMO_MAX_PERMIT_TTL_MINUTES is not None
+                    else None
+                ),
                 now=utc_now(),
             )
         except DemoPermitDenied as exc:

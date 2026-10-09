@@ -71,7 +71,7 @@ class WalletModel(SQLModel, table=True):
     # Status and metadata
     status: str = Field(default="active", max_length=20)
     # Tenant isolation label. NULL = normal wallet; "demo" = self-serve demo
-    # tenant (synthetic credits, tightly capped permits). See
+    # tenant (synthetic credits, structurally contained). See
     # docs/demo-tenant.md.
     tenant: Optional[str] = Field(default=None, max_length=32, index=True)
     kyc_status: str = Field(default="not_required", max_length=30)
