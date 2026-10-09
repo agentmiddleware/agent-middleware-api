@@ -578,17 +578,17 @@ async def build_receipt_evidence(
                 ledger_failures.append("ledger_wallet_mismatch")
             if ledger_entry.action != LedgerAction.DEBIT.value:
                 ledger_failures.append("ledger_action_not_debit")
-            if receipt.credits_charged > Decimal("0"):
-                expected_amount = -receipt.credits_charged
-                if ledger_entry.amount != expected_amount:
-                    ledger_failures.append("ledger_amount_mismatch")
-            elif receipt.outcome == "failed_refunded":
+            if receipt.outcome == "failed_refunded":
                 refund_found = await _refund_exists(
                     wallet_id=receipt.wallet_id,
                     ledger_entry_id=receipt.ledger_entry_id,
                 )
                 if not refund_found:
                     ledger_failures.append("refund_entry_not_found")
+            else:
+                expected_amount = -receipt.credits_charged
+                if ledger_entry.amount != expected_amount:
+                    ledger_failures.append("ledger_amount_mismatch")
             checks.append(
                 _check(
                     "ledger_linkage",

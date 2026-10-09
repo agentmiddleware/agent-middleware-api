@@ -457,6 +457,55 @@ async def test_receipt_evidence_detects_ledger_tampering(
 
 
 @pytest.mark.anyio
+async def test_receipt_evidence_rejects_zero_charge_receipt_linked_to_debit(
+    client,
+    clean_database,
+):
+    provisioned = await provision_agent_wallet(client)
+    tool_name = "receipt-evidence-zero-charge-link"
+    registry = get_service_registry()
+    _register_echo_tool(tool_name)
+    try:
+        permit, receipt = await _create_governed_receipt(
+            client,
+            provisioned=provisioned,
+            tool_name=tool_name,
+            idem_key="receipt-evidence-zero-charge-link",
+        )
+    finally:
+        registry.unregister_local(tool_name)
+
+    # A zero-charge receipt that still points at the nonzero debit must not
+    # verify: the amount check applies whenever a ledger entry is linked.
+    zero_charge = await get_receipt_service().create_receipt(
+        permit_id=permit["permit_id"],
+        wallet_id=provisioned["agent_wallet_id"],
+        key_id=provisioned["key_id"],
+        tool=tool_name,
+        request_payload={"message": "hello"},
+        response_payload={"message": "hello"},
+        ledger_entry_id=receipt["ledger_entry_id"],
+        credits_authorized=Decimal(str(receipt["credits_authorized"])),
+        credits_charged=Decimal("0"),
+        outcome="success",
+        audit_event_id=receipt["audit_event_id"],
+    )
+
+    evidence_resp = await client.get(
+        f"/v1/receipts/{zero_charge.receipt_id}/evidence",
+        headers=provisioned["agent_headers"],
+    )
+
+    assert evidence_resp.status_code == 200
+    evidence = evidence_resp.json()
+    assert evidence["valid"] is False
+    checks = {check["name"]: check for check in evidence["checks"]}
+    assert checks["receipt_signature"]["status"] == "passed"
+    assert checks["ledger_linkage"]["status"] == "failed"
+    assert checks["ledger_linkage"]["reason"] == "ledger_amount_mismatch"
+
+
+@pytest.mark.anyio
 async def test_receipt_evidence_does_not_expose_cross_wallet_artifacts(
     client,
     clean_database,
