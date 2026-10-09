@@ -1105,3 +1105,53 @@ class TestNotificationService:
         assert "status=401" in failures[0].getMessage()
         assert "api.resend.com" not in caplog.text
         assert api_key not in caplog.text
+
+
+class TestPaymentFailedHandlerUnusualShapes:
+    """The failed-payment webhook path must never raise on odd event shapes."""
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        "payment_intent",
+        [
+            {"id": "pi_no_metadata"},
+            {"id": "pi_null_metadata", "metadata": None},
+            {
+                "id": "pi_null_error",
+                "metadata": {"wallet_id": "wallet-1"},
+                "last_payment_error": None,
+            },
+            {"metadata": {"wallet_id": "wallet-1"}},
+            {"id": "pi_empty_error", "metadata": {}, "last_payment_error": {}},
+            None,
+        ],
+    )
+    async def test_unusual_shapes_do_not_raise(self, payment_intent):
+        """Missing, null, or empty fields are logged, never raised."""
+        service = StripeIntegration()
+        with patch(
+            "app.services.notifications.get_notification_service"
+        ) as mock_factory:
+            mock_factory.return_value.send_payment_failed_alert = AsyncMock()
+            await service._handle_payment_failed(payment_intent)
+
+    @pytest.mark.anyio
+    async def test_null_last_payment_error_alerts_with_default_message(self):
+        """A null last_payment_error still alerts with the default message."""
+        service = StripeIntegration()
+        with patch(
+            "app.services.notifications.get_notification_service"
+        ) as mock_factory:
+            mock_factory.return_value.send_payment_failed_alert = AsyncMock()
+            await service._handle_payment_failed(
+                {
+                    "id": "pi_null_error_msg",
+                    "metadata": {"wallet_id": "wallet-1"},
+                    "last_payment_error": None,
+                }
+            )
+            mock_factory.return_value.send_payment_failed_alert.assert_awaited_once_with(
+                wallet_id="wallet-1",
+                error_message="Unknown error",
+                payment_intent_id="pi_null_error_msg",
+            )
