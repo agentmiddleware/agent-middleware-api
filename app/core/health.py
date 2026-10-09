@@ -269,7 +269,9 @@ async def _check_mqtt(simulation_modes: dict[str, bool]) -> dict[str, Any]:
     import aiomqtt
 
     async with aiomqtt.Client(hostname=host, port=port, timeout=CHECK_TIMEOUT_SECONDS):
-        return {"status": "up", "host": host, "port": port}
+        # The broker address is internal: connect with it, but report only the
+        # verdict on this unauthenticated endpoint.
+        return {"status": "up"}
 
 
 async def _check_stripe() -> dict[str, Any]:
@@ -286,13 +288,10 @@ async def _check_stripe() -> dict[str, Any]:
         return stripe.Balance.retrieve()
 
     loop = asyncio.get_running_loop()
-    balance = await loop.run_in_executor(None, _retrieve)
-    mode = "live" if settings.STRIPE_SECRET_KEY.startswith("sk_live_") else "test"
-    return {
-        "status": "up",
-        "mode": mode,
-        "livemode": getattr(balance, "livemode", None),
-    }
+    await loop.run_in_executor(None, _retrieve)
+    # Live-versus-test mode stays server side: report only the verdict on
+    # this unauthenticated endpoint.
+    return {"status": "up"}
 
 
 async def _check_llm(simulation_modes: dict[str, bool]) -> dict[str, Any]:
@@ -380,12 +379,14 @@ async def _check_upstream_mcp() -> dict[str, Any]:
     returned_errors = dispatch_metrics.state_counts.get("returned_error", 0)
     rejected = dispatch_metrics.state_counts.get("response_rejected", 0)
     uncertainty_count = dispatch_metrics.state_counts.get("delivery_uncertain", 0)
+    # The partner server address is internal: keep the tool identity and the
+    # payload-free counters, but report no origin on this unauthenticated
+    # endpoint.
     return {
         "status": "up",
         "enabled": True,
         "public_tool_id": service.get("service_id"),
         "upstream_tool_name": service.get("upstream_tool_name"),
-        "upstream_origin": service.get("upstream_origin"),
         "call_metrics": get_upstream_mcp_metrics_snapshot(),
         "dispatch_metrics": {
             "state_counts": dispatch_metrics.state_counts,
