@@ -1,4 +1,4 @@
-.PHONY: site-transcript site-transcript-check quickstart quickstart-check live-loop-proof demo-ambiguous-retry demo-ambiguous-retry-check failure-lab failure-lab-check test test-all test-proof coverage prove-trust-plane prove-trust-plane-postgres prove-crash-recovery demo-trust-plane demo-trust-plane-check dogfood-trust-plane dogfood-trust-plane-check red-team-trust-plane red-team-trust-plane-check agent-ops-war-room agent-ops-war-room-check check-doc-references check-railway-iac trust-coverage-gate trust-release-gate trust-conformance-live adversarial-battery-live railway-preflight railway-preflight-live failure-lab-suite failure-lab-all failure-lab-evidence failure-lab-list failure-lab-explore failure-lab-integration-check failure-lab-diagnostic failure-lab-verify-bundle
+.PHONY: site-transcript site-transcript-check site-regression-gate quickstart quickstart-check live-loop-proof demo-ambiguous-retry demo-ambiguous-retry-check failure-lab failure-lab-check test test-all test-proof coverage prove-trust-plane prove-trust-plane-postgres prove-crash-recovery demo-trust-plane demo-trust-plane-check dogfood-trust-plane dogfood-trust-plane-check red-team-trust-plane red-team-trust-plane-check agent-ops-war-room agent-ops-war-room-check check-doc-references check-railway-iac trust-coverage-gate trust-release-gate trust-conformance-live adversarial-battery-live railway-preflight railway-preflight-live failure-lab-suite failure-lab-all failure-lab-evidence failure-lab-list failure-lab-explore failure-lab-integration-check failure-lab-diagnostic failure-lab-verify-bundle
 
 # The governed-loop transcript the public site renders. Re-runs the
 # trust-plane demo on a throwaway SQLite gateway, records the exchanges the
@@ -10,6 +10,15 @@ site-transcript:
 
 site-transcript-check:
 	uv run --with-requirements requirements.txt python scripts/record_site_transcript.py --check
+
+# Required release step for site changes: run every browser regression script
+# to completion with per-script reporting (see docs/site-regression-gate.md).
+# With no URL it builds a throwaway preview with placeholder contacts and
+# serves it on loopback; pass SITE_PREVIEW_URL to target a running preview,
+# PLAYWRIGHT_PATH for an installed Playwright module, and SCREENSHOT_DIR to
+# keep screenshots. Exits nonzero unless every script passes.
+site-regression-gate:
+	bash scripts/site_regression_gate.sh
 
 # The 15-minute golden path: boot a real local trust plane on loopback with
 # self-serve key minting and one invokable governed tool, then follow
