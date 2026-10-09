@@ -2244,7 +2244,16 @@ async def _execute_registered_tool_inner(
         if not await get_quote_service().consume(
             quote_id, idempotency_key=idempotency_key
         ):
-            reason = QUOTE_REASON_CONSUMED
+            # The atomic spend is the verdict, not the earlier read: re-read
+            # the row so an expiry midflight denies as expired instead of
+            # being misreported as already consumed. Either way the call is
+            # denied at the quoted price, never repriced at the live price.
+            rechecked = await get_quote_service().validate_for_action(
+                quote_id=quote_id,
+                wallet_id=wallet_id,
+                tool_name=tool_name,
+            )
+            reason = rechecked.reason or QUOTE_REASON_CONSUMED
             if dispatch_service is not None and dispatch_attempt is not None:
                 if action_identity is not None:
                     raise IdempotencyInProgressError("idempotency_in_progress")
