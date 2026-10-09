@@ -16,6 +16,7 @@ import app.services.agent_money as agent_money
 import app.services.audit_chain as audit_chain
 import app.services.audit_log as audit_log
 import app.services.governance as governance
+import app.services.human_approval as human_approval
 import app.services.idempotency as idempotency
 import app.services.permits as permits
 import app.services.policies as policies
@@ -161,6 +162,15 @@ def test_agent_money_singleton_and_exception_contracts():
         "KYC verification required for wallet wallet-3. Current status: pending. "
         "Complete verification at /v1/kyc/sessions"
     )
+
+
+def test_approvals_facade_matches_service():
+    assert trust.HumanApprovalService is human_approval.HumanApprovalService
+    assert trust.get_human_approval_service is (
+        human_approval.get_human_approval_service
+    )
+    assert trust.SentinelClient is human_approval.SentinelClient
+    assert "SentinelClient" in trust.__all__
 
 
 def test_signing_facade_matches_service():
