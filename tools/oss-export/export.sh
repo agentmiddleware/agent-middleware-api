@@ -79,6 +79,32 @@ cp "$SRC/.dockerignore" "$DST/.dockerignore"
 rm -rf "$G/docs"
 mkdir -p "$G/docs"
 for d in threat-model.md owasp-agentic-top10-mapping.md security-review-kit.md failure-semantics.md failure-lab.md failure-lab-suite.md key-management.md quickstart.md golden-path.md signed-quotes.md permit-requests.md denial-details.md human-approval-gate.md tool-interface-authority.md mcp-tool-metadata-spec.md POLICY_ENFORCEMENT.md PROOF_MATRIX.md PROOF_SURFACES.md static-dev-api-keys.md stranger-test.md related-work.md partner-api-key-bootstrap.md schema-040-rollout.md schema-041-rollout.md schema-042-rollout.md human-onboarding.md agent-accountability.md agent-self-credentialing.md awi-adoption-guide.md awi-action-vocabulary-spec.md partner-first-tool-runbook.md openapi.json agent-recipes.md authority-required-flow.md constant-test-loop.md settlement-rails.md simulations-inventory.md sim-inventory.json invariant-attack-report.md demo-trust-plane-output.md README.md; do [ -e "$SRC/docs/$d" ] && cp "$SRC/docs/$d" "$G/docs/" || echo "missing doc $d"; done
+python3 - "$G/docs/quickstart.md" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+clone = r"git clone https://github\.com/[^/\s]+/agent-middleware-api\.git\ncd agent-middleware-api\nmake quickstart"
+if len(re.findall(clone, text)) != 1:
+    raise SystemExit("expected one source checkout command in quickstart.md")
+text = re.sub(clone, "cd gateway\nmake quickstart", text)
+edits = {
+    "# Quickstart: from `git clone` to a verified receipt": "# Quickstart: from checkout to a verified receipt",
+    "## 1. Boot the trust plane (~2 minutes)\n\n": (
+        "## 1. Boot the trust plane (~2 minutes)\n\n"
+        "From the root of your `agent-middleware` export checkout:\n\n"
+    ),
+    "repository root:\n": "`gateway/` directory:\n",
+    "PYTHONPATH=b2a_sdk/src": "PYTHONPATH=../sdk/python/src",
+}
+for old, new in edits.items():
+    if old not in text:
+        raise SystemExit(f"expected {old!r} in quickstart.md")
+    text = text.replace(old, new)
+path.write_text(text)
+PY
 # --- root trust docs ---
 cp "$SRC/SECURITY_LIMITATIONS.md" "$SRC/TRUST_MODEL.md" "$DST/"
 # --- SDKs (Apache) ---

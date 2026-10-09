@@ -124,6 +124,13 @@ def test_export_rerun_purges_stale_gateway_files_and_preserves_public_metadata(
     assert (destination / ".dockerignore").read_bytes() == (
         ROOT / ".dockerignore"
     ).read_bytes()
+    quickstart = (gateway / "docs/quickstart.md").read_text()
+    assert "From the root of your `agent-middleware` export checkout:" in quickstart
+    assert "cd gateway\nmake quickstart" in quickstart
+    assert "from the\n`gateway/` directory:" in quickstart
+    assert quickstart.count("PYTHONPATH=../sdk/python/src") == 2
+    assert "agent-middleware-api.git" not in quickstart
+    assert "PYTHONPATH=b2a_sdk/src" not in quickstart
 
     wording = subprocess.run(
         [sys.executable, str(FIX_WORDING)],
