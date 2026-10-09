@@ -195,6 +195,49 @@ def _gateway_fails():
     ]
 
 
+def _gateway_reduces_but_still_duplicates():
+    """The baseline duplicated twice; the gateway still duplicated once."""
+    return [
+        _comparison(
+            [
+                _entry(
+                    Configuration.DIRECT_NAIVE, verdict=Verdict.OBSERVED, executions=3
+                ),
+                _entry(
+                    Configuration.DIRECT_NATIVE, verdict=Verdict.OBSERVED, executions=3
+                ),
+                _entry(
+                    Configuration.GATEWAY_NATIVE,
+                    verdict=Verdict.PASS,
+                    executions=2,
+                    dispatches=2,
+                    known=2,
+                    receipts=1,
+                    debits=1,
+                ),
+            ]
+        )
+    ]
+
+
+def _gateway_does_worse():
+    """Both baselines clean; the gateway duplicated twice."""
+    return [
+        _comparison(
+            [
+                _entry(Configuration.DIRECT_NAIVE, verdict=Verdict.PASS, executions=1),
+                _entry(Configuration.DIRECT_NATIVE, verdict=Verdict.PASS, executions=1),
+                _entry(
+                    Configuration.GATEWAY_NATIVE,
+                    verdict=Verdict.PASS,
+                    executions=3,
+                    dispatches=3,
+                ),
+            ]
+        )
+    ]
+
+
 def _no_baseline():
     return [
         _comparison(
@@ -295,6 +338,33 @@ def test_a_failed_guarantee_outranks_a_prevention_in_the_same_run():
     html = _html(comparisons)
     # The failure block is physically above the answer card.
     assert html.index("Read this first") < html.index(answer.headline)
+
+
+def test_a_gateway_worse_run_headlines_as_a_failure_not_a_non_result():
+    """The worst outcome must not get the mildest presentation.
+
+    A run where the gateway duplicated more than the baseline headlines
+    with the guarantee failures, is listed to read first, and carries no
+    offer.
+    """
+    comparisons = _gateway_does_worse()
+    assert headline_for(comparisons) is Answer.GATEWAY_DID_NOT_HOLD
+
+    answer = build_answer(comparisons)
+    assert answer.counts["failed_gateway_guarantees"] == 1
+    assert answer.gateway_failures, "the worse scenario is not listed first"
+    assert not answer.recommends_the_product
+    assert OFFER.headline not in _html(comparisons)
+
+
+def test_a_reduced_run_does_not_claim_duplicates_never_happened():
+    """A run that reduced but did not eliminate duplicates stays truthful."""
+    comparisons = _gateway_reduces_but_still_duplicates()
+    answer = build_answer(comparisons)
+
+    assert answer.answer is Answer.GATEWAY_PREVENTED_DUPLICATES
+    assert "did not happen behind" not in answer.headline
+    assert "still occurred behind it" in answer.rows[0].conclusion_text
 
 
 def test_a_run_with_no_baseline_does_not_claim_the_baseline_would_have_coped():

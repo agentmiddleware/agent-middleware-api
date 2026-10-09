@@ -53,8 +53,11 @@ class Answer(str, Enum):
 
     #: A guarantee the product documents did not hold in this run.
     GATEWAY_DID_NOT_HOLD = "gateway_did_not_hold"
-    #: Duplicate business effects occurred in a measured baseline and did not
-    #: occur behind the gateway, in the same failure, at the same instruments.
+    #: The baseline produced more duplicate business effects than the
+    #: gateway, in the same failure, at the same instruments. Worded as a
+    #: comparison on purpose: a run that reduced duplicates without
+    #: eliminating them maps here too, and "did not happen behind" would be
+    #: false for it. Whether none remained is stated per scenario.
     GATEWAY_PREVENTED_DUPLICATES = "gateway_prevented_duplicates"
     #: No additional duplicate was prevented; what changed is what the caller
     #: can know and prove afterwards.
@@ -97,8 +100,7 @@ ANSWER_HEADLINES: dict[Answer, str] = {
         "Agent Middleware did not hold one of its own guarantees in this run."
     ),
     Answer.GATEWAY_PREVENTED_DUPLICATES: (
-        "Duplicate business effects happened in the baseline and did not "
-        "happen behind Agent Middleware."
+        "The baseline produced more duplicate business effects than Agent Middleware."
     ),
     Answer.GATEWAY_CHANGED_EVIDENCE_ONLY: (
         "No duplicate business effect was prevented. What changed is what the "
@@ -284,7 +286,17 @@ def headline_for(comparisons: list[Comparison]) -> Answer:
 
     if ConclusionKind.GATEWAY_DID_NOT_HOLD in kinds:
         return Answer.GATEWAY_DID_NOT_HOLD
+    if ConclusionKind.GATEWAY_DID_WORSE in kinds:
+        # Duplicating more than the baseline fails the property the
+        # comparison checks, so it headlines with the guarantee failures,
+        # above any prevention found elsewhere in the same run.
+        return Answer.GATEWAY_DID_NOT_HOLD
     if ConclusionKind.GATEWAY_PREVENTED_DUPLICATES in kinds:
+        return Answer.GATEWAY_PREVENTED_DUPLICATES
+    if ConclusionKind.GATEWAY_REDUCED_DUPLICATES in kinds:
+        # A reduction still prevented duplicates against a baseline; the
+        # per-scenario text says some remained, and the headline above is
+        # worded as a comparison so it stays true here too.
         return Answer.GATEWAY_PREVENTED_DUPLICATES
 
     baseline_sufficient = {
@@ -317,6 +329,8 @@ def _not_tested(comparisons: list[Comparison]) -> list[str]:
             ConclusionKind.NATIVE_CONTROLS_SUFFICIENT,
             ConclusionKind.EXISTING_INTEGRATION_SUFFICIENT,
             ConclusionKind.GATEWAY_PREVENTED_DUPLICATES,
+            ConclusionKind.GATEWAY_REDUCED_DUPLICATES,
+            ConclusionKind.GATEWAY_DID_WORSE,
             ConclusionKind.GATEWAY_ADDED_EVIDENCE_ONLY,
         )
     ]
@@ -359,7 +373,8 @@ def build_answer(comparisons: list[Comparison]) -> DiagnosticAnswer:
     counts["failed_gateway_guarantees"] = sum(
         1
         for c in comparisons
-        if c.conclusion.kind is ConclusionKind.GATEWAY_DID_NOT_HOLD
+        if c.conclusion.kind
+        in (ConclusionKind.GATEWAY_DID_NOT_HOLD, ConclusionKind.GATEWAY_DID_WORSE)
     )
     # Kept as two numbers, never collapsed into one, because they answer two
     # different questions and the collapsed version reads as a contradiction.
@@ -381,7 +396,8 @@ def build_answer(comparisons: list[Comparison]) -> DiagnosticAnswer:
     gateway_failures = [
         f"{c.test_id} — {c.title}: {c.conclusion.text}"
         for c in comparisons
-        if c.conclusion.kind is ConclusionKind.GATEWAY_DID_NOT_HOLD
+        if c.conclusion.kind
+        in (ConclusionKind.GATEWAY_DID_NOT_HOLD, ConclusionKind.GATEWAY_DID_WORSE)
         or c.verdict == Verdict.ERROR.value
     ]
 

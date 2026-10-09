@@ -38,6 +38,14 @@ class ConclusionKind(str, Enum):
     NATIVE_CONTROLS_SUFFICIENT = "native_controls_sufficient"
     #: The gateway prevented duplicate business effects the baseline allowed.
     GATEWAY_PREVENTED_DUPLICATES = "gateway_prevented_duplicates"
+    #: The gateway produced fewer duplicates than a measured baseline but
+    #: still duplicated. Kept apart from prevention so the prevention
+    #: sentence, which says duplicates did not occur behind the gateway, is
+    #: only used when none did.
+    GATEWAY_REDUCED_DUPLICATES = "gateway_reduced_duplicates"
+    #: The gateway produced more duplicate business effects than a measured
+    #: baseline. Previously this clamped to zero prevented and read as mild.
+    GATEWAY_DID_WORSE = "gateway_did_worse"
     #: No additional duplicate was prevented, but the gateway changed what the
     #: caller can know or prove. Reported as exactly that, never as prevention.
     GATEWAY_ADDED_EVIDENCE_ONLY = "gateway_added_evidence_only"
@@ -68,6 +76,13 @@ CONCLUSION_GLOSS: dict[str, str] = {
     ConclusionKind.GATEWAY_PREVENTED_DUPLICATES.value: (
         "duplicate business effects occurred in a measured baseline and did "
         "not occur behind the gateway"
+    ),
+    ConclusionKind.GATEWAY_REDUCED_DUPLICATES.value: (
+        "fewer duplicate business effects behind the gateway than in a "
+        "measured baseline, but they still occurred behind it"
+    ),
+    ConclusionKind.GATEWAY_DID_WORSE.value: (
+        "more duplicate business effects behind the gateway than in a measured baseline"
     ),
     ConclusionKind.GATEWAY_ADDED_EVIDENCE_ONLY.value: (
         "no additional duplicate effect was prevented; what changed is what "
@@ -312,6 +327,23 @@ def _conclude(
         and governed.ran
         else 0
     )
+    # Unclamped excess behind the gateway, per baseline. The prevented
+    # counts above clamp at zero, which used to make a gateway-worse run
+    # read as mild. A positive excess here means the gateway duplicated
+    # more than that baseline, and gets its own conclusion below.
+    worse_vs_native = (
+        max(0, governed.duplicate_effects - native.duplicate_effects)
+        if native is not None and governed is not None and native.ran and governed.ran
+        else 0
+    )
+    worse_vs_existing = (
+        max(0, governed.duplicate_effects - existing.duplicate_effects)
+        if existing is not None
+        and governed is not None
+        and existing.ran
+        and governed.ran
+        else 0
+    )
     differences, disadvantages = _differences(native, governed)
 
     if governed is None or not governed.ran:
@@ -371,6 +403,36 @@ def _conclude(
             disadvantages,
         )
 
+    # A gateway that duplicated more than a measured baseline is reported
+    # as exactly that, before any branch that could call the baseline
+    # sufficient or the run evidence-only. Bad news first: a zero prevented
+    # count on its own reads as neutral, which is how the worst outcome got
+    # the mildest wording. The correct native baseline is the primary
+    # comparison; the existing integration names the fallback.
+    if worse_vs_native > 0 or worse_vs_existing > 0:
+        if worse_vs_native > 0 and native is not None:
+            baseline_name = "the correct native baseline"
+            baseline_duplicates = native.duplicate_effects
+        elif existing is not None:
+            baseline_name = "your existing integration"
+            baseline_duplicates = existing.duplicate_effects
+        else:  # pragma: no cover - unreachable: an excess needs a ran baseline
+            baseline_name = "the measured baseline"
+            baseline_duplicates = 0
+        return Conclusion(
+            ConclusionKind.GATEWAY_DID_WORSE,
+            f"{governed.duplicate_effects} duplicate downstream business "
+            f"effect(s) occurred with Agent Middleware in front of the same "
+            f"tool under the same injected failure, against "
+            f"{baseline_duplicates} in {baseline_name}. The gateway produced "
+            "more duplicate effects than the baseline in this scenario, so "
+            "no duplicate prevention is reported for it.",
+            prevented_vs_native,
+            prevented_vs_existing,
+            differences,
+            disadvantages,
+        )
+
     if existing is not None and existing.ran and existing.duplicate_effects == 0:
         return Conclusion(
             ConclusionKind.EXISTING_INTEGRATION_SUFFICIENT,
@@ -421,6 +483,35 @@ def _conclude(
             ConclusionKind.NATIVE_CONTROLS_SUFFICIENT,
             "No difference was observed between the baseline and the gateway "
             "in this scenario.",
+            prevented_vs_native,
+            prevented_vs_existing,
+            differences,
+            disadvantages,
+        )
+
+    # Prevention with duplicates still behind the gateway is a reduction,
+    # not a clean prevention. The "did not occur" sentence below requires
+    # zero gateway duplicates, so this branch states both counts instead.
+    if governed.duplicate_effects > 0:
+        if prevented_vs_native > 0 and native is not None:
+            against = "the correct native baseline"
+            baseline_duplicates = native.duplicate_effects
+        elif existing is not None:
+            against = "your existing integration"
+            baseline_duplicates = existing.duplicate_effects
+        else:  # pragma: no cover - unreachable: prevented needs a ran baseline
+            against = "the measured baseline"
+            baseline_duplicates = 0
+        return Conclusion(
+            ConclusionKind.GATEWAY_REDUCED_DUPLICATES,
+            f"{baseline_duplicates} duplicate downstream business effect(s) "
+            f"occurred in {against} against "
+            f"{governed.duplicate_effects} with Agent Middleware in front of "
+            "the same tool under the same injected failure. The gateway "
+            "reduced duplicates but they still occurred behind it, so this "
+            "is reported as a reduction, not as prevention. The duplicate "
+            "count comes from the downstream system's own ledger, which the "
+            "gateway cannot reach.",
             prevented_vs_native,
             prevented_vs_existing,
             differences,

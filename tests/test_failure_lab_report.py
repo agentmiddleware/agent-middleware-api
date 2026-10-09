@@ -183,6 +183,85 @@ def test_a_real_prevention_is_reported_as_one():
     assert conclusion.duplicates_prevented_vs_native == 1
 
 
+def test_prevention_with_gateway_duplicates_is_a_reduction_not_a_clean_win():
+    """The "did not occur" sentence requires zero gateway duplicates.
+
+    A baseline with two duplicates against one behind the gateway is a
+    real reduction, but saying the duplicates "did not occur with Agent
+    Middleware in front" would be literally false, so it gets its own
+    conclusion that states both counts.
+    """
+    result = _result(
+        [
+            _entry(Configuration.DIRECT_NAIVE, verdict=Verdict.OBSERVED, executions=3),
+            _entry(Configuration.DIRECT_NATIVE, verdict=Verdict.OBSERVED, executions=3),
+            _entry(
+                Configuration.GATEWAY_NATIVE,
+                verdict=Verdict.PASS,
+                executions=2,
+                dispatches=2,
+                receipts=1,
+                debits=1,
+            ),
+        ]
+    )
+    conclusion = build_comparison(result).conclusion
+    assert conclusion.kind is ConclusionKind.GATEWAY_REDUCED_DUPLICATES
+    assert conclusion.duplicates_prevented_vs_native == 1
+    assert conclusion.duplicates_prevented_vs_existing == 1
+    assert "did not occur" not in conclusion.text
+    assert "still occurred behind it" in conclusion.text
+
+
+def test_a_gateway_that_duplicated_more_than_baseline_says_so():
+    """A gateway-worse run must not read as neutral.
+
+    The prevented counts clamp at zero, which used to let this fall through
+    to the mildest wording. Zero prevented against a baseline the gateway
+    did worse than is now an explicit conclusion.
+    """
+    result = _result(
+        [
+            _entry(Configuration.DIRECT_NAIVE, verdict=Verdict.PASS, executions=1),
+            _entry(Configuration.DIRECT_NATIVE, verdict=Verdict.PASS, executions=1),
+            _entry(
+                Configuration.GATEWAY_NATIVE,
+                verdict=Verdict.PASS,
+                executions=3,
+                dispatches=3,
+            ),
+        ]
+    )
+    conclusion = build_comparison(result).conclusion
+    assert conclusion.kind is ConclusionKind.GATEWAY_DID_WORSE
+    assert conclusion.duplicates_prevented_vs_native == 0
+    assert conclusion.duplicates_prevented_vs_existing == 0
+    assert "more duplicate effects than the baseline" in conclusion.text
+    assert "no duplicate prevention is reported" in conclusion.text
+
+
+def test_doing_worse_than_native_wins_over_beating_the_naive_baseline():
+    """Bad news first: beating one baseline does not hide losing to another."""
+    result = _result(
+        [
+            _entry(Configuration.DIRECT_NAIVE, verdict=Verdict.OBSERVED, executions=4),
+            _entry(Configuration.DIRECT_NATIVE, verdict=Verdict.PASS, executions=1),
+            _entry(
+                Configuration.GATEWAY_NATIVE,
+                verdict=Verdict.PASS,
+                executions=2,
+                dispatches=2,
+            ),
+        ]
+    )
+    conclusion = build_comparison(result).conclusion
+    assert conclusion.kind is ConclusionKind.GATEWAY_DID_WORSE
+    assert "the correct native baseline" in conclusion.text
+    # The win against the naive baseline is still recorded, not erased.
+    assert conclusion.duplicates_prevented_vs_existing == 2
+    assert conclusion.duplicates_prevented_vs_native == 0
+
+
 def test_a_gateway_that_did_not_hold_is_not_dressed_up():
     result = _result(
         [
