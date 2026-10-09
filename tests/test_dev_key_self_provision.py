@@ -22,6 +22,7 @@ from app.core.trust_mode import (
     validate_trust_mode_config,
 )
 from app.main import app
+from app.routers import dev_keys as dev_keys_module
 
 
 @pytest.fixture()
@@ -39,6 +40,14 @@ def self_provision_settings():
     finally:
         for name, value in saved.items():
             setattr(settings, name, value)
+
+
+@pytest.fixture(autouse=True)
+def _reset_self_provision_mint_budgets():
+    """Isolate per-address mint budgets so tests never share one budget."""
+    dev_keys_module.reset_dev_key_self_provision_limits_for_tests()
+    yield
+    dev_keys_module.reset_dev_key_self_provision_limits_for_tests()
 
 
 @pytest.fixture()
@@ -182,6 +191,41 @@ async def test_no_origin_header_passes_through(
     # affected by the browser hardening.
     resp = await client.post("/v1/dev-keys/self-provision", json={})
     assert resp.status_code == 201, resp.text
+
+
+async def test_per_address_mint_budget_refuses_after_limit(
+    client, self_provision_settings, clean_database, monkeypatch
+):
+    # One party must not mint without end: past a small per-address budget
+    # the route refuses with 429, even though the caller presents the
+    # test-key header that bypasses the global rate limiter.
+    monkeypatch.setattr(dev_keys_module, "MAX_SELF_PROVISION_MINTS_PER_CLIENT", 3)
+    for index in range(3):
+        resp = await client.post(
+            "/v1/dev-keys/self-provision",
+            json={"agent_id": f"mint-budget-agent-{index}"},
+        )
+        assert resp.status_code == 201, resp.text
+    over = await client.post(
+        "/v1/dev-keys/self-provision",
+        json={"agent_id": "mint-budget-agent-over"},
+    )
+    assert over.status_code == 429
+    assert over.json()["detail"]["error"] == "dev_key_self_provision_rate_limited"
+
+
+async def test_refused_requests_do_not_consume_mint_budget(
+    client, self_provision_settings, monkeypatch
+):
+    # Gates run before budgeting: a 403 in a production-like environment
+    # must not spend the address budget, so flipping back to local still
+    # leaves the full budget available.
+    monkeypatch.setattr(dev_keys_module, "MAX_SELF_PROVISION_MINTS_PER_CLIENT", 1)
+    self_provision_settings.ENVIRONMENT = "production"
+    refused = await client.post("/v1/dev-keys/self-provision", json={})
+    assert refused.status_code == 403
+    self_provision_settings.ENVIRONMENT = "local"
+    assert dev_keys_module._mint_timestamps == {}
 
 
 async def test_agent_manifest_advertises_self_provision_only_when_enabled(
