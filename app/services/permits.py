@@ -480,17 +480,41 @@ class PermitService:
             await session.refresh(model)
         return permit_model_to_response(model)
 
-    async def revoke_permit(self, permit_id: str) -> PermitResponse:
+    async def revoke_permit(
+        self,
+        permit_id: str,
+        *,
+        caller_wallet_id: str | None = None,
+        caller_is_admin: bool = False,
+    ) -> PermitResponse:
+        """Revoke a permit, authorized against the caller's own identity.
+
+        The web route checks wallet access before calling, but this service
+        is also reachable from background and test callers, so it enforces
+        the same rule itself: a bootstrap admin, or the wallet that issued
+        the permit. An omitted caller is denied, so a future caller that
+        forgets to pass identity fails closed instead of revoking for
+        anyone. Revocation is terminal and always recorded in the log.
+        """
         factory = get_session_factory()
         async with factory() as session:
             model = await session.get(PermitModel, permit_id)
             if not model:
                 raise PermitError("permit_not_found")
+            if not caller_is_admin and caller_wallet_id != model.issuer_wallet_id:
+                raise PermitError("permit_access_denied")
             model.status = "revoked"
             model.revoked_at = utc_now()
             session.add(model)
             await session.commit()
             await session.refresh(model)
+            logger.info(
+                "permit_revoked",
+                extra={
+                    "permit_id": permit_id,
+                    "issuer_wallet_id": model.issuer_wallet_id,
+                },
+            )
             return permit_model_to_response(model)
 
     async def validate_for_action(
@@ -1201,15 +1225,23 @@ class PermitService:
         await self._run_with_write_retry(_once)
 
     async def release_budget(self, permit_id: str, amount: Decimal) -> None:
+        """Give back a budget reservation held by ``permit_id``.
+
+        A system-only compensation entry point: no web route reaches it, and
+        only the governed paths that created a reservation may call it to
+        hand that reservation back. There is no caller to authorize beyond
+        that, so instead every release that actually moves budget is
+        recorded in the log with the permit and amount.
+        """
         factory = get_session_factory()
 
-        async def _once() -> None:
+        async def _once() -> bool:
             async with factory() as session:
                 async with session.begin():
                     # Atomic clamped decrement: a single UPDATE so a concurrent
                     # reservation on the same permit cannot be lost to a
                     # read-modify-write refund. A missing permit is a no-op.
-                    await session.execute(
+                    released = await session.execute(
                         sa_update(PermitModel)
                         .where(
                             cast(
@@ -1233,8 +1265,13 @@ class PermitService:
                         )
                         .execution_options(synchronize_session=False)
                     )
+                    return (cast(Any, released).rowcount or 0) == 1
 
-        await self._run_with_write_retry(_once)
+        if await self._run_with_write_retry(_once):
+            logger.info(
+                "permit_budget_released",
+                extra={"permit_id": permit_id, "amount": str(amount)},
+            )
 
     async def record_absorbed_release_drift(
         self,
@@ -1325,10 +1362,14 @@ class PermitService:
         this refund; clamped at zero; a missing permit, absent counter, or
         persistently contended CAS is a no-op (the counter then stays
         conservatively high — never low).
+
+        Like :meth:`release_budget` this is a system-only compensation entry
+        point with no web route, and every release that actually moves the
+        counter is recorded in the log.
         """
         factory = get_session_factory()
 
-        async def _once() -> None:
+        async def _once() -> bool:
             for _ in range(5):
                 async with factory() as session:
                     async with session.begin():
@@ -1336,7 +1377,7 @@ class PermitService:
                             PermitModel, permit_id, with_for_update=True
                         )
                         if model is None:
-                            return
+                            return False
                         original_counts_json = model.tool_call_counts_json
                         counts = _loads_dict(original_counts_json or "{}")
                         current = counts.get(tool_name, 0)
@@ -1345,7 +1386,7 @@ class PermitService:
                         # coerced into a decrementable number (same rule the
                         # reserve path applies to the configured limit).
                         if type(current) is not int or current <= 0:
-                            return
+                            return False
                         updated = dict(counts)
                         updated[tool_name] = current - 1
                         result = await session.execute(
@@ -1368,7 +1409,7 @@ class PermitService:
                             .execution_options(synchronize_session=False)
                         )
                         if (cast(Any, result).rowcount or 0) == 1:
-                            return
+                            return True
                 # CAS miss: a concurrent reservation moved the counter between
                 # our read and write (only possible where the row lock above is
                 # a no-op, i.e. SQLite). Re-read and try again.
@@ -1381,8 +1422,13 @@ class PermitService:
                 permit_id,
                 tool_name,
             )
+            return False
 
-        await self._run_with_write_retry(_once)
+        if await self._run_with_write_retry(_once):
+            logger.info(
+                "permit_tool_call_released",
+                extra={"permit_id": permit_id, "tool": tool_name},
+            )
 
     async def release_dispatch_budget_once(self, attempt_id: str) -> bool:
         """Release one remote attempt's reservation exactly once.
@@ -1391,6 +1437,10 @@ class PermitService:
         closes the crash window that exists when a plain ``release_budget``
         call succeeds but the caller dies before recording that it succeeded.
         Returns ``True`` only for the transaction that performed the release.
+
+        Like :meth:`release_budget` this is a system-only compensation entry
+        point with no web route, and the single release it performs is
+        recorded in the log.
         """
         factory = get_session_factory()
 
@@ -1540,6 +1590,14 @@ class PermitService:
                     attempt.budget_released_at = now
                     attempt.updated_at = now
                     session.add(attempt)
+                    logger.info(
+                        "permit_dispatch_budget_released",
+                        extra={
+                            "attempt_id": attempt_id,
+                            "permit_id": attempt.permit_id,
+                            "amount": str(attempt.credits_authorized),
+                        },
+                    )
                 return True
 
         return await self._run_with_write_retry(_once)

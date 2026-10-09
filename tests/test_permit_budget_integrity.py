@@ -116,8 +116,10 @@ async def test_reserve_budget_reports_revocation_rather_than_exhaustion(
     collapsed all of them to ``permit_budget_exceeded``, which tells an
     operator to top up a permit that more money cannot revive.
     """
-    _, permit = await _permit_with_budget(client)
-    await get_permit_service().revoke_permit(permit.permit_id)
+    provisioned, permit = await _permit_with_budget(client)
+    await get_permit_service().revoke_permit(
+        permit.permit_id, caller_wallet_id=provisioned["agent_wallet_id"]
+    )
 
     with pytest.raises(PermitError) as denied:
         await get_permit_service().reserve_budget(permit.permit_id, Decimal("1"))
@@ -221,7 +223,7 @@ async def test_reconcile_budgets_does_not_erase_a_concurrent_reservation(
     monkeypatch.setattr(
         permits_module,
         "get_session_factory",
-        lambda: (lambda: _InterleavingFactory(real_factory())),
+        lambda: lambda: _InterleavingFactory(real_factory()),
     )
 
     # Observe the service's own logger object rather than stdlib capture:

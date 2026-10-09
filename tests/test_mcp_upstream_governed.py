@@ -2601,7 +2601,10 @@ async def test_upstream_permit_denials_never_charge_or_dispatch(
             idem_key=f"partner-upstream-denied-{denial}-permit",
         )
         if denial == "revoked":
-            await get_permit_service().revoke_permit(permit["permit_id"])
+            await get_permit_service().revoke_permit(
+                permit["permit_id"],
+                caller_wallet_id=provisioned["agent_wallet_id"],
+            )
         elif denial == "expired":
             factory = get_session_factory()
             async with factory() as session:
