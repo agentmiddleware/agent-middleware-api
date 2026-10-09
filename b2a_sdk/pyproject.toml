@@ -93,3 +93,6 @@ include = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# Import the checkout's own src layout so SDK tests exercise this tree,
+# not any b2a-sdk copy installed elsewhere on sys.path.
+pythonpath = ["src"]
