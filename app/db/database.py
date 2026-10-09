@@ -132,7 +132,10 @@ def get_engine() -> AsyncEngine | None:
         is_sqlite = db_url.startswith("sqlite")
 
         engine_kwargs: dict = {
-            "echo": get_settings().DEBUG,
+            # Never derive echo from DEBUG. SQLAlchemy echo logs bound
+            # parameter values (wallet ids, keys, PII) with the statements,
+            # so flipping DEBUG on must not switch value logging on.
+            "echo": False,
             "pool_pre_ping": True,
         }
         if is_sqlite:

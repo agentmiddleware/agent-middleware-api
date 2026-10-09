@@ -843,7 +843,7 @@ class AWIRAGEngine:
         if not settings.LLM_API_KEY:
             raise ValueError("LLM_API_KEY is not configured")
 
-        client = AsyncOpenAI(api_key=settings.LLM_API_KEY)
+        client = AsyncOpenAI(api_key=settings.LLM_API_KEY.get_secret_value())
         try:
             response = await client.embeddings.create(
                 model=self._embedding_model,

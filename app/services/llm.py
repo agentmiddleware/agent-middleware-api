@@ -69,7 +69,7 @@ class LLMService:
 
         if provider in ("openai", "azure", "anthropic"):
             return {
-                "Authorization": f"Bearer {self.settings.LLM_API_KEY}",
+                "Authorization": f"Bearer {self.settings.LLM_API_KEY.get_secret_value()}",
                 "Content-Type": "application/json",
             }
 

@@ -216,8 +216,12 @@ class Settings(BaseSettings):
     ENABLE_PUBLIC_MCP_ENDPOINT: bool = False
 
     # --- Stripe Payment Processing ---
-    STRIPE_SECRET_KEY: str = ""
-    STRIPE_WEBHOOK_SECRET: str = ""
+    # Secret-bearing values are SecretStr so a settings repr, log line, or
+    # dump never carries the raw key. Unwrap at the call site with
+    # get_secret_value(). STRIPE_PUBLISHABLE_KEY stays plain str: it is
+    # public by design and is safe to render.
+    STRIPE_SECRET_KEY: SecretStr = SecretStr("")
+    STRIPE_WEBHOOK_SECRET: SecretStr = SecretStr("")
     STRIPE_PUBLISHABLE_KEY: str = ""
 
     # --- KYC Verification ---
@@ -259,7 +263,9 @@ class Settings(BaseSettings):
     # Real mode needs both URL and key; used only when
     # SIMULATION_MODE_HUMAN_APPROVAL=false.
     SENTINEL_API_URL: str = ""
-    SENTINEL_API_KEY: str = ""
+    # SecretStr so the key never appears in a settings repr or log line.
+    # Unwrap at the call site with get_secret_value().
+    SENTINEL_API_KEY: SecretStr = SecretStr("")
     # Forwarded to Sentinel as timeout_seconds (its magic-link expiry, 1..86400)
     # and enforced locally as the approval's expiry — Sentinel itself never
     # expires a pending approval.
@@ -317,7 +323,9 @@ class Settings(BaseSettings):
     # --- LLM / AI Agent Intelligence ---
     # Provider: openai, azure, anthropic, ollama
     LLM_PROVIDER: str = "openai"
-    LLM_API_KEY: str = ""
+    # SecretStr so the key never appears in a settings repr or log line.
+    # Unwrap at the call site with get_secret_value().
+    LLM_API_KEY: SecretStr = SecretStr("")
     LLM_MODEL: str = "gpt-4o"
     LLM_BASE_URL: str = "https://api.openai.com/v1"
     LLM_MAX_TOKENS: int = 4096
