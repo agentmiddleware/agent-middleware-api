@@ -17,8 +17,10 @@ Usage:
 """
 
 import asyncio
+import hashlib
 import os
 import sys
+import traceback
 
 # The SDK sources live under b2a_sdk/src; inserting the repo root instead makes
 # "b2a_sdk" resolve to the bare directory and the import fails.
@@ -62,7 +64,10 @@ async def demo_simulation():
     async def generate_video_hook(url: str, style: str = "cinematic") -> dict:
         """Simulate a video generation call."""
         return {
-            "video_url": f"https://example.com/{hash(url)}.mp4",
+            "video_url": (
+                "https://example.com/"
+                f"{hashlib.sha256(url.encode('utf-8')).hexdigest()}.mp4"
+            ),
             "style": style,
             "status": "generated",
         }
@@ -169,8 +174,8 @@ async def demo_simulation():
 async def main():
     try:
         await demo_simulation()
-    except Exception as e:
-        print(f"\nError: {e}")
+    except Exception:
+        traceback.print_exc()
         print("Make sure the B2A API is running at http://localhost:8000")
         print("Or set B2A_API_URL environment variable.")
 

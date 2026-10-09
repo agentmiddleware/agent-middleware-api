@@ -24,6 +24,7 @@ Usage:
 """
 
 import asyncio
+import hashlib
 import json
 import os
 import sys
@@ -142,7 +143,10 @@ async def generate_image(
         "prompt": prompt,
         "style": style,
         "size": size,
-        "image_url": f"https://placeholder.com/generated/{hash(prompt)}.png",
+        "image_url": (
+            "https://placeholder.com/generated/"
+            f"{hashlib.sha256(prompt.encode('utf-8')).hexdigest()}.png"
+        ),
         "credits_charged": 25.0,
     }
 

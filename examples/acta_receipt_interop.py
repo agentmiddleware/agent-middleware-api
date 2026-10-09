@@ -39,6 +39,7 @@ import base64
 import json
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from cryptography.exceptions import InvalidSignature
@@ -257,19 +258,42 @@ def verify_acta_receipt(
     return body
 
 
-def _demo(bundle_path: str) -> int:
+# Paths resolve from this script's location, not the launch directory, so
+# the demo works no matter where it is invoked from.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_DEFAULT_BUNDLE_PATH = _REPO_ROOT / "site" / "proof" / "receipt.json"
+_TRUST_KEYS_PATH = _REPO_ROOT / "site" / "proof" / "trust-keys.json"
+
+
+def _resolve_demo_path(raw_path: str | Path) -> Path:
+    """Resolve a demo path against the repo root when it is not absolute."""
+    path = Path(raw_path)
+    if not path.is_absolute():
+        path = _REPO_ROOT / path
+    return path
+
+
+def _demo(bundle_path: str | Path) -> int:
     """Verify a portable bundle end-to-end and print the ACTA envelope."""
-    with open(bundle_path, "r", encoding="utf-8") as handle:
+    resolved_bundle = _resolve_demo_path(bundle_path)
+    with open(resolved_bundle, "r", encoding="utf-8") as handle:
         bundle = json.load(handle)
 
     # The public proof bundle's key snapshot ships beside it.
-    with open("site/proof/trust-keys.json", "r", encoding="utf-8") as handle:
+    with open(_TRUST_KEYS_PATH, "r", encoding="utf-8") as handle:
         keys = json.load(handle)
-    key_b64 = next(
-        entry["public_key_b64"]
-        for entry in keys["keys"]
-        if entry["kid"] == bundle["kid"]
-    )
+    bundle_kid = bundle.get("kid")
+    try:
+        key_b64 = next(
+            entry["public_key_b64"]
+            for entry in keys["keys"]
+            if entry["kid"] == bundle_kid
+        )
+    except StopIteration as exc:
+        raise TranscodeError(
+            f"no key with kid {bundle_kid!r} in {_TRUST_KEYS_PATH}; "
+            "the bundle was signed by an unknown key"
+        ) from exc
 
     verified = verify_portable_bundle(bundle, key_b64, expected_issuer=keys["issuer"])
     print(f"inner signature: VERIFIED (kid={verified.kid})")
@@ -288,5 +312,5 @@ def _demo(bundle_path: str) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(
-        _demo(sys.argv[1] if len(sys.argv) > 1 else "site/proof/receipt.json")
+        _demo(sys.argv[1] if len(sys.argv) > 1 else str(_DEFAULT_BUNDLE_PATH))
     )
