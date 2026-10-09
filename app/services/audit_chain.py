@@ -1,3 +1,13 @@
+"""Append-only hash chained audit log for control plane actions.
+
+Each wallet (plus one wallet-less chain for system records) gets an ordered
+sequence of signed events where every event links to the hash of the previous
+one. Concurrent appends are ordered through the per-wallet chain head row,
+and replays of a known event id return the stored event when the recorded
+fields match. Verification recomputes payload hashes, signatures and chain
+links, and compares the tail against the head row to catch deletions.
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -36,6 +46,7 @@ def audit_payload(
     metadata_json: str | None,
     previous_hash: str | None,
 ) -> dict[str, Any]:
+    """Build the canonical payload dict that is hashed and signed for an event."""
     return {
         "event_id": event_id,
         "created_at": created_at,
@@ -358,6 +369,13 @@ async def append_chained_audit_event(
 
 @dataclass(frozen=True)
 class AuditChainVerification:
+    """Result of verifying one chain or all chains.
+
+    ``valid`` is True only when every checked event links correctly and its
+    signature verifies. ``reason`` and ``broken_event_id`` name the first
+    failure when ``valid`` is False.
+    """
+
     valid: bool
     checked_events: int
     first_event_id: str | None = None
@@ -372,6 +390,12 @@ async def verify_audit_chain(
     created_after: datetime | None = None,
     created_before: datetime | None = None,
 ) -> AuditChainVerification:
+    """Verify stored audit events and report the first chain break, if any.
+
+    With a wallet id, verifies that wallet's chain. With None, verifies every
+    known chain including the wallet-less one. Optional time bounds restrict
+    which events are rechecked.
+    """
     if wallet_id is None:
         # Global verification: walk every per-wallet chain, INCLUDING the
         # wallet-less chain (events whose wallet_id IS NULL -- system and
