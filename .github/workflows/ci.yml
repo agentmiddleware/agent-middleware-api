@@ -413,6 +413,20 @@ jobs:
             tests/test_governed_debit_dispatch_fence.py::test_freeze_notification_observes_committed_governed_state \
             -q --tb=short
 
+      - name: Run permit row-lock concurrency against Postgres
+        # The dedicated postgres_permit_concurrency job runs this file too;
+        # this step keeps the required postgres_trust job honest as well.
+        # REQUIRE_POSTGRES_CONCURRENCY_TESTS turns the file's opt-in skip
+        # into a failure, so a lost DATABASE_URL or flag goes red instead
+        # of passing by skipping the only proof this step was added for.
+        # Migrations for this database were applied above; this suite only
+        # inserts and deletes its own uuid-suffixed rows.
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/trust_ci
+          RUN_POSTGRES_CONCURRENCY_TESTS: "1"
+          REQUIRE_POSTGRES_CONCURRENCY_TESTS: "1"
+        run: pytest tests/test_permit_postgres_concurrency.py -v --tb=short
+
   # Production-like trust flags (default conftest stays permissive for unit speed).
   production_trust:
     runs-on: ubuntu-latest
@@ -499,6 +513,7 @@ jobs:
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/agent_middleware_permit_test
           RUN_POSTGRES_CONCURRENCY_TESTS: "1"
+          REQUIRE_POSTGRES_CONCURRENCY_TESTS: "1"
         run: |
           pytest tests/test_permit_postgres_concurrency.py -v --tb=short
           pytest tests/test_duplicate_guard_postgres_concurrency.py -v --tb=short
