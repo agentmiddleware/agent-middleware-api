@@ -21,12 +21,11 @@ from ..services.sandbox import SandboxEngine
 from ..services.telemetry_scope import TelemetryScope
 from ..services.oracle_broadcast import OracleBroadcastEngine
 
-settings = get_settings()
-
 
 @lru_cache()
 def get_iot_bridge() -> ProtocolBridge:
     """Singleton IoT Protocol Bridge with ACL engine and MQTT translator."""
+    settings = get_settings()
     bridge = ProtocolBridge(
         mqtt_broker_url=settings.MQTT_BROKER_URL,
         mqtt_default_qos=settings.MQTT_DEFAULT_QOS,
@@ -37,6 +36,7 @@ def get_iot_bridge() -> ProtocolBridge:
 @lru_cache()
 def get_autonomous_pm() -> AutonomousPM:
     """Singleton Autonomous Product Manager with event store and anomaly detector."""
+    settings = get_settings()
     return AutonomousPM(
         retention_hours=settings.TELEMETRY_RETENTION_HOURS,
         git_remote=settings.GIT_REMOTE_URL,
