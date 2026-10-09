@@ -44,6 +44,42 @@ EXIT_UNDETERMINED = 2
 
 _KEYS_PATH = "/.well-known/trust-keys.json"
 
+_LOCAL_KEYS_HINT = "pass --keys with a key set you already hold to verify offline."
+
+
+def _is_loopback_host(host: str | None) -> bool:
+    if not host:
+        return False
+    name = host.strip().strip("[]").lower().rstrip(".")
+    if name == "localhost":
+        return True
+    try:
+        import ipaddress
+
+        return ipaddress.ip_address(name).is_loopback
+    except ValueError:
+        return False
+
+
+def _checked_key_url(issuer: str) -> str:
+    from urllib.parse import urlparse
+
+    issuer = (issuer or "").strip()
+    parsed = urlparse(issuer)
+    host = parsed.hostname
+    if parsed.scheme not in ("https", "http") or not host:
+        raise VerificationError(
+            "Issuer must be an https origin such as https://api.example.com; " + _LOCAL_KEYS_HINT
+        )
+    if parsed.scheme == "http" and not _is_loopback_host(host):
+        raise VerificationError(
+            "Refusing to fetch trust keys over plain http from a non-loopback "
+            "host; use an https issuer, or "
+            + _LOCAL_KEYS_HINT
+            + " Plain http is allowed only against loopback hosts."
+        )
+    return issuer.rstrip("/") + _KEYS_PATH
+
 
 def _read_json(path: str) -> Any:
     if path == "-":
@@ -59,7 +95,7 @@ def _fetch_key_document(issuer: str, timeout: float) -> Any:
         raise VerificationError(
             "Fetching a key set requires httpx; pass --keys to verify offline."
         ) from exc
-    url = issuer.rstrip("/") + _KEYS_PATH
+    url = _checked_key_url(issuer)
     response = httpx.get(url, timeout=timeout)
     response.raise_for_status()
     return response.json()
@@ -89,7 +125,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     source.add_argument(
         "--issuer",
-        help="Origin to fetch /.well-known/trust-keys.json from, e.g. https://api.example.com",
+        help=(
+            "https origin to fetch /.well-known/trust-keys.json from, e.g. "
+            "https://api.example.com (plain http only for loopback). "
+            "Prefer --keys with a locally held key set when you have one."
+        ),
     )
     parser.add_argument(
         "--expect-issuer",
