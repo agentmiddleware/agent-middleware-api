@@ -303,6 +303,47 @@ async def test_redis_command_failure_outside_production_falls_back_and_resets(
 
 
 @pytest.mark.anyio
+async def test_redis_outage_fallback_still_enforces_per_key_bucket(monkeypatch):
+    """The memory fallback must enforce the per-key bucket, not skip it.
+
+    The per-key bucket is resolved after the pre-auth reservation, so when
+    the reservation itself raises on a non-public request the fallback
+    handler has to resolve the bucket there too. Answering from memory
+    with no bucket would either crash or let one key use an unbounded
+    budget for the whole outage.
+    """
+
+    async def ok(_request):
+        return PlainTextResponse("ok")
+
+    monkeypatch.setattr(
+        rate_limiter_module,
+        "is_production_like_environment",
+        lambda _env: False,
+    )
+    app = Starlette(routes=[Route("/v1/wallets", ok)])
+    limiter = RateLimitMiddleware(app, requests_per_minute=2)
+    limiter._redis_url = _SECRET_URL
+    limiter._redis = _FakeRedis(fail=TimeoutError("Timeout reading from socket"))
+    monkeypatch.setattr(
+        rate_limiter_module.redis,
+        "from_url",
+        lambda url, **kwargs: _FakeRedis(fail=ConnectionError("still down")),
+    )
+    headers = {"X-API-Key": "stable-key"}
+    async with AsyncClient(
+        transport=ASGITransport(app=limiter), base_url="http://test"
+    ) as http:
+        first = await http.get("/v1/wallets", headers=headers)
+        second = await http.get("/v1/wallets", headers=headers)
+        third = await http.get("/v1/wallets", headers=headers)
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert third.status_code == 429
+    assert "2 requests per minute" in third.text
+
+
+@pytest.mark.anyio
 async def test_redis_client_is_built_with_timeouts(monkeypatch):
     limiter = _limited_app(monkeypatch, production_like=True)
     seen: dict = {}

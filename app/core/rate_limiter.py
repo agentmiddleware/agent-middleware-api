@@ -815,6 +815,19 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     if rejection is not None:
                         return rejection
                     preauth_in_memory = preauth_reserved
+                if not public_mcp_request and not bucket_limits:
+                    # The reservation raised before the per-key bucket was
+                    # resolved (it sits behind the pre-auth ceiling now), so
+                    # the memory fallback below would loop zero times and
+                    # leave the limit decision unbound. Resolve it here, the
+                    # same way the try block does, so per-key enforcement
+                    # still applies during the outage.
+                    bucket_limits = [
+                        (
+                            _api_key_bucket(_presented_rate_identity(request)),
+                            self.limit,
+                        )
+                    ]
                 for index, (bucket_key, applied_limit) in enumerate(bucket_limits):
                     limited, remaining, reset_in = await self._check_limit_in_memory(
                         bucket_key,
