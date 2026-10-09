@@ -63,7 +63,15 @@ def test_permit_credit_json_schema_preserves_positive_numeric_and_scale_bounds(
     text = next(branch for branch in branches if branch["type"] == "string")
     for amount in ("0.00000001", "1.12345678", "999999999999.99999999"):
         assert re.fullmatch(text["pattern"], amount)
-    for amount in ("0.000000001", "1.123456789", "1000000000000", "NaN", "Infinity"):
+    for amount in (
+        "0.000000001",
+        "1.123456789",
+        "1000000000000",
+        "NaN",
+        "Infinity",
+        "-1",
+        "0",
+    ):
         assert re.fullmatch(text["pattern"], amount) is None
     if nullable:
         assert contract["default"] is None
