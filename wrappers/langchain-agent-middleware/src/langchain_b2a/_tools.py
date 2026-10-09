@@ -73,7 +73,11 @@ def create_mcp_tool(
                 scopes=[f"tool:{tool_name}:invoke", "billing:charge"],
             )
             permit_requests[permit_idempotency_key] = request
-        elif request.allowed_tools != [tool_name]:
+        elif (
+            request.subject_wallet_id != wallet_id
+            or request.max_credits != permit_budget
+            or request.allowed_tools != [tool_name]
+        ):
             raise ValueError("permit_idempotency_key reused with different permit terms")
 
         if permit_idempotency_key in permit_cache:
