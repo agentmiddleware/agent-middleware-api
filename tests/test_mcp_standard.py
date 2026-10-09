@@ -37,15 +37,16 @@ def make_params(
 
 
 def make_request(
-    url: str = "http://test/mcp",
     headers: list[tuple[bytes, bytes]] | None = None,
+    host: str = "test",
+    scheme: str = "http",
 ) -> Request:
     scope = {
         "type": "http",
         "http_version": "1.1",
         "method": "POST",
-        "scheme": "http",
-        "server": ("test", 80),
+        "scheme": scheme,
+        "server": (host, 443 if scheme == "https" else 80),
         "path": "/mcp",
         "query_string": b"",
         "headers": headers or [],
@@ -252,9 +253,27 @@ def test_validate_origin_refuses_mismatched_origin(
     try:
         request = make_request(
             headers=[(b"origin", b"https://evil.example")],
+            host="allowed.example",
+            scheme="https",
         )
         with pytest.raises(HTTPException) as exc_info:
             std._validate_origin(request)
         assert exc_info.value.status_code == 403
+    finally:
+        get_settings.cache_clear()
+
+
+def test_validate_origin_refuses_unbound_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PUBLIC_URL", "https://allowed.example")
+    get_settings.cache_clear()
+    try:
+        request = make_request(
+            headers=[(b"origin", b"https://allowed.example")],
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            std._validate_origin(request)
+        assert exc_info.value.status_code == 421
     finally:
         get_settings.cache_clear()
