@@ -135,8 +135,13 @@ CANDIDATE = MyIntegration
 Run it with:
 
 ```
-python -m failure_lab.integration_check.judge --candidate path/to/your_file.py
+python -m failure_lab.integration_check.judge --candidate path/to/your_file.py --i-have-reviewed
 ```
+
+The `--i-have-reviewed` flag is the operator confirming they have read the
+candidate file. The judge imports it in-process, so it runs with their
+privileges. The judge also refuses files that import the gateway or a vendor
+SDK before running them.
 
 ### What the context gives you
 

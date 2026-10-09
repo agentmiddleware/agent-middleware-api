@@ -479,7 +479,7 @@ system actually did, from the downstream system's own ledger.</p>
   <pre>git clone &lt;this repository&gt;
 $EDITOR failure_lab/integration_check/PROMPT.md      # what to implement
 cp failure_lab/integration_check/reference_candidate.py my_integration.py
-python -m failure_lab.integration_check.judge --candidate ./my_integration.py</pre>
+python -m failure_lab.integration_check.judge --candidate ./my_integration.py --i-have-reviewed</pre>
   <p class="sub">The judge reports what it observed per assertion, including the
   workarounds it considered unsafe. It does not score you.</p>
 </div>

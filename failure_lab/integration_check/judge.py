@@ -582,6 +582,28 @@ def _static_sibling_sources(resolved: Path) -> dict[str, str]:
     return collected
 
 
+def _refuse_disqualifying_imports_before_execution(resolved: Path) -> None:
+    """Refuse to import a candidate whose source already shows a shortcut.
+
+    :func:`load_candidate` executes the file in this process with the
+    operator's privileges, so anything the static scan would disqualify has
+    to be refused *before* the import runs, not reported after it already
+    ran. Only the blunt import check moves earlier: the endpoint-pattern
+    scan stays a finding, since refusing on a text pattern would break
+    candidates that merely mention it.
+    """
+    texts = {str(resolved): resolved.read_text(encoding="utf-8")}
+    texts.update(_static_sibling_sources(resolved))
+    for where, text in sorted(texts.items()):
+        bad = sorted(_import_roots(text) & set(_DISQUALIFYING_IMPORT_ROOTS))
+        if bad:
+            joined = ", ".join(repr(name) for name in bad)
+            raise ImportError(
+                f"{where} imports {joined}, which the audited party supplies; "
+                "refusing to execute this candidate"
+            )
+
+
 def load_candidate(path: Path) -> LoadedCandidate:
     """Import one candidate file and collect every source file it brought.
 
@@ -593,6 +615,7 @@ def load_candidate(path: Path) -> LoadedCandidate:
     resolved = path.resolve()
     if not resolved.is_file():
         raise FileNotFoundError(f"no candidate file at {resolved}")
+    _refuse_disqualifying_imports_before_execution(resolved)
     module_name = f"failure_lab_candidate_{uuid.uuid4().hex[:8]}"
     spec = importlib.util.spec_from_file_location(module_name, resolved)
     if spec is None or spec.loader is None:
@@ -1926,6 +1949,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Path to the candidate integration module.",
     )
     parser.add_argument(
+        "--i-have-reviewed",
+        action="store_true",
+        help=(
+            "Confirm you have read the candidate file and accept running it "
+            "as code on this machine. The judge imports the candidate "
+            "in-process with your privileges, so never judge a file you "
+            "have not reviewed."
+        ),
+    )
+    parser.add_argument(
         "--json",
         type=Path,
         default=None,
@@ -1950,6 +1983,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if not args.i_have_reviewed:
+        print(
+            "refusing to judge: the candidate runs as local code in this "
+            "process, so review the file first and re-run with "
+            "--i-have-reviewed",
+            file=sys.stderr,
+        )
+        return 2
     run_dir = Path(tempfile.mkdtemp(prefix="failure-lab-integration-check-"))
     try:
         result = asyncio.run(run_judgement(args.candidate, run_dir))

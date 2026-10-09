@@ -215,7 +215,8 @@ failure-lab-explore:
 # Clean-room integration judge: executable assertions, not an AI's self-report.
 failure-lab-integration-check:
 	uv run --with-requirements requirements.txt python -m failure_lab.integration_check.judge \
-	  --candidate $(or $(CANDIDATE),failure_lab/integration_check/reference_candidate.py)
+	  --candidate $(or $(CANDIDATE),failure_lab/integration_check/reference_candidate.py) \
+	  --i-have-reviewed
 
 # The self-serve diagnostic, on loopback only. Refuses production-like boots.
 failure-lab-diagnostic:
