@@ -365,6 +365,13 @@ class Settings(BaseSettings):
     # cloud metadata endpoints and internal services. Non-http(s) schemes
     # stay blocked regardless.
     ALLOW_PRIVATE_NETWORK_TARGETS: bool = False
+    # Local-development escape hatch for blocked name shapes (localhost,
+    # *.local, *.internal): allows agent-supplied targets to use those names
+    # (e.g. a mock server reached as localhost). It never lifts the cloud
+    # metadata hostname or address blocks, and a name that resolves to a
+    # private address still needs ALLOW_PRIVATE_NETWORK_TARGETS. Never
+    # enable in production.
+    ALLOW_PRIVATE_NETWORK_NAMES: bool = False
 
     # Directory that AWI upload_file actions may read from. Empty (the
     # default) disables file uploads entirely; when set, requested paths are
