@@ -583,12 +583,22 @@ async def build_receipt_evidence(
                 if ledger_entry.amount != expected_amount:
                     ledger_failures.append("ledger_amount_mismatch")
             elif receipt.outcome == "failed_refunded":
+                # A refunded receipt records zero net charge against the
+                # original debit, so the refund entry below is the linkage
+                # proof here, not the debit amount.
                 refund_found = await _refund_exists(
                     wallet_id=receipt.wallet_id,
                     ledger_entry_id=receipt.ledger_entry_id,
                 )
                 if not refund_found:
                     ledger_failures.append("refund_entry_not_found")
+            else:
+                # A zero-charge receipt linked to a ledger entry must still
+                # match it. Only a zero-amount entry is consistent with no
+                # charge, so any other amount fails the linkage instead of
+                # passing silently.
+                if ledger_entry.amount != -receipt.credits_charged:
+                    ledger_failures.append("ledger_amount_mismatch")
             checks.append(
                 _check(
                     "ledger_linkage",

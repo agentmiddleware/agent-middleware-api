@@ -260,6 +260,11 @@ def _client_idempotency_key(
     """
     sources: list[tuple[str, object]] = []
     try:
+        if "mcp_context" in (params.model_extra or {}):
+            raise _mcp_error(
+                -32602,
+                "Invalid params: use mcpContext or the idempotency _meta field; mcp_context is REST-only",
+            )
         if http_request is not None:
             sources.extend(_header_idempotency_key_sources(http_request))
         meta_source = _meta_idempotency_key_source(params)
@@ -349,7 +354,7 @@ async def _mint_auto_permit(
             request_payload=mint_payload,
         )
     except IdempotencyConflictError as exc:
-        raise _mcp_error(-32003, "idempotency_key_reused") from exc
+        raise _mcp_error(-32009, "idempotency_key_reused") from exc
     except IdempotencyInProgressError as exc:
         raise _mcp_error(-32005, "idempotency_in_progress") from exc
     if mint_replay and mint_replay.response_json:
