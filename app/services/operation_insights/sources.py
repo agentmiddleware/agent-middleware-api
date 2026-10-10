@@ -370,7 +370,7 @@ async def _keyset(
     cursor: tuple[datetime | None, str] | None = None
     while True:
         if time.monotonic() >= deadline:
-            raise TimeoutError("insight_read_budget_exceeded")
+            return
         page_stmt = statement
         if cursor is not None:
             last_time, last_id = cursor
@@ -544,6 +544,8 @@ async def _read_legacy_links(
     all_roots = list(roots)
     ambiguous_context: set[tuple[str, str]] = set()
     for offset in range(0, len(all_roots), limits.page_size):
+        if time.monotonic() >= deadline:
+            return
         ids = all_roots[offset : offset + limits.page_size]
         root_scope = and_(
             col(i.record_id).in_(ids),
@@ -1361,7 +1363,7 @@ async def read_evidence(
                     break
             if truncated:
                 break
-        if "evidence_limit_reached" not in gaps:
+        if "evidence_limit_reached" not in gaps and time.monotonic() < deadline:
             try:
                 await _read_legacy_links(
                     scope,
@@ -1386,6 +1388,9 @@ async def read_evidence(
         gaps.add("ingress_enumeration_unavailable")
     if truncated:
         gaps.add("operation_limit_reached")
+    if time.monotonic() >= deadline:
+        truncated = True
+        gaps.add("execution_budget_reached")
     if not snapshot.atomic:
         gaps.add("non_atomic_snapshot")
     # The legacy stores cannot independently prove original ownership for

@@ -574,6 +574,74 @@ async def test_build_report_marks_budget_expiry_partial(
     assert "execution_budget_reached" in report.coverage.gaps
 
 
+@pytest.mark.parametrize("gap", ["execution_budget_reached", "evidence_limit_reached"])
+@pytest.mark.asyncio
+async def test_build_report_preserves_rows_from_budgeted_reader(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, gap: str
+) -> None:
+    monkeypatch.setattr(
+        "app.services.operation_insights.auth.assert_scope_bound",
+        lambda scope, session: None,
+    )
+    root = Evidence(
+        source="idempotency",
+        source_id="budget-root",
+        wallet_id="wallet-1",
+        ownership_epoch_id="epoch-1",
+        original_operation_anchor_id="budget-root",
+        logical_operation_id="budget-root",
+        occurred_at=START + timedelta(days=1),
+    )
+    read_limits: list[int] = []
+
+    async def partial_batch(scope, window, limits, session):
+        read_limits.append(limits.seconds)
+        assert len(read_limits) == 1  # No prior read after current read budget expires.
+        return EvidenceBatch(
+            rows=(root,),
+            snapshot=Snapshot(END, "snapshot-budget", True, None),
+            coverage=Coverage(
+                sources=(),
+                truncated=True,
+                gaps=(gap,),
+            ),
+        )
+
+    monkeypatch.setattr(
+        "app.services.operation_insights.sources.read_evidence", partial_batch
+    )
+    ticks = itertools.chain((0.0,), itertools.repeat(200.0))
+    scope = _scope()
+    report = await build_report(
+        scope,
+        Window(START, END, "first_observed_evidence"),
+        Limits(),
+        AccountMapping("unverified", ()),
+        object(),
+        clock=lambda: next(ticks),
+    )
+
+    assert read_limits == [200]
+    assert len(report.operations) == 1
+    assert report.operations[0].operation_id
+    assert report.coverage.truncated is True
+    assert gap in report.coverage.gaps
+    assert "prior_window_skipped_current_partial" in report.coverage.gaps
+    assert all(metric.completeness == "partial" for metric in report.metrics)
+    assert all(metric.ratio is None for metric in report.metrics)
+    directory = tmp_path / "bundle"
+    manifest = write_bundle(
+        report,
+        directory,
+        scope=scope,
+        session=object(),
+        deadline=300.0,
+        clock=lambda: 200.0,
+    )
+    assert manifest.completeness == "partial"
+    assert manifest.files[0].row_count == 1
+
+
 @pytest.mark.asyncio
 async def test_authorized_unknown_count_timeout_is_partial_not_denied(
     monkeypatch: pytest.MonkeyPatch,
@@ -743,7 +811,8 @@ async def test_operator_route_delivers_only_prepared_scoped_artifact(
     async def authorize(*args):
         return _scope()
 
-    async def prepared_report(*args):
+    async def prepared_report(*args, **kwargs):
+        assert isinstance(kwargs["deadline"], float)
         return _report()
 
     monkeypatch.setattr(route, "reporting_read_transaction", transaction)

@@ -96,7 +96,9 @@ async def get_insight_report(
             # No verified account mapping is shipped with the reader. Unknown
             # attribution remains unknown until a governed mapping is supplied.
             mapping = AccountMapping(version="unverified", intervals=())
-            report = await build_report(scope, window, limits, mapping, session)
+            report = await build_report(
+                scope, window, limits, mapping, session, deadline=deadline
+            )
             if format == "json":
                 content = report_json_bytes(
                     report, scope=scope, session=session, deadline=deadline
@@ -157,7 +159,9 @@ async def get_operation_insight(
                 principal, frozenset({wallet_id}), False, session
             )
             mapping = AccountMapping(version="unverified", intervals=())
-            report = await build_report(scope, window, limits, mapping, session)
+            report = await build_report(
+                scope, window, limits, mapping, session, deadline=deadline
+            )
             payload = json.loads(
                 report_json_bytes(
                     report, scope=scope, session=session, deadline=deadline
