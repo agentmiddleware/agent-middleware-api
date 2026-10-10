@@ -42,6 +42,7 @@ from app.services.permits import (
     get_permit_service,
 )
 from app.services.signing_keys import canonical_json, sha256_hex
+from app.services.operation_insights.events import schedule_attempt
 
 logger = logging.getLogger(__name__)
 
@@ -1584,6 +1585,21 @@ class McpDispatchAttemptService:
             ) from exc
 
     async def claim_dispatch(self, attempt_id: str) -> McpDispatchAttemptModel:
+        """Claim first; only then observe an execution attempt out of transaction."""
+        attempt = await self._claim_dispatch(attempt_id)
+        try:
+            schedule_attempt(
+                attempt_id=attempt.attempt_id,
+                wallet_id=attempt.wallet_id,
+                tool=attempt.public_tool_id,
+                logical_operation_id=attempt.idempotency_record_id,
+            )
+        except Exception:
+            # Insight capture cannot change send authority or trigger redispatch.
+            pass
+        return attempt
+
+    async def _claim_dispatch(self, attempt_id: str) -> McpDispatchAttemptModel:
         """Acquire the durable, non-reacquirable right to send exactly once.
 
         Every activation generates a fresh process-local secret and persists

@@ -67,6 +67,11 @@ from ..services.action_permits import (
 from ..db.database import get_session_factory
 from ..db.models import PermitModel
 from ..services.mcp_generator import get_mcp_generator
+from ..services.operation_insights.events import (
+    allowlisted_reason_code,
+    mark_current_request,
+    schedule_attempt,
+)
 from ..services.dogfood_tool import sync_dogfood_tool_registration
 from ..services.mcp_phase9_tools import sync_proof_surface_mcp_registration
 from ..services.mcp_dispatch_attempts import (
@@ -409,6 +414,9 @@ def _jsonrpc_error_response(
     message: str,
     data: dict[str, Any] | None = None,
 ) -> JSONResponse:
+    mark_current_request(
+        gateway_outcome="denied", reason_code="request_validation_denied"
+    )
     error_payload: dict[str, Any] = {"code": code, "message": message}
     if data:
         error_payload["data"] = data
@@ -599,7 +607,9 @@ async def handle_messages(
         )
 
     if method == "tools/list":
+        mark_current_request(disposition="non_execution_read")
         result = await _handle_tools_list(params)
+        mark_current_request(gateway_outcome="succeeded")
         return JSONResponse(
             {
                 "jsonrpc": "2.0",
@@ -609,6 +619,7 @@ async def handle_messages(
         )
 
     elif method == "tools/call":
+        mark_current_request(disposition="execution_intent")
         # Shape and replay-key validation run before the governed pipeline is
         # entered, so a refused request has minted, reserved, charged, and
         # dispatched nothing. The header and the body may both carry a key;
@@ -639,6 +650,8 @@ async def handle_messages(
                 idempotency_key=client_idempotency_key,
                 request_payload=body,
             )
+            if result.get("isError") is False:
+                mark_current_request(gateway_outcome="succeeded")
             return JSONResponse(
                 {
                     "jsonrpc": "2.0",
@@ -647,6 +660,9 @@ async def handle_messages(
                 }
             )
         except HumanApprovalPendingSignal as e:
+            mark_current_request(
+                gateway_outcome="unknown", reason_code="human_approval_pending"
+            )
             error_payload: dict[str, Any] = {
                 "code": e.jsonrpc_code,
                 "message": str(e),
@@ -667,6 +683,9 @@ async def handle_messages(
             ReceiptWriteContendedError,
             PermitWriteContendedError,
         ) as e:
+            mark_current_request(
+                gateway_outcome="unknown", reason_code="operation_contended"
+            )
             # All five mean the same thing to a caller: nothing terminal was
             # recorded, retry the same idempotency key. -32005 is this
             # surface's retryable code and str(e) carries which one it was, so
@@ -697,6 +716,9 @@ async def handle_messages(
                 }
             )
         except TerminalRecordContendedError as e:
+            mark_current_request(
+                gateway_outcome="unknown", reason_code="terminal_record_contended"
+            )
             # The same contention, on the other side of the charge. Its own
             # code so a client cannot read it as either neighbour: -32005 would
             # invite the retry that runs a paid call again, and -32603 would
@@ -713,6 +735,15 @@ async def handle_messages(
                 }
             )
         except ToolPermissionDenied as e:
+            mark_current_request(
+                gateway_outcome="denied",
+                reason_code=(
+                    allowlisted_reason_code(
+                        e.receipt.get("reason_code") if e.receipt else None
+                    )
+                    or "tool_permission_denied"
+                ),
+            )
             error_payload = {
                 "code": -32003,
                 "message": str(e),
@@ -732,6 +763,21 @@ async def handle_messages(
                 }
             )
         except GovernedToolError as e:
+            mark_current_request(
+                gateway_outcome=(
+                    "unknown"
+                    if e.jsonrpc_code in {-32005, -32007}
+                    else "denied"
+                    if e.jsonrpc_code in {-32001, -32002, -32003, -32004, -32602}
+                    else "failed"
+                ),
+                reason_code=(
+                    allowlisted_reason_code(
+                        e.receipt.get("reason_code") if e.receipt else None
+                    )
+                    or "governed_tool_error"
+                ),
+            )
             error_payload = {
                 "code": e.jsonrpc_code,
                 "message": str(e),
@@ -749,6 +795,9 @@ async def handle_messages(
                 }
             )
         except PermissionError as e:
+            mark_current_request(
+                gateway_outcome="denied", reason_code="tool_permission_denied"
+            )
             return JSONResponse(
                 {
                     "jsonrpc": "2.0",
@@ -760,6 +809,9 @@ async def handle_messages(
                 }
             )
         except ToolExecutionError as e:
+            mark_current_request(
+                gateway_outcome="failed", reason_code="tool_execution_failed"
+            )
             # Legacy (unpermitted) tool failure: compensation is complete and,
             # as on the governed path, the message is the tool's own error.
             return JSONResponse(
@@ -775,10 +827,16 @@ async def handle_messages(
         except ValueError as e:
             code = _value_error_jsonrpc_code(str(e))
             if code is None:
+                mark_current_request(
+                    gateway_outcome="failed", reason_code="internal_error"
+                )
                 error_payload = _internal_error(
                     e, surface="/mcp/messages", request_id=request_id
                 )
             else:
+                mark_current_request(
+                    gateway_outcome="denied", reason_code="request_validation_denied"
+                )
                 error_payload = {"code": code, "message": str(e)}
             return JSONResponse(
                 {
@@ -788,6 +846,7 @@ async def handle_messages(
                 }
             )
         except Exception as e:
+            mark_current_request(gateway_outcome="failed", reason_code="internal_error")
             return JSONResponse(
                 {
                     "jsonrpc": "2.0",
@@ -799,6 +858,7 @@ async def handle_messages(
             )
 
     else:
+        mark_current_request(gateway_outcome="denied", reason_code="method_not_found")
         return JSONResponse(
             {
                 "jsonrpc": "2.0",
@@ -1277,6 +1337,8 @@ async def _execute_registered_tool_inner(
         )
         raise ToolPermissionDenied(tenant_decision.reason)
 
+    mark_current_request(disposition="execution_intent", wallet_id=wallet_id)
+
     governed_call = bool(permit_id) or (
         settings.TRUST_MODE_ENABLED and not settings.ALLOW_LEGACY_UNPERMITTED_MCP
     )
@@ -1368,9 +1430,14 @@ async def _execute_registered_tool_inner(
                 )
                 replay = idem_begin.replay
                 idem_started = True
+                mark_current_request(
+                    logical_operation_id=idem_begin.record_id,
+                    disposition="same_key_replay" if replay is not None else None,
+                )
                 if owned_record is not None:
                     owned_record["record_id"] = idem_begin.record_id
             except IdempotencyInProgressError:
+                mark_current_request(disposition="status_read")
                 raise
             except IdempotencyConflictError as exc:
                 raise ValueError(str(exc)) from exc
@@ -1397,6 +1464,7 @@ async def _execute_registered_tool_inner(
         raise ValueError(reason)
 
     execution_backend = str(service.get("execution_backend") or "metadata_only")
+    mark_current_request(tool=tool_name)
     func = registry.get_local_func(tool_name)
     upstream_executor = registry.get_executor(tool_name)
     if execution_backend == "local" and func is None:
@@ -1611,6 +1679,10 @@ async def _execute_registered_tool_inner(
                 )
             replay = idem_begin.replay
             idem_started = True
+            mark_current_request(
+                logical_operation_id=idem_begin.record_id,
+                disposition="same_key_replay" if replay is not None else None,
+            )
             if owned_record is not None:
                 owned_record["record_id"] = idem_begin.record_id
                 if action_identity is not None:
@@ -1631,6 +1703,7 @@ async def _execute_registered_tool_inner(
                 },
             )
             if isinstance(exc, IdempotencyInProgressError):
+                mark_current_request(disposition="status_read")
                 raise
             raise ValueError(str(exc))
         if replay and replay.response_json:
@@ -2684,6 +2757,18 @@ async def _execute_registered_tool_inner(
         )
 
     assert func is not None
+    try:
+        schedule_attempt(
+            attempt_id=f"loc-{uuid.uuid4().hex}",
+            wallet_id=wallet_id,
+            tool=tool_name,
+            logical_operation_id=idem_begin.record_id
+            if idem_begin is not None
+            else None,
+        )
+    except Exception:
+        # Insight capture cannot affect a charged local invocation.
+        pass
     try:
         if inspect.iscoroutinefunction(func):
             result = await func(**arguments)
@@ -4591,6 +4676,9 @@ async def invoke_tool(
             ]
         )
     except InvalidIdempotencyKeyError as exc:
+        mark_current_request(
+            gateway_outcome="denied", reason_code="request_validation_denied"
+        )
         raise HTTPException(
             status_code=400,
             detail={"message": str(exc), **exc.as_error_data()},
@@ -4618,8 +4706,14 @@ async def invoke_tool(
             request_payload=request.model_dump(mode="json"),
         )
         result = await _mcp_adapter.invoke(governed_request)
-        return ToolCallResponse(**await _mcp_adapter.normalize_response(result))
+        response_payload = await _mcp_adapter.normalize_response(result)
+        if response_payload.get("isError") is False:
+            mark_current_request(gateway_outcome="succeeded")
+        return ToolCallResponse(**response_payload)
     except HumanApprovalPendingSignal as exc:
+        mark_current_request(
+            gateway_outcome="unknown", reason_code="human_approval_pending"
+        )
         detail: dict[str, Any] = {"error": str(exc)}
         if exc.data:
             detail["approval"] = exc.data
@@ -4631,6 +4725,9 @@ async def invoke_tool(
         ReceiptWriteContendedError,
         PermitWriteContendedError,
     ) as exc:
+        mark_current_request(
+            gateway_outcome="unknown", reason_code="operation_contended"
+        )
         # Same five-way retryable family as /mcp/messages: the caller may
         # retry the same idempotency key. A pre-effect
         # ReceiptWriteContendedError that reached here without this entry fell
@@ -4660,6 +4757,9 @@ async def invoke_tool(
             detail={"error": str(exc)},
         ) from exc
     except TerminalRecordContendedError as exc:
+        mark_current_request(
+            gateway_outcome="unknown", reason_code="terminal_record_contended"
+        )
         # Stays 500 -- the server did fail to record the call, and this surface
         # has no better status for "effects committed, outcome indeterminate".
         # What changes is the body: a named reason and its remediation instead
@@ -4670,6 +4770,15 @@ async def invoke_tool(
             detail=_terminal_record_contended_data(exc.reason),
         ) from exc
     except ToolPermissionDenied as exc:
+        mark_current_request(
+            gateway_outcome="denied",
+            reason_code=(
+                allowlisted_reason_code(
+                    exc.receipt.get("reason_code") if exc.receipt else None
+                )
+                or "tool_permission_denied"
+            ),
+        )
         detail = {"error": str(exc)}
         if exc.receipt:
             detail["receipt"] = exc.receipt
@@ -4677,14 +4786,35 @@ async def invoke_tool(
             detail["details"] = exc.details
         raise HTTPException(status_code=403, detail=detail)
     except GovernedToolError as exc:
+        mark_current_request(
+            gateway_outcome=(
+                "unknown"
+                if exc.jsonrpc_code in {-32005, -32007}
+                else "denied"
+                if exc.jsonrpc_code in {-32001, -32002, -32003, -32004, -32602}
+                else "failed"
+            ),
+            reason_code=(
+                allowlisted_reason_code(
+                    exc.receipt.get("reason_code") if exc.receipt else None
+                )
+                or "governed_tool_error"
+            ),
+        )
         detail = {"error": str(exc)}
         if exc.receipt:
             detail["receipt"] = exc.receipt
         detail.update(exc.extra_data)
         raise HTTPException(status_code=exc.status_code, detail=detail)
     except PermissionError as exc:
+        mark_current_request(
+            gateway_outcome="denied", reason_code="tool_permission_denied"
+        )
         raise HTTPException(status_code=403, detail=str(exc))
     except ToolExecutionError as exc:
+        mark_current_request(
+            gateway_outcome="failed", reason_code="tool_execution_failed"
+        )
         # Legacy (unpermitted) tool failure: compensation is complete and the
         # message is the tool's own error, as on the governed path.
         return ToolCallResponse(
@@ -4694,9 +4824,26 @@ async def invoke_tool(
     except ValueError as exc:
         message = str(exc)
         if _value_error_jsonrpc_code(message) is None:
+            mark_current_request(gateway_outcome="failed", reason_code="internal_error")
             return _internal_error_tool_result(
                 exc, surface="/mcp/tools/{service_id}/invoke"
             )
+        if message == "idempotency_in_progress":
+            event_reason = "operation_contended"
+        elif message.startswith("Tool not found"):
+            event_reason = "tool_not_found"
+        elif message.startswith("Tool not executable"):
+            event_reason = "tool_not_executable"
+        else:
+            event_reason = (
+                allowlisted_reason_code(message) or "request_validation_denied"
+            )
+        mark_current_request(
+            gateway_outcome=(
+                "unknown" if message == "idempotency_in_progress" else "denied"
+            ),
+            reason_code=event_reason,
+        )
         if message == "idempotency_key_reused":
             raise HTTPException(status_code=409, detail=message)
         if message == "insufficient_funds":
@@ -4709,6 +4856,7 @@ async def invoke_tool(
             raise HTTPException(status_code=501, detail=message)
         raise HTTPException(status_code=400, detail=message)
     except Exception as exc:
+        mark_current_request(gateway_outcome="failed", reason_code="internal_error")
         return _internal_error_tool_result(
             exc, surface="/mcp/tools/{service_id}/invoke"
         )

@@ -78,6 +78,7 @@ DORMANT_SURFACE_TEST_MODULES = frozenset(
         "test_golden_path",
         "test_kyc",
         "test_mcp_trust_mode",
+        "test_operation_insights_events",
         "test_mcp_upstream_governed",
         "test_planner_constraints",
         "test_pods",
@@ -213,7 +214,7 @@ def interleaving_factory(real_factory, hook, state, *, fire_on: int = 1):
         async def __aexit__(self, *exc):
             return await self._cm.__aexit__(*exc)
 
-    return lambda: (lambda: _CM(real_factory()))
+    return lambda: lambda: _CM(real_factory())
 
 
 def running_on_sqlite() -> bool:
@@ -373,6 +374,7 @@ async def setup_database():
 #: tests/test_clean_database_coverage.py's exemption set fails that test, so a
 #: new trust-plane table cannot silently escape per-test cleanup.
 CLEAN_DATABASE_TABLES = (
+    "operation_insight_events",
     "receipts",
     "mcp_dispatch_attempts",
     "human_approvals",
