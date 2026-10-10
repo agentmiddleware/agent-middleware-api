@@ -28,7 +28,7 @@ from typing import Any, NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.exc import IntegrityError
 
 from ..audit.lightweight import record_audit
@@ -440,6 +440,15 @@ class ToolCallRequest(BaseModel):
     )
     mcp_context: McpContext | None = Field(None, description="Billing context")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_jsonrpc_context(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "mcpContext" in value:
+            raise ValueError(
+                "Use mcp_context for this REST route; mcpContext is JSON-RPC-only"
+            )
+        return value
+
 
 class ToolCallResponse(BaseModel):
     """MCP tool call response."""
@@ -491,8 +500,39 @@ async def get_tools_json(
         "initialization lifecycle. Check `/.well-known/agent.json` before "
         "assuming the standard MCP Streamable HTTP endpoint at POST /mcp is "
         "available; both transports run the same governed permit→meter→receipt "
-        "path when enabled."
+        "path when enabled. tools/call uses params.mcpContext; mcp_context "
+        "belongs only to the deprecated REST invoke route. Preserve one "
+        "Idempotency-Key across retries."
     ),
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "jsonrpc": {"type": "string", "enum": ["2.0"]},
+                            "id": {"type": ["string", "number", "null"]},
+                            "method": {
+                                "type": "string",
+                                "enum": ["tools/list", "tools/call"],
+                            },
+                            "params": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {"type": "string"},
+                                    "arguments": {"type": "object"},
+                                    "mcpContext": McpContext.model_json_schema(),
+                                },
+                            },
+                        },
+                        "required": ["method"],
+                    }
+                }
+            },
+        }
+    },
 )
 async def handle_messages(
     request: Request,
