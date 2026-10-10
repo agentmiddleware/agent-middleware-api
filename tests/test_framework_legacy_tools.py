@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import gc
 import inspect
+import json
 import sys
 import types
 import warnings
@@ -232,7 +233,7 @@ async def test_langgraph_tool_rejects_malformed_json_without_sending(
     client, sent = recording
     tools = {fn.__name__: fn for fn in get_langgraph_tools(client)}
 
-    with pytest.raises(ValueError):
+    with pytest.raises(json.JSONDecodeError, match="Expecting property name"):
         await _ainvoke_langchain_style(
             tools["send_message"], {"to_agent": "agent-2", "content": "{not json"}
         )
