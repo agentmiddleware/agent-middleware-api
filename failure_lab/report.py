@@ -70,8 +70,8 @@ CONCLUSION_GLOSS: dict[str, str] = {
         "prevented no additional duplicate effect"
     ),
     ConclusionKind.GATEWAY_PREVENTED_DUPLICATES.value: (
-        "duplicate business effects occurred in a measured baseline and did "
-        "not occur behind the gateway"
+        "fewer duplicate business effects occurred behind the gateway than "
+        "in a measured baseline"
     ),
     ConclusionKind.GATEWAY_ADDED_EVIDENCE_ONLY.value: (
         "no additional duplicate effect was prevented; what changed is what "
@@ -363,7 +363,7 @@ def _conclude(
             f"Middleware in front of the tool than in "
             f"{reference.label} ({governed.duplicate_effects} against "
             f"{reference.duplicate_effects}). The gateway added {extra} "
-            f"duplicate effect(s) here rather than preventing any.",
+            f"duplicate effect(s) relative to that baseline.",
             prevented_vs_native,
             prevented_vs_existing,
             differences,

@@ -249,6 +249,27 @@ def test_a_gateway_that_adds_duplicates_says_so_plainly():
     assert conclusion.duplicates_prevented_vs_existing == 0
 
 
+def test_gateway_worse_than_native_can_still_prevent_vs_existing():
+    result = _result(
+        [
+            _entry(Configuration.DIRECT_NAIVE, verdict=Verdict.OBSERVED, executions=5),
+            _entry(Configuration.DIRECT_NATIVE, verdict=Verdict.PASS, executions=1),
+            _entry(
+                Configuration.GATEWAY_NATIVE,
+                verdict=Verdict.PASS,
+                executions=3,
+                dispatches=3,
+            ),
+        ]
+    )
+    conclusion = build_comparison(result).conclusion
+    assert conclusion.kind is ConclusionKind.GATEWAY_ADDED_DUPLICATES
+    assert conclusion.duplicates_prevented_vs_existing == 2
+    assert conclusion.duplicates_prevented_vs_native == 0
+    assert "relative to that baseline" in conclusion.text
+    assert "rather than preventing any" not in conclusion.text
+
+
 def test_a_gateway_that_did_not_hold_is_not_dressed_up():
     result = _result(
         [
