@@ -1726,6 +1726,23 @@ def test_local_event_migration_matches_model_and_preserves_retained_rows(
             sa_inspect(connection).get_columns("operation_insight_events")[i]["name"]
             for i in range(len(InsightEventModel.__table__.columns))
         ) == set(InsightEventModel.__table__.columns.keys())
+        anchor_index = (
+            "wallet_id",
+            "original_operation_anchor_id",
+            "occurred_at",
+        )
+        assert any(
+            index["name"] == "ix_insight_events_wallet_anchor_time"
+            and tuple(index["column_names"]) == anchor_index
+            and index["unique"] == 0
+            for index in sa_inspect(connection).get_indexes("operation_insight_events")
+        )
+        assert any(
+            index.name == "ix_insight_events_wallet_anchor_time"
+            and tuple(column.name for column in index.columns) == anchor_index
+            and index.unique is False
+            for index in InsightEventModel.__table__.indexes
+        )
         connection.execute(
             text(
                 "INSERT INTO operation_insight_events "

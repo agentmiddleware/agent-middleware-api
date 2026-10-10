@@ -1273,6 +1273,12 @@ class InsightEventModel(SQLModel, table=True):
     __tablename__ = "operation_insight_events"
     __table_args__ = (
         Index("ix_insight_events_wallet_time", "wallet_id", "occurred_at", "event_id"),
+        Index(
+            "ix_insight_events_wallet_anchor_time",
+            "wallet_id",
+            "original_operation_anchor_id",
+            "occurred_at",
+        ),
         Index("ix_insight_events_request", "request_id", "event_id"),
     )
 
