@@ -67,7 +67,7 @@ def test_reset_accepts_repo_relative_state_dir():
     ],
 )
 def test_reset_refuses_paths_outside_data_dir(raw):
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Refusing --reset outside"):
         quickstart.resolve_state_dir_for_reset(raw)
 
 
@@ -79,7 +79,7 @@ def test_reset_refuses_symlink_escaping_data_dir(tmp_path):
     link.parent.mkdir(parents=True, exist_ok=True)
     try:
         link.symlink_to(outside, target_is_directory=True)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Refusing --reset outside"):
             quickstart.resolve_state_dir_for_reset(link)
     finally:
         if link.is_symlink() or link.exists():
@@ -99,7 +99,7 @@ def test_reset_refuses_symlinked_data_root(tmp_path, monkeypatch):
     (fake_root / "data").symlink_to(outside, target_is_directory=True)
     monkeypatch.setattr(quickstart, "ROOT", fake_root)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Refusing --reset through a symlinked"):
         quickstart.resolve_state_dir_for_reset(fake_root / "data" / "quickstart")
 
 
