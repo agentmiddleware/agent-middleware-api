@@ -265,4 +265,7 @@ async def test_permit_issuer_can_inspect_subject_receipts(
         },
         headers=sponsor_headers,
     )
-    assert cross_wallet.status_code == 403
+    # Same 404 as an unknown permit: a 403 here would confirm the permit
+    # id is real to any authenticated caller.
+    assert cross_wallet.status_code == 404
+    assert cross_wallet.json() == {"detail": "permit_not_found"}

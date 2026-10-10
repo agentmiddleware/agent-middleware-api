@@ -158,9 +158,9 @@ async def test_expired_lifecycle_inspection_retains_auth_and_wallet_boundaries(
     _check_at(monkeypatch, to_naive_utc(datetime.fromisoformat(permit["expires_at"])))
     route = f"/v1/permits/{permit['permit_id']}"
     assert (await client.get(route)).status_code == 401
-    assert (
-        await client.get(route, headers=outsider["agent_headers"])
-    ).status_code == 403
+    foreign_read = await client.get(route, headers=outsider["agent_headers"])
+    assert foreign_read.status_code == 404, foreign_read.text
+    assert foreign_read.json()["detail"] == "permit_not_found"
     foreign_verify = await client.post(
         "/v1/permits/verify",
         json={"permit_id": permit["permit_id"]},
