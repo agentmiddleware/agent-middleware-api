@@ -9,54 +9,34 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
-out_dir="${1:-${TMPDIR:-/tmp}/refund-partner-bundle}"
+out_dir="${1-${TMPDIR:-/tmp}/refund-partner-bundle}"
 
 refuse() {
   echo "build_refund_partner_bundle: refusing to delete unsafe path: $1" >&2
   exit 2
 }
 
-if [ -z "${out_dir:-}" ]; then
-  refuse "(empty path)"
-fi
+# Only replace the named bundle directory directly under /tmp or TMPDIR.
+# Resolve symlinks and .. even when the target does not exist yet, then delete
+# the checked path.
+if ! out_canonical="$(python3 - "$out_dir" "${TMPDIR:-/tmp}" "$repo_root" <<'PY'
+from pathlib import Path
+import sys
 
-# Canonicalize for the safety checks below. realpath -m resolves .. and
-# symlinks without requiring the path to exist (GNU coreutils); elsewhere
-# fall back to making the path absolute so the exact-match checks still hold.
-if out_canonical="$(realpath -m "$out_dir" 2>/dev/null)"; then
-  :
-else
-  case "$out_dir" in
-    /*) out_canonical="$out_dir" ;;
-    *) out_canonical="$PWD/$out_dir" ;;
-  esac
+target = Path(sys.argv[1]).resolve()
+roots = {Path("/tmp").resolve(), Path(sys.argv[2]).resolve()}
+blocked = {Path("/"), Path.home().resolve(), Path(sys.argv[3]).resolve()}
+allowed = {root / "refund-partner-bundle" for root in roots - blocked}
+if target not in allowed:
+    raise SystemExit(2)
+print(target)
+PY
+)"; then
+  refuse "$out_dir"
 fi
-# Strip trailing slashes for comparison ("/" becomes the empty string).
-out_stripped="${out_canonical%/}"
+out_dir="$out_canonical"
 
-home_dir="${HOME:-}"
-tmp_dir="${TMPDIR:-/tmp}"
-tmp_stripped="${tmp_dir%/}"
-
-if [ -z "$out_stripped" ]; then
-  refuse "$out_dir (resolves to filesystem root)"
-fi
-if [ "$out_stripped" = "$repo_root" ]; then
-  refuse "$out_dir (the repo root)"
-fi
-if [ -n "$home_dir" ] && [ "$out_stripped" = "$home_dir" ]; then
-  refuse "$out_dir (home directory)"
-fi
-if [ -n "$tmp_stripped" ] && [ "$out_stripped" = "$tmp_stripped" ]; then
-  refuse "$out_dir (the temp directory itself)"
-fi
-# Never delete a top-level directory such as /tmp or /data.
-case "$out_stripped" in
-  /*/*) ;;
-  *) refuse "$out_dir (top-level directory)" ;;
-esac
-
-rm -rf "$out_dir"
+rm -rf -- "$out_dir"
 mkdir -p "$out_dir"
 
 cp "$repo_root/tests/support/mcp_refund_partner_app.py" "$out_dir/main.py"
