@@ -52,7 +52,9 @@ async def exchange(client, key, scopes):
     return response.json()
 
 
-@pytest.mark.parametrize("scopes", [["billing:read"], [], ["custom:read"]])
+@pytest.mark.parametrize(
+    "scopes", [["billing:read"], [], ["tool:partner.notes.write:invoke"]]
+)
 async def test_refresh_preserves_requested_scopes(client, scopes):
     key = await seed("qa_refresh_scope")
     tokens = await exchange(client, key, scopes)
@@ -74,6 +76,105 @@ async def test_refresh_preserves_requested_scopes(client, scopes):
         get_jwt_service().verify_access_token(again.json()["access_token"]).scopes
         == scopes
     )
+
+
+async def test_token_exchange_rejects_unknown_scope(client):
+    """Tokens must not carry caller-invented permission names.
+
+    Before scope validation, any string in ``scopes`` was minted into the
+    JWT, so the first route to check scopes would have trusted a
+    self-minted permission. Unknown names are now refused loudly.
+    """
+    key = await seed("qa_unknown_scope")
+
+    response = await client.post(
+        "/v1/auth/token",
+        json={"api_key": key["api_key"], "scopes": ["custom:read"]},
+    )
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert detail["error"] == "invalid_scope"
+    assert detail["unknown_scopes"] == ["custom:read"]
+    assert "access_token" not in response.json()
+
+    mixed = await client.post(
+        "/v1/auth/token",
+        json={
+            "api_key": key["api_key"],
+            "scopes": ["billing:charge", "admin:everything"],
+        },
+    )
+    assert mixed.status_code == 400
+    assert mixed.json()["detail"]["error"] == "invalid_scope"
+    assert mixed.json()["detail"]["unknown_scopes"] == ["admin:everything"]
+
+    trailing_newline = "tool:partner.notes.write:invoke\n"
+    malformed = await client.post(
+        "/v1/auth/token",
+        json={"api_key": key["api_key"], "scopes": [trailing_newline]},
+    )
+    assert malformed.status_code == 400
+    assert malformed.json()["detail"]["unknown_scopes"] == [trailing_newline]
+
+
+async def test_token_exchange_grants_known_scopes(client):
+    """Documented scope names are still minted, including tool-specific ones."""
+    key = await seed("qa_known_scope")
+    wanted = ["billing:read", "tool:partner.notes.write:invoke"]
+
+    response = await client.post(
+        "/v1/auth/token", json={"api_key": key["api_key"], "scopes": wanted}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["scope"] == " ".join(wanted)
+    payload = get_jwt_service().verify_access_token(body["access_token"])
+    assert payload.scopes == wanted
+
+    # A limited token stays limited: still denied where billing:charge is
+    # required.
+    denied = await client.get(
+        "/guarded", headers={"Authorization": "Bearer " + body["access_token"]}
+    )
+    assert denied.status_code == 403
+
+
+async def test_refresh_drops_pre_validation_scopes(client):
+    """Refresh must not launder invented scopes minted before validation.
+
+    A refresh token created directly with an unknown scope (as exchange
+    used to allow) renews into tokens carrying only the known subset.
+    """
+    from datetime import timedelta
+
+    from app.core.time import utc_now
+    from app.db.models import RefreshTokenModel
+
+    key = await seed("qa_refresh_scope_scrub")
+    jwt_svc = get_jwt_service()
+    legacy_refresh = jwt_svc.create_refresh_token(
+        wallet_id="qa_refresh_scope_scrub",
+        scopes=["billing:read", "bogus:scope", "tool:partner.notes.write:invoke\n"],
+    )
+    legacy_payload = jwt_svc.verify_refresh_token(legacy_refresh)
+    async with get_session_factory()() as session:
+        session.add(
+            RefreshTokenModel(
+                jti=legacy_payload.jti,
+                wallet_id="qa_refresh_scope_scrub",
+                key_id=key["key_id"],
+                expires_at=utc_now() + timedelta(days=1),
+            )
+        )
+        await session.commit()
+
+    renewed = await client.post(
+        "/v1/auth/refresh", json={"refresh_token": legacy_refresh}
+    )
+    assert renewed.status_code == 200
+    payload = jwt_svc.verify_access_token(renewed.json()["access_token"])
+    assert payload.scopes == ["billing:read"]
+    assert "bogus:scope" not in payload.scopes
 
 
 async def test_scoped_jwt_cannot_mint_unrestricted_api_key(client):
