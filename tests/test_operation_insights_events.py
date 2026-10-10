@@ -5,7 +5,7 @@ import base64
 import importlib.util
 import uuid
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from pathlib import Path
 
@@ -1698,6 +1698,163 @@ async def test_governed_local_replay_adds_one_attempt_and_shared_logical_anchor(
         if row.kind == "terminal"
         and row.request_disposition in {"execution_intent", "same_key_replay"}
     )
+
+
+@pytest.mark.parametrize("unregister_before_status", (False, True))
+@pytest.mark.asyncio
+async def test_real_in_progress_status_read_links_verified_owner_into_trace(
+    clean_database: None,
+    monkeypatch: pytest.MonkeyPatch,
+    unregister_before_status: bool,
+) -> None:
+    from app.core.config import get_settings
+    from app.db.models import IdempotencyRecordModel, InsightEventModel
+    from app.main import app
+    from app.schemas.billing import ServiceCategory
+    from app.services.idempotency import GOVERNED_MCP_IDEMPOTENCY_ENDPOINT
+    from app.services.operation_insights import auth as insight_auth
+    from app.services.operation_insights.contracts import (
+        AuthorizedOwnershipEpoch,
+        Limits,
+        Scope,
+        Window,
+    )
+    from app.services.operation_insights.events import wait_for_pending_events
+    from app.services.operation_insights.sources import read_evidence
+    from app.services.service_registry import get_service_registry
+    from app.services.signing_keys import get_signing_key_service
+    from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "OPERATION_INSIGHTS_EVENTS_ENABLED", True)
+    monkeypatch.setattr(settings, "TRUST_MODE_ENABLED", True)
+    monkeypatch.setattr(settings, "ALLOW_LEGACY_UNPERMITTED_MCP", False)
+    private_key = Ed25519PrivateKey.generate().private_bytes(
+        Encoding.Raw, PrivateFormat.Raw, NoEncryption()
+    )
+    monkeypatch.setattr(
+        settings,
+        "TRUST_SIGNING_PRIVATE_KEY_B64",
+        base64.b64encode(private_key).decode(),
+    )
+    get_signing_key_service()._private_key = None
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+    calls: list[int] = []
+
+    async def held_tool() -> dict[str, bool]:
+        calls.append(1)
+        started.set()
+        await release.wait()
+        return {"ok": True}
+
+    tool_name = "insight.local.held"
+    registry = get_service_registry()
+    registry.register_local(
+        service_id=tool_name,
+        name="Insight held local tool",
+        description="Synthetic in-progress governed operation",
+        category=ServiceCategory.AGENT_COMMS,
+        func=held_tool,
+        credits_per_unit=2.0,
+        unit_name="call",
+    )
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            provisioned = await provision_agent_wallet(client)
+            permit = await create_tool_permit(
+                client,
+                wallet_id=provisioned["agent_wallet_id"],
+                key_id=provisioned["key_id"],
+                tool_name=tool_name,
+            )
+            body = {
+                "jsonrpc": "2.0",
+                "id": "untrusted-client-id",
+                "method": "tools/call",
+                "params": {
+                    "name": tool_name,
+                    "arguments": {},
+                    "mcpContext": {
+                        "wallet_id": provisioned["agent_wallet_id"],
+                        "permit_id": permit["permit_id"],
+                        "idempotency_key": uuid.uuid4().hex,
+                    },
+                },
+            }
+            first_task = asyncio.create_task(
+                client.post(
+                    "/mcp/messages", headers=provisioned["agent_headers"], json=body
+                )
+            )
+            try:
+                await asyncio.wait_for(started.wait(), timeout=5)
+                if unregister_before_status:
+                    registry.unregister_local(tool_name)
+                pending = await client.post(
+                    "/mcp/messages", headers=provisioned["agent_headers"], json=body
+                )
+            finally:
+                release.set()
+                first = await first_task
+    finally:
+        registry.unregister_local(tool_name)
+
+    await wait_for_pending_events()
+    # SQLite CURRENT_TIMESTAMP has second precision; let the reader cutoff
+    # advance beyond the freshly ingested fractional-second event timestamps.
+    await asyncio.sleep(1.05)
+    async with get_session_factory()() as session:
+        rows = (await session.execute(select(InsightEventModel))).scalars().all()
+        owner = (
+            await session.execute(
+                select(IdempotencyRecordModel).where(
+                    IdempotencyRecordModel.wallet_id == provisioned["agent_wallet_id"],
+                    IdempotencyRecordModel.endpoint
+                    == GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+                )
+            )
+        ).scalar_one()
+
+        monkeypatch.setattr(insight_auth, "assert_scope_bound", lambda *_args: None)
+        now = datetime.now(timezone.utc)
+        scope = Scope(
+            wallet_ids=frozenset({provisioned["agent_wallet_id"]}),
+            authorized_ownership_epochs=(
+                AuthorizedOwnershipEpoch(
+                    provisioned["agent_wallet_id"],
+                    "synthetic-epoch",
+                    now - timedelta(minutes=5),
+                    now + timedelta(minutes=5),
+                ),
+            ),
+        )
+        evidence = await read_evidence(
+            scope,
+            Window(now - timedelta(minutes=5), now + timedelta(minutes=5), "ingress"),
+            Limits(),
+            session,
+        )
+
+    assert first.status_code == 200
+    assert pending.status_code == 200
+    assert pending.json()["error"]["code"] == -32005
+    assert calls == [1]
+    assert [row.kind for row in rows].count("attempt") == 1
+    status_ingress = next(
+        row
+        for row in rows
+        if row.kind == "ingress" and row.request_disposition == "status_read"
+    )
+    assert status_ingress.logical_operation_id == owner.record_id
+    assert status_ingress.original_operation_anchor_id == owner.record_id
+    assert status_ingress.duplicate_conflict_at is None
+    assert {row.source_id for row in evidence.window_ingress} >= {
+        status_ingress.event_id
+    }
 
 
 def test_local_event_migration_matches_model_and_preserves_retained_rows(
