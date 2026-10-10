@@ -122,6 +122,7 @@ from .policy import (
     PolicyEvaluation,
     evaluate_governed_action,
     evaluate_tool_invocation,
+    evaluate_wallet_access_for_tool,
     evaluate_wallet_policy,
     list_policy_bundles,
     record_governed_action,
@@ -282,6 +283,7 @@ __all__ = [
     "summarize_audit_events",
     # policy
     "evaluate_tool_invocation",
+    "evaluate_wallet_access_for_tool",
     "evaluate_governed_action",
     "evaluate_wallet_policy",
     "list_policy_bundles",

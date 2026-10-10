@@ -91,6 +91,13 @@ class Settings(BaseSettings):
     # production-like environments refuse to boot when this is true, and the
     # handler independently fails closed there. See docs/static-dev-api-keys.md.
     ENABLE_DEV_KEY_SELF_PROVISION: bool = False
+    # Unauthenticated local admin (opt-in DEBUG open mode): when true, and
+    # only when no keys of any class are configured, DEBUG is on, and the
+    # environment is local-compatible, any caller authenticates as a
+    # bootstrap admin. Default off, so DEBUG alone never mints admins.
+    # Production-like environments refuse to boot with this true, and the
+    # auth path independently fails closed there. See app/core/auth.py.
+    ALLOW_UNAUTHENTICATED_DEV_ADMIN: bool = False
 
     # --- Enterprise IGA bridge (OIDC -> PolicyBundle) ---
     # JSON object mapping a trusted enterprise OIDC issuer URL to its pinned

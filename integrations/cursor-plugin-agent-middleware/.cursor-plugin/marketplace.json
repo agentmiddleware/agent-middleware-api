@@ -1,0 +1,17 @@
+{
+  "name": "agent-middleware-marketplace",
+  "owner": {
+    "name": "Chris Sellers"
+  },
+  "metadata": {
+    "description": "Cursor plugin for Agent Middleware governed tool calls",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "agent-middleware",
+      "source": "./plugins/agent-middleware",
+      "description": "Permit before action, receipt after, via the Agent Middleware API"
+    }
+  ]
+}
