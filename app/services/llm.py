@@ -69,7 +69,7 @@ class LLMService:
 
         if provider in ("openai", "azure", "anthropic"):
             return {
-                "Authorization": f"Bearer {self.settings.LLM_API_KEY}",
+                "Authorization": f"Bearer {self.settings.LLM_API_KEY.get_secret_value()}",
                 "Content-Type": "application/json",
             }
 
@@ -229,7 +229,10 @@ class LLMService:
             )
             raise Exception("LLM circuit breaker is open")
 
-        if not self.settings.LLM_API_KEY and self._get_provider() not in ("ollama",):
+        if (
+            not self.settings.LLM_API_KEY.get_secret_value()
+            and self._get_provider() not in ("ollama",)
+        ):
             logger.warning("LLM_API_KEY not set, returning mock response")
             return LLMResponse(
                 content="Mock response: API key not configured",

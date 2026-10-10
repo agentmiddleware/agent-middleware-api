@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 _KYC_OWNED_SUSPENSION_REASONS = ("rejected", "expired")
 settings = get_settings()
 
-stripe.api_key = settings.STRIPE_SECRET_KEY
+stripe.api_key = settings.STRIPE_SECRET_KEY.get_secret_value()
 
 
 class KYCNotRequiredError(Exception):
@@ -330,7 +330,7 @@ class KYCService:
             event = stripe.Webhook.construct_event(
                 payload,
                 sig_header,
-                settings.STRIPE_WEBHOOK_SECRET,
+                settings.STRIPE_WEBHOOK_SECRET.get_secret_value(),
             )
         # SignatureVerificationError is a StripeError, not a ValueError, so it
         # must be named: otherwise a bad signature escapes as a 500.
