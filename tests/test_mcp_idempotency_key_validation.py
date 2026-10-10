@@ -690,6 +690,50 @@ async def test_legacy_context_null_key_reads_as_absent(
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.parametrize("surface", ["legacy", "rest", "standard"])
+async def test_misplaced_context_spelling_is_refused_before_any_effect(
+    client, governed_legacy, counted_tool, standard_mcp_enabled, surface
+):
+    provisioned, permit = governed_legacy
+    before = await _snapshot(client, provisioned, counted_tool)
+    body = _legacy_call(counted_tool.name, provisioned, permit, key="spelling-1")
+    headers = provisioned["agent_headers"]
+    if surface == "rest":
+        path = f"/mcp/tools/{counted_tool.name}/invoke"
+        payload = body["params"]
+        expected_field = "mcp_context"
+    else:
+        path = "/mcp/messages" if surface == "legacy" else "/mcp"
+        body["params"]["mcp_context"] = body["params"].pop("mcpContext")
+        payload = body
+        expected_field = "mcpContext"
+        if surface == "standard":
+            headers = {**headers, **MCP_HEADERS}
+
+    response = await client.post(path, json=payload, headers=headers)
+    if surface == "rest":
+        assert response.status_code == 422, response.text
+        assert expected_field in response.json()["detail"][0]["msg"]
+    else:
+        assert response.status_code == 200, response.text
+        error = response.json()["error"]
+        assert error["code"] == -32602
+        assert f"use {expected_field}" in error["message"]
+    assert await _snapshot(client, provisioned, counted_tool) == before
+
+
+def test_openapi_context_fields_are_bound_to_their_transport():
+    app.openapi_schema = None
+    schema = app.openapi()
+    legacy = schema["paths"]["/mcp/messages"]["post"]["requestBody"]
+    params = legacy["content"]["application/json"]["schema"]["properties"]["params"]
+    assert "mcpContext" in params["properties"]
+    assert "mcp_context" not in params["properties"]
+    rest = schema["components"]["schemas"]["ToolCallRequest"]["properties"]
+    assert "mcp_context" in rest
+    assert "mcpContext" not in rest
+
+
 async def test_rest_invoke_refuses_blank_or_conflicting_keys_before_any_effect(
     client, governed_legacy, counted_tool
 ):
