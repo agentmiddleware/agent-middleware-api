@@ -322,9 +322,8 @@ async def test_classified_value_error_text_still_reaches_the_client(
 ):
     """Only unknown text is replaced; the strings clients match stay on the wire.
 
-    ``idempotency_key_reused`` is the one contract message that shares the
-    -32603 code with the internal-error fallback, so it is the case most
-    likely to be swept up by mistake.
+    ``idempotency_key_reused`` has its own application code; unknown
+    ``ValueError`` text must still use the internal-error fallback.
     """
     provisioned = await provision_agent_wallet(client)
     _break_invoke(monkeypatch, ValueError("idempotency_key_reused"))
@@ -349,6 +348,6 @@ async def test_classified_value_error_text_still_reaches_the_client(
 
     assert resp.status_code == 200
     assert resp.json()["error"] == {
-        "code": -32603,
+        "code": -32009,
         "message": "idempotency_key_reused",
     }

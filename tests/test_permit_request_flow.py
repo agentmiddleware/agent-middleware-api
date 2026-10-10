@@ -27,6 +27,7 @@ from decimal import Decimal
 import httpx
 import pytest
 from httpx import ASGITransport, AsyncClient
+from pydantic import SecretStr
 from sqlalchemy import select
 
 import app.services.permit_requests as permit_requests_module
@@ -102,7 +103,9 @@ def _sentinel_env(monkeypatch, *, simulated: bool, configured: bool = True):
         settings, "SENTINEL_API_URL", "https://sentinel.test" if configured else ""
     )
     monkeypatch.setattr(
-        settings, "SENTINEL_API_KEY", "sk_test_" + "0" * 64 if configured else ""
+        settings,
+        "SENTINEL_API_KEY",
+        SecretStr("sk_test_" + "0" * 64) if configured else SecretStr(""),
     )
     monkeypatch.setattr(settings, "SENTINEL_APPROVERS", "")
     monkeypatch.setattr(settings, "PERMIT_REQUEST_TIMEOUT_SECONDS", 3600)

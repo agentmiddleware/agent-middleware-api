@@ -24,7 +24,7 @@ settings = get_settings()
 
 def _is_stripe_configured() -> bool:
     """Check if Stripe is configured (same truth as /health/dependencies)."""
-    return bool(get_settings().STRIPE_SECRET_KEY)
+    return bool(get_settings().STRIPE_SECRET_KEY.get_secret_value())
 
 
 class ServiceCapability(BaseModel):

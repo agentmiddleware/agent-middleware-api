@@ -12,10 +12,14 @@ Scope, stated honestly:
   falling back to ``groups``) to wallet-scoped PolicyBundle definitions via
   ``IGA_GROUP_POLICY_MAP`` and enforces per-principal runtime call caps
   (lifetime ``max_uses`` and a sliding velocity window).
-- Cap counters are IN-PROCESS and PER-INSTANCE — the same honesty as
-  app/services/velocity_monitor.py owes its DB counters: they reset on
-  restart and are not shared across replicas. They bound abuse on a single
-  instance; a fleet-wide cap needs a shared store and is out of scope here.
+- Cap counters live in the shared Redis store (via app.core.durable_state)
+  whenever the durable backend resolves to redis, so max_uses and velocity
+  caps hold across processes and restarts. Without a Redis backend the
+  counters are IN-PROCESS and PER-INSTANCE: they reset on restart and are
+  not shared across replicas, bounding abuse on a single instance only. A
+  capped call that cannot reach the configured Redis store is denied with
+  iga_cap_store_unavailable instead of spending from a local counter that
+  other processes cannot see.
 
 PolicyBundleModel deliberately carries no max_uses/velocity columns; the
 runtime caps live in the mapping config and are enforced here.
@@ -24,9 +28,11 @@ runtime caps live in the mapping config and are enforced here.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import time
+import uuid
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
@@ -87,11 +93,17 @@ class IGAGrant:
 
 @dataclass(eq=False)
 class IGAUseReservation:
-    """Process-local identity for one consumption; never exposed to callers."""
+    """Identity for one consumption; never exposed to callers.
+
+    ``shared`` marks uses recorded in Redis rather than the process-local
+    counters; ``member`` names the use in the shared velocity sorted set.
+    """
 
     counter_key: tuple[str, str, str, str, str]
     recorded_at: float
     released: bool = False
+    shared: bool = False
+    member: str = ""
 
 
 @dataclass(frozen=True)
@@ -521,11 +533,217 @@ _REASON_RANK = {
     "iga_tool_not_allowed": 3,
     "iga_max_uses_exceeded": 4,
     "iga_velocity_exceeded": 4,
+    # A store outage beats every grant-level denial: it says the caps could
+    # not be verified at all, which is more actionable than any one denial.
+    "iga_cap_store_unavailable": 5,
 }
+
+
+class _SharedCapUnavailable(RuntimeError):
+    """The configured Redis cap store could not be reached or answered."""
+
+
+# Atomic check-and-consume for the shared Redis path. Server TIME keeps the
+# velocity window consistent across processes with different clocks. The
+# script checks both caps before recording anything, so a denied call leaves
+# no state behind. The lifetime counter is maintained for every capped grant
+# (mirroring the process-local path) and never expires; the velocity sorted
+# set carries a TTL of one window.
+_IGA_SHARED_CONSUME_LUA = """
+local uses_key = KEYS[1]
+local window_key = KEYS[2]
+local max_uses = tonumber(ARGV[1])
+local window_ms = tonumber(ARGV[2])
+local max_calls = tonumber(ARGV[3])
+local member = ARGV[4]
+local t = redis.call('TIME')
+local now_ms = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+if max_uses > 0 then
+  local used = tonumber(redis.call('GET', uses_key) or '0')
+  if used >= max_uses then
+    return {2, used}
+  end
+end
+if window_ms > 0 then
+  redis.call('ZREMRANGEBYSCORE', window_key, 0, now_ms - window_ms)
+  local in_window = redis.call('ZCARD', window_key)
+  if in_window >= max_calls then
+    return {3, in_window}
+  end
+end
+local new_used = redis.call('INCR', uses_key)
+if window_ms > 0 then
+  redis.call('ZADD', window_key, now_ms, member)
+  redis.call('PEXPIRE', window_key, window_ms)
+end
+return {1, new_used}
+"""
+
+# Best-effort compensation for a reserved use whose action never dispatched.
+# A missing counter is a no-op (counters never go negative); the caller
+# guards double release with the reservation's released flag before calling.
+_IGA_SHARED_RELEASE_LUA = """
+local uses_key = KEYS[1]
+local window_key = KEYS[2]
+local member = ARGV[1]
+local used = tonumber(redis.call('GET', uses_key) or '0')
+if used > 1 then
+  redis.call('DECR', uses_key)
+elseif used == 1 then
+  redis.call('DEL', uses_key)
+end
+redis.call('ZREM', window_key, member)
+return 1
+"""
+
+
+def _grant_has_caps(grant: IGAGrant) -> bool:
+    """Whether this grant needs any cap accounting at all."""
+    if grant.max_uses is not None:
+        return True
+    return (
+        grant.velocity_window_seconds is not None
+        and grant.velocity_max_calls is not None
+    )
+
+
+def _shared_cap_keys(counter_key: _CounterKey) -> tuple[str, str]:
+    """Redis keys for one grant counter, under the durable-state namespace."""
+    digest = hashlib.sha256(
+        json.dumps(list(counter_key), separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    base = f"{get_settings().STATE_NAMESPACE}:iga:v1:{digest}"
+    return f"{base}:uses", f"{base}:window"
+
+
+async def _shared_cap_client() -> Any:
+    """Redis client for shared caps, or None for the process-local path.
+
+    None means no shared store is configured (any non-redis durable
+    backend): caps fall back to the documented per-process counters. A
+    configured-but-broken store raises _SharedCapUnavailable so callers fail
+    closed instead of spending from counters other processes cannot see.
+    """
+    try:
+        from app.core.durable_state import get_durable_state
+
+        return await get_durable_state().shared_redis()
+    except Exception as exc:
+        logger.warning(
+            "iga_shared_cap_store_unavailable: shared IGA caps unreachable, "
+            "denying capped calls (%s: %s)",
+            type(exc).__name__,
+            exc,
+        )
+        raise _SharedCapUnavailable from exc
+
+
+async def _shared_consume(
+    client: Any,
+    counter_key: _CounterKey,
+    grant: IGAGrant,
+    now: float,
+) -> IGADecision:
+    """Atomically check and record one use in Redis.
+
+    Raises _SharedCapUnavailable when the store cannot answer, so the caller
+    fails closed. Denial details mirror the process-local path.
+    """
+    uses_key, window_key = _shared_cap_keys(counter_key)
+    max_uses = grant.max_uses or 0
+    window_seconds = grant.velocity_window_seconds
+    max_calls = grant.velocity_max_calls
+    if window_seconds is None or max_calls is None:
+        window_ms = 0
+        max_calls_arg = 0
+    else:
+        window_ms = int(window_seconds * 1000)
+        max_calls_arg = max_calls
+    member = uuid.uuid4().hex
+    try:
+        status, count = await client.eval(
+            _IGA_SHARED_CONSUME_LUA,
+            2,
+            uses_key,
+            window_key,
+            max_uses,
+            window_ms,
+            max_calls_arg,
+            member,
+        )
+    except Exception as exc:
+        logger.warning(
+            "iga_shared_cap_store_unavailable: shared consume failed, "
+            "denying capped call (%s: %s)",
+            type(exc).__name__,
+            exc,
+        )
+        raise _SharedCapUnavailable from exc
+    status = int(status)
+    count = int(count)
+    if status == 1:
+        return IGADecision(
+            allowed=True,
+            reason="allowed",
+            group=grant.group,
+            policy_id=grant.policy_id,
+            details={"used": count},
+            reservation=IGAUseReservation(counter_key, now, shared=True, member=member),
+        )
+    if status == 2:
+        return IGADecision(
+            False,
+            "iga_max_uses_exceeded",
+            grant.group,
+            grant.policy_id,
+            {"used": count, "limit": grant.max_uses},
+        )
+    return IGADecision(
+        False,
+        "iga_velocity_exceeded",
+        grant.group,
+        grant.policy_id,
+        {
+            "window_seconds": window_seconds,
+            "calls_in_window": count,
+            "limit": max_calls,
+        },
+    )
+
+
+async def _shared_release(counter_key: _CounterKey, member: str) -> None:
+    """Hand back one shared use. Best effort and never raises.
+
+    A use that cannot be handed back (store unreachable) stays consumed: the
+    principal loses one use rather than every process losing the cap.
+    """
+    try:
+        from app.core.durable_state import get_durable_state
+
+        client = await get_durable_state().shared_redis()
+        if client is None:
+            logger.warning(
+                "iga_shared_release_skipped: no shared store configured; "
+                "a shared use stays consumed"
+            )
+            return
+        uses_key, window_key = _shared_cap_keys(counter_key)
+        await client.eval(
+            _IGA_SHARED_RELEASE_LUA, 2, uses_key, window_key, member or ""
+        )
+    except Exception as exc:
+        logger.warning(
+            "iga_shared_release_failed: a shared use stays consumed (%s: %s)",
+            type(exc).__name__,
+            exc,
+        )
 
 
 def reset_iga_counters() -> None:
     """Drop all in-process cap counters. Test hook.
+
+    Shared Redis counters are untouched: they belong to every process, so a
+    local reset (which also simulates a fresh process) must not erase them.
 
     Also rebinds the lock: asyncio primitives bind to the first event loop
     that awaits them, and each test runs on a fresh loop.
@@ -542,8 +760,9 @@ async def enforce_tool_call(
     """Decide whether this enterprise principal may invoke ``tool_name``.
 
     First grant whose bundle is active, allows the tool, and passes the
-    runtime caps wins; the use is recorded atomically with the ALLOW under
-    the counter lock. When every grant is exhausted, the most informative
+    runtime caps wins; the use is recorded atomically with the ALLOW (under
+    the counter lock for process-local counters, in one Lua script for the
+    shared Redis store). When every grant is exhausted, the most informative
     denial gathered is returned.
     """
     grants = resolve_policy_grants(principal)
@@ -603,9 +822,21 @@ async def enforce_tool_call(
         grant = eligible[0]
         return IGADecision(True, "allowed", grant.group, grant.policy_id, {})
     if eligible:
+        # The shared client is resolved once, outside the counter lock: it
+        # performs network I/O and must not serialize with local accounting.
+        # A broken store fails every capped grant closed below.
+        try:
+            shared_client = await _shared_cap_client()
+        except _SharedCapUnavailable:
+            shared_client = None
+            shared_broken = True
+        else:
+            shared_broken = False
         # Check-and-record must be atomic: the same lock covers the cap read,
         # the decision, and the increment, so two concurrent calls cannot both
-        # observe the last remaining use.
+        # observe the last remaining use. The shared path is atomic in Redis
+        # itself (one Lua script); the lock additionally serializes it with
+        # the process-local fallback.
         async with _counter_lock:
             now = _monotonic()
             for grant in eligible:
@@ -618,6 +849,34 @@ async def enforce_tool_call(
                     grant.group,
                     grant.policy_id,
                 )
+                if _grant_has_caps(grant) and (
+                    shared_client is not None or shared_broken
+                ):
+                    if shared_client is None:
+                        decision = IGADecision(
+                            False,
+                            "iga_cap_store_unavailable",
+                            grant.group,
+                            grant.policy_id,
+                            {},
+                        )
+                    else:
+                        try:
+                            decision = await _shared_consume(
+                                shared_client, counter_key, grant, now
+                            )
+                        except _SharedCapUnavailable:
+                            decision = IGADecision(
+                                False,
+                                "iga_cap_store_unavailable",
+                                grant.group,
+                                grant.policy_id,
+                                {},
+                            )
+                    if not decision.allowed:
+                        candidates.append(decision)
+                        continue
+                    return decision
                 used = _lifetime_uses.get(counter_key, 0)
                 if grant.max_uses is not None and used >= grant.max_uses:
                     candidates.append(
@@ -724,6 +983,9 @@ async def release_tool_use(
         ):
             return
         reservation.released = True
+        if reservation.shared:
+            await _shared_release(key, reservation.member)
+            return
         used = _lifetime_uses.get(key, 0)
         if used > 1:
             _lifetime_uses[key] = used - 1
