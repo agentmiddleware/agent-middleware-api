@@ -46,6 +46,11 @@ def upgrade() -> None:
         ["wallet_id", "occurred_at", "event_id"],
     )
     op.create_index(
+        "ix_insight_events_wallet_anchor_time",
+        "operation_insight_events",
+        ["wallet_id", "original_operation_anchor_id", "occurred_at"],
+    )
+    op.create_index(
         "ix_insight_events_request",
         "operation_insight_events",
         ["request_id", "event_id"],
@@ -72,6 +77,10 @@ def downgrade() -> None:
         table_name="operation_insight_events",
     )
     op.drop_index("ix_insight_events_request", table_name="operation_insight_events")
+    op.drop_index(
+        "ix_insight_events_wallet_anchor_time",
+        table_name="operation_insight_events",
+    )
     op.drop_index(
         "ix_insight_events_wallet_time", table_name="operation_insight_events"
     )
