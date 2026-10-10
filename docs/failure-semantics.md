@@ -234,8 +234,7 @@ Two non-terminal answers matter to clients:
   The claim fence also uses this response for an uncertain
   preparation commit and for a losing dispatch claimant. That is an observable
   correction from the earlier generic upstream-prepare failure on the rare
-  uncertain-commit path. REST preserves the existing `400` response and
-  JSON-RPC preserves the existing `-32003` code.
+  uncertain-commit path. REST returns `409` and JSON-RPC returns `-32005`.
 - **`idempotency_key_reused`** — the same key arrived with a *different*
   logical payload. Fail-closed; nothing is dispatched or charged
   (`test_governed_upstream_conflicting_payload_reuse_never_redispatches`).
