@@ -1714,12 +1714,14 @@ async def test_real_in_progress_status_read_links_verified_owner_into_trace(
     from app.services.idempotency import GOVERNED_MCP_IDEMPOTENCY_ENDPOINT
     from app.services.operation_insights import auth as insight_auth
     from app.services.operation_insights.contracts import (
+        AccountMapping,
         AuthorizedOwnershipEpoch,
         Limits,
         Scope,
         Window,
     )
     from app.services.operation_insights.events import wait_for_pending_events
+    from app.services.operation_insights.inspect import inspect_operations
     from app.services.operation_insights.sources import read_evidence
     from app.services.service_registry import get_service_registry
     from app.services.signing_keys import get_signing_key_service
@@ -1855,6 +1857,21 @@ async def test_real_in_progress_status_read_links_verified_owner_into_trace(
     assert {row.source_id for row in evidence.window_ingress} >= {
         status_ingress.event_id
     }
+    assert status_ingress.event_id in {row.source_id for row in evidence.rows}
+    operation = next(
+        item
+        for item in inspect_operations(
+            evidence, AccountMapping(version="synthetic-v1", intervals=())
+        )
+        if item.original_operation_anchor_id == owner.record_id
+    )
+    assert status_ingress.request_id in operation.request_ids
+    assert any(
+        observation.request_id == status_ingress.request_id
+        and observation.disposition == "status_read"
+        for observation in operation.ingress_observations
+    )
+    assert len(operation.attempt_ids) == 1
 
 
 def test_local_event_migration_matches_model_and_preserves_retained_rows(
