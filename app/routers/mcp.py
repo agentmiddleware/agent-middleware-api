@@ -1249,6 +1249,29 @@ async def _execute_registered_tool_inner(
     if not wallet_id:
         raise ValueError("Missing wallet_id in mcpContext")
 
+    # Per-key tool allowlist: deny BEFORE any permit lookup, budget
+    # reservation, idempotency claim, charge, or dispatch, so a bounded key
+    # can neither spend nor learn anything through a tool outside its list.
+    if auth.allowed_tools is not None and tool_name not in auth.allowed_tools:
+        raise ToolPermissionDenied("key_tool_not_allowed")
+    # Defense in depth for the demo tenant: when the operator configured a
+    # demo tool set, a demo-tenant wallet may only be charged for tools in
+    # it — even for callers (e.g. bootstrap) that bypass the permit-mint
+    # checks. Unset (the default) means no cap and skips the lookup.
+    from app.services.demo_tenant import DEMO_TENANT_LABEL
+
+    _demo_tools = settings.demo_allowed_tools_list
+    if _demo_tools:
+        from app.db.models import WalletModel as _DemoWalletModel
+
+        async with get_session_factory()() as _demo_session:
+            _demo_wallet = await _demo_session.get(_DemoWalletModel, wallet_id)
+            _demo_wallet_tenant = (
+                getattr(_demo_wallet, "tenant", None) if _demo_wallet else None
+            )
+        if _demo_wallet_tenant == DEMO_TENANT_LABEL and tool_name not in _demo_tools:
+            raise ToolPermissionDenied("demo_tool_not_allowed")
+
     # Authorize wallet ownership BEFORE the idempotency store is touched. The
     # idempotency lookup key is (wallet_id, endpoint, key) with wallet_id taken
     # from the request body, so running idem.begin() first let an unauthorized

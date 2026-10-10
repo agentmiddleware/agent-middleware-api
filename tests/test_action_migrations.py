@@ -26,6 +26,10 @@ FIELDS = (
     "action_upstream_binding_hash",
 )
 ACTION_REVISION = "042_permit_action_binding"
+# Current migration head. 043 adds only nullable tenant/allowlist columns
+# (no permit/receipt row changes), so every authority-retention assertion
+# below still exercises the 042/041 behavior through the new head.
+HEAD_REVISION = "043_demo_tenant_key_allowlist"
 SCRUB_REVISION = "041_scrub_content_owner_keys"
 CONTENT_TABLES = ("content_pipelines", "content_campaigns")
 AUTHORITIES = [
@@ -112,7 +116,7 @@ def test_action_migration_retains_legacy_and_blocks_authority_loss(
     assert result.returncode == 0, result.stderr
     with sqlite3.connect(path) as db:
         assert db.execute("SELECT version_num FROM alembic_version").fetchone() == (
-            ACTION_REVISION,
+            HEAD_REVISION,
         )
         assert db.execute("SELECT * FROM permits").fetchone() == (
             *before,
@@ -149,6 +153,9 @@ def test_action_migration_retains_legacy_and_blocks_authority_loss(
         assert result.returncode != 0, "downgrade discarded durable action authority"
         assert "action_authority_retained" in result.stderr
         with sqlite3.connect(path) as db:
+            # The 043 downgrade (drops its own added columns) succeeds, then
+            # the 042 guard refuses: the version rests on 042 with all rows
+            # intact.
             assert (
                 db.execute("SELECT version_num FROM alembic_version").fetchone()[0]
                 == ACTION_REVISION
@@ -211,7 +218,7 @@ def test_postgres_legacy_roundtrip_and_fail_closed_downgrade():
     result = migrate(url, "head")
     assert result.returncode == 0, result.stderr
     assert sql("SELECT version_num FROM alembic_version") == [
-        {"version_num": ACTION_REVISION}
+        {"version_num": HEAD_REVISION}
     ]
     for table, old in before.items():
         assert sql(f"SELECT * FROM {table}")[0] == {**old, **dict.fromkeys(FIELDS)}
@@ -227,7 +234,8 @@ def test_postgres_legacy_roundtrip_and_fail_closed_downgrade():
         {"version_num": SCRUB_REVISION}
     ]
     assert {t: sql(f"SELECT * FROM {t}")[0] for t in before} == before
-    # The second upgrade exercises the 041 -> 042 entry path independently.
+    # The second upgrade exercises the 041 -> head entry path independently
+    # (through 042).
     result = migrate(url, "head")
     assert result.returncode == 0, result.stderr
     for table, old in before.items():
@@ -261,6 +269,7 @@ def test_postgres_legacy_roundtrip_and_fail_closed_downgrade():
             {"owner_key": "w"},
         ]
     print(
-        "PostgreSQL: 040 -> 041 -> 042 and 041 -> 042; content owners scrubbed; "
-        "legacy permit/receipt bytes retained; every partial authority and owner downgrade blocked"
+        "PostgreSQL: 040 -> 041 -> head(043, through 042) and 041 -> head(043); "
+        "content owners scrubbed; legacy permit/receipt bytes retained; "
+        "every partial authority and owner downgrade blocked"
     )

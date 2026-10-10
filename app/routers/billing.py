@@ -34,7 +34,7 @@ from ..services.idempotency import (
 )
 from ..services.policies import evaluate_wallet_policy
 from ..services.velocity_monitor import WalletFrozenError
-from ..services.wallet_engine import WalletExpiredError
+from ..services.wallet_engine import CrossTenantTransferError, WalletExpiredError
 from ..services.stripe_integration import get_stripe_integration
 from ..services.shadow_ledger import SimulatedChargeResult, get_shadow_ledger
 from ..services.acp_bridge import (
@@ -1136,6 +1136,31 @@ async def transfer_wallets(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=expired_detail,
+        )
+    except CrossTenantTransferError as e:
+        await _record_billing_governance(
+            event="billing.transfer",
+            auth=auth,
+            wallet_id=from_wallet_id,
+            service_category="transfer",
+            endpoint="/v1/billing/transfer",
+            request_id=correlation_id,
+            estimated_cost=amount,
+            ok=False,
+            error="cross_tenant_transfer_refused",
+            metadata={"to_wallet_id": to_wallet_id, "message": str(e)},
+        )
+        refused_detail = {
+            "error": "cross_tenant_transfer_refused",
+            "message": str(e),
+        }
+        await guard.complete(
+            refused_detail,
+            status.HTTP_403_FORBIDDEN,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=refused_detail,
         )
     except ValueError as e:
         await _record_billing_governance(

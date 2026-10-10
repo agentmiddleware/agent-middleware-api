@@ -97,6 +97,7 @@ from .routers import (
     kyc,
     api_keys,
     dev_keys,
+    demo_keys,
     keys,
     me,
     awi,
@@ -560,6 +561,14 @@ app = FastAPI(
 # Rate limiting (enforces documented 120 req/min per API key)
 app.add_middleware(RateLimitMiddleware)
 
+# Stash (method, path) for auth-time demo-tenant route confinement. No
+# authentication, no branching, negligible cost: only demo-tenant
+# credentials read this value. Added after (so it wraps) the rate limiter,
+# which sets the context before any handler or auth dependency runs.
+from app.services.demo_tenant import DemoRequestContextMiddleware
+
+app.add_middleware(DemoRequestContextMiddleware)
+
 # Inbound body ceiling. Registered between the rate limiter and CORS so the
 # stack puts it outside RateLimitMiddleware — an oversized body is refused
 # before any per-key bookkeeping or handler buffers it — and inside
@@ -763,6 +772,15 @@ for router_module in CORE_TRUST_ROUTERS:
 app.include_router(
     dev_keys.router, include_in_schema=settings.ENABLE_DEV_KEY_SELF_PROVISION
 )
+
+# Self-serve demo tenant: the handler is gated at runtime by its own
+# ENABLE_DEMO_TENANT kill switch (404 when off, plus every existing demo
+# credential refused at authentication), with issuance abuse controls and a
+# route denylist for demo callers — so the route stays mounted for flag
+# flips but is only *advertised* in the OpenAPI schema when the flag is on.
+# Unlike dev keys this IS allowed in production-like environments (with
+# REDIS_URL, enforced at boot).
+app.include_router(demo_keys.router, include_in_schema=settings.ENABLE_DEMO_TENANT)
 
 # Stripe webhooks answer only signed Stripe traffic; a deployment with no
 # Stripe key configured has nothing that could ever call them, so they are
