@@ -33,7 +33,7 @@ from .agent_money import WalletNotFoundError
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-stripe.api_key = settings.STRIPE_SECRET_KEY
+stripe.api_key = settings.STRIPE_SECRET_KEY.get_secret_value()
 
 # Explicit HTTP timeout on the shared Stripe client (the SDK's RequestsClient
 # default, stated here so it is a contract rather than an accident). The ACP
@@ -291,7 +291,7 @@ class StripeIntegration:
             event = stripe.Webhook.construct_event(
                 payload,
                 sig_header,
-                settings.STRIPE_WEBHOOK_SECRET,
+                settings.STRIPE_WEBHOOK_SECRET.get_secret_value(),
             )
         except (ValueError, stripe.SignatureVerificationError) as e:
             logger.error(f"Invalid Stripe signature: {e}")
