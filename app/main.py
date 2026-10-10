@@ -768,7 +768,7 @@ app.include_router(
 # Stripe key configured has nothing that could ever call them, so they are
 # mounted only when Stripe is actually configured (or on instances that mount
 # every surface anyway).
-if settings.STRIPE_SECRET_KEY or settings.ENABLE_PROOF_SURFACES:
+if settings.STRIPE_SECRET_KEY.get_secret_value() or settings.ENABLE_PROOF_SURFACES:
     app.include_router(webhooks.router)
 
 if settings.ENABLE_PROOF_SURFACES:
