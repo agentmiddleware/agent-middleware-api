@@ -52,6 +52,7 @@ from .middleware.security_headers import SecurityHeadersMiddleware
 from .core.trust_mode import (
     is_production_like_environment,
     validate_trust_mode_guardrails,
+    warn_if_open_admin_enabled,
     warn_if_trust_mode_permissive,
 )
 from .db.database import SchemaInitError, init_db, close_db
@@ -169,6 +170,7 @@ _SIGNING_KEY_REMEDIATION = {
 async def lifespan(app: FastAPI):
     validate_trust_mode_guardrails(settings)
     warn_if_trust_mode_permissive(settings)
+    warn_if_open_admin_enabled(settings)
     # Operator-facing posture record. The unauthenticated /health/dependencies
     # payload no longer publishes per-service simulation modes when proof
     # surfaces are unmounted, so this startup line is where that truth lives
