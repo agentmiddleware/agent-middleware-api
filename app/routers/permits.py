@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 
 from app.core.auth import AuthContext, get_auth_context
 from app.core.config import get_settings
+from app.idempotency_gate import requires_idempotency
 from app.schemas.trust import (
     ActionPermitFields,
     ActionPermitCreateRequest,
@@ -115,6 +116,11 @@ async def list_permits(
 
 
 @router.post("", response_model=PermitResponse, status_code=status.HTTP_201_CREATED)
+@requires_idempotency(
+    "POST /v1/permits",
+    enforced=True,
+    mechanism="required Idempotency-Key header",
+)
 async def create_permit(
     request: PermitCreateRequest,
     idempotency_key: str = Header(..., alias="Idempotency-Key"),
@@ -338,6 +344,11 @@ async def verify_permit(
 
 
 @action_router.post("", response_model=PermitResponse, status_code=201)
+@requires_idempotency(
+    "POST /v1/action-permits",
+    enforced=True,
+    mechanism="required Idempotency-Key header",
+)
 async def issue_action_permit(
     request: ActionPermitCreateRequest,
     idempotency_key: str = Header(..., alias="Idempotency-Key"),
