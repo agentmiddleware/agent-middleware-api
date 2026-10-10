@@ -348,10 +348,12 @@ def _gateway_adds_duplicates():
 def test_a_gateway_worse_than_baseline_is_a_headline_failure():
     """More duplicates behind the gateway outranks anything good in the run."""
     comparisons = _gateway_prevents() + _gateway_adds_duplicates()
-    assert headline_for(comparisons) is Answer.GATEWAY_DID_NOT_HOLD
+    assert headline_for(comparisons) is Answer.GATEWAY_ADDED_DUPLICATES
 
     answer = build_answer(_gateway_adds_duplicates())
-    assert answer.answer is Answer.GATEWAY_DID_NOT_HOLD
+    assert answer.answer is Answer.GATEWAY_ADDED_DUPLICATES
+    assert answer.as_dict()["answer"] == "gateway_added_duplicates"
+    assert answer.as_dict()["counts"]["failed_gateway_guarantees"] == 0
     assert not answer.recommends_the_product
     assert answer.gateway_failures, "the worse run must be listed as a failure"
     assert "More duplicate" in answer.headline
@@ -360,6 +362,11 @@ def test_a_gateway_worse_than_baseline_is_a_headline_failure():
     assert answer.headline in html
     assert "Failures and worse outcomes measured in this run" in html
     assert "Guarantees this product did not hold in this run" not in html
+
+
+def test_failed_guarantee_outranks_a_worse_baseline_comparison():
+    comparisons = _gateway_adds_duplicates() + _gateway_fails()
+    assert headline_for(comparisons) is Answer.GATEWAY_DID_NOT_HOLD
 
 
 def test_a_run_with_no_baseline_does_not_claim_the_baseline_would_have_coped():
