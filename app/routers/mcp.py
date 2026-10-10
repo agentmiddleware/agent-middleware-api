@@ -28,7 +28,7 @@ from typing import Any, NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.exc import IntegrityError
 
 from ..audit.lightweight import record_audit
@@ -111,7 +111,7 @@ from ..trust import (
     PermitWriteContendedError,
     PolicyDecision,
     ReceiptWriteContendedError,
-    evaluate_tool_invocation,
+    evaluate_wallet_access_for_tool,
     evaluate_wallet_policy,
     get_agent_money,
     get_human_approval_service,
@@ -440,6 +440,15 @@ class ToolCallRequest(BaseModel):
     )
     mcp_context: McpContext | None = Field(None, description="Billing context")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_jsonrpc_context(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "mcpContext" in value:
+            raise ValueError(
+                "Use mcp_context for this REST route; mcpContext is JSON-RPC-only"
+            )
+        return value
+
 
 class ToolCallResponse(BaseModel):
     """MCP tool call response."""
@@ -491,8 +500,39 @@ async def get_tools_json(
         "initialization lifecycle. Check `/.well-known/agent.json` before "
         "assuming the standard MCP Streamable HTTP endpoint at POST /mcp is "
         "available; both transports run the same governed permit→meter→receipt "
-        "path when enabled."
+        "path when enabled. tools/call uses params.mcpContext; mcp_context "
+        "belongs only to the deprecated REST invoke route. Preserve one "
+        "Idempotency-Key across retries."
     ),
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "jsonrpc": {"type": "string", "enum": ["2.0"]},
+                            "id": {"type": ["string", "number", "null"]},
+                            "method": {
+                                "type": "string",
+                                "enum": ["tools/list", "tools/call"],
+                            },
+                            "params": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {"type": "string"},
+                                    "arguments": {"type": "object"},
+                                    "mcpContext": McpContext.model_json_schema(),
+                                },
+                            },
+                        },
+                        "required": ["method"],
+                    }
+                }
+            },
+        }
+    },
 )
 async def handle_messages(
     request: Request,
@@ -1095,7 +1135,7 @@ async def _action_request_denial_receipt(
         "tool_name": tool_name,
         "arguments": arguments,
     }
-    decision = evaluate_tool_invocation(
+    decision = evaluate_wallet_access_for_tool(
         auth=auth,
         wallet_id=wallet_id,
         tool_name=tool_name,
@@ -1240,7 +1280,9 @@ async def _execute_registered_tool_inner(
     # namespace on denial, permanently poisoning that (wallet, key). Gate here so
     # a caller who does not own wallet_id never reaches the store. The priced
     # decision below re-runs this check with the real cost for the audit record.
-    tenant_decision = evaluate_tool_invocation(
+    # Passing this gate is not approval: permit validation and wallet policy
+    # are enforced separately further down before anything is dispatched.
+    tenant_decision = evaluate_wallet_access_for_tool(
         auth=auth,
         wallet_id=wallet_id,
         tool_name=tool_name,
@@ -1473,7 +1515,7 @@ async def _execute_registered_tool_inner(
     charge_units = _charge_units_for_registered_cost(registered_cost, category)
     estimated_cost = float(registered_cost)
 
-    decision = evaluate_tool_invocation(
+    decision = evaluate_wallet_access_for_tool(
         auth=auth,
         wallet_id=wallet_id,
         tool_name=tool_name,
@@ -4309,9 +4351,9 @@ def _value_error_jsonrpc_code(message: str) -> int | None:
     if message in {"wallet_frozen", "wallet_expired"}:
         return -32003
     if message == "idempotency_key_reused":
-        # Re-raised from IdempotencyConflictError. Stays on -32603 because
-        # clients (and the SDK) match the message, not the code.
-        return -32603
+        # A known request conflict has its own application code. Keep the
+        # message stable for existing clients and the SDK's typed exception.
+        return -32009
     return None
 
 
@@ -4678,6 +4720,8 @@ async def invoke_tool(
             return _internal_error_tool_result(
                 exc, surface="/mcp/tools/{service_id}/invoke"
             )
+        if message == "idempotency_key_reused":
+            raise HTTPException(status_code=409, detail=message)
         if message == "insufficient_funds":
             raise HTTPException(status_code=402, detail=message)
         if message in {"wallet_frozen", "wallet_expired"}:
