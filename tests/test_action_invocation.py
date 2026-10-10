@@ -67,27 +67,33 @@ def test_identity_is_stable_across_signing_and_transport_keys():
 
 
 @pytest.mark.parametrize(
-    "changes",
+    ("changes", "match"),
     [
-        {"action_contract_version": 2},
-        {"action_contract_version": None},
-        {"action_payload_hash": None},
-        {"action_payload_hash": "bad"},
-        {"action_schema_id": "wrong"},
-        {"action_schema_version": "wrong"},
-        {"action_public_tool_id": "wrong"},
-        {"action_upstream_binding_hash": "wrong"},
-        {"allowed_tools_json": '["partner.pay","other"]'},
-        {"max_calls_per_tool_json": '{"partner.pay":2}'},
+        ({"action_contract_version": 2}, "unsupported_action_contract_version"),
+        ({"action_contract_version": None}, "unsupported_action_contract_version"),
+        ({"action_payload_hash": None}, "invalid_action_digest"),
+        ({"action_payload_hash": "bad"}, "invalid_action_digest"),
+        ({"action_schema_id": "wrong"}, "action_binding_mismatch"),
+        ({"action_schema_version": "wrong"}, "action_binding_mismatch"),
+        ({"action_public_tool_id": "wrong"}, "action_binding_mismatch"),
+        ({"action_upstream_binding_hash": "wrong"}, "action_binding_mismatch"),
+        (
+            {"allowed_tools_json": '["partner.pay","other"]'},
+            "invalid_action_permit_scope",
+        ),
+        (
+            {"max_calls_per_tool_json": '{"partner.pay":2}'},
+            "invalid_action_permit_scope",
+        ),
     ],
 )
-def test_identity_refuses_unsupported_or_mismatched_permit(changes):
-    with pytest.raises(ValueError):
+def test_identity_refuses_unsupported_or_mismatched_permit(changes, match):
+    with pytest.raises(ValueError, match=match):
         action_permits.action_execution_identity(action_permit(**changes), BINDING)
 
 
 def test_identity_refuses_incomplete_binding():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="invalid_action_binding"):
         action_permits.action_execution_identity(
             action_permit(), replace(BINDING, deployment_authority="")
         )
