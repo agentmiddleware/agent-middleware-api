@@ -1,12 +1,16 @@
 from app.core.auth import AuthContext
 from app.core.durable_state import _json_default
-from app.policy import PolicyDecision, evaluate_tool_invocation
+from app.policy import (
+    PolicyDecision,
+    evaluate_tool_invocation,
+    evaluate_wallet_access_for_tool,
+)
 
 
 def test_bootstrap_admin_can_invoke_for_any_wallet():
     auth = AuthContext(source="env", raw_key="test-key", is_bootstrap_admin=True)
 
-    decision = evaluate_tool_invocation(
+    decision = evaluate_wallet_access_for_tool(
         auth=auth,
         wallet_id="wallet-any",
         tool_name="echo",
@@ -32,7 +36,7 @@ def test_wallet_key_can_invoke_for_own_wallet():
         wallet_id="wallet-1",
     )
 
-    decision = evaluate_tool_invocation(
+    decision = evaluate_wallet_access_for_tool(
         auth=auth,
         wallet_id="wallet-1",
         tool_name="echo",
@@ -53,7 +57,7 @@ def test_wallet_key_cannot_invoke_for_other_wallet():
         wallet_id="wallet-1",
     )
 
-    decision = evaluate_tool_invocation(
+    decision = evaluate_wallet_access_for_tool(
         auth=auth,
         wallet_id="wallet-2",
         tool_name="echo",
@@ -69,7 +73,7 @@ def test_wallet_key_cannot_invoke_for_other_wallet():
 def test_policy_decision_model_dump_accepts_json_mode_for_durable_state():
     auth = AuthContext(source="env", raw_key="test-key", is_bootstrap_admin=True)
 
-    decision = evaluate_tool_invocation(
+    decision = evaluate_wallet_access_for_tool(
         auth=auth,
         wallet_id="wallet-any",
         tool_name="echo",
@@ -78,3 +82,7 @@ def test_policy_decision_model_dump_accepts_json_mode_for_durable_state():
     )
 
     assert _json_default(decision) == decision.model_dump(mode="json")
+
+
+def test_legacy_tool_invocation_name_remains_a_compatible_alias():
+    assert evaluate_tool_invocation is evaluate_wallet_access_for_tool
