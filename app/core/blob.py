@@ -177,10 +177,10 @@ def get_blob_backend() -> BlobBackend:
         )
         return _UnimplementedBlob("vercel")
 
-    logger.warning(
-        "Unknown BLOB_BACKEND=%r, falling back to local filesystem", backend_name
+    raise ValueError(
+        f"Unknown BLOB_BACKEND={backend_name!r}; "
+        "expected one of 'local', 's3', 'vercel'"
     )
-    return LocalFilesystemBlob()
 
 
 # Surface settings for debugging.
