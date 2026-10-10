@@ -206,6 +206,10 @@ class Evidence:
     occurred_at: UtcDateTime | None = None
     ingested_at: UtcDateTime | None = None
     reason_code: ReasonCode | None = None
+    environment: SafeId | None = None
+    server_release: SafeId | None = None
+    deployment: SafeId | None = None
+    client_version: SafeId | None = None
     state_facts: EvidenceStateFacts = field(default_factory=EvidenceStateFacts)
     event_kind: Literal["ingress", "terminal", "attempt"] | None = None
     request_disposition: RequestDisposition | None = None
@@ -328,6 +332,7 @@ class Operation:
     refund_state: RecoveryState = "unknown"
     budget_release_state: RecoveryState = "unknown"
     unresolved_since: UtcDateTime | None = None
+    environment: SafeId | None = None
     server_release: SafeId | None = None
     deployment: SafeId | None = None
     client_version: SafeId | None = None
