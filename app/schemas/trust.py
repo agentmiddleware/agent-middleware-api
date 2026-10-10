@@ -9,6 +9,7 @@ from pydantic import (
     BaseModel,
     Field,
     StrictInt,
+    WithJsonSchema,
     field_validator,
     model_validator,
 )
@@ -22,6 +23,7 @@ from app.schemas.policies import PolicyBundleResponse
 # permit whose stored terms no longer match its signature. Refuse those here.
 _CREDIT_DIGITS = 20
 _CREDIT_DECIMAL_PLACES = 8
+_POSITIVE_STORED_CREDIT_PATTERN = r"^(?=[0-9.]*[1-9])0*[0-9]{1,12}(?:\.[0-9]{1,8})?$"
 
 
 def _require_storable_credit(amount: Decimal) -> Decimal:
@@ -36,6 +38,15 @@ _PositiveStoredCredit = Annotated[
     Decimal,
     Field(gt=0, max_digits=_CREDIT_DIGITS, decimal_places=_CREDIT_DECIMAL_PLACES),
     AfterValidator(_require_storable_credit),
+    WithJsonSchema(
+        {
+            "anyOf": [
+                {"type": "number", "exclusiveMinimum": 0},
+                {"type": "string", "pattern": _POSITIVE_STORED_CREDIT_PATTERN},
+            ]
+        },
+        mode="validation",
+    ),
 ]
 
 

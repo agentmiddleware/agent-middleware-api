@@ -118,7 +118,19 @@ async def _check_redis() -> dict[str, Any]:
 
     import redis.asyncio as redis
 
-    client = redis.from_url(redis_url, decode_responses=True)
+    from .rate_limiter import enforce_redis_timeouts
+
+    client = enforce_redis_timeouts(
+        redis.from_url(
+            redis_url,
+            decode_responses=True,
+            socket_connect_timeout=settings.REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS,
+            socket_timeout=settings.REDIS_SOCKET_TIMEOUT_SECONDS,
+            health_check_interval=15,
+        ),
+        connect_timeout=settings.REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS,
+        read_timeout=settings.REDIS_SOCKET_TIMEOUT_SECONDS,
+    )
     try:
         await client.ping()
         return {"status": "up"}
