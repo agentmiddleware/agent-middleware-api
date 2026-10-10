@@ -48,5 +48,12 @@ production rollout still needs review of the migration graph, a backup and
 rollback plan, issuer resource audience, least-privilege read role or replica,
 historical ownership provenance, exact grant assignments and revocation,
 append-only epoch enforcement, export access and retention, and deployed
-revision parity. `downgrade()`
-refuses to drop nonempty authority tables.
+revision parity.
+
+## Rollback boundary
+
+An older application image cannot restart against a database upgraded to this
+head. Keep reporting and event capture disabled until a separate rollout is
+approved. If rollout is stopped, preserve existing authority and evidence rows;
+`downgrade()` refuses to drop nonempty authority tables. Reconcile the deployed
+image and migration graph before any approved schema reversal.

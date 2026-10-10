@@ -375,6 +375,9 @@ async def setup_database():
 #: new trust-plane table cannot silently escape per-test cleanup.
 CLEAN_DATABASE_TABLES = (
     "operation_insight_events",
+    "insight_reporting_wallet_grants",
+    "insight_wallet_ownership_epochs",
+    "insight_reporting_principals",
     "receipts",
     "mcp_dispatch_attempts",
     "human_approvals",

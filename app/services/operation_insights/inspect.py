@@ -99,6 +99,11 @@ def _group_operation(
     timeline = _timeline(rows)
     all_observed = [stamp for row in rows if (stamp := _observed_at(row)) is not None]
     all_observed.extend(point.at for point in timeline)
+    historical_roots = [
+        row.occurred_at
+        for row in rows
+        if row.source == "idempotency" and row.occurred_at is not None
+    ]
     starts = (
         [
             row.occurred_at
@@ -107,7 +112,7 @@ def _group_operation(
             and row.occurred_at is not None
         ]
         if ingress_rows
-        else all_observed
+        else historical_roots or all_observed
     )
     first_seen = min(starts) if starts else None
     last_seen = max(all_observed) if all_observed else None

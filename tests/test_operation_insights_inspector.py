@@ -17,7 +17,9 @@ from app.services.operation_insights.contracts import (
     MappingInterval,
     Snapshot,
     StageTimestamp,
+    Window,
 )
+from app.services.operation_insights.cohorts import compute_metrics
 from app.services.operation_insights.inspect import inspect_operations
 
 
@@ -118,6 +120,31 @@ def test_incident_matrix_lost_ack_remains_unresolved_with_proven_effect() -> Non
     assert operation.gateway_outcome == "unknown"
     assert operation.unresolved_since == at(4)
     assert operation.next_action == "manual_review"
+
+
+def test_historical_cohort_anchor_ignores_older_authority_context() -> None:
+    end = BASE + timedelta(days=10)
+    window = Window(end - timedelta(days=7), end, "first_observed_evidence")
+    snapshot = Snapshot(end + timedelta(days=1), "historical-anchor", True, None)
+    evidence = (
+        row("permit", "permit-older", hour=1, anchor="idem-root"),
+        row("idempotency", "idem-root", hour=24 * 9, anchor="idem-root"),
+    )
+    coverage = Coverage(sources=())
+
+    operations = inspect_operations(
+        EvidenceBatch(evidence, snapshot, coverage), MAPPING
+    )
+    metrics = {
+        item.name: item
+        for item in compute_metrics(
+            operations, (), (), (), MAPPING, window, snapshot, coverage
+        )
+    }
+
+    assert len(operations) == 1
+    assert operations[0].first_seen_at == BASE + timedelta(days=9)
+    assert metrics["eligible_operations"].count == 1
 
 
 def test_correlation_boundaries_count_only_ingress_and_trusted_attempts() -> None:
