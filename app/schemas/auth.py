@@ -9,7 +9,10 @@ class TokenExchangeRequest(BaseModel):
     api_key: str = Field(..., min_length=8, description="Wallet API key to exchange")
     scopes: list[str] | None = Field(
         default=None,
-        description="Requested scopes (default: billing:charge tool:invoke)",
+        description=(
+            "Requested scopes (default: billing:charge tool:invoke). "
+            "Unknown scope names are rejected with invalid_scope."
+        ),
     )
 
 

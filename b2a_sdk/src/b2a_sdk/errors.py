@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 
@@ -86,7 +87,15 @@ class InsufficientFundsError(APIError):
         payload: dict[str, Any] | None = None,
     ) -> None:
         self.wallet_id = wallet_id
-        self.shortfall = None if shortfall is None or shortfall == "unknown" else float(shortfall)
+        if shortfall is None or shortfall == "unknown" or isinstance(shortfall, bool):
+            self.shortfall = None
+        else:
+            try:
+                parsed = float(shortfall)
+            except (TypeError, ValueError, OverflowError):
+                self.shortfall = None
+            else:
+                self.shortfall = parsed if math.isfinite(parsed) and parsed >= 0 else None
         self.top_up_url = top_up_url
         self.receipt_id = receipt_id
         message = f"Insufficient funds in wallet {wallet_id}. Shortfall: {self.shortfall} credits."
