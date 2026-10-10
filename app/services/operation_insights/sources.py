@@ -1218,89 +1218,105 @@ async def read_evidence(
             if truncated:
                 break
         if window.time_basis == "ingress":
-            candidate_roots: dict[tuple[str | None, str | None], Evidence] = {}
-            ambiguous_anchors: set[tuple[str | None, str | None]] = set()
+            candidate_roots: dict[tuple[str | None, str | None], list[Evidence]] = {}
             for row in window_ingress.values():
                 if row.request_disposition != "execution_intent":
                     continue
                 key = (row.wallet_id, row.original_operation_anchor_id)
-                if key in candidate_roots:
-                    ambiguous_anchors.add(key)
-                else:
-                    candidate_roots[key] = row
-            if ambiguous_anchors:
-                gaps.add("original_ingress_anchor_conflicting")
-            roots = {
-                key: row
-                for key, row in candidate_roots.items()
-                if key not in ambiguous_anchors
-            }
-            for row in roots.values():
-                try:
-                    rows[(row.source, row.source_id)] = row
-                except _EvidenceLimitReached:
-                    truncated = True
-                    gaps.add("evidence_limit_reached")
+                candidate_roots.setdefault(key, []).append(row)
+            roots: dict[tuple[str | None, str | None], Evidence] = {}
+            for key, ingress_rows in candidate_roots.items():
+                root = ingress_rows[0]  # Keyset traversal is ordered by time, then ID.
+                if any(
+                    row.ownership_epoch_id != root.ownership_epoch_id
+                    or (
+                        row.logical_operation_id is not None
+                        and row.logical_operation_id != key[1]
+                    )
+                    for row in ingress_rows
+                ):
+                    gaps.add("original_ingress_anchor_conflicting")
+                    continue
+                roots[key] = root
+                for row in ingress_rows:
+                    try:
+                        rows[(row.source, row.source_id)] = row
+                    except _EvidenceLimitReached:
+                        truncated = True
+                        gaps.add("evidence_limit_reached")
+                        break
+                if truncated:
                     break
             if roots and "evidence_limit_reached" not in gaps:
-                original = e.alias("original_ingress")
-                linked = e.alias("linked_event")
-                valid_anchor = exists(
-                    select(1)
-                    .select_from(original)
-                    .where(
-                        original.c.kind == "ingress",
-                        original.c.wallet_id == linked.c.wallet_id,
-                        original.c.original_operation_anchor_id
-                        == linked.c.original_operation_anchor_id,
-                        _event_epoch_filter(scope, original),
-                        original.c.event_id.in_(
-                            tuple(row.source_id for row in roots.values())
-                        ),
+                root_values = tuple(roots.values())
+                for offset in range(0, len(root_values), limits.page_size):
+                    chunk = root_values[offset : offset + limits.page_size]
+                    original = e.alias("original_ingress")
+                    linked = e.alias("linked_event")
+                    valid_anchor = exists(
+                        select(1)
+                        .select_from(original)
+                        .where(
+                            original.c.kind == "ingress",
+                            original.c.wallet_id == linked.c.wallet_id,
+                            original.c.original_operation_anchor_id
+                            == linked.c.original_operation_anchor_id,
+                            _event_epoch_filter(scope, original),
+                            original.c.event_id.in_(
+                                tuple(row.source_id for row in chunk)
+                            ),
+                        )
                     )
-                )
-                linked_stmt = select(*_event_columns(linked)).where(
-                    linked.c.kind.in_(("attempt", "terminal")),
-                    linked.c.wallet_id.in_(scope.wallet_ids),
-                    linked.c.original_operation_anchor_id.in_(
-                        tuple(anchor for _, anchor in roots if anchor is not None)
-                    ),
-                    linked.c.ingested_at <= to_naive_utc(cutoff),
-                    valid_anchor,
-                )
-                async for page in _keyset(
-                    session,
-                    linked_stmt,
-                    linked.c.occurred_at,
-                    linked.c.event_id,
-                    limits.page_size,
-                    deadline=deadline,
-                ):
-                    for record in page:
-                        if record["duplicate_conflict_at"] is not None:
-                            gaps.add("linked_event_duplicate_conflict")
-                            continue
-                        root = roots.get(
-                            (
-                                record["wallet_id"],
-                                record["original_operation_anchor_id"],
+                    linked_stmt = select(*_event_columns(linked)).where(
+                        linked.c.kind.in_(("attempt", "terminal")),
+                        linked.c.wallet_id.in_(
+                            tuple(dict.fromkeys(row.wallet_id for row in chunk))
+                        ),
+                        linked.c.original_operation_anchor_id.in_(
+                            tuple(
+                                dict.fromkeys(
+                                    row.original_operation_anchor_id for row in chunk
+                                )
                             )
-                        )
-                        evidence = (
-                            _event_evidence(record, root.ownership_epoch_id)
-                            if root
-                            else None
-                        )
-                        if root is None or evidence is None:
-                            gaps.add("linked_event_provenance_ambiguous")
-                            continue
-                        try:
-                            rows[(evidence.source, evidence.source_id)] = replace(
-                                evidence, edges=(_ref(root),)
+                        ),
+                        linked.c.ingested_at <= to_naive_utc(cutoff),
+                        valid_anchor,
+                    )
+                    async for page in _keyset(
+                        session,
+                        linked_stmt,
+                        linked.c.occurred_at,
+                        linked.c.event_id,
+                        limits.page_size,
+                        deadline=deadline,
+                    ):
+                        for record in page:
+                            if record["duplicate_conflict_at"] is not None:
+                                gaps.add("linked_event_duplicate_conflict")
+                                continue
+                            linked_root = roots.get(
+                                (
+                                    record["wallet_id"],
+                                    record["original_operation_anchor_id"],
+                                )
                             )
-                        except _EvidenceLimitReached:
-                            truncated = True
-                            gaps.add("evidence_limit_reached")
+                            evidence = (
+                                _event_evidence(record, linked_root.ownership_epoch_id)
+                                if linked_root
+                                else None
+                            )
+                            if linked_root is None or evidence is None:
+                                gaps.add("linked_event_provenance_ambiguous")
+                                continue
+                            try:
+                                rows[(evidence.source, evidence.source_id)] = replace(
+                                    evidence, edges=(_ref(linked_root),)
+                                )
+                            except _EvidenceLimitReached:
+                                truncated = True
+                                gaps.add("evidence_limit_reached")
+                                break
+                        if truncated:
                             break
                     if truncated:
                         break
