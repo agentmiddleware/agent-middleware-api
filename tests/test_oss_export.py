@@ -115,6 +115,12 @@ def test_export_rerun_purges_stale_gateway_files_and_preserves_public_metadata(
         "test_site_design.mjs",
         "test_site_pilot_fit.mjs",
         "test_oss_export.py",
+        "test_oss_export_drop_tests.py",
+        "test_failure_lab_ci.py",
+        "test_historical_probe_retirement.py",
+        "test_operator_doc_contracts.py",
+        "test_publish_mcp_pinned_download.py",
+        "test_railway_iac_config.py",
     ):
         assert not (gateway / "tests" / name).exists()
     assert not (gateway / "site").exists()
@@ -131,6 +137,30 @@ def test_export_rerun_purges_stale_gateway_files_and_preserves_public_metadata(
         "test_awi_sdk_governed_execute_end_to_end_and_cross_wallet_denied",
     ):
         assert f"def {name}(" not in awi_tests
+    removed_source_cases = {
+        "test_ci_second_tool_denial.py": (
+            "test_ci_registers_second_tool_and_passes_it_to_constant_test",
+            "test_ci_workflow_syntax_is_valid",
+        ),
+        "test_docker_commit_sha.py": (
+            "test_dockerfile_requires_staged_commit_sha",
+            "test_local_compose_uses_the_unstamped_development_dockerfile",
+            "test_docker_publish_stages_the_checked_out_commit",
+        ),
+        "test_stale_commit_sha_prevention.py": (
+            "test_dockerfile_requires_staged_build_commit_sha_file",
+        ),
+        "test_wedge_honesty.py": (
+            "test_agentmarket_listing_is_wedge_honest",
+            "test_feature_request_preserves_customer_identity_privacy",
+            "test_readme_does_not_claim_deployment_ready_complete",
+        ),
+        "test_qa_be100_documentation.py": ("test_be100_pitch_scopes_retry_guarantees",),
+    }
+    for filename, names in removed_source_cases.items():
+        exported = (gateway / "tests" / filename).read_text()
+        for name in names:
+            assert f"def {name}(" not in exported
     dockerfile = (gateway / "Dockerfile").read_text()
     assert "COPY sdk/python/ /sdk/python/" in dockerfile
     assert "pip install --no-cache-dir /sdk/python" in dockerfile
