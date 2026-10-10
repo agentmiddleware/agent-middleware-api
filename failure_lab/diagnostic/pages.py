@@ -656,7 +656,7 @@ def render_result(
         f"""
 <section class="card bad">
   <p class="kicker">Read this first</p>
-  <h3 style="margin:0 0 8px">Guarantees this product did not hold in this run</h3>
+  <h3 style="margin:0 0 8px">Failures and worse outcomes measured in this run</h3>
   {_list(answer.gateway_failures)}
 </section>"""
         if answer.gateway_failures

@@ -52,10 +52,10 @@ class Answer(str, Enum):
     its own rank, so a renderer cannot reorder them by accident.
     """
 
-    #: A guarantee the product documents did not hold in this run.
+    #: A documented guarantee failed, or the gateway added duplicate effects.
     GATEWAY_DID_NOT_HOLD = "gateway_did_not_hold"
-    #: Duplicate business effects occurred in a measured baseline and did not
-    #: occur behind the gateway, in the same failure, at the same instruments.
+    #: Fewer duplicate business effects occurred behind the gateway than in a
+    #: measured baseline under the same failure.
     GATEWAY_PREVENTED_DUPLICATES = "gateway_prevented_duplicates"
     #: No additional duplicate was prevented; what changed is what the caller
     #: can know and prove afterwards.
@@ -98,8 +98,8 @@ ANSWER_HEADLINES: dict[Answer, str] = {
         "Agent Middleware did not hold one of its own guarantees in this run."
     ),
     Answer.GATEWAY_PREVENTED_DUPLICATES: (
-        "Duplicate business effects happened in the baseline and did not "
-        "happen behind Agent Middleware."
+        "Fewer duplicate business effects happened behind Agent Middleware "
+        "than in the measured baseline."
     ),
     Answer.GATEWAY_CHANGED_EVIDENCE_ONLY: (
         "No duplicate business effect was prevented. What changed is what the "
@@ -356,6 +356,20 @@ def build_answer(comparisons: list[Comparison]) -> DiagnosticAnswer:
     """The whole visitor-facing result, derived and never composed by hand."""
     answer = headline_for(comparisons)
     rows = _rows(comparisons)
+    headline = ANSWER_HEADLINES[answer]
+    detail = ANSWER_DETAIL[answer]
+    if answer is Answer.GATEWAY_DID_NOT_HOLD and not any(
+        c.conclusion.kind is ConclusionKind.GATEWAY_DID_NOT_HOLD for c in comparisons
+    ):
+        headline = (
+            "More duplicate business effects occurred behind Agent Middleware "
+            "than in the measured baseline."
+        )
+        detail = (
+            "At least one scenario measured more duplicate downstream effects "
+            "behind the gateway than in its baseline. The scenario's own page "
+            "states both counts and the injected failure."
+        )
 
     counts: dict[str, int] = {"scenarios": len(comparisons)}
     for comparison in comparisons:
@@ -401,8 +415,8 @@ def build_answer(comparisons: list[Comparison]) -> DiagnosticAnswer:
 
     return DiagnosticAnswer(
         answer=answer,
-        headline=ANSWER_HEADLINES[answer],
-        detail=ANSWER_DETAIL[answer],
+        headline=headline,
+        detail=detail,
         rows=rows,
         counts=counts,
         gateway_failures=gateway_failures,

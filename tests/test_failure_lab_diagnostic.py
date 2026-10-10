@@ -280,6 +280,33 @@ def test_a_prevention_result_is_the_only_one_that_carries_an_offer():
         assert OFFER.headline not in _html(comparisons)
 
 
+def test_partial_reduction_summaries_do_not_claim_elimination():
+    comparisons = [
+        _comparison(
+            [
+                _entry(
+                    Configuration.DIRECT_NAIVE, verdict=Verdict.OBSERVED, executions=3
+                ),
+                _entry(
+                    Configuration.DIRECT_NATIVE, verdict=Verdict.OBSERVED, executions=3
+                ),
+                _entry(
+                    Configuration.GATEWAY_NATIVE,
+                    verdict=Verdict.PASS,
+                    executions=2,
+                    dispatches=2,
+                ),
+            ]
+        )
+    ]
+
+    answer = build_answer(comparisons)
+    assert answer.answer is Answer.GATEWAY_PREVENTED_DUPLICATES
+    assert "Fewer duplicate" in answer.headline
+    assert "fewer duplicate" in answer.rows[0].conclusion_gloss
+    assert "did not occur" not in answer.rows[0].conclusion_gloss
+
+
 def test_exactly_one_answer_recommends_the_product():
     """A second true case would be a second place to put a pitch."""
     recommending = [member for member in Answer if member.recommends_the_product]
@@ -327,6 +354,12 @@ def test_a_gateway_worse_than_baseline_is_a_headline_failure():
     assert answer.answer is Answer.GATEWAY_DID_NOT_HOLD
     assert not answer.recommends_the_product
     assert answer.gateway_failures, "the worse run must be listed as a failure"
+    assert "More duplicate" in answer.headline
+    assert "guarantee" not in answer.headline + answer.detail
+    html = _html(_gateway_adds_duplicates())
+    assert answer.headline in html
+    assert "Failures and worse outcomes measured in this run" in html
+    assert "Guarantees this product did not hold in this run" not in html
 
 
 def test_a_run_with_no_baseline_does_not_claim_the_baseline_would_have_coped():
