@@ -113,17 +113,26 @@ async def test_simultaneous_key_reuse_has_one_dispatch_and_debit(
                 assert response["result"] == first_result
                 assert body["params"]["arguments"]["message"] == winner
             else:
-                assert response["error"]["message"] in {
-                    "idempotency_key_reused",
-                    "idempotency_in_progress",
-                }
+                if body["params"]["arguments"]["message"] == winner:
+                    assert response["error"] == {
+                        "code": -32005,
+                        "message": "idempotency_in_progress",
+                    }
+                else:
+                    assert response["error"] == {
+                        "code": -32009,
+                        "message": "idempotency_key_reused",
+                    }
             replay = await client.post(
                 "/mcp/messages", json=body, headers=provisioned["agent_headers"]
             )
             if body["params"]["arguments"]["message"] == winner:
                 assert replay.json()["result"] == first_result
             else:
-                assert replay.json()["error"]["message"] == "idempotency_key_reused"
+                assert replay.json()["error"] == {
+                    "code": -32009,
+                    "message": "idempotency_key_reused",
+                }
         persisted = await _load_persisted_invocation(
             wallet_id=provisioned["agent_wallet_id"],
             permit_id=permit["permit_id"],
