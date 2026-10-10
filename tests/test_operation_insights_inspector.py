@@ -736,6 +736,10 @@ def test_replay_only_root_has_no_execution_intent_cohort_anchor() -> None:
         event_kind="ingress",
         request_id="request-replay",
         request_disposition="same_key_replay",
+        environment="production",
+        server_release="release-r2",
+        deployment="deploy-r2",
+        client_version="sdk-r2",
         stage_timestamps=(
             StageTimestamp("request_observed", at(1), "insight_event", "replay-1"),
         ),
@@ -748,6 +752,238 @@ def test_replay_only_root_has_no_execution_intent_cohort_anchor() -> None:
     assert operation.replay_only is True
     assert operation.unresolved_since == at(1)
     assert "execution_intent_ingress_missing" in operation.evidence_gaps
+    assert operation.environment is None
+    assert operation.server_release is None
+    assert operation.deployment is None
+    assert operation.client_version is None
+
+
+def test_later_replay_and_status_metadata_do_not_rewrite_execution_release() -> None:
+    def event(
+        source_id: str,
+        hour: int,
+        kind: str,
+        request_id: str,
+        disposition: str,
+        release: str,
+    ) -> Evidence:
+        return row(
+            "insight_event",
+            source_id,
+            hour=hour,
+            event_kind=kind,
+            request_id=request_id,
+            attempt_id=f"attempt-{source_id}" if kind == "attempt" else None,
+            request_disposition=disposition,
+            environment="production",
+            server_release=release,
+            deployment=f"deploy-{release}",
+            client_version=f"sdk-{release}",
+        )
+
+    rows = (
+        event("owner-ingress", 1, "ingress", "request-owner", "execution_intent", "r1"),
+        event("owner-attempt", 2, "attempt", "request-owner", "execution_intent", "r1"),
+        event(
+            "owner-terminal", 3, "terminal", "request-owner", "execution_intent", "r1"
+        ),
+        event(
+            "replay-ingress", 4, "ingress", "request-replay", "same_key_replay", "r2"
+        ),
+        event(
+            "replay-terminal", 5, "terminal", "request-replay", "same_key_replay", "r2"
+        ),
+        event("status-ingress", 6, "ingress", "request-status", "status_read", "r2"),
+        event("status-terminal", 7, "terminal", "request-status", "status_read", "r2"),
+    )
+
+    operation = inspect_operations(batch(*rows), MAPPING)[0]
+
+    assert operation.environment == "production"
+    assert operation.server_release == "r1"
+    assert operation.deployment == "deploy-r1"
+    assert operation.client_version == "sdk-r1"
+    assert operation.request_ids == (
+        "request-owner",
+        "request-replay",
+        "request-status",
+    )
+    assert operation.attempt_ids == ("attempt-owner-attempt",)
+    assert tuple(ref.source_id for ref in operation.evidence_refs) == tuple(
+        row.source_id for row in rows
+    )
+    assert tuple(item.disposition for item in operation.ingress_observations) == (
+        "execution_intent",
+        "same_key_replay",
+        "status_read",
+    )
+    assert not any("metadata_conflict" in item for item in operation.conflicts)
+    assert operation.next_action == "inspect"
+
+
+def test_distinct_execution_intents_with_mixed_release_still_conflict() -> None:
+    first = row(
+        "insight_event",
+        "owner-ingress",
+        hour=1,
+        event_kind="ingress",
+        request_id="request-owner",
+        request_disposition="execution_intent",
+        server_release="r1",
+    )
+    second = row(
+        "insight_event",
+        "second-ingress",
+        hour=2,
+        event_kind="ingress",
+        request_id="request-second",
+        request_disposition="execution_intent",
+        server_release="r2",
+    )
+
+    operation = inspect_operations(batch(first, second), MAPPING)[0]
+
+    assert operation.server_release is None
+    assert "server_release_metadata_conflict" in operation.conflicts
+    assert operation.next_action == "manual_review"
+
+
+@pytest.mark.parametrize("disposition", [None, "unknown"])
+def test_same_anchor_attempt_with_unknown_disposition_retains_release_conflict(
+    disposition: str | None,
+) -> None:
+    owner = row(
+        "insight_event",
+        "owner-ingress",
+        hour=1,
+        event_kind="ingress",
+        request_id="request-owner",
+        request_disposition="execution_intent",
+        server_release="r1",
+    )
+    attempt = row(
+        "insight_event",
+        "attempt-r2",
+        hour=2,
+        event_kind="attempt",
+        attempt_id="attempt-1",
+        request_disposition=disposition,
+        server_release="r2",
+    )
+
+    operation = inspect_operations(batch(owner, attempt), MAPPING)[0]
+
+    assert operation.attempt_ids == ("attempt-1",)
+    assert operation.server_release is None
+    assert "server_release_metadata_conflict" in operation.conflicts
+    assert operation.next_action == "manual_review"
+
+
+@pytest.mark.parametrize("disposition", [None, "unknown"])
+def test_attempt_kind_is_execution_evidence_with_unknown_disposition(
+    disposition: str | None,
+) -> None:
+    attempt = row(
+        "insight_event",
+        "attempt-only",
+        hour=1,
+        event_kind="attempt",
+        attempt_id="attempt-1",
+        request_disposition=disposition,
+        server_release="r1",
+    )
+
+    operation = inspect_operations(batch(attempt), MAPPING)[0]
+
+    assert operation.attempt_ids == ("attempt-1",)
+    assert operation.server_release == "r1"
+    assert operation.execution_intent is None
+
+
+@pytest.mark.parametrize(
+    ("kind", "disposition", "request_id"),
+    [
+        ("terminal", None, "request-owner"),
+        ("terminal", "unknown", "request-owner"),
+        ("terminal", "unknown", "request-unknown"),
+        ("ingress", "unknown", "request-unknown"),
+    ],
+)
+def test_same_anchor_unknown_request_event_withholds_execution_release(
+    kind: str, disposition: str | None, request_id: str
+) -> None:
+    owner = row(
+        "insight_event",
+        "owner-ingress",
+        hour=1,
+        event_kind="ingress",
+        request_id="request-owner",
+        request_disposition="execution_intent",
+        server_release="r1",
+    )
+    uncertain = row(
+        "insight_event",
+        "unknown-r2",
+        hour=2,
+        event_kind=kind,
+        request_id=request_id,
+        request_disposition=disposition,
+        server_release="r2",
+    )
+
+    operation = inspect_operations(batch(owner, uncertain), MAPPING)[0]
+
+    assert operation.server_release is None
+    assert "server_release_metadata_conflict" in operation.conflicts
+    assert tuple(ref.source_id for ref in operation.evidence_refs) == (
+        "owner-ingress",
+        "unknown-r2",
+    )
+    assert operation.next_action == "manual_review"
+
+
+def test_unknown_terminal_without_release_does_not_erase_verified_release() -> None:
+    owner = row(
+        "insight_event",
+        "owner-ingress",
+        hour=1,
+        event_kind="ingress",
+        request_id="request-owner",
+        request_disposition="execution_intent",
+        server_release="r1",
+    )
+    uncertain = row(
+        "insight_event",
+        "unknown-terminal",
+        hour=2,
+        event_kind="terminal",
+        request_id="request-unknown",
+        request_disposition="unknown",
+    )
+
+    operation = inspect_operations(batch(owner, uncertain), MAPPING)[0]
+
+    assert operation.server_release == "r1"
+    assert "server_release_metadata_conflict" not in operation.conflicts
+
+
+def test_unknown_only_terminal_cannot_establish_execution_release() -> None:
+    terminal = row(
+        "insight_event",
+        "unknown-terminal",
+        hour=1,
+        event_kind="terminal",
+        request_id="request-unknown",
+        request_disposition="unknown",
+        server_release="r2",
+    )
+
+    operation = inspect_operations(batch(terminal), MAPPING)[0]
+
+    assert operation.server_release is None
+    assert tuple(ref.source_id for ref in operation.evidence_refs) == (
+        "unknown-terminal",
+    )
 
 
 def test_only_consistent_prospective_events_attribute_operation_metadata() -> None:
@@ -768,6 +1004,8 @@ def test_only_consistent_prospective_events_attribute_operation_metadata() -> No
         "terminal-1",
         hour=2,
         event_kind="terminal",
+        request_id="request-1",
+        request_disposition="execution_intent",
         environment="staging",
         server_release="commit-abc",
         deployment="deploy-abc",
@@ -802,6 +1040,8 @@ def test_conflicting_or_missing_event_metadata_remains_unknown() -> None:
         "terminal-1",
         hour=2,
         event_kind="terminal",
+        request_id="request-1",
+        request_disposition="execution_intent",
         environment=None,
         server_release="commit-def",
         deployment="deploy-abc",
