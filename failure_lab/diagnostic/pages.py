@@ -11,9 +11,8 @@ Four rules that the markup enforces rather than describes:
 **The result that says the product was not needed looks exactly like the result
 that says it was.** :func:`_answer_card` picks its accent from a table, and the
 two headline outcomes -- "you may not need us" and "duplicates were prevented"
--- are given the same one. The only answer rendered in the warning colour is
-the one where the product failed its own guarantee, which is the reader's
-problem and not a styling decision.
+-- are given the same one. The warning colour is reserved for a failed product
+guarantee or a worse measured outcome behind the gateway.
 
 **The offer is downstream of the answer, not of the page.**
 :func:`render_result` asks :attr:`DiagnosticAnswer.recommends_the_product`, and
@@ -57,6 +56,7 @@ REASSURANCE = "No production credentials required. Runs against a disposable san
 #: purpose -- see the module docstring.
 _ANSWER_ACCENT: dict[Answer, str] = {
     Answer.GATEWAY_DID_NOT_HOLD: "bad",
+    Answer.GATEWAY_ADDED_DUPLICATES: "bad",
     Answer.GATEWAY_PREVENTED_DUPLICATES: "accent",
     Answer.GATEWAY_CHANGED_EVIDENCE_ONLY: "accent",
     Answer.YOU_MAY_NOT_NEED_US: "accent",
@@ -68,6 +68,7 @@ _ANSWER_ACCENT: dict[Answer, str] = {
 #: they are looking at before they read it.
 _ANSWER_KICKER: dict[Answer, str] = {
     Answer.GATEWAY_DID_NOT_HOLD: "Finding against this product",
+    Answer.GATEWAY_ADDED_DUPLICATES: "Finding against this product",
     Answer.GATEWAY_PREVENTED_DUPLICATES: "Measured difference",
     Answer.GATEWAY_CHANGED_EVIDENCE_ONLY: "Measured difference",
     Answer.YOU_MAY_NOT_NEED_US: "Result",
@@ -656,7 +657,7 @@ def render_result(
         f"""
 <section class="card bad">
   <p class="kicker">Read this first</p>
-  <h3 style="margin:0 0 8px">Guarantees this product did not hold in this run</h3>
+  <h3 style="margin:0 0 8px">Failures and worse outcomes measured in this run</h3>
   {_list(answer.gateway_failures)}
 </section>"""
         if answer.gateway_failures
