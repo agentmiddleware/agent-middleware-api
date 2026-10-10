@@ -627,3 +627,20 @@ class TestCharge402BodyShapes:
                 await client.charge("wallet-123", "iot_bridge")
 
         assert exc_info.value.shortfall is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("shortfall", [True, "NaN", "Infinity", -1, 10**400])
+    async def test_invalid_numeric_shortfall_does_not_crash(self, shortfall):
+        """A malformed 402 still raises the typed error without a false amount."""
+        client, _ = _recording_client(
+            {
+                ("POST", "/v1/billing/charge"): httpx.Response(
+                    402, json={"detail": {"shortfall": shortfall}}
+                )
+            }
+        )
+        async with client:
+            with pytest.raises(InsufficientFundsError) as exc_info:
+                await client.charge("wallet-123", "iot_bridge")
+
+        assert exc_info.value.shortfall is None

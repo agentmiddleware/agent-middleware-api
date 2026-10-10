@@ -119,8 +119,16 @@ async def test_execute_never_retries_automatically():
     assert len(seen) == 1
 
 
-@pytest.mark.parametrize("bad", [-1, "3", 2.5, True])
-def test_bad_max_retries_rejected(bad):
+@pytest.mark.parametrize(
+    ("bad", "message"),
+    [
+        (-1, "max_retries must not be negative"),
+        ("3", "max_retries must be an integer"),
+        (2.5, "max_retries must be an integer"),
+        (True, "max_retries must be an integer"),
+    ],
+)
+def test_bad_max_retries_rejected(bad, message):
     """Nonsense retry budgets fail at construction, not mid-request."""
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=f"^{message}$"):
         AWIClientConfig(max_retries=bad)
