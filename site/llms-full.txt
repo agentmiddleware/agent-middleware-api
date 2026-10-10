@@ -1,4 +1,4 @@
-# Agent Middleware API — full machine brief
+# Agent Middleware API: full machine brief
 
 The long-form companion to /llms.txt on this host. Read /llms.txt first for the
 bootstrap sequence; read this when you need the product boundary, the
@@ -6,9 +6,9 @@ vocabulary, and the claims that are deliberately NOT made.
 
 Origin roles:
 
-- https://www.thisisatest.tech  — human design-partner site and published proof.
+- https://www.thisisatest.tech: human design-partner site and published proof.
   Static. Mints no credentials, executes no tools, holds no customer data.
-- https://api.thisisatest.tech  — the gateway itself. All protected actions live
+- https://api.thisisatest.tech: the gateway itself. All protected actions live
   here.
 
 Do not treat the marketing origin as an API base URL.
@@ -68,16 +68,28 @@ Exit 0 proves the receipt matches the supplied key snapshot. It does not
 independently authenticate who supplied that snapshot; pin the key through a
 trusted channel before relying on issuer identity.
 
-## Run the whole loop yourself
+## Check it today, no access needed
 
-No live API credentials required. The source repository is private; clone access
-must be granted separately. From an authorized clone of
-https://github.com/PetrefiedThunder/agent-middleware-api:
+The standalone verifier is published next to the receipt, so no repository
+access is needed: download receipt.json, trust-keys.json, and verify_receipt.py
+from https://www.thisisatest.tech/proof/, run `python3 -m pip install
+cryptography`, then `python3 verify_receipt.py --bundle receipt.json --keys
+trust-keys.json --expect-issuer https://api.thisisatest.tech`. Keyless live
+calls: https://api.thisisatest.tech/health and
+https://api.thisisatest.tech/.well-known/trust-keys.json. Public API contract:
+https://api.thisisatest.tech/openapi.json and https://api.thisisatest.tech/docs.
+Permits and tool calls on the live API need an operator-issued key.
 
-- `make quickstart` then docs/quickstart.md — mint a wallet-scoped key, issue a
+## Run the whole loop yourself (public source)
+
+No live API credentials required. Clone
+https://github.com/agentmiddleware/agent-middleware-api, then from the repository
+root:
+
+- `make quickstart` then docs/quickstart.md: mint a wallet-scoped key, issue a
   permit, invoke one governed tool, replay it, overspend it, verify the receipt.
-- `make prove-trust-plane` — one command, no server, asserts the full loop.
-- `make red-team-trust-plane` — drives one valid permit and attacks it ten ways
+- `make prove-trust-plane`: one command, no server, asserts the full loop.
+- `make red-team-trust-plane`: drives one valid permit and attacks it ten ways
   (no permit, unknown permit, out-of-scope tool, missing scope, over-budget,
   wrong wallet, wrong key, expired, revoked, tampered signature), asserting each
   is denied with a concrete reason code and produces no ledger debit.
@@ -122,5 +134,5 @@ Human site: https://www.thisisatest.tech/
 Offline receipt verification: https://www.thisisatest.tech/proof/
 Comparison with named alternatives, including the rows this loses:
 https://www.thisisatest.tech/compare/
-Source: https://github.com/PetrefiedThunder/agent-middleware-api
+Source repository: https://github.com/agentmiddleware/agent-middleware-api (public)
 Security contact: https://www.thisisatest.tech/.well-known/security.txt
