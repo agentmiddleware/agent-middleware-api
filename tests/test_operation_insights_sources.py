@@ -21,6 +21,7 @@ from sqlalchemy import (
     Table,
     delete,
     insert,
+    update,
 )
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
@@ -38,6 +39,7 @@ from app.db.models import (
     WalletModel,
 )
 from app.services.operation_insights.contracts import (
+    AccountMapping,
     AuthorizedOwnershipEpoch,
     Limits,
     Scope,
@@ -410,6 +412,157 @@ async def test_window_ingress_is_independent_of_historical_roots(
     } == {("insight_event", "ingress-A"), ("insight_event", "replay-A")}
     assert capped.coverage.truncated is True
     assert "evidence_limit_reached" in capped.coverage.gaps
+
+
+@pytest.mark.asyncio
+async def test_prospective_links_use_page_sized_bind_sets(scoped_session) -> None:
+    from app.services.operation_insights import sources
+
+    session, scope = scoped_session
+    async with session.bind.begin() as connection:
+        await connection.run_sync(sources._EVENTS.create)
+    for index in range(6):
+        anchor = f"root-{index}"
+        for event_row in (
+            {
+                "event_id": anchor,
+                "kind": "ingress",
+                "request_id": f"request-{index}",
+                "wallet_id": "wallet-A",
+                "original_operation_anchor_id": anchor,
+                "request_disposition": "execution_intent",
+                "occurred_at": utc(2),
+                "ingested_at": utc(2),
+            },
+            {
+                "event_id": f"terminal-{index}",
+                "kind": "terminal",
+                "request_id": f"request-{index}",
+                "wallet_id": "wallet-A",
+                "original_operation_anchor_id": anchor,
+                "gateway_outcome": "failed",
+                "occurred_at": utc(3),
+                "ingested_at": utc(3),
+            },
+        ):
+            await session.execute(insert(sources._EVENTS).values(**event_row))
+    linked_bind_counts: list[int] = []
+
+    def count_linked_binds(
+        _connection, _cursor, statement, parameters, _context, _executemany
+    ) -> None:
+        if "linked_event" in statement:
+            linked_bind_counts.append(len(parameters))
+
+    event.listen(session.bind.sync_engine, "before_cursor_execute", count_linked_binds)
+    try:
+        batch = await sources.read_evidence(
+            scope, Window(utc(2), utc(4), "ingress"), Limits(page_size=2), session
+        )
+    finally:
+        event.remove(
+            session.bind.sync_engine, "before_cursor_execute", count_linked_binds
+        )
+
+    assert {row.source_id for row in batch.rows} == {
+        *(f"root-{index}" for index in range(6)),
+        *(f"terminal-{index}" for index in range(6)),
+    }
+    assert linked_bind_counts
+    assert max(linked_bind_counts) <= 18
+    assert batch.coverage.truncated is False
+
+
+@pytest.mark.asyncio
+async def test_same_anchor_execution_requests_retain_one_operation_and_both_requests(
+    scoped_session,
+) -> None:
+    from app.services.operation_insights import sources
+    from app.services.operation_insights.inspect import inspect_operations
+
+    session, scope = scoped_session
+    async with session.bind.begin() as connection:
+        await connection.run_sync(sources._EVENTS.create)
+    session.add(WalletModel(wallet_id="wallet-A", wallet_type="agent"))
+    session.add(
+        IdempotencyRecordModel(
+            record_id="shared-anchor",
+            wallet_id="wallet-A",
+            endpoint="/mcp/invoke",
+            idempotency_key="synthetic-shared-anchor",
+            request_hash="0" * 64,
+            operation_kind="upstream_mcp",
+            created_at=utc(2),
+        )
+    )
+    await session.flush()
+    for event_row in (
+        {
+            "event_id": "first-ingress",
+            "kind": "ingress",
+            "request_id": "request-one",
+            "logical_operation_id": "shared-anchor",
+            "wallet_id": "wallet-A",
+            "original_operation_anchor_id": "shared-anchor",
+            "request_disposition": "execution_intent",
+            "occurred_at": utc(2),
+            "ingested_at": utc(2),
+        },
+        {
+            "event_id": "second-ingress",
+            "kind": "ingress",
+            "request_id": "request-two",
+            "logical_operation_id": "shared-anchor",
+            "wallet_id": "wallet-A",
+            "original_operation_anchor_id": "shared-anchor",
+            "request_disposition": "execution_intent",
+            "occurred_at": utc(3),
+            "ingested_at": utc(3),
+        },
+        {
+            "event_id": "shared-terminal",
+            "kind": "terminal",
+            "request_id": "request-two",
+            "logical_operation_id": "shared-anchor",
+            "wallet_id": "wallet-A",
+            "original_operation_anchor_id": "shared-anchor",
+            "gateway_outcome": "failed",
+            "effect_state": "unknown",
+            "reason_code": "upstream_response_invalid",
+            "occurred_at": utc(4),
+            "ingested_at": utc(4),
+        },
+    ):
+        await session.execute(insert(sources._EVENTS).values(**event_row))
+
+    batch = await sources.read_evidence(
+        scope, Window(utc(2), utc(5), "ingress"), Limits(page_size=1), session
+    )
+    operations = inspect_operations(batch, AccountMapping("unverified", ()))
+
+    assert {row.source_id for row in batch.rows} == {
+        "first-ingress",
+        "second-ingress",
+        "shared-terminal",
+    }
+    assert len(batch.window_ingress) == 2
+    assert len(operations) == 1
+    assert operations[0].request_ids == ("request-one", "request-two")
+    assert operations[0].gateway_outcome == "failed"
+    assert operations[0].effect_state == "unknown"
+    assert "original_ingress_anchor_conflicting" not in batch.coverage.gaps
+
+    await session.execute(
+        update(sources._EVENTS)
+        .where(sources._EVENTS.c.event_id == "second-ingress")
+        .values(logical_operation_id="different-operation")
+    )
+    conflicting = await sources.read_evidence(
+        scope, Window(utc(2), utc(5), "ingress"), Limits(page_size=1), session
+    )
+    assert conflicting.rows == ()
+    assert len(conflicting.window_ingress) == 2
+    assert "original_ingress_anchor_conflicting" in conflicting.coverage.gaps
 
 
 @pytest.mark.asyncio
