@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from ..core.auth import AuthContext, get_auth_context, verify_api_key
 from ..core.config import get_settings
 from ..core.dependencies import get_agent_money
+from ..idempotency_gate import requires_idempotency
 from .http_idempotency import (
     begin_http_idempotency as _begin_idempotency,
 )
@@ -577,6 +578,11 @@ async def get_ledger(
         },
     },
 )
+@requires_idempotency(
+    "POST /v1/billing/charge",
+    enforced=False,
+    mechanism="opt-in Idempotency-Key header, key is optional",
+)
 async def charge_wallet(
     request: Request,
     wallet_id: str,
@@ -874,6 +880,11 @@ async def charge_wallet(
         }
     },
 )
+@requires_idempotency(
+    "POST /v1/billing/top-up",
+    enforced=True,
+    mechanism="disabled endpoint, always 410, no ledger write",
+)
 async def top_up_wallet(
     request: TopUpRequest,
     auth: AuthContext = Depends(get_auth_context),
@@ -917,6 +928,11 @@ async def top_up_wallet(
         "After payment succeeds, credits are minted automatically via webhook. "
         "Requires KYC verification if enabled for the wallet."
     ),
+)
+@requires_idempotency(
+    "POST /v1/billing/top-up/prepare",
+    enforced=False,
+    mechanism="no idempotency key yet, Stripe PaymentIntent created per call",
 )
 async def prepare_top_up(
     wallet_id: str,
@@ -1000,6 +1016,11 @@ async def prepare_top_up(
             "description": "Source wallet expired or wallet access denied",
         },
     },
+)
+@requires_idempotency(
+    "POST /v1/billing/transfer",
+    enforced=False,
+    mechanism="opt-in Idempotency-Key header, key is optional",
 )
 async def transfer_wallets(
     from_wallet_id: str = Query(..., description="Source wallet ID"),
@@ -1645,6 +1666,11 @@ async def end_dry_run_session(
         "Use this after reviewing the simulation results and deciding to proceed."
     ),
 )
+@requires_idempotency(
+    "POST /v1/billing/dry-run/session/{session_id}/commit",
+    enforced=True,
+    mechanism="single-claim session commit, retry finds session ended",
+)
 async def commit_dry_run_session(
     session_id: str,
     auth: AuthContext = Depends(get_auth_context),
@@ -1735,6 +1761,11 @@ async def revert_dry_run_session(
         "- Use session_id for multi-step simulation (tracks cumulative cost)\n"
         "- Omit session_id for single-shot estimation"
     ),
+)
+@requires_idempotency(
+    "POST /v1/billing/dry-run/charge",
+    enforced=True,
+    mechanism="dry-run simulation only, no ledger write, no balance change",
 )
 async def simulate_charge(
     request: SimulatedChargeRequest,
