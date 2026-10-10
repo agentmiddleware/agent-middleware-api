@@ -26,7 +26,7 @@ def _client(**kwargs) -> TestClient:
 
 def test_serve_refuses_non_loopback_without_a_token():
     for host in ("0.0.0.0", "192.168.1.5", "", "::"):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="refusing to bind"):
             serve(host=host, port=8080)
 
 
