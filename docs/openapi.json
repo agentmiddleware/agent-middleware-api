@@ -1406,8 +1406,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Filter by effective lifecycle status: active, expired, revoked.",
               "title": "Status"
-            }
+            },
+            "description": "Filter by effective lifecycle status: active, expired, revoked."
           },
           {
             "name": "subject_key_id",
@@ -3207,7 +3209,7 @@
           "MCP"
         ],
         "summary": "Mcp Json-Rpc Messages",
-        "description": "Legacy project JSON-RPC endpoint, kept for existing clients and the local proof scripts. It does not implement the standard MCP initialization lifecycle. Check `/.well-known/agent.json` before assuming the standard MCP Streamable HTTP endpoint at POST /mcp is available; both transports run the same governed permit→meter→receipt path when enabled.",
+        "description": "Legacy project JSON-RPC endpoint, kept for existing clients and the local proof scripts. It does not implement the standard MCP initialization lifecycle. Check `/.well-known/agent.json` before assuming the standard MCP Streamable HTTP endpoint at POST /mcp is available; both transports run the same governed permit→meter→receipt path when enabled. tools/call uses params.mcpContext; mcp_context belongs only to the deprecated REST invoke route. Preserve one Idempotency-Key across retries.",
         "operationId": "MCP_JSON_RPC_Messages_mcp_messages_post",
         "deprecated": true,
         "security": [
@@ -3252,6 +3254,115 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "jsonrpc": {
+                    "type": "string",
+                    "enum": [
+                      "2.0"
+                    ]
+                  },
+                  "id": {
+                    "type": [
+                      "string",
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "method": {
+                    "type": "string",
+                    "enum": [
+                      "tools/list",
+                      "tools/call"
+                    ]
+                  },
+                  "params": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "arguments": {
+                        "type": "object"
+                      },
+                      "mcpContext": {
+                        "description": "MCP execution context passed in tool calls.",
+                        "properties": {
+                          "wallet_id": {
+                            "description": "Wallet to charge for this call",
+                            "title": "Wallet Id",
+                            "type": "string"
+                          },
+                          "request_path": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Optional request path for tracking",
+                            "title": "Request Path"
+                          },
+                          "permit_id": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Signed permit for governed calls",
+                            "title": "Permit Id"
+                          },
+                          "quote_id": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Signed price quote to charge against (locks the price)",
+                            "title": "Quote Id"
+                          },
+                          "idempotency_key": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Replay key for governed calls",
+                            "title": "Idempotency Key"
+                          }
+                        },
+                        "required": [
+                          "wallet_id"
+                        ],
+                        "title": "McpContext",
+                        "type": "object"
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "method"
+                ]
               }
             }
           }
@@ -4278,8 +4389,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Filter by effective lifecycle status: active, expired, revoked.",
               "title": "Status"
-            }
+            },
+            "description": "Filter by effective lifecycle status: active, expired, revoked."
           },
           {
             "name": "created_after",
@@ -6097,10 +6210,12 @@
           },
           "balance": {
             "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Balance"
           },
           "daily_spend_used": {
             "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Daily Spend Used"
           },
           "human_approval_required": {
@@ -6542,10 +6657,12 @@
           },
           "credits_authorized": {
             "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Credits Authorized"
           },
           "credits_charged": {
             "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Credits Charged"
           },
           "error_code": {
@@ -7609,6 +7726,7 @@
           },
           "max_credits": {
             "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Max Credits"
           },
           "permit_expires_at": {
@@ -7829,10 +7947,12 @@
           },
           "max_credits": {
             "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Max Credits"
           },
           "spent_credits": {
             "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Spent Credits"
           },
           "expires_at": {
@@ -7846,7 +7966,8 @@
           },
           "status": {
             "type": "string",
-            "title": "Status"
+            "title": "Status",
+            "description": "Stored lifecycle status; expiry does not change it."
           },
           "requires_human_approval": {
             "type": "boolean",
@@ -7888,7 +8009,8 @@
           "aggregate_value_cap": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
               },
               {
                 "type": "null"
@@ -7931,6 +8053,12 @@
               }
             ],
             "title": "Repeat Window Seconds"
+          },
+          "effective_status": {
+            "type": "string",
+            "title": "Effective Status",
+            "description": "Current lifecycle: a non-active stored status takes precedence; otherwise expired when expires_at is at or before the current UTC time. Active does not establish authorization for a particular action. Unsigned.",
+            "readOnly": true
           }
         },
         "type": "object",
@@ -7948,7 +8076,8 @@
           "status",
           "signature",
           "key_id",
-          "issued_at"
+          "issued_at",
+          "effective_status"
         ],
         "title": "PermitResponse"
       },
@@ -7986,7 +8115,8 @@
                 "type": "number"
               },
               {
-                "type": "string"
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
               },
               {
                 "type": "null"
@@ -8729,6 +8859,7 @@
           },
           "quoted_credits": {
             "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Quoted Credits"
           },
           "category": {
@@ -9110,10 +9241,12 @@
           },
           "credits_authorized": {
             "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Credits Authorized"
           },
           "credits_charged": {
             "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Credits Charged"
           },
           "outcome": {
@@ -9267,6 +9400,7 @@
           },
           "credits": {
             "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Credits"
           },
           "status": {
