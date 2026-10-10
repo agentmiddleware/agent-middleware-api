@@ -87,6 +87,17 @@ def classify(operation: Operation, evidence: tuple[Evidence, ...]) -> Operation:
         for row in evidence
     ):
         raise ValueError("classification evidence crosses operation provenance")
+    # Read/replay responses belong in the operation trace, but describe the
+    # later request rather than the original execution's business outcome.
+    classification_evidence = tuple(
+        row
+        for row in evidence
+        if not (
+            row.source == "insight_event"
+            and row.event_kind == "terminal"
+            and row.request_disposition != "execution_intent"
+        )
+    )
     gaps = set(operation.evidence_gaps)
     conflicts = set(operation.conflicts)
     gateway_values: list[GatewayOutcome] = []
@@ -96,7 +107,7 @@ def classify(operation: Operation, evidence: tuple[Evidence, ...]) -> Operation:
     refund_claimed = False
     refund_verified = False
     refund_mismatch = False
-    for row in evidence:
+    for row in classification_evidence:
         facts = row.state_facts
         if facts.gateway_outcome is not None:
             gateway_values.append(facts.gateway_outcome)
@@ -145,8 +156,8 @@ def classify(operation: Operation, evidence: tuple[Evidence, ...]) -> Operation:
     ):
         if value == "conflicting":
             conflicts.add(f"{name}_state_conflict")
-    has_dispatch = any(row.source == "dispatch" for row in evidence)
-    has_receipt = any(row.source == "receipt" for row in evidence)
+    has_dispatch = any(row.source == "dispatch" for row in classification_evidence)
+    has_receipt = any(row.source == "receipt" for row in classification_evidence)
     if has_dispatch and not has_receipt:
         gaps.add("receipt_missing")
     if effect == "unknown" and (
@@ -154,17 +165,19 @@ def classify(operation: Operation, evidence: tuple[Evidence, ...]) -> Operation:
         or any(
             row.state_facts.dispatch_state
             in ("dispatch_claimed", "dispatched", "succeeded", "delivery_uncertain")
-            for row in evidence
+            for row in classification_evidence
         )
     ):
         gaps.add("effect_proof_missing")
-    reason_rows = [row for row in evidence if row.reason_code is not None]
+    reason_rows = [
+        row for row in classification_evidence if row.reason_code is not None
+    ]
     reason = reason_rows[0].reason_code if reason_rows else None
     if len({row.reason_code for row in reason_rows}) > 1:
         conflicts.add("reason_code_conflict")
     denial_rows = [
         row
-        for row in evidence
+        for row in classification_evidence
         if row.reason_code in _DENIAL_CODES
         or row.state_facts.policy_decision == "deny"
         or row.state_facts.gateway_outcome == "denied"
@@ -174,7 +187,7 @@ def classify(operation: Operation, evidence: tuple[Evidence, ...]) -> Operation:
     ]
     fault_rows = [
         row
-        for row in evidence
+        for row in classification_evidence
         if row.reason_code in _FAULT_CODES
         or row.state_facts.gateway_outcome == "failed"
         or row.state_facts.refund_state == "failed"
@@ -211,7 +224,7 @@ def classify(operation: Operation, evidence: tuple[Evidence, ...]) -> Operation:
             and any(
                 row.state_facts.dispatch_state
                 in ("dispatch_claimed", "dispatched", "delivery_uncertain")
-                for row in evidence
+                for row in classification_evidence
             )
         )
     ):
@@ -219,7 +232,7 @@ def classify(operation: Operation, evidence: tuple[Evidence, ...]) -> Operation:
     elif refund in ("failed", "pending") or any(
         row.state_facts.dispatch_state == "prepared"
         or row.state_facts.ledger_action == "debit"
-        for row in evidence
+        for row in classification_evidence
     ):
         action = "reconcile"
     else:
