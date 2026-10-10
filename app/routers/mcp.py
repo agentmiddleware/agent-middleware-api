@@ -1435,8 +1435,11 @@ async def _execute_registered_tool_inner(
                 )
                 if owned_record is not None:
                     owned_record["record_id"] = idem_begin.record_id
-            except IdempotencyInProgressError:
-                mark_current_request(disposition="status_read")
+            except IdempotencyInProgressError as exc:
+                mark_current_request(
+                    disposition="status_read",
+                    logical_operation_id=exc.verified_record_id,
+                )
                 raise
             except IdempotencyConflictError as exc:
                 raise ValueError(str(exc)) from exc
@@ -1702,7 +1705,10 @@ async def _execute_registered_tool_inner(
                 },
             )
             if isinstance(exc, IdempotencyInProgressError):
-                mark_current_request(disposition="status_read")
+                mark_current_request(
+                    disposition="status_read",
+                    logical_operation_id=exc.verified_record_id,
+                )
                 raise
             raise ValueError(str(exc))
         if replay and replay.response_json:
