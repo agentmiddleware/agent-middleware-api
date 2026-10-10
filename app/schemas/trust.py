@@ -10,11 +10,13 @@ from pydantic import (
     Field,
     StrictInt,
     WithJsonSchema,
+    computed_field,
     field_validator,
     model_validator,
 )
 
 from app.core.credits import credit_amount_fits_storage
+from app.core.time import to_naive_utc, utc_now
 from app.schemas.policies import PolicyBundleResponse
 
 # Permit and permit-request credit columns are Numeric(20, 8). A permit is
@@ -139,7 +141,9 @@ class PermitResponse(ActionPermitFields):
     spent_credits: Decimal
     expires_at: datetime
     nonce: str
-    status: str
+    status: str = Field(
+        description="Stored lifecycle status; expiry does not change it."
+    )
     requires_human_approval: bool = False
     signature: str
     key_id: str
@@ -152,6 +156,18 @@ class PermitResponse(ActionPermitFields):
     recipient_domain: str | None = None
     allow_identical_repeats: bool = False
     repeat_window_seconds: int | None = Field(default=None, gt=0, le=31536000)
+
+    @computed_field(
+        description=(
+            "Current lifecycle: a non-active stored status takes precedence; otherwise "
+            "expired when expires_at is at or before the current UTC time. Active "
+            "does not establish authorization for a particular action. Unsigned."
+        )
+    )
+    def effective_status(self) -> str:
+        if self.status != "active":
+            return self.status
+        return "expired" if to_naive_utc(self.expires_at) <= utc_now() else "active"
 
 
 class QuoteCreateRequest(BaseModel):
