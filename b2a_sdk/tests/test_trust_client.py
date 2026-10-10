@@ -279,6 +279,32 @@ async def test_governed_jsonrpc_errors_are_typed(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("code", [-32603, -32003, -32009])
+async def test_replay_conflict_code_preserves_typed_sdk_error(code: int) -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "jsonrpc": "2.0",
+                "id": "invoke-key",
+                "error": {"code": code, "message": "idempotency_key_reused"},
+            },
+        )
+
+    async with _client(handler) as client:
+        with pytest.raises(IdempotencyConflictError) as exc_info:
+            await client.invoke_tool(
+                "partner.search",
+                {},
+                wallet_id="wallet-1",
+                permit_id="permit-1",
+                idempotency_key="invoke-key",
+            )
+    assert exc_info.value.detail == "idempotency_key_reused"
+    assert exc_info.value.status_code == 409
+
+
+@pytest.mark.asyncio
 async def test_receipt_verification_and_evidence_are_typed() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/v1/receipts/receipt-success":
