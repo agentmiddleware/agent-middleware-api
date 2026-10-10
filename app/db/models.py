@@ -1267,6 +1267,41 @@ class McpDispatchAttemptModel(SQLModel, table=True):
     model_config = {"arbitrary_types_allowed": True}
 
 
+class InsightEventModel(SQLModel, table=True):
+    """Bounded observations; no request content or credential material."""
+
+    __tablename__ = "operation_insight_events"
+    __table_args__ = (
+        Index("ix_insight_events_wallet_time", "wallet_id", "occurred_at", "event_id"),
+        Index("ix_insight_events_request", "request_id", "event_id"),
+    )
+
+    event_id: str = Field(primary_key=True, max_length=128)
+    kind: str = Field(max_length=16)
+    request_id: Optional[str] = Field(default=None, max_length=128)
+    attempt_id: Optional[str] = Field(default=None, max_length=128)
+    logical_operation_id: Optional[str] = Field(default=None, max_length=128)
+    wallet_id: Optional[str] = Field(default=None, max_length=128)
+    ownership_epoch_id: Optional[str] = Field(default=None, max_length=128)
+    original_operation_anchor_id: Optional[str] = Field(default=None, max_length=128)
+    request_disposition: Optional[str] = Field(default=None, max_length=32)
+    tool: Optional[str] = Field(default=None, max_length=128)
+    reason_code: Optional[str] = Field(default=None, max_length=128)
+    gateway_outcome: Optional[str] = Field(default=None, max_length=16)
+    effect_state: Optional[str] = Field(default=None, max_length=20)
+    http_status_code: Optional[int] = Field(default=None)
+    occurred_at: datetime = Field(sa_type=NaiveUTCDateTime, index=True)
+    ingested_at: datetime = Field(sa_type=NaiveUTCDateTime, default_factory=utc_now)
+    duplicate_conflict_at: Optional[datetime] = Field(
+        sa_type=NaiveUTCDateTime, default=None
+    )
+    classification_version: int = Field(default=1)
+    environment: Optional[str] = Field(default=None, max_length=128)
+    server_release: Optional[str] = Field(default=None, max_length=128)
+    deployment: Optional[str] = Field(default=None, max_length=128)
+    client_version: Optional[str] = Field(default=None, max_length=128)
+
+
 class RefreshTokenModel(SQLModel, table=True):
     """Refresh token registry for JWT revocation."""
 

@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     BUILD_COMMIT_SHA: str = ""
     ENVIRONMENT: str = "local"
     DEBUG: bool = False
+    OPERATION_INSIGHTS_EVENTS_ENABLED: bool = False
+    OPERATION_INSIGHTS_ALLOWED_CLIENT_VERSIONS: str = ""
 
     # --- Server ---
     HOST: str = "0.0.0.0"

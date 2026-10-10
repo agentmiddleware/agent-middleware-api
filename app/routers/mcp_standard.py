@@ -96,6 +96,7 @@ from app.services.receipts import ReceiptWriteContendedError
 from app.services.billing_engine import LedgerWriteContendedError
 from app.core.config import get_settings
 from app.core.time import utc_now
+from app.services.operation_insights.events import mark_current_request
 from app.routers.mcp import (
     _MAX_JSON_NESTING_DEPTH,
     GovernedToolError,
@@ -476,6 +477,9 @@ async def _governed_tools_call(
         raise _mcp_error(-32602, "Missing tool name")
 
     if not auth.wallet_id:
+        mark_current_request(
+            gateway_outcome="denied", reason_code="wallet_scoped_key_required"
+        )
         raise _mcp_error(
             -32003,
             "wallet_scoped_key_required: this endpoint mints permits from the "
@@ -484,9 +488,14 @@ async def _governed_tools_call(
 
     record = get_service_registry().get_local(tool_name)
     if record is None:
+        mark_current_request(gateway_outcome="denied", reason_code="tool_not_found")
         raise _mcp_error(-32001, f"Tool not found: {tool_name}")
+    mark_current_request(tool=tool_name)
 
     if get_service_registry().get_action_binding(record) is not None and not permit_id:
+        mark_current_request(
+            gateway_outcome="denied", reason_code="action_permit_required"
+        )
         raise _mcp_error(-32003, "action_permit_required")
 
     # Wallet policy shapes the permit this surface mints. A policy demanding a
@@ -626,6 +635,9 @@ async def _governed_tools_call(
             # the error from the stored terminal record), so both get the same
             # result shape. See _delivery_uncertain_tool_result for why this
             # one outcome leaves the JSON-RPC error channel.
+            mark_current_request(
+                gateway_outcome="unknown", reason_code="delivery_uncertain"
+            )
             return _delivery_uncertain_tool_result(
                 e, client_key_supplied=bool(client_idempotency_key)
             )
@@ -661,7 +673,9 @@ def _build_standard_mcp_server() -> Server:
 
     @server.list_tools()
     async def list_tools() -> list[mcp_types.Tool]:
+        mark_current_request(disposition="non_execution_read")
         result = await _handle_tools_list({})
+        mark_current_request(gateway_outcome="succeeded")
         tools = []
         for tool in result["tools"]:
             payload = dict(tool)
@@ -690,6 +704,10 @@ def _build_standard_mcp_server() -> Server:
             # driven by an unexpected transport. Fail closed.
             raise _mcp_error(-32603, "auth_context_missing")
 
+        mark_current_request(
+            disposition="execution_intent",
+            wallet_id=auth.wallet_id,
+        )
         request_id = str(ctx.request_id) if ctx.request_id is not None else None
         try:
             # Validated before anything is minted or metered: a present-but-
@@ -705,6 +723,8 @@ def _build_standard_mcp_server() -> Server:
                 permit_id=_action_permit_reference(req.params),
                 request_id=request_id,
             )
+            if result.get("isError") is False:
+                mark_current_request(gateway_outcome="succeeded")
 
             payload = dict(result)
             receipt = payload.get("receipt")
@@ -715,7 +735,27 @@ def _build_standard_mcp_server() -> Server:
             return mcp_types.ServerResult(
                 mcp_types.CallToolResult.model_validate(payload)
             )
-        except McpError:
+        except McpError as e:
+            code = e.error.code
+            mark_current_request(
+                gateway_outcome=(
+                    "unknown"
+                    if code in {-32005, -32007}
+                    else "denied"
+                    if code
+                    in {-32600, -32601, -32602, -32001, -32002, -32003, -32004, -32009}
+                    else "failed"
+                ),
+                reason_code=(
+                    "operation_contended"
+                    if code == -32005
+                    else "terminal_record_contended"
+                    if code == -32007
+                    else "request_validation_denied"
+                    if code in {-32600, -32601, -32602}
+                    else "governed_tool_error"
+                ),
+            )
             raise
         except Exception as e:
             # The SDK reports any other exception that escapes a handler as
@@ -724,6 +764,7 @@ def _build_standard_mcp_server() -> Server:
             # mint, or result validation is sanitized the same way as one
             # inside the governed call.
             error = _internal_error(e, surface="/mcp", request_id=request_id)
+            mark_current_request(gateway_outcome="failed", reason_code="internal_error")
             raise _mcp_error(error["code"], error["message"], error["data"]) from e
 
     server.request_handlers[mcp_types.CallToolRequest] = handle_call_tool

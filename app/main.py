@@ -47,6 +47,7 @@ from .core.product_positioning import (
 from .core.rate_limiter import RateLimitMiddleware, rate_limit_discovery
 from .core.runtime_mode import get_simulation_modes
 from .middleware.head_method import HeadMethodMiddleware
+from .middleware.operation_insight_events import OperationInsightEventsMiddleware
 from .middleware.request_body_limit import RequestBodyLimitMiddleware
 from .middleware.security_headers import SecurityHeadersMiddleware
 from .core.trust_mode import (
@@ -618,6 +619,8 @@ app.add_middleware(SecurityHeadersMiddleware)
 # layer below — routing included — sees a GET, and the response leaves with
 # the GET's status and headers but no body, per RFC 9110 §9.3.2.
 app.add_middleware(HeadMethodMiddleware)
+# Outermost: capture refused ingress before auth, routing, and body validation.
+app.add_middleware(OperationInsightEventsMiddleware)
 
 
 def _json_safe_numbers(value: Any) -> Any:
