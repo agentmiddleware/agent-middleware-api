@@ -4,4 +4,10 @@ target-version = "py311"
 # Pyflakes: unused imports/variables, undefined names, redefinitions.
 # Previously this file selected only E501 and then immediately ignored it,
 # so `ruff check` passed with zero rules actually enforced.
-select = ["F"]
+#
+# PT011/PT015/PT017 (flake8-pytest-style) plus B011/B015 (bugbear) are the
+# test-quality gate: broad `pytest.raises(ValueError)` without `match`
+# cannot tell one failure mode from another, `assert` in `except` blocks
+# hides the real verdict, and `assert False` / useless except blocks pass
+# without checking anything. CI runs `ruff check .`, so this is enforced.
+select = ["F", "B011", "B015", "PT011", "PT015", "PT017"]

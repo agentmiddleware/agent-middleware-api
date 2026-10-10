@@ -1065,66 +1065,167 @@ class BillingEngine:
         description: str = "",
     ) -> LedgerEntry:
         """Reverse a prior debit with a correlated refund ledger entry."""
-        async with self._session_factory()() as session:
-            async with session.begin():
-                refund_entry_id = f"refund-{charge_entry_id}"
-                wallet_result = await session.execute(
-                    select(WalletModel)
-                    .where(
-                        cast(ColumnElement[bool], WalletModel.wallet_id == wallet_id)
+        refund_entry_id = f"refund-{charge_entry_id}"
+        try:
+            async with self._session_factory()() as session:
+                async with session.begin():
+                    wallet_result = await session.execute(
+                        select(WalletModel)
+                        .where(
+                            cast(
+                                ColumnElement[bool],
+                                WalletModel.wallet_id == wallet_id,
+                            )
+                        )
+                        .with_for_update()
                     )
-                    .with_for_update()
-                )
-                wallet = wallet_result.scalar_one_or_none()
-                if not wallet:
-                    raise self._wallet_not_found_error(wallet_id)
+                    wallet = wallet_result.scalar_one_or_none()
+                    if not wallet:
+                        raise self._wallet_not_found_error(wallet_id)
 
-                charge_result = await session.execute(
-                    select(LedgerEntryModel).where(
-                        cast(
-                            ColumnElement[bool],
-                            LedgerEntryModel.entry_id == charge_entry_id,
-                        ),
-                        cast(
-                            ColumnElement[bool], LedgerEntryModel.wallet_id == wallet_id
-                        ),
-                        cast(
-                            ColumnElement[bool],
-                            LedgerEntryModel.action == LedgerAction.DEBIT.value,
-                        ),
+                    charge_result = await session.execute(
+                        select(LedgerEntryModel).where(
+                            cast(
+                                ColumnElement[bool],
+                                LedgerEntryModel.entry_id == charge_entry_id,
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                LedgerEntryModel.wallet_id == wallet_id,
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                LedgerEntryModel.action == LedgerAction.DEBIT.value,
+                            ),
+                        )
                     )
-                )
-                charge_entry = charge_result.scalar_one_or_none()
-                if not charge_entry:
-                    raise ValueError(f"Debit ledger entry not found: {charge_entry_id}")
+                    charge_entry = charge_result.scalar_one_or_none()
+                    if not charge_entry:
+                        raise ValueError(
+                            f"Debit ledger entry not found: {charge_entry_id}"
+                        )
 
-                existing_refund_result = await session.execute(
-                    select(LedgerEntryModel).where(
-                        cast(
-                            ColumnElement[bool], LedgerEntryModel.wallet_id == wallet_id
-                        ),
-                        cast(
-                            ColumnElement[bool],
-                            LedgerEntryModel.action == LedgerAction.REFUND.value,
-                        ),
-                        cast(
-                            ColumnElement[bool],
-                            LedgerEntryModel.correlation_id == charge_entry_id,
-                        ),
+                    existing_refund_result = await session.execute(
+                        select(LedgerEntryModel).where(
+                            cast(
+                                ColumnElement[bool],
+                                LedgerEntryModel.wallet_id == wallet_id,
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                LedgerEntryModel.action == LedgerAction.REFUND.value,
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                LedgerEntryModel.correlation_id == charge_entry_id,
+                            ),
+                        )
                     )
-                )
-                existing_refund = existing_refund_result.scalar_one_or_none()
-                if existing_refund:
-                    return ledger_entry_model_to_schema(existing_refund)
+                    existing_refund = existing_refund_result.scalar_one_or_none()
+                    if existing_refund:
+                        return ledger_entry_model_to_schema(existing_refund)
 
-                existing_refund_result = await session.execute(
+                    existing_refund_result = await session.execute(
+                        select(LedgerEntryModel).where(
+                            cast(
+                                ColumnElement[bool],
+                                LedgerEntryModel.entry_id == refund_entry_id,
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                LedgerEntryModel.wallet_id == wallet_id,
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                LedgerEntryModel.action == LedgerAction.REFUND.value,
+                            ),
+                        )
+                    )
+                    existing_refund = existing_refund_result.scalar_one_or_none()
+                    if existing_refund:
+                        return ledger_entry_model_to_schema(existing_refund)
+
+                    refund_amount = abs(charge_entry.amount)
+                    # Credit relatively, in one statement, for the same reason the
+                    # debit does. Two refunds for *different* charges landing
+                    # together each read the same balance and each write their
+                    # own total, so one credit is silently lost -- and a lost
+                    # credit is the customer's money. The duplicate-refund
+                    # guard above does not help here: these are distinct,
+                    # legitimate refunds.
+                    refund_values: dict[str, Any] = {
+                        "balance": WalletModel.balance + refund_amount,
+                        "lifetime_debits": clamped_decrement(
+                            WalletModel.lifetime_debits, refund_amount
+                        ),
+                        "updated_at": utc_now(),
+                    }
+                    if _timestamp_in_current_period(
+                        charge_entry.timestamp,
+                        wallet.hourly_reset_at,
+                    ):
+                        refund_values["hourly_spent"] = clamped_decrement(
+                            WalletModel.hourly_spent, refund_amount
+                        )
+                    if _timestamp_in_current_period(
+                        charge_entry.timestamp,
+                        wallet.daily_reset_at,
+                    ):
+                        # daily_spent is incremented exactly once per charge
+                        # (by the velocity monitor), so reverse exactly one
+                        # increment.
+                        refund_values["daily_spent"] = clamped_decrement(
+                            WalletModel.daily_spent, refund_amount
+                        )
+                    await session.execute(
+                        sa_update(WalletModel)
+                        .where(
+                            cast(
+                                ColumnElement[bool],
+                                WalletModel.wallet_id == wallet_id,
+                            )
+                        )
+                        .values(**refund_values)
+                        .execution_options(synchronize_session=False)
+                    )
+                    # ``balance_after`` below must be the balance this refund
+                    # produced, not the one read before it.
+                    await session.refresh(wallet)
+
+                    entry = LedgerEntryModel(
+                        entry_id=refund_entry_id,
+                        wallet_id=wallet_id,
+                        action=LedgerAction.REFUND.value,
+                        amount=refund_amount,
+                        balance_after=wallet.balance,
+                        service_category=charge_entry.service_category,
+                        description=description
+                        or f"Refund for {charge_entry.description}",
+                        request_path=charge_entry.request_path,
+                        compute_cost=Decimal("0"),
+                        margin=Decimal("0"),
+                        correlation_id=charge_entry_id,
+                    )
+                    session.add(entry)
+
+                await session.commit()
+                return ledger_entry_model_to_schema(entry)
+        except IntegrityError:
+            # A concurrent duplicate refund committed between the
+            # duplicate-refund checks above and this insert. This
+            # transaction rolled back whole, so its wallet credit never
+            # landed, and the winner's credit stands alone. Return the
+            # winner through the same shape as a sequential duplicate.
+            async with self._session_factory()() as recovery_session:
+                by_entry_id = await recovery_session.execute(
                     select(LedgerEntryModel).where(
                         cast(
                             ColumnElement[bool],
                             LedgerEntryModel.entry_id == refund_entry_id,
                         ),
                         cast(
-                            ColumnElement[bool], LedgerEntryModel.wallet_id == wallet_id
+                            ColumnElement[bool],
+                            LedgerEntryModel.wallet_id == wallet_id,
                         ),
                         cast(
                             ColumnElement[bool],
@@ -1132,69 +1233,28 @@ class BillingEngine:
                         ),
                     )
                 )
-                existing_refund = existing_refund_result.scalar_one_or_none()
-                if existing_refund:
-                    return ledger_entry_model_to_schema(existing_refund)
-
-                refund_amount = abs(charge_entry.amount)
-                # Credit relatively, in one statement, for the same reason the
-                # debit does. Two refunds for *different* charges landing
-                # together each read the same balance and each write their own
-                # total, so one credit is silently lost -- and a lost credit is
-                # the customer's money. The duplicate-refund guard above does
-                # not help here: these are distinct, legitimate refunds.
-                refund_values: dict[str, Any] = {
-                    "balance": WalletModel.balance + refund_amount,
-                    "lifetime_debits": clamped_decrement(
-                        WalletModel.lifetime_debits, refund_amount
-                    ),
-                    "updated_at": utc_now(),
-                }
-                if _timestamp_in_current_period(
-                    charge_entry.timestamp,
-                    wallet.hourly_reset_at,
-                ):
-                    refund_values["hourly_spent"] = clamped_decrement(
-                        WalletModel.hourly_spent, refund_amount
+                existing = by_entry_id.scalar_one_or_none()
+                if existing is None:
+                    by_correlation = await recovery_session.execute(
+                        select(LedgerEntryModel).where(
+                            cast(
+                                ColumnElement[bool],
+                                LedgerEntryModel.wallet_id == wallet_id,
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                LedgerEntryModel.action == LedgerAction.REFUND.value,
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                LedgerEntryModel.correlation_id == charge_entry_id,
+                            ),
+                        )
                     )
-                if _timestamp_in_current_period(
-                    charge_entry.timestamp,
-                    wallet.daily_reset_at,
-                ):
-                    # daily_spent is incremented exactly once per charge (by the
-                    # velocity monitor), so reverse exactly one increment.
-                    refund_values["daily_spent"] = clamped_decrement(
-                        WalletModel.daily_spent, refund_amount
-                    )
-                await session.execute(
-                    sa_update(WalletModel)
-                    .where(
-                        cast(ColumnElement[bool], WalletModel.wallet_id == wallet_id)
-                    )
-                    .values(**refund_values)
-                    .execution_options(synchronize_session=False)
-                )
-                # ``balance_after`` below must be the balance this refund
-                # produced, not the one read before it.
-                await session.refresh(wallet)
-
-                entry = LedgerEntryModel(
-                    entry_id=refund_entry_id,
-                    wallet_id=wallet_id,
-                    action=LedgerAction.REFUND.value,
-                    amount=refund_amount,
-                    balance_after=wallet.balance,
-                    service_category=charge_entry.service_category,
-                    description=description or f"Refund for {charge_entry.description}",
-                    request_path=charge_entry.request_path,
-                    compute_cost=Decimal("0"),
-                    margin=Decimal("0"),
-                    correlation_id=charge_entry_id,
-                )
-                session.add(entry)
-
-            await session.commit()
-            return ledger_entry_model_to_schema(entry)
+                    existing = by_correlation.scalar_one_or_none()
+            if existing is None:
+                raise
+            return ledger_entry_model_to_schema(existing)
 
     # --- Top-Up (Fiat Ingestion) ---
 
