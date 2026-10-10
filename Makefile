@@ -1,4 +1,4 @@
-.PHONY: site-transcript site-transcript-check quickstart quickstart-check live-loop-proof demo-ambiguous-retry demo-ambiguous-retry-check failure-lab failure-lab-check test test-all test-proof coverage prove-trust-plane prove-trust-plane-postgres prove-crash-recovery demo-trust-plane demo-trust-plane-check dogfood-trust-plane dogfood-trust-plane-check red-team-trust-plane red-team-trust-plane-check agent-ops-war-room agent-ops-war-room-check check-doc-references check-railway-iac trust-coverage-gate trust-release-gate trust-conformance-live adversarial-battery-live railway-preflight railway-preflight-live failure-lab-suite failure-lab-all failure-lab-evidence failure-lab-list failure-lab-explore failure-lab-integration-check failure-lab-diagnostic failure-lab-verify-bundle
+.PHONY: site-transcript site-transcript-check quickstart quickstart-check live-loop-proof demo-ambiguous-retry demo-ambiguous-retry-check failure-lab failure-lab-check test test-all test-proof test-perf coverage prove-trust-plane prove-trust-plane-postgres prove-crash-recovery demo-trust-plane demo-trust-plane-check dogfood-trust-plane dogfood-trust-plane-check red-team-trust-plane red-team-trust-plane-check agent-ops-war-room agent-ops-war-room-check check-doc-references check-railway-iac trust-coverage-gate trust-release-gate trust-conformance-live adversarial-battery-live railway-preflight railway-preflight-live failure-lab-suite failure-lab-all failure-lab-evidence failure-lab-list failure-lab-explore failure-lab-integration-check failure-lab-diagnostic failure-lab-verify-bundle
 
 # The governed-loop transcript the public site renders. Re-runs the
 # trust-plane demo on a throwaway SQLite gateway, records the exchanges the
@@ -35,18 +35,23 @@ live-loop-proof:
 
 # Fast inner loop: trust-plane (product) tests only. Proof-surface workloads
 # are skipped here — run them with `make test-all` (what CI runs) or `make test-proof`.
+# `perf` tests (wall-clock latency budgets, which time the runner as much as
+# the code) are skipped here too — run them with `make test-perf`; CI still runs them.
 # `--with-requirements` makes these self-contained: uv installs the runtime +
 # test deps for the run, so `make test` works on a fresh checkout without a
 # separate `pip install -r requirements.txt` (deps live in requirements.txt,
 # not pyproject [project.dependencies]).
 test:
-	uv run --with-requirements requirements.txt pytest tests/ -q -m "not proof"
+	uv run --with-requirements requirements.txt pytest tests/ -q -m "not proof and not perf"
 
 test-all:
 	uv run --with-requirements requirements.txt pytest tests/ -q
 
 test-proof:
 	uv run --with-requirements requirements.txt pytest tests/ -q -m proof
+
+test-perf:
+	uv run --with-requirements requirements.txt pytest tests/ -q -m perf
 
 # Reproducible whole-application coverage baseline. Production-posture tests run
 # in their dedicated CI job because they require a different environment.

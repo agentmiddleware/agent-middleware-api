@@ -19,8 +19,9 @@ from sqlalchemy.orm import Session
 # else is a "proof surface" — example workloads that exercise the spine but are
 # NOT the product (see README "Core platform vs. example workloads"). Tests for
 # these are auto-marked `proof` so the inner dev loop can skip them:
-#     make test       -> fast, core only  (pytest -m "not proof")
+#     make test       -> fast, core only  (pytest -m "not proof and not perf")
 #     make test-all   -> full suite       (what CI runs)
+#     make test-perf  -> wall-clock latency budgets only (hand-marked `perf`)
 # Conservative by design: when a test's surface is ambiguous, leave it OUT of
 # this set so it stays in the fast (core) loop and is never silently skipped.
 PROOF_SURFACE_TEST_MODULES = frozenset(
