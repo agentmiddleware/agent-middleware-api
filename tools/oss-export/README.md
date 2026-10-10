@@ -16,6 +16,9 @@ them so the export is reviewable and repeatable.
 
 ## Notes before the next export
 
+- Run `export.sh`, then `python3 rewrite_paths.py <export>/gateway`, then run
+  `python3 <source>/tools/oss-export/fix_wording.py` from the export root.
+  All three stages are required before validating or publishing the candidate.
 - `export.sh` defaults to `~/tmp/amw-oss/src` and
   `~/tmp/amw-oss/agent-middleware`. Set `AMW_EXPORT_SRC` and `AMW_EXPORT_DST`
   to use a clean exact-SHA source checkout and a public working copy elsewhere.
