@@ -547,6 +547,10 @@ def test_machine_pointer_copies_match_and_state_live_access_boundary() -> None:
     assert "delivery_uncertain" in llm_txt
     assert "at most one gateway dispatch and debit" in " ".join(llm_txt.split())
     assert "public source" in llm_txt
+    assert "GET /mcp/tools.json requires an" in llm_txt
+    assert "returns 401 without one" in llm_txt
+    assert "The local quickstart exposes the catalog without a key" in llm_txt
+    assert "Python 3.11+" in llm_txt
     assert "make prove-trust-plane" in llm_txt
     assert "operator-issued" in llm_txt
     assert "no public self-serve key mint" in llm_txt
@@ -596,6 +600,21 @@ PUBLIC_ORG_URL = "https://github.com/agentmiddleware"
 PUBLIC_REPO_URL = "https://github.com/agentmiddleware/agent-middleware-api"
 OLD_REPO_URL = "https://github.com/PetrefiedThunder/agent-middleware-api"
 GITHUB_URL_PATTERN = re.compile(r"https://github\.com[^\s\"'<>)\]]*")
+
+
+def test_machine_discovery_names_keyed_catalog_and_scoped_tool_invoke(tmp_path) -> None:
+    output = tmp_path / "site"
+    result = _render_site(output, VALID_TEST_CONTACTS)
+    assert result.returncode == 0, result.stderr
+
+    home = (output / "index.html").read_text(encoding="utf-8")
+    machine = home.split('id="machine-discovery"', 1)[1].split("</section>", 1)[0]
+    normalized = " ".join(machine.split())
+    assert "Three unauthenticated GETs" in normalized
+    assert "/mcp/tools.json</code> returns 401" in normalized
+    assert "governed tool invocation requires an operator-issued key" in normalized
+    assert "and a scoped permit" in normalized
+    assert "protected actions need" not in normalized
 
 
 def test_public_surfaces_link_public_source_without_requiring_credentials(
@@ -648,6 +667,11 @@ def test_public_surfaces_link_public_source_without_requiring_credentials(
     assert manifest["github_access"] == "public"
     assert manifest["try_it"]["repository"] == PUBLIC_REPO_URL
     assert manifest["try_it"]["repository_access"] == "public"
+
+    quickstart = (ROOT / "docs" / "quickstart.md").read_text(encoding="utf-8")
+    assert f"git clone {PUBLIC_REPO_URL}.git" in quickstart
+    compare = (output / "compare" / "index.html").read_text(encoding="utf-8")
+    assert "docs/market-research-2026-08.md</code> in the public source" in compare
 
     # The shared footer still links the organization page.
     footer = (SITE / "partials" / "footer.html").read_text(encoding="utf-8")

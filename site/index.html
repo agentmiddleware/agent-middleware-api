@@ -599,8 +599,10 @@
           <p class="section-kicker">04 / Machine discovery</p>
           <h2 id="machine-title">Public pointers for agents and operators.</h2>
           <p>
-            Discovery is public; protected actions need an operator-issued
-            key and a scoped permit.
+            Public discovery pointers need no key. On production-like
+            deployments, the tool catalog needs an operator-issued key. A
+            governed tool invocation requires an operator-issued key and a
+            scoped permit.
           </p>
         </div>
         <div class="machine-links">
@@ -644,7 +646,10 @@
           </a>
         </div>
         <p class="machine-note">
-          Four unauthenticated GETs; each opens JSON in a new tab.
+          Three unauthenticated GETs open directly: the agent manifest,
+          llms.txt, and dependency status. On production-like deployments,
+          <code>/mcp/tools.json</code> returns 401 without an operator-issued
+          key. The local quickstart exposes the catalog without a key.
         </p>
       </section>
 
