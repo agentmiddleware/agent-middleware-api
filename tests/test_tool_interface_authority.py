@@ -28,6 +28,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from pydantic import SecretStr
 from sqlalchemy import update
 
 import app.routers.mcp_standard as mcp_standard_module
@@ -105,7 +106,9 @@ def _sentinel_env(monkeypatch, *, simulated: bool, configured: bool = True):
         settings, "SENTINEL_API_URL", "https://sentinel.test" if configured else ""
     )
     monkeypatch.setattr(
-        settings, "SENTINEL_API_KEY", "sk_test_" + "0" * 64 if configured else ""
+        settings,
+        "SENTINEL_API_KEY",
+        SecretStr("sk_test_" + "0" * 64) if configured else SecretStr(""),
     )
     monkeypatch.setattr(settings, "SENTINEL_WAIT_SECONDS", 0.0)
     return settings

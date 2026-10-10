@@ -305,7 +305,18 @@ class PermitService:
                 )
             )
         if status:
-            filters.append(cast(ColumnElement[bool], PermitModel.status == status))
+            effective_status = case(
+                (
+                    cast(ColumnElement[bool], PermitModel.status != "active"),
+                    PermitModel.status,
+                ),
+                (
+                    cast(ColumnElement[bool], PermitModel.expires_at <= utc_now()),
+                    "expired",
+                ),
+                else_="active",
+            )
+            filters.append(cast(ColumnElement[bool], effective_status == status))
         if subject_key_id:
             filters.append(
                 cast(ColumnElement[bool], PermitModel.subject_key_id == subject_key_id)
