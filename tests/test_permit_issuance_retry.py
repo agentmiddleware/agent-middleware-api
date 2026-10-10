@@ -1,6 +1,7 @@
 """Only proven pre-persistence refusals may release issuance ownership."""
 
-from datetime import timedelta
+from datetime import datetime, timedelta
+from decimal import Decimal
 from unittest.mock import AsyncMock
 
 import pytest
@@ -8,7 +9,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services import idempotency, permits, signing_keys
-from app.core.time import utc_now
+from app.core.time import to_naive_utc, utc_now
 from app.db.database import get_session_factory
 from app.db.models import IdempotencyRecordModel, PermitModel
 from app.main import app
@@ -16,6 +17,7 @@ from app.services.idempotency import get_idempotency_service
 from app.services.permits import PermitError, get_permit_service
 from app.services.service_registry import get_service_registry
 from app.services.signing_keys import get_signing_key_service
+from b2a_sdk.edge_client import LocalPermitValidator
 from tests.test_action_integration import action_registry as _action_registry
 from tests.test_action_permits import _action_request
 from tests.test_trust_helpers import BOOTSTRAP_HEADERS, provision_agent_wallet
@@ -63,6 +65,103 @@ async def issuance(request, clean_database, action_registry):
         )
         headers = {**BOOTSTRAP_HEADERS, "Idempotency-Key": identity["idempotency_key"]}
         yield client, wallets, payload, path, headers, identity
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("change", ["revoked", "expired", "spent"])
+async def test_completed_issuance_replay_refreshes_mutable_state_without_reminting(
+    issuance, monkeypatch, change
+):
+    client, wallets, payload, path, headers, identity = issuance
+    first = await client.post(path, json=payload, headers=headers)
+    assert first.status_code == 201
+    original = first.json()
+    service = get_permit_service()
+    if change == "revoked":
+        await service.revoke_permit(original["permit_id"])
+    elif change == "expired":
+        checked_at = to_naive_utc(datetime.fromisoformat(original["expires_at"]))
+        monkeypatch.setattr(permits, "utc_now", lambda: checked_at)
+        monkeypatch.setattr("app.schemas.trust.utc_now", lambda: checked_at)
+    else:
+        await service.reserve_budget(original["permit_id"], Decimal("2"))
+
+    sponsor_key = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": wallets["sponsor_wallet_id"], "key_name": "replay-issuer"},
+        headers=BOOTSTRAP_HEADERS,
+    )
+    assert sponsor_key.status_code == 201
+    issuer_headers = {
+        "X-API-Key": sponsor_key.json()["api_key"],
+        "Idempotency-Key": identity["idempotency_key"],
+    }
+    replay = await client.post(path, json=payload, headers=issuer_headers)
+    assert replay.status_code == 201
+    current = replay.json()
+    assert current["effective_status"] == ("active" if change == "spent" else change)
+    assert Decimal(current["spent_credits"]) == (2 if change == "spent" else 0)
+    assert current["permit_id"] == original["permit_id"]
+    assert current["signature"] == original["signature"]
+    assert LocalPermitValidator.permit_signing_payload(current) == (
+        LocalPermitValidator.permit_signing_payload(original)
+    )
+    read = await client.get(
+        f"/v1/permits/{original['permit_id']}", headers=issuer_headers
+    )
+    assert read.status_code == 200
+    assert read.json() == current
+    verify = await client.post(
+        "/v1/permits/verify",
+        json={
+            "permit_id": original["permit_id"],
+            "wallet_id": wallets["agent_wallet_id"],
+            "tool": current["allowed_tools"][0],
+            "estimated_credits": "1",
+        },
+        headers=wallets["agent_headers"],
+    )
+    assert verify.status_code == 200
+    assert verify.json()["valid"] is (change == "spent")
+    assert verify.json()["permit"] == current
+    assert (await service.list_permits(wallet_id=wallets["agent_wallet_id"]))[1] == 1
+    record = await get_idempotency_service().get_record(**identity)
+    assert record is not None
+    assert record.response_reference == original["permit_id"]
+
+    no_auth = await client.post(
+        path,
+        json=payload,
+        headers={"Idempotency-Key": identity["idempotency_key"]},
+    )
+    assert no_auth.status_code == 401
+    foreign_replay = await client.post(
+        path,
+        json=payload,
+        headers={
+            **wallets["agent_headers"],
+            "Idempotency-Key": identity["idempotency_key"],
+        },
+    )
+    assert foreign_replay.status_code == 403
+
+
+@pytest.mark.anyio
+async def test_completed_issuance_with_missing_permit_never_remints(
+    issuance, monkeypatch
+):
+    client, wallets, payload, path, headers, identity = issuance
+    first = await client.post(path, json=payload, headers=headers)
+    assert first.status_code == 201
+    service = get_permit_service()
+    monkeypatch.setattr(service, "get_permit", AsyncMock(return_value=None))
+    replay = await client.post(path, json=payload, headers=headers)
+    assert replay.status_code == 404
+    assert replay.json()["detail"] == "permit_not_found"
+    record = await get_idempotency_service().get_record(**identity)
+    assert record is not None
+    assert record.response_reference == first.json()["permit_id"]
+    assert (await service.list_permits(wallet_id=wallets["agent_wallet_id"]))[1] == 1
 
 
 @pytest.mark.anyio
