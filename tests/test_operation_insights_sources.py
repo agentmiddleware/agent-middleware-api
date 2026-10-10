@@ -5,9 +5,10 @@ from __future__ import annotations
 import sys
 import os
 import uuid
+import itertools
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 from sqlalchemy import event
@@ -171,6 +172,45 @@ async def test_equal_time_keyset_deduplicates_and_filters_wallet(
         assert coverage.enumeration_complete is False
         assert "surviving_roots_only" in coverage.gaps
         assert "retention_unverified" in coverage.gaps
+
+
+@pytest.mark.asyncio
+async def test_reader_time_limit_preserves_enumerated_rows_as_partial(
+    scoped_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.services.operation_insights import sources
+
+    session, scope = scoped_session
+    session.add(WalletModel(wallet_id="wallet-A", wallet_type="agent"))
+    session.add_all(
+        IdempotencyRecordModel(
+            record_id=f"budget-root-{index}",
+            wallet_id="wallet-A",
+            endpoint="/mcp/invoke",
+            idempotency_key=f"synthetic-budget-{index}",
+            request_hash="0" * 64,
+            operation_kind="upstream_mcp",
+            created_at=utc(2),
+        )
+        for index in range(3)
+    )
+    await session.flush()
+    ticks = itertools.chain((0.0, 0.0), itertools.repeat(301.0))
+    monkeypatch.setattr(sources, "time", SimpleNamespace(monotonic=lambda: next(ticks)))
+
+    batch = await sources.read_evidence(
+        scope,
+        Window(utc(2), utc(3), "first_observed_evidence"),
+        Limits(page_size=1),
+        session,
+    )
+
+    assert {(row.source, row.source_id) for row in batch.rows} == {
+        ("idempotency", "budget-root-0")
+    }
+    assert batch.coverage.truncated is True
+    assert batch.coverage.enumeration_complete is False
+    assert "execution_budget_reached" in batch.coverage.gaps
 
 
 @pytest.mark.asyncio

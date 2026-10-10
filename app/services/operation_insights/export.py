@@ -442,13 +442,26 @@ async def build_report(
     session: AsyncSession,
     *,
     clock: Any = time.monotonic,
+    deadline: float | None = None,
 ) -> Report:
     """Read and inspect one authorized snapshot within the shared time cap."""
     _assert_bound(scope, session)
     if window.end - window.start not in (timedelta(days=7), timedelta(days=30)):
         raise ValueError("insight_window_must_be_7_or_30_days")
     started = clock()
-    deadline = started + limits.seconds
+    deadline = (
+        min(deadline, started + limits.seconds)
+        if deadline is not None
+        else started + limits.seconds
+    )
+    if deadline <= started:
+        raise InsightExportTimeout("insight_export_time_limit")
+    # Leave time to inspect the rows and serialize the artifact before the
+    # caller's hard deadline. A reader cap returns its collected rows as partial.
+    current_limits = replace(
+        limits,
+        seconds=max(1, min(limits.seconds, int((deadline - started) * 2 // 3))),
+    )
     from app.services.operation_insights.cohorts import compute_metrics
     from app.services.operation_insights.inspect import inspect_operations
     from app.services.operation_insights.sources import (
@@ -457,12 +470,12 @@ async def build_report(
     )
 
     try:
-        batch = await read_evidence(scope, window, limits, session)
+        batch = await read_evidence(scope, window, current_limits, session)
     except TimeoutError:
         # No batch means no defensible snapshot or partial rows to export.
         raise InsightExportTimeout("insight_export_time_limit") from None
     timed_out = clock() >= deadline
-    operations = () if timed_out else inspect_operations(batch, mapping)
+    operations = inspect_operations(batch, mapping)
     too_many = len(operations) > limits.operations
     selected = operations[: limits.operations]
     gaps = set(batch.coverage.gaps)
@@ -472,11 +485,11 @@ async def build_report(
     prior_coverage: Coverage | None = None
     if too_many:
         prior_gaps.add("prior_window_skipped_output_limit")
-    elif timed_out:
-        prior_gaps.add("prior_window_budget_exhausted")
+    elif timed_out or batch.coverage.truncated:
+        prior_gaps.add("prior_window_skipped_current_partial")
     else:
         remaining = deadline - clock()
-        if remaining < 1:
+        if remaining < 2:
             prior_gaps.add("prior_window_budget_exhausted")
         else:
             duration = window.end - window.start
@@ -486,7 +499,7 @@ async def build_report(
             prior_limits = Limits(
                 page_size=limits.page_size,
                 operations=limits.operations,
-                seconds=min(limits.seconds, int(remaining)),
+                seconds=min(limits.seconds, int(remaining // 2)),
             )
             try:
                 prior_batch = await read_evidence(
@@ -532,9 +545,7 @@ async def build_report(
     refs = {
         _evidence_key(ref) for operation in selected for ref in operation.evidence_refs
     }
-    current_ingress = (
-        batch.window_ingress if window.time_basis == "ingress" and not timed_out else ()
-    )
+    current_ingress = batch.window_ingress if window.time_basis == "ingress" else ()
     refs.update(_evidence_key(row) for row in current_ingress)
     evidence = tuple(row for row in batch.rows if _evidence_key(row) in refs)
     seen = {_evidence_key(row) for row in evidence}
