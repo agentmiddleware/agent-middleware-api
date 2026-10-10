@@ -88,7 +88,7 @@ required common snapshot or keyset traversal.
 | Wallet | `wallet_id`, parent wallet, wallet type, created/updated times (`app/db/models.py:17-80`). | Owner name, email, and metadata are not safe report fields. Parent hierarchy is not a canonical customer account or effective-dated ownership map. |
 | Permit and request | Permit issuer/subject wallets, subject key, status, expiry/revocation/issue/update times (`app/db/models.py:759-825`); permit request has issuer/subject wallets, request ID, status and decision times (`app/db/models.py:945-1009`). | Permit request is a request for authority, not automatically a tool execution. Current effective permit status is time-dependent (`docs/failure-semantics.md`, “Permit lifecycle inspection”). |
 | Human approval | Wallet, permit, tool, approval ID, status, requested/decided/expiry times (`app/db/models.py:901-943`). | Approval ID links to dispatch or receipt, when present. Raw `reason` and reviewer identity are excluded. |
-| Audit | Event ID, wallet, tool, endpoint, policy decision ID, request ID, `ok`, created time, sequence (`app/db/models.py:686-719`). | Audit metadata/error are arbitrary and may contain client idempotency keys or raw strings (`app/routers/mcp.py:1513-1525,4421-4460`); never project wholesale. Wallet-less audit rows cannot be attributed to a tenant. |
+| Audit | Event ID, wallet, tool, endpoint, policy decision ID, `ok`, created time, sequence (`app/db/models.py:686-719`). | Legacy audit is unavailable in Stage 1. Its request ID is client supplied; metadata/error may contain client idempotency keys or raw strings (`app/routers/mcp.py:1513-1525,4421-4460`). Wallet-less audit rows cannot be attributed to a tenant. |
 | Idempotency | Record ID, wallet, endpoint, operation kind, response reference, status code, created/expiry times, ledger entry ID (`app/db/models.py:1045-1093`). | `(wallet, endpoint, key)` is the database identity, but raw key and response JSON are excluded. Effect-free recovery may delete rows (`app/services/idempotency.py:930-1042`), so absence is not proof of no ingress. |
 | Dispatch | Attempt ID, idempotency record ID, wallet, permit, approval, key ID, public tool, ledger ID, state, bounded error code and prepared/claim/terminal/refund/budget timestamps (`app/db/models.py:1095-1173`). | One attempt per idempotency record by unique FK. `result_json`, upstream name/origin, request/response hashes and claim hash do not belong in exports. `dispatch_claimed` is a committed send claim, not delivery proof (`app/services/mcp_dispatch_attempts.py:165-177`; `docs/failure-semantics.md`, “The invariant”). |
 | Ledger | Entry ID, wallet, action, amount, timestamp, operation key, correlation ID (`app/db/models.py:84-152`). | A governed debit uses the idempotency record ID as `operation_key` (`app/services/mcp_dispatch_attempts.py:269-283`). Verify action, wallet and amount; do not join solely on arbitrary correlation text. Refund is an independent ledger fact. |
@@ -96,10 +96,17 @@ required common snapshot or keyset traversal.
 | Refund work item | Pending/resolved item is embedded in the idempotency `response_json` and linked to `failed_unrefunded` receipt (`app/services/refund_reconciliation.py:81-101,279-299,340-402`). | There is no standalone refund table. Existing `list_items` joins all failed-refund rows, then filters wallet in Python (`app/services/refund_reconciliation.py:404-464`); do not reuse it for a scoped reader. Parse only allowlisted state fields after an SQL wallet predicate. |
 
 Receipt links are explicit foreign keys except the legacy approval string.
+The Stage 1 reader withholds legacy audit rows: `audit_event_id` is not unique
+across receipts, and a scoped query cannot prove one original operation without
+reading another owner's epoch. Audit-only denials also lack a trusted original
+anchor. The reader reports audit as unavailable with `audit_anchor_unverified`.
+Refund ledger entries linked to verified debits remain readable, but embedded
+refund work-item state in `response_json` is unavailable to this reader.
 The existing evidence builder enforces wallet predicates on permit, audit,
 ledger and dispatch lookups (`app/trust/evidence.py:127-212`), a pattern to
-retain. The root set must include audit, dispatch, idempotency and ledger rows
-without receipts. Completely unrecorded ingress remains invisible until
+retain. The Stage 1 root set includes surviving idempotency records and their
+verified dispatch and ledger rows without receipts; unanchored audit remains
+withheld. Completely unrecorded ingress remains invisible until
 prospective capture. Heuristic matches are ambiguous, never silent joins.
 
 ## Snapshot, retention, counts, and classification limits
