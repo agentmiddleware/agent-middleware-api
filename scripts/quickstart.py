@@ -185,7 +185,12 @@ def resolve_state_dir_for_reset(raw_state_dir: Path) -> Path:
     itself, and anything outside it raise ``ValueError`` before anything is
     removed.
     """
-    base = (ROOT / "data").resolve()
+    data_dir = ROOT / "data"
+    base = data_dir.resolve()
+    if base != data_dir:
+        raise ValueError(
+            "[quickstart] Refusing --reset through a symlinked data directory"
+        )
     candidate = Path(raw_state_dir).expanduser()
     if not candidate.is_absolute():
         candidate = ROOT / candidate

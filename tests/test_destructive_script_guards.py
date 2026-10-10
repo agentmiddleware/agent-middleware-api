@@ -91,6 +91,18 @@ def test_reset_refuses_symlink_escaping_data_dir(tmp_path):
                 pass
 
 
+def test_reset_refuses_symlinked_data_root(tmp_path, monkeypatch):
+    fake_root = (tmp_path / "repo").resolve()
+    fake_root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (fake_root / "data").symlink_to(outside, target_is_directory=True)
+    monkeypatch.setattr(quickstart, "ROOT", fake_root)
+
+    with pytest.raises(ValueError):
+        quickstart.resolve_state_dir_for_reset(fake_root / "data" / "quickstart")
+
+
 def test_reset_main_refuses_root_without_deleting(tmp_path):
     sentinel = tmp_path / "sentinel"
     sentinel.mkdir()
@@ -125,29 +137,35 @@ def test_bundle_script_uses_strict_mode():
     assert "set -euo pipefail" in text
 
 
+def test_bundle_script_refuses_explicit_empty_output(tmp_path):
+    result = _run_bundle_script("", extra_env={"TMPDIR": str(tmp_path)})
+    assert result.returncode == 2
+    assert "refusing" in result.stderr
+
+
 @pytest.mark.parametrize("dangerous", ["root", "home", "repo", "tmp"])
-def test_bundle_script_refuses_dangerous_output_dirs(tmp_path, dangerous, monkeypatch):
+def test_bundle_script_refuses_dangerous_output_dirs(tmp_path, dangerous):
+    env = {"TMPDIR": str(tmp_path)}
     if dangerous == "root":
         target = Path("/")
         probe = None
     elif dangerous == "home":
-        target = Path.home()
-        probe = target / ".fleet-guard-probe"
-        probe.mkdir(exist_ok=True)
+        target = tmp_path / "fake-home"
+        target.mkdir()
+        env["HOME"] = str(target)
+        probe = target / "keep.txt"
+        probe.write_text("keep", encoding="utf-8")
     elif dangerous == "repo":
         target = REPO_ROOT
         probe = None
     else:
-        target = Path(os.environ.get("TMPDIR", "/tmp"))
+        target = tmp_path
         probe = None
-    try:
-        result = _run_bundle_script(str(target))
-    finally:
-        if probe is not None:
-            assert probe.exists()
-            shutil.rmtree(probe, ignore_errors=True)
+    result = _run_bundle_script(str(target), extra_env=env)
     assert result.returncode != 0
     assert "refusing" in result.stderr
+    if probe is not None:
+        assert probe.read_text(encoding="utf-8") == "keep"
 
 
 def test_bundle_script_rebuilds_bundle_dir(tmp_path):
@@ -155,12 +173,66 @@ def test_bundle_script_rebuilds_bundle_dir(tmp_path):
     out_dir.mkdir()
     stale = out_dir / "stale.txt"
     stale.write_text("stale", encoding="utf-8")
-    result = _run_bundle_script(str(out_dir))
+    result = _run_bundle_script(str(out_dir), extra_env={"TMPDIR": str(tmp_path)})
     assert result.returncode == 0, result.stdout + result.stderr
     assert not stale.exists()
     assert (out_dir / "main.py").exists()
     assert (out_dir / "requirements.txt").exists()
     assert (out_dir / "railway.json").exists()
+
+
+@pytest.mark.parametrize(
+    "relative",
+    [
+        "unrelated/nested",
+        "unrelated/refund-partner-bundle",
+        "refund-partner-bundle/nested",
+    ],
+)
+def test_bundle_script_refuses_arbitrary_nested_output(tmp_path, relative):
+    target = tmp_path / relative
+    target.mkdir(parents=True)
+    marker = target / "keep.txt"
+    marker.write_text("keep", encoding="utf-8")
+
+    result = _run_bundle_script(str(target), extra_env={"TMPDIR": str(tmp_path)})
+
+    assert result.returncode == 2
+    assert "refusing" in result.stderr
+    assert marker.read_text(encoding="utf-8") == "keep"
+
+
+def test_bundle_script_refuses_symlinked_output(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    marker = outside / "keep.txt"
+    marker.write_text("keep", encoding="utf-8")
+    link = tmp_path / "refund-partner-bundle"
+    link.symlink_to(outside, target_is_directory=True)
+
+    result = _run_bundle_script(str(link), extra_env={"TMPDIR": str(tmp_path)})
+
+    assert result.returncode == 2
+    assert "refusing" in result.stderr
+    assert link.is_symlink()
+    assert marker.read_text(encoding="utf-8") == "keep"
+
+
+def test_bundle_script_refuses_dotdot_escape(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    marker = outside / "keep.txt"
+    marker.write_text("keep", encoding="utf-8")
+    pivot = tmp_path / "pivot"
+    pivot.mkdir()
+
+    result = _run_bundle_script(
+        str(pivot / ".." / "outside"), extra_env={"TMPDIR": str(tmp_path)}
+    )
+
+    assert result.returncode == 2
+    assert "refusing" in result.stderr
+    assert marker.read_text(encoding="utf-8") == "keep"
 
 
 def test_bundle_script_passes_shellcheck():
