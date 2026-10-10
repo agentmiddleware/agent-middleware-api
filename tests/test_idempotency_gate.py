@@ -35,6 +35,7 @@ SCANNED_ROUTERS = (
 EXPECTED_MONEY_ROUTES = {
     "POST /v1/billing/charge": "charge",
     "POST /v1/billing/dry-run/charge": "charge",
+    "POST /v1/billing/dry-run/session/{session_id}/commit": "charge",
     "POST /v1/billing/transfer": "transfer",
     "POST /v1/billing/top-up": "top-up",
     "POST /v1/billing/top-up/prepare": "top-up",
@@ -49,6 +50,7 @@ EXPECTED_MONEY_ROUTES = {
 ENFORCEMENT = {
     "POST /v1/billing/charge": False,
     "POST /v1/billing/dry-run/charge": True,
+    "POST /v1/billing/dry-run/session/{session_id}/commit": True,
     "POST /v1/billing/transfer": False,
     "POST /v1/billing/top-up": True,
     "POST /v1/billing/top-up/prepare": False,
@@ -63,6 +65,7 @@ ENFORCEMENT = {
 # paths carry no such substring and are pinned by EXPECTED_MONEY_ROUTES.
 MONEY_PATH_SUBSTRINGS = (
     "charge",
+    "commit",
     "transfer",
     "top-up",
     "top_up",
