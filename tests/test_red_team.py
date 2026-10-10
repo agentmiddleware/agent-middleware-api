@@ -144,7 +144,7 @@ async def test_get_vulnerabilities(client, api_headers):
     assert resp.status_code == 200
     data = resp.json()
     # After patching all findings, zero vulns = fortress mode
-    assert data["total"] >= 0
+    assert data["total"] == 0
     assert "critical_count" in data
     assert "high_count" in data
 

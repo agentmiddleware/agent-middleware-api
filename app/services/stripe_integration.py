@@ -403,23 +403,32 @@ class StripeIntegration:
 
         return payment_intent_id, wallet_id, credits
 
-    async def _handle_payment_failed(self, payment_intent: dict) -> None:
+    async def _handle_payment_failed(self, payment_intent: Any) -> None:
         """Log payment failure and notify via Slack."""
         from ..services.notifications import get_notification_service
 
-        wallet_id = payment_intent["metadata"].get("wallet_id")
-        error_msg = payment_intent.get("last_payment_error", {}).get(
-            "message", "Unknown error"
-        )
+        # Stripe omits or nulls fields on unusual event shapes, so every
+        # lookup here uses the safe getter instead of direct dict access.
+        # A null last_payment_error or a missing metadata block must log
+        # sensibly, never raise and trigger a Stripe retry loop.
+        metadata = self._stripe_value(payment_intent, "metadata")
+        wallet_id = self._stripe_value(metadata, "wallet_id")
+        last_error = self._stripe_value(payment_intent, "last_payment_error")
+        error_msg = self._stripe_value(last_error, "message", "Unknown error")
+        if not isinstance(error_msg, str) or not error_msg.strip():
+            error_msg = "Unknown error"
+        payment_intent_id = self._stripe_value(payment_intent, "id", "unknown")
+        if not isinstance(payment_intent_id, str) or not payment_intent_id:
+            payment_intent_id = "unknown"
 
         logger.warning(f"Payment failed for wallet {wallet_id}: {error_msg}")
 
-        if wallet_id:
+        if isinstance(wallet_id, str) and wallet_id.strip():
             notifications = get_notification_service()
             await notifications.send_payment_failed_alert(
                 wallet_id=wallet_id,
                 error_message=error_msg,
-                payment_intent_id=payment_intent["id"],
+                payment_intent_id=payment_intent_id,
             )
 
     @staticmethod

@@ -1112,3 +1112,160 @@ class TestNotificationService:
         assert "status=401" in failures[0].getMessage()
         assert "api.resend.com" not in caplog.text
         assert api_key not in caplog.text
+
+
+class TestPaymentFailedHandler:
+    """Unusual payment_failed shapes must log sensibly, never raise."""
+
+    @pytest.mark.anyio
+    async def test_normal_shape_notifies(self):
+        integration = StripeIntegration()
+        with patch(
+            "app.services.notifications.get_notification_service"
+        ) as mock_factory:
+            mock_service = MagicMock()
+            mock_service.send_payment_failed_alert = AsyncMock()
+            mock_factory.return_value = mock_service
+            await integration._handle_payment_failed(
+                {
+                    "id": "pi_failed_1",
+                    "metadata": {"wallet_id": "wallet-1"},
+                    "last_payment_error": {"message": "card declined"},
+                }
+            )
+        mock_service.send_payment_failed_alert.assert_awaited_once_with(
+            wallet_id="wallet-1",
+            error_message="card declined",
+            payment_intent_id="pi_failed_1",
+        )
+
+    @pytest.mark.anyio
+    async def test_null_last_payment_error_logs_default_and_notifies(self, caplog):
+        import logging
+
+        integration = StripeIntegration()
+        with (
+            patch(
+                "app.services.notifications.get_notification_service"
+            ) as mock_factory,
+            caplog.at_level(logging.WARNING, logger="app.services.stripe_integration"),
+        ):
+            mock_service = MagicMock()
+            mock_service.send_payment_failed_alert = AsyncMock()
+            mock_factory.return_value = mock_service
+            await integration._handle_payment_failed(
+                {
+                    "id": "pi_failed_2",
+                    "metadata": {"wallet_id": "wallet-2"},
+                    "last_payment_error": None,
+                }
+            )
+        mock_service.send_payment_failed_alert.assert_awaited_once_with(
+            wallet_id="wallet-2",
+            error_message="Unknown error",
+            payment_intent_id="pi_failed_2",
+        )
+        assert "wallet-2" in caplog.text
+        assert "Unknown error" in caplog.text
+
+    @pytest.mark.anyio
+    async def test_missing_metadata_logs_without_notify(self, caplog):
+        import logging
+
+        integration = StripeIntegration()
+        with (
+            patch(
+                "app.services.notifications.get_notification_service"
+            ) as mock_factory,
+            caplog.at_level(logging.WARNING, logger="app.services.stripe_integration"),
+        ):
+            await integration._handle_payment_failed(
+                {
+                    "id": "pi_failed_3",
+                    "last_payment_error": {"message": "card declined"},
+                }
+            )
+        mock_factory.assert_not_called()
+        assert "Payment failed" in caplog.text
+        assert "card declined" in caplog.text
+
+    @pytest.mark.anyio
+    async def test_missing_id_still_notifies_as_unknown(self):
+        integration = StripeIntegration()
+        with patch(
+            "app.services.notifications.get_notification_service"
+        ) as mock_factory:
+            mock_service = MagicMock()
+            mock_service.send_payment_failed_alert = AsyncMock()
+            mock_factory.return_value = mock_service
+            await integration._handle_payment_failed(
+                {
+                    "metadata": {"wallet_id": "wallet-4"},
+                    "last_payment_error": {"message": "expired card"},
+                }
+            )
+        mock_service.send_payment_failed_alert.assert_awaited_once_with(
+            wallet_id="wallet-4",
+            error_message="expired card",
+            payment_intent_id="unknown",
+        )
+
+    @pytest.mark.anyio
+    async def test_empty_and_non_dict_shapes_never_raise(self):
+        integration = StripeIntegration()
+        with patch(
+            "app.services.notifications.get_notification_service"
+        ) as mock_factory:
+            mock_factory.return_value.send_payment_failed_alert = AsyncMock()
+            for shape in (
+                {},
+                {"metadata": None, "last_payment_error": None},
+                {
+                    "id": "pi_failed_5",
+                    "metadata": {"wallet_id": ""},
+                    "last_payment_error": {"message": ""},
+                },
+                None,
+            ):
+                await integration._handle_payment_failed(shape)
+            mock_factory.assert_not_called()
+
+            # A non-string error message falls back to the default but the
+            # valid wallet is still notified.
+            mock_factory.reset_mock()
+            await integration._handle_payment_failed(
+                {
+                    "id": "pi_failed_6",
+                    "metadata": {"wallet_id": "wallet-6"},
+                    "last_payment_error": {"message": {"code": "odd"}},
+                }
+            )
+            mock_factory.return_value.send_payment_failed_alert.assert_awaited_once_with(
+                wallet_id="wallet-6",
+                error_message="Unknown error",
+                payment_intent_id="pi_failed_6",
+            )
+
+    @pytest.mark.anyio
+    async def test_payment_failed_webhook_returns_200(self, client):
+        """End to end: a sparse payment_failed event is accepted, not a 500."""
+        event = {
+            "id": "evt_failed_sparse",
+            "type": "payment_intent.payment_failed",
+            "data": {
+                "object": {
+                    "id": "pi_failed_sparse",
+                    "last_payment_error": None,
+                }
+            },
+        }
+        with patch(
+            "app.services.stripe_integration.stripe.Webhook.construct_event",
+            return_value=event,
+        ):
+            resp = await client.post(
+                "/v1/webhooks/stripe",
+                content=b"sparse_failed_payload",
+                headers={"stripe-signature": "valid_signature"},
+            )
+        assert resp.status_code == 200

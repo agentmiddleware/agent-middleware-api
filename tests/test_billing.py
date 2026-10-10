@@ -429,6 +429,142 @@ async def test_refund_charge_reverses_debit(client, api_headers, clean_database)
 
 
 @pytest.mark.anyio
+async def test_concurrent_duplicate_refund_returns_existing_refund(
+    client, api_headers, clean_database, monkeypatch
+):
+    """A refund that loses a same-charge race returns the winner's refund.
+
+    Two callers refunding one charge both pass the duplicate-refund checks,
+    then the loser hits the primary-key conflict on ``refund-{charge}`` at
+    commit. That conflict must come back as the existing refund, with the
+    same shape as a sequential duplicate, and the wallet must be credited
+    exactly once. The race is injected rather than timed: a wrapper fires
+    once, just before the wallet credit update, and commits a competing
+    refund from a separate session, so the operation under test always
+    loses the race the same way.
+    """
+    from sqlalchemy import update as sa_update
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    sponsor_resp = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={
+            "sponsor_name": "Race Refund Test",
+            "email": "race-refund@example.com",
+            "initial_credits": 10000,
+        },
+        headers=api_headers,
+    )
+    sponsor_id = sponsor_resp.json()["wallet_id"]
+
+    agent_resp = await client.post(
+        "/v1/billing/wallets/agent",
+        json={
+            "sponsor_wallet_id": sponsor_id,
+            "agent_id": "race-refund-bot",
+            "budget_credits": 5000,
+            "daily_limit": 1000,
+        },
+        headers=api_headers,
+    )
+    agent_wallet_id = agent_resp.json()["wallet_id"]
+
+    charge_resp = await client.post(
+        f"/v1/billing/charge?wallet_id={agent_wallet_id}&service=agent_comms&units=5",
+        headers=api_headers,
+    )
+    assert charge_resp.status_code == 200
+    charge = charge_resp.json()
+    charge_entry_id = charge["entry_id"]
+    refund_entry_id = f"refund-{charge_entry_id}"
+    refund_amount = abs(Decimal(charge["amount_exact"]))
+
+    async def _commit_competing_refund() -> None:
+        factory = get_session_factory()
+        async with factory() as session:
+            async with session.begin():
+                wallet_result = await session.execute(
+                    select(WalletModel).where(WalletModel.wallet_id == agent_wallet_id)
+                )
+                wallet = wallet_result.scalar_one()
+                new_balance = wallet.balance + refund_amount
+                await session.execute(
+                    sa_update(WalletModel)
+                    .where(WalletModel.wallet_id == agent_wallet_id)
+                    .values(balance=new_balance)
+                )
+                session.add(
+                    LedgerEntryModel(
+                        entry_id=refund_entry_id,
+                        wallet_id=agent_wallet_id,
+                        action="refund",
+                        amount=refund_amount,
+                        balance_after=new_balance,
+                        correlation_id=charge_entry_id,
+                        description="competing refund",
+                    )
+                )
+
+    original_execute = AsyncSession.execute
+    state = {"fired": False}
+
+    async def _execute_with_race(self, statement, *args, **kwargs):
+        compiled = str(statement)
+        if (
+            not state["fired"]
+            and compiled.lstrip().upper().startswith("UPDATE")
+            and "wallets" in compiled
+        ):
+            state["fired"] = True
+            await _commit_competing_refund()
+        return await original_execute(self, statement, *args, **kwargs)
+
+    monkeypatch.setattr(AsyncSession, "execute", _execute_with_race)
+
+    refund = await get_agent_money().refund_charge(
+        wallet_id=agent_wallet_id,
+        charge_entry_id=charge_entry_id,
+        description="Refund failed MCP tool",
+    )
+    assert state["fired"] is True
+    assert refund.entry_id == refund_entry_id
+    assert refund.action.value == "refund"
+    assert refund.amount == refund_amount
+
+    sequential_duplicate = await get_agent_money().refund_charge(
+        wallet_id=agent_wallet_id,
+        charge_entry_id=charge_entry_id,
+        description="Refund failed MCP tool",
+    )
+    assert sequential_duplicate.entry_id == refund.entry_id
+    assert sequential_duplicate.balance_after == refund.balance_after
+    assert sequential_duplicate.amount == refund.amount
+
+    factory = get_session_factory()
+    async with factory() as session:
+        refund_rows = (
+            (
+                await session.execute(
+                    select(LedgerEntryModel).where(
+                        LedgerEntryModel.wallet_id == agent_wallet_id,
+                        LedgerEntryModel.action == "refund",
+                        LedgerEntryModel.correlation_id == charge_entry_id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(refund_rows) == 1
+
+        wallet_result = await session.execute(
+            select(WalletModel).where(WalletModel.wallet_id == agent_wallet_id)
+        )
+        wallet = wallet_result.scalar_one()
+        assert wallet.balance == Decimal("5000")
+
+
+@pytest.mark.anyio
 async def test_late_refund_does_not_reduce_new_period_spend(
     client, api_headers, clean_database
 ):
