@@ -40,6 +40,7 @@ from app.db.models import (
     PermitRequestModel,
     ReceiptModel,
 )
+from app.services.service_registry import get_service_registry
 from app.services.operation_insights.contracts import (
     Coverage,
     EffectState,
@@ -57,10 +58,10 @@ from app.services.operation_insights.contracts import (
     Window,
     RequestDisposition,
 )
+from app.services.operation_insights.events import allowlisted_reason_code
 
 
 _SAFE_ID = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}\Z")
-_SAFE_REASON = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
 _GOVERNED_ENDPOINTS = ("/mcp/invoke", "/mcp/messages", "/mcp/action/v1")
 _SOURCE_NAMES = (
     "insight_event",
@@ -74,6 +75,7 @@ _SOURCE_NAMES = (
     "approval",
     "refund",
 )
+_MAX_EVIDENCE_ROWS = 100_000
 _EVENTS = Table(
     "operation_insight_events",
     MetaData(),
@@ -125,6 +127,58 @@ _DISPATCH_STATES = frozenset(
         "conflicting",
     )
 )
+_HISTORICAL_REASON_CODES = frozenset(
+    {
+        "duplicate_request_new_key",
+        "failed_refunded",
+        "permit_aggregate_value_cap_exceeded",
+        "permit_budget_exceeded",
+        "permit_expired",
+        "permit_forbidden_field",
+        "permit_key_mismatch",
+        "permit_max_calls_exceeded",
+        "permit_revoked",
+        "permit_scope_missing",
+        "permit_signature_invalid",
+        "permit_tool_not_allowed",
+        "permit_wallet_mismatch",
+        "reconciled_stale_prepared",
+        "refund_failed",
+        "upstream_dispatch_checkpoint_failed",
+        "upstream_invocation_context_missing",
+        "upstream_mcp_configuration_invalid",
+        "upstream_prepare_failed",
+        "upstream_response_invalid",
+        "upstream_response_rejected",
+        "upstream_response_too_large",
+        "upstream_tool_not_initialized",
+    }
+)
+
+
+class _EvidenceLimitReached(Exception):
+    pass
+
+
+class _EvidenceBudget:
+    def __init__(self) -> None:
+        self.seen: set[tuple[str, str]] = set()
+
+    def reserve(self, key: tuple[str, str]) -> None:
+        if key not in self.seen:
+            if len(self.seen) >= _MAX_EVIDENCE_ROWS:
+                raise _EvidenceLimitReached
+            self.seen.add(key)
+
+
+class _BoundedEvidenceRows(dict[tuple[str, str], Evidence]):
+    def __init__(self, budget: _EvidenceBudget) -> None:
+        super().__init__()
+        self.budget = budget
+
+    def __setitem__(self, key: tuple[str, str], value: Evidence) -> None:
+        self.budget.reserve(key)
+        super().__setitem__(key, value)
 
 
 def _bound(scope: Scope, session: AsyncSession) -> None:
@@ -147,7 +201,24 @@ def _safe(value: str | None) -> str | None:
 
 
 def _safe_reason(value: str | None) -> str | None:
-    return value if value is not None and _SAFE_REASON.fullmatch(value) else None
+    return allowlisted_reason_code(value) or (
+        value if value in _HISTORICAL_REASON_CODES else None
+    )
+
+
+def _public_legacy_tool(value: str | None) -> str | None:
+    """Only project public identifiers still verified by the executable registry."""
+    candidate = _safe(value)
+    if candidate is None:
+        return None
+    service = get_service_registry().get_local(candidate)
+    return (
+        candidate
+        if service is not None
+        and service.get("is_active") is True
+        and service.get("is_executable") is True
+        else None
+    )
 
 
 def _known(value: str | None, allowed: frozenset[str]) -> str | None:
@@ -161,6 +232,23 @@ def _epoch_filter(scope: Scope, wallet_column: Any, anchor_column: Any) -> Any:
             wallet_column == epoch.wallet_id,
             anchor_column >= to_naive_utc(epoch.evidence_from),
             anchor_column < to_naive_utc(epoch.evidence_until),
+        )
+        for epoch in scope.authorized_ownership_epochs
+    ]
+    return or_(*clauses) if clauses else false()
+
+
+def _linked_epoch_filter(
+    scope: Scope, wallet_column: Any, root_anchor: Any, linked_anchor: Any
+) -> Any:
+    """A linked context row must originate in its root's exact ownership epoch."""
+    clauses = [
+        and_(
+            wallet_column == epoch.wallet_id,
+            root_anchor >= to_naive_utc(epoch.evidence_from),
+            root_anchor < to_naive_utc(epoch.evidence_until),
+            linked_anchor >= to_naive_utc(epoch.evidence_from),
+            linked_anchor < to_naive_utc(epoch.evidence_until),
         )
         for epoch in scope.authorized_ownership_epochs
     ]
@@ -532,7 +620,7 @@ async def _read_legacy_links(
                     original_operation_anchor_id=root.original_operation_anchor_id,
                     attempt_id=source_id,
                     logical_operation_id=root.source_id,
-                    tool=_safe(record["public_tool_id"]),
+                    tool=_public_legacy_tool(record["public_tool_id"]),
                     occurred_at=_aware(record["page_time"]),
                     stage_timestamps=tuple(timestamps),
                     reason_code=_safe_reason(record["error_code"]),
@@ -758,7 +846,7 @@ async def _read_legacy_links(
                     ownership_epoch_id=root.ownership_epoch_id,
                     original_operation_anchor_id=root.original_operation_anchor_id,
                     logical_operation_id=root.source_id,
-                    tool=_safe(record["tool"]),
+                    tool=_public_legacy_tool(record["tool"]),
                     occurred_at=_aware(record["page_time"]),
                     reason_code=_safe_reason(record["reason_code"]),
                     state_facts=EvidenceStateFacts(gateway_outcome=cast(Any, gateway)),
@@ -799,6 +887,9 @@ async def _read_legacy_links(
                 )
                 .where(
                     root_scope,
+                    _linked_epoch_filter(
+                        scope, col(i.wallet_id), col(i.created_at), col(p.issued_at)
+                    ),
                     col(d.attempt_id).in_(tuple(dispatches)),
                     col(p.issued_at) <= to_naive_utc(cutoff),
                 )
@@ -874,6 +965,12 @@ async def _read_legacy_links(
                 )
                 .where(
                     root_scope,
+                    _linked_epoch_filter(
+                        scope,
+                        col(i.wallet_id),
+                        col(i.created_at),
+                        col(h.requested_at),
+                    ),
                     col(d.attempt_id).in_(tuple(dispatches)),
                     col(h.requested_at) <= to_naive_utc(cutoff),
                 )
@@ -902,7 +999,7 @@ async def _read_legacy_links(
                             ownership_epoch_id=root.ownership_epoch_id,
                             original_operation_anchor_id=root.original_operation_anchor_id,
                             logical_operation_id=root.source_id,
-                            tool=_safe(record["tool"]),
+                            tool=_public_legacy_tool(record["tool"]),
                             occurred_at=_aware(record["page_time"]),
                             state_facts=EvidenceStateFacts(
                                 approval_status=cast(
@@ -957,6 +1054,12 @@ async def _read_legacy_links(
                 )
                 .where(
                     root_scope,
+                    _linked_epoch_filter(
+                        scope,
+                        col(i.wallet_id),
+                        col(i.created_at),
+                        col(pr.requested_at),
+                    ),
                     col(d.attempt_id).in_(tuple(dispatches)),
                     col(pr.requested_at) <= to_naive_utc(cutoff),
                 )
@@ -1008,6 +1111,25 @@ async def _read_legacy_links(
                         gaps,
                     )
 
+            verified_request_roots = {
+                row.logical_operation_id
+                for row in rows.values()
+                if row.source == "permit_request"
+            }
+            if any(
+                (
+                    item["permit_id"] is not None
+                    and ("permit", item["permit_id"]) not in rows
+                )
+                or (
+                    item["approval_id"] is not None
+                    and ("approval", item["approval_id"]) not in rows
+                )
+                or item["idempotency_record_id"] not in verified_request_roots
+                for item in dispatches.values()
+            ):
+                gaps.add("linked_context_epoch_unverified")
+
 
 async def read_evidence(
     scope: Scope,
@@ -1038,7 +1160,8 @@ async def read_evidence(
         "historical_ingress_not_reconstructable",
         "audit_original_anchor_unverified",
     }
-    rows: dict[tuple[str, str], Evidence] = {}
+    evidence_budget = _EvidenceBudget()
+    rows: dict[tuple[str, str], Evidence] = _BoundedEvidenceRows(evidence_budget)
     truncated = False
     source_available = {name: True for name in _SOURCE_NAMES}
     source_available["insight_event"] = await _has_events(session)
@@ -1080,6 +1203,12 @@ async def read_evidence(
                 if evidence is None:
                     gaps.add("ingress_provenance_ambiguous")
                     continue
+                try:
+                    evidence_budget.reserve((evidence.source, evidence.source_id))
+                except _EvidenceLimitReached:
+                    truncated = True
+                    gaps.add("evidence_limit_reached")
+                    break
                 window_ingress[evidence.source_id] = evidence
                 if len(window_ingress) >= limits.operations:
                     truncated = True
@@ -1104,8 +1233,14 @@ async def read_evidence(
                 for key, row in candidate_roots.items()
                 if key not in ambiguous_anchors
             }
-            rows.update({(row.source, row.source_id): row for row in roots.values()})
-            if roots:
+            for row in roots.values():
+                try:
+                    rows[(row.source, row.source_id)] = row
+                except _EvidenceLimitReached:
+                    truncated = True
+                    gaps.add("evidence_limit_reached")
+                    break
+            if roots and "evidence_limit_reached" not in gaps:
                 original = e.alias("original_ingress")
                 linked = e.alias("linked_event")
                 valid_anchor = exists(
@@ -1157,9 +1292,16 @@ async def read_evidence(
                         if root is None or evidence is None:
                             gaps.add("linked_event_provenance_ambiguous")
                             continue
-                        rows[(evidence.source, evidence.source_id)] = replace(
-                            evidence, edges=(_ref(root),)
-                        )
+                        try:
+                            rows[(evidence.source, evidence.source_id)] = replace(
+                                evidence, edges=(_ref(root),)
+                            )
+                        except _EvidenceLimitReached:
+                            truncated = True
+                            gaps.add("evidence_limit_reached")
+                            break
+                    if truncated:
+                        break
 
     if window.time_basis == "first_observed_evidence":
         idem = IdempotencyRecordModel
@@ -1199,35 +1341,45 @@ async def read_evidence(
                 if source_id is None or wallet_id is None or epoch_id is None:
                     gaps.add("original_ownership_ambiguous")
                     continue
-                rows[("idempotency", source_id)] = Evidence(
-                    source="idempotency",
-                    source_id=source_id,
-                    wallet_id=wallet_id,
-                    ownership_epoch_id=epoch_id,
-                    original_operation_anchor_id=source_id,
-                    logical_operation_id=source_id,
-                    occurred_at=_aware(root["page_time"]),
-                    state_facts=EvidenceStateFacts(idempotency_outcome="unknown"),
-                )
+                try:
+                    rows[("idempotency", source_id)] = Evidence(
+                        source="idempotency",
+                        source_id=source_id,
+                        wallet_id=wallet_id,
+                        ownership_epoch_id=epoch_id,
+                        original_operation_anchor_id=source_id,
+                        logical_operation_id=source_id,
+                        occurred_at=_aware(root["page_time"]),
+                        state_facts=EvidenceStateFacts(idempotency_outcome="unknown"),
+                    )
+                except _EvidenceLimitReached:
+                    truncated = True
+                    gaps.add("evidence_limit_reached")
+                    break
                 if len(rows) >= limits.operations:
                     truncated = True
                     break
             if truncated:
                 break
-        await _read_legacy_links(
-            scope,
-            {
-                source_id: row
-                for (source, source_id), row in rows.items()
-                if source == "idempotency"
-            },
-            cutoff,
-            limits,
-            session,
-            rows,
-            gaps,
-            deadline,
-        )
+        if "evidence_limit_reached" not in gaps:
+            try:
+                await _read_legacy_links(
+                    scope,
+                    {
+                        source_id: row
+                        for (source, source_id), row in rows.items()
+                        if source == "idempotency"
+                    },
+                    cutoff,
+                    limits,
+                    session,
+                    rows,
+                    gaps,
+                    deadline,
+                )
+            except _EvidenceLimitReached:
+                truncated = True
+                gaps.add("evidence_limit_reached")
     # Prospective event enumeration is added when the disabled-by-default
     # event table lands. Its absence must never be treated as zero ingress.
     if window.time_basis == "ingress" and not source_available["insight_event"]:

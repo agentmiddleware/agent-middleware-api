@@ -203,9 +203,11 @@ async def test_empty_epoch_scope_reads_no_wallet_rows(scoped_session) -> None:
 
 @pytest.mark.asyncio
 async def test_window_ingress_is_independent_of_historical_roots(
-    scoped_session,
+    scoped_session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from app.services.operation_insights.sources import read_evidence
+    from app.services.operation_insights import sources
+
+    read_evidence = sources.read_evidence
 
     session, scope = scoped_session
     event_table = Table(
@@ -259,6 +261,16 @@ async def test_window_ingress_is_independent_of_historical_roots(
             "gateway_outcome": "denied",
             "occurred_at": utc(4).replace(tzinfo=None),
             "ingested_at": utc(4).replace(tzinfo=None),
+        },
+        {
+            "event_id": "replay-A",
+            "kind": "ingress",
+            "request_id": "req-A-replay",
+            "wallet_id": "wallet-A",
+            "original_operation_anchor_id": "ingress-A",
+            "request_disposition": "same_key_replay",
+            "occurred_at": utc(2).replace(tzinfo=None),
+            "ingested_at": utc(2).replace(tzinfo=None),
         },
         {
             "event_id": "ingress-B",
@@ -349,6 +361,15 @@ async def test_window_ingress_is_independent_of_historical_roots(
         ).enumeration_complete
         is False
     )
+    monkeypatch.setattr(sources, "_MAX_EVIDENCE_ROWS", 2)
+    capped = await read_evidence(
+        scope, Window(utc(2), utc(3), "ingress"), Limits(), session
+    )
+    assert {
+        (row.source, row.source_id) for row in (*capped.rows, *capped.window_ingress)
+    } == {("insight_event", "ingress-A"), ("insight_event", "replay-A")}
+    assert capped.coverage.truncated is True
+    assert "evidence_limit_reached" in capped.coverage.gaps
 
 
 @pytest.mark.asyncio
@@ -667,6 +688,418 @@ async def test_receiptless_dispatch_keeps_verified_debit_and_subject_permit(
 
     assert {row.source_id for row in shared.rows if row.source == "permit"} == set()
     assert "shared_context_anchor_ambiguous" in shared.coverage.gaps
+
+
+@pytest.mark.asyncio
+async def test_b_epoch_root_does_not_expose_a_epoch_linked_context(
+    scoped_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.services.operation_insights.sources import read_evidence
+
+    session, _ = scoped_session
+    scope_b = Scope(
+        wallet_ids=frozenset({"wallet-A"}),
+        authorized_ownership_epochs=(
+            AuthorizedOwnershipEpoch("wallet-A", "epoch-B", utc(5), utc(20)),
+        ),
+    )
+    auth = sys.modules["app.services.operation_insights.auth"]
+
+    def assert_b_scope(presented: Scope, current: AsyncSession) -> None:
+        if presented is not scope_b or current is not session:
+            raise PermissionError("scope_unbound")
+
+    monkeypatch.setattr(auth, "assert_scope_bound", assert_b_scope)
+    session.add(WalletModel(wallet_id="wallet-A", wallet_type="agent"))
+    session.add(
+        IdempotencyRecordModel(
+            record_id="b-root",
+            wallet_id="wallet-A",
+            endpoint="/mcp/invoke",
+            idempotency_key="synthetic-b-key",
+            request_hash="0" * 64,
+            operation_kind="upstream_mcp",
+            created_at=utc(6),
+        )
+    )
+    session.add(
+        PermitModel(
+            permit_id="a-permit",
+            issuer_wallet_id="wallet-A",
+            subject_wallet_id="wallet-A",
+            scopes_json="[]",
+            allowed_tools_json="[]",
+            max_credits=Decimal("10"),
+            expires_at=utc(15),
+            nonce="a-nonce",
+            signature="synthetic-signature",
+            key_id="synthetic-signing-key",
+            issued_at=utc(2),
+        )
+    )
+    session.add(
+        HumanApprovalModel(
+            approval_id="a-approval",
+            wallet_id="wallet-A",
+            permit_id="a-permit",
+            tool="partner.echo",
+            idempotency_key="synthetic-a-approval-key",
+            requested_at=utc(3),
+            expires_at=utc(15),
+            status="approved",
+        )
+    )
+    session.add(
+        PermitRequestModel(
+            request_id="a-request",
+            issuer_wallet_id="wallet-A",
+            subject_wallet_id="wallet-A",
+            idempotency_key="synthetic-a-request-key",
+            scopes_json="[]",
+            allowed_tools_json="[]",
+            max_credits=Decimal("10"),
+            permit_expires_at=utc(15),
+            justification="synthetic",
+            request_hash="0" * 64,
+            original_request_hash="0" * 64,
+            reserved_permit_id="a-permit",
+            permit_id="a-permit",
+            requested_at=utc(2),
+            expires_at=utc(15),
+            status="approved",
+        )
+    )
+    session.add(
+        McpDispatchAttemptModel(
+            attempt_id="b-attempt",
+            idempotency_record_id="b-root",
+            wallet_id="wallet-A",
+            permit_id="a-permit",
+            approval_id="a-approval",
+            public_tool_id="partner.echo",
+            upstream_tool_name="raw.upstream.name",
+            upstream_origin="https://example.invalid",
+            request_hash="0" * 64,
+            credits_authorized=Decimal("0"),
+            credits_charged=Decimal("0"),
+            state="prepared",
+            created_at=utc(6),
+            updated_at=utc(6),
+        )
+    )
+    await session.flush()
+
+    batch = await read_evidence(
+        scope_b, Window(utc(6), utc(7), "first_observed_evidence"), Limits(), session
+    )
+
+    assert {(row.source, row.source_id) for row in batch.rows} == {
+        ("idempotency", "b-root"),
+        ("dispatch", "b-attempt"),
+    }
+    assert {row.ownership_epoch_id for row in batch.rows} == {"epoch-B"}
+    assert "a-permit" not in repr(batch)
+    assert "a-approval" not in repr(batch)
+    assert "a-request" not in repr(batch)
+    assert "linked_context_epoch_unverified" in batch.coverage.gaps
+
+
+@pytest.mark.asyncio
+async def test_b_epoch_permit_does_not_hide_missing_a_epoch_request_gap(
+    scoped_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.services.operation_insights.sources import read_evidence
+
+    session, _ = scoped_session
+    scope_b = Scope(
+        wallet_ids=frozenset({"wallet-A"}),
+        authorized_ownership_epochs=(
+            AuthorizedOwnershipEpoch("wallet-A", "epoch-B", utc(5), utc(20)),
+        ),
+    )
+    auth = sys.modules["app.services.operation_insights.auth"]
+
+    def assert_b_scope(presented: Scope, current: AsyncSession) -> None:
+        if presented is not scope_b or current is not session:
+            raise PermissionError("scope_unbound")
+
+    monkeypatch.setattr(
+        auth,
+        "assert_scope_bound",
+        assert_b_scope,
+    )
+    session.add(WalletModel(wallet_id="wallet-A", wallet_type="agent"))
+    session.add(
+        IdempotencyRecordModel(
+            record_id="b-root-request-gap",
+            wallet_id="wallet-A",
+            endpoint="/mcp/invoke",
+            idempotency_key="synthetic-root-key",
+            request_hash="0" * 64,
+            operation_kind="upstream_mcp",
+            created_at=utc(6),
+        )
+    )
+    session.add(
+        PermitModel(
+            permit_id="b-permit",
+            issuer_wallet_id="wallet-A",
+            subject_wallet_id="wallet-A",
+            scopes_json="[]",
+            allowed_tools_json="[]",
+            max_credits=Decimal("0"),
+            expires_at=utc(15),
+            nonce="b-nonce",
+            signature="synthetic-signature",
+            key_id="synthetic-signing-key",
+            issued_at=utc(6),
+        )
+    )
+    session.add(
+        PermitRequestModel(
+            request_id="a-request-hidden",
+            issuer_wallet_id="wallet-A",
+            subject_wallet_id="wallet-A",
+            idempotency_key="synthetic-a-request-key",
+            scopes_json="[]",
+            allowed_tools_json="[]",
+            max_credits=Decimal("0"),
+            permit_expires_at=utc(15),
+            justification="synthetic",
+            request_hash="0" * 64,
+            original_request_hash="0" * 64,
+            reserved_permit_id="b-permit",
+            permit_id="b-permit",
+            requested_at=utc(2),
+            expires_at=utc(15),
+            status="approved",
+        )
+    )
+    session.add(
+        McpDispatchAttemptModel(
+            attempt_id="b-attempt-request-gap",
+            idempotency_record_id="b-root-request-gap",
+            wallet_id="wallet-A",
+            permit_id="b-permit",
+            public_tool_id="partner.echo",
+            upstream_tool_name="raw.upstream.name",
+            upstream_origin="https://example.invalid",
+            request_hash="0" * 64,
+            credits_authorized=Decimal("0"),
+            credits_charged=Decimal("0"),
+            state="prepared",
+            created_at=utc(6),
+            updated_at=utc(6),
+        )
+    )
+    await session.flush()
+
+    batch = await read_evidence(
+        scope_b, Window(utc(6), utc(7), "first_observed_evidence"), Limits(), session
+    )
+
+    assert {(row.source, row.source_id) for row in batch.rows} == {
+        ("idempotency", "b-root-request-gap"),
+        ("dispatch", "b-attempt-request-gap"),
+        ("permit", "b-permit"),
+    }
+    assert "a-request-hidden" not in repr(batch)
+    assert "linked_context_epoch_unverified" in batch.coverage.gaps
+
+
+@pytest.mark.asyncio
+async def test_linked_evidence_fanout_stops_at_row_cap(
+    scoped_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.services.operation_insights import sources
+
+    session, scope = scoped_session
+    monkeypatch.setattr(sources, "_MAX_EVIDENCE_ROWS", 2, raising=False)
+    session.add(WalletModel(wallet_id="wallet-A", wallet_type="agent"))
+    session.add(
+        IdempotencyRecordModel(
+            record_id="fanout-root",
+            wallet_id="wallet-A",
+            endpoint="/mcp/invoke",
+            idempotency_key="synthetic-fanout-key",
+            request_hash="0" * 64,
+            operation_kind="upstream_mcp",
+            created_at=utc(2),
+        )
+    )
+    session.add(
+        PermitModel(
+            permit_id="fanout-permit",
+            issuer_wallet_id="wallet-A",
+            subject_wallet_id="wallet-A",
+            scopes_json="[]",
+            allowed_tools_json="[]",
+            max_credits=Decimal("0"),
+            expires_at=utc(9),
+            nonce="fanout-nonce",
+            signature="synthetic-signature",
+            key_id="synthetic-signing-key",
+            issued_at=utc(2),
+        )
+    )
+    session.add(
+        McpDispatchAttemptModel(
+            attempt_id="fanout-attempt",
+            idempotency_record_id="fanout-root",
+            wallet_id="wallet-A",
+            permit_id="fanout-permit",
+            public_tool_id="partner.echo",
+            upstream_tool_name="raw.upstream.name",
+            upstream_origin="https://example.invalid",
+            request_hash="0" * 64,
+            credits_authorized=Decimal("0"),
+            credits_charged=Decimal("0"),
+            state="prepared",
+            created_at=utc(2),
+            updated_at=utc(2),
+        )
+    )
+    await session.flush()
+
+    batch = await sources.read_evidence(
+        scope,
+        Window(utc(2), utc(3), "first_observed_evidence"),
+        Limits(page_size=1),
+        session,
+    )
+
+    assert len(batch.rows) == 2
+    assert {row.source for row in batch.rows} == {"idempotency", "dispatch"}
+    assert batch.coverage.truncated is True
+    assert "evidence_limit_reached" in batch.coverage.gaps
+
+
+@pytest.mark.asyncio
+async def test_historical_free_form_codes_and_tools_are_not_projected(
+    scoped_session,
+) -> None:
+    from app.services.operation_insights.sources import read_evidence
+
+    session, scope = scoped_session
+    secret = "private_key_abcdef"  # pragma: allowlist secret (synthetic sentinel)
+    session.add(WalletModel(wallet_id="wallet-A", wallet_type="agent"))
+    session.add(
+        IdempotencyRecordModel(
+            record_id="secret-root",
+            wallet_id="wallet-A",
+            endpoint="/mcp/invoke",
+            idempotency_key="synthetic-key",
+            request_hash="0" * 64,
+            operation_kind="upstream_mcp",
+            created_at=utc(2),
+        )
+    )
+    session.add(
+        PermitModel(
+            permit_id="synthetic-permit",
+            issuer_wallet_id="wallet-A",
+            subject_wallet_id="wallet-A",
+            scopes_json="[]",
+            allowed_tools_json="[]",
+            max_credits=Decimal("0"),
+            expires_at=utc(9),
+            nonce="synthetic-nonce",
+            signature="synthetic-signature",
+            key_id="synthetic-signing-key",
+            issued_at=utc(2),
+        )
+    )
+    session.add(
+        HumanApprovalModel(
+            approval_id="secret-approval",
+            wallet_id="wallet-A",
+            permit_id="synthetic-permit",
+            tool=secret,
+            idempotency_key="synthetic-approval-key",
+            requested_at=utc(2),
+            expires_at=utc(9),
+            status="approved",
+        )
+    )
+    session.add(
+        McpDispatchAttemptModel(
+            attempt_id="secret-attempt",
+            idempotency_record_id="secret-root",
+            wallet_id="wallet-A",
+            permit_id="synthetic-permit",
+            approval_id="secret-approval",
+            public_tool_id=secret,
+            upstream_tool_name="raw.upstream.name",
+            upstream_origin="https://example.invalid",
+            request_hash="0" * 64,
+            credits_authorized=Decimal("0"),
+            credits_charged=Decimal("0"),
+            state="returned_error",
+            error_code=secret,
+            created_at=utc(2),
+            updated_at=utc(2),
+        )
+    )
+    session.add(
+        ReceiptModel(
+            receipt_id="secret-receipt",
+            idempotency_record_id="secret-root",
+            dispatch_attempt_id="secret-attempt",
+            permit_id="synthetic-permit",
+            wallet_id="wallet-A",
+            tool=secret,
+            request_hash="0" * 64,
+            credits_authorized=Decimal("0"),
+            outcome="failed",
+            reason_code=secret,
+            signature="synthetic-signature",
+            signature_key_id="synthetic-signing-key",
+            created_at=utc(2),
+        )
+    )
+    await session.flush()
+
+    batch = await read_evidence(
+        scope, Window(utc(2), utc(3), "first_observed_evidence"), Limits(), session
+    )
+
+    assert {row.source for row in batch.rows} == {
+        "idempotency",
+        "dispatch",
+        "receipt",
+        "permit",
+        "approval",
+    }
+    assert secret not in repr(batch)
+    assert all(row.tool is None and row.reason_code is None for row in batch.rows)
+
+
+def test_historical_known_reason_keeps_its_original_code() -> None:
+    from app.services.operation_insights.sources import _safe_reason
+
+    assert _safe_reason("permit_expired") == "permit_expired"
+    assert _safe_reason("private_key_abcdef") is None
+
+
+def test_historical_tool_requires_registered_public_identifier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.schemas.billing import ServiceCategory
+    from app.services.operation_insights import sources
+    from app.services.service_registry import ServiceRegistry
+
+    registry = ServiceRegistry()
+    registry.register_local(
+        service_id="partner.echo",
+        name="Synthetic echo",
+        description="Synthetic test tool",
+        category=ServiceCategory.SANDBOX,
+        func=lambda: None,
+    )
+    monkeypatch.setattr(sources, "get_service_registry", lambda: registry)
+
+    assert sources._public_legacy_tool("partner.echo") == "partner.echo"
+    assert sources._public_legacy_tool("private_key_abcdef") is None
 
 
 @pytest.mark.asyncio
