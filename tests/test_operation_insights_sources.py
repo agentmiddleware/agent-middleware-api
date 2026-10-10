@@ -711,6 +711,70 @@ async def test_same_anchor_execution_requests_retain_one_operation_and_both_requ
     assert "original_ingress_anchor_conflicting" in conflicting.coverage.gaps
 
 
+@pytest.mark.asyncio
+async def test_durable_anchor_created_after_ingress_retains_real_operation_trace(
+    scoped_session,
+) -> None:
+    from app.services.operation_insights import sources
+    from app.services.operation_insights.inspect import inspect_operations
+
+    session, scope = scoped_session
+    async with session.bind.begin() as connection:
+        await connection.run_sync(sources._EVENTS.create)
+    session.add(WalletModel(wallet_id="wallet-A", wallet_type="agent"))
+    session.add(
+        IdempotencyRecordModel(
+            record_id="durable-anchor",
+            wallet_id="wallet-A",
+            endpoint="/mcp/invoke",
+            idempotency_key="synthetic-durable-anchor",
+            request_hash="0" * 64,
+            operation_kind="upstream_mcp",
+            created_at=utc(3) + timedelta(milliseconds=5),
+        )
+    )
+    await session.flush()
+    for event_row in (
+        {
+            "event_id": "original-ingress",
+            "kind": "ingress",
+            "request_id": "original-request",
+            "logical_operation_id": "durable-anchor",
+            "wallet_id": "wallet-A",
+            "original_operation_anchor_id": "durable-anchor",
+            "request_disposition": "execution_intent",
+            "occurred_at": utc(3) - timedelta(milliseconds=2),
+            "ingested_at": utc(3) - timedelta(milliseconds=2),
+        },
+        {
+            "event_id": "terminal-event",
+            "kind": "terminal",
+            "request_id": "original-request",
+            "logical_operation_id": "durable-anchor",
+            "wallet_id": "wallet-A",
+            "original_operation_anchor_id": "durable-anchor",
+            "gateway_outcome": "failed",
+            "occurred_at": utc(3) + timedelta(milliseconds=8),
+            "ingested_at": utc(3) + timedelta(milliseconds=8),
+        },
+    ):
+        await session.execute(insert(sources._EVENTS).values(**event_row))
+
+    batch = await sources.read_evidence(
+        scope, Window(utc(2), utc(3), "ingress"), Limits(), session
+    )
+    operations = inspect_operations(batch, AccountMapping("unverified", ()))
+
+    assert {row.source_id for row in batch.rows} == {
+        "original-ingress",
+        "terminal-event",
+    }
+    assert len(operations) == 1
+    assert operations[0].request_ids == ("original-request",)
+    assert operations[0].gateway_outcome == "failed"
+    assert "original_ingress_origin_unverified" not in batch.coverage.gaps
+
+
 @pytest.mark.parametrize("days", [7, 30])
 @pytest.mark.asyncio
 async def test_later_execution_request_does_not_move_original_into_current_cohort(
@@ -731,7 +795,7 @@ async def test_later_execution_request_does_not_move_original_into_current_cohor
             idempotency_key="synthetic-old-anchor",
             request_hash="0" * 64,
             operation_kind="upstream_mcp",
-            created_at=utc(2),
+            created_at=utc(2) + timedelta(milliseconds=7),
         )
     )
     await session.flush()
@@ -1838,8 +1902,9 @@ async def test_real_pg_bound_scope_keeps_late_replay_out_of_new_owner() -> None:
     subject_epoch_id = f"epoch-subject-{suffix}"
     grant_a_id, grant_b_id = f"grant-a-{suffix}", f"grant-b-{suffix}"
     subject_grant_id = f"grant-subject-{suffix}"
-    original_id, replay_id, terminal_id, walletless_id = (
+    original_id, later_execution_id, replay_id, terminal_id, walletless_id = (
         f"original-{suffix}",
+        f"later-execution-{suffix}",
         f"replay-{suffix}",
         f"terminal-{suffix}",
         f"walletless-{suffix}",
@@ -1989,7 +2054,11 @@ async def test_real_pg_bound_scope_keeps_late_replay_out_of_new_owner() -> None:
                         endpoint="/mcp/invoke",
                         idempotency_key=record_id,
                         request_hash="0" * 64,
-                        created_at=utc(2),
+                        created_at=(
+                            utc(3) + timedelta(milliseconds=5)
+                            if record_id == idem_one_id
+                            else utc(2)
+                        ),
                     )
                 )
             await session.flush()
@@ -2090,10 +2159,31 @@ async def test_real_pg_bound_scope_keeps_late_replay_out_of_new_owner() -> None:
                     kind="ingress",
                     request_id=f"request-{suffix}",
                     wallet_id=wallet_id,
-                    original_operation_anchor_id=original_id,
+                    logical_operation_id=idem_one_id,
+                    original_operation_anchor_id=idem_one_id,
                     request_disposition="execution_intent",
-                    occurred_at=utc(2).replace(tzinfo=None),
-                    ingested_at=utc(2).replace(tzinfo=None),
+                    occurred_at=(utc(3) - timedelta(milliseconds=2)).replace(
+                        tzinfo=None
+                    ),
+                    ingested_at=(utc(3) - timedelta(milliseconds=2)).replace(
+                        tzinfo=None
+                    ),
+                    classification_version=1,
+                ),
+                dict(
+                    event_id=later_execution_id,
+                    kind="ingress",
+                    request_id=f"later-request-{suffix}",
+                    wallet_id=wallet_id,
+                    logical_operation_id=idem_one_id,
+                    original_operation_anchor_id=idem_one_id,
+                    request_disposition="execution_intent",
+                    occurred_at=(utc(3) + timedelta(milliseconds=10)).replace(
+                        tzinfo=None
+                    ),
+                    ingested_at=(utc(3) + timedelta(milliseconds=10)).replace(
+                        tzinfo=None
+                    ),
                     classification_version=1,
                 ),
                 dict(
@@ -2101,7 +2191,7 @@ async def test_real_pg_bound_scope_keeps_late_replay_out_of_new_owner() -> None:
                     kind="ingress",
                     request_id=f"replay-request-{suffix}",
                     wallet_id=wallet_id,
-                    original_operation_anchor_id=original_id,
+                    original_operation_anchor_id=idem_one_id,
                     request_disposition="same_key_replay",
                     occurred_at=utc(7).replace(tzinfo=None),
                     ingested_at=utc(7).replace(tzinfo=None),
@@ -2112,7 +2202,7 @@ async def test_real_pg_bound_scope_keeps_late_replay_out_of_new_owner() -> None:
                     kind="terminal",
                     request_id=f"request-{suffix}",
                     wallet_id=wallet_id,
-                    original_operation_anchor_id=original_id,
+                    original_operation_anchor_id=idem_one_id,
                     gateway_outcome="failed",
                     occurred_at=utc(7).replace(tzinfo=None),
                     ingested_at=utc(7).replace(tzinfo=None),
@@ -2153,6 +2243,9 @@ async def test_real_pg_bound_scope_keeps_late_replay_out_of_new_owner() -> None:
                 late = await read_evidence(
                     scope_a, Window(utc(7), utc(8), "ingress"), Limits(), session
                 )
+                later = await read_evidence(
+                    scope_a, Window(utc(3), utc(4), "ingress"), Limits(), session
+                )
                 legacy_a = await read_evidence(
                     scope_a,
                     Window(utc(2), utc(3), "first_observed_evidence"),
@@ -2173,6 +2266,11 @@ async def test_real_pg_bound_scope_keeps_late_replay_out_of_new_owner() -> None:
                     == original_id
                 )
                 assert late.window_ingress == ()
+                assert {row.source_id for row in later.window_ingress} == {
+                    later_execution_id
+                }
+                assert later.rows == ()
+                assert "original_ingress_before_window" in later.coverage.gaps
                 assert orphan_terminal_id not in repr(old)
                 assert late_legacy_a.rows == ()
                 assert orphan_audit_id not in repr(legacy_a)
@@ -2254,6 +2352,7 @@ async def test_real_pg_bound_scope_keeps_late_replay_out_of_new_owner() -> None:
                         event_table.c.event_id.in_(
                             (
                                 original_id,
+                                later_execution_id,
                                 replay_id,
                                 terminal_id,
                                 orphan_terminal_id,
