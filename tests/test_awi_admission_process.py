@@ -150,10 +150,12 @@ async def worker(directory, crash, phase):
     replay = False
     try:
         context = await begin_awi_http_governed(**arguments)
+    except HTTPException as exc:
+        if exc.status_code != 409:
+            raise
+    else:
         assert context.replay_response and context.replay_response["reconciled"]
         replay = True
-    except HTTPException as exc:
-        assert exc.status_code == 409
     async with get_session_factory()() as db:
         debits = (
             (

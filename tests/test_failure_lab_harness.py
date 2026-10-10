@@ -19,7 +19,7 @@ from failure_lab.configurations import (
 from failure_lab.effect_ledger import EffectLedger, NativeConflictError
 from failure_lab.faults import FaultMode, FaultPlan
 from failure_lab.identity import KeyPolicy, OperationIdentity, new_business_operation_id
-from failure_lab.refund_tool import RefundRequest
+from failure_lab.refund_tool import RefundRequest, RefundValidationError
 
 
 def test_effect_ledger_is_duplicate_visible(tmp_path):
@@ -88,7 +88,9 @@ def test_refund_request_is_strict_about_representation():
     RefundRequest.from_mapping(
         {"operation_id": "o", "customer_id": "c", "payment_id": "p", "amount": 5000}
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        RefundValidationError, match="amount must be an integer number of minor units"
+    ):
         RefundRequest.from_mapping(
             {
                 "operation_id": "o",
@@ -97,7 +99,9 @@ def test_refund_request_is_strict_about_representation():
                 "amount": "5000",
             }
         )
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        RefundValidationError, match="amount must be an integer number of minor units"
+    ):
         RefundRequest.from_mapping(
             {
                 "operation_id": "o",
@@ -106,7 +110,7 @@ def test_refund_request_is_strict_about_representation():
                 "amount": 5000.0,
             }
         )
-    with pytest.raises(ValueError):
+    with pytest.raises(RefundValidationError, match="unknown fields: x"):
         RefundRequest.from_mapping(
             {
                 "operation_id": "o",
