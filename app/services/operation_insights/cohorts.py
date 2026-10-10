@@ -369,6 +369,17 @@ def compute_metrics(
     add(
         "gateway_completed_accounts",
         len(
+            {
+                account
+                for row, account in eligible
+                if row.gateway_outcome in ("succeeded", "failed", "denied")
+            }
+        ),
+        "account",
+    )
+    add(
+        "gateway_succeeded_accounts",
+        len(
             {account for row, account in eligible if row.gateway_outcome == "succeeded"}
         ),
         "account",

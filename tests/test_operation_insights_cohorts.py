@@ -189,6 +189,8 @@ def test_counts_and_denominators() -> None:
     assert metrics["returning_accounts"].ratio == 2 / 3
     assert metrics["fault_incidence"].numerator == 2
     assert metrics["fault_incidence"].denominator == 10
+    assert metrics["gateway_completed_accounts"].count == 3
+    assert metrics["gateway_succeeded_accounts"].count == 0
     assert metrics["denial_incidence"].numerator == 3
     assert metrics["denial_incidence"].denominator == 10
     assert metrics["fault_incidence"].unknown_count == 2
@@ -241,6 +243,23 @@ def test_exact_windows_and_revisions() -> None:
     }
     assert revised_metrics["fault_incidence"].numerator == 1
     assert revised_metrics["logical_operations"].count == 10001
+
+
+def test_failed_gateway_terminal_still_counts_as_completion() -> None:
+    account_mapping = mapping(("wa", "A", "eligible"))
+    metrics = {
+        item.name: item
+        for item in calculate(
+            (operation(1, "wa", at(2), gateway_outcome="failed"),),
+            (),
+            (),
+            (),
+            account_mapping,
+        )
+    }
+
+    assert metrics["gateway_completed_accounts"].count == 1
+    assert metrics["gateway_succeeded_accounts"].count == 0
 
 
 def test_late_ingestion_labels_original_cohort_revision() -> None:

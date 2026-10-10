@@ -4,6 +4,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 from alembic.config import Config
@@ -28,7 +29,10 @@ FIELDS = (
     "action_upstream_binding_hash",
 )
 ACTION_REVISION = "042_permit_action_binding"
-CURRENT_HEAD = ScriptDirectory.from_config(Config("alembic.ini")).get_current_head()
+_ROOT = Path(__file__).resolve().parents[1]
+_CONFIG = Config(str(_ROOT / "alembic.ini"))
+_CONFIG.set_main_option("script_location", str(_ROOT / "migrations"))
+CURRENT_HEAD = ScriptDirectory.from_config(_CONFIG).get_current_head()
 SCRUB_REVISION = "041_scrub_content_owner_keys"
 CONTENT_TABLES = ("content_pipelines", "content_campaigns")
 AUTHORITIES = [
