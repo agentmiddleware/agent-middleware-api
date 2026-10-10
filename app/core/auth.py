@@ -300,6 +300,28 @@ async def _resolve_auth_context(
             headers=dict(_CREDENTIAL_REJECTED),
         )
 
+    # DEBUG alone never mints admins: unauthenticated local admin needs the
+    # explicit ALLOW_UNAUTHENTICATED_DEV_ADMIN opt-in on top of DEBUG with no
+    # keys configured. Production-like environments fail closed above even
+    # when the flag is set (and refuse to boot with it at all).
+    if not getattr(settings, "ALLOW_UNAUTHENTICATED_DEV_ADMIN", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "invalid_api_key",
+                "message": "The provided API key is not authorized.",
+            },
+            headers=dict(_CREDENTIAL_REJECTED),
+        )
+
+    import logging
+
+    logging.getLogger(__name__).warning(
+        "open_admin_auth: unauthenticated caller accepted as bootstrap "
+        "admin (ALLOW_UNAUTHENTICATED_DEV_ADMIN is set in a "
+        "local-compatible environment). Never enable this flag in "
+        "production or staging."
+    )
     return AuthContext(
         source="env",
         raw_key=stripped,

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "agent-middleware": {
+      "type": "http",
+      "url": "https://api.thisisatest.tech/mcp",
+      "headers": {
+        "X-API-Key": "${AMW_API_KEY}"
+      }
+    }
+  }
+}
