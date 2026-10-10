@@ -248,7 +248,6 @@ async def test_get_permit_denies_unrelated_wallet(client, clean_database):
     assert resp.status_code == 403, resp.text
 
 
-@pytest.mark.anyio
 # Permits: create.
 
 
@@ -545,6 +544,12 @@ async def test_delegated_permit_issuer_reads_receipt_evidence_and_bundle(
     assert bundle.status_code == 200, bundle.text
     assert bundle.json()["receipt_id"] == receipt_id
     assert bundle.json()["valid"] is True
+
+    portable = await client.get(
+        f"/v1/receipts/{receipt_id}/portable", headers=sponsor_headers
+    )
+    assert portable.status_code == 200, portable.text
+    assert portable.json()["receipt_id"] == receipt_id
 
 
 @pytest.mark.anyio
