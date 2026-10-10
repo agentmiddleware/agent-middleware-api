@@ -77,6 +77,9 @@ def test_export_rerun_purges_stale_gateway_files_and_preserves_public_metadata(
     assert (gateway / "DESIGN_PARTNER_GUIDE.md").read_bytes() == (
         ROOT / "DESIGN_PARTNER_GUIDE.md"
     ).read_bytes()
+    assert (gateway / "SECURITY_LIMITATIONS.md").read_bytes() == (
+        ROOT / "SECURITY_LIMITATIONS.md"
+    ).read_bytes()
     assert (
         tomllib.loads((gateway / "pyproject.toml").read_text())["project"]["license"]
         == "LicenseRef-FSL-1.1-ALv2"

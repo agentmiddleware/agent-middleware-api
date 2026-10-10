@@ -60,7 +60,7 @@ rsync -a --delete --delete-excluded "${X[@]}" \
   --exclude publish_live_proof.py --exclude repo_guardian.py --exclude record_site_transcript.py \
   --exclude operator_analytics_export.py \
   "$SRC/scripts/" "$G/scripts/"
-for f in alembic.ini Dockerfile Dockerfile.dev docker-compose.yml Makefile requirements.txt pyproject.toml mypy.ini ruff.toml .env.example .dockerignore TROUBLESHOOTING.md DEMO_SCRIPT.md WEDGE.md DESIGN_PARTNER_GUIDE.md; do cp "$SRC/$f" "$G/"; done
+for f in alembic.ini Dockerfile Dockerfile.dev docker-compose.yml Makefile requirements.txt pyproject.toml mypy.ini ruff.toml .env.example .dockerignore TROUBLESHOOTING.md DEMO_SCRIPT.md WEDGE.md DESIGN_PARTNER_GUIDE.md SECURITY_LIMITATIONS.md; do cp "$SRC/$f" "$G/"; done
 python3 - "$G/pyproject.toml" <<'PY'
 from pathlib import Path
 import sys
