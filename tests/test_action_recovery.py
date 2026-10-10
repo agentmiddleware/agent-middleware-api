@@ -578,6 +578,7 @@ async def test_recovery_never_adopts_changed_authority(
 @pytest.mark.anyio
 async def test_receipt_conflicts_include_action_binding(action_runtime):
     from app.services.receipts import ReceiptError, get_receipt_service
+    from pydantic import ValidationError
     from app.schemas.trust import ActionPermitFields
     from app.services.mcp_dispatch_reconciliation import (
         get_mcp_dispatch_reconciliation_service,
@@ -619,9 +620,9 @@ async def test_receipt_conflicts_include_action_binding(action_runtime):
     bad = original.model_copy(update={"action_payload_hash": "b" * 64})
     with pytest.raises(ReceiptError, match="receipt_action_binding_conflict"):
         await service.assert_action_receipt_binding(bad)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValidationError):
         ActionPermitFields(action_contract_version=1)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValidationError):
         ActionPermitFields.model_validate({**expected, "action_contract_version": 2})
     # A syntactically valid binding with a valid signature for the wrong digest
     # must also be refused by reconciliation's adoption path.
