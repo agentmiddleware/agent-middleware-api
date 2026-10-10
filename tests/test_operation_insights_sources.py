@@ -458,14 +458,14 @@ async def test_current_root_replay_and_status_trace_without_extra_attempts(
             "replay-A",
             "ingress",
             "request-replay",
-            3,
+            7,
             request_disposition="same_key_replay",
         ),
         event_row(
             "status-A",
             "ingress",
             "request-status",
-            4,
+            8,
             request_disposition="status_read",
         ),
         event_row(
@@ -474,6 +474,32 @@ async def test_current_root_replay_and_status_trace_without_extra_attempts(
             "request-original",
             5,
             attempt_id="attempt-1",
+        ),
+        event_row(
+            "original-terminal",
+            "terminal",
+            "request-original",
+            6,
+            request_disposition="execution_intent",
+            gateway_outcome="succeeded",
+        ),
+        event_row(
+            "replay-terminal",
+            "terminal",
+            "request-replay",
+            8,
+            request_disposition="same_key_replay",
+            gateway_outcome="denied",
+            reason_code="permit_denied",
+        ),
+        event_row(
+            "status-terminal",
+            "terminal",
+            "request-status",
+            9,
+            request_disposition="status_read",
+            gateway_outcome="failed",
+            reason_code="internal_error",
         ),
         event_row(
             "foreign-replay",
@@ -528,6 +554,9 @@ async def test_current_root_replay_and_status_trace_without_extra_attempts(
         "replay-A",
         "status-A",
         "attempt-A",
+        "original-terminal",
+        "replay-terminal",
+        "status-terminal",
     }
     assert operation.request_ids == (
         "request-original",
@@ -544,6 +573,9 @@ async def test_current_root_replay_and_status_trace_without_extra_attempts(
         "replay-A",
         "status-A",
         "attempt-A",
+        "original-terminal",
+        "replay-terminal",
+        "status-terminal",
     }
     assert {
         stamp.source_id
@@ -551,6 +583,10 @@ async def test_current_root_replay_and_status_trace_without_extra_attempts(
         if stamp.stage == "ingress"
     } == {"root-A", "replay-A", "status-A"}
     assert operation.attempt_ids == ("attempt-1",)
+    assert operation.gateway_outcome == "succeeded"
+    assert operation.effect_state == "unknown"
+    assert operation.failure_class == "none"
+    assert operation.reason_code is None
     assert "linked_event_provenance_ambiguous" in batch.coverage.gaps
     assert metrics["requests"].count == 4
     assert metrics["execution_intent_requests"].count == 1
@@ -672,6 +708,7 @@ async def test_same_anchor_execution_requests_retain_one_operation_and_both_requ
             "logical_operation_id": "shared-anchor",
             "wallet_id": "wallet-A",
             "original_operation_anchor_id": "shared-anchor",
+            "request_disposition": "execution_intent",
             "gateway_outcome": "failed",
             "effect_state": "unknown",
             "reason_code": "upstream_response_invalid",
@@ -753,6 +790,7 @@ async def test_durable_anchor_created_after_ingress_retains_real_operation_trace
             "logical_operation_id": "durable-anchor",
             "wallet_id": "wallet-A",
             "original_operation_anchor_id": "durable-anchor",
+            "request_disposition": "execution_intent",
             "gateway_outcome": "failed",
             "occurred_at": utc(3) + timedelta(milliseconds=8),
             "ingested_at": utc(3) + timedelta(milliseconds=8),

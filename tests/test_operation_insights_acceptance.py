@@ -401,6 +401,8 @@ def test_complete_ingress_cohort_keeps_late_evidence_and_prior_gap_separate() ->
         occurred_at=END + timedelta(days=1),
         ingested_at=END + timedelta(days=1),
         event_kind="terminal",
+        request_id="request-a",
+        request_disposition="execution_intent",
         state_facts=EvidenceStateFacts(gateway_outcome="succeeded"),
     )
     source = SourceCoverage(

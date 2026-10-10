@@ -539,6 +539,141 @@ def test_terminal_gateway_receipt_resolves_an_earlier_dispatch_claim() -> None:
     assert operation.next_action == "inspect"
 
 
+def test_later_denied_replay_cannot_change_original_success() -> None:
+    original = row(
+        "insight_event",
+        "ingress-original",
+        hour=1,
+        event_kind="ingress",
+        request_id="request-original",
+        request_disposition="execution_intent",
+    )
+    succeeded = row(
+        "insight_event",
+        "terminal-original",
+        hour=2,
+        event_kind="terminal",
+        request_id="request-original",
+        request_disposition="execution_intent",
+        state_facts=EvidenceStateFacts(gateway_outcome="succeeded"),
+    )
+    replay = row(
+        "insight_event",
+        "ingress-replay",
+        hour=3,
+        event_kind="ingress",
+        request_id="request-replay",
+        request_disposition="same_key_replay",
+    )
+    denied_replay = row(
+        "insight_event",
+        "terminal-replay",
+        hour=4,
+        event_kind="terminal",
+        request_id="request-replay",
+        request_disposition="same_key_replay",
+        state_facts=EvidenceStateFacts(
+            gateway_outcome="denied", effect_state="confirmed"
+        ),
+        reason_code="permit_denied",
+    )
+
+    operation = inspect_operations(
+        batch(original, succeeded, replay, denied_replay), MAPPING
+    )[0]
+
+    assert operation.gateway_outcome == "succeeded"
+    assert operation.effect_state == "unknown"
+    assert operation.failure_class == "none"
+    assert operation.reason_code is None
+    assert operation.observed_denial is False
+    assert operation.next_action == "inspect"
+    assert operation.request_ids == ("request-original", "request-replay")
+    assert {ref.source_id for ref in operation.evidence_refs} == {
+        "ingress-original",
+        "terminal-original",
+        "ingress-replay",
+        "terminal-replay",
+    }
+    assert {stamp.source_id for stamp in operation.stage_timestamps} == {
+        "ingress-original",
+        "terminal-original",
+        "ingress-replay",
+        "terminal-replay",
+    }
+
+
+def test_status_terminal_without_owner_result_keeps_operation_outcome_unknown() -> None:
+    original = row(
+        "insight_event",
+        "ingress-original",
+        hour=1,
+        event_kind="ingress",
+        request_id="request-original",
+        request_disposition="execution_intent",
+    )
+    status = row(
+        "insight_event",
+        "ingress-status",
+        hour=2,
+        event_kind="ingress",
+        request_id="request-status",
+        request_disposition="status_read",
+    )
+    failed_status = row(
+        "insight_event",
+        "terminal-status",
+        hour=3,
+        event_kind="terminal",
+        request_id="request-status",
+        request_disposition="status_read",
+        state_facts=EvidenceStateFacts(gateway_outcome="failed"),
+        reason_code="internal_error",
+    )
+
+    operation = inspect_operations(batch(original, status, failed_status), MAPPING)[0]
+
+    assert operation.gateway_outcome == "unknown"
+    assert operation.failure_class == "unknown"
+    assert operation.reason_code is None
+    assert operation.observed_fault is None
+    assert operation.next_action == "inspect"
+    assert operation.request_ids == ("request-original", "request-status")
+    assert {ref.source_id for ref in operation.evidence_refs} == {
+        "ingress-original",
+        "ingress-status",
+        "terminal-status",
+    }
+
+
+def test_execution_terminal_denial_still_classifies_original_denial() -> None:
+    original = row(
+        "insight_event",
+        "ingress-original",
+        hour=1,
+        event_kind="ingress",
+        request_id="request-original",
+        request_disposition="execution_intent",
+    )
+    denied = row(
+        "insight_event",
+        "terminal-original",
+        hour=2,
+        event_kind="terminal",
+        request_id="request-original",
+        request_disposition="execution_intent",
+        state_facts=EvidenceStateFacts(gateway_outcome="denied"),
+        reason_code="permit_denied",
+    )
+
+    operation = inspect_operations(batch(original, denied), MAPPING)[0]
+
+    assert operation.gateway_outcome == "denied"
+    assert operation.failure_class == "expected_denial"
+    assert operation.reason_code == "permit_denied"
+    assert operation.observed_denial is True
+
+
 def test_unreferenced_stage_timestamp_is_flagged_without_dropping_operation() -> None:
     evidence = row(
         "dispatch",
