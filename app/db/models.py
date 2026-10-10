@@ -7,7 +7,15 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import Column, Index, Text, UniqueConstraint, text
+from sqlalchemy import (
+    CheckConstraint,
+    Column,
+    ForeignKeyConstraint,
+    Index,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlmodel import SQLModel, Field
 
 from app.core.time import utc_now
@@ -77,6 +85,92 @@ class WalletModel(SQLModel, table=True):
     # Timestamps
     created_at: datetime = Field(sa_type=NaiveUTCDateTime, default_factory=utc_now)
     updated_at: datetime = Field(sa_type=NaiveUTCDateTime, default_factory=utc_now)
+
+    model_config = {"arbitrary_types_allowed": True}
+
+
+class InsightReportingPrincipal(SQLModel, table=True):
+    """Exact verified enterprise identity with no business authority."""
+
+    __tablename__ = "insight_reporting_principals"
+    __table_args__ = (
+        UniqueConstraint("issuer", "subject", name="uq_insight_principal_identity"),
+        CheckConstraint("starts_at < expires_at", name="ck_insight_principal_liveness"),
+    )
+
+    principal_id: str = Field(primary_key=True, max_length=64)
+    issuer: str = Field(max_length=512)
+    subject: str = Field(max_length=255)
+    starts_at: datetime = Field(sa_type=NaiveUTCDateTime)
+    expires_at: datetime = Field(sa_type=NaiveUTCDateTime)
+    revoked_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
+    allow_unknown_wallet_counts: bool = Field(default=False)
+
+    model_config = {"arbitrary_types_allowed": True}
+
+
+class InsightWalletOwnershipEpoch(SQLModel, table=True):
+    """Certified immutable wallet owner boundary for historical evidence."""
+
+    __tablename__ = "insight_wallet_ownership_epochs"
+    __table_args__ = (
+        UniqueConstraint(
+            "wallet_id", "ownership_epoch_id", name="uq_insight_epoch_wallet_id"
+        ),
+        CheckConstraint(
+            "evidence_from < evidence_until", name="ck_insight_epoch_range"
+        ),
+    )
+
+    ownership_epoch_id: str = Field(primary_key=True, max_length=128)
+    wallet_id: str = Field(max_length=50, foreign_key="wallets.wallet_id", index=True)
+    owner_boundary_id: str = Field(max_length=128)
+    evidence_from: datetime = Field(sa_type=NaiveUTCDateTime)
+    evidence_until: datetime = Field(sa_type=NaiveUTCDateTime)
+    history_complete: bool = Field(default=False)
+
+    model_config = {"arbitrary_types_allowed": True}
+
+
+class InsightReportingWalletGrant(SQLModel, table=True):
+    """One explicit wallet and certified epoch, with independent liveness."""
+
+    __tablename__ = "insight_reporting_wallet_grants"
+    __table_args__ = (
+        UniqueConstraint(
+            "principal_id",
+            "wallet_id",
+            "ownership_epoch_id",
+            name="uq_insight_grant_principal_wallet_epoch",
+        ),
+        ForeignKeyConstraint(
+            ["wallet_id", "ownership_epoch_id"],
+            [
+                "insight_wallet_ownership_epochs.wallet_id",
+                "insight_wallet_ownership_epochs.ownership_epoch_id",
+            ],
+            name="fk_insight_grant_wallet_epoch",
+        ),
+        CheckConstraint("starts_at < expires_at", name="ck_insight_grant_liveness"),
+        CheckConstraint(
+            "evidence_from < evidence_until", name="ck_insight_grant_range"
+        ),
+    )
+
+    grant_id: str = Field(primary_key=True, max_length=64)
+    principal_id: str = Field(
+        max_length=64,
+        foreign_key="insight_reporting_principals.principal_id",
+        index=True,
+    )
+    wallet_id: str = Field(max_length=50, index=True)
+    ownership_epoch_id: str = Field(max_length=128)
+    permission_kind: str = Field(default="wallet_evidence_read", max_length=32)
+    starts_at: datetime = Field(sa_type=NaiveUTCDateTime)
+    expires_at: datetime = Field(sa_type=NaiveUTCDateTime)
+    revoked_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
+    evidence_from: datetime = Field(sa_type=NaiveUTCDateTime)
+    evidence_until: datetime = Field(sa_type=NaiveUTCDateTime)
 
     model_config = {"arbitrary_types_allowed": True}
 
