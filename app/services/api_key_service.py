@@ -24,6 +24,7 @@ from sqlalchemy import case, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from ..core.config import get_settings
 from ..core.time import to_naive_utc, utc_now
 from ..db.database import get_session_factory
 from ..db.models import (
@@ -83,6 +84,53 @@ class InvalidRotationRequestError(APIKeyError):
     pass
 
 
+def _configured_pepper() -> bytes | None:
+    """Server pepper for API key digests, or None when not configured.
+
+    Read lazily (not at import) so settings changes take effect without a
+    reimport. An empty pepper means legacy plain SHA-256 behavior.
+    """
+    raw = get_settings().API_KEY_PEPPER
+    secret = raw.get_secret_value() if hasattr(raw, "get_secret_value") else raw
+    if not secret:
+        return None
+    return str(secret).encode("utf-8")
+
+
+def _plain_key_hash(api_key: str) -> str:
+    """Legacy unpeppered digest, kept so existing keys keep verifying."""
+    return hashlib.sha256(api_key.encode()).hexdigest()
+
+
+def hash_api_key(api_key: str, pepper: bytes | None = None) -> str:
+    """Digest an API key for storage.
+
+    With a pepper this is HMAC-SHA256, otherwise plain SHA-256. A pepper of
+    None reads the configured pepper; pass an explicit value to override it
+    (tests use this to avoid touching settings).
+    """
+    if pepper is None:
+        pepper = _configured_pepper()
+    if pepper:
+        return hmac.new(pepper, api_key.encode(), hashlib.sha256).hexdigest()
+    return _plain_key_hash(api_key)
+
+
+def candidate_key_hashes(api_key: str) -> list[str]:
+    """All stored digests ``api_key`` could match.
+
+    Peppered first when a pepper is configured, then the legacy unpeppered
+    digest so keys stored before the pepper was set keep verifying. Both
+    forms are the same length, so no schema change is needed.
+    """
+    pepper = _configured_pepper()
+    candidates = []
+    if pepper:
+        candidates.append(hash_api_key(api_key, pepper=pepper))
+    candidates.append(_plain_key_hash(api_key))
+    return candidates
+
+
 def generate_api_key() -> tuple[str, str, str]:
     """
     Generate a new API key.
@@ -91,7 +139,7 @@ def generate_api_key() -> tuple[str, str, str]:
         tuple: (full_key, key_hash, key_prefix)
     """
     full_key = f"b2a_{secrets.token_urlsafe(API_KEY_LENGTH)}"
-    key_hash = hashlib.sha256(full_key.encode()).hexdigest()
+    key_hash = hash_api_key(full_key)
     key_prefix = full_key[:API_KEY_PREFIX_LENGTH]
     return full_key, key_hash, key_prefix
 
@@ -401,7 +449,10 @@ class APIKeyService:
             return None
 
         key_prefix = api_key[:API_KEY_PREFIX_LENGTH]
-        key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+        # Peppered digests first when a pepper is configured, then the
+        # legacy plain digest, so keys stored before the pepper was set
+        # keep verifying with no rotation and no schema change.
+        candidates = candidate_key_hashes(api_key)
 
         async with self._session_factory()() as session:
             # Look up by the indexed full digest, not the prefix alone: the
@@ -412,7 +463,7 @@ class APIKeyService:
             # failed every request for both keys with a 500.
             result = await session.execute(
                 select(APIKeyModel).where(
-                    col(APIKeyModel.key_hash) == key_hash,
+                    col(APIKeyModel.key_hash).in_(candidates),
                     col(APIKeyModel.key_prefix) == key_prefix,
                     col(APIKeyModel.status) == APIKeyStatus.ACTIVE.value,
                 )
@@ -422,7 +473,9 @@ class APIKeyService:
             if not key:
                 return None
 
-            if not hmac.compare_digest(key.key_hash, key_hash):
+            if not any(
+                hmac.compare_digest(key.key_hash, candidate) for candidate in candidates
+            ):
                 return None
 
             now = utc_now()
