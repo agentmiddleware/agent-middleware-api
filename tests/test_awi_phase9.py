@@ -107,24 +107,20 @@ class TestWebAuthnProvider:
     @pytest.mark.asyncio
     async def test_create_challenge_fails_for_low_risk_action(self, provider):
         """Test that challenge creation fails for low-risk actions."""
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ValueError, match="does not require passkey"):
             await provider.create_challenge(
                 session_id="session1",
                 action="navigate_to",
             )
 
-        assert "does not require passkey" in str(exc_info.value)
-
     @pytest.mark.asyncio
     async def test_verify_response_invalid_challenge(self, provider):
         """Test verification with invalid challenge ID."""
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ValueError, match="Challenge not found"):
             await provider.verify_response(
                 challenge_id="invalid-id",
                 credential={},
             )
-
-        assert "Challenge not found" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_verify_response_expired(self, provider):
@@ -136,13 +132,11 @@ class TestWebAuthnProvider:
             action="checkout",
         )
 
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ValueError, match="(?i)expired"):
             await provider.verify_response(
                 challenge_id=challenge["challenge_id"],
                 credential={},
             )
-
-        assert "expired" in str(exc_info.value).lower()
 
     @pytest.mark.asyncio
     async def test_verify_response_success(self, provider):
@@ -561,14 +555,12 @@ class TestAWIPlaywrightBridge:
         """Test translating add_to_cart action."""
         session = await bridge.create_session("https://example.com")
 
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ValueError, match="No add-to-cart element found"):
             await bridge.translate_action(
                 session_id=session.session_id,
                 action="add_to_cart",
                 parameters={},
             )
-
-        assert "No add-to-cart element found" in str(exc_info.value)
 
         await bridge.destroy_session(session.session_id)
 
@@ -644,28 +636,24 @@ class TestAWIPlaywrightBridge:
         """Test translating unsupported action."""
         session = await bridge.create_session("https://example.com")
 
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ValueError, match="Unsupported AWI action"):
             await bridge.translate_action(
                 session_id=session.session_id,
                 action="unsupported_action",
                 parameters={},
             )
 
-        assert "Unsupported AWI action" in str(exc_info.value)
-
         await bridge.destroy_session(session.session_id)
 
     @pytest.mark.asyncio
     async def test_translate_invalid_session(self, bridge):
         """Test translating action with invalid session."""
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ValueError, match="Session invalid-session not found"):
             await bridge.translate_action(
                 session_id="invalid-session",
                 action="search_and_sort",
                 parameters={},
             )
-
-        assert "Session invalid-session not found" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_execute_commands(self, bridge):
