@@ -23,6 +23,10 @@ rsync -a --delete --delete-excluded "${X[@]}" \
   --exclude test_repo_guardian.py --exclude test_auto_pr_runner.py \
   --exclude test_railway_preflight.py --exclude test_onboarding_contract.py \
   --exclude test_site_agent_interface.py --exclude test_acta_receipt_interop.py \
+  --exclude test_dashboard_design.py --exclude test_proof_verifier.py \
+  --exclude test_published_proof.py --exclude test_vendor_fonts.py \
+  --exclude test_arcade_regressions.mjs --exclude test_site_design.mjs \
+  --exclude test_site_pilot_fit.mjs \
   --exclude test_oss_export.py \
   "$SRC/tests/" "$G/tests/"
 rsync -a --delete --delete-excluded "${X[@]}" \

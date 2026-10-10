@@ -107,9 +107,17 @@ def test_export_rerun_purges_stale_gateway_files_and_preserves_public_metadata(
         "test_onboarding_contract.py",
         "test_site_agent_interface.py",
         "test_acta_receipt_interop.py",
+        "test_dashboard_design.py",
+        "test_proof_verifier.py",
+        "test_published_proof.py",
+        "test_vendor_fonts.py",
+        "test_arcade_regressions.mjs",
+        "test_site_design.mjs",
+        "test_site_pilot_fit.mjs",
         "test_oss_export.py",
     ):
         assert not (gateway / "tests" / name).exists()
+    assert not (gateway / "site").exists()
     assert (gateway / "tests" / "test_permit_numeric_storage.py").is_file()
     dockerfile = (gateway / "Dockerfile").read_text()
     assert "COPY sdk/python/ /sdk/python/" in dockerfile
@@ -145,6 +153,8 @@ def test_export_rerun_purges_stale_gateway_files_and_preserves_public_metadata(
         gateway / "scripts" / "stale.py",
         gateway / "scripts" / "repo_guardian.py",
         gateway / "tests" / "test_repo_guardian.py",
+        gateway / "tests" / "test_proof_verifier.py",
+        gateway / "tests" / "test_arcade_regressions.mjs",
         gateway / "docs" / "stale.md",
         destination / "sdk" / "python" / "stale.py",
         destination / "examples" / "stale.py",
@@ -158,6 +168,8 @@ def test_export_rerun_purges_stale_gateway_files_and_preserves_public_metadata(
         gateway / "scripts" / "stale.py",
         gateway / "scripts" / "repo_guardian.py",
         gateway / "tests" / "test_repo_guardian.py",
+        gateway / "tests" / "test_proof_verifier.py",
+        gateway / "tests" / "test_arcade_regressions.mjs",
         gateway / "docs" / "stale.md",
         destination / "sdk" / "python" / "stale.py",
         destination / "examples" / "stale.py",
