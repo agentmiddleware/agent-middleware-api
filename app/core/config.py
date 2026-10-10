@@ -71,6 +71,11 @@ class Settings(BaseSettings):
     # Used for SQLModel/SQLAlchemy async sessions
     DB_POOL_SIZE: int = 5
     DB_MAX_OVERFLOW: int = 10
+    # SQL statement echo (SQLAlchemy ``echo=True`` logs statements WITH bound
+    # values, which can carry wallet ids, permit payloads, and other caller
+    # content). Off by default and never enabled by DEBUG alone: an operator
+    # turns it on explicitly for local query debugging.
+    SQL_ECHO: bool = False
 
     # --- Authentication ---
     API_KEY_HEADER: str = "X-API-Key"
@@ -240,8 +245,11 @@ class Settings(BaseSettings):
     ENABLE_PUBLIC_MCP_ENDPOINT: bool = False
 
     # --- Stripe Payment Processing ---
-    STRIPE_SECRET_KEY: str = ""
-    STRIPE_WEBHOOK_SECRET: str = ""
+    # Secret keys stay masked in repr/str so settings dumps and logs never
+    # carry them. STRIPE_PUBLISHABLE_KEY stays a plain string: it is public
+    # by design and is safe to display.
+    STRIPE_SECRET_KEY: SecretStr = SecretStr("")
+    STRIPE_WEBHOOK_SECRET: SecretStr = SecretStr("")
     STRIPE_PUBLISHABLE_KEY: str = ""
 
     # --- KYC Verification ---
@@ -283,7 +291,7 @@ class Settings(BaseSettings):
     # Real mode needs both URL and key; used only when
     # SIMULATION_MODE_HUMAN_APPROVAL=false.
     SENTINEL_API_URL: str = ""
-    SENTINEL_API_KEY: str = ""
+    SENTINEL_API_KEY: SecretStr = SecretStr("")
     # Forwarded to Sentinel as timeout_seconds (its magic-link expiry, 1..86400)
     # and enforced locally as the approval's expiry — Sentinel itself never
     # expires a pending approval.
@@ -341,7 +349,7 @@ class Settings(BaseSettings):
     # --- LLM / AI Agent Intelligence ---
     # Provider: openai, azure, anthropic, ollama
     LLM_PROVIDER: str = "openai"
-    LLM_API_KEY: str = ""
+    LLM_API_KEY: SecretStr = SecretStr("")
     LLM_MODEL: str = "gpt-4o"
     LLM_BASE_URL: str = "https://api.openai.com/v1"
     LLM_MAX_TOKENS: int = 4096

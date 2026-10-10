@@ -110,7 +110,7 @@ async def openai_compatible_chat_completion(
 ) -> tuple[str, str, str | None]:
     """POST /v1/chat/completions. Returns (text, model_used, request_id)."""
     settings = get_settings()
-    api_key = (settings.LLM_API_KEY or "").strip()
+    api_key = (settings.LLM_API_KEY.get_secret_value() or "").strip()
     if not api_key:
         raise RuntimeError(
             "LLM_API_KEY is not configured; cannot call the model in real mode."
