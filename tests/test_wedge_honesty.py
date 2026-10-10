@@ -115,6 +115,7 @@ async def test_agent_json_sdk_integrations_are_honest(client):
     python_sdk = integrations["python_sdk"]
     assert isinstance(python_sdk, dict)
     assert python_sdk["status"] == "release_artifact_only"
+    assert python_sdk["path"] == "b2a_sdk/"
     # The advertised version must be the one an editable install actually
     # yields. Read it from the SDK's own pyproject rather than restating a
     # literal: a hand-copied number is exactly what drifts, and this endpoint
