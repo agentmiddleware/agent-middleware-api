@@ -269,7 +269,10 @@ async def test_evidence_bundle_denies_cross_wallet_access(client, clean_database
         f"/v1/evidence/{receipt['receipt_id']}",
         headers=other_headers,
     )
-    assert resp.status_code == 403
+    # Same 404 as an unknown receipt: a 403 here would confirm the
+    # receipt id is real to any authenticated caller.
+    assert resp.status_code == 404
+    assert resp.json() == {"detail": "receipt_not_found"}
 
 
 # The evidence bundle is the buyer-facing artifact an auditor verifies, so its
