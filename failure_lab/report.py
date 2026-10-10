@@ -43,6 +43,10 @@ class ConclusionKind(str, Enum):
     GATEWAY_ADDED_EVIDENCE_ONLY = "gateway_added_evidence_only"
     #: The gateway did not hold its own documented guarantee here.
     GATEWAY_DID_NOT_HOLD = "gateway_did_not_hold"
+    #: More duplicate business effects occurred behind the gateway than in
+    #: the measured baseline. Reported as exactly that, never as prevention
+    #: and never folded into the milder "controls sufficient" wording.
+    GATEWAY_ADDED_DUPLICATES = "gateway_added_duplicates"
     #: The test exercises a component only the gateway has, so no baseline
     #: column ran and no comparison was possible. The gateway's own verdict
     #: still stands; what cannot be said is whether the caller needs it.
@@ -66,8 +70,8 @@ CONCLUSION_GLOSS: dict[str, str] = {
         "prevented no additional duplicate effect"
     ),
     ConclusionKind.GATEWAY_PREVENTED_DUPLICATES.value: (
-        "duplicate business effects occurred in a measured baseline and did "
-        "not occur behind the gateway"
+        "fewer duplicate business effects occurred behind the gateway than "
+        "in a measured baseline"
     ),
     ConclusionKind.GATEWAY_ADDED_EVIDENCE_ONLY.value: (
         "no additional duplicate effect was prevented; what changed is what "
@@ -75,6 +79,10 @@ CONCLUSION_GLOSS: dict[str, str] = {
     ),
     ConclusionKind.GATEWAY_DID_NOT_HOLD.value: (
         "the gateway did not hold the property this test checks"
+    ),
+    ConclusionKind.GATEWAY_ADDED_DUPLICATES.value: (
+        "more duplicate effects occurred behind the gateway than in the "
+        "measured baseline"
     ),
     ConclusionKind.NO_BASELINE_COMPARISON.value: (
         "only the gateway has the component under test, so no baseline ran "
@@ -338,6 +346,30 @@ def _conclude(
 
     existing_ran = existing is not None and existing.ran
     native_ran = native is not None and native.ran
+    # The reference baseline is the correct native one when it ran, else the
+    # existing integration. A gateway that produced MORE duplicates than that
+    # reference must say so plainly: the counts below are clamped at zero, so
+    # without this branch a gateway-worse run would read as if the gateway
+    # had merely added nothing.
+    reference = native if native_ran else (existing if existing_ran else None)
+    if (
+        reference is not None
+        and governed.duplicate_effects > reference.duplicate_effects
+    ):
+        extra = governed.duplicate_effects - reference.duplicate_effects
+        return Conclusion(
+            ConclusionKind.GATEWAY_ADDED_DUPLICATES,
+            f"More duplicate downstream business effect(s) occurred with Agent "
+            f"Middleware in front of the tool than in "
+            f"{reference.label} ({governed.duplicate_effects} against "
+            f"{reference.duplicate_effects}). The gateway added {extra} "
+            f"duplicate effect(s) relative to that baseline.",
+            prevented_vs_native,
+            prevented_vs_existing,
+            differences,
+            disadvantages,
+        )
+
     if not existing_ran and not native_ran:
         if any(
             column is not None and column.verdict == Verdict.ERROR.value
@@ -433,13 +465,29 @@ def _conclude(
         else "your existing integration"
     )
     count = prevented_vs_native or prevented_vs_existing
+    if governed.duplicate_effects == 0:
+        return Conclusion(
+            ConclusionKind.GATEWAY_PREVENTED_DUPLICATES,
+            f"{count} duplicate downstream business effect(s) occurred in "
+            f"{against} and did not occur with Agent Middleware in front of the "
+            "same tool under the same injected failure. The duplicate count comes "
+            "from the downstream system's own ledger, which the gateway cannot "
+            "reach.",
+            prevented_vs_native,
+            prevented_vs_existing,
+            differences,
+            disadvantages,
+        )
+    # Partial prevention: fewer duplicates behind the gateway, but not zero.
+    # Saying they "did not occur" would be false, so report both counts.
     return Conclusion(
         ConclusionKind.GATEWAY_PREVENTED_DUPLICATES,
         f"{count} duplicate downstream business effect(s) occurred in "
-        f"{against} and did not occur with Agent Middleware in front of the "
-        "same tool under the same injected failure. The duplicate count comes "
-        "from the downstream system's own ledger, which the gateway cannot "
-        "reach.",
+        f"{against}, and {governed.duplicate_effects} still occurred with Agent "
+        "Middleware in front of the same tool under the same injected failure, "
+        "so the gateway reduced but did not remove the duplicates. The "
+        "duplicate count comes from the downstream system's own ledger, which "
+        "the gateway cannot reach.",
         prevented_vs_native,
         prevented_vs_existing,
         differences,
