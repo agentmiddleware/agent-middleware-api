@@ -1,0 +1,13 @@
+{
+  "name": "agent-middleware",
+  "displayName": "Agent Middleware",
+  "version": "0.1.0",
+  "description": "Permit before action, receipt after. Governs side-effecting tool calls through the Agent Middleware API.",
+  "author": {
+    "name": "Chris Sellers"
+  },
+  "repository": "https://github.com/agentmiddleware/agent-middleware-api",
+  "license": "MIT",
+  "keywords": ["cursor", "plugin", "governance", "permits", "receipts", "mcp"],
+  "logo": "assets/logo.svg"
+}
