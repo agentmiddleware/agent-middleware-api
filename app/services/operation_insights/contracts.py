@@ -593,6 +593,18 @@ class Report:
             ):
                 raise ValueError("raw report rows exceed authorized_scope epochs")
         if self.time_basis == "ingress":
+            ingress_evidence = {
+                (
+                    evidence.wallet_id,
+                    evidence.ownership_epoch_id,
+                    evidence.original_operation_anchor_id,
+                    evidence.request_id,
+                    evidence.occurred_at,
+                    evidence.request_disposition,
+                )
+                for evidence in self.evidence
+                if evidence.event_kind == "ingress"
+            }
             for operation in self.operations:
                 if not any(
                     observation.disposition == "execution_intent"
@@ -602,17 +614,14 @@ class Report:
                         "ingress observation requires execution_intent anchor"
                     )
                 for observation in operation.ingress_observations:
-                    if not any(
-                        evidence.event_kind == "ingress"
-                        and evidence.wallet_id == operation.wallet_id
-                        and evidence.ownership_epoch_id == operation.ownership_epoch_id
-                        and evidence.original_operation_anchor_id
-                        == operation.original_operation_anchor_id
-                        and evidence.request_id == observation.request_id
-                        and evidence.occurred_at == observation.occurred_at
-                        and evidence.request_disposition == observation.disposition
-                        for evidence in self.evidence
-                    ):
+                    if (
+                        operation.wallet_id,
+                        operation.ownership_epoch_id,
+                        operation.original_operation_anchor_id,
+                        observation.request_id,
+                        observation.occurred_at,
+                        observation.disposition,
+                    ) not in ingress_evidence:
                         raise ValueError(
                             "ingress observation must match scoped ingress evidence"
                         )
