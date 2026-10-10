@@ -163,6 +163,8 @@ def compute_metrics(
     snapshot: Snapshot,
     coverage: Coverage,
     prior_coverage: Coverage | None = None,
+    *,
+    current_evidence: tuple[Evidence, ...] = (),
 ) -> tuple[Metric, ...]:
     """Calculate one 7/30-day cohort without mixing observed and ingress time."""
     duration = window.end - window.start
@@ -276,6 +278,15 @@ def compute_metrics(
         )
         add("unknown_disposition_requests", disposition_counts["unknown"], "request")
         add("active_accounts", len(active), "account")
+        late_ingress = {
+            (row.source, row.source_id)
+            for row in current_window_ingress
+            if row.occurred_at is not None
+            and window.start <= row.occurred_at < window.end
+            and row.ingested_at is not None
+            and window.end <= row.ingested_at <= snapshot.cutoff
+        }
+        add("post_window_ingress_events", len(late_ingress), "event")
     else:
         active = set()
         prior_active = set()
@@ -436,6 +447,18 @@ def compute_metrics(
     unresolved_age: Counter[str] = Counter()
     unresolved_count = 0
     post_window_updates = 0
+    late_evidence = {
+        (
+            row.source,
+            row.source_id,
+            row.wallet_id,
+            row.ownership_epoch_id,
+            row.original_operation_anchor_id,
+        )
+        for row in current_evidence
+        if row.ingested_at is not None
+        and window.end <= row.ingested_at <= snapshot.cutoff
+    }
     for row, account in eligible:
         for prefix, value in (
             (
@@ -452,7 +475,17 @@ def compute_metrics(
             ("release", row.server_release),
         ):
             dimensions[prefix][_key(prefix, value)] += 1
-        if row.last_seen_at is not None and row.last_seen_at >= window.end:
+        if (row.last_seen_at is not None and row.last_seen_at >= window.end) or any(
+            (
+                ref.source,
+                ref.source_id,
+                ref.wallet_id,
+                ref.ownership_epoch_id,
+                ref.original_operation_anchor_id,
+            )
+            in late_evidence
+            for ref in row.evidence_refs
+        ):
             post_window_updates += 1
         unresolved = bool(
             row.unresolved_since is not None

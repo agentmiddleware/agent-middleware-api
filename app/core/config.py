@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "local"
     DEBUG: bool = False
     OPERATION_INSIGHTS_EVENTS_ENABLED: bool = False
+    OPERATION_INSIGHTS_REPORTING_ENABLED: bool = False
     OPERATION_INSIGHTS_ALLOWED_CLIENT_VERSIONS: str = ""
 
     # --- Server ---

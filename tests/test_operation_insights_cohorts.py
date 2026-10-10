@@ -243,6 +243,75 @@ def test_exact_windows_and_revisions() -> None:
     assert revised_metrics["logical_operations"].count == 10001
 
 
+def test_late_ingestion_labels_original_cohort_revision() -> None:
+    account_mapping = mapping(("wa", "A", "eligible"))
+    occurred = at(2)
+    received = AS_OF + timedelta(hours=1)
+    request = ingress("late", "wa", occurred, ingested_at=received)
+    terminal = Evidence(
+        "insight_event",
+        "event-terminal",
+        "wa",
+        event_kind="terminal",
+        occurred_at=occurred,
+        ingested_at=received,
+        ownership_epoch_id="epoch-wa",
+        original_operation_anchor_id="anchor-1",
+    )
+    from app.services.operation_insights.contracts import EvidenceRef
+
+    current = operation(
+        1,
+        "wa",
+        occurred,
+        last_seen_at=occurred,
+        evidence_refs=(
+            EvidenceRef(
+                "insight_event", "event-terminal", "wa", "epoch-wa", "anchor-1"
+            ),
+        ),
+    )
+    metrics = {
+        metric.name: metric
+        for metric in compute_metrics(
+            (current,),
+            (),
+            (request,),
+            (),
+            account_mapping,
+            window(),
+            snapshot(),
+            complete_coverage(),
+            complete_coverage(),
+            current_evidence=(terminal,),
+        )
+    }
+    assert metrics["requests"].count == 1
+    assert metrics["post_window_ingress_events"].count == 1
+    assert metrics["post_window_observed_updates"].count == 1
+    assert metrics["eligible_operations"].count == 1
+
+
+def test_late_duplicate_ingress_is_labeled_as_event_not_new_request() -> None:
+    account_mapping = mapping(("wa", "A", "eligible"))
+    occurred = at(2)
+    early = ingress("same", "wa", occurred, ingested_at=occurred)
+    late = ingress(
+        "same",
+        "wa",
+        occurred,
+        source_id="event-late-duplicate",
+        ingested_at=AS_OF + timedelta(hours=1),
+    )
+
+    metrics = {
+        metric.name: metric
+        for metric in calculate((), (), (early, late), (), account_mapping)
+    }
+    assert metrics["requests"].count == 1
+    assert metrics["post_window_ingress_events"].count == 1
+
+
 def test_old_root_denial_is_active_from_independent_window_ingress() -> None:
     account_mapping = mapping(("wa", "A", "eligible"))
     old_root = operation(1, "wa", at(20), failure="expected_denial")
