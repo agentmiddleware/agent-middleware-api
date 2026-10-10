@@ -31,6 +31,20 @@ router = APIRouter(prefix="/v1/receipts", tags=["Trust Receipts"])
 logger = logging.getLogger(__name__)
 
 
+def _hide_receipt_existence(exc: HTTPException) -> HTTPException:
+    """Answer a receipt authorization denial exactly like a missing receipt.
+
+    A 403 for "exists but is not yours" next to a 404 for "no such receipt"
+    tells any authenticated caller which ids are real, so the read routes
+    below convert the denial into the same 404. This only applies once the
+    caller is authenticated: missing or invalid credentials still fail
+    earlier, identically for every id.
+    """
+    if exc.status_code == 403:
+        return HTTPException(status_code=404, detail="receipt_not_found")
+    return exc
+
+
 async def _authorize_receipt_list(
     *,
     auth: AuthContext,
@@ -45,12 +59,18 @@ async def _authorize_receipt_list(
             permit.issuer_wallet_id,
             permit.subject_wallet_id,
         }:
-            auth.require_bootstrap_admin()
+            if not auth.is_bootstrap_admin:
+                # Same 404 as a missing permit: a 403 here would confirm
+                # the permit id is real to any authenticated caller.
+                raise HTTPException(status_code=404, detail="permit_not_found")
             return
         if auth.is_bootstrap_admin:
             return
         if auth.wallet_id in {permit.issuer_wallet_id, permit.subject_wallet_id}:
             return
+        # The caller named a permit they may not see, with or without a
+        # wallet filter: same 404, so the id stays unconfirmed either way.
+        raise HTTPException(status_code=404, detail="permit_not_found")
     if wallet_id:
         auth.require_wallet_access(wallet_id)
         return
@@ -249,7 +269,10 @@ async def get_receipt(
     receipt = await get_receipt_service().get_receipt(receipt_id)
     if not receipt:
         raise HTTPException(status_code=404, detail="receipt_not_found")
-    await authorize_receipt_access(auth=auth, receipt=receipt)
+    try:
+        await authorize_receipt_access(auth=auth, receipt=receipt)
+    except HTTPException as exc:
+        raise _hide_receipt_existence(exc) from None
     return receipt
 
 
@@ -261,7 +284,10 @@ async def get_receipt_evidence(
     receipt = await get_receipt_service().get_receipt(receipt_id)
     if not receipt:
         raise HTTPException(status_code=404, detail="receipt_not_found")
-    await authorize_receipt_access(auth=auth, receipt=receipt)
+    try:
+        await authorize_receipt_access(auth=auth, receipt=receipt)
+    except HTTPException as exc:
+        raise _hide_receipt_existence(exc) from None
     return await build_receipt_evidence(receipt=receipt, auth=auth)
 
 
@@ -280,7 +306,10 @@ async def get_portable_receipt(
     receipt = await get_receipt_service().get_receipt(receipt_id)
     if not receipt:
         raise HTTPException(status_code=404, detail="receipt_not_found")
-    await authorize_receipt_access(auth=auth, receipt=receipt)
+    try:
+        await authorize_receipt_access(auth=auth, receipt=receipt)
+    except HTTPException as exc:
+        raise _hide_receipt_existence(exc) from None
 
     signing_input = await get_receipt_service().signing_input(receipt_id)
     if signing_input is None:
