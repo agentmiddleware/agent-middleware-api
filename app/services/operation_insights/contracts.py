@@ -5,7 +5,7 @@ These types carry a wallet projection; they do not authorize or fetch one.
 
 from __future__ import annotations
 
-from dataclasses import field
+from dataclasses import InitVar, field
 from datetime import datetime, timedelta
 from typing import Annotated, Literal
 
@@ -37,6 +37,13 @@ NonnegativeCount = Annotated[int, Field(ge=0)]
 NonnegativeFloat = Annotated[FiniteFloat, Field(ge=0)]
 
 TimeBasis = Literal["ingress", "first_observed_evidence"]
+RequestDisposition = Literal[
+    "execution_intent",
+    "same_key_replay",
+    "status_read",
+    "non_execution_read",
+    "unknown",
+]
 AccountClass = Literal["eligible", "internal", "demo", "CI", "monitoring", "unknown"]
 MappedAccountClass = Literal["eligible", "internal", "demo", "CI", "monitoring"]
 MappingStatus = Literal["mapped", "unmapped", "undated", "ambiguous", "wallet_unknown"]
@@ -64,10 +71,31 @@ def _check_attribution(
 
 
 @dataclass(config=_FROZEN)
+class AuthorizedOwnershipEpoch:
+    wallet_id: SafeId
+    ownership_epoch_id: SafeId
+    evidence_from: UtcDateTime
+    evidence_until: UtcDateTime
+
+    def __post_init__(self) -> None:
+        if self.evidence_from >= self.evidence_until:
+            raise ValueError("evidence_until must follow evidence_from")
+
+
+@dataclass(config=_FROZEN)
 class Scope:
-    """Authorized wallet IDs only; an empty set is not a wildcard."""
+    """Explicit wallet epochs only; wallet IDs alone grant no evidence history."""
 
     wallet_ids: frozenset[SafeId]
+    authorized_ownership_epochs: tuple[AuthorizedOwnershipEpoch, ...] = ()
+    allow_unknown_wallet_counts: bool = False
+
+    def __post_init__(self) -> None:
+        if any(
+            epoch.wallet_id not in self.wallet_ids
+            for epoch in self.authorized_ownership_epochs
+        ):
+            raise ValueError("ownership epoch wallet must be in scope")
 
 
 @dataclass(config=_FROZEN)
@@ -101,6 +129,8 @@ class EvidenceRef:
     source: SafeId
     source_id: SafeId
     wallet_id: SafeId | None
+    ownership_epoch_id: SafeId | None = None
+    original_operation_anchor_id: SafeId | None = None
 
 
 @dataclass(config=_FROZEN)
@@ -177,6 +207,18 @@ class Evidence:
     ingested_at: UtcDateTime | None = None
     reason_code: ReasonCode | None = None
     state_facts: EvidenceStateFacts = field(default_factory=EvidenceStateFacts)
+    event_kind: Literal["ingress", "terminal", "attempt"] | None = None
+    request_disposition: RequestDisposition | None = None
+    ownership_epoch_id: SafeId | None = None
+    original_operation_anchor_id: SafeId | None = None
+
+    def __post_init__(self) -> None:
+        if self.event_kind == "attempt" and self.request_disposition in (
+            "same_key_replay",
+            "status_read",
+            "non_execution_read",
+        ):
+            raise ValueError("attempt event cannot represent a nonexecution request")
 
 
 @dataclass(config=_FROZEN)
@@ -207,6 +249,20 @@ class EvidenceBatch:
     rows: tuple[Evidence, ...]
     snapshot: Snapshot
     coverage: Coverage
+    window_ingress: tuple[Evidence, ...] = ()
+
+    def __post_init__(self) -> None:
+        if any(
+            row.event_kind != "ingress"
+            or row.wallet_id is None
+            or row.ownership_epoch_id is None
+            or row.original_operation_anchor_id is None
+            or row.request_id is None
+            or row.occurred_at is None
+            or row.request_disposition is None
+            for row in self.window_ingress
+        ):
+            raise ValueError("window_ingress requires identified ingress evidence")
 
 
 @dataclass(config=_FROZEN)
@@ -239,6 +295,13 @@ class AccountAttribution:
 
     def __post_init__(self) -> None:
         _check_attribution(self.account_id, self.account_class, self.mapping_status)
+
+
+@dataclass(config=_FROZEN)
+class IngressObservation:
+    request_id: SafeId
+    occurred_at: UtcDateTime
+    disposition: RequestDisposition
 
 
 @dataclass(config=_FROZEN)
@@ -276,6 +339,9 @@ class Operation:
     replay_only: bool | None = None
     observed_fault: bool | None = None
     observed_denial: bool | None = None
+    ownership_epoch_id: SafeId | None = None
+    original_operation_anchor_id: SafeId | None = None
+    ingress_observations: tuple[IngressObservation, ...] = ()
 
     def __post_init__(self) -> None:
         if self.wallet_id is None:
@@ -307,6 +373,35 @@ class Metric:
 
 
 @dataclass(config=_FROZEN)
+class UnknownWalletCount:
+    status: Literal["complete", "not_authorized", "unavailable", "partial"] = (
+        "not_authorized"
+    )
+    count: NonnegativeCount | None = None
+    bucket_start: UtcDateTime | None = None
+    bucket_end: UtcDateTime | None = None
+
+    def __post_init__(self) -> None:
+        if self.status == "complete":
+            if self.count is None:
+                raise ValueError("complete unknown-wallet aggregate requires count")
+            if self.bucket_start is None or self.bucket_end is None:
+                raise ValueError("complete unknown-wallet aggregate requires bucket")
+        elif self.count is not None:
+            raise ValueError("incomplete unknown-wallet aggregate requires null count")
+        if (self.bucket_start is None) != (self.bucket_end is None):
+            raise ValueError("unknown-wallet bucket requires both boundaries")
+        if self.bucket_start is not None and self.bucket_end is not None:
+            if (
+                self.bucket_start.time() != datetime.min.time()
+                or self.bucket_end.time() != datetime.min.time()
+                or self.bucket_end - self.bucket_start
+                not in (timedelta(days=7), timedelta(days=30))
+            ):
+                raise ValueError("unknown-wallet bucket must be 7 or 30 full UTC days")
+
+
+@dataclass(config=_FROZEN)
 class Report:
     report_id: SafeId
     generated_at: UtcDateTime
@@ -325,8 +420,12 @@ class Report:
     metrics: tuple[Metric, ...]
     schema_version: Literal[1] = SCHEMA_VERSION
     classification_version: Literal[1] = CLASSIFICATION_VERSION
+    unknown_wallet_aggregate: UnknownWalletCount = field(
+        default_factory=UnknownWalletCount
+    )
+    authorized_scope: InitVar[Scope | None] = None
 
-    def __post_init__(self) -> None:
+    def __post_init__(self, authorized_scope: Scope | None) -> None:
         Window(self.window_start, self.window_end, self.time_basis)
         if self.as_of != self.window_end:
             raise ValueError("as_of must equal window_end")
@@ -336,6 +435,187 @@ class Report:
             raise ValueError("operation time_basis must match report time_basis")
         if any(metric.window.time_basis != self.time_basis for metric in self.metrics):
             raise ValueError("metric time_basis must match report time_basis")
+        if self.time_basis == "first_observed_evidence" and (
+            any(evidence.event_kind == "ingress" for evidence in self.evidence)
+            or any(operation.ingress_observations for operation in self.operations)
+        ):
+            raise ValueError(
+                "historical time_basis cannot include ingress observations"
+            )
+        if (
+            self.unknown_wallet_aggregate.bucket_end is not None
+            and self.unknown_wallet_aggregate.bucket_end
+            != self.as_of.replace(hour=0, minute=0, second=0, microsecond=0)
+        ):
+            raise ValueError("unknown_wallet_aggregate bucket_end must match as_of day")
+        bucket = self.unknown_wallet_aggregate
+        if (
+            bucket.bucket_start is not None
+            and bucket.bucket_end is not None
+            and bucket.bucket_end - bucket.bucket_start
+            != self.window_end - self.window_start
+        ):
+            raise ValueError(
+                "unknown_wallet_aggregate bucket window must match report window"
+            )
+        if bucket.status == "complete":
+            if (
+                bucket.bucket_end is not None
+                and bucket.bucket_end > self.snapshot_cutoff
+            ):
+                raise ValueError(
+                    "unknown_wallet_aggregate bucket_end exceeds snapshot_cutoff"
+                )
+        if any(operation.wallet_id is None for operation in self.operations) or any(
+            evidence.wallet_id is None for evidence in self.evidence
+        ):
+            raise ValueError("report rows require wallet_id")
+        if any(
+            ref.wallet_id is None
+            for operation in self.operations
+            for ref in operation.evidence_refs
+        ) or any(
+            edge.wallet_id is None
+            for evidence in self.evidence
+            for edge in evidence.edges
+        ):
+            raise ValueError("report evidence refs require wallet_id")
+        evidence_ids = {
+            (
+                evidence.source,
+                evidence.source_id,
+                evidence.wallet_id,
+                evidence.ownership_epoch_id,
+                evidence.original_operation_anchor_id,
+            )
+            for evidence in self.evidence
+        }
+        if any(
+            ref.wallet_id != operation.wallet_id
+            or ref.ownership_epoch_id != operation.ownership_epoch_id
+            or ref.original_operation_anchor_id
+            != operation.original_operation_anchor_id
+            or (
+                ref.source,
+                ref.source_id,
+                ref.wallet_id,
+                ref.ownership_epoch_id,
+                ref.original_operation_anchor_id,
+            )
+            not in evidence_ids
+            for operation in self.operations
+            for ref in operation.evidence_refs
+        ) or any(
+            edge.wallet_id != evidence.wallet_id
+            or edge.ownership_epoch_id != evidence.ownership_epoch_id
+            or edge.original_operation_anchor_id
+            != evidence.original_operation_anchor_id
+            or (
+                edge.source,
+                edge.source_id,
+                edge.wallet_id,
+                edge.ownership_epoch_id,
+                edge.original_operation_anchor_id,
+            )
+            not in evidence_ids
+            for evidence in self.evidence
+            for edge in evidence.edges
+        ):
+            raise ValueError("report evidence ref must match scoped evidence wallet")
+        if any(
+            (
+                stage.source,
+                stage.source_id,
+                operation.wallet_id,
+                operation.ownership_epoch_id,
+                operation.original_operation_anchor_id,
+            )
+            not in evidence_ids
+            for operation in self.operations
+            for stage in operation.stage_timestamps
+        ) or any(
+            (
+                stage.source,
+                stage.source_id,
+                evidence.wallet_id,
+                evidence.ownership_epoch_id,
+                evidence.original_operation_anchor_id,
+            )
+            not in evidence_ids
+            for evidence in self.evidence
+            for stage in evidence.stage_timestamps
+        ):
+            raise ValueError("report stage timestamp must match scoped evidence wallet")
+        if authorized_scope is None:
+            raise ValueError("report requires authorized_scope")
+        if (
+            bucket.status in ("complete", "partial")
+            and not authorized_scope.allow_unknown_wallet_counts
+        ):
+            raise ValueError(
+                "unknown wallet aggregate requires allow_unknown_wallet_counts"
+            )
+        if self.operations or self.evidence:
+            if any(
+                operation.ownership_epoch_id is None
+                or operation.original_operation_anchor_id is None
+                for operation in self.operations
+            ) or any(
+                evidence.ownership_epoch_id is None
+                or evidence.original_operation_anchor_id is None
+                for evidence in self.evidence
+            ):
+                raise ValueError("raw report rows require original provenance")
+            if any(
+                ref.ownership_epoch_id is None
+                or ref.original_operation_anchor_id is None
+                for operation in self.operations
+                for ref in operation.evidence_refs
+            ) or any(
+                edge.ownership_epoch_id is None
+                or edge.original_operation_anchor_id is None
+                for evidence in self.evidence
+                for edge in evidence.edges
+            ):
+                raise ValueError("report evidence ref requires original provenance")
+            authorized_epochs = {
+                (epoch.wallet_id, epoch.ownership_epoch_id)
+                for epoch in authorized_scope.authorized_ownership_epochs
+            }
+            if any(
+                (operation.wallet_id, operation.ownership_epoch_id)
+                not in authorized_epochs
+                for operation in self.operations
+            ) or any(
+                (evidence.wallet_id, evidence.ownership_epoch_id)
+                not in authorized_epochs
+                for evidence in self.evidence
+            ):
+                raise ValueError("raw report rows exceed authorized_scope epochs")
+        if self.time_basis == "ingress":
+            for operation in self.operations:
+                if not any(
+                    observation.disposition == "execution_intent"
+                    for observation in operation.ingress_observations
+                ):
+                    raise ValueError(
+                        "ingress observation requires execution_intent anchor"
+                    )
+                for observation in operation.ingress_observations:
+                    if not any(
+                        evidence.event_kind == "ingress"
+                        and evidence.wallet_id == operation.wallet_id
+                        and evidence.ownership_epoch_id == operation.ownership_epoch_id
+                        and evidence.original_operation_anchor_id
+                        == operation.original_operation_anchor_id
+                        and evidence.request_id == observation.request_id
+                        and evidence.occurred_at == observation.occurred_at
+                        and evidence.request_disposition == observation.disposition
+                        for evidence in self.evidence
+                    ):
+                        raise ValueError(
+                            "ingress observation must match scoped ingress evidence"
+                        )
 
 
 @dataclass(config=_FROZEN)
