@@ -26,6 +26,7 @@ from sqlalchemy import (
     inspect as sa_inspect,
     or_,
     select,
+    tuple_,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -1238,7 +1239,85 @@ async def read_evidence(
                     gaps.add("original_ingress_anchor_conflicting")
                     continue
                 roots[key] = root
-                for row in ingress_rows:
+            prior_ingress_anchors: set[tuple[str | None, str | None]] = set()
+            prewindow_idempotency_anchors: set[tuple[str | None, str | None]] = set()
+            idempotency_origins: dict[tuple[str | None, str | None], datetime] = {}
+            root_keys = tuple(roots)
+            checked_keys: set[tuple[str | None, str | None]] = set()
+            for offset in range(0, len(root_keys), limits.page_size):
+                if time.monotonic() >= deadline:
+                    truncated = True
+                    gaps.add("execution_budget_reached")
+                    break
+                chunk_keys = root_keys[offset : offset + limits.page_size]
+                idem = IdempotencyRecordModel
+                idem_query = select(
+                    col(idem.wallet_id), col(idem.record_id), col(idem.created_at)
+                ).where(
+                    tuple_(col(idem.wallet_id), col(idem.record_id)).in_(chunk_keys),
+                    _epoch_filter(scope, col(idem.wallet_id), col(idem.created_at)),
+                    or_(
+                        col(idem.endpoint).in_(_GOVERNED_ENDPOINTS),
+                        col(idem.endpoint).like("/mcp/tools/%/invoke"),
+                    ),
+                    col(idem.created_at) <= to_naive_utc(cutoff),
+                )
+                for wallet_id, record_id, created_at in (
+                    await session.execute(idem_query)
+                ).all():
+                    key = (wallet_id, record_id)
+                    origin = _aware(created_at)
+                    idempotency_origins[key] = origin
+                    if origin < window.start:
+                        prewindow_idempotency_anchors.add(key)
+                if time.monotonic() >= deadline:
+                    truncated = True
+                    gaps.add("execution_budget_reached")
+                    break
+                prior_ingress_query = (
+                    select(e.c.wallet_id, e.c.original_operation_anchor_id)
+                    .where(
+                        tuple_(e.c.wallet_id, e.c.original_operation_anchor_id).in_(
+                            chunk_keys
+                        ),
+                        e.c.kind == "ingress",
+                        e.c.request_disposition == "execution_intent",
+                        e.c.occurred_at < to_naive_utc(window.start),
+                        e.c.ingested_at <= to_naive_utc(cutoff),
+                        e.c.duplicate_conflict_at.is_(None),
+                        _event_epoch_filter(scope, e),
+                    )
+                    .distinct()
+                )
+                for wallet_id, anchor_id in (
+                    await session.execute(prior_ingress_query)
+                ).all():
+                    prior_ingress_anchors.add((wallet_id, anchor_id))
+                if time.monotonic() >= deadline:
+                    truncated = True
+                    gaps.add("execution_budget_reached")
+                    break
+                checked_keys.update(chunk_keys)
+            current_roots: dict[tuple[str | None, str | None], Evidence] = {}
+            for key, root in roots.items():
+                if key not in checked_keys:
+                    continue
+                if key in prior_ingress_anchors:
+                    gaps.add("original_ingress_before_window")
+                    continue
+                if key in prewindow_idempotency_anchors:
+                    gaps.add("original_ingress_origin_unverified")
+                    continue
+                known_origin = idempotency_origins.get(key)
+                if root.source_id != key[1] and (
+                    known_origin is None
+                    or root.occurred_at is None
+                    or known_origin > root.occurred_at
+                ):
+                    gaps.add("original_ingress_origin_unverified")
+                    continue
+                current_roots[key] = root
+                for row in candidate_roots[key]:
                     try:
                         rows[(row.source, row.source_id)] = row
                     except _EvidenceLimitReached:
@@ -1247,7 +1326,11 @@ async def read_evidence(
                         break
                 if truncated:
                     break
-            if roots and "evidence_limit_reached" not in gaps:
+            roots = current_roots
+            if (
+                roots
+                and not {"evidence_limit_reached", "execution_budget_reached"} & gaps
+            ):
                 root_values = tuple(roots.values())
                 for offset in range(0, len(root_values), limits.page_size):
                     chunk = root_values[offset : offset + limits.page_size]

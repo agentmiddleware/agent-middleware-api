@@ -565,6 +565,130 @@ async def test_same_anchor_execution_requests_retain_one_operation_and_both_requ
     assert "original_ingress_anchor_conflicting" in conflicting.coverage.gaps
 
 
+@pytest.mark.parametrize("days", [7, 30])
+@pytest.mark.asyncio
+async def test_later_execution_request_does_not_move_original_into_current_cohort(
+    scoped_session, days: int
+) -> None:
+    from app.services.operation_insights import sources
+    from app.services.operation_insights.inspect import inspect_operations
+
+    session, scope = scoped_session
+    async with session.bind.begin() as connection:
+        await connection.run_sync(sources._EVENTS.create)
+    session.add(WalletModel(wallet_id="wallet-A", wallet_type="agent"))
+    session.add(
+        IdempotencyRecordModel(
+            record_id="old-anchor",
+            wallet_id="wallet-A",
+            endpoint="/mcp/invoke",
+            idempotency_key="synthetic-old-anchor",
+            request_hash="0" * 64,
+            operation_kind="upstream_mcp",
+            created_at=utc(2),
+        )
+    )
+    await session.flush()
+    for event_id, request_id, occurred_at in (
+        ("original-ingress", "old-request", utc(2)),
+        ("later-ingress", "current-request", utc(8)),
+    ):
+        await session.execute(
+            insert(sources._EVENTS).values(
+                event_id=event_id,
+                kind="ingress",
+                request_id=request_id,
+                logical_operation_id="old-anchor",
+                wallet_id="wallet-A",
+                original_operation_anchor_id="old-anchor",
+                request_disposition="execution_intent",
+                occurred_at=occurred_at,
+                ingested_at=occurred_at,
+            )
+        )
+
+    batch = await sources.read_evidence(
+        scope,
+        Window(utc(3), utc(3) + timedelta(days=days), "ingress"),
+        Limits(page_size=1),
+        session,
+    )
+
+    assert tuple(row.request_id for row in batch.window_ingress) == ("current-request",)
+    assert inspect_operations(batch, AccountMapping("unverified", ())) == ()
+    assert "original_ingress_before_window" in batch.coverage.gaps
+
+    await session.execute(
+        delete(sources._EVENTS).where(sources._EVENTS.c.event_id == "original-ingress")
+    )
+    missing_original = await sources.read_evidence(
+        scope,
+        Window(utc(3), utc(3) + timedelta(days=days), "ingress"),
+        Limits(page_size=1),
+        session,
+    )
+    assert tuple(row.request_id for row in missing_original.window_ingress) == (
+        "current-request",
+    )
+    assert missing_original.rows == ()
+    assert "original_ingress_origin_unverified" in missing_original.coverage.gaps
+
+
+@pytest.mark.asyncio
+async def test_origin_lookup_deadline_withholds_unchecked_roots(
+    scoped_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.services.operation_insights import sources
+
+    session, scope = scoped_session
+    async with session.bind.begin() as connection:
+        await connection.run_sync(sources._EVENTS.create)
+    for index in range(2):
+        await session.execute(
+            insert(sources._EVENTS).values(
+                event_id=f"budget-root-{index}",
+                kind="ingress",
+                request_id=f"budget-request-{index}",
+                wallet_id="wallet-A",
+                original_operation_anchor_id=f"budget-root-{index}",
+                request_disposition="execution_intent",
+                occurred_at=utc(2),
+                ingested_at=utc(2),
+            )
+        )
+    clock = [0.0]
+    monkeypatch.setattr(sources, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+
+    def expire_after_origin_query(
+        _connection, _cursor, statement, _parameters, _context, _executemany
+    ) -> None:
+        if "SELECT DISTINCT" in statement and "operation_insight_events" in statement:
+            clock[0] = 2.0
+
+    event.listen(
+        session.bind.sync_engine, "before_cursor_execute", expire_after_origin_query
+    )
+    try:
+        batch = await sources.read_evidence(
+            scope,
+            Window(utc(2), utc(3), "ingress"),
+            Limits(page_size=1, seconds=1),
+            session,
+        )
+    finally:
+        event.remove(
+            session.bind.sync_engine, "before_cursor_execute", expire_after_origin_query
+        )
+
+    assert {row.request_id for row in batch.window_ingress} == {
+        "budget-request-0",
+        "budget-request-1",
+    }
+    assert batch.rows == ()
+    assert batch.coverage.truncated is True
+    assert "execution_budget_reached" in batch.coverage.gaps
+
+
 @pytest.mark.asyncio
 async def test_post_transfer_replay_cannot_reown_original_ingress(
     scoped_session,
