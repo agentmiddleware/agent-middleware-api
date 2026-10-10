@@ -94,6 +94,10 @@ _EVENTS = Table(
     Column("occurred_at", DateTime),
     Column("ingested_at", DateTime),
     Column("duplicate_conflict_at", DateTime),
+    Column("environment", String),
+    Column("server_release", String),
+    Column("deployment", String),
+    Column("client_version", String),
 )
 _DISPOSITIONS = frozenset(
     (
@@ -353,6 +357,10 @@ def _event_evidence(record: Any, epoch_id: str | None) -> Evidence | None:
         request_disposition=cast(RequestDisposition | None, disposition),
         tool=_safe(record["tool"]),
         reason_code=_safe_reason(record["reason_code"]),
+        environment=_safe(record["environment"]),
+        server_release=_safe(record["server_release"]),
+        deployment=_safe(record["deployment"]),
+        client_version=_safe(record["client_version"]),
         occurred_at=_aware(occurred_at),
         ingested_at=_aware(record["ingested_at"]) if record["ingested_at"] else None,
         state_facts=EvidenceStateFacts(
@@ -385,6 +393,10 @@ def _event_columns(event_table: Any) -> tuple[Any, ...]:
         event_table.c.effect_state,
         event_table.c.ingested_at,
         event_table.c.duplicate_conflict_at,
+        event_table.c.environment,
+        event_table.c.server_release,
+        event_table.c.deployment,
+        event_table.c.client_version,
     )
 
 
@@ -1036,7 +1048,7 @@ async def read_evidence(
         gaps.add("prospective_ingress_unavailable")
 
     window_ingress: dict[str, Evidence] = {}
-    if source_available["insight_event"]:
+    if source_available["insight_event"] and window.time_basis == "ingress":
         e = _EVENTS
         ingress_stmt = select(*_event_columns(e)).where(
             e.c.kind == "ingress",

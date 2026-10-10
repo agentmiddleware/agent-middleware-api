@@ -228,6 +228,10 @@ async def test_window_ingress_is_independent_of_historical_roots(
         Column("occurred_at", DateTime),
         Column("ingested_at", DateTime),
         Column("duplicate_conflict_at", DateTime),
+        Column("environment", String),
+        Column("server_release", String),
+        Column("deployment", String),
+        Column("client_version", String),
     )
     async with session.bind.begin() as connection:
         await connection.run_sync(event_table.create)
@@ -239,6 +243,10 @@ async def test_window_ingress_is_independent_of_historical_roots(
             "wallet_id": "wallet-A",
             "original_operation_anchor_id": "ingress-A",
             "request_disposition": "execution_intent",
+            "environment": "staging",
+            "server_release": "commit-abc",
+            "deployment": "deploy-abc",
+            "client_version": "sdk-py-1.2",
             "occurred_at": utc(2).replace(tzinfo=None),
             "ingested_at": utc(2).replace(tzinfo=None),
         },
@@ -323,9 +331,14 @@ async def test_window_ingress_is_independent_of_historical_roots(
         scope, Window(utc(2), utc(3), "ingress"), Limits(), session
     )
 
-    assert tuple(row.source_id for row in historical.window_ingress) == ("ingress-A",)
+    assert historical.window_ingress == ()
     assert historical.rows == ()
     assert tuple(row.source_id for row in ingress.rows) == ("ingress-A", "terminal-A")
+    ingress_row = ingress.window_ingress[0]
+    assert ingress_row.environment == "staging"
+    assert ingress_row.server_release == "commit-abc"
+    assert ingress_row.deployment == "deploy-abc"
+    assert ingress_row.client_version == "sdk-py-1.2"
     assert {row.original_operation_anchor_id for row in ingress.rows} == {"ingress-A"}
     assert "prospective_capture_completeness_unverified" in ingress.coverage.gaps
     assert (
@@ -365,6 +378,10 @@ async def test_post_transfer_replay_cannot_reown_original_ingress(
         Column("occurred_at", DateTime),
         Column("ingested_at", DateTime),
         Column("duplicate_conflict_at", DateTime),
+        Column("environment", String),
+        Column("server_release", String),
+        Column("deployment", String),
+        Column("client_version", String),
     )
     async with session.bind.begin() as connection:
         await connection.run_sync(event_table.create)
@@ -898,6 +915,10 @@ async def test_real_pg_bound_scope_keeps_late_replay_out_of_new_owner() -> None:
         Column("ingested_at", DateTime, nullable=False),
         Column("duplicate_conflict_at", DateTime),
         Column("classification_version", Integer, nullable=False),
+        Column("environment", String),
+        Column("server_release", String),
+        Column("deployment", String),
+        Column("client_version", String),
     )
     suffix = uuid.uuid4().hex[:12]
     wallet_id = f"insight-{suffix}"

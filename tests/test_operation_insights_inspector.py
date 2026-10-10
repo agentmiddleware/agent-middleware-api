@@ -588,6 +588,99 @@ def test_replay_only_root_has_no_execution_intent_cohort_anchor() -> None:
     assert "execution_intent_ingress_missing" in operation.evidence_gaps
 
 
+def test_only_consistent_prospective_events_attribute_operation_metadata() -> None:
+    ingress = row(
+        "insight_event",
+        "ingress-1",
+        hour=1,
+        event_kind="ingress",
+        request_id="request-1",
+        request_disposition="execution_intent",
+        environment="staging",
+        server_release="commit-abc",
+        deployment="deploy-abc",
+        client_version="sdk-py-1.2",
+    )
+    terminal = row(
+        "insight_event",
+        "terminal-1",
+        hour=2,
+        event_kind="terminal",
+        environment="staging",
+        server_release="commit-abc",
+        deployment="deploy-abc",
+        client_version="sdk-py-1.2",
+    )
+    historical = row("audit", "audit-1", hour=3, server_release="legacy-build-stamp")
+
+    operation = inspect_operations(batch(ingress, terminal, historical), MAPPING)[0]
+
+    assert operation.environment == "staging"
+    assert operation.server_release == "commit-abc"
+    assert operation.deployment == "deploy-abc"
+    assert operation.client_version == "sdk-py-1.2"
+    assert "server_release_metadata_conflict" not in operation.conflicts
+
+
+def test_conflicting_or_missing_event_metadata_remains_unknown() -> None:
+    ingress = row(
+        "insight_event",
+        "ingress-1",
+        hour=1,
+        event_kind="ingress",
+        request_id="request-1",
+        request_disposition="execution_intent",
+        environment="staging",
+        server_release="commit-abc",
+        deployment="deploy-abc",
+        client_version="sdk-py-1.2",
+    )
+    terminal = row(
+        "insight_event",
+        "terminal-1",
+        hour=2,
+        event_kind="terminal",
+        environment=None,
+        server_release="commit-def",
+        deployment="deploy-abc",
+        client_version=None,
+    )
+
+    operation = inspect_operations(batch(ingress, terminal), MAPPING)[0]
+
+    assert operation.environment is None
+    assert operation.server_release is None
+    assert operation.deployment == "deploy-abc"
+    assert operation.client_version is None
+    assert "server_release_metadata_conflict" in operation.conflicts
+    assert "environment_metadata_missing" in operation.evidence_gaps
+    assert "client_version_metadata_missing" in operation.evidence_gaps
+    assert tuple(ref.source_id for ref in operation.evidence_refs) == (
+        "ingress-1",
+        "terminal-1",
+    )
+    assert operation.next_action == "manual_review"
+
+
+def test_event_with_no_metadata_cannot_acquire_release_attribution() -> None:
+    ingress = row(
+        "insight_event",
+        "ingress-1",
+        hour=1,
+        event_kind="ingress",
+        request_id="request-1",
+        request_disposition="execution_intent",
+    )
+
+    operation = inspect_operations(batch(ingress), MAPPING)[0]
+
+    assert operation.environment is None
+    assert operation.server_release is None
+    assert operation.deployment is None
+    assert operation.client_version is None
+    assert "server_release_metadata_missing" in operation.evidence_gaps
+
+
 def test_historical_first_observation_includes_verified_stage_checkpoint() -> None:
     dispatch = row(
         "dispatch",

@@ -153,6 +153,16 @@ def _group_operation(
         gaps.add("ingress_time_missing")
     if len(tools) > 1:
         conflicts.add("tool_mismatch")
+    event_rows = tuple(row for row in rows if row.source == "insight_event")
+    metadata: dict[str, str | None] = {}
+    for field in ("environment", "server_release", "deployment", "client_version"):
+        values = {getattr(row, field) for row in event_rows}
+        present = values - {None}
+        if len(present) > 1:
+            conflicts.add(f"{field}_metadata_conflict")
+        if None in values:
+            gaps.add(f"{field}_metadata_missing")
+        metadata[field] = next(iter(present)) if len(values) == 1 and present else None
     if heuristic_match:
         gaps.add("heuristic_correlation_candidate")
     source_ids = {(row.source, row.source_id) for row in rows}
@@ -239,6 +249,10 @@ def _group_operation(
         tool=tool,
         first_seen_at=first_seen,
         last_seen_at=last_seen,
+        environment=metadata["environment"],
+        server_release=metadata["server_release"],
+        deployment=metadata["deployment"],
+        client_version=metadata["client_version"],
         stage_timestamps=timeline,
         evidence_refs=tuple(_ref(row) for row in rows),
         evidence_gaps=tuple(sorted(gaps)),
