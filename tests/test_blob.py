@@ -98,9 +98,10 @@ def test_default_backend_is_local(monkeypatch):
     assert isinstance(backend, LocalFilesystemBlob)
 
 
-def test_unknown_backend_falls_back_to_local(monkeypatch):
+def test_unknown_backend_fails_loudly(monkeypatch):
     monkeypatch.setenv("BLOB_BACKEND", "moonbase")
-    assert isinstance(get_blob_backend(), LocalFilesystemBlob)
+    with pytest.raises(ValueError, match="Unknown BLOB_BACKEND"):
+        get_blob_backend()
 
 
 def test_s3_and_vercel_stubs_raise_not_implemented(monkeypatch):
