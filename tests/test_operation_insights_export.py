@@ -6,8 +6,10 @@ import csv
 import asyncio
 import hashlib
 import io
+import itertools
 import json
 import os
+import subprocess
 import sys
 import zipfile
 from contextlib import asynccontextmanager
@@ -21,10 +23,14 @@ from app.services.operation_insights.contracts import (
     AuthorizedOwnershipEpoch,
     Coverage,
     Evidence,
+    EvidenceBatch,
     EvidenceRef,
+    IngressObservation,
     Limits,
+    MappingInterval,
     Operation,
     Report,
+    RequestDisposition,
     Scope,
     Snapshot,
     SourceCoverage,
@@ -367,6 +373,171 @@ async def test_build_report_stops_at_100000_without_exact_coverage(
     assert report.coverage.enumeration_complete is False
 
 
+@pytest.mark.parametrize("days", [7, 30])
+@pytest.mark.parametrize("prior_incomplete", [False, True])
+@pytest.mark.parametrize("release_conflict", [False, True])
+@pytest.mark.asyncio
+async def test_build_report_reconciles_current_and_prior_ingress_in_one_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+    days: int,
+    prior_incomplete: bool,
+    release_conflict: bool,
+) -> None:
+    monkeypatch.setattr(
+        "app.services.operation_insights.auth.assert_scope_bound",
+        lambda scope, session: None,
+    )
+    start = END - timedelta(days=days)
+    previous_start = start - timedelta(days=days)
+    scope = Scope(
+        frozenset({"wallet-1"}),
+        authorized_ownership_epochs=(
+            AuthorizedOwnershipEpoch(
+                "wallet-1", "epoch-1", previous_start, END + timedelta(days=1)
+            ),
+        ),
+    )
+    mapping = AccountMapping(
+        "verified-1",
+        (MappingInterval("wallet-1", "account-1", "eligible", previous_start, None),),
+    )
+    current_at = start + timedelta(days=1)
+    prior_at = start - timedelta(days=1)
+
+    def ingress(label: str, at: datetime, disposition: RequestDisposition) -> Evidence:
+        return Evidence(
+            source="insight_event",
+            source_id=f"evt-{label}",
+            wallet_id="wallet-1",
+            ownership_epoch_id="epoch-1",
+            original_operation_anchor_id=f"anchor-{label}",
+            request_id=f"request-{label}",
+            occurred_at=at,
+            event_kind="ingress",
+            request_disposition=disposition,
+            environment="staging",
+            server_release=(
+                "release-b" if release_conflict and label == "status" else "release-a"
+            ),
+        )
+
+    current = ingress("current", current_at, "execution_intent")
+    status = ingress("status", current_at, "non_execution_read")
+    prior = ingress("prior", prior_at, "execution_intent")
+    coverage = Coverage(
+        sources=(
+            SourceCoverage(
+                "insight_event",
+                availability="available",
+                earliest_retained_at=previous_start,
+                enumeration_complete=True,
+            ),
+        ),
+        enumeration_complete=True,
+    )
+    earlier_coverage = (
+        Coverage(
+            sources=(replace(coverage.sources[0], earliest_retained_at=start),),
+            enumeration_complete=False,
+            gaps=("retention_unverified",),
+        )
+        if prior_incomplete
+        else coverage
+    )
+    calls: list[Window] = []
+
+    async def read_batch(scope, window, limits, session) -> EvidenceBatch:
+        calls.append(window)
+        earlier = window.end == start
+        events = (prior,) if earlier else (current, status)
+        return EvidenceBatch(
+            rows=(prior,) if earlier else (current,),
+            snapshot=Snapshot(END, "same-transaction", True, None),
+            coverage=earlier_coverage if earlier else coverage,
+            window_ingress=events,
+        )
+
+    def inspect(batch: EvidenceBatch, mapping: AccountMapping) -> tuple[Operation, ...]:
+        event = next(
+            row for row in batch.rows if row.request_disposition == "execution_intent"
+        )
+        return (
+            Operation(
+                operation_id=f"operation-{event.source_id}",
+                wallet_id="wallet-1",
+                time_basis="ingress",
+                ownership_epoch_id="epoch-1",
+                original_operation_anchor_id=event.original_operation_anchor_id,
+                first_seen_at=event.occurred_at,
+                execution_intent=True,
+                environment="staging",
+                server_release="release-a",
+                ingress_observations=(
+                    IngressObservation(
+                        event.request_id, event.occurred_at, "execution_intent"
+                    ),
+                ),
+                evidence_refs=(
+                    EvidenceRef(
+                        event.source,
+                        event.source_id,
+                        event.wallet_id,
+                        event.ownership_epoch_id,
+                        event.original_operation_anchor_id,
+                    ),
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(
+        "app.services.operation_insights.sources.read_evidence", read_batch
+    )
+    monkeypatch.setattr(
+        "app.services.operation_insights.inspect.inspect_operations", inspect
+    )
+
+    report = await build_report(
+        scope, Window(start, END, "ingress"), Limits(), mapping, object()
+    )
+
+    metrics = {metric.name: metric for metric in report.metrics}
+    assert [(window.start, window.end) for window in calls] == [
+        (start, END),
+        (previous_start, start),
+    ]
+    assert metrics["requests"].count == 2
+    assert metrics["requests"].completeness == "complete"
+    assert metrics["active_accounts"].count == 1
+    assert metrics["returning_accounts"].numerator == 1
+    assert metrics["returning_accounts"].denominator == (
+        None if prior_incomplete else 1
+    )
+    assert metrics["returning_accounts"].completeness == (
+        "partial" if prior_incomplete else "complete"
+    )
+    assert (
+        "prior_window_retention_incomplete" in report.coverage.gaps
+    ) == prior_incomplete
+    assert {row.source_id for row in report.evidence} == {"evt-current", "evt-status"}
+    assert report.coverage.enumeration_complete is not prior_incomplete
+    assert report.environment == "staging"
+    assert report.source_release == (None if release_conflict else "release-a")
+    payload = _report_payload(report, scope)
+    assert payload["environment"] == "staging"
+    assert payload["source_release"] == (None if release_conflict else "release-a")
+    directory = tmp_path / "bundle"
+    manifest = write_bundle(report, directory, scope=scope, session=object())
+    with (directory / "report.csv").open(newline="", encoding="utf-8") as handle:
+        report_row = next(csv.DictReader(handle))
+    assert report_row["environment"] == "staging"
+    assert report_row["source_release"] == ("" if release_conflict else "release-a")
+    assert json.loads((directory / "report.json").read_text())["source_release"] == (
+        None if release_conflict else "release-a"
+    )
+    assert manifest.completeness == ("partial" if prior_incomplete else "complete")
+
+
 @pytest.mark.asyncio
 async def test_build_report_marks_budget_expiry_partial(
     monkeypatch: pytest.MonkeyPatch,
@@ -387,7 +558,7 @@ async def test_build_report_marks_budget_expiry_partial(
             )
         ),
     )
-    ticks = iter((0.0, 301.0, 301.0, 301.0))
+    ticks = itertools.chain((0.0,), itertools.repeat(301.0))
 
     report = await build_report(
         _scope(),
@@ -423,7 +594,7 @@ async def test_authorized_unknown_count_timeout_is_partial_not_denied(
             )
         ),
     )
-    ticks = iter((0.0, 301.0, 301.0, 301.0))
+    ticks = itertools.chain((0.0,), itertools.repeat(301.0))
 
     report = await build_report(
         _scope(allow_unknown=True),
@@ -492,6 +663,27 @@ def test_operator_report_http_route_requires_reporting_bearer() -> None:
             },
         )
     assert response.status_code == 401
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_application_mounts_reporting_only_when_enabled(enabled: bool) -> None:
+    environment = {
+        **os.environ,
+        "OPERATION_INSIGHTS_REPORTING_ENABLED": str(enabled).lower(),
+    }
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from app.main import app; "
+            "print('/v1/operator/insights/report' in app.openapi()['paths'])",
+        ],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.strip() == str(enabled)
 
 
 @pytest.mark.asyncio

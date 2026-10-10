@@ -95,6 +95,7 @@ from .routers import (
     mcp,
     mcp_public,
     mcp_standard,
+    operation_insights,
     kyc,
     api_keys,
     dev_keys,
@@ -755,6 +756,9 @@ for router_module in CORE_TRUST_ROUTERS:
             else True
         ),
     )
+
+if settings.OPERATION_INSIGHTS_REPORTING_ENABLED:
+    app.include_router(operation_insights.router)
 
 # Self-serve dev keys: the handler is triple-gated at runtime (its own
 # ENABLE_DEV_KEY_SELF_PROVISION flag answers 404, production-like environments

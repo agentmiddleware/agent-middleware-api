@@ -25,6 +25,7 @@ from app.services.operation_insights.contracts import (
     ArtifactFile,
     ArtifactManifest,
     Completeness,
+    Coverage,
     Evidence,
     EvidenceRef,
     Limits,
@@ -272,6 +273,18 @@ def _evidence_key(
     )
 
 
+def _report_metadata(
+    operations: tuple[Operation, ...], evidence: tuple[Evidence, ...], field: str
+) -> str | None:
+    event_rows = tuple(row for row in evidence if row.source == "insight_event")
+    if not event_rows:
+        return None
+    values = [getattr(row, field) for row in event_rows]
+    values.extend(getattr(row, field) for row in operations)
+    known = {value for value in values if value is not None}
+    return next(iter(known)) if len(known) == 1 and all(values) else None
+
+
 def _evidence_rows(report: Report):
     linked: dict[tuple[str, str, str | None, str | None, str | None], list[str]] = {}
     for operation in report.operations:
@@ -436,6 +449,7 @@ async def build_report(
         raise ValueError("insight_window_must_be_7_or_30_days")
     started = clock()
     deadline = started + limits.seconds
+    from app.services.operation_insights.cohorts import compute_metrics
     from app.services.operation_insights.inspect import inspect_operations
     from app.services.operation_insights.sources import (
         read_evidence,
@@ -451,14 +465,84 @@ async def build_report(
     operations = () if timed_out else inspect_operations(batch, mapping)
     too_many = len(operations) > limits.operations
     selected = operations[: limits.operations]
+    gaps = set(batch.coverage.gaps)
+    prior_gaps: set[str] = set()
+    prior_operations: tuple[Operation, ...] = ()
+    prior_ingress: tuple[Evidence, ...] = ()
+    prior_coverage: Coverage | None = None
+    if too_many:
+        prior_gaps.add("prior_window_skipped_output_limit")
+    elif timed_out:
+        prior_gaps.add("prior_window_budget_exhausted")
+    else:
+        remaining = deadline - clock()
+        if remaining < 1:
+            prior_gaps.add("prior_window_budget_exhausted")
+        else:
+            duration = window.end - window.start
+            prior_window = Window(
+                window.start - duration, window.start, window.time_basis
+            )
+            prior_limits = Limits(
+                page_size=limits.page_size,
+                operations=limits.operations,
+                seconds=min(limits.seconds, int(remaining)),
+            )
+            try:
+                prior_batch = await read_evidence(
+                    scope, prior_window, prior_limits, session
+                )
+            except TimeoutError:
+                prior_gaps.add("prior_window_read_timeout")
+            else:
+                if prior_batch.snapshot.cutoff != batch.snapshot.cutoff:
+                    prior_gaps.add("prior_window_snapshot_mismatch")
+                else:
+                    prior_operations = inspect_operations(prior_batch, mapping)
+                    prior_coverage = prior_batch.coverage
+                    if not prior_coverage.sources or any(
+                        source.earliest_retained_at is None
+                        or source.earliest_retained_at > prior_window.start
+                        for source in prior_coverage.sources
+                    ):
+                        prior_gaps.add("prior_window_retention_incomplete")
+                    if any(
+                        source.availability != "available"
+                        for source in prior_coverage.sources
+                    ):
+                        prior_gaps.add("prior_window_source_unavailable")
+                    if (
+                        not prior_coverage.enumeration_complete
+                        or prior_coverage.truncated
+                        or prior_coverage.gaps
+                        or prior_coverage.consistency_flags
+                        or prior_coverage.skew_flags
+                        or any(
+                            not source.enumeration_complete
+                            or source.truncated
+                            or source.gaps
+                            or source.consistency_flags
+                            or source.skew_flags
+                            for source in prior_coverage.sources
+                        )
+                    ):
+                        prior_gaps.add("prior_window_coverage_incomplete")
+                    if window.time_basis == "ingress":
+                        prior_ingress = prior_batch.window_ingress
     refs = {
         _evidence_key(ref) for operation in selected for ref in operation.evidence_refs
     }
+    current_ingress = (
+        batch.window_ingress if window.time_basis == "ingress" and not timed_out else ()
+    )
+    refs.update(_evidence_key(row) for row in current_ingress)
     evidence = tuple(row for row in batch.rows if _evidence_key(row) in refs)
-    gaps = set(batch.coverage.gaps)
-    gaps.add("cohorts_not_available")
+    seen = {_evidence_key(row) for row in evidence}
+    evidence += tuple(row for row in current_ingress if _evidence_key(row) not in seen)
     if too_many:
         gaps.add("operation_limit_reached")
+    if mapping.version == "unverified":
+        gaps.add("account_mapping_unverified")
     if timed_out or clock() >= deadline:
         timed_out = True
         gaps.add("execution_budget_reached")
@@ -499,6 +583,23 @@ async def build_report(
             truncated=True,
             gaps=tuple(sorted(set(coverage.gaps) | {"execution_budget_reached"})),
         )
+    metrics = compute_metrics(
+        selected,
+        prior_operations,
+        current_ingress,
+        prior_ingress,
+        mapping,
+        window,
+        batch.snapshot,
+        coverage,
+        prior_coverage,
+        current_evidence=batch.rows,
+    )
+    report_coverage = replace(
+        coverage,
+        enumeration_complete=coverage.enumeration_complete and not prior_gaps,
+        gaps=tuple(sorted(set(coverage.gaps) | prior_gaps)),
+    )
     return Report(
         report_id=f"report-{uuid.uuid4().hex}",
         generated_at=datetime.now(timezone.utc),
@@ -507,14 +608,14 @@ async def build_report(
         window_start=window.start,
         window_end=window.end,
         time_basis=window.time_basis,
-        environment=None,
-        source_release=None,
-        coverage=coverage,
+        environment=_report_metadata(selected, evidence, "environment"),
+        source_release=_report_metadata(selected, evidence, "server_release"),
+        coverage=report_coverage,
         mapping_version=mapping.version,
         exclusions=_EXCLUSIONS,
         operations=selected,
         evidence=evidence,
-        metrics=(),
+        metrics=metrics,
         unknown_wallet_aggregate=unknown_count,
         authorized_scope=scope,
     )
