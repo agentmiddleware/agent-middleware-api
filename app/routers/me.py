@@ -133,7 +133,10 @@ async def get_my_authority(
 
 @router.get("/permits", response_model=PermitListResponse)
 async def list_my_permits(
-    status: str | None = Query(None),
+    status: str | None = Query(
+        None,
+        description="Filter by effective lifecycle status: active, expired, revoked.",
+    ),
     created_after: datetime | None = Query(None),
     created_before: datetime | None = Query(None),
     expires_after: datetime | None = Query(None),

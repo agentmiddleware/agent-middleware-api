@@ -9,6 +9,7 @@ Provides wallet management, telemetry, and billing for agent swarms.
 from __future__ import annotations
 
 import logging
+import uuid
 import warnings
 from contextlib import asynccontextmanager
 from typing import Any
@@ -38,6 +39,18 @@ from .models import (
 )
 
 logger = logging.getLogger("b2a_sdk")
+
+
+def new_idempotency_key() -> str:
+    """Mint a fresh caller-owned idempotency key.
+
+    Returns a random ``uuid4`` hex string (32 characters, within the
+    server's 128-character limit). Use it when starting a new logical
+    money-moving action that has no caller-supplied key yet, and reuse
+    the returned value for every retry of that same action. Minting a
+    second key for a retry turns the retry into a second charge.
+    """
+    return uuid.uuid4().hex
 
 
 class DryRunSimulation:
@@ -504,15 +517,19 @@ class AgentMiddlewareClient:
         description: str | None = None,
         *,
         idempotency_key: str | None = None,
+        max_attempts: int = 1,
     ) -> dict[str, Any]:
         """
         Charge a wallet for API usage (micro-metering).
 
-        Without ``idempotency_key`` a charge is not replay-safe: retrying one
-        whose response was lost (a timeout, a dropped connection) bills the
-        wallet again. Pass a caller-owned key and reuse it for every retry of
-        the same logical charge; the server then replays the original outcome
-        instead of debiting twice.
+        Every charge carries an ``Idempotency-Key``. Pass a caller-owned key
+        and reuse it for every retry of the same logical charge; the server
+        then replays the original outcome instead of debiting twice. When no
+        key is passed the SDK mints one per ``charge()`` call, so a single
+        call is protected but two separate calls (an ordinary caller-level
+        retry after a timeout) are two charges: callers that retry across
+        ``charge()`` calls must pass their own key, or use ``max_attempts``
+        so the SDK retries internally with the same key.
 
         Args:
             wallet_id: The wallet to charge
@@ -520,22 +537,36 @@ class AgentMiddlewareClient:
             units: Number of units consumed (default: 1.0)
             request_path: Optional API path for tracking
             description: Optional description of the charge
-            idempotency_key: Optional key sent as ``Idempotency-Key``; must be
-                nonblank and at most 128 characters
+            idempotency_key: Optional caller-owned key sent as
+                ``Idempotency-Key``; must be nonblank and at most 128
+                characters. When omitted the SDK mints one fresh key for
+                this call (see :func:`new_idempotency_key`).
+            max_attempts: How many times to attempt the charge after a
+                transport-level failure (a timeout, a dropped connection)
+                before giving up. Every attempt reuses the same key; a new
+                key is never minted for a retry. Must be a positive integer.
 
         Returns:
             Ledger entry with action, amount, balance_after
 
         Raises:
             InsufficientFundsError: If wallet has insufficient balance
-            IdempotencyConflictError: If ``idempotency_key`` was already used
-                for a different charge, or that charge is still in progress
-            ValueError: If ``idempotency_key`` is blank or too long (nothing
-                is sent)
+            IdempotencyConflictError: If the key was already used for a
+                different charge, or that charge is still in progress
+            ValueError: If ``idempotency_key`` is blank or too long, or
+                ``max_attempts`` is not a positive integer (nothing is sent)
         """
-        headers: dict[str, str] | None = None
-        if idempotency_key is not None:
-            headers = {"Idempotency-Key": self._validate_idempotency_key(idempotency_key)}
+        if not isinstance(max_attempts, int) or max_attempts < 1:
+            raise ValueError("max_attempts must be a positive integer")
+        # Minted once per charge() call, before any attempt: retries below
+        # reuse this same key, so a retried charge replays instead of
+        # billing again.
+        key = (
+            self._validate_idempotency_key(idempotency_key)
+            if idempotency_key is not None
+            else new_idempotency_key()
+        )
+        headers = {"Idempotency-Key": key}
 
         params: dict[str, str | float] = {
             "wallet_id": wallet_id,
@@ -547,7 +578,18 @@ class AgentMiddlewareClient:
         if description:
             params["description"] = description
 
-        response = await self._client.post("/v1/billing/charge", params=params, headers=headers)
+        attempts = 0
+        while True:
+            attempts += 1
+            try:
+                response = await self._client.post(
+                    "/v1/billing/charge", params=params, headers=headers
+                )
+            except httpx.HTTPError:
+                if attempts >= max_attempts:
+                    raise
+                continue
+            break
 
         if response.status_code == 402:
             try:
@@ -564,9 +606,9 @@ class AgentMiddlewareClient:
                 shortfall=detail.get("shortfall", "unknown"),
                 top_up_url=f"{self.base_url}/dashboard/top-up?wallet={wallet_id}",
             )
-        # A 409 is an idempotency conflict only when a key was sent; unkeyed
-        # calls keep the legacy httpx.HTTPStatusError for any non-402 error.
-        if response.status_code == 409 and headers is not None:
+        # Every charge now carries a key, so a 409 is always an idempotency
+        # conflict (key reused with different terms, or charge in progress).
+        if response.status_code == 409:
             try:
                 payload = response.json()
             except ValueError:
@@ -724,20 +766,42 @@ class AgentMiddlewareClient:
         wallet_id: str,
         amount_fiat: float,
         currency: str = "USD",
+        *,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """
         Prepare a fiat top-up via Stripe.
 
         Returns a client_secret for Stripe Elements.
 
+        Every prepare carries an ``Idempotency-Key``: the caller key when
+        given, otherwise one minted for this call. The key is sent so a
+        retry can deduplicate once the server honors it; this server route
+        does not deduplicate yet, so a retry may create a second
+        PaymentIntent. Callers that retry one logical top-up must reuse
+        the key.
+
         Args:
             wallet_id: Wallet to credit
             amount_fiat: Amount in fiat currency
             currency: Currency code (default: USD)
+            idempotency_key: Optional caller-owned key sent as
+                ``Idempotency-Key``; must be nonblank and at most 128
+                characters. When omitted the SDK mints one fresh key for
+                this call (see :func:`new_idempotency_key`).
 
         Returns:
             Stripe PaymentIntent details including client_secret
+
+        Raises:
+            ValueError: If ``idempotency_key`` is blank or too long (nothing
+                is sent)
         """
+        key = (
+            self._validate_idempotency_key(idempotency_key)
+            if idempotency_key is not None
+            else new_idempotency_key()
+        )
         response = await self._client.post(
             "/v1/billing/top-up/prepare",
             params={
@@ -745,6 +809,7 @@ class AgentMiddlewareClient:
                 "amount_fiat": amount_fiat,
                 "currency": currency,
             },
+            headers={"Idempotency-Key": key},
         )
         response.raise_for_status()
         return response.json()
@@ -946,4 +1011,9 @@ class B2AClient(AgentMiddlewareClient):
         super().__init__(*args, **kwargs)
 
 
-__all__ = ["AgentMiddlewareClient", "B2AClient", "DryRunSimulation"]
+__all__ = [
+    "AgentMiddlewareClient",
+    "B2AClient",
+    "DryRunSimulation",
+    "new_idempotency_key",
+]

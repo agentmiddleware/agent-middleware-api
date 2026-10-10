@@ -85,6 +85,11 @@ def validate_tools_call_params(raw: Any) -> dict[str, Any]:
     if not isinstance(params, dict):
         raise GovernedRequestInvalid("Invalid params: params must be an object")
 
+    if "mcp_context" in params:
+        raise GovernedRequestInvalid(
+            "Invalid params: use mcpContext for JSON-RPC; mcp_context is REST-only"
+        )
+
     name = params.get("name")
     if name is None or name == "":
         # Same message the pipeline has always used for an absent tool name.
