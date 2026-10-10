@@ -53,7 +53,10 @@ def _authorize_permit_inspection(
 @router.get("", response_model=PermitListResponse)
 async def list_permits(
     wallet_id: str | None = Query(None),
-    status: str | None = Query(None),
+    status: str | None = Query(
+        None,
+        description="Filter by effective lifecycle status: active, expired, revoked.",
+    ),
     subject_key_id: str | None = Query(None),
     created_after: datetime | None = Query(None),
     created_before: datetime | None = Query(None),
