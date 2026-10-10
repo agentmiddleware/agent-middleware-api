@@ -52,8 +52,10 @@ class Answer(str, Enum):
     its own rank, so a renderer cannot reorder them by accident.
     """
 
-    #: A documented guarantee failed, or the gateway added duplicate effects.
+    #: A documented guarantee failed in this run.
     GATEWAY_DID_NOT_HOLD = "gateway_did_not_hold"
+    #: More duplicate effects occurred behind the gateway than in the baseline.
+    GATEWAY_ADDED_DUPLICATES = "gateway_added_duplicates"
     #: Fewer duplicate business effects occurred behind the gateway than in a
     #: measured baseline under the same failure.
     GATEWAY_PREVENTED_DUPLICATES = "gateway_prevented_duplicates"
@@ -84,6 +86,7 @@ class Answer(str, Enum):
 
 _ANSWER_ORDER: tuple[Answer, ...] = (
     Answer.GATEWAY_DID_NOT_HOLD,
+    Answer.GATEWAY_ADDED_DUPLICATES,
     Answer.GATEWAY_PREVENTED_DUPLICATES,
     Answer.GATEWAY_CHANGED_EVIDENCE_ONLY,
     Answer.YOU_MAY_NOT_NEED_US,
@@ -91,11 +94,15 @@ _ANSWER_ORDER: tuple[Answer, ...] = (
     Answer.NOTHING_ESTABLISHED,
 )
 
-#: The short line at the top of the page. Plain, and in two of the six cases
+#: The short line at the top of the page. Plain, and in three of the seven cases
 #: plainly against the product's interest.
 ANSWER_HEADLINES: dict[Answer, str] = {
     Answer.GATEWAY_DID_NOT_HOLD: (
         "Agent Middleware did not hold one of its own guarantees in this run."
+    ),
+    Answer.GATEWAY_ADDED_DUPLICATES: (
+        "More duplicate business effects occurred behind Agent Middleware "
+        "than in the measured baseline."
     ),
     Answer.GATEWAY_PREVENTED_DUPLICATES: (
         "Fewer duplicate business effects happened behind Agent Middleware "
@@ -127,6 +134,11 @@ ANSWER_DETAIL: dict[Answer, str] = {
         "anything else the same run found, including any duplicate the "
         "gateway did prevent. The scenario's own page says which property, "
         "which configuration, and what the instruments counted."
+    ),
+    Answer.GATEWAY_ADDED_DUPLICATES: (
+        "At least one scenario measured more duplicate downstream effects "
+        "behind the gateway than in its baseline. The scenario's own page "
+        "states both counts and the injected failure."
     ),
     Answer.GATEWAY_PREVENTED_DUPLICATES: (
         "The same workload, under the same injected failure, produced more "
@@ -283,11 +295,10 @@ def headline_for(comparisons: list[Comparison]) -> Answer:
 
     kinds = [comparison.conclusion.kind for comparison in comparisons]
 
-    if (
-        ConclusionKind.GATEWAY_DID_NOT_HOLD in kinds
-        or ConclusionKind.GATEWAY_ADDED_DUPLICATES in kinds
-    ):
+    if ConclusionKind.GATEWAY_DID_NOT_HOLD in kinds:
         return Answer.GATEWAY_DID_NOT_HOLD
+    if ConclusionKind.GATEWAY_ADDED_DUPLICATES in kinds:
+        return Answer.GATEWAY_ADDED_DUPLICATES
     if ConclusionKind.GATEWAY_PREVENTED_DUPLICATES in kinds:
         return Answer.GATEWAY_PREVENTED_DUPLICATES
 
@@ -356,21 +367,6 @@ def build_answer(comparisons: list[Comparison]) -> DiagnosticAnswer:
     """The whole visitor-facing result, derived and never composed by hand."""
     answer = headline_for(comparisons)
     rows = _rows(comparisons)
-    headline = ANSWER_HEADLINES[answer]
-    detail = ANSWER_DETAIL[answer]
-    if answer is Answer.GATEWAY_DID_NOT_HOLD and not any(
-        c.conclusion.kind is ConclusionKind.GATEWAY_DID_NOT_HOLD for c in comparisons
-    ):
-        headline = (
-            "More duplicate business effects occurred behind Agent Middleware "
-            "than in the measured baseline."
-        )
-        detail = (
-            "At least one scenario measured more duplicate downstream effects "
-            "behind the gateway than in its baseline. The scenario's own page "
-            "states both counts and the injected failure."
-        )
-
     counts: dict[str, int] = {"scenarios": len(comparisons)}
     for comparison in comparisons:
         key = comparison.conclusion.kind.value
@@ -415,8 +411,8 @@ def build_answer(comparisons: list[Comparison]) -> DiagnosticAnswer:
 
     return DiagnosticAnswer(
         answer=answer,
-        headline=headline,
-        detail=detail,
+        headline=ANSWER_HEADLINES[answer],
+        detail=ANSWER_DETAIL[answer],
         rows=rows,
         counts=counts,
         gateway_failures=gateway_failures,
