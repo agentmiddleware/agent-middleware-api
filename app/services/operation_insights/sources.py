@@ -1309,10 +1309,11 @@ async def read_evidence(
                     gaps.add("original_ingress_origin_unverified")
                     continue
                 known_origin = idempotency_origins.get(key)
+                # Ingress occurs before the handler creates its durable record.
+                # Window membership follows ingress; the prior-origin checks above
+                # still prevent a later request from re-owning an old operation.
                 if root.source_id != key[1] and (
-                    known_origin is None
-                    or root.occurred_at is None
-                    or known_origin > root.occurred_at
+                    known_origin is None or root.occurred_at is None
                 ):
                     gaps.add("original_ingress_origin_unverified")
                     continue
