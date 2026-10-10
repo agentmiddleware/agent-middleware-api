@@ -218,6 +218,29 @@ async def test_preauth_capture_uses_server_ids_and_null_wallet(
 
 
 @pytest.mark.asyncio
+async def test_rest_preauth_ingress_awaits_trusted_call_classification(
+    clean_database: None,
+) -> None:
+    from app.db.models import InsightEventModel
+    from app.middleware.operation_insight_events import OperationInsightEventsMiddleware
+
+    middleware = OperationInsightEventsMiddleware(_deny_request, enabled=True)
+    async with AsyncClient(
+        transport=ASGITransport(app=middleware), base_url="http://test"
+    ) as client:
+        response = await client.post("/mcp/tools/synthetic.tool/invoke")
+
+    async with get_session_factory()() as session:
+        rows = (await session.execute(select(InsightEventModel))).scalars().all()
+
+    assert response.status_code == 401
+    assert len(rows) == 2
+    assert all(row.request_disposition == "unknown" for row in rows)
+    assert all(row.wallet_id is None for row in rows)
+    assert all(row.original_operation_anchor_id is None for row in rows)
+
+
+@pytest.mark.asyncio
 async def test_client_version_invalid_wire_bytes_are_not_allowlisted(
     clean_database: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1417,6 +1440,124 @@ async def test_rest_success_has_gateway_outcome_without_effect_claim(
     )
     assert denied_terminal.gateway_outcome == "denied"
     assert denied_terminal.reason_code == "insufficient_funds"
+
+
+@pytest.mark.asyncio
+async def test_rest_same_key_replay_keeps_usable_ingress_and_business_result(
+    clean_database: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.core.config import get_settings
+    from app.db.models import InsightEventModel
+    from app.main import app
+    from app.schemas.billing import ServiceCategory
+    from app.services.operation_insights import events
+    from app.services.service_registry import get_service_registry
+    from app.services.signing_keys import get_signing_key_service
+    from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "OPERATION_INSIGHTS_EVENTS_ENABLED", True)
+    monkeypatch.setattr(settings, "TRUST_MODE_ENABLED", True)
+    monkeypatch.setattr(settings, "ALLOW_LEGACY_UNPERMITTED_MCP", False)
+    private_key = Ed25519PrivateKey.generate().private_bytes(
+        Encoding.Raw, PrivateFormat.Raw, NoEncryption()
+    )
+    monkeypatch.setattr(
+        settings,
+        "TRUST_SIGNING_PRIVATE_KEY_B64",
+        base64.b64encode(private_key).decode(),
+    )
+    get_signing_key_service()._private_key = None
+
+    calls: list[int] = []
+
+    def local_tool() -> dict[str, bool]:
+        calls.append(1)
+        return {"ok": True}
+
+    tool_name = "insight.rest.replay"
+    registry = get_service_registry()
+    registry.register_local(
+        service_id=tool_name,
+        name="Synthetic REST replay tool",
+        description="Synthetic governed local operation",
+        category=ServiceCategory.AGENT_COMMS,
+        func=local_tool,
+        credits_per_unit=2.0,
+        unit_name="call",
+    )
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            provisioned = await provision_agent_wallet(client)
+            permit = await create_tool_permit(
+                client,
+                wallet_id=provisioned["agent_wallet_id"],
+                key_id=provisioned["key_id"],
+                tool_name=tool_name,
+            )
+            body = {
+                "name": tool_name,
+                "arguments": {},
+                "mcp_context": {
+                    "wallet_id": provisioned["agent_wallet_id"],
+                    "permit_id": permit["permit_id"],
+                    "idempotency_key": uuid.uuid4().hex,
+                },
+            }
+            url = f"/mcp/tools/{tool_name}/invoke"
+            first = await client.post(
+                url, headers=provisioned["agent_headers"], json=body
+            )
+            replay = await client.post(
+                url, headers=provisioned["agent_headers"], json=body
+            )
+            await events.wait_for_pending_events()
+
+            sink_calls: list[int] = []
+
+            async def failed_sink(_event) -> None:
+                sink_calls.append(1)
+                raise RuntimeError
+
+            monkeypatch.setattr(events, "record_event", failed_sink)
+            failed_observer_replay = await client.post(
+                url, headers=provisioned["agent_headers"], json=body
+            )
+    finally:
+        registry.unregister_local(tool_name)
+
+    async with get_session_factory()() as session:
+        rows = (await session.execute(select(InsightEventModel))).scalars().all()
+
+    assert first.status_code == 200
+    assert replay.status_code == 200
+    assert failed_observer_replay.status_code == 200
+    assert replay.json() == first.json()
+    assert failed_observer_replay.json() == first.json()
+    assert calls == [1]
+    assert sink_calls == [1, 1]
+    usable_ingress = [
+        row
+        for row in rows
+        if row.kind == "ingress" and row.duplicate_conflict_at is None
+    ]
+    assert len(usable_ingress) == 2
+    assert sorted(row.request_disposition for row in usable_ingress) == [
+        "execution_intent",
+        "same_key_replay",
+    ]
+    assert len({row.request_id for row in usable_ingress}) == 2
+    assert len({row.original_operation_anchor_id for row in usable_ingress}) == 1
+    assert usable_ingress[0].original_operation_anchor_id is not None
+    assert [row.kind for row in rows].count("attempt") == 1
+    terminal_rows = [row for row in rows if row.kind == "terminal"]
+    assert len(terminal_rows) == 2
+    assert sorted(row.request_disposition for row in terminal_rows) == [
+        "execution_intent",
+        "same_key_replay",
+    ]
 
 
 @pytest.mark.asyncio

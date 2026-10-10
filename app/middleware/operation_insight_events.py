@@ -51,7 +51,8 @@ def _client_version_header(scope: dict[str, Any]) -> str | None:
 
 def _disposition(method: str, path: str) -> RequestDisposition | None:
     if method == "POST" and _REST_INVOKE.fullmatch(path):
-        return "execution_intent"
+        # The handler decides whether this is a new call, replay, or status read.
+        return "unknown"
     if method == "POST" and path in {"/mcp", "/mcp/messages"}:
         return "unknown"
     if method in {"GET", "HEAD", "DELETE"} and path in {"/mcp", "/mcp/messages"}:
