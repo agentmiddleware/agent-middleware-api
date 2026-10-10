@@ -4326,9 +4326,9 @@ def _value_error_jsonrpc_code(message: str) -> int | None:
     if message in {"wallet_frozen", "wallet_expired"}:
         return -32003
     if message == "idempotency_key_reused":
-        # Re-raised from IdempotencyConflictError. Stays on -32603 because
-        # clients (and the SDK) match the message, not the code.
-        return -32603
+        # A known request conflict has its own application code. Keep the
+        # message stable for existing clients and the SDK's typed exception.
+        return -32009
     return None
 
 
@@ -4695,6 +4695,8 @@ async def invoke_tool(
             return _internal_error_tool_result(
                 exc, surface="/mcp/tools/{service_id}/invoke"
             )
+        if message == "idempotency_key_reused":
+            raise HTTPException(status_code=409, detail=message)
         if message == "insufficient_funds":
             raise HTTPException(status_code=402, detail=message)
         if message in {"wallet_frozen", "wallet_expired"}:
