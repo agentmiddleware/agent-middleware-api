@@ -42,6 +42,12 @@ redaction; and JSON/CSV counts and checksums. Assert that report and inspector
 reads call no dispatch, refund, or business write path. Record the actual
 expected unknowns and permitted `next_action` for each fixture.
 
+The golden `lost_ack_after_effect` row supplies hypothetical independently
+verified effect evidence to exercise conservative classification. The current
+event emitter records downstream effect as unknown, and the scoped reader does
+not establish external delivery from a dispatch claim. Passing that fixture
+does not certify an end-to-end effect-proof capture path.
+
 ## Scoped read procedure, after separate approval
 
 1. Verify `GET /health` reports the accepted `commit_sha` and
@@ -79,7 +85,8 @@ cannot be certified until effective-dated wallet-to-account intervals and
 internal, demo, CI, and monitoring exclusions are approved. A wallet with no
 mapping remains visible as an unknown account inside its authorized scope.
 Wallet-less raw rows never enter a report. The separate unknown-wallet count
-requires a separate grant and request flag; it covers fixed complete UTC days
+requires a separate principal permission and request flag; it covers fixed
+complete UTC days
 and reports a null count when unauthorized, unavailable, or partial. Never
 render any of those states as zero.
 
@@ -121,7 +128,8 @@ idempotency record; completely unrecorded ingress remains invisible. The
 legacy audit reason summary and 200-row receipt/export defaults are not cohort
 sources. The 168-hour telemetry setting is not a receipt, audit, idempotency,
 or insight-event retention guarantee. Treat a source gap as a coverage gap,
-not a measured zero.
+not a measured zero. A missing recovery row is not proof that it was deleted;
+record deletion only when independently verified.
 
 ## Inspect and reconcile an incident
 
