@@ -1801,7 +1801,7 @@ async def test_precanonical_alternate_transport_identity_fails_closed(
                 json=retry_body,
                 headers=provisioned["agent_headers"],
             )
-            assert response.status_code == 400
+            assert response.status_code == 409
             assert response.json()["detail"] == "idempotency_key_reused"
 
         assert executor.dispatch_count == 0
@@ -2181,7 +2181,10 @@ async def test_governed_upstream_conflicting_payload_reuse_never_redispatches(
         )
 
         assert "result" in first.json()
-        assert conflict.json()["error"]["message"] == "idempotency_key_reused"
+        assert conflict.json()["error"] == {
+            "code": -32009,
+            "message": "idempotency_key_reused",
+        }
         assert executor.dispatch_count == 1
         assert len(executor.calls) == 1
         persisted = await _load_persisted_invocation(
