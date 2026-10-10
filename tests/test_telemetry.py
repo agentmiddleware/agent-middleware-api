@@ -120,8 +120,8 @@ async def test_list_anomalies_empty(client, api_headers):
     resp = await client.get("/v1/telemetry/anomalies", headers=api_headers)
     assert resp.status_code == 200
     data = resp.json()
-    assert data["total"] >= 0
-    assert isinstance(data["anomalies"], list)
+    assert data["total"] == 0
+    assert data["anomalies"] == []
 
 
 @pytest.mark.anyio

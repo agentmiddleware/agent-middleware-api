@@ -6,6 +6,7 @@ Lightweight client for interacting with AWI-enabled services.
 Based on arXiv:2506.10953v1 - "Build the web for agents, not agents for the web"
 """
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -13,6 +14,13 @@ import httpx
 
 #: Longest ``Idempotency-Key`` the governed AWI routes accept.
 MAX_IDEMPOTENCY_KEY_LENGTH = 128
+
+#: Statuses worth one more attempt on a request with no side effects.
+_RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
+
+#: First pause between attempts; doubles per attempt up to _RETRY_BACKOFF_CAP.
+_RETRY_BACKOFF_BASE = 0.1
+_RETRY_BACKOFF_CAP = 2.0
 
 
 @dataclass
@@ -24,7 +32,17 @@ class AWIClientConfig:
     api_key: str | None = field(default=None, repr=False)
     wallet_id: str | None = None
     timeout: float = 30.0
+    # Retries for side-effect-free GET requests only (one initial attempt
+    # plus up to this many retries). POST/DELETE calls never retry
+    # automatically: reissue them yourself with the same idempotency key so
+    # the server replays the first outcome instead of acting twice.
     max_retries: int = 3
+
+    def __post_init__(self) -> None:
+        if isinstance(self.max_retries, bool) or not isinstance(self.max_retries, int):
+            raise ValueError("max_retries must be an integer")
+        if self.max_retries < 0:
+            raise ValueError("max_retries must not be negative")
 
 
 class AWIClient:
@@ -80,13 +98,40 @@ class AWIClient:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.close()
 
+    async def _get(self, path: str) -> httpx.Response:
+        """GET with bounded retries for transient failures.
+
+        Only safe here because GET requests have no side effects. A dropped
+        connection (``httpx.TransportError``) or a retryable status gets
+        another attempt, up to ``config.max_retries`` retries after the
+        first attempt. Anything else, including 4xx answers, is returned
+        as-is so the caller sees the real outcome.
+        """
+        attempts = 1 + self.config.max_retries
+        for attempt in range(attempts):
+            try:
+                response = await self._client.get(path)
+            except httpx.TransportError:
+                if attempt == attempts - 1:
+                    raise
+            else:
+                if (
+                    response.status_code not in _RETRYABLE_STATUS
+                    or attempt == attempts - 1
+                ):
+                    return response
+            await asyncio.sleep(
+                min(_RETRY_BACKOFF_BASE * (2**attempt), _RETRY_BACKOFF_CAP)
+            )
+        raise AssertionError("unreachable")  # pragma: no cover
+
     async def discover(self) -> dict[str, Any]:
         """
         Discover AWI capabilities from the server.
 
         Returns the manifest with available actions and representations.
         """
-        response = await self._client.get("/v1/awi/vocabulary")
+        response = await self._get("/v1/awi/vocabulary")
         response.raise_for_status()
         return response.json()
 
@@ -255,7 +300,7 @@ class AWIClient:
 
     async def get_session(self, session_id: str) -> dict[str, Any]:
         """Get the current state of a session."""
-        response = await self._client.get(f"/v1/awi/sessions/{session_id}")
+        response = await self._get(f"/v1/awi/sessions/{session_id}")
         response.raise_for_status()
         return response.json()
 
@@ -286,13 +331,13 @@ class AWIClient:
 
     async def get_task_status(self, task_id: str) -> dict[str, Any]:
         """Get the status of an AWI task."""
-        response = await self._client.get(f"/v1/awi/tasks/{task_id}")
+        response = await self._get(f"/v1/awi/tasks/{task_id}")
         response.raise_for_status()
         return response.json()
 
     async def get_queue_status(self) -> dict[str, Any]:
         """Get the overall task queue status."""
-        response = await self._client.get("/v1/awi/queue/status")
+        response = await self._get("/v1/awi/queue/status")
         response.raise_for_status()
         return response.json()
 
@@ -303,6 +348,6 @@ class AWIClient:
 
     async def list_actions_by_category(self, category: str) -> list[dict[str, Any]]:
         """List AWI actions in a specific category."""
-        response = await self._client.get(f"/v1/awi/vocabulary/category/{category}")
+        response = await self._get(f"/v1/awi/vocabulary/category/{category}")
         response.raise_for_status()
         return response.json().get("actions", [])
