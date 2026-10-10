@@ -29,6 +29,13 @@ rsync -a --delete --delete-excluded "${X[@]}" \
   --exclude test_site_pilot_fit.mjs \
   --exclude test_oss_export.py \
   "$SRC/tests/" "$G/tests/"
+python3 "$SRC/tools/oss-export/drop_tests.py" \
+  "$G/tests/test_awi_adapter_sdk_hardening.py" \
+  test_awi_sdk_execute_sends_permit_and_idempotency_headers \
+  test_awi_sdk_execute_rejects_invalid_governance_headers \
+  test_awi_sdk_config_repr_masks_api_key \
+  test_awi_sdk_does_not_follow_cross_host_redirects \
+  test_awi_sdk_governed_execute_end_to_end_and_cross_wallet_denied
 rsync -a --delete --delete-excluded "${X[@]}" \
   --exclude railway_preflight.py --exclude prepare_railway_release.py --exclude auto_pr_runner.py \
   --exclude publish_live_proof.py --exclude repo_guardian.py --exclude record_site_transcript.py \

@@ -119,6 +119,18 @@ def test_export_rerun_purges_stale_gateway_files_and_preserves_public_metadata(
         assert not (gateway / "tests" / name).exists()
     assert not (gateway / "site").exists()
     assert (gateway / "tests" / "test_permit_numeric_storage.py").is_file()
+    awi_tests = (gateway / "tests" / "test_awi_adapter_sdk_hardening.py").read_text()
+    assert (
+        "def test_adapter_governance_denial_never_reaches_internal_route(" in awi_tests
+    )
+    for name in (
+        "test_awi_sdk_execute_sends_permit_and_idempotency_headers",
+        "test_awi_sdk_execute_rejects_invalid_governance_headers",
+        "test_awi_sdk_config_repr_masks_api_key",
+        "test_awi_sdk_does_not_follow_cross_host_redirects",
+        "test_awi_sdk_governed_execute_end_to_end_and_cross_wallet_denied",
+    ):
+        assert f"def {name}(" not in awi_tests
     dockerfile = (gateway / "Dockerfile").read_text()
     assert "COPY sdk/python/ /sdk/python/" in dockerfile
     assert "pip install --no-cache-dir /sdk/python" in dockerfile
