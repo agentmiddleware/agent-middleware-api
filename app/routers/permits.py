@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 
 from app.core.auth import AuthContext, get_auth_context
 from app.core.config import get_settings
+from app.idempotency_gate import requires_idempotency
 from app.schemas.trust import (
     ActionPermitFields,
     ActionPermitCreateRequest,
@@ -50,10 +51,27 @@ def _authorize_permit_inspection(
     auth.require_bootstrap_admin()
 
 
+def _hide_permit_existence(exc: HTTPException) -> HTTPException:
+    """Answer a permit authorization denial exactly like a missing permit.
+
+    A 403 for "exists but is not yours" next to a 404 for "no such permit"
+    tells any authenticated caller which ids are real, so the read routes
+    below convert the denial into the same 404. This only applies once the
+    caller is authenticated: missing or invalid credentials still fail
+    earlier, identically for every id.
+    """
+    if exc.status_code == status.HTTP_403_FORBIDDEN:
+        return HTTPException(status_code=404, detail="permit_not_found")
+    return exc
+
+
 @router.get("", response_model=PermitListResponse)
 async def list_permits(
     wallet_id: str | None = Query(None),
-    status: str | None = Query(None),
+    status: str | None = Query(
+        None,
+        description="Filter by effective lifecycle status: active, expired, revoked.",
+    ),
     subject_key_id: str | None = Query(None),
     created_after: datetime | None = Query(None),
     created_before: datetime | None = Query(None),
@@ -98,6 +116,11 @@ async def list_permits(
 
 
 @router.post("", response_model=PermitResponse, status_code=status.HTTP_201_CREATED)
+@requires_idempotency(
+    "POST /v1/permits",
+    enforced=True,
+    mechanism="required Idempotency-Key header",
+)
 async def create_permit(
     request: PermitCreateRequest,
     idempotency_key: str = Header(..., alias="Idempotency-Key"),
@@ -156,7 +179,9 @@ async def create_permit(
     except (IdempotencyConflictError, IdempotencyInProgressError) as exc:
         raise HTTPException(status_code=409, detail=exc.args[0])
     if begun.replay and begun.replay.response_json:
-        return PermitResponse(**begun.replay.response_json)
+        # Keep the original permit identity/signature, but report live revocation
+        # and spending rather than the mutable state cached at issuance.
+        return await get_permit(begun.replay.response_json["permit_id"], auth=auth)
 
     try:
         permit = await get_permit_service().create_permit(
@@ -192,11 +217,14 @@ async def get_permit(
     permit = await get_permit_service().get_permit(permit_id)
     if not permit:
         raise HTTPException(status_code=404, detail="permit_not_found")
-    _authorize_permit_inspection(
-        auth=auth,
-        issuer_wallet_id=permit.issuer_wallet_id,
-        subject_wallet_id=permit.subject_wallet_id,
-    )
+    try:
+        _authorize_permit_inspection(
+            auth=auth,
+            issuer_wallet_id=permit.issuer_wallet_id,
+            subject_wallet_id=permit.subject_wallet_id,
+        )
+    except HTTPException as exc:
+        raise _hide_permit_existence(exc) from None
     return permit
 
 
@@ -212,11 +240,14 @@ async def list_permit_receipts(
     permit = await get_permit_service().get_permit(permit_id)
     if not permit:
         raise HTTPException(status_code=404, detail="permit_not_found")
-    _authorize_permit_inspection(
-        auth=auth,
-        issuer_wallet_id=permit.issuer_wallet_id,
-        subject_wallet_id=permit.subject_wallet_id,
-    )
+    try:
+        _authorize_permit_inspection(
+            auth=auth,
+            issuer_wallet_id=permit.issuer_wallet_id,
+            subject_wallet_id=permit.subject_wallet_id,
+        )
+    except HTTPException as exc:
+        raise _hide_permit_existence(exc) from None
     receipts, total = await get_receipt_service().list_receipts(
         permit_id=permit_id,
         tool=tool,
@@ -313,6 +344,11 @@ async def verify_permit(
 
 
 @action_router.post("", response_model=PermitResponse, status_code=201)
+@requires_idempotency(
+    "POST /v1/action-permits",
+    enforced=True,
+    mechanism="required Idempotency-Key header",
+)
 async def issue_action_permit(
     request: ActionPermitCreateRequest,
     idempotency_key: str = Header(..., alias="Idempotency-Key"),
@@ -337,7 +373,7 @@ async def issue_action_permit(
     except (IdempotencyConflictError, IdempotencyInProgressError) as exc:
         raise HTTPException(status_code=409, detail=exc.args[0])
     if begun.replay and begun.replay.response_json:
-        return PermitResponse(**begun.replay.response_json)
+        return await get_permit(begun.replay.response_json["permit_id"], auth=auth)
     try:
         permit = await create_action_permit(request, auth)
     except PermitCreationRejectedError as exc:

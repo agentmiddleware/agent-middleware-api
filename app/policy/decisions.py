@@ -23,7 +23,7 @@ class PolicyDecision:
         return asdict(self)
 
 
-def evaluate_tool_invocation(
+def evaluate_wallet_access_for_tool(
     *,
     auth: AuthContext,
     wallet_id: str,
@@ -31,6 +31,15 @@ def evaluate_tool_invocation(
     estimated_cost: float | None,
     request_id: str | None,
 ) -> PolicyDecision:
+    """Check wallet ownership for a tool call, nothing else.
+
+    This is a tenant-isolation check only: it passes when the caller is the
+    bootstrap admin or owns ``wallet_id``. It does not check permits, wallet
+    policy bundles, budgets, scopes, or human approvals. Every caller that
+    authorizes a real tool call must enforce those separately after this
+    check (see docs/POLICY_ENFORCEMENT.md layers B and C). A decision with
+    ``allowed=True`` here is never sufficient on its own to run a tool.
+    """
     if auth.is_bootstrap_admin or auth.wallet_id == wallet_id:
         return PolicyDecision(
             decision_id=f"pol-{uuid.uuid4().hex[:16]}",
@@ -57,6 +66,11 @@ def evaluate_tool_invocation(
     )
 
 
+# Kept for backward compatibility. New code should call
+# evaluate_wallet_access_for_tool, which says what is actually checked.
+evaluate_tool_invocation = evaluate_wallet_access_for_tool
+
+
 def evaluate_governed_action(
     *,
     auth: AuthContext | None,
@@ -68,7 +82,14 @@ def evaluate_governed_action(
     allowed: bool | None = None,
     reason: str | None = None,
 ) -> PolicyDecision:
-    """Create the shared policy-shaped decision used by governed actions."""
+    """Create the shared policy-shaped decision used by governed actions.
+
+    When the caller passes ``allowed``/``reason`` explicitly, this records
+    that caller-side outcome; it does not re-derive it. When they are left
+    unset, the default allow derives only from wallet identity, exactly like
+    evaluate_wallet_access_for_tool: it never checks permits, policy
+    bundles, budgets, or approvals.
+    """
     auth_source = (
         "bootstrap"
         if auth and auth.is_bootstrap_admin

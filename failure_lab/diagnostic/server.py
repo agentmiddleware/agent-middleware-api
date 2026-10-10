@@ -1,10 +1,14 @@
-"""The HTTP surface: one page, one run at a time, on the loopback only.
+"""The HTTP surface: one page, one run at a time, loopback by default.
 
 Every refusal below is structural. A warning in the copy is a warning somebody
 reads after the thing has already happened.
 
-**Loopback only, and production refuses to boot at all.** :func:`serve` will
-not bind anything but a loopback address, and :func:`create_app` calls
+**Loopback by default, token-gated beyond it, and production refuses to boot
+at all.** :func:`serve` binds a non-loopback address only when an auth token
+is configured, and then every request must carry it as
+``Authorization: Bearer <token>`` -- there is no login page because there is
+no session to hold, just one shared secret compared in constant time.
+:func:`create_app` calls
 :func:`~failure_lab.diagnostic.runs.assert_not_production_like` against the
 ``ENVIRONMENT`` this process started with -- captured before
 :func:`~failure_lab.gateway.boot_standalone_environment` can overwrite it with
@@ -46,6 +50,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hmac
 import json
 import logging
 import re
@@ -164,6 +169,11 @@ class DiagnosticSettings:
     telemetry: bool = True
     allowed_scenarios: tuple[str, ...] = runs.PUBLIC_SCENARIOS
     max_retained_runs: int = MAX_RETAINED_RUNS
+    #: Shared secret required on every request as
+    #: ``Authorization: Bearer <token>`` when set. :func:`serve` refuses a
+    #: non-loopback bind without one. Unset means the loopback default: the
+    #: app answers without asking, exactly as before.
+    auth_token: str | None = None
 
 
 @dataclass
@@ -601,6 +611,37 @@ def _guarded(service: DiagnosticService, text: str, *, instead: str) -> str:
         return instead
 
 
+def _has_valid_token(request: Request, expected: str) -> bool:
+    """Whether the request carries the configured diagnostic token.
+
+    Only the ``Authorization: Bearer <token>`` header counts, and the
+    comparison is constant time. Anything else -- missing header, wrong
+    scheme, wrong value -- is the same False.
+    """
+    scheme, _, presented = request.headers.get("authorization", "").partition(" ")
+    if scheme.lower() != "bearer" or not presented:
+        return False
+    try:
+        return hmac.compare_digest(presented, expected)
+    except TypeError:
+        # A non-ASCII presented value can never equal the configured token.
+        return False
+
+
+def _token_required() -> JSONResponse:
+    return JSONResponse(
+        {
+            "error": "unauthorized",
+            "reason": (
+                "this diagnostic instance requires its token as "
+                "'Authorization: Bearer <token>'."
+            ),
+        },
+        status_code=401,
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
 def _refuse_target(payload: dict[str, Any]) -> None:
     """Refuse a target on the sandbox endpoint, whatever the server allows.
 
@@ -625,6 +666,19 @@ def create_app(settings: DiagnosticSettings | None = None) -> Starlette:
     """Build the diagnostic application, refusing a production-like process."""
     runs.assert_not_production_like()
     service = DiagnosticService(settings)
+
+    def check_token(request: Request) -> Response | None:
+        """Refuse the request when a token is configured and missing here.
+
+        Every handler calls this first, before rate limiting and before any
+        lookup, so a token-gated instance answers 401 identically whether
+        the path or the run id exists.
+        """
+        expected = service.settings.auth_token
+        if expected and not _has_valid_token(request, expected):
+            return _token_required()
+        return None
+
     scenario_titles = {
         test_id: getattr(SCENARIOS_BY_ID[test_id], "title", "")
         for test_id in service.settings.allowed_scenarios
@@ -632,9 +686,15 @@ def create_app(settings: DiagnosticSettings | None = None) -> Starlette:
     }
 
     async def root(request: Request) -> Response:
+        denied = check_token(request)
+        if denied is not None:
+            return denied
         return RedirectResponse("/diagnostic", status_code=307)
 
     async def index(request: Request) -> Response:
+        denied = check_token(request)
+        if denied is not None:
+            return denied
         if not service.allow_read(request):
             return _rate_limited("requests")
         service.record(
@@ -657,6 +717,9 @@ def create_app(settings: DiagnosticSettings | None = None) -> Starlette:
         )
 
     async def start_run(request: Request) -> Response:
+        denied = check_token(request)
+        if denied is not None:
+            return denied
         if not service.allow_run(request):
             return _rate_limited("checks")
         try:
@@ -680,6 +743,9 @@ def create_app(settings: DiagnosticSettings | None = None) -> Starlette:
         )
 
     async def stream_run(request: Request) -> Response:
+        denied = check_token(request)
+        if denied is not None:
+            return denied
         if not service.allow_read(request):
             return _rate_limited("requests")
         record = service.get(request.path_params["run_id"])
@@ -754,6 +820,9 @@ def create_app(settings: DiagnosticSettings | None = None) -> Starlette:
         )
 
     async def read_run(request: Request) -> Response:
+        denied = check_token(request)
+        if denied is not None:
+            return denied
         if not service.allow_read(request):
             return _rate_limited("requests")
         raw_id = request.path_params["run_id"]
@@ -786,6 +855,9 @@ def create_app(settings: DiagnosticSettings | None = None) -> Starlette:
         return service.html(pages.render_result(record, fragment=fragment))
 
     async def read_report(request: Request) -> Response:
+        denied = check_token(request)
+        if denied is not None:
+            return denied
         if not service.allow_read(request):
             return _rate_limited("requests")
         record = service.get(request.path_params["run_id"])
@@ -801,6 +873,9 @@ def create_app(settings: DiagnosticSettings | None = None) -> Starlette:
         return service.html(pages.render_report(record))
 
     async def read_bundle(request: Request) -> Response:
+        denied = check_token(request)
+        if denied is not None:
+            return denied
         if not service.allow_read(request):
             return _rate_limited("requests")
         record = service.get(request.path_params["run_id"])
@@ -831,6 +906,9 @@ def create_app(settings: DiagnosticSettings | None = None) -> Starlette:
         )
 
     async def deployment(request: Request) -> Response:
+        denied = check_token(request)
+        if denied is not None:
+            return denied
         if not service.allow_read(request):
             return _rate_limited("requests")
         service.record(
@@ -843,6 +921,9 @@ def create_app(settings: DiagnosticSettings | None = None) -> Starlette:
         return service.html(pages.render_deployment())
 
     async def healthz(request: Request) -> Response:
+        denied = check_token(request)
+        if denied is not None:
+            return denied
         return JSONResponse(
             {
                 "status": "ok",
@@ -930,6 +1011,9 @@ def _external_route(service: DiagnosticService) -> Any:
     """
 
     async def external(request: Request) -> Response:
+        expected = service.settings.auth_token
+        if expected and not _has_valid_token(request, expected):
+            return _token_required()
         if not service.allow_run(request):
             return _rate_limited("checks")
         try:
@@ -978,31 +1062,63 @@ def _external_route(service: DiagnosticService) -> Any:
 # --------------------------------------------------------------------------- #
 
 
-def serve(*, host: str = "127.0.0.1", port: int = 8080, **kwargs: Any) -> int:
-    """Run the diagnostic until interrupted. Loopback addresses only."""
-    if host not in LOOPBACK_HOSTS:
+def serve(
+    *,
+    host: str = "127.0.0.1",
+    port: int = 8080,
+    auth_token: str | None = None,
+    **kwargs: Any,
+) -> int:
+    """Run the diagnostic until interrupted.
+
+    Loopback addresses always bind. Any other address binds only when
+    ``auth_token`` is set, and then every request must carry it as
+    ``Authorization: Bearer <token>``.
+    """
+    if not auth_token:
+        auth_token = None
+    if host not in LOOPBACK_HOSTS and auth_token is None:
         raise ValueError(
-            f"refusing to bind {host!r}: this diagnostic boots a gateway with an "
-            "ephemeral signing key and an admin credential it mints itself, and "
-            f"serves it unauthenticated. Bind one of {sorted(LOOPBACK_HOSTS)}."
+            f"refusing to bind {host!r} without an auth token: this diagnostic "
+            "boots a gateway with an ephemeral signing key and an admin "
+            "credential it mints itself. Either bind one of "
+            f"{sorted(LOOPBACK_HOSTS)}, or pass auth_token=... (--auth-token) "
+            "and send it as 'Authorization: Bearer <token>'."
         )
     import uvicorn
 
-    settings = DiagnosticSettings(**kwargs) if kwargs else DiagnosticSettings()
+    if kwargs or auth_token is not None:
+        settings = DiagnosticSettings(auth_token=auth_token, **kwargs)
+    else:
+        settings = DiagnosticSettings()
     uvicorn.run(create_app(settings), host=host, port=port, log_level="info")
     return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     import argparse
+    import os
     import sys
 
     parser = argparse.ArgumentParser(
         prog="python -m failure_lab serve",
         description="Run the Agent Action Safety Check on this machine.",
     )
-    parser.add_argument("--host", default="127.0.0.1", help="loopback addresses only")
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="loopback addresses only, unless --auth-token is set",
+    )
     parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument(
+        "--auth-token",
+        default=None,
+        help=(
+            "Shared secret required as 'Authorization: Bearer <token>' on "
+            "every request. Required for a non-loopback --host. Also read "
+            "from FAILURE_LAB_DIAGNOSTIC_TOKEN when the flag is absent."
+        ),
+    )
     parser.add_argument(
         "--allow-external-targets",
         action="store_true",
@@ -1037,6 +1153,8 @@ def main(argv: list[str] | None = None) -> int:
         return serve(
             host=args.host,
             port=args.port,
+            auth_token=args.auth_token
+            or os.environ.get("FAILURE_LAB_DIAGNOSTIC_TOKEN"),
             allow_external_targets=args.allow_external_targets,
             traffic_source=TrafficSource(args.traffic_source),
             browser_traffic_source=(

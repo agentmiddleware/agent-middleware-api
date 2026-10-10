@@ -9,6 +9,7 @@ Local development: stripe listen --forward-to localhost:8000/v1/webhooks/stripe
 import logging
 from fastapi import APIRouter, Request, HTTPException, status
 
+from ..idempotency_gate import requires_idempotency
 from ..services.stripe_integration import StripeSettlementError, get_stripe_integration
 from ..services.kyc_service import get_kyc_service
 
@@ -21,6 +22,11 @@ router = APIRouter(
 
 
 @router.post("/stripe")
+@requires_idempotency(
+    "POST /v1/webhooks/stripe",
+    enforced=True,
+    mechanism="Stripe event id dedupe plus cumulative refund delta",
+)
 async def handle_stripe_webhook(request: Request):
     """
     Receive and process Stripe webhook events.
