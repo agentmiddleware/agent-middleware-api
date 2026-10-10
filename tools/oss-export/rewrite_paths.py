@@ -76,3 +76,60 @@ for p in paths:
     if n != s:
         p.write_text(n)
         print("rewrote", p.relative_to(root.parent))
+
+# These published instructions describe the source checkout layout. The
+# exported checkout places the SDK at the public repository root in sdk/python.
+export_guidance = {
+    root / "app/routers/well_known.py": [
+        ('"path": "b2a_sdk/"', '"path": "sdk/python/"'),
+        (
+            '"install": "pip install -e ./b2a_sdk"',
+            '"install": "pip install -e ./sdk/python"',
+        ),
+        ("source in b2a_sdk/ is", "source in sdk/python/ is"),
+    ],
+    root / "static/llm.txt": [
+        ("from `b2a_sdk/`.", "from `sdk/python/`."),
+        ("pip install -e ./b2a_sdk", "pip install -e ./sdk/python"),
+    ],
+    root / "docs/partner-first-tool-runbook.md": [
+        (
+            "or run it from a copy of b2a_sdk/:",
+            "or install it from the public repository root:",
+        ),
+        ('pip install "./b2a_sdk[verify]"', 'pip install "./sdk/python[verify]"'),
+    ],
+    root / "tests/test_wedge_honesty.py": [
+        (
+            'assert python_sdk["path"] == "b2a_sdk/"',
+            'assert python_sdk["path"] == "sdk/python/"',
+        ),
+        (
+            'assert python_sdk["install"] == "pip install -e ./b2a_sdk"',
+            'assert python_sdk["install"] == "pip install -e ./sdk/python"',
+        ),
+        (
+            'assert "pip install -e ./b2a_sdk" in text',
+            'assert "pip install -e ./sdk/python" in text',
+        ),
+    ],
+    root / "tests/test_onboarding_doc_contracts.py": [
+        (
+            "assert 'pip install \"./b2a_sdk[verify]\"' in doc",
+            "assert 'pip install \"./sdk/python[verify]\"' in doc",
+        ),
+    ],
+}
+for p, replacements in export_guidance.items():
+    if not p.is_file():
+        continue
+    s = p.read_text()
+    n = s
+    for old, new in replacements:
+        if n.count(old) == 1:
+            n = n.replace(old, new)
+        elif not (old not in n and n.count(new) == 1):
+            raise SystemExit(f"expected one {old!r} or {new!r} in {p}")
+    if n != s:
+        p.write_text(n)
+        print("rewrote", p.relative_to(root.parent))

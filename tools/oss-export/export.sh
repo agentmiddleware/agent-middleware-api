@@ -27,15 +27,34 @@ rsync -a --delete --delete-excluded "${X[@]}" \
   --exclude test_published_proof.py --exclude test_vendor_fonts.py \
   --exclude test_arcade_regressions.mjs --exclude test_site_design.mjs \
   --exclude test_site_pilot_fit.mjs \
-  --exclude test_oss_export.py \
+  --exclude test_oss_export.py --exclude test_oss_export_drop_tests.py \
+  --exclude test_failure_lab_ci.py --exclude test_historical_probe_retirement.py \
+  --exclude test_operator_doc_contracts.py --exclude test_publish_mcp_pinned_download.py \
+  --exclude test_railway_iac_config.py \
   "$SRC/tests/" "$G/tests/"
-python3 "$SRC/tools/oss-export/drop_tests.py" \
+DROP_TESTS="$SRC/tools/oss-export/drop_tests.py"
+python3 "$DROP_TESTS" \
   "$G/tests/test_awi_adapter_sdk_hardening.py" \
   test_awi_sdk_execute_sends_permit_and_idempotency_headers \
   test_awi_sdk_execute_rejects_invalid_governance_headers \
   test_awi_sdk_config_repr_masks_api_key \
   test_awi_sdk_does_not_follow_cross_host_redirects \
   test_awi_sdk_governed_execute_end_to_end_and_cross_wallet_denied
+python3 "$DROP_TESTS" "$G/tests/test_ci_second_tool_denial.py" \
+  test_ci_registers_second_tool_and_passes_it_to_constant_test \
+  test_ci_workflow_syntax_is_valid
+python3 "$DROP_TESTS" "$G/tests/test_docker_commit_sha.py" \
+  test_dockerfile_requires_staged_commit_sha \
+  test_local_compose_uses_the_unstamped_development_dockerfile \
+  test_docker_publish_stages_the_checked_out_commit
+python3 "$DROP_TESTS" "$G/tests/test_stale_commit_sha_prevention.py" \
+  test_dockerfile_requires_staged_build_commit_sha_file
+python3 "$DROP_TESTS" "$G/tests/test_wedge_honesty.py" \
+  test_agentmarket_listing_is_wedge_honest \
+  test_feature_request_preserves_customer_identity_privacy \
+  test_readme_does_not_claim_deployment_ready_complete
+python3 "$DROP_TESTS" "$G/tests/test_qa_be100_documentation.py" \
+  test_be100_pitch_scopes_retry_guarantees
 rsync -a --delete --delete-excluded "${X[@]}" \
   --exclude railway_preflight.py --exclude prepare_railway_release.py --exclude auto_pr_runner.py \
   --exclude publish_live_proof.py --exclude repo_guardian.py --exclude record_site_transcript.py \
