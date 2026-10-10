@@ -164,7 +164,7 @@ async def test_report_default_shape():
 async def test_sentinel_health_probe_is_single_and_unauthenticated(monkeypatch):
     settings = get_settings()
     settings.SENTINEL_API_URL = "https://SENTINEL.example:443/"
-    settings.SENTINEL_API_KEY = "never-send-this-key"
+    settings.SENTINEL_API_KEY = SecretStr("never-send-this-key")
     import httpx
 
     calls = []
@@ -254,7 +254,7 @@ async def test_invalid_sentinel_health_origin_fails_without_network(
 ):
     settings = get_settings()
     settings.SENTINEL_API_URL = sentinel_url
-    settings.SENTINEL_API_KEY = "sk_test_safe"
+    settings.SENTINEL_API_KEY = SecretStr("sk_test_safe")
     import httpx
 
     monkeypatch.setattr(
@@ -289,7 +289,7 @@ async def test_loopback_sentinel_health_origin_is_allowed(
 ):
     settings = get_settings()
     settings.SENTINEL_API_URL = sentinel_url
-    settings.SENTINEL_API_KEY = "sk_test_safe"
+    settings.SENTINEL_API_KEY = SecretStr("sk_test_safe")
     calls = []
 
     class Response:
@@ -327,7 +327,7 @@ async def test_sentinel_health_failure_is_sanitized_in_full_report(monkeypatch):
     private_key = "sentinel-key-that-must-not-leak"
     settings.SIMULATION_MODE_HUMAN_APPROVAL = False
     settings.SENTINEL_API_URL = private_url
-    settings.SENTINEL_API_KEY = private_key
+    settings.SENTINEL_API_KEY = SecretStr(private_key)
 
     class Client:
         def __init__(self, **_kwargs):
@@ -490,7 +490,7 @@ async def test_llm_not_used_when_telemetry_pm_simulated():
     """LLM probe skipped if its primary consumer is simulated — even when
     a key is configured — to avoid needlessly burning API quota."""
     settings = get_settings()
-    settings.LLM_API_KEY = "sk-fake-but-set"
+    settings.LLM_API_KEY = SecretStr("sk-fake-but-set")
     settings.LLM_PROVIDER = "openai"
     # telemetry_pm already defaults to simulation=True
 

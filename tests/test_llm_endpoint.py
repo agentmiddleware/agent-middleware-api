@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from pydantic import SecretStr
 
 from app.core.config import Settings
 from app.services.llm import LLMService
@@ -41,7 +42,7 @@ async def test_openai_uses_configured_api_root(base_url, expected):
     service.settings = SimpleNamespace(
         LLM_PROVIDER="openai",
         LLM_BASE_URL=base_url,
-        LLM_API_KEY="synthetic",
+        LLM_API_KEY=SecretStr("synthetic"),
         LLM_MODEL="synthetic",
         LLM_MAX_TOKENS=10,
         LLM_TEMPERATURE=0,

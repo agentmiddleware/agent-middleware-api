@@ -39,6 +39,7 @@ from typing import Any
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from pydantic import SecretStr
 from sqlalchemy import func, select
 from sqlalchemy.exc import OperationalError
 
@@ -843,7 +844,7 @@ async def test_a_consumed_approval_is_not_advertised_as_a_plain_retry(
     settings = get_settings()
     monkeypatch.setattr(settings, "SIMULATION_MODE_HUMAN_APPROVAL", True)
     monkeypatch.setattr(settings, "SENTINEL_API_URL", "")
-    monkeypatch.setattr(settings, "SENTINEL_API_KEY", "")
+    monkeypatch.setattr(settings, "SENTINEL_API_KEY", SecretStr(""))
     monkeypatch.setattr(settings, "SENTINEL_WAIT_SECONDS", 0.0)
 
     tool_name = "receipt-contention-approval"
@@ -935,7 +936,7 @@ async def test_a_rejected_approval_denial_is_still_a_plain_retry(
     settings = get_settings()
     monkeypatch.setattr(settings, "SIMULATION_MODE_HUMAN_APPROVAL", False)
     monkeypatch.setattr(settings, "SENTINEL_API_URL", "https://sentinel.test")
-    monkeypatch.setattr(settings, "SENTINEL_API_KEY", "sk_test_" + "0" * 64)
+    monkeypatch.setattr(settings, "SENTINEL_API_KEY", SecretStr("sk_test_" + "0" * 64))
     monkeypatch.setattr(settings, "SENTINEL_WAIT_SECONDS", 0.0)
     service = HumanApprovalService()
     monkeypatch.setattr(human_approval_module, "_service", service)
