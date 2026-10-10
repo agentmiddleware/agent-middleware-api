@@ -6,6 +6,8 @@ import subprocess
 import sys
 
 import pytest
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 
 from tests.support.action_database_guard import (
     require_action_database_url,
@@ -26,6 +28,7 @@ FIELDS = (
     "action_upstream_binding_hash",
 )
 ACTION_REVISION = "042_permit_action_binding"
+CURRENT_HEAD = ScriptDirectory.from_config(Config("alembic.ini")).get_current_head()
 SCRUB_REVISION = "041_scrub_content_owner_keys"
 CONTENT_TABLES = ("content_pipelines", "content_campaigns")
 AUTHORITIES = [
@@ -112,7 +115,7 @@ def test_action_migration_retains_legacy_and_blocks_authority_loss(
     assert result.returncode == 0, result.stderr
     with sqlite3.connect(path) as db:
         assert db.execute("SELECT version_num FROM alembic_version").fetchone() == (
-            ACTION_REVISION,
+            CURRENT_HEAD,
         )
         assert db.execute("SELECT * FROM permits").fetchone() == (
             *before,
