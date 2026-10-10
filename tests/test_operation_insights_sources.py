@@ -42,6 +42,7 @@ from app.services.operation_insights.contracts import (
     AccountMapping,
     AuthorizedOwnershipEpoch,
     Limits,
+    MappingInterval,
     Scope,
     Window,
 )
@@ -387,7 +388,11 @@ async def test_window_ingress_is_independent_of_historical_roots(
 
     assert historical.window_ingress == ()
     assert historical.rows == ()
-    assert tuple(row.source_id for row in ingress.rows) == ("ingress-A", "terminal-A")
+    assert tuple(row.source_id for row in ingress.rows) == (
+        "ingress-A",
+        "replay-A",
+        "terminal-A",
+    )
     ingress_row = ingress.window_ingress[0]
     assert ingress_row.environment == "staging"
     assert ingress_row.server_release == "commit-abc"
@@ -412,6 +417,147 @@ async def test_window_ingress_is_independent_of_historical_roots(
     } == {("insight_event", "ingress-A"), ("insight_event", "replay-A")}
     assert capped.coverage.truncated is True
     assert "evidence_limit_reached" in capped.coverage.gaps
+
+
+@pytest.mark.asyncio
+async def test_current_root_replay_and_status_trace_without_extra_attempts(
+    scoped_session,
+) -> None:
+    from app.services.operation_insights import sources
+    from app.services.operation_insights.cohorts import compute_metrics
+    from app.services.operation_insights.inspect import inspect_operations
+
+    session, scope = scoped_session
+    async with session.bind.begin() as connection:
+        await connection.run_sync(sources._EVENTS.create)
+
+    def event_row(
+        event_id: str, kind: str, request_id: str, day: int, **changes: object
+    ) -> dict[str, object]:
+        return {
+            "event_id": event_id,
+            "kind": kind,
+            "request_id": request_id,
+            "logical_operation_id": "root-A",
+            "wallet_id": "wallet-A",
+            "original_operation_anchor_id": "root-A",
+            "occurred_at": utc(day),
+            "ingested_at": utc(day),
+            **changes,
+        }
+
+    for record in (
+        event_row(
+            "root-A",
+            "ingress",
+            "request-original",
+            2,
+            request_disposition="execution_intent",
+        ),
+        event_row(
+            "replay-A",
+            "ingress",
+            "request-replay",
+            3,
+            request_disposition="same_key_replay",
+        ),
+        event_row(
+            "status-A",
+            "ingress",
+            "request-status",
+            4,
+            request_disposition="status_read",
+        ),
+        event_row(
+            "attempt-A",
+            "attempt",
+            "request-original",
+            5,
+            attempt_id="attempt-1",
+        ),
+        event_row(
+            "foreign-replay",
+            "ingress",
+            "request-foreign",
+            4,
+            wallet_id="wallet-B",
+            request_disposition="same_key_replay",
+        ),
+        event_row(
+            "other-epoch-status",
+            "ingress",
+            "request-other-epoch",
+            4,
+            ownership_epoch_id="epoch-other",
+            request_disposition="status_read",
+        ),
+        event_row(
+            "mismatched-operation-status",
+            "ingress",
+            "request-mismatched-operation",
+            4,
+            logical_operation_id="another-operation",
+            request_disposition="status_read",
+        ),
+    ):
+        await session.execute(insert(sources._EVENTS).values(**record))
+
+    selected = Window(utc(2), utc(9), "ingress")
+    batch = await sources.read_evidence(scope, selected, Limits(page_size=1), session)
+    mapping = AccountMapping(
+        "synthetic-mapping",
+        (MappingInterval("wallet-A", "account-A", "eligible", utc(1), None),),
+    )
+    operation = inspect_operations(batch, mapping)[0]
+    metrics = {
+        metric.name: metric
+        for metric in compute_metrics(
+            (operation,),
+            (),
+            batch.window_ingress,
+            (),
+            mapping,
+            selected,
+            batch.snapshot,
+            batch.coverage,
+        )
+    }
+
+    assert {row.source_id for row in batch.rows} == {
+        "root-A",
+        "replay-A",
+        "status-A",
+        "attempt-A",
+    }
+    assert operation.request_ids == (
+        "request-original",
+        "request-replay",
+        "request-status",
+    )
+    assert tuple(item.disposition for item in operation.ingress_observations) == (
+        "execution_intent",
+        "same_key_replay",
+        "status_read",
+    )
+    assert {ref.source_id for ref in operation.evidence_refs} == {
+        "root-A",
+        "replay-A",
+        "status-A",
+        "attempt-A",
+    }
+    assert {
+        stamp.source_id
+        for stamp in operation.stage_timestamps
+        if stamp.stage == "ingress"
+    } == {"root-A", "replay-A", "status-A"}
+    assert operation.attempt_ids == ("attempt-1",)
+    assert "linked_event_provenance_ambiguous" in batch.coverage.gaps
+    assert metrics["requests"].count == 4
+    assert metrics["execution_intent_requests"].count == 1
+    assert metrics["non_execution_requests"].count == 3
+    assert metrics["attempts"].count == 1
+    assert metrics["eligible_operations"].count == 1
+    assert metrics["logical_operations"].count == 1
 
 
 @pytest.mark.asyncio
