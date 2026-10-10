@@ -67,8 +67,5 @@ def test_partner_bootstrap_rejects_cleartext_remote_url():
 
     assert _require_safe_api_url("https://api.example.com") == "https://api.example.com"
     assert _require_safe_api_url("http://127.0.0.1:8000") == "http://127.0.0.1:8000"
-    try:
+    with pytest.raises(SystemExit, match="https://"):
         _require_safe_api_url("http://api.example.com")
-        raise AssertionError("expected SystemExit")
-    except SystemExit as exc:
-        assert "https://" in str(exc)
