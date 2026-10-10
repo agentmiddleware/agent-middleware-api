@@ -9,6 +9,7 @@ Usage:
 
 from __future__ import annotations
 
+import re
 from functools import wraps
 from typing import Callable, TypeVar
 
@@ -17,6 +18,39 @@ from fastapi import HTTPException, status
 from app.core.auth import AuthContext
 
 F = TypeVar("F", bound=Callable)
+
+# Canonical scope vocabulary for JWT access tokens minted at /v1/auth/token.
+# API keys carry no per-key scope restrictions (require_scope below grants
+# key callers implicit full access), so every key is entitled to the same
+# set: the exact names here plus the tool-invocation pattern. Anything else
+# a caller asks for is not granted. If per-key entitlements are added later,
+# intersect with them here as well.
+KNOWN_SCOPES = frozenset(
+    {
+        # Default token scopes and the spend-gating scope permits require.
+        "billing:charge",
+        # Read-only billing scope used for limited tokens.
+        "billing:read",
+        # Generic tool-invocation scope (one of the defaults).
+        "tool:invoke",
+    }
+)
+
+# Tool-specific invocation scopes, e.g. "tool:partner.notes.write:invoke".
+# This is the documented permit/tool pattern (see docs/quickstart.md), so a
+# token minted for one governed tool cannot be widened by inventing names
+# outside it.
+_TOOL_SCOPE_RE = re.compile(r"^tool:[A-Za-z0-9_.\-]+:invoke$")
+
+
+def is_known_scope(scope: str) -> bool:
+    """Return True when ``scope`` is part of the grantable vocabulary."""
+    return scope in KNOWN_SCOPES or _TOOL_SCOPE_RE.fullmatch(scope) is not None
+
+
+def unknown_scopes(scopes: list[str]) -> list[str]:
+    """Return the requested scopes that cannot be granted, in order."""
+    return [scope for scope in scopes if not is_known_scope(scope)]
 
 
 def require_scope(*required_scopes: str) -> Callable[[F], F]:
