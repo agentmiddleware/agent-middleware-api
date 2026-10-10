@@ -21,7 +21,7 @@ python -m pip install -e wrappers/langchain-agent-middleware
 ```
 
 `b2a_sdk` must be installed from the local path first: this package
-depends on `b2a-sdk>=0.4.0`, which is not on PyPI, so installing the
+depends on `b2a-sdk>=0.4,<1`, which is not on PyPI, so installing the
 wrapper on its own fails to resolve. That installs the `langchain_b2a`
 module used below.
 
@@ -112,5 +112,26 @@ tools = get_mcp_tools(
 ## Requirements
 
 - Python 3.11+
-- LangChain 0.1.0+
-- httpx 0.25.0+
+- langchain-core 1.x, langgraph 1.x, httpx 0.25+ (installed automatically
+  with the package; see `pyproject.toml` for the exact pins)
+- `b2a-sdk` 0.4 or later, installed from the checkout in this repository
+  (it is not on PyPI, so install it from the local path first as shown
+  above)
+
+## Release checklist (not yet run)
+
+PyPI release is pending. The package is installable from a checkout only.
+When C.Lee approves a public release, the manual steps are:
+
+1. Confirm the version in `pyproject.toml` and `src/langchain_b2a/__init__.py`
+   agree, and that `CHANGELOG`-style notes exist for the release.
+2. Build both distributions from the wrapper directory: `python -m build`
+   (produces `dist/*.tar.gz` and `dist/*.whl`).
+3. Check the distributions render correctly: `twine check dist/*`.
+4. Confirm a fresh virtualenv installs and imports cleanly:
+   `pip install ./b2a_sdk ./wrappers/langchain-agent-middleware`
+   from the repo root, then `python -c "import langchain_b2a"`.
+5. Run the wrapper tests: `pytest wrappers/langchain-agent-middleware/tests -q`.
+6. Upload with `twine upload dist/*` (requires a PyPI project and token;
+   do not create either without C.Lee). Release `b2a-sdk` first, since
+   this package depends on it.
