@@ -1666,6 +1666,11 @@ async def end_dry_run_session(
         "Use this after reviewing the simulation results and deciding to proceed."
     ),
 )
+@requires_idempotency(
+    "POST /v1/billing/dry-run/session/{session_id}/commit",
+    enforced=True,
+    mechanism="single-claim session commit, retry finds session ended",
+)
 async def commit_dry_run_session(
     session_id: str,
     auth: AuthContext = Depends(get_auth_context),
