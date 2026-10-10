@@ -1326,6 +1326,31 @@ async def read_evidence(
                         break
                 if truncated:
                     break
+            if not truncated:
+                for ingress in window_ingress.values():
+                    if ingress.request_disposition not in (
+                        "same_key_replay",
+                        "status_read",
+                    ):
+                        continue
+                    key = (ingress.wallet_id, ingress.original_operation_anchor_id)
+                    linked_root = current_roots.get(key)
+                    if linked_root is None:
+                        continue
+                    if ingress.ownership_epoch_id != linked_root.ownership_epoch_id or (
+                        ingress.logical_operation_id is not None
+                        and ingress.logical_operation_id != key[1]
+                    ):
+                        gaps.add("linked_event_provenance_ambiguous")
+                        continue
+                    try:
+                        rows[(ingress.source, ingress.source_id)] = replace(
+                            ingress, edges=(_ref(linked_root),)
+                        )
+                    except _EvidenceLimitReached:
+                        truncated = True
+                        gaps.add("evidence_limit_reached")
+                        break
             roots = current_roots
             if (
                 roots
