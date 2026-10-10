@@ -183,6 +183,72 @@ def test_a_real_prevention_is_reported_as_one():
     assert conclusion.duplicates_prevented_vs_native == 1
 
 
+def test_full_prevention_says_duplicates_did_not_occur_behind_the_gateway():
+    """The "did not occur" sentence requires zero gateway duplicates."""
+    result = _result(
+        [
+            _entry(Configuration.DIRECT_NAIVE, verdict=Verdict.OBSERVED, executions=3),
+            _entry(Configuration.DIRECT_NATIVE, verdict=Verdict.OBSERVED, executions=3),
+            _entry(
+                Configuration.GATEWAY_NATIVE,
+                verdict=Verdict.PASS,
+                executions=1,
+                dispatches=1,
+                receipts=1,
+                debits=1,
+            ),
+        ]
+    )
+    conclusion = build_comparison(result).conclusion
+    assert conclusion.kind is ConclusionKind.GATEWAY_PREVENTED_DUPLICATES
+    assert "did not occur with Agent Middleware" in conclusion.text
+
+
+def test_partial_prevention_does_not_claim_duplicates_did_not_occur():
+    """Two baseline duplicates cut to one behind the gateway is a reduction."""
+    result = _result(
+        [
+            _entry(Configuration.DIRECT_NAIVE, verdict=Verdict.OBSERVED, executions=3),
+            _entry(Configuration.DIRECT_NATIVE, verdict=Verdict.OBSERVED, executions=3),
+            _entry(
+                Configuration.GATEWAY_NATIVE,
+                verdict=Verdict.PASS,
+                executions=2,
+                dispatches=2,
+                receipts=1,
+                debits=1,
+            ),
+        ]
+    )
+    conclusion = build_comparison(result).conclusion
+    assert conclusion.kind is ConclusionKind.GATEWAY_PREVENTED_DUPLICATES
+    assert conclusion.duplicates_prevented_vs_native == 1
+    assert "did not occur with Agent Middleware" not in conclusion.text
+    assert "still occurred" in conclusion.text
+
+
+def test_a_gateway_that_adds_duplicates_says_so_plainly():
+    """A gateway-worse run must not hide behind the mildest wording."""
+    result = _result(
+        [
+            _entry(Configuration.DIRECT_NAIVE, verdict=Verdict.OBSERVED, executions=3),
+            _entry(Configuration.DIRECT_NATIVE, verdict=Verdict.PASS, executions=1),
+            _entry(
+                Configuration.GATEWAY_NATIVE,
+                verdict=Verdict.PASS,
+                executions=3,
+                dispatches=3,
+            ),
+        ]
+    )
+    conclusion = build_comparison(result).conclusion
+    assert conclusion.kind is ConclusionKind.GATEWAY_ADDED_DUPLICATES
+    assert conclusion.kind is not ConclusionKind.NATIVE_CONTROLS_SUFFICIENT
+    assert "more duplicate" in conclusion.text.lower()
+    assert conclusion.duplicates_prevented_vs_native == 0
+    assert conclusion.duplicates_prevented_vs_existing == 0
+
+
 def test_a_gateway_that_did_not_hold_is_not_dressed_up():
     result = _result(
         [
