@@ -58,6 +58,14 @@ class Settings(BaseSettings):
     DATABASE_URL: str = ""
     REDIS_URL: str = ""
     SQLITE_URL: str = ""
+    # Bound every Redis round trip for the durable-state backend. Without
+    # these, a hung Redis can freeze requests that touch durable state and
+    # stall readiness. The connect timeout covers TCP/TLS handshake; the
+    # socket timeout covers each subsequent command. Same shape as the
+    # rate limiter's own REDIS_SOCKET_* constants
+    # (app/core/rate_limiter.py), which stay as the limiter's local knob.
+    REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS: float = 2.0
+    REDIS_SOCKET_TIMEOUT_SECONDS: float = 5.0
 
     # --- Database Pool Settings ---
     # Used for SQLModel/SQLAlchemy async sessions

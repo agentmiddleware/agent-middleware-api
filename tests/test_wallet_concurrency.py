@@ -269,15 +269,15 @@ async def test_delegation_refuses_a_parent_frozen_under_it(
         lambda: _commit_freeze(parent.wallet_id),
     )
 
-    with pytest.raises(ValueError) as excinfo:
+    with pytest.raises(
+        ValueError, match="Parent wallet is frozen and cannot spawn child wallets"
+    ):
         await money.create_child_wallet(
             parent_wallet_id=parent.wallet_id,
             child_agent_id=f"child-{uuid.uuid4().hex[:8]}",
             budget_credits=Decimal("200"),
             max_spend=Decimal("200"),
         )
-
-    assert "frozen" in str(excinfo.value).lower()
     # Nothing was spent out of the frozen wallet.
     assert await _balance(parent.wallet_id) == Decimal("400")
 
@@ -376,15 +376,13 @@ async def test_zero_lifetime_cap_is_a_cap_not_an_absent_one(
     )
     await _set_child_cap(parent.wallet_id, Decimal("0"))
 
-    with pytest.raises(ValueError) as excinfo:
+    with pytest.raises(ValueError, match="Child wallet lifetime spend cap exceeded"):
         await money.create_child_wallet(
             parent_wallet_id=parent.wallet_id,
             child_agent_id=f"child-{uuid.uuid4().hex[:8]}",
             budget_credits=Decimal("10"),
             max_spend=Decimal("10"),
         )
-
-    assert "cap exceeded" in str(excinfo.value).lower()
     # The balance was never the problem, and none of it moved.
     assert await _balance(parent.wallet_id) == Decimal("400")
 
@@ -406,14 +404,12 @@ async def test_zero_lifetime_cap_refuses_a_transfer_as_a_cap(
     )
     await _set_child_cap(source.wallet_id, Decimal("0"))
 
-    with pytest.raises(ValueError) as excinfo:
+    with pytest.raises(ValueError, match="Child wallet lifetime spend cap exceeded"):
         await money.transfer(
             from_wallet_id=source.wallet_id,
             to_wallet_id=dest.wallet_id,
             amount=Decimal("10"),
         )
-
-    assert "cap exceeded" in str(excinfo.value).lower()
     assert await _balance(source.wallet_id) == Decimal("300")
     assert await _balance(dest.wallet_id) == Decimal("100")
 

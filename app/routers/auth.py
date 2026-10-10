@@ -13,6 +13,7 @@ from sqlalchemy import select, update
 from sqlmodel import col
 
 from app.core.jwt import JWTError, get_jwt_service
+from app.core.scopes import is_known_scope, unknown_scopes
 from app.db.database import get_session_factory
 from app.db.models import RefreshTokenModel
 from app.schemas.auth import (
@@ -55,11 +56,27 @@ async def exchange_api_key_for_tokens(
     jwt_svc = get_jwt_service()
 
     # Default scopes: all billing and tool invoke
-    scopes = (
-        request.scopes
-        if request.scopes is not None
-        else ["billing:charge", "tool:invoke"]
-    )
+    if request.scopes is None:
+        scopes = ["billing:charge", "tool:invoke"]
+    else:
+        # A token must never carry scope names the caller invented: the
+        # first route that checks scopes would trust them. Reject unknown
+        # names loudly (OAuth2-style invalid_scope) instead of silently
+        # dropping them, so a typo surfaces here rather than as a confusing
+        # 403 later. No existing client sends unknown scopes: callers either
+        # omit scopes or send documented names, and no route checks scopes
+        # yet, so nothing depends on custom names being honored.
+        unknown = unknown_scopes(request.scopes)
+        if unknown:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error": "invalid_scope",
+                    "message": ("Unknown scope(s) requested: " + ", ".join(unknown)),
+                    "unknown_scopes": unknown,
+                },
+            )
+        scopes = list(request.scopes)
 
     access_token = jwt_svc.create_access_token(
         wallet_id=db_key.wallet_id,
@@ -196,15 +213,21 @@ async def refresh_access_token(
             },
         )
 
+    # Tokens minted before scope validation could carry invented names, and
+    # refresh used to preserve them verbatim, laundering them into fresh
+    # chains. Intersect here (drop, rather than reject: the original
+    # requester is not on this call, and the safe direction needs no
+    # signal). Exchange-time rejection keeps new chains clean; this keeps
+    # old ones from renewing dirty.
+    scopes = [scope for scope in payload.scopes if is_known_scope(scope)]
+
     # Issue new tokens
     new_access = jwt_svc.create_access_token(
         wallet_id=payload.sub,
         key_id=origin_key_id,
-        scopes=payload.scopes,
+        scopes=scopes,
     )
-    new_refresh = jwt_svc.create_refresh_token(
-        wallet_id=payload.sub, scopes=payload.scopes
-    )
+    new_refresh = jwt_svc.create_refresh_token(wallet_id=payload.sub, scopes=scopes)
 
     # Store new refresh token, carrying the binding forward so rotation cannot
     # launder a chain into an unbound one.
