@@ -42,8 +42,9 @@ def _ledger_entry(**overrides):
     return LedgerEntryModel(**base)
 
 
-def test_wallet_corrupt_metadata_raises_typed_error(caplog):
-    wallet = _wallet(metadata_json="{not-json")
+@pytest.mark.parametrize("metadata_json", ["{not-json", ""])
+def test_wallet_corrupt_metadata_raises_typed_error(caplog, metadata_json):
+    wallet = _wallet(metadata_json=metadata_json)
     with caplog.at_level(logging.ERROR, logger="app.db.converters"):
         with pytest.raises(CorruptStoredJsonError, match="w-1"):
             wallet_model_to_response(wallet)
@@ -52,8 +53,9 @@ def test_wallet_corrupt_metadata_raises_typed_error(caplog):
     )
 
 
-def test_ledger_corrupt_metadata_raises_typed_error(caplog):
-    entry = _ledger_entry(metadata_json="{not-json")
+@pytest.mark.parametrize("metadata_json", ["{not-json", ""])
+def test_ledger_corrupt_metadata_raises_typed_error(caplog, metadata_json):
+    entry = _ledger_entry(metadata_json=metadata_json)
     with caplog.at_level(logging.ERROR, logger="app.db.converters"):
         with pytest.raises(CorruptStoredJsonError, match="e-1"):
             ledger_entry_model_to_schema(entry)

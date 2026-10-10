@@ -79,7 +79,7 @@ def wallet_model_to_response(
 ) -> WalletResponse:
     """Convert a WalletModel to a WalletResponse Pydantic schema."""
     metadata = {}
-    if wallet.metadata_json:
+    if wallet.metadata_json is not None:
         try:
             metadata = json.loads(wallet.metadata_json)
         except json.JSONDecodeError as exc:
@@ -146,7 +146,7 @@ def ledger_entry_model_to_schema(
 ) -> LedgerEntry:
     """Convert a LedgerEntryModel to a LedgerEntry Pydantic schema."""
     metadata = {}
-    if entry.metadata_json:
+    if entry.metadata_json is not None:
         try:
             metadata = json.loads(entry.metadata_json)
         except json.JSONDecodeError as exc:
