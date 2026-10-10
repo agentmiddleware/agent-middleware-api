@@ -424,15 +424,15 @@ def _event_evidence(record: Any, epoch_id: str | None) -> Evidence | None:
         )
     ):
         return None
-    disposition = _known(record["request_disposition"], _DISPOSITIONS)
+    raw_disposition = record["request_disposition"]
+    disposition = _known(raw_disposition, _DISPOSITIONS)
     if kind == "ingress" and (request_id is None or disposition is None):
         return None
-    if kind == "attempt" and disposition in (
-        "same_key_replay",
-        "status_read",
-        "non_execution_read",
+    if kind == "attempt" and (
+        (raw_disposition is not None and disposition is None)
+        or disposition in ("same_key_replay", "status_read", "non_execution_read")
     ):
-        disposition = None
+        return None
     return Evidence(
         source="insight_event",
         source_id=source_id,

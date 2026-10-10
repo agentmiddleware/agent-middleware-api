@@ -158,16 +158,41 @@ def _group_operation(
         gaps.add("ingress_time_missing")
     if len(tools) > 1:
         conflicts.add("tool_mismatch")
-    event_rows = tuple(row for row in rows if row.source == "insight_event")
+    execution_events = tuple(
+        row
+        for row in rows
+        if row.source == "insight_event"
+        and row.event_kind in ("ingress", "attempt", "terminal")
+        and (
+            row.request_disposition == "execution_intent" or row.event_kind == "attempt"
+        )
+    )
+    uncertain_events = tuple(
+        row
+        for row in rows
+        if row.source == "insight_event"
+        and row.event_kind in ("ingress", "terminal")
+        and row.request_disposition in (None, "unknown")
+    )
     metadata: dict[str, str | None] = {}
     for field in ("environment", "server_release", "deployment", "client_version"):
-        values = {getattr(row, field) for row in event_rows}
+        values = {getattr(row, field) for row in execution_events}
         present = values - {None}
-        if len(present) > 1:
+        # Unknown request kinds can contradict an execution release, not establish one.
+        uncertain_present = (
+            {getattr(row, field) for row in uncertain_events} - {None}
+            if execution_events
+            else set()
+        )
+        if len(present | uncertain_present) > 1:
             conflicts.add(f"{field}_metadata_conflict")
         if None in values:
             gaps.add(f"{field}_metadata_missing")
-        metadata[field] = next(iter(present)) if len(values) == 1 and present else None
+        metadata[field] = (
+            next(iter(present))
+            if len(values) == 1 and present and uncertain_present <= present
+            else None
+        )
     if heuristic_match:
         gaps.add("heuristic_correlation_candidate")
     source_ids = {(row.source, row.source_id) for row in rows}

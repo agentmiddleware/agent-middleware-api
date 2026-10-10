@@ -597,6 +597,78 @@ async def test_current_root_replay_and_status_trace_without_extra_attempts(
 
 
 @pytest.mark.asyncio
+async def test_nonexecution_labeled_attempt_is_rejected_with_provenance_gap(
+    scoped_session,
+) -> None:
+    from app.services.operation_insights import sources
+    from app.services.operation_insights.inspect import inspect_operations
+
+    session, scope = scoped_session
+    async with session.bind.begin() as connection:
+        await connection.run_sync(sources._EVENTS.create)
+    common = {
+        "logical_operation_id": "root-A",
+        "wallet_id": "wallet-A",
+        "original_operation_anchor_id": "root-A",
+    }
+    for record in (
+        {
+            **common,
+            "event_id": "root-A",
+            "kind": "ingress",
+            "request_id": "request-owner",
+            "request_disposition": "execution_intent",
+            "server_release": "r1",
+            "occurred_at": utc(2),
+            "ingested_at": utc(2),
+        },
+        {
+            **common,
+            "event_id": "invalid-attempt",
+            "kind": "attempt",
+            "attempt_id": "attempt-invalid",
+            "request_id": "request-status",
+            "request_disposition": "status_read",
+            "server_release": "r2",
+            "occurred_at": utc(3),
+            "ingested_at": utc(3),
+        },
+        {
+            **common,
+            "event_id": "unrecognized-attempt",
+            "kind": "attempt",
+            "attempt_id": "attempt-unrecognized",
+            "request_id": "request-unknown",
+            "request_disposition": "malformed_future_disposition",
+            "server_release": "r2",
+            "occurred_at": utc(3),
+            "ingested_at": utc(3),
+        },
+        {
+            **common,
+            "event_id": "unknown-attempt",
+            "kind": "attempt",
+            "attempt_id": "attempt-unknown",
+            "request_id": "request-owner",
+            "server_release": "r1",
+            "occurred_at": utc(4),
+            "ingested_at": utc(4),
+        },
+    ):
+        await session.execute(insert(sources._EVENTS).values(**record))
+
+    batch = await sources.read_evidence(
+        scope, Window(utc(2), utc(6), "ingress"), Limits(), session
+    )
+    operation = inspect_operations(batch, AccountMapping("unverified", ()))[0]
+
+    assert {row.source_id for row in batch.rows} == {"root-A", "unknown-attempt"}
+    assert "linked_event_provenance_ambiguous" in batch.coverage.gaps
+    assert operation.attempt_ids == ("attempt-unknown",)
+    assert operation.server_release == "r1"
+
+
+@pytest.mark.asyncio
 async def test_prospective_links_use_page_sized_bind_sets(scoped_session) -> None:
     from app.services.operation_insights import sources
 
