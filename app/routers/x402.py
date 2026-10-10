@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from app.core.auth import AuthContext, get_auth_context
 from app.core.time import utc_now
+from app.idempotency_gate import requires_idempotency
 from app.services.x402_engine import (
     X402Error,
     X402SettlementUncertainError,
@@ -147,6 +148,11 @@ async def _refuse_in_progress_settle(
 
 
 @router.post("/settle", response_model=X402SettleResponse)
+@requires_idempotency(
+    "POST /v1/x402/settle",
+    enforced=True,
+    mechanism="required Idempotency-Key header",
+)
 async def settle_payment_required(
     request: X402SettleRequest,
     idempotency_key: str = Header(..., alias="Idempotency-Key"),
