@@ -180,7 +180,9 @@ def approval_window_seconds() -> int:
 def human_approval_configured() -> bool:
     """Whether real-mode Sentinel calls are possible with current settings."""
     settings = get_settings()
-    if not sentinel_api_key_is_valid(settings.SENTINEL_API_KEY or ""):
+    if not sentinel_api_key_is_valid(
+        settings.SENTINEL_API_KEY.get_secret_value() or ""
+    ):
         return False
     try:
         normalize_sentinel_origin(
@@ -311,12 +313,14 @@ class SentinelClient:
 def sentinel_client_from_settings() -> SentinelClient:
     """Build a credentialed client only from a currently safe configuration."""
     settings = get_settings()
-    if not sentinel_api_key_is_valid(settings.SENTINEL_API_KEY or ""):
+    if not sentinel_api_key_is_valid(
+        settings.SENTINEL_API_KEY.get_secret_value() or ""
+    ):
         raise HumanApprovalUnavailableError()
     try:
         return SentinelClient(
             settings.SENTINEL_API_URL or "",
-            settings.SENTINEL_API_KEY,
+            settings.SENTINEL_API_KEY.get_secret_value(),
             allow_loopback=not is_production_like_environment(settings.ENVIRONMENT),
         )
     except SentinelTargetError as exc:

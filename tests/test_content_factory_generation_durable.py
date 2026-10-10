@@ -5,6 +5,7 @@ import uuid
 import httpx
 import pytest
 from httpx import ASGITransport, AsyncClient
+from pydantic import SecretStr
 from sqlalchemy import select
 
 from app.core.config import get_settings
@@ -32,7 +33,7 @@ def _restore_content_factory_sim():
 async def test_real_mode_persists_and_get_returns_row(monkeypatch):
     settings = get_settings()
     settings.SIMULATION_MODE_CONTENT_FACTORY = False
-    settings.LLM_API_KEY = "sk-test"
+    settings.LLM_API_KEY = SecretStr("sk-test")
 
     async def fake_llm(prompt: str, model: str | None = None):
         _ = prompt, model
@@ -137,7 +138,7 @@ def _enable_real_mode(monkeypatch, text: str = "Generated output text") -> list:
     """Switch to real mode with a fake provider; return the models it saw."""
     settings = get_settings()
     settings.SIMULATION_MODE_CONTENT_FACTORY = False
-    settings.LLM_API_KEY = "sk-test"
+    settings.LLM_API_KEY = SecretStr("sk-test")
     seen_models: list = []
 
     async def fake_llm(prompt: str, model: str | None = None):
@@ -288,7 +289,7 @@ async def test_provider_failure_returns_502_and_is_audited(
 ):
     settings = get_settings()
     settings.SIMULATION_MODE_CONTENT_FACTORY = False
-    settings.LLM_API_KEY = "sk-test"
+    settings.LLM_API_KEY = SecretStr("sk-test")
     settings.LLM_BASE_URL = "https://llm.internal.example/v1"
 
     real_async_client = httpx.AsyncClient

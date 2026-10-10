@@ -67,7 +67,10 @@ def _hide_permit_existence(exc: HTTPException) -> HTTPException:
 @router.get("", response_model=PermitListResponse)
 async def list_permits(
     wallet_id: str | None = Query(None),
-    status: str | None = Query(None),
+    status: str | None = Query(
+        None,
+        description="Filter by effective lifecycle status: active, expired, revoked.",
+    ),
     subject_key_id: str | None = Query(None),
     created_after: datetime | None = Query(None),
     created_before: datetime | None = Query(None),
@@ -170,7 +173,9 @@ async def create_permit(
     except (IdempotencyConflictError, IdempotencyInProgressError) as exc:
         raise HTTPException(status_code=409, detail=exc.args[0])
     if begun.replay and begun.replay.response_json:
-        return PermitResponse(**begun.replay.response_json)
+        # Keep the original permit identity/signature, but report live revocation
+        # and spending rather than the mutable state cached at issuance.
+        return await get_permit(begun.replay.response_json["permit_id"], auth=auth)
 
     try:
         permit = await get_permit_service().create_permit(
@@ -357,7 +362,7 @@ async def issue_action_permit(
     except (IdempotencyConflictError, IdempotencyInProgressError) as exc:
         raise HTTPException(status_code=409, detail=exc.args[0])
     if begun.replay and begun.replay.response_json:
-        return PermitResponse(**begun.replay.response_json)
+        return await get_permit(begun.replay.response_json["permit_id"], auth=auth)
     try:
         permit = await create_action_permit(request, auth)
     except PermitCreationRejectedError as exc:
