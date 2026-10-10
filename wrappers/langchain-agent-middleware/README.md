@@ -72,7 +72,7 @@ An identical replay with the same invocation key returns the original receipt
 without recharging. `idempotency_key` identifies one governed invocation, and
 the gateway rejects that key reused with changed invocation input with an
 idempotency conflict (`IdempotencyConflictError`; on `/mcp/messages` the gateway
-reports it as a JSON-RPC `-32603` `idempotency_key_reused` error rather than an
+reports it as a JSON-RPC `-32009` `idempotency_key_reused` error rather than an
 HTTP 409). `permit_idempotency_key` makes permit creation
 repeatable; it does not make a changed invocation an idempotent replay.
 

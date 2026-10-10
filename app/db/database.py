@@ -132,7 +132,9 @@ def get_engine() -> AsyncEngine | None:
         is_sqlite = db_url.startswith("sqlite")
 
         engine_kwargs: dict = {
-            "echo": get_settings().DEBUG,
+            # SQL_ECHO only: DEBUG must never turn on statement logging with
+            # bound values on its own.
+            "echo": get_settings().SQL_ECHO,
             "pool_pre_ping": True,
         }
         if is_sqlite:

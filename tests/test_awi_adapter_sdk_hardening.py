@@ -31,6 +31,7 @@ from typing import Any
 import httpx
 import pytest
 from httpx import ASGITransport, AsyncClient
+from pydantic import SecretStr
 
 import app.services.awi_external_adapter as adapter_module
 from app.core.config import get_settings
@@ -350,7 +351,7 @@ async def test_representation_embedding_is_non_zero_deterministic_and_labelled()
 
 @pytest.mark.anyio
 async def test_rag_embedding_fallback_is_logged_without_payload(monkeypatch, caplog):
-    monkeypatch.setattr(get_settings(), "LLM_API_KEY", "sk-test-not-real")
+    monkeypatch.setattr(get_settings(), "LLM_API_KEY", SecretStr("sk-test-not-real"))
     engine = AWIRAGEngine()
 
     async def _boom(text: str) -> list[float]:
@@ -371,7 +372,7 @@ async def test_rag_embedding_fallback_is_logged_without_payload(monkeypatch, cap
 
 @pytest.mark.anyio
 async def test_rag_embedding_without_key_skips_openai(monkeypatch, caplog):
-    monkeypatch.setattr(get_settings(), "LLM_API_KEY", "")
+    monkeypatch.setattr(get_settings(), "LLM_API_KEY", SecretStr(""))
     engine = AWIRAGEngine()
     calls: list[str] = []
 
