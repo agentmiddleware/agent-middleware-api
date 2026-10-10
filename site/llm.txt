@@ -36,6 +36,10 @@ Fetch in this order:
 3. GET https://api.thisisatest.tech/mcp/tools.json
 4. GET https://api.thisisatest.tech/openapi.json
 
+On production-like API deployments, GET /mcp/tools.json requires an
+operator-issued key and returns 401 without one. The other bootstrap GETs are
+unauthenticated. The local quickstart exposes the catalog without a key.
+
 Before assuming real side effects, fetch:
 
 GET https://api.thisisatest.tech/health/dependencies
@@ -79,7 +83,8 @@ Permits and tool calls on the live API need an operator-issued key.
 ## Try the complete loop locally (public source)
 
 No live API credentials are required. Clone
-https://github.com/agentmiddleware/agent-middleware-api. Two local paths are
+https://github.com/agentmiddleware/agent-middleware-api. Install Python 3.11+,
+git, make, curl, and uv first; see docs/quickstart.md. Two local paths are
 self-contained:
 
 Drive it yourself (a real server, you hold the keys):
