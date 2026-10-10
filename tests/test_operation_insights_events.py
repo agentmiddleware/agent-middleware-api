@@ -70,6 +70,38 @@ def test_event_reason_codes_are_fixed_allowlist() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "reason",
+    (
+        "permit_budget_exceeded",
+        "permit_budget_exceeds_wallet_balance",
+        "permit_constraint_unsupported_for_upstream",
+        "permit_max_calls_exceeded",
+        "permit_not_found",
+        "idempotency_key_required_for_human_approval",
+        "permit_expired",
+        "permit_revoked",
+        "permit_wallet_mismatch",
+        "permit_key_mismatch",
+        "permit_tool_not_allowed",
+        "permit_scope_missing",
+        "permit_signature_invalid",
+        "permit_aggregate_value_cap_exceeded",
+        "permit_forbidden_field",
+        "permit_denied",
+        "policy_denied",
+        "action_permit_denied",
+        "action_tool_binding_required",
+        "action_quote_unsupported",
+    ),
+)
+def test_established_permit_denial_codes_are_bounded(reason: str) -> None:
+    from app.services.operation_insights.events import allowlisted_reason_code
+
+    assert allowlisted_reason_code(reason) == reason
+    assert allowlisted_reason_code("permit_forbidden_field:raw-field") is None
+
+
 @pytest.mark.asyncio
 async def test_duplicate_event_is_idempotent_and_conflict_marks_coverage_gap(
     clean_database: None,
@@ -873,6 +905,107 @@ async def test_standard_mcp_read_and_early_wallet_denial_are_classified(
 
 
 @pytest.mark.asyncio
+async def test_standard_list_validation_error_is_not_recorded_as_success(
+    clean_database: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.core.config import get_settings
+    from app.db.models import InsightEventModel
+    from app.main import app
+    from app.routers import mcp_standard as standard_router
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "OPERATION_INSIGHTS_EVENTS_ENABLED", True)
+    monkeypatch.setattr(settings, "ENABLE_STANDARD_MCP_ENDPOINT", True)
+
+    async def invalid_manifest(_params):
+        return {"tools": [{}]}
+
+    monkeypatch.setattr(standard_router, "_handle_tools_list", invalid_manifest)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/mcp",
+            headers={
+                "X-API-Key": settings.VALID_API_KEYS.split(",")[0],
+                "Accept": "application/json, text/event-stream",
+                "Content-Type": "application/json",
+            },
+            json={"jsonrpc": "2.0", "id": "list-client-id", "method": "tools/list"},
+        )
+
+    async with get_session_factory()() as session:
+        rows = (await session.execute(select(InsightEventModel))).scalars().all()
+
+    assert response.status_code == 200
+    assert "error" in response.json()
+    assert len(rows) == 2
+    terminal = next(row for row in rows if row.kind == "terminal")
+    assert terminal.request_disposition == "non_execution_read"
+    assert terminal.gateway_outcome == "failed"
+    assert terminal.reason_code == "internal_error"
+
+
+@pytest.mark.asyncio
+async def test_standard_call_validation_emits_no_success_observation(
+    clean_database: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.core.config import get_settings
+    from app.db.models import InsightEventModel
+    from app.main import app
+    from app.routers import mcp_standard as standard_router
+    from tests.test_trust_helpers import provision_agent_wallet
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "OPERATION_INSIGHTS_EVENTS_ENABLED", True)
+    monkeypatch.setattr(settings, "ENABLE_STANDARD_MCP_ENDPOINT", True)
+
+    async def invalid_result(**_kwargs):
+        return {"content": "invalid", "isError": False}
+
+    observed_outcomes: list[str] = []
+    real_mark = standard_router.mark_current_request
+
+    def capture_outcome(**kwargs):
+        outcome = kwargs.get("gateway_outcome")
+        if outcome is not None:
+            observed_outcomes.append(outcome)
+        real_mark(**kwargs)
+
+    monkeypatch.setattr(standard_router, "_governed_tools_call", invalid_result)
+    monkeypatch.setattr(standard_router, "mark_current_request", capture_outcome)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        provisioned = await provision_agent_wallet(client)
+        response = await client.post(
+            "/mcp",
+            headers={
+                **provisioned["agent_headers"],
+                "Accept": "application/json, text/event-stream",
+                "Content-Type": "application/json",
+            },
+            json={
+                "jsonrpc": "2.0",
+                "id": "invalid-result-call",
+                "method": "tools/call",
+                "params": {"name": "synthetic.tool", "arguments": {}},
+            },
+        )
+
+    async with get_session_factory()() as session:
+        rows = (await session.execute(select(InsightEventModel))).scalars().all()
+
+    assert response.status_code == 200
+    assert response.json()["error"]["code"] == -32603
+    assert observed_outcomes == ["failed"]
+    assert len(rows) == 2
+    terminal = next(row for row in rows if row.kind == "terminal")
+    assert terminal.gateway_outcome == "failed"
+    assert terminal.reason_code == "internal_error"
+
+
+@pytest.mark.asyncio
 async def test_standard_mcp_invalid_key_is_a_terminal_denial(
     clean_database: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -915,6 +1048,246 @@ async def test_standard_mcp_invalid_key_is_a_terminal_denial(
     terminal = next(row for row in rows if row.kind == "terminal")
     assert terminal.gateway_outcome == "denied"
     assert terminal.reason_code == "request_validation_denied"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("transport", ("jsonrpc", "rest"))
+@pytest.mark.parametrize(
+    ("reason", "receipt_reason", "expected_reason"),
+    (
+        ("permit_budget_exceeded", None, "permit_budget_exceeded"),
+        ("permit_max_calls_exceeded", None, "permit_max_calls_exceeded"),
+        ("permit_not_found", None, "permit_not_found"),
+        ("permit_forbidden_field:synthetic-field", None, "tool_permission_denied"),
+        ("permit_not_found", "unknown_receipt_reason", "tool_permission_denied"),
+        (
+            "permit_max_calls_exceeded",
+            "permit_budget_exceeded",
+            "permit_budget_exceeded",
+        ),
+    ),
+)
+async def test_permit_denial_uses_only_authoritative_fixed_reason(
+    clean_database: None,
+    monkeypatch: pytest.MonkeyPatch,
+    transport: str,
+    reason: str,
+    receipt_reason: str | None,
+    expected_reason: str,
+) -> None:
+    from app.core.config import get_settings
+    from app.db.models import InsightEventModel
+    from app.main import app
+    from app.routers import mcp as mcp_router
+    from app.routers.mcp import ToolPermissionDenied
+    from app.services.operation_insights.events import mark_current_request
+    from tests.test_trust_helpers import provision_agent_wallet
+
+    monkeypatch.setattr(get_settings(), "OPERATION_INSIGHTS_EVENTS_ENABLED", True)
+
+    async def normalize_request(*_args, **_kwargs):
+        return object()
+
+    async def denied(_request):
+        mark_current_request(wallet_id=wallet_id)
+        raise ToolPermissionDenied(
+            reason,
+            receipt=(
+                {"reason_code": receipt_reason} if receipt_reason is not None else None
+            ),
+        )
+
+    monkeypatch.setattr(mcp_router._mcp_adapter, "normalize_request", normalize_request)
+    monkeypatch.setattr(mcp_router._mcp_adapter, "invoke", denied)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        provisioned = await provision_agent_wallet(client)
+        wallet_id = provisioned["agent_wallet_id"]
+        if transport == "jsonrpc":
+            response = await client.post(
+                "/mcp/messages",
+                headers=provisioned["agent_headers"],
+                json={
+                    "jsonrpc": "2.0",
+                    "id": "denied-call",
+                    "method": "tools/call",
+                    "params": {
+                        "name": "synthetic.tool",
+                        "arguments": {},
+                        "mcpContext": {"wallet_id": wallet_id},
+                    },
+                },
+            )
+        else:
+            response = await client.post(
+                "/mcp/tools/synthetic.tool/invoke",
+                headers=provisioned["agent_headers"],
+                json={
+                    "name": "synthetic.tool",
+                    "arguments": {},
+                    "mcp_context": {"wallet_id": wallet_id},
+                },
+            )
+
+    async with get_session_factory()() as session:
+        rows = (await session.execute(select(InsightEventModel))).scalars().all()
+
+    assert response.status_code == (200 if transport == "jsonrpc" else 403)
+    assert len(rows) == 2
+    terminal = next(row for row in rows if row.kind == "terminal")
+    assert terminal.gateway_outcome == "denied"
+    assert terminal.reason_code == expected_reason
+    assert terminal.wallet_id == wallet_id
+
+
+@pytest.mark.asyncio
+async def test_standard_human_approval_key_denial_keeps_reason(
+    clean_database: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.core.config import get_settings
+    from app.db.models import InsightEventModel
+    from app.main import app
+    from app.routers import mcp_standard as standard_router
+    from app.schemas.billing import ServiceCategory
+    from app.services.service_registry import get_service_registry
+    from tests.test_trust_helpers import provision_agent_wallet
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "OPERATION_INSIGHTS_EVENTS_ENABLED", True)
+    monkeypatch.setattr(settings, "ENABLE_STANDARD_MCP_ENDPOINT", True)
+
+    async def approval_required(_wallet_id):
+        return True
+
+    monkeypatch.setattr(
+        standard_router, "wallet_human_approval_required", approval_required
+    )
+    registry = get_service_registry()
+    tool_name = "insight.synthetic.approval"
+    registry.register_local(
+        service_id=tool_name,
+        name="Synthetic approval tool",
+        description="Synthetic approval fixture",
+        category=ServiceCategory.AGENT_COMMS,
+        func=lambda: {"ok": True},
+    )
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            provisioned = await provision_agent_wallet(client)
+            response = await client.post(
+                "/mcp",
+                headers={
+                    **provisioned["agent_headers"],
+                    "Accept": "application/json, text/event-stream",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "jsonrpc": "2.0",
+                    "id": "approval-call",
+                    "method": "tools/call",
+                    "params": {"name": tool_name, "arguments": {}},
+                },
+            )
+    finally:
+        registry.unregister_local(tool_name)
+
+    async with get_session_factory()() as session:
+        rows = (await session.execute(select(InsightEventModel))).scalars().all()
+
+    assert response.status_code == 200
+    assert response.json()["error"]["code"] == -32003
+    assert len(rows) == 2
+    terminal = next(row for row in rows if row.kind == "terminal")
+    assert terminal.gateway_outcome == "denied"
+    assert terminal.reason_code == "idempotency_key_required_for_human_approval"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("reason", "at_mint", "expected_code"),
+    (
+        ("permit_max_calls_exceeded", False, -32003),
+        ("permit_budget_exceeds_wallet_balance", True, -32004),
+    ),
+)
+async def test_standard_early_permit_denial_keeps_reason(
+    clean_database: None,
+    monkeypatch: pytest.MonkeyPatch,
+    reason: str,
+    at_mint: bool,
+    expected_code: int,
+) -> None:
+    from app.core.config import get_settings
+    from app.db.models import InsightEventModel
+    from app.main import app
+    from app.routers import mcp_standard as standard_router
+    from app.routers.mcp import ToolPermissionDenied
+    from app.schemas.billing import ServiceCategory
+    from app.services.permits import PermitError
+    from app.services.service_registry import get_service_registry
+    from tests.test_trust_helpers import provision_agent_wallet
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "OPERATION_INSIGHTS_EVENTS_ENABLED", True)
+    monkeypatch.setattr(settings, "ENABLE_STANDARD_MCP_ENDPOINT", True)
+
+    async def no_approval(_wallet_id):
+        return False
+
+    async def synthetic_permit(**_kwargs):
+        if at_mint:
+            raise standard_router._permit_error(PermitError(reason))
+        return "permit-synthetic"
+
+    async def denied_call(*_args, **_kwargs):
+        raise ToolPermissionDenied(reason)
+
+    monkeypatch.setattr(standard_router, "wallet_human_approval_required", no_approval)
+    monkeypatch.setattr(standard_router, "_mint_auto_permit", synthetic_permit)
+    monkeypatch.setattr(standard_router, "_handle_tools_call", denied_call)
+    registry = get_service_registry()
+    tool_name = "insight.synthetic.permit-denial"
+    registry.register_local(
+        service_id=tool_name,
+        name="Synthetic permit denial tool",
+        description="Synthetic permit denial fixture",
+        category=ServiceCategory.AGENT_COMMS,
+        func=lambda: {"ok": True},
+    )
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            provisioned = await provision_agent_wallet(client)
+            response = await client.post(
+                "/mcp",
+                headers={
+                    **provisioned["agent_headers"],
+                    "Accept": "application/json, text/event-stream",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "jsonrpc": "2.0",
+                    "id": "permit-denial-call",
+                    "method": "tools/call",
+                    "params": {"name": tool_name, "arguments": {}},
+                },
+            )
+    finally:
+        registry.unregister_local(tool_name)
+
+    async with get_session_factory()() as session:
+        rows = (await session.execute(select(InsightEventModel))).scalars().all()
+
+    assert response.status_code == 200
+    assert response.json()["error"]["code"] == expected_code
+    assert len(rows) == 2
+    terminal = next(row for row in rows if row.kind == "terminal")
+    assert terminal.gateway_outcome == "denied"
+    assert terminal.reason_code == reason
 
 
 @pytest.mark.asyncio

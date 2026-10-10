@@ -69,6 +69,7 @@ from ..db.models import PermitModel
 from ..services.mcp_generator import get_mcp_generator
 from ..services.operation_insights.events import (
     allowlisted_reason_code,
+    bounded_governed_reason,
     mark_current_request,
     schedule_attempt,
 )
@@ -737,11 +738,10 @@ async def handle_messages(
         except ToolPermissionDenied as e:
             mark_current_request(
                 gateway_outcome="denied",
-                reason_code=(
-                    allowlisted_reason_code(
-                        e.receipt.get("reason_code") if e.receipt else None
-                    )
-                    or "tool_permission_denied"
+                reason_code=bounded_governed_reason(
+                    receipt=e.receipt,
+                    exception_reason=str(e),
+                    fallback="tool_permission_denied",
                 ),
             )
             error_payload = {
@@ -771,11 +771,10 @@ async def handle_messages(
                     if e.jsonrpc_code in {-32001, -32002, -32003, -32004, -32602}
                     else "failed"
                 ),
-                reason_code=(
-                    allowlisted_reason_code(
-                        e.receipt.get("reason_code") if e.receipt else None
-                    )
-                    or "governed_tool_error"
+                reason_code=bounded_governed_reason(
+                    receipt=e.receipt,
+                    exception_reason=str(e),
+                    fallback="governed_tool_error",
                 ),
             )
             error_payload = {
@@ -4772,11 +4771,10 @@ async def invoke_tool(
     except ToolPermissionDenied as exc:
         mark_current_request(
             gateway_outcome="denied",
-            reason_code=(
-                allowlisted_reason_code(
-                    exc.receipt.get("reason_code") if exc.receipt else None
-                )
-                or "tool_permission_denied"
+            reason_code=bounded_governed_reason(
+                receipt=exc.receipt,
+                exception_reason=str(exc),
+                fallback="tool_permission_denied",
             ),
         )
         detail = {"error": str(exc)}
@@ -4794,11 +4792,10 @@ async def invoke_tool(
                 if exc.jsonrpc_code in {-32001, -32002, -32003, -32004, -32602}
                 else "failed"
             ),
-            reason_code=(
-                allowlisted_reason_code(
-                    exc.receipt.get("reason_code") if exc.receipt else None
-                )
-                or "governed_tool_error"
+            reason_code=bounded_governed_reason(
+                receipt=exc.receipt,
+                exception_reason=str(exc),
+                fallback="governed_tool_error",
             ),
         )
         detail = {"error": str(exc)}
