@@ -1,0 +1,70 @@
+[
+  {
+    "name": "crash_before_prepare",
+    "rows": [{"source": "idempotency", "id": "record-1", "at": 1, "facts": {"idempotency_outcome": "in_progress"}}],
+    "expected": {"gateway_outcome": "unknown", "effect_state": "unknown", "refund_state": "unknown", "budget_release_state": "unknown", "failure_class": "unknown", "next_action": "inspect", "attempts": 0}
+  },
+  {
+    "name": "crash_after_prepare",
+    "rows": [{"source": "dispatch", "id": "attempt-1", "at": 2, "facts": {"dispatch_state": "prepared"}}],
+    "expected": {"gateway_outcome": "unknown", "effect_state": "unknown", "refund_state": "unknown", "budget_release_state": "unknown", "failure_class": "unknown", "next_action": "reconcile", "attempts": 1}
+  },
+  {
+    "name": "crash_after_debit",
+    "rows": [
+      {"source": "dispatch", "id": "attempt-1", "at": 2, "facts": {"dispatch_state": "prepared"}},
+      {"source": "ledger", "id": "debit-1", "at": 3, "facts": {"ledger_action": "debit", "ledger_link_verified": true}}
+    ],
+    "expected": {"gateway_outcome": "unknown", "effect_state": "unknown", "refund_state": "unknown", "budget_release_state": "unknown", "failure_class": "unknown", "next_action": "reconcile", "attempts": 1}
+  },
+  {
+    "name": "crash_after_dispatch_claim",
+    "rows": [{"source": "dispatch", "id": "attempt-1", "at": 4, "facts": {"dispatch_state": "dispatch_claimed"}}],
+    "expected": {"gateway_outcome": "unknown", "effect_state": "unknown", "refund_state": "unknown", "budget_release_state": "unknown", "failure_class": "unknown", "next_action": "manual_review", "attempts": 1}
+  },
+  {
+    "name": "lost_ack_after_effect",
+    "rows": [
+      {"source": "dispatch", "id": "attempt-1", "at": 4, "facts": {"dispatch_state": "dispatch_claimed"}},
+      {"source": "insight_event", "id": "effect-1", "at": 5, "facts": {"effect_state": "confirmed"}}
+    ],
+    "expected": {"gateway_outcome": "unknown", "effect_state": "confirmed", "refund_state": "unknown", "budget_release_state": "unknown", "failure_class": "unknown", "next_action": "manual_review", "attempts": 1}
+  },
+  {
+    "name": "crash_after_gateway_response_before_receipt",
+    "rows": [{"source": "dispatch", "id": "attempt-1", "at": 5, "facts": {"dispatch_state": "succeeded"}}],
+    "expected": {"gateway_outcome": "succeeded", "effect_state": "unknown", "refund_state": "unknown", "budget_release_state": "unknown", "failure_class": "none", "next_action": "inspect", "attempts": 1}
+  },
+  {
+    "name": "receipt_committed",
+    "rows": [
+      {"source": "dispatch", "id": "attempt-1", "at": 5, "facts": {"dispatch_state": "succeeded"}},
+      {"source": "receipt", "id": "receipt-1", "at": 6, "facts": {"gateway_outcome": "succeeded"}}
+    ],
+    "expected": {"gateway_outcome": "succeeded", "effect_state": "unknown", "refund_state": "unknown", "budget_release_state": "unknown", "failure_class": "none", "next_action": "inspect", "attempts": 1}
+  },
+  {
+    "name": "dispatch_refunded_without_effect_proof",
+    "rows": [
+      {"source": "dispatch", "id": "attempt-1", "at": 4, "facts": {"dispatch_state": "dispatch_claimed"}},
+      {"source": "ledger", "id": "refund-1", "at": 7, "facts": {"ledger_action": "refund", "ledger_link_verified": true, "refund_amount_matches_debit": true}}
+    ],
+    "expected": {"gateway_outcome": "unknown", "effect_state": "unknown", "refund_state": "completed", "budget_release_state": "unknown", "failure_class": "unknown", "next_action": "manual_review", "attempts": 1}
+  },
+  {
+    "name": "refund_failed_after_gateway_success",
+    "rows": [
+      {"source": "receipt", "id": "receipt-1", "at": 6, "facts": {"gateway_outcome": "succeeded"}},
+      {"source": "idempotency", "id": "record-1", "at": 7, "facts": {"refund_state": "failed"}, "reason": "refund_failed"}
+    ],
+    "expected": {"gateway_outcome": "succeeded", "effect_state": "unknown", "refund_state": "failed", "budget_release_state": "unknown", "failure_class": "unexpected_fault", "next_action": "reconcile", "attempts": 0}
+  },
+  {
+    "name": "budget_released_without_refund_proof",
+    "rows": [
+      {"source": "dispatch", "id": "attempt-1", "at": 2, "facts": {"dispatch_state": "prepared"}},
+      {"source": "insight_event", "id": "checkpoint-1", "at": 8, "facts": {"budget_release_state": "completed"}}
+    ],
+    "expected": {"gateway_outcome": "unknown", "effect_state": "unknown", "refund_state": "unknown", "budget_release_state": "completed", "failure_class": "unknown", "next_action": "reconcile", "attempts": 1}
+  }
+]
