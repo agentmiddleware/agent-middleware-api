@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import re
 import os
+from collections.abc import Mapping
 from contextvars import ContextVar, Token
 from dataclasses import dataclass as standard_dataclass
 from dataclasses import fields
@@ -40,18 +41,38 @@ _MAX_PENDING_EVENTS = 256
 _SAFE_ID = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}\Z")
 _REASON_CODES = frozenset(
     {
+        "action_permit_denied",
         "action_permit_required",
+        "action_quote_unsupported",
+        "action_tool_binding_required",
         "delivery_uncertain",
         "governed_tool_error",
         "human_approval_pending",
         "idempotency_key_required",
+        "idempotency_key_required_for_human_approval",
         "idempotency_key_reused",
         "insufficient_funds",
         "internal_error",
         "method_not_found",
         "operation_contended",
+        "permit_aggregate_value_cap_exceeded",
+        "permit_budget_exceeded",
+        "permit_budget_exceeds_wallet_balance",
+        "permit_constraint_unsupported_for_upstream",
+        "permit_denied",
+        "permit_expired",
+        "permit_forbidden_field",
+        "permit_key_mismatch",
+        "permit_max_calls_exceeded",
+        "permit_not_found",
         "permit_recipient_domain_mismatch",
         "permit_required",
+        "permit_revoked",
+        "permit_scope_missing",
+        "permit_signature_invalid",
+        "permit_tool_not_allowed",
+        "permit_wallet_mismatch",
+        "policy_denied",
         "request_validation_denied",
         "response_rejected",
         "terminal_record_contended",
@@ -197,6 +218,14 @@ def normalize_client_version(value: str | None, allowed: frozenset[str]) -> str 
 def allowlisted_reason_code(value: object) -> str | None:
     """Reject free text even when it has the shape of a safe identifier."""
     return value if isinstance(value, str) and value in _REASON_CODES else None
+
+
+def bounded_governed_reason(
+    *, receipt: Mapping[str, object] | None, exception_reason: str, fallback: str
+) -> str:
+    """A receipt's fixed reason takes precedence over exception text."""
+    source = receipt.get("reason_code") if receipt is not None else exception_reason
+    return allowlisted_reason_code(source) or fallback
 
 
 async def record_event(event: InsightEvent) -> None:

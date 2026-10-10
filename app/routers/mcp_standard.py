@@ -96,7 +96,11 @@ from app.services.receipts import ReceiptWriteContendedError
 from app.services.billing_engine import LedgerWriteContendedError
 from app.core.config import get_settings
 from app.core.time import utc_now
-from app.services.operation_insights.events import mark_current_request
+from app.services.operation_insights.events import (
+    allowlisted_reason_code,
+    bounded_governed_reason,
+    mark_current_request,
+)
 from app.routers.mcp import (
     _MAX_JSON_NESTING_DEPTH,
     GovernedToolError,
@@ -178,6 +182,10 @@ def _permit_error(
     own tool cost is disclosed (it is public in discovery); the wallet balance
     is not restated because the caller can read it via ``/v1/me``.
     """
+    mark_current_request(
+        gateway_outcome="denied",
+        reason_code=allowlisted_reason_code(exc.reason) or "governed_tool_error",
+    )
     if exc.reason == "permit_budget_exceeds_wallet_balance":
         data: dict[str, Any] = {
             "error": "authority_required",
@@ -506,6 +514,10 @@ async def _governed_tools_call(
     if requires_human_approval and not client_idempotency_key and not permit_id:
         # Without a client key every retry would mint a fresh permit and page
         # a human again instead of polling the pending decision.
+        mark_current_request(
+            gateway_outcome="denied",
+            reason_code="idempotency_key_required_for_human_approval",
+        )
         raise _mcp_error(
             -32003,
             "idempotency_key_required_for_human_approval",
@@ -623,6 +635,14 @@ async def _governed_tools_call(
             e.jsonrpc_code, e.reason, _terminal_record_contended_data(e.reason)
         ) from e
     except ToolPermissionDenied as e:
+        mark_current_request(
+            gateway_outcome="denied",
+            reason_code=bounded_governed_reason(
+                receipt=e.receipt,
+                exception_reason=str(e),
+                fallback="tool_permission_denied",
+            ),
+        )
         denial_data: dict[str, Any] = {}
         if e.receipt:
             denial_data["receipt"] = e.receipt
@@ -641,6 +661,13 @@ async def _governed_tools_call(
             return _delivery_uncertain_tool_result(
                 e, client_key_supplied=bool(client_idempotency_key)
             )
+        mark_current_request(
+            reason_code=bounded_governed_reason(
+                receipt=e.receipt,
+                exception_reason=str(e),
+                fallback="governed_tool_error",
+            )
+        )
         data = dict(e.extra_data)
         if e.receipt:
             data["receipt"] = e.receipt
@@ -674,13 +701,17 @@ def _build_standard_mcp_server() -> Server:
     @server.list_tools()
     async def list_tools() -> list[mcp_types.Tool]:
         mark_current_request(disposition="non_execution_read")
-        result = await _handle_tools_list({})
+        try:
+            result = await _handle_tools_list({})
+            tools = []
+            for tool in result["tools"]:
+                payload = dict(tool)
+                payload.setdefault("inputSchema", {"type": "object"})
+                tools.append(mcp_types.Tool.model_validate(payload))
+        except Exception:
+            mark_current_request(gateway_outcome="failed", reason_code="internal_error")
+            raise
         mark_current_request(gateway_outcome="succeeded")
-        tools = []
-        for tool in result["tools"]:
-            payload = dict(tool)
-            payload.setdefault("inputSchema", {"type": "object"})
-            tools.append(mcp_types.Tool.model_validate(payload))
         return tools
 
     async def handle_call_tool(
@@ -723,18 +754,18 @@ def _build_standard_mcp_server() -> Server:
                 permit_id=_action_permit_reference(req.params),
                 request_id=request_id,
             )
-            if result.get("isError") is False:
-                mark_current_request(gateway_outcome="succeeded")
-
             payload = dict(result)
             receipt = payload.get("receipt")
             if receipt is not None:
                 meta = dict(payload.get("_meta") or {})
                 meta[_RECEIPT_META_KEY] = receipt
                 payload["_meta"] = meta
-            return mcp_types.ServerResult(
+            validated = mcp_types.ServerResult(
                 mcp_types.CallToolResult.model_validate(payload)
             )
+            if result.get("isError") is False:
+                mark_current_request(gateway_outcome="succeeded")
+            return validated
         except McpError as e:
             code = e.error.code
             mark_current_request(
