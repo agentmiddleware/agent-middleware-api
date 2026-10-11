@@ -6210,10 +6210,12 @@
           },
           "balance": {
             "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Balance"
           },
           "daily_spend_used": {
             "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Daily Spend Used"
           },
           "human_approval_required": {
@@ -6655,10 +6657,12 @@
           },
           "credits_authorized": {
             "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Credits Authorized"
           },
           "credits_charged": {
             "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Credits Charged"
           },
           "error_code": {
@@ -7722,6 +7726,7 @@
           },
           "max_credits": {
             "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Max Credits"
           },
           "permit_expires_at": {
@@ -7942,10 +7947,12 @@
           },
           "max_credits": {
             "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Max Credits"
           },
           "spent_credits": {
             "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Spent Credits"
           },
           "expires_at": {
@@ -8002,7 +8009,8 @@
           "aggregate_value_cap": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
               },
               {
                 "type": "null"
@@ -8107,7 +8115,8 @@
                 "type": "number"
               },
               {
-                "type": "string"
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
               },
               {
                 "type": "null"
@@ -8850,6 +8859,7 @@
           },
           "quoted_credits": {
             "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Quoted Credits"
           },
           "category": {
@@ -9231,10 +9241,12 @@
           },
           "credits_authorized": {
             "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Credits Authorized"
           },
           "credits_charged": {
             "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Credits Charged"
           },
           "outcome": {
@@ -9388,6 +9400,7 @@
           },
           "credits": {
             "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Credits"
           },
           "status": {
