@@ -19,8 +19,9 @@ from sqlalchemy.orm import Session
 # else is a "proof surface" — example workloads that exercise the spine but are
 # NOT the product (see README "Core platform vs. example workloads"). Tests for
 # these are auto-marked `proof` so the inner dev loop can skip them:
-#     make test       -> fast, core only  (pytest -m "not proof")
+#     make test       -> fast, core only  (pytest -m "not proof and not perf")
 #     make test-all   -> full suite       (what CI runs)
+#     make test-perf  -> wall-clock latency budgets only (hand-marked `perf`)
 # Conservative by design: when a test's surface is ambiguous, leave it OUT of
 # this set so it stays in the fast (core) loop and is never silently skipped.
 PROOF_SURFACE_TEST_MODULES = frozenset(
@@ -78,6 +79,7 @@ DORMANT_SURFACE_TEST_MODULES = frozenset(
         "test_golden_path",
         "test_kyc",
         "test_mcp_trust_mode",
+        "test_operation_insights_events",
         "test_mcp_upstream_governed",
         "test_planner_constraints",
         "test_pods",
@@ -213,7 +215,7 @@ def interleaving_factory(real_factory, hook, state, *, fire_on: int = 1):
         async def __aexit__(self, *exc):
             return await self._cm.__aexit__(*exc)
 
-    return lambda: (lambda: _CM(real_factory()))
+    return lambda: lambda: _CM(real_factory())
 
 
 def running_on_sqlite() -> bool:
@@ -373,6 +375,10 @@ async def setup_database():
 #: tests/test_clean_database_coverage.py's exemption set fails that test, so a
 #: new trust-plane table cannot silently escape per-test cleanup.
 CLEAN_DATABASE_TABLES = (
+    "operation_insight_events",
+    "insight_reporting_wallet_grants",
+    "insight_wallet_ownership_epochs",
+    "insight_reporting_principals",
     "receipts",
     "mcp_dispatch_attempts",
     "human_approvals",
