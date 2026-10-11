@@ -109,7 +109,7 @@ async def test_rag_query_insufficient_funds_aborts_and_replays(client, clean_dat
             "to_wallet_id": provisioned["sponsor_wallet_id"],
             "amount": 998,
         },
-        headers=BOOTSTRAP_HEADERS,
+        headers={**BOOTSTRAP_HEADERS, "Idempotency-Key": "awi-broke-drain-1"},
     )
     assert transfer.status_code == 200, transfer.text
 

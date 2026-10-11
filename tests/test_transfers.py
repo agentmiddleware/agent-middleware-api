@@ -21,6 +21,13 @@ def api_headers():
     return {"X-API-Key": "test-key"}
 
 
+def _keyed(api_headers):
+    """Copy headers with a fresh Idempotency-Key (money endpoints require one)."""
+    from uuid import uuid4
+
+    return {**api_headers, "Idempotency-Key": f"test-{uuid4()}"}
+
+
 @pytest.fixture
 async def two_wallets(client, api_headers):
     """Create two wallets for transfer testing."""
@@ -63,7 +70,7 @@ async def test_transfer_success(client, two_wallets, api_headers):
             "amount": 1000.0,
             "description": "Payment for services",
         },
-        headers=api_headers,
+        headers=_keyed(api_headers),
     )
 
     assert resp.status_code == 200
@@ -97,7 +104,7 @@ async def test_transfer_insufficient_funds(client, two_wallets, api_headers):
             "to_wallet_id": receiver_id,
             "amount": 50000.0,  # More than sender has
         },
-        headers=api_headers,
+        headers=_keyed(api_headers),
     )
 
     assert resp.status_code == 402
@@ -117,7 +124,7 @@ async def test_transfer_same_wallet_fails(client, two_wallets, api_headers):
             "to_wallet_id": sender_id,
             "amount": 100.0,
         },
-        headers=api_headers,
+        headers=_keyed(api_headers),
     )
 
     assert resp.status_code == 400
@@ -137,7 +144,7 @@ async def test_transfer_zero_amount_fails(client, two_wallets, api_headers):
             "to_wallet_id": receiver_id,
             "amount": 0.0,
         },
-        headers=api_headers,
+        headers=_keyed(api_headers),
     )
 
     assert resp.status_code == 422  # FastAPI validation error
@@ -153,7 +160,7 @@ async def test_transfer_wallet_not_found(client, api_headers):
             "to_wallet_id": "also-nonexistent",
             "amount": 100.0,
         },
-        headers=api_headers,
+        headers=_keyed(api_headers),
     )
 
     assert resp.status_code == 404
@@ -173,7 +180,7 @@ async def test_transfer_records_ledger(client, two_wallets, api_headers):
             "amount": 500.0,
             "correlation_id": "test-correlation-123",
         },
-        headers=api_headers,
+        headers=_keyed(api_headers),
     )
 
     sender_ledger = await client.get(

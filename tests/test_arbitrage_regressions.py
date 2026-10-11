@@ -32,7 +32,10 @@ async def test_arbitrage_requires_admin_before_loading_global_economics(
     charged = await client.post(
         "/v1/billing/charge",
         params={"wallet_id": owner["agent_wallet_id"], "service": "platform_fee"},
-        headers=owner["agent_headers"],
+        headers={
+            **owner["agent_headers"],
+            "Idempotency-Key": "arbitrage-admin-charge-1",
+        },
     )
     assert charged.status_code == 200
     for agent in (owner, other):

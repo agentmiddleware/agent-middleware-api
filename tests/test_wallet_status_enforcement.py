@@ -26,6 +26,13 @@ from app.services.wallet_engine import MAX_CHILD_WALLET_TTL_SECONDS
 BOOTSTRAP = {"X-API-Key": "test-key"}
 
 
+def _keyed(headers):
+    """Copy headers with a fresh Idempotency-Key (money endpoints require one)."""
+    from uuid import uuid4
+
+    return {**headers, "Idempotency-Key": f"test-{uuid4()}"}
+
+
 @pytest.fixture
 async def client():
     transport = ASGITransport(app=app)
@@ -200,7 +207,7 @@ async def test_frozen_wallet_cannot_transfer_out(client, clean_database):
 
     resp = await client.post(
         f"/v1/billing/transfer?from_wallet_id={agent}&to_wallet_id={other}&amount=10",
-        headers=BOOTSTRAP,
+        headers=_keyed(BOOTSTRAP),
     )
     assert resp.status_code == 400
     assert resp.json()["detail"]["error"] == "transfer_error"
@@ -274,7 +281,7 @@ async def test_child_cap_enforced_on_transfer(client, clean_database):
     # out would exceed the cap and must be rejected, closing the transfer-escape.
     resp = await client.post(
         f"/v1/billing/transfer?from_wallet_id={child}&to_wallet_id={sink}&amount=10",
-        headers=BOOTSTRAP,
+        headers=_keyed(BOOTSTRAP),
     )
     assert resp.status_code == 400
     assert resp.json()["detail"]["error"] == "transfer_error"
@@ -457,11 +464,11 @@ async def test_expired_ancestor_blocks_legacy_descendant_charge_and_transfer(
 
     charge = await client.post(
         f"/v1/billing/charge?wallet_id={grandchild}&service=iot_bridge&units=1",
-        headers=BOOTSTRAP,
+        headers=_keyed(BOOTSTRAP),
     )
     transfer = await client.post(
         f"/v1/billing/transfer?from_wallet_id={grandchild}&to_wallet_id={sink}&amount=10",
-        headers=BOOTSTRAP,
+        headers=_keyed(BOOTSTRAP),
     )
 
     assert charge.status_code == 403
@@ -624,7 +631,7 @@ async def test_unexpired_child_wallet_still_operates(client, clean_database):
 
     response = await client.post(
         f"/v1/billing/charge?wallet_id={child}&service=iot_bridge&units=1",
-        headers=BOOTSTRAP,
+        headers=_keyed(BOOTSTRAP),
     )
 
     assert response.status_code == 200
@@ -645,7 +652,7 @@ async def test_child_wallet_without_ttl_still_operates(client, clean_database):
 
     response = await client.post(
         f"/v1/billing/charge?wallet_id={child}&service=iot_bridge&units=1",
-        headers=BOOTSTRAP,
+        headers=_keyed(BOOTSTRAP),
     )
 
     assert response.status_code == 200
@@ -674,6 +681,6 @@ async def test_active_wallet_still_operates(client, clean_database):
     _, agent = await _make_agent(client)
     resp = await client.post(
         f"/v1/billing/charge?wallet_id={agent}&service=iot_bridge&units=1",
-        headers=BOOTSTRAP,
+        headers=_keyed(BOOTSTRAP),
     )
     assert resp.status_code == 200

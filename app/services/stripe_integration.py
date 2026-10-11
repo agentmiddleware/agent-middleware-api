@@ -89,6 +89,7 @@ class StripeIntegration:
         wallet_id: str,
         amount_fiat: Decimal,
         currency: str = "usd",
+        idempotency_key: str | None = None,
     ) -> dict:
         """
         Create a Stripe PaymentIntent for fiat top-up.
@@ -97,6 +98,9 @@ class StripeIntegration:
             wallet_id: The wallet to credit after successful payment
             amount_fiat: Amount in fiat currency (e.g., 50.00 for $50)
             currency: ISO 4217 currency code (default: usd)
+            idempotency_key: Caller-supplied key forwarded to Stripe, so a
+                retried prepare with the same key returns the same intent
+                instead of creating a second one.
 
         Returns:
             {
@@ -144,6 +148,9 @@ class StripeIntegration:
         )
 
         def _create_top_up_payment_intent() -> Any:
+            create_kwargs: dict[str, Any] = {}
+            if idempotency_key is not None:
+                create_kwargs["idempotency_key"] = idempotency_key
             return stripe.PaymentIntent.create(
                 amount=amount_cents,
                 currency=SUPPORTED_TOP_UP_CURRENCY,
@@ -152,6 +159,7 @@ class StripeIntegration:
                     "credits": credits_metadata,
                     "idempotency_key": str(uuid4()),
                 },
+                **create_kwargs,
             )
 
         # The Stripe SDK call is synchronous network I/O; run it on a worker

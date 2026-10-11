@@ -256,6 +256,19 @@ class Settings(BaseSettings):
     # Require KYC verification before allowing fiat top-ups (default: false for dev)
     KYC_REQUIRED_FOR_TOPUP: bool = False
 
+    # --- Money-movement idempotency ---
+    # When true, the money-moving endpoints (charge, transfer, fiat top-up
+    # prepare) refuse requests without an Idempotency-Key header instead of
+    # executing them unprotected. A retried request without a key cannot be
+    # told apart from a new one, so it would bill twice.
+    # Default false (opt-in): deployed clients that predate key support
+    # (b2a_sdk <= 0.5.0 charge without a caller key, prepare_top_up with no
+    # key at all, raw HTTP integrations) keep working. A request that does
+    # send a key is always deduplicated. Turn this on per environment only
+    # after every client sends Idempotency-Key on charge, transfer and
+    # top-up prepare.
+    REQUIRE_IDEMPOTENCY_KEY: bool = False
+
     # --- Credit Exchange Rate ---
     # Credits minted per $1.00 USD settled (1000 credits = $1.00, 1 credit =
     # $0.001). This is the single source of truth: Stripe settlement mints
