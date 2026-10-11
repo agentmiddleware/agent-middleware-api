@@ -237,9 +237,17 @@ async def test_acp_checkout_end_to_end(client, spt_stub, clean_database):
     assert chain_verdict["checked_events"] >= 1
 
 
+@pytest.mark.perf
 @pytest.mark.anyio
 async def test_acp_checkout_end_to_end_under_45ms(client, spt_stub, clean_database):
-    """Median service-level checkout latency stays under 45ms (SPT stubbed)."""
+    """Median service-level checkout latency stays under 45ms (SPT stubbed).
+
+    Marked `perf`: asserting a wall-clock budget measures the runner as much
+    as the code, so a loaded dev machine fails this with nothing actually
+    wrong. `make test` therefore skips it and `make test-perf` runs it. The
+    budget itself is NOT softened — CI selects on `not production_trust`
+    only, so this test and its 45ms bound still run on every push.
+    """
     ctx = await provision_agent_wallet(client)
     adapter = get_acp_commerce_adapter()
 
@@ -267,7 +275,8 @@ async def test_acp_checkout_end_to_end_under_45ms(client, spt_stub, clean_databa
 
     # Median rather than max: a single noisy CI scheduling blip must not
     # flake the suite, but the typical checkout must stay fast. The bound is
-    # env-overridable so a slow runner can widen it without editing code.
+    # env-overridable for local runs on a slow machine; CI must keep the
+    # default (pinned by tests/test_perf_marker_contract.py).
     budget_s = float(os.environ.get("ACP_CHECKOUT_MEDIAN_BUDGET_S", "0.045"))
     assert statistics.median(samples) < budget_s, samples
 
