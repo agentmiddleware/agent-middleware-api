@@ -20,6 +20,7 @@ from ..core.dependencies import get_agent_money
 from ..idempotency_gate import requires_idempotency
 from .http_idempotency import (
     begin_http_idempotency as _begin_idempotency,
+    require_idempotency_key as _require_idempotency_key,
 )
 from ..services.agent_money import (
     AgentMoney,
@@ -611,6 +612,7 @@ async def charge_wallet(
     money: AgentMoney = Depends(get_agent_money),
 ):
     _require_wallet_access(auth, wallet_id)
+    _require_idempotency_key(idempotency_key)
     category = service_category or service
     if not category:
         raise HTTPException(
@@ -645,9 +647,10 @@ async def charge_wallet(
             },
         )
 
-    # Idempotency is opt-in via the Idempotency-Key header: a client that
-    # retries a charge (e.g. after a timeout) with the same key gets the
-    # original outcome replayed instead of being billed twice.
+    # A client that retries a charge (e.g. after a timeout) with the same
+    # Idempotency-Key gets the original outcome replayed instead of being
+    # billed twice. The key is required unless REQUIRE_IDEMPOTENCY_KEY is
+    # relaxed for a client migration (checked above).
     idem = None
     idem_key: str | None = None
     if idempotency_key:
@@ -944,7 +947,9 @@ async def prepare_top_up(
         description="Amount in fiat currency (USD)",
     ),
     currency: str = Query("USD", description="Fiat currency code"),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     auth: AuthContext = Depends(get_auth_context),
+    money: AgentMoney = Depends(get_agent_money),
 ):
     _require_wallet_access(auth, wallet_id)
     """
@@ -969,6 +974,10 @@ async def prepare_top_up(
 
     settings = get_settings()
 
+    # KYC status is transient account state, not an operation outcome, so it
+    # is checked before the idempotency record is opened: a caller who
+    # verifies and retries with the same key must reach Stripe, not replay
+    # the earlier refusal.
     if settings.KYC_REQUIRED_FOR_TOPUP:
         from ..services.kyc_service import get_kyc_service
 
@@ -989,6 +998,33 @@ async def prepare_top_up(
                 },
             )
 
+    # A retried prepare with the same Idempotency-Key replays the original
+    # PaymentIntent instead of creating a second one. The key is required
+    # unless REQUIRE_IDEMPOTENCY_KEY is relaxed for a client migration.
+    _require_idempotency_key(idempotency_key)
+    # The idempotency row carries a foreign key to the wallet, so a keyed
+    # prepare for an unknown wallet would fail the insert instead of
+    # answering 404. Check first when a key will open a record, mirroring
+    # the charge endpoint's pre-check.
+    if idempotency_key and not await money.get_wallet(wallet_id):
+        raise HTTPException(
+            status_code=404,
+            detail=str(WalletNotFoundError(wallet_id)),
+        )
+    endpoint = "/v1/billing/top-up/prepare"
+    guard, replay = await _begin_idempotency(
+        idempotency_key=idempotency_key,
+        wallet_id=wallet_id,
+        endpoint=endpoint,
+        request_payload={
+            "wallet_id": wallet_id,
+            "amount_fiat": str(amount_fiat),
+            "currency": currency,
+        },
+    )
+    if replay is not None:
+        return replay
+
     stripe_integration = get_stripe_integration()
 
     try:
@@ -996,14 +1032,19 @@ async def prepare_top_up(
             wallet_id=wallet_id,
             amount_fiat=Decimal(str(amount_fiat)),
             currency=currency,
+            idempotency_key=idempotency_key,
         )
+        await guard.complete(result, 200)
         return result
     except WalletNotFoundError as e:
+        await guard.complete({"detail": str(e)}, status.HTTP_404_NOT_FOUND)
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
+        prepare_detail = {"error": "topup_prepare_error", "message": str(e)}
+        await guard.complete({"detail": prepare_detail}, status.HTTP_400_BAD_REQUEST)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "topup_prepare_error", "message": str(e)},
+            detail=prepare_detail,
         )
 
 
@@ -1050,10 +1091,33 @@ async def transfer_wallets(
     Both wallets are locked during the transaction for ACID compliance.
     """
     _require_wallet_access(auth, from_wallet_id)
+    _require_idempotency_key(idempotency_key)
     endpoint = "/v1/billing/transfer"
-    # Opt-in idempotency: a retried transfer with the same Idempotency-Key
-    # replays the original result instead of moving credits twice. Keyed on
-    # the source wallet (the debited side).
+    # The idempotency row carries a foreign key to the source wallet, so a
+    # keyed request for an unknown wallet would fail the insert instead of
+    # answering 404. Check first when a key will open a record, mirroring
+    # the charge endpoint's pre-check.
+    if idempotency_key and not await money.get_wallet(from_wallet_id):
+        await _record_billing_governance(
+            event="billing.transfer",
+            auth=auth,
+            wallet_id=from_wallet_id,
+            service_category="transfer",
+            endpoint="/v1/billing/transfer",
+            request_id=correlation_id,
+            estimated_cost=amount,
+            ok=False,
+            error="wallet_not_found",
+            metadata={"to_wallet_id": to_wallet_id},
+        )
+        raise HTTPException(
+            status_code=404,
+            detail=str(WalletNotFoundError(from_wallet_id)),
+        )
+    # A retried transfer with the same Idempotency-Key replays the original
+    # result instead of moving credits twice. Keyed on the source wallet
+    # (the debited side). The key is required unless REQUIRE_IDEMPOTENCY_KEY
+    # is relaxed for a client migration (checked above).
     guard, replay = await _begin_idempotency(
         idempotency_key=idempotency_key,
         wallet_id=from_wallet_id,

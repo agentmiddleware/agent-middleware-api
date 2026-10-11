@@ -31,6 +31,13 @@ def api_headers():
     return {"X-API-Key": "test-key"}
 
 
+def _keyed(api_headers):
+    """Copy headers with a fresh Idempotency-Key (money endpoints require one)."""
+    from uuid import uuid4
+
+    return {**api_headers, "Idempotency-Key": f"test-{uuid4()}"}
+
+
 @pytest.fixture
 async def sponsor_wallet(client, api_headers):
     """Create a sponsor wallet for testing."""
@@ -153,7 +160,7 @@ async def test_prepare_top_up_creates_payment_intent(
 
         resp = await client.post(
             f"/v1/billing/top-up/prepare?wallet_id={wallet_id}&amount_fiat=50.0",
-            headers=api_headers,
+            headers=_keyed(api_headers),
         )
 
         assert resp.status_code == 200
@@ -185,7 +192,7 @@ async def test_prepare_top_up_rejects_non_usd_in_api_and_service(
         response = await client.post(
             f"/v1/billing/top-up/prepare?wallet_id={wallet_id}"
             "&amount_fiat=50.0&currency=EUR",
-            headers=api_headers,
+            headers=_keyed(api_headers),
         )
         assert response.status_code == 400
 
@@ -210,7 +217,7 @@ async def test_prepare_top_up_rejects_agent_and_child_wallets(
             wallet_id = wallet_hierarchy[wallet_type]
             response = await client.post(
                 f"/v1/billing/top-up/prepare?wallet_id={wallet_id}&amount_fiat=1",
-                headers=api_headers,
+                headers=_keyed(api_headers),
             )
             assert response.status_code == 400
             assert response.json()["detail"]["error"] == "topup_prepare_error"
@@ -228,7 +235,7 @@ async def test_prepare_top_up_wallet_not_found(client, api_headers):
 
         resp = await client.post(
             "/v1/billing/top-up/prepare?wallet_id=nonexistent&amount_fiat=50.0",
-            headers=api_headers,
+            headers=_keyed(api_headers),
         )
         assert resp.status_code == 404
 
@@ -966,7 +973,7 @@ class TestStripeWebhookIdempotency:
 
                 resp1 = await client.post(
                     f"/v1/billing/top-up/prepare?wallet_id={wallet_id}&amount_fiat=50.0",
-                    headers=api_headers,
+                    headers=_keyed(api_headers),
                 )
                 assert resp1.status_code == 200
 
