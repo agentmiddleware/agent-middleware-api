@@ -32,6 +32,13 @@ def api_headers():
     return {"X-API-Key": "test-key"}
 
 
+def _keyed(api_headers):
+    """Copy headers with a fresh Idempotency-Key (money endpoints require one)."""
+    from uuid import uuid4
+
+    return {**api_headers, "Idempotency-Key": f"test-{uuid4()}"}
+
+
 # --- Sponsor Wallet ---
 
 
@@ -271,7 +278,7 @@ async def test_charge_agent_wallet(client, api_headers):
     # Charge for IoT bridge usage (2 credits per request × 10 units = 20 credits)
     resp = await client.post(
         f"/v1/billing/charge?wallet_id={agent_wallet_id}&service=iot_bridge&units=10&request_path=POST+/v1/iot/devices",
-        headers=api_headers,
+        headers=_keyed(api_headers),
     )
     assert resp.status_code == 200
     data = resp.json()
@@ -318,7 +325,7 @@ async def test_billing_charge_records_governance_audit_event(
             f"/v1/billing/charge?wallet_id={agent_wallet_id}"
             "&service=agent_comms&units=2&request_path=POST+/v1/agent-comms/send"
         ),
-        headers={**api_headers, "X-Request-ID": "req-billing-governance"},
+        headers={**_keyed(api_headers), "X-Request-ID": "req-billing-governance"},
     )
 
     assert charge_resp.status_code == 200
@@ -367,7 +374,7 @@ async def test_refund_charge_reverses_debit(client, api_headers, clean_database)
 
     charge_resp = await client.post(
         f"/v1/billing/charge?wallet_id={agent_wallet_id}&service=agent_comms&units=5",
-        headers=api_headers,
+        headers=_keyed(api_headers),
     )
     assert charge_resp.status_code == 200
     charge = charge_resp.json()
@@ -586,7 +593,7 @@ async def test_late_refund_does_not_reduce_new_period_spend(
 
     charge_resp = await client.post(
         f"/v1/billing/charge?wallet_id={agent_wallet_id}&service=agent_comms&units=5",
-        headers=api_headers,
+        headers=_keyed(api_headers),
     )
     assert charge_resp.status_code == 200
     charge = charge_resp.json()
@@ -652,7 +659,7 @@ async def test_charge_insufficient_funds_returns_402(client, api_headers):
     # Try to charge more than balance (red_team scan = 100 credits)
     resp = await client.post(
         f"/v1/billing/charge?wallet_id={agent_wallet_id}&service=red_team&units=1",
-        headers=api_headers,
+        headers=_keyed(api_headers),
     )
     assert resp.status_code == 402
     detail = resp.json()["detail"]
@@ -692,7 +699,7 @@ async def test_ledger_records_transactions(client, api_headers):
     # Make a charge
     await client.post(
         f"/v1/billing/charge?wallet_id={agent_wallet_id}&service=agent_comms&units=5",
-        headers=api_headers,
+        headers=_keyed(api_headers),
     )
 
     # Check ledger
@@ -983,15 +990,15 @@ async def test_arbitrage_report(client, api_headers):
     # Generate some revenue across services
     await client.post(
         f"/v1/billing/charge?wallet_id={wallet_id}&service=iot_bridge&units=100",
-        headers=api_headers,
+        headers=_keyed(api_headers),
     )
     await client.post(
         f"/v1/billing/charge?wallet_id={wallet_id}&service=content_factory&units=5",
-        headers=api_headers,
+        headers=_keyed(api_headers),
     )
     await client.post(
         f"/v1/billing/charge?wallet_id={wallet_id}&service=media_engine&units=200",
-        headers=api_headers,
+        headers=_keyed(api_headers),
     )
 
     resp = await client.get("/v1/billing/arbitrage", headers=api_headers)
@@ -1406,7 +1413,7 @@ async def test_rejected_charge_does_not_inflate_velocity_counters(
     for _ in range(3):
         resp = await client.post(
             f"/v1/billing/charge?wallet_id={wallet_id}&service=red_team&units=1",
-            headers=api_headers,
+            headers=_keyed(api_headers),
         )
         assert resp.status_code == 402
 
@@ -1471,7 +1478,7 @@ async def test_charge_rejects_malformed_units_without_touching_the_wallet(
     resp = await client.post(
         f"/v1/billing/charge?wallet_id={agent_wallet_id}"
         f"&service=iot_bridge&units={units}",
-        headers=api_headers,
+        headers=_keyed(api_headers),
     )
     assert resp.status_code == expected_status, resp.text
 
@@ -1552,7 +1559,7 @@ async def test_charge_against_an_unknown_wallet_creates_nothing(
 
     resp = await client.post(
         f"/v1/billing/charge?wallet_id={unknown}&service=iot_bridge&units=1",
-        headers=api_headers,
+        headers=_keyed(api_headers),
     )
     assert resp.status_code == 404, resp.text
     assert resp.json()["detail"]["error"] == "wallet_not_found"
@@ -1747,7 +1754,7 @@ async def test_charge_without_a_service_category_is_refused(
 
     resp = await client.post(
         f"/v1/billing/charge?wallet_id={agent_wallet_id}&units=1",
-        headers=api_headers,
+        headers=_keyed(api_headers),
     )
     assert resp.status_code == 400, resp.text
     assert resp.json()["detail"]["error"] == "missing_service"
@@ -2010,7 +2017,7 @@ async def test_a_failed_commit_is_not_reported_as_a_missing_session(
 
     drain = await client.post(
         f"/v1/billing/charge?wallet_id={wallet_id}&service=iot_bridge&units=49",
-        headers=api_headers,
+        headers=_keyed(api_headers),
     )
     assert drain.status_code == 200, drain.text
     assert drain.json()["balance_after"] == 2.0, drain.text
@@ -2460,7 +2467,7 @@ async def test_zero_daily_limit_blocks_spending_rather_than_unlocking_it(
 
     charge_resp = await client.post(
         f"/v1/billing/charge?wallet_id={agent_wallet_id}&service=agent_comms&units=1",
-        headers=api_headers,
+        headers=_keyed(api_headers),
     )
     assert charge_resp.status_code == 402, (
         "a zero daily limit was read as 'no limit' and the charge went through"

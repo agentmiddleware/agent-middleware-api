@@ -245,7 +245,8 @@ async def test_get_permit_denies_unrelated_wallet(client, clean_database):
         f"/v1/permits/{permit['permit_id']}",
         headers=stranger["agent_headers"],
     )
-    assert resp.status_code == 403, resp.text
+    assert resp.status_code == 404, resp.text
+    assert resp.json()["detail"] == "permit_not_found"
 
 
 # Permits: create.
@@ -388,7 +389,8 @@ async def test_list_permit_receipts_denies_unrelated_wallet(client, clean_databa
         f"/v1/permits/{permit['permit_id']}/receipts",
         headers=stranger["agent_headers"],
     )
-    assert resp.status_code == 403, resp.text
+    assert resp.status_code == 404, resp.text
+    assert resp.json()["detail"] == "permit_not_found"
 
 
 # Receipts: list.
@@ -421,7 +423,8 @@ async def test_list_receipts_permit_wallet_mismatch_needs_admin(client, clean_da
         },
         headers=second["agent_headers"],
     )
-    assert resp.status_code == 403, resp.text
+    assert resp.status_code == 404, resp.text
+    assert resp.json()["detail"] == "permit_not_found"
 
 
 @pytest.mark.anyio
@@ -498,7 +501,8 @@ async def test_receipts_for_permit_route_auth(client, clean_database):
         f"/v1/receipts/permit/{permit['permit_id']}",
         headers=stranger["agent_headers"],
     )
-    assert denied.status_code == 403, denied.text
+    assert denied.status_code == 404, denied.text
+    assert denied.json()["detail"] == "permit_not_found"
 
 
 # Receipts: single read, evidence, portable, verify.
@@ -529,7 +533,8 @@ async def test_delegated_permit_issuer_reads_receipt_evidence_and_bundle(
         f"/v1/receipts/{receipt_id}/portable",
     ):
         denied = await client.get(path, headers=stranger["agent_headers"])
-        assert denied.status_code == 403, (path, denied.text)
+        assert denied.status_code == 404, (path, denied.text)
+        assert denied.json()["detail"] == "receipt_not_found"
 
     as_issuer = await client.get(f"/v1/receipts/{receipt_id}", headers=sponsor_headers)
     assert as_issuer.status_code == 200, as_issuer.text

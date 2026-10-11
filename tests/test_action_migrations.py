@@ -4,8 +4,11 @@ import os
 import sqlite3
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 
 from tests.support.action_database_guard import (
     require_action_database_url,
@@ -26,10 +29,10 @@ FIELDS = (
     "action_upstream_binding_hash",
 )
 ACTION_REVISION = "042_permit_action_binding"
-# Current migration head. 043 adds only nullable tenant/allowlist columns
-# (no permit/receipt row changes), so every authority-retention assertion
-# below still exercises the 042/041 behavior through the new head.
-HEAD_REVISION = "043_demo_tenant_key_allowlist"
+_ROOT = Path(__file__).resolve().parents[1]
+_CONFIG = Config(str(_ROOT / "alembic.ini"))
+_CONFIG.set_main_option("script_location", str(_ROOT / "migrations"))
+CURRENT_HEAD = ScriptDirectory.from_config(_CONFIG).get_current_head()
 SCRUB_REVISION = "041_scrub_content_owner_keys"
 CONTENT_TABLES = ("content_pipelines", "content_campaigns")
 AUTHORITIES = [
@@ -116,7 +119,7 @@ def test_action_migration_retains_legacy_and_blocks_authority_loss(
     assert result.returncode == 0, result.stderr
     with sqlite3.connect(path) as db:
         assert db.execute("SELECT version_num FROM alembic_version").fetchone() == (
-            HEAD_REVISION,
+            CURRENT_HEAD,
         )
         assert db.execute("SELECT * FROM permits").fetchone() == (
             *before,
@@ -218,7 +221,7 @@ def test_postgres_legacy_roundtrip_and_fail_closed_downgrade():
     result = migrate(url, "head")
     assert result.returncode == 0, result.stderr
     assert sql("SELECT version_num FROM alembic_version") == [
-        {"version_num": HEAD_REVISION}
+        {"version_num": CURRENT_HEAD}
     ]
     for table, old in before.items():
         assert sql(f"SELECT * FROM {table}")[0] == {**old, **dict.fromkeys(FIELDS)}
@@ -254,7 +257,7 @@ def test_postgres_legacy_roundtrip_and_fail_closed_downgrade():
         result = migrate(url, SCRUB_REVISION, "downgrade")
         assert result.returncode != 0 and "action_authority_retained" in result.stderr
         assert sql("SELECT version_num FROM alembic_version") == [
-            {"version_num": ACTION_REVISION}
+            {"version_num": CURRENT_HEAD}
         ]
         for table, rows in retained.items():
             assert sql(f"SELECT * FROM {table}") == rows

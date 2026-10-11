@@ -236,7 +236,11 @@ async def test_billing_policy_denies_disallowed_category(client, clean_database)
 
     response = await client.post(
         f"/v1/billing/charge?wallet_id={wallet_id}&service=iot_bridge&units=1",
-        headers={"X-API-Key": "test-key", "X-Request-ID": "policy-billing-deny"},
+        headers={
+            "X-API-Key": "test-key",
+            "X-Request-ID": "policy-billing-deny",
+            "Idempotency-Key": "policy-billing-deny-key",
+        },
     )
     assert response.status_code == 403
     assert response.json()["detail"]["error"] == "service_category_not_allowed"
@@ -267,7 +271,11 @@ async def test_billing_policy_denies_over_cost_charge(client, clean_database):
 
     response = await client.post(
         f"/v1/billing/charge?wallet_id={wallet_id}&service=agent_comms&units=2",
-        headers={"X-API-Key": "test-key", "X-Request-ID": "policy-cost-deny"},
+        headers={
+            "X-API-Key": "test-key",
+            "X-Request-ID": "policy-cost-deny",
+            "Idempotency-Key": "policy-cost-deny-key",
+        },
     )
 
     assert response.status_code == 403
