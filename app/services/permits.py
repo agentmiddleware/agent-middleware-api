@@ -364,6 +364,7 @@ class PermitService:
         request: PermitCreateRequest,
         subject_key_id: str | None = None,
         permit_id: str | None = None,
+        auth: Any | None = None,
     ) -> PermitResponse:
         """Mint a signed permit.
 
@@ -371,13 +372,99 @@ class PermitService:
         permit-request flow reserves one when the human is paged) mint under
         it, so a retried mint collides on the primary key instead of issuing a
         second permit carrying the same authority.
+
+        ``auth`` carries the caller key's tool allowlist/tenant when known
+        (routers pass it; they also pre-check before the idempotency record
+        is begun so the denial is a 403, not a 400). The service re-checks
+        here as defense in depth for paths that mint without that pre-check
+        (e.g. standard-MCP auto-mint).
         """
         if any(
             getattr(request, field) is not None
             for field in ActionPermitFields.model_fields
         ):
             raise PermitCreationRejectedError("action_permit_requires_trusted_issuance")
+        await self._enforce_key_and_demo_bounds(request, auth)
         return await self._persist_permit(request, subject_key_id, permit_id)
+
+    async def _enforce_key_and_demo_bounds(
+        self,
+        request: PermitCreateRequest,
+        auth: Any | None,
+    ) -> None:
+        """Re-check allowlist + demo caps inside the mint path.
+
+        Raises the shared ``KeyAllowlistDenied``/``DemoPermitDenied`` errors
+        (with the ``key_tool_not_allowed`` / ``demo_permit_out_of_bounds``
+        codes) so every mint funnels through one policy, whether the caller
+        is a router (which maps them to 403 before idempotency begins) or a
+        server-side minter (mapped to ``PermitCreationRejectedError`` below).
+        """
+        from app.services.demo_tenant import (
+            DEMO_TENANT_LABEL,
+            DemoPermitDenied,
+            KeyAllowlistDenied,
+            check_demo_permit_bounds,
+            check_key_allowlist_for_permit,
+        )
+
+        key_allowlist = getattr(auth, "allowed_tools", None)
+        caller_tenant = getattr(auth, "tenant", None)
+        caller_key_expires_at = None
+        if auth is not None and getattr(auth, "key_id", None):
+            caller_key_expires_at = await self._caller_key_expires_at(auth.key_id)
+        try:
+            check_key_allowlist_for_permit(
+                key_allowlist=key_allowlist,
+                allowed_tools=list(request.allowed_tools or []),
+                scopes=list(request.scopes or []),
+            )
+        except KeyAllowlistDenied as exc:
+            raise PermitCreationRejectedError(exc.error) from exc
+        # Wallet tenants decide whether demo caps apply even when the caller
+        # is unknown (auth None): a demo wallet must never back an uncapped
+        # permit, whoever mints it.
+        factory = get_session_factory()
+        async with factory() as session:
+            issuer = await session.get(WalletModel, request.issuer_wallet_id)
+            subject = await session.get(WalletModel, request.subject_wallet_id)
+            issuer_tenant = getattr(issuer, "tenant", None) if issuer else None
+            subject_tenant = getattr(subject, "tenant", None) if subject else None
+        demo_involved = (
+            issuer_tenant == DEMO_TENANT_LABEL
+            or subject_tenant == DEMO_TENANT_LABEL
+            or caller_tenant == DEMO_TENANT_LABEL
+        )
+        if not demo_involved:
+            return
+        settings = get_settings()
+        try:
+            check_demo_permit_bounds(
+                issuer_tenant=issuer_tenant,
+                subject_tenant=subject_tenant,
+                caller_tenant=caller_tenant,
+                allowed_tools=list(request.allowed_tools or []),
+                max_credits=request.max_credits,
+                expires_at=request.expires_at,
+                caller_key_expires_at=caller_key_expires_at,
+                demo_allowed_tools=settings.demo_allowed_tools_list,
+                max_permit_credits=settings.DEMO_MAX_PERMIT_CREDITS,
+                max_permit_ttl=(
+                    timedelta(minutes=settings.DEMO_MAX_PERMIT_TTL_MINUTES)
+                    if settings.DEMO_MAX_PERMIT_TTL_MINUTES is not None
+                    else None
+                ),
+                now=utc_now(),
+            )
+        except DemoPermitDenied as exc:
+            raise PermitCreationRejectedError(exc.error) from exc
+
+    async def _caller_key_expires_at(self, key_id: str) -> datetime | None:
+        """Expiry of the caller key, for the never-outlive-the-key rule."""
+        from app.services.api_key_service import get_api_key_service
+
+        row = await get_api_key_service().get_key_record(key_id)
+        return row.expires_at if row is not None else None
 
     async def _persist_permit(
         self,

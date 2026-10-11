@@ -172,8 +172,8 @@ unpublished work were not modified. This observation does not establish that
 no unseen concurrent work exists; recheck immediately before editing shared
 files or reserving a migration revision.
 
-At this review, open PR #766 proposes a `043` demo-tenant migration and edits
-models, authentication, and MCP handling. PR #638 edits permit authorization
-and reconciliation; PR #627 edits money-endpoint idempotency. None is an
-insight implementation. A future insight migration cannot claim revision
-`043` without checking how those branches are resolved.
+At this review, open PR #766 proposed a separate demo-tenant migration and
+edits to models, authentication, and MCP handling. PR #638 edited permit
+authorization and reconciliation; PR #627 edited money-endpoint idempotency.
+None was an insight implementation. Integration later placed the demo-tenant
+migration at `046_demo_tenant_key_allowlist`, after the 044/045 insight chain.
