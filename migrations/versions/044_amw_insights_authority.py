@@ -113,6 +113,14 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     connection = op.get_bind()
+    if connection.dialect.name == "postgresql":
+        connection.execute(
+            sa.text(
+                "LOCK TABLE insight_reporting_wallet_grants, "
+                "insight_wallet_ownership_epochs, insight_reporting_principals "
+                "IN ACCESS EXCLUSIVE MODE"
+            )
+        )
     for table in (
         "insight_reporting_wallet_grants",
         "insight_wallet_ownership_epochs",

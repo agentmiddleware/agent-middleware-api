@@ -2,18 +2,25 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import importlib.util
 import json
 import os
+import threading
 import uuid
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from pathlib import Path
 
+import asyncpg
 import jwt
 import pytest
 import pytest_asyncio
 from alembic.config import Config
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 from alembic.script import ScriptDirectory
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.serialization import (
@@ -326,6 +333,123 @@ async def pg_factory():
             await _assert_synthetic_authority_rows(connection)
         yield factory
     finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(
+    not _PG_TEST_URL,
+    reason="owner: reporting auth; isolated PostgreSQL test database required; see docs/amw-insights-auth-amendment.md",
+)
+@pytest.mark.asyncio
+async def test_authority_downgrade_blocks_insert_after_empty_check() -> None:
+    url = _require_disposable_pg_url(_PG_TEST_URL)
+    schema = f"insight_lock_{uuid.uuid4().hex}"
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "migrations/versions/044_amw_insights_authority.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "insight_authority_lock_migration", path
+    )
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    reached_check = threading.Event()
+    release_check = threading.Event()
+
+    class StopBeforeDrop(Exception):
+        pass
+
+    def pause_after_empty_check(
+        _connection, _cursor, statement, _parameters, _context, _executemany
+    ) -> None:
+        if statement != "SELECT 1 FROM insight_reporting_principals LIMIT 1":
+            return
+        reached_check.set()
+        if not release_check.wait(10):
+            raise AssertionError("authority downgrade check did not resume")
+        raise StopBeforeDrop
+
+    engine = create_async_engine(url)
+    try:
+        async with engine.begin() as connection:
+            await connection.execute(text(f"CREATE SCHEMA {schema}"))
+            for table in (
+                "insight_reporting_wallet_grants",
+                "insight_wallet_ownership_epochs",
+                "insight_reporting_principals",
+            ):
+                await connection.execute(
+                    text(f"CREATE TABLE {schema}.{table} (marker text)")
+                )
+
+        async def run_downgrade() -> None:
+            migration_engine = create_async_engine(url)
+            try:
+                try:
+                    async with migration_engine.begin() as connection:
+                        await connection.execute(
+                            text(f"SET LOCAL search_path TO {schema}")
+                        )
+
+                        def call_migration(sync_connection) -> None:
+                            event.listen(
+                                sync_connection,
+                                "after_cursor_execute",
+                                pause_after_empty_check,
+                            )
+                            try:
+                                migration.op = Operations(
+                                    MigrationContext.configure(sync_connection)
+                                )
+                                migration.downgrade()
+                            finally:
+                                event.remove(
+                                    sync_connection,
+                                    "after_cursor_execute",
+                                    pause_after_empty_check,
+                                )
+
+                        await connection.run_sync(call_migration)
+                except StopBeforeDrop:
+                    return
+                raise AssertionError(
+                    "authority downgrade did not reach the final check"
+                )
+            finally:
+                await migration_engine.dispose()
+
+        worker = asyncio.create_task(
+            asyncio.to_thread(lambda: asyncio.run(run_downgrade()))
+        )
+        try:
+            assert await asyncio.to_thread(reached_check.wait, 5), (
+                "authority downgrade did not reach the final check"
+            )
+            writer = await asyncpg.connect(
+                url.replace("postgresql+asyncpg://", "postgresql://", 1)
+            )
+            try:
+                transaction = writer.transaction()
+                await transaction.start()
+                try:
+                    await writer.execute(f"SET LOCAL search_path TO {schema}")
+                    await writer.execute("SET LOCAL lock_timeout = '500ms'")
+                    with pytest.raises(asyncpg.exceptions.LockNotAvailableError):
+                        await writer.execute(
+                            "INSERT INTO insight_reporting_principals (marker) VALUES ('race')"
+                        )
+                finally:
+                    await transaction.rollback()
+            finally:
+                await writer.close()
+        finally:
+            release_check.set()
+            await asyncio.wait_for(worker, 10)
+    finally:
+        async with engine.begin() as connection:
+            await connection.execute(text(f"DROP SCHEMA IF EXISTS {schema} CASCADE"))
         await engine.dispose()
 
 
