@@ -1,0 +1,113 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import test from "node:test";
+import { runInNewContext } from "node:vm";
+
+const script = readFileSync(new URL("./demo-key/demo-key.js", import.meta.url), "utf8");
+const commandTemplate = `API=https://api.thisisatest.tech
+KEY='YOUR_DEMO_KEY'
+WALLET='YOUR_WALLET_ID'
+curl -fsS "$API/v1/permits"
+curl -fsS "$API/mcp/tools/partner.echo/invoke"
+curl -fsS "$API/v1/receipts/$RECEIPT/portable"`;
+
+function makePage(fetchResponse) {
+  const ids = [
+    "get-demo-key",
+    "copy-demo-key",
+    "demo-key-status",
+    "demo-key-result",
+    "demo-api-key",
+    "demo-wallet-id",
+    "demo-budget-credits",
+    "demo-commands",
+  ];
+  const elements = new Map(ids.map((id) => [id, {
+    disabled: false,
+    hidden: true,
+    textContent: id === "demo-commands" ? commandTemplate : "",
+    value: "",
+    listeners: {},
+    addEventListener(event, listener) { this.listeners[event] = listener; },
+    set innerHTML(_) { throw new Error("API data must not be inserted as HTML"); },
+  }]));
+  const requests = [];
+  const copies = [];
+  const forbidden = () => { throw new Error("key must not be persisted or logged"); };
+  const document = {
+    getElementById(id) { return elements.get(id); },
+    set cookie(_) { forbidden(); },
+  };
+  runInNewContext(script, {
+    document,
+    async fetch(url, options) {
+      requests.push([url, options]);
+      return fetchResponse();
+    },
+    navigator: { clipboard: { async writeText(value) { copies.push(value); } } },
+    localStorage: { setItem: forbidden },
+    sessionStorage: { setItem: forbidden },
+    console: { log: forbidden },
+  }, { filename: "demo-key.js" });
+  return {
+    elements,
+    requests,
+    copies,
+    async click(id) {
+      const element = elements.get(id);
+      if (!element.disabled) await element.listeners.click();
+    },
+  };
+}
+
+test("issuance uses an empty credential-free POST and renders one key as text", async () => {
+  const key = "demo_<img src=x onerror=alert(1)>";
+  const page = makePage(async () => ({
+    status: 201,
+    async json() {
+      return { api_key: key, wallet_id: "wallet_demo_1", budget_credits: 25 };
+    },
+  }));
+
+  await page.click("get-demo-key");
+  assert.equal(page.requests.length, 1);
+  const [url, options] = page.requests[0];
+  assert.equal(url, "https://api.thisisatest.tech/v1/demo/keys");
+  assert.equal(options.method, "POST");
+  assert.equal(options.credentials, "omit");
+  assert.deepEqual(Object.keys(options).sort(), ["credentials", "method"]);
+  assert.equal(page.elements.get("get-demo-key").disabled, true);
+  assert.equal(page.elements.get("demo-key-result").hidden, false);
+  assert.equal(page.elements.get("demo-api-key").value, key);
+  assert.equal(page.elements.get("demo-wallet-id").textContent, "wallet_demo_1");
+  assert.equal(page.elements.get("demo-budget-credits").textContent, "25");
+  assert.equal(page.elements.get("demo-commands").textContent,
+    commandTemplate.replace("KEY='YOUR_DEMO_KEY'", `KEY='${key}'`)
+      .replace("WALLET='YOUR_WALLET_ID'", "WALLET='wallet_demo_1'"));
+  await page.click("copy-demo-key");
+  assert.deepEqual(page.copies, [key]);
+  await page.click("get-demo-key");
+  assert.equal(page.requests.length, 1);
+});
+
+test("issuance failures show actionable messages and allow retry", async () => {
+  const messages = new Map([
+    [403, "This page is not allowed to issue demo keys right now. Try the curl fallback below."],
+    [404, "The demo is off right now. Please try again later."],
+    [429, "Demo key requests are rate limited. Please try again later."],
+    [503, "Demo key issuance is temporarily unavailable. Please try again later."],
+  ]);
+  for (const [code, message] of messages) {
+    const page = makePage(async () => ({ status: code }));
+    await page.click("get-demo-key");
+    assert.equal(page.elements.get("demo-key-status").textContent, message);
+    assert.equal(page.elements.get("get-demo-key").disabled, false);
+    assert.equal(page.elements.get("demo-key-result").hidden, true);
+  }
+
+  const network = makePage(async () => { throw new Error("offline"); });
+  await network.click("get-demo-key");
+  assert.equal(network.elements.get("demo-key-status").textContent,
+    "Could not reach the demo API. Check your connection and try again.");
+  assert.equal(network.elements.get("get-demo-key").disabled, false);
+});
