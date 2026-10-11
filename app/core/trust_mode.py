@@ -151,6 +151,7 @@ def validate_trust_mode_config(
     database_url: str = "",
     enable_dogfood_tool: bool = False,
     enable_dogfood_second_tool: bool = False,
+    enable_demo_tenant: bool = False,
 ) -> None:
     """Refuse unsafe deploy postures in production-like environments.
 
@@ -238,6 +239,17 @@ def validate_trust_mode_config(
                 "ENABLE_DOGFOOD_SECOND_TOOL must be false in production-like "
                 "environments (partner.notes.count is CI-only scaffolding)"
             )
+        if enable_demo_tenant and not (redis_url or "").strip():
+            # Demo issuance limits (per-IP, global, live-key cap) are the
+            # only thing standing between an anonymous endpoint and key
+            # farming. In-process counters do not survive a second replica,
+            # so a production-like deployment with the demo tenant on must
+            # share them through Redis.
+            violations.append(
+                "REDIS_URL is required in production-like environments when "
+                "ENABLE_DEMO_TENANT is true (demo issuance limits must be "
+                "shared across replicas)"
+            )
         if allow_private_network_targets:
             violations.append(
                 "ALLOW_PRIVATE_NETWORK_TARGETS must be false in production-like "
@@ -323,6 +335,7 @@ def validate_trust_mode_guardrails(settings: Settings) -> None:
         database_url=settings.DATABASE_URL,
         enable_dogfood_tool=settings.ENABLE_DOGFOOD_TOOL,
         enable_dogfood_second_tool=settings.ENABLE_DOGFOOD_SECOND_TOOL,
+        enable_demo_tenant=settings.ENABLE_DEMO_TENANT,
     )
 
 

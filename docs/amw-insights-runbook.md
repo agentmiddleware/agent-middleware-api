@@ -26,10 +26,11 @@ after checking that they contain no non-fixture rows. The tests reject any
 other URL. `docs/schema-044-rollout.md` gives the authority migration and test
 commands; the reader proof uses
 `AMW_INSIGHTS_READER_TEST_DATABASE_URL=postgresql+asyncpg://sellers@127.0.0.1:55489/amw_insights_reader_test`.
-Verify migrations 044 and 045 on a disposable database only, and reconcile the
-current Alembic graph before any release: external PR #766 proposes a separate
-043 migration. `docs/schema-045-rollout.md` covers event migration and retained
-row behavior. Record pass, skip, and failure counts. Synthetic tests are not
+Verify the single 042 → 044 → 045 → 046 migration chain on a disposable
+database only. The demo-tenant migration is now 046 after the insight event
+migration; `docs/schema-045-rollout.md` covers event migration and retained
+row behavior, and `docs/schema-046-rollout.md` covers demo labels. Record
+pass, skip, and failure counts. Synthetic tests are not
 evidence of production retention, traffic coverage, or deployed revision.
 
 The acceptance record should cover the golden incident fixture matrix: lost
