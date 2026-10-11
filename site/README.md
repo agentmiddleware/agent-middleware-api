@@ -10,12 +10,12 @@ the one-tool pilot funnel and through the static pointer files.
 
 ## Shared page design
 
-All five HTML pages use `styles.css` for colors, typography, spacing, buttons,
+All six HTML pages use `styles.css` for colors, typography, spacing, buttons,
 focus states, and accessibility preferences. `partials/nav.html` and
 `partials/footer.html` render into every page during the build, so navigation
 and contact links also work without JavaScript. Edit those shared files once;
 do not duplicate their markup in a page. Proof always opens `/proof/`, and the
-Proof and Compare pages mark their current navigation link.
+Proof, Compare, and Demo key pages mark their current navigation link.
 
 The stylesheet URL includes a content hash generated at build time. A style
 change therefore refreshes consistently across cached pages. The archived
@@ -119,6 +119,8 @@ Open `http://127.0.0.1:8765/`.
 - `/proof/transcript.json` — the recorded governed-loop transcript the
   homepage renders (see "The governed loop as evidence" below)
 - `/compare/` — named competitor comparison, build-vs-buy, and fit/compliance FAQ
+- `/demo-key/` — one-time demo credential display and terminal steps for the
+  permit → `partner.echo` → portable receipt loop with synthetic credits
 - `/concept/` — unlisted landing-page design study (noindex, absent from the
   sitemap, never linked from the funnel): the single-fold treatment the
   homepage hero was promoted from, kept as the archived study. It shares
@@ -237,6 +239,7 @@ query token**: every reference looks like `/styles.css?v=gateway-19`. When you
 change any of those files (including `/wave.js`, `/arcade-boot.js`,
 `/arcade.js`, and `/arcade.css`), bump the token in
 `index.html`, `proof/index.html`, `compare/index.html`, `concept/index.html`,
+`demo-key/index.html`,
 `404.html`, and `build_site.py`'s `ANALYTICS_SCRIPTS`, or
 returning visitors
 keep the old bytes for up to a week. HTML itself carries no long-lived
@@ -247,7 +250,11 @@ stylesheet uses an independent `?v=concept-N` token: bump it when
 The pilot calculator uses its own `?v=pilot-2` token and the default revalidating
 cache policy; bump its token when `pilot-fit.js` changes.
 
-Explicit `/proof` → `/proof/` and `/compare` → `/compare/` redirects match
+The demo key page's script uses its own `?v=demo-key-1` token; bump it when
+`demo-key/demo-key.js` changes.
+
+Explicit `/proof` → `/proof/`, `/compare` → `/compare/`, and
+`/demo-key` → `/demo-key/` redirects match
 those pages' `rel="canonical"`. Every directory page needs its own entry. Do **not** replace it with the global `trailingSlash: true`
 setting: on Vercel that makes every `/.well-known/*` entry in `headers` stop
 matching, so `agent.json` and `security.txt` silently fall back to
