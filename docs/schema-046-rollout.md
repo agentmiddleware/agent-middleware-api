@@ -1,7 +1,10 @@
-# Schema 043: demo-tenant labels and per-key tool allowlist
+# Schema 046: demo-tenant labels and per-key tool allowlist
 
-Migration `043_demo_tenant_key_allowlist` revises
-`042_permit_action_binding`. It adds two nullable columns to `api_keys`
+Migration `046_demo_tenant_key_allowlist` revises
+`amw_insights_events_20261010` (schema 045). The chain is
+`042_permit_action_binding` → `amw_insights_authority_20261010` (044) →
+`amw_insights_events_20261010` (045) → `046_demo_tenant_key_allowlist`.
+This migration adds two nullable columns to `api_keys`
 (`allowed_tools_json` TEXT, `tenant` VARCHAR(32)) and one nullable column to
 `wallets` (`tenant` VARCHAR(32)), plus an index on each `tenant` column.
 Existing rows are untouched: every pre-existing key keeps
@@ -30,17 +33,18 @@ manifest do not satisfy it.
 | Current database revision and current packaged head; private parity result | REQUIRED / UNVERIFIED |
 | Current full build SHA, immutable image digest, deployment ID and worker IDs | REQUIRED / UNVERIFIED |
 | Target full build SHA, immutable image digest, deployment ID and worker IDs | REQUIRED / UNVERIFIED |
-| Target database revision and packaged head: `043_demo_tenant_key_allowlist`; private parity result | REQUIRED / UNVERIFIED |
-| Rehearsal: 042 → 043 upgrade on disposable PostgreSQL, legacy rows keep NULL labels | REQUIRED / UNVERIFIED |
+| Target database revision and packaged head: `046_demo_tenant_key_allowlist`; private parity result | REQUIRED / UNVERIFIED |
+| Rehearsal: 045 → 046 upgrade on disposable PostgreSQL, legacy rows keep NULL labels | REQUIRED / UNVERIFIED |
 | `ENABLE_DEMO_TENANT` stays `false` until the separately authorized launch; issuance 404 verified | REQUIRED / UNVERIFIED |
 
-1. Verify the actual database is at `042_permit_action_binding` and the
-   serving image has matching packaged schema. Earlier revisions require
-   their own review under their own rollout notes. Rehearse 042 → 043 on
-   fresh disposable PostgreSQL and confirm existing keys and wallets read
-   back with NULL allowlist/tenant labels.
+1. Verify the actual database revision and the serving image's packaged
+   schema. Schema 046 requires 044 and 045; their rollout gates in
+   [schema-044-rollout.md](schema-044-rollout.md) and
+   [schema-045-rollout.md](schema-045-rollout.md) require separate review.
+   Rehearse 045 → 046 on fresh disposable PostgreSQL and confirm existing
+   keys and wallets read back with NULL allowlist/tenant labels.
 2. Use the canonical immutable exact-SHA release path in
-   [deploy-railway.md](deploy-railway.md). Apply 043 through the reviewed
+   [deploy-railway.md](deploy-railway.md). Apply 046 through the reviewed
    migration entrypoint, then verify private schema parity, the baked build
    SHA, worker identity, runtime posture, health and logs.
 3. Keep `ENABLE_DEMO_TENANT=false` through the release. The demo issuance
@@ -50,11 +54,11 @@ manifest do not satisfy it.
 
 ## Rollback after activation
 
-Alembic `downgrade` from 043 to 042 drops `api_keys.allowed_tools_json`,
+Alembic `downgrade` from 046 to 045 drops `api_keys.allowed_tools_json`,
 `api_keys.tenant`, and `wallets.tenant` (with their indexes). That is a
 schema-only reversal, not an operational rollback procedure: any demo keys,
-demo wallets, or allowlisted keys created while 043 was active lose their
-labels silently, and a 042-packaged image cannot restart against a 043
+demo wallets, or allowlisted keys created while 046 was active lose their
+labels silently, and a 045-packaged image cannot restart against a 046
 database because schema parity is enforced. Before any downgrade rehearsal,
 revoke all demo keys (`POST /v1/demo/admin/revoke-all`), confirm no rows
 carry tenant or allowlist labels, and use a disposable database only. Never

@@ -6,9 +6,8 @@ been authorized by this change. The production release gate is in
 [the reporting authorization amendment](amw-insights-auth-amendment.md).
 
 Revision `amw_insights_authority_20261010` follows
-`042_permit_action_binding`. The filename reserves ordinal 044 while external
-PR #766 proposes ordinal 043; the integration owner must reconcile the Alembic
-graph if that PR merges. This revision adds:
+`042_permit_action_binding`. Schema 045 follows this revision, then the
+demo-tenant migration follows as schema 046. This revision adds:
 
 - `insight_reporting_principals`: exact verified issuer and subject, a live
   interval, revocation, and an independent unknown-wallet-count permission.

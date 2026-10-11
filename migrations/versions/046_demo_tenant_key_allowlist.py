@@ -1,14 +1,14 @@
 """Add per-key tool allowlist and demo-tenant labels.
 
-Revision ID: 043_demo_tenant_key_allowlist
-Revises: 042_permit_action_binding
+Revision ID: 046_demo_tenant_key_allowlist
+Revises: amw_insights_events_20261010
 """
 
 from alembic import op
 import sqlalchemy as sa
 
-revision: str = "043_demo_tenant_key_allowlist"
-down_revision: str = "042_permit_action_binding"
+revision: str = "046_demo_tenant_key_allowlist"
+down_revision: str = "amw_insights_events_20261010"
 branch_labels = None
 depends_on = None
 

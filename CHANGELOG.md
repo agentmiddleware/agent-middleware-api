@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   admins get single-key revoke, revoke-all, and stats. Per-key tool
   allowlists (`api_keys.allowed_tools_json`, enforced at permit creation
   and invoke) ship as the general mechanism behind the optional
-  `DEMO_ALLOWED_TOOLS`. Migration `043_demo_tenant_key_allowlist` is
+  `DEMO_ALLOWED_TOOLS`. Migration `046_demo_tenant_key_allowlist` is
   additive-only. See [`docs/demo-tenant.md`](docs/demo-tenant.md).
 
 ### Changed — standard `/mcp` returns `delivery_uncertain` as a tool result

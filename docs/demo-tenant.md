@@ -3,6 +3,9 @@
 Anonymous visitors can mint their own demo credential and run the
 permit → invoke → receipt loop end to end, with no operator involvement:
 
+The additive schema and separate rollout prerequisites are in
+[schema-046-rollout.md](schema-046-rollout.md).
+
 ```bash
 # 1. Mint a demo key (no auth; shown once)
 curl -s -X POST https://YOUR-HOST/v1/demo/keys | tee demo.json
