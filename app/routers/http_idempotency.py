@@ -14,12 +14,39 @@ from typing import Any
 from fastapi import HTTPException, status
 from fastapi.responses import JSONResponse
 
+from ..core.config import get_settings
 from ..services.idempotency import (
     IdempotencyConflictError,
     IdempotencyInProgressError,
     IdempotencyService,
     get_idempotency_service,
 )
+
+
+def require_idempotency_key(idempotency_key: str | None) -> None:
+    """Refuse a money-moving request that arrived without an Idempotency-Key.
+
+    A retry without a key cannot be told apart from a new request, so the
+    server would execute it twice. ``REQUIRE_IDEMPOTENCY_KEY`` is off by
+    default (legacy clients keep working); while off the key stays optional
+    and this is a no-op.
+    """
+    if idempotency_key:
+        return
+    if not get_settings().REQUIRE_IDEMPOTENCY_KEY:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail={
+            "error": "missing_idempotency_key",
+            "message": (
+                "The Idempotency-Key header is required for this endpoint. "
+                "Send a unique key per operation and reuse the same key when "
+                "retrying, so a retry replays the original result instead of "
+                "moving money twice."
+            ),
+        },
+    )
 
 
 @dataclass
