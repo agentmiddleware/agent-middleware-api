@@ -275,7 +275,8 @@ async def test_acp_checkout_end_to_end_under_45ms(client, spt_stub, clean_databa
 
     # Median rather than max: a single noisy CI scheduling blip must not
     # flake the suite, but the typical checkout must stay fast. The bound is
-    # env-overridable so a slow runner can widen it without editing code.
+    # env-overridable for local runs on a slow machine; CI must keep the
+    # default (pinned by tests/test_perf_marker_contract.py).
     budget_s = float(os.environ.get("ACP_CHECKOUT_MEDIAN_BUDGET_S", "0.045"))
     assert statistics.median(samples) < budget_s, samples
 
