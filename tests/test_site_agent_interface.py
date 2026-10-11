@@ -393,7 +393,12 @@ def test_booking_identity_names_one_product_and_one_operator(tmp_path, booking_u
     output = tmp_path / "site"
     result = _render_site(output, contacts)
     assert result.returncode == 0, result.stderr
-    for relative in ("index.html", "proof/index.html", "compare/index.html"):
+    for relative in (
+        "index.html",
+        "proof/index.html",
+        "compare/index.html",
+        "demo-key/index.html",
+    ):
         page = (output / relative).read_text()
         assert "RegEngine" not in page, (
             f"{relative} names the calendar host; the page carries one "
@@ -421,6 +426,7 @@ def test_pages_name_no_second_brand_in_visible_copy(tmp_path) -> None:
         "index.html",
         "proof/index.html",
         "compare/index.html",
+        "demo-key/index.html",
         "404.html",
     ):
         page = (output / relative).read_text(encoding="utf-8")
@@ -583,6 +589,7 @@ def test_customer_facing_outputs_do_not_publish_provider_origins(tmp_path) -> No
         output / "proof" / "index.html",
         output / "compare" / "index.html",
         output / "concept" / "index.html",
+        output / "demo-key" / "index.html",
         output / "llm.txt",
         output / "llms.txt",
         output / ".well-known" / "agent.json",
@@ -629,6 +636,7 @@ def test_public_surfaces_link_public_source_without_requiring_credentials(
         output / "index.html",
         output / "compare" / "index.html",
         output / "proof" / "index.html",
+        output / "demo-key" / "index.html",
         output / "llm.txt",
         output / "llms.txt",
         output / "llms-full.txt",
@@ -779,6 +787,7 @@ def test_search_social_and_analytics_contracts(tmp_path) -> None:
     assert "Sitemap: https://www.thisisatest.tech/sitemap.xml" in robots
     assert "https://www.thisisatest.tech/proof/" in sitemap
     assert "https://www.thisisatest.tech/compare/" in sitemap
+    assert "https://www.thisisatest.tech/demo-key/" in sitemap
     assert _png_dimensions(output / "social-card.png") == (1200, 630)
     organization = next(
         node
@@ -811,7 +820,12 @@ def test_search_social_and_analytics_contracts(tmp_path) -> None:
     # Truthful events: without a booking link nothing can emit booking_click.
     email_only = tmp_path / "email-only"
     assert _render_site(email_only, EMAIL_ONLY_TEST_CONTACTS).returncode == 0
-    for relative_path in ("index.html", "proof/index.html", "compare/index.html"):
+    for relative_path in (
+        "index.html",
+        "proof/index.html",
+        "compare/index.html",
+        "demo-key/index.html",
+    ):
         rendered = (email_only / relative_path).read_text(encoding="utf-8")
         assert 'data-analytics-event="booking_click"' not in rendered
         assert 'data-analytics-event="email_click"' in rendered
@@ -825,6 +839,7 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
         "index.html",
         "proof/index.html",
         "compare/index.html",
+        "demo-key/index.html",
         "concept/index.html",
         "404.html",
     )
@@ -897,6 +912,7 @@ def test_external_links_carry_noopener_noreferrer(tmp_path) -> None:
         "index.html",
         "proof/index.html",
         "compare/index.html",
+        "demo-key/index.html",
         "concept/index.html",
     ):
         collector = _ExternalLinkCollector()
@@ -974,7 +990,12 @@ def test_cta_aria_labels_preserve_visible_text_and_contact_targets(tmp_path) -> 
         result = _render_site(output, contacts)
         assert result.returncode == 0, result.stderr
 
-        for relative_path in ("index.html", "proof/index.html", "compare/index.html"):
+        for relative_path in (
+            "index.html",
+            "proof/index.html",
+            "compare/index.html",
+            "demo-key/index.html",
+        ):
             page = (output / relative_path).read_text(encoding="utf-8")
             collector = _LabeledLinkCollector()
             collector.feed(page)
@@ -1059,6 +1080,7 @@ INDEXABLE_PAGES = {
     "index.html": "https://www.thisisatest.tech/",
     "proof/index.html": "https://www.thisisatest.tech/proof/",
     "compare/index.html": "https://www.thisisatest.tech/compare/",
+    "demo-key/index.html": "https://www.thisisatest.tech/demo-key/",
 }
 
 
@@ -1123,6 +1145,7 @@ def test_pages_publish_valid_json_ld(tmp_path) -> None:
         "index.html": {"Organization", "WebSite", "SoftwareApplication", "WebPage"},
         "proof/index.html": {"WebPage", "BreadcrumbList", "HowTo"},
         "compare/index.html": {"WebPage", "BreadcrumbList", "FAQPage"},
+        "demo-key/index.html": {"WebPage", "BreadcrumbList"},
     }
     defined: set[str] = set()
     referenced: set[str] = set()
@@ -1438,12 +1461,56 @@ def test_site_sends_a_content_security_policy_and_hsts() -> None:
     # The accessibility preload and the analytics shim live in same-origin files
     # precisely so no inline-script escape hatch is needed.
     assert policy["script-src"] == "script-src 'self'"
+    assert policy["connect-src"] == (
+        "connect-src 'self' https://vitals.vercel-insights.com "
+        "https://api.thisisatest.tech"
+    )
     assert "'unsafe-inline'" not in values["Content-Security-Policy"]
     # Typography is self-hosted from /fonts, so neither font CDN is permitted.
     assert policy["style-src"] == "style-src 'self'"
     assert policy["font-src"] == "font-src 'self'"
     assert "fonts.googleapis.com" not in values["Content-Security-Policy"]
     assert "fonts.gstatic.com" not in values["Content-Security-Policy"]
+
+
+def test_built_demo_key_page_has_the_key_controls_and_api_connection(tmp_path) -> None:
+    output = tmp_path / "site"
+    result = _render_site(output, VALID_TEST_CONTACTS)
+    assert result.returncode == 0, result.stderr
+
+    page_path = output / "demo-key" / "index.html"
+    script_path = output / "demo-key" / "demo-key.js"
+    assert page_path.is_file()
+    assert script_path.is_file()
+    page = page_path.read_text(encoding="utf-8")
+    assert (
+        '<button class="button button-primary" id="get-demo-key" type="button">'
+        "Get a demo key</button>"
+    ) in page
+    assert re.search(r'<input id="demo-api-key"[^>]*\breadonly\b', page)
+    assert 'id="copy-demo-key"' in page
+    assert 'id="demo-wallet-id"' in page
+    assert 'id="demo-budget-credits"' in page
+    assert (
+        "Shown once. Store it now. Confined to the demo tenant "
+        "(synthetic credits, no real money)"
+    ) in page
+    assert 'src="/demo-key/demo-key.js?v=demo-key-1"' in page
+    assert "https://api.thisisatest.tech/v1/demo/keys" in page
+    assert 'id="demo-commands"' in page
+    assert "partner.echo" in page
+    assert "/v1/receipts/$RECEIPT/portable" in page
+
+    config = json.loads((SITE / "vercel.json").read_text(encoding="utf-8"))
+    global_headers = next(
+        entry for entry in config["headers"] if entry["source"] == "/(.*)"
+    )
+    values = {header["key"]: header["value"] for header in global_headers["headers"]}
+    policy = _csp_policy(values["Content-Security-Policy"])
+    assert policy["connect-src"] == (
+        "connect-src 'self' https://vitals.vercel-insights.com "
+        "https://api.thisisatest.tech"
+    )
 
 
 def test_pages_carry_no_inline_scripts(tmp_path) -> None:
@@ -1463,6 +1530,7 @@ def test_pages_carry_no_inline_scripts(tmp_path) -> None:
             "index.html",
             "proof/index.html",
             "compare/index.html",
+            "demo-key/index.html",
             "concept/index.html",
             "404.html",
         ):
@@ -1486,6 +1554,7 @@ def test_static_assets_are_cached_and_html_is_not() -> None:
     }
     assert any("styles.css" in source for source in cached_sources)
     assert "/proof/proof.js" in cached_sources
+    assert "/demo-key/demo-key.js" in cached_sources
 
     # Fingerprinting is a query token, so every reference must carry it or the
     # week-long cache would pin visitors to a stale asset. Discover the
@@ -1499,6 +1568,7 @@ def test_static_assets_are_cached_and_html_is_not() -> None:
         "index.html",
         "proof/index.html",
         "compare/index.html",
+        "demo-key/index.html",
         "concept/index.html",
         "404.html",
     ):
@@ -1535,7 +1605,7 @@ def test_trailing_slash_is_canonical_for_subpages() -> None:
     assert "trailingSlash" not in config
     # Because the global setting is off, every directory page needs its own
     # redirect or the un-slashed URL 404s.
-    for directory in ("proof", "compare"):
+    for directory in ("proof", "compare", "demo-key"):
         page = (SITE / directory / "index.html").read_text(encoding="utf-8")
         redirect = next(
             entry
@@ -1758,6 +1828,7 @@ def test_navigation_is_identical_across_pages(tmp_path, contacts) -> None:
         "index.html",
         "proof/index.html",
         "compare/index.html",
+        "demo-key/index.html",
         "concept/index.html",
         "404.html",
     )
@@ -1770,11 +1841,12 @@ def test_navigation_is_identical_across_pages(tmp_path, contacts) -> None:
             "/#pilot",
             "/proof/",
             "/compare/",
+            "/demo-key/",
             "/#machine-discovery",
         ):
             assert f'href="{destination}"' in nav, path
         assert PRIMARY_CTA in nav
-        if path in ("proof/index.html", "compare/index.html"):
+        if path in ("proof/index.html", "compare/index.html", "demo-key/index.html"):
             current = "/" + path.removesuffix("index.html")
             assert f'href="{current}" aria-current="page"' in nav
             assert nav.count('aria-current="page"') == 1
@@ -1808,6 +1880,7 @@ def test_footer_reaches_the_same_places_on_every_page(tmp_path) -> None:
             "index.html",
             "proof/index.html",
             "compare/index.html",
+            "demo-key/index.html",
             "concept/index.html",
             "404.html",
         )
@@ -2125,6 +2198,8 @@ def test_local_site_assets_exist() -> None:
         SITE / "proof" / "index.html",
         SITE / "proof" / "proof.js",
         SITE / "compare" / "index.html",
+        SITE / "demo-key" / "index.html",
+        SITE / "demo-key" / "demo-key.js",
         SITE / "404.html",
         SITE / "a11y-preload.js",
         SITE / "arcade-boot.js",
@@ -2153,6 +2228,7 @@ def test_typography_is_self_hosted_with_no_third_party_request(tmp_path) -> None
         output / "index.html",
         output / "proof" / "index.html",
         output / "compare" / "index.html",
+        output / "demo-key" / "index.html",
         output / "404.html",
     ]
     for page in rendered:
@@ -2195,6 +2271,7 @@ def test_every_page_loads_the_accessibility_scripts(tmp_path) -> None:
         "index.html",
         "proof/index.html",
         "compare/index.html",
+        "demo-key/index.html",
         "concept/index.html",
         "404.html",
     ):
@@ -2266,7 +2343,12 @@ def test_preloaded_fonts_exist_and_are_actually_used(tmp_path) -> None:
     # font fetches per bad URL buys nothing.
     assert 'rel="preload"' not in (output / "404.html").read_text(encoding="utf-8")
 
-    for relative_path in ("index.html", "proof/index.html", "compare/index.html"):
+    for relative_path in (
+        "index.html",
+        "proof/index.html",
+        "compare/index.html",
+        "demo-key/index.html",
+    ):
         markup = (output / relative_path).read_text(encoding="utf-8")
         preloads = re.findall(r'<link rel="preload" href="(/fonts/[^"]+)"', markup)
         assert preloads, f"{relative_path} preloads no fonts"
@@ -2305,7 +2387,12 @@ def test_stylesheet_cache_key_tracks_the_generated_css(tmp_path) -> None:
     assert _render_site(output, VALID_TEST_CONTACTS).returncode == 0
 
     digest = hashlib.sha256((SITE / "fonts.css").read_bytes()).hexdigest()[:8]
-    for relative_path in ("index.html", "proof/index.html", "404.html"):
+    for relative_path in (
+        "index.html",
+        "proof/index.html",
+        "demo-key/index.html",
+        "404.html",
+    ):
         markup = (output / relative_path).read_text(encoding="utf-8")
         assert f'href="/fonts.css?v={digest}"' in markup, relative_path
         assert "@@FONTS_CSS_VERSION@@" not in markup

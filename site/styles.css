@@ -1488,6 +1488,89 @@ main,
   margin-top: 0.25rem;
 }
 
+/* Demo key ---------------------------------------------------------------- */
+
+.demo-key-panel {
+  margin-top: 2rem;
+  padding: clamp(1.25rem, 3vw, 2rem);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.demo-key-panel button {
+  cursor: pointer;
+}
+
+.demo-key-panel button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.demo-key-panel label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+}
+
+.demo-key-copy-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.demo-key-copy-row input {
+  flex: 1 1 18rem;
+  min-width: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--ink);
+  color: var(--text);
+  font: 0.9rem var(--font-mono);
+}
+
+.demo-key-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 2rem;
+  margin: 1.5rem 0;
+}
+
+.demo-key-details dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.demo-key-details dt,
+#demo-key-note {
+  color: var(--text-dim);
+}
+
+.demo-key-next {
+  margin-top: 3rem;
+}
+
+.demo-key-next pre {
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 1.25rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--text);
+  font: 0.85rem/1.65 var(--font-mono);
+}
+
+.demo-key-next pre code {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+}
+
 /* Footer ---------------------------------------------------------------------------------- */
 
 .site-footer {
