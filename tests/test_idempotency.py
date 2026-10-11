@@ -82,6 +82,92 @@ async def test_idempotency_fails_closed_for_in_progress_record(clean_database):
 
 
 @pytest.mark.anyio
+async def test_in_progress_exposes_only_hash_verified_record_id(clean_database):
+    service = get_idempotency_service()
+    wallet = await get_agent_money().create_sponsor_wallet(
+        sponsor_name="Verified In Progress Sponsor",
+        email="verified-in-progress@example.com",
+    )
+    first = await service.begin_with_record(
+        wallet_id=wallet.wallet_id,
+        endpoint="/v1/test",
+        idempotency_key="verified-in-progress-key",
+        request_payload={"amount": 1},
+    )
+
+    with pytest.raises(IdempotencyInProgressError) as matched:
+        await service.begin_with_record(
+            wallet_id=wallet.wallet_id,
+            endpoint="/v1/test",
+            idempotency_key="verified-in-progress-key",
+            request_payload={"amount": 1},
+        )
+    assert matched.value.verified_record_id == first.record_id
+    assert str(matched.value) == "idempotency_in_progress"
+
+    with pytest.raises(IdempotencyInProgressError) as timed_out:
+        await service.begin_with_record(
+            wallet_id=wallet.wallet_id,
+            endpoint="/v1/test",
+            idempotency_key="verified-in-progress-key",
+            request_payload={"amount": 1},
+            wait_timeout_seconds=0.01,
+            poll_interval_seconds=0.002,
+        )
+    assert timed_out.value.verified_record_id == first.record_id
+
+    with pytest.raises(IdempotencyConflictError):
+        await service.begin_with_record(
+            wallet_id=wallet.wallet_id,
+            endpoint="/v1/test",
+            idempotency_key="verified-in-progress-key",
+            request_payload={"amount": 2},
+        )
+
+    other_wallet = await get_agent_money().create_sponsor_wallet(
+        sponsor_name="Other In Progress Sponsor",
+        email="other-in-progress@example.com",
+    )
+    other = await service.begin_with_record(
+        wallet_id=other_wallet.wallet_id,
+        endpoint="/v1/test",
+        idempotency_key="verified-in-progress-key",
+        request_payload={"amount": 1},
+    )
+    assert other.record_id != first.record_id
+
+
+@pytest.mark.anyio
+async def test_cross_transport_legacy_contention_has_no_verified_anchor(clean_database):
+    from app.routers.mcp import _begin_governed_mcp_idempotency
+
+    service = get_idempotency_service()
+    wallet = await get_agent_money().create_sponsor_wallet(
+        sponsor_name="Legacy Contention Sponsor",
+        email="legacy-contention@example.com",
+    )
+    await service.begin_with_record(
+        wallet_id=wallet.wallet_id,
+        endpoint="/mcp/tools/tool-a/invoke",
+        idempotency_key="legacy-contention-key",
+        request_payload={"transport": "rest"},
+    )
+
+    with pytest.raises(IdempotencyInProgressError) as unverified:
+        await _begin_governed_mcp_idempotency(
+            idem=service,
+            wallet_id=wallet.wallet_id,
+            idempotency_key="legacy-contention-key",
+            tool_name="tool-a",
+            endpoint="/mcp/messages",
+            logical_request_payload={"tool": "tool-a"},
+            legacy_request_payload={"transport": "jsonrpc"},
+            operation_kind="local",
+        )
+    assert unverified.value.verified_record_id is None
+
+
+@pytest.mark.anyio
 async def test_concurrent_begin_with_same_key_never_raises_unhandled_error(
     clean_database,
 ):
@@ -148,13 +234,14 @@ async def test_begin_translates_sqlite_lock_error_to_in_progress(
         )
 
     monkeypatch.setattr(AsyncSession, "commit", locked_commit)
-    with pytest.raises(IdempotencyInProgressError):
+    with pytest.raises(IdempotencyInProgressError) as locked:
         await service.begin(
             wallet_id=wallet.wallet_id,
             endpoint="/v1/test",
             idempotency_key="locked-key",
             request_payload={"amount": 1},
         )
+    assert locked.value.verified_record_id is None
 
     # Once the lock clears, the same key begins normally (no phantom row).
     monkeypatch.setattr(AsyncSession, "commit", real_commit)
