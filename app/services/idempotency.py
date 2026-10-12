@@ -117,7 +117,31 @@ async def may_abandon_action_owner(
 
 
 class IdempotencyConflictError(RuntimeError):
-    """Raised when an idempotency key is reused for a different request."""
+    """Raised when an idempotency key is reused for a different request.
+
+    ``expected_request_hash`` is the hash stored for the key's original request
+    and ``received_request_hash`` is the hash of the rejected one. Both are set
+    only where the two were computed the same way, so a caller can compare them.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        expected_request_hash: str | None = None,
+        received_request_hash: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.expected_request_hash = expected_request_hash
+        self.received_request_hash = received_request_hash
+
+    def as_error_data(self) -> dict[str, str] | None:
+        if self.expected_request_hash is None or self.received_request_hash is None:
+            return None
+        return {
+            "expected_request_hash": self.expected_request_hash,
+            "received_request_hash": self.received_request_hash,
+        }
 
 
 class IdempotencyInProgressError(RuntimeError):
@@ -302,7 +326,11 @@ def _replay_from_record(
     existing: IdempotencyRecordModel, request_hash: str
 ) -> IdempotencyReplay | None:
     if existing.request_hash != request_hash:
-        raise IdempotencyConflictError("idempotency_key_reused")
+        raise IdempotencyConflictError(
+            "idempotency_key_reused",
+            expected_request_hash=existing.request_hash,
+            received_request_hash=request_hash,
+        )
     if existing.response_json:
         try:
             decoded = json.loads(existing.response_json)

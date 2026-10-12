@@ -230,6 +230,19 @@ class HumanApprovalPendingSignal(RuntimeError):
         self.status_code = status_code
 
 
+class IdempotencyKeyReusedError(ValueError):
+    """``idempotency_key_reused`` carrying the conflict's request hashes.
+
+    Still a ``ValueError`` with the same message, so every handler that maps
+    ``idempotency_key_reused`` keeps working; JSON-RPC handlers add
+    ``error_data`` to the -32009 error.
+    """
+
+    def __init__(self, conflict: IdempotencyConflictError) -> None:
+        super().__init__(str(conflict))
+        self.error_data = conflict.as_error_data()
+
+
 AUDIT_CHAIN_CONTENDED_AFTER_EFFECTS = "audit_chain_contended_after_effects"
 RECEIPT_WRITE_CONTENDED_AFTER_EFFECTS = "receipt_write_contended_after_effects"
 
@@ -837,6 +850,9 @@ async def handle_messages(
                     gateway_outcome="denied", reason_code="request_validation_denied"
                 )
                 error_payload = {"code": code, "message": str(e)}
+                conflict_data = getattr(e, "error_data", None)
+                if conflict_data:
+                    error_payload["data"] = conflict_data
             return JSONResponse(
                 {
                     "jsonrpc": "2.0",
@@ -1465,7 +1481,7 @@ async def _execute_registered_tool_inner(
                 )
                 raise
             except IdempotencyConflictError as exc:
-                raise ValueError(str(exc)) from exc
+                raise IdempotencyKeyReusedError(exc) from exc
             if replay and replay.response_json:
                 if permit_id:
                     await _assert_governed_replay_access(
@@ -1733,7 +1749,7 @@ async def _execute_registered_tool_inner(
                     logical_operation_id=exc.verified_record_id,
                 )
                 raise
-            raise ValueError(str(exc))
+            raise IdempotencyKeyReusedError(exc) from exc
         if replay and replay.response_json:
             if action_identity is not None:
                 # A waiter may observe completion after authority was revoked.
