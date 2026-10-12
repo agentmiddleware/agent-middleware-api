@@ -3281,6 +3281,7 @@ async def _execute_upstream_after_charge(
             ledger_entry_id=ledger_entry_id,
             policy_metadata=policy_metadata,
             approval_check=approval_check,
+            upstream_evidence=_upstream_dispatch_evidence(forwarded_idempotency_key),
         )
         raise AssertionError("unreachable")
 
@@ -3289,11 +3290,12 @@ async def _execute_upstream_after_charge(
             return "upstream_response_too_large"
         return "upstream_response_invalid"
 
+    forwarded_idempotency_key = native_idempotency_key or idempotency_key
     try:
         upstream_result = await executor.call_tool(
             arguments,
             invocation_id=idempotency_record_id,
-            idempotency_key=native_idempotency_key or idempotency_key,
+            idempotency_key=forwarded_idempotency_key,
             before_dispatch=claim_dispatch,
         )
     except UpstreamMcpReturnedError as exc:
@@ -3429,6 +3431,7 @@ async def _execute_upstream_after_charge(
             ledger_entry_id=ledger_entry_id,
             policy_metadata=policy_metadata,
             approval_check=approval_check,
+            upstream_evidence=_upstream_dispatch_evidence(forwarded_idempotency_key),
         )
         raise AssertionError("unreachable")
     except UpstreamMcpResponseRejectedError as exc:
@@ -3487,7 +3490,13 @@ async def _execute_upstream_after_charge(
             dispatch_attempt_id=terminal.attempt_id,
             response_hash_override=terminal.response_hash,
             approval_id=(approval_check.approval_id if approval_check else None),
-            constraints_evaluated=_permit_constraints_snapshot(permit_model),
+            constraints_evaluated={
+                **_permit_constraints_snapshot(permit_model),
+                **_upstream_dispatch_evidence(
+                    forwarded_idempotency_key,
+                    upstream_result.provider_request_id,
+                ),
+            },
         )
     except ReceiptWriteContendedError as exc:
         # Post-charge: the tool ran and the wallet moved, so a lost receipt
@@ -3706,6 +3715,7 @@ async def _raise_charged_upstream_failure(
     ledger_entry_id: str,
     policy_metadata: dict[str, Any],
     approval_check: Any | None,
+    upstream_evidence: dict[str, Any] | None = None,
 ) -> None:
     """Sign an ambiguous/rejected response without refunding or releasing budget."""
     audit_event = await _audit_mcp_invocation(
@@ -3749,6 +3759,7 @@ async def _raise_charged_upstream_failure(
             idempotency_record_id=dispatch_attempt.idempotency_record_id,
             dispatch_attempt_id=dispatch_attempt.attempt_id,
             approval_id=(approval_check.approval_id if approval_check else None),
+            constraints_evaluated=upstream_evidence,
         )
     except ReceiptWriteContendedError as exc:
         # Post-charge: the tool ran and the wallet moved, so a lost receipt
@@ -3781,6 +3792,26 @@ async def _raise_charged_upstream_failure(
 def _permit_constraints_snapshot(permit_model: Any) -> dict[str, Any]:
     """Build a snapshot of permit v2 constraints for receipt signing."""
     return permit_constraints_snapshot(permit_model)
+
+
+def _upstream_dispatch_evidence(
+    forwarded_idempotency_key: str,
+    provider_request_id: str | None = None,
+) -> dict[str, Any]:
+    """Provider-lookup handles signed onto upstream receipts.
+
+    Rides in the already-signed ``constraints_evaluated`` JSON (same
+    precedent as ``jev_risk_guard``), so no receipt schema change. The
+    forwarded key is the exact ``io.agentmiddleware/idempotency_key`` value
+    the upstream received; ``idempotency_record_id`` on the receipt is the
+    forwarded ``io.agentmiddleware/invocation_id``.
+    """
+    evidence: dict[str, Any] = {
+        "forwarded_idempotency_key": forwarded_idempotency_key,
+    }
+    if provider_request_id is not None:
+        evidence["provider_request_id"] = provider_request_id
+    return {"upstream_dispatch": evidence}
 
 
 def _registered_tool_cost(
