@@ -97,6 +97,7 @@ You reused an `Idempotency-Key` with different payload. Use a fresh UUID for eac
 - `Tool not found: <name>` (`-32001`; REST `404`): confirm the tool name exists in `/mcp/tools.json`.
 - `Missing wallet_id in mcpContext` (`-32602`): `wallet_id` must sit inside `params.mcpContext`.
 - REST `422 Unprocessable Entity`: the body failed schema validation (for example `name` is missing). The REST body spells the context `mcp_context`, not `mcpContext`.
+- `Invalid params: use mcpContext for JSON-RPC; mcp_context is REST-only` (`-32602`): JSON-RPC `tools/call` (`/mcp/messages`, `/mcp`) takes `params.mcpContext` (camel case). `mcp_context` (snake case) is accepted only by the deprecated REST route `POST /mcp/tools/{service_id}/invoke`, which in turn refuses `mcpContext` with `422`. Neither route accepts both spellings.
 
 ### `delivery_uncertain` receipt
 The gateway claimed a send but has no trustworthy terminal result. Delivery and the downstream effect may or may not have occurred; this receipt does not prove upstream acceptance or execution. Under the configured conservative policy, the charge stands and replaying the same key returns the uncertain outcome without redispatching. Do not retry automatically. Reconcile against authoritative downstream state before making a new attempt. See [docs/partner-first-tool-runbook.md](docs/partner-first-tool-runbook.md).

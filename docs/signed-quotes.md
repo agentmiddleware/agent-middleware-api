@@ -83,8 +83,13 @@ spent quote to the invoke that spent it.
 | `GET` | `/v1/quotes/{quote_id}` | Wallet-scoped read. Reports `expired` once the window has passed. |
 | `GET` | `/v1/me/quotes` | The calling wallet's own quotes. `?status=active` lists the spendable ones; `?status=expired` also catches rows still stored as `active` but past their window. |
 
-Spending happens on the existing governed invoke — pass `quote_id` in
-`mcpContext` alongside `wallet_id`, `permit_id`, and `idempotency_key`.
+Spending happens on the existing governed invoke — pass `quote_id` in the
+call context alongside `wallet_id`, `permit_id`, and `idempotency_key`. The
+context field is spelled per route: `params.mcpContext` (camel case) on
+JSON-RPC `tools/call` (`/mcp/messages`), and `mcp_context` (snake case) on the
+deprecated REST invoke `/mcp/tools/{service_id}/invoke` used in the example
+below. The other spelling is refused before execution (JSON-RPC `-32602`,
+REST `422`); neither route accepts both.
 
 ## Example
 
