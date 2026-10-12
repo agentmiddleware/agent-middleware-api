@@ -89,7 +89,9 @@ counts as a key".
 
 A valid key reused with a different governed request is a known conflict.
 Both `/mcp` and `/mcp/messages` return JSON-RPC code `-32009` with message
-`idempotency_key_reused`; the deprecated REST invoke returns HTTP 409 with
+`idempotency_key_reused` and `data: {"expected_request_hash": ...,
+"received_request_hash": ...}` (the stored hash of the key's original request
+and the hash of the rejected one); the deprecated REST invoke returns HTTP 409 with
 `detail: "idempotency_key_reused"`. The rejected request does not execute or
 add a debit. Do not retry the changed request under that key. Retrying the
 original request with the same key returns its original terminal result.

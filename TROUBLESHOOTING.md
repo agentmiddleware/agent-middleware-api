@@ -92,7 +92,7 @@ You reused an `Idempotency-Key` with different payload. Use a fresh UUID for eac
 
 ### Errors on MCP invocation
 `POST /mcp/messages` returns these as JSON-RPC errors in an HTTP `200`; the deprecated REST route (`POST /mcp/tools/{service_id}/invoke`) answers with the REST status shown.
-- `idempotency_key_reused` (`-32009`; REST `409`): the `idempotency_key` in `mcpContext` was already used for a different payload. Replay the original payload with the same key; use a fresh key only for an intentionally distinct invocation.
+- `idempotency_key_reused` (`-32009`; REST `409`): the `idempotency_key` in `mcpContext` was already used for a different payload. `error.data.expected_request_hash` is the hash of the key's original request (the `request_hash` on the original receipt) and `error.data.received_request_hash` is the hash of the request just rejected. Replay the original payload with the same key; use a fresh key only for an intentionally distinct invocation.
 - `idempotency_key_required` (`-32003`; REST `400`): governed calls need an `idempotency_key` in `mcpContext`.
 - `Tool not found: <name>` (`-32001`; REST `404`): confirm the tool name exists in `/mcp/tools.json`.
 - `Missing wallet_id in mcpContext` (`-32602`): `wallet_id` must sit inside `params.mcpContext`.

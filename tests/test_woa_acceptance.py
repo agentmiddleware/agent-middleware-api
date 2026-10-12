@@ -76,6 +76,20 @@ async def _race(bodies, headers, monkeypatch):
     return [response.json() for response in responses]
 
 
+def _assert_key_reused(error, first_result):
+    """-32009 names the winner's request hash so the loser can retry safely."""
+    assert error["code"] == -32009
+    assert error["message"] == "idempotency_key_reused"
+    assert (
+        error["data"]["expected_request_hash"]
+        == (first_result["receipt"]["request_hash"])
+    )
+    assert (
+        error["data"]["received_request_hash"]
+        != (error["data"]["expected_request_hash"])
+    )
+
+
 @pytest.mark.parametrize("mixed", [False, True], ids=["ten-identical", "five-bodies"])
 async def test_simultaneous_key_reuse_has_one_dispatch_and_debit(
     client, clean_database, monkeypatch, mixed
@@ -119,20 +133,14 @@ async def test_simultaneous_key_reuse_has_one_dispatch_and_debit(
                         "message": "idempotency_in_progress",
                     }
                 else:
-                    assert response["error"] == {
-                        "code": -32009,
-                        "message": "idempotency_key_reused",
-                    }
+                    _assert_key_reused(response["error"], first_result)
             replay = await client.post(
                 "/mcp/messages", json=body, headers=provisioned["agent_headers"]
             )
             if body["params"]["arguments"]["message"] == winner:
                 assert replay.json()["result"] == first_result
             else:
-                assert replay.json()["error"] == {
-                    "code": -32009,
-                    "message": "idempotency_key_reused",
-                }
+                _assert_key_reused(replay.json()["error"], first_result)
         persisted = await _load_persisted_invocation(
             wallet_id=provisioned["agent_wallet_id"],
             permit_id=permit["permit_id"],
