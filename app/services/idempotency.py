@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import time
 import uuid
@@ -29,6 +30,8 @@ from app.db.models import (
 )
 from app.services.signing_keys import sha256_hex
 from app.services.action_permits import ActionExecutionIdentity
+
+logger = logging.getLogger(__name__)
 
 GOVERNED_MCP_IDEMPOTENCY_ENDPOINT = "/mcp/invoke"
 ACTION_MCP_IDEMPOTENCY_ENDPOINT = "/mcp/action/v1"
@@ -317,6 +320,74 @@ def _replay_from_record(
     raise IdempotencyInProgressError(
         "idempotency_in_progress", verified_record_id=existing.record_id
     )
+
+
+async def _alert_on_first_repeat(
+    session: AsyncSession,
+    *,
+    record_id: str,
+    wallet_id: str,
+    endpoint: str,
+    request_hash: str,
+) -> None:
+    """Log ``retry_loop_first_repeat`` when this record is the first repeat.
+
+    A repeat is a new idempotency key for the same caller (wallet), endpoint
+    and request hash -- the case idempotency does not deduplicate. Same-key
+    retries replay and never reach here. The alert fires once per window: for
+    the record that is second in ``(created_at, record_id)`` order among
+    matching records inside ``RETRY_LOOP_ALERT_WINDOW_SECONDS``. Observe-only
+    and best-effort: it never blocks, and a failure here is swallowed so the
+    governed call proceeds exactly as it would with the flag off.
+    """
+    settings = get_settings()
+    if not settings.RETRY_LOOP_ALERT_ENABLED:
+        return
+    try:
+        cutoff = to_naive_utc(
+            utc_now() - timedelta(seconds=settings.RETRY_LOOP_ALERT_WINDOW_SECONDS)
+        )
+        rows = (
+            await session.execute(
+                select(
+                    cast(Any, IdempotencyRecordModel.record_id),
+                    cast(Any, IdempotencyRecordModel.created_at),
+                )
+                .where(
+                    cast(
+                        ColumnElement[bool],
+                        IdempotencyRecordModel.wallet_id == wallet_id,
+                    ),
+                    cast(
+                        ColumnElement[bool], IdempotencyRecordModel.endpoint == endpoint
+                    ),
+                    cast(
+                        ColumnElement[bool],
+                        IdempotencyRecordModel.request_hash == request_hash,
+                    ),
+                    cast(Any, IdempotencyRecordModel.created_at) >= cutoff,
+                )
+                .order_by(
+                    cast(Any, IdempotencyRecordModel.created_at).asc(),
+                    cast(Any, IdempotencyRecordModel.record_id).asc(),
+                )
+                .limit(2)
+            )
+        ).all()
+        if len(rows) == 2 and rows[1][0] == record_id:
+            logger.warning(
+                "retry_loop_first_repeat",
+                extra={
+                    "wallet_id": wallet_id,
+                    "endpoint": endpoint,
+                    "request_hash_prefix": request_hash[:16],
+                    "prior_record_id": rows[0][0],
+                    "record_id": record_id,
+                    "window_seconds": settings.RETRY_LOOP_ALERT_WINDOW_SECONDS,
+                },
+            )
+    except Exception as exc:
+        logger.debug("retry_loop_alert_failed error=%s", type(exc).__name__)
 
 
 class IdempotencyService:
@@ -622,6 +693,13 @@ class IdempotencyService:
                     request_hash=request_hash,
                     replay=replay,
                 )
+            await _alert_on_first_repeat(
+                session,
+                record_id=record.record_id,
+                wallet_id=wallet_id,
+                endpoint=endpoint,
+                request_hash=request_hash,
+            )
             return IdempotencyBegin(
                 record_id=record.record_id,
                 request_hash=request_hash,

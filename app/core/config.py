@@ -315,6 +315,14 @@ class Settings(BaseSettings):
     # Default repeat detection window in seconds. Duplicates outside this window
     # are not detected.
     MCP_UPSTREAM_DUPLICATE_WINDOW_SECONDS: int = 86400  # 24 hours
+    # Retry-loop alerting (observe-only, off by default). Logs
+    # `retry_loop_first_repeat` on the FIRST new-key repeat of the same call
+    # (same wallet + endpoint + request hash) inside the window. Covers every
+    # governed call, local and upstream; never blocks. Distinct from the
+    # duplicate guard above, which is upstream-only and logs every repeat.
+    # See docs/retry-loop-alerting-and-caps.md.
+    RETRY_LOOP_ALERT_ENABLED: bool = False
+    RETRY_LOOP_ALERT_WINDOW_SECONDS: int = 600
     # Enable only after all workers can verify and enforce repeat-window permits.
     # Disabling issuance never disables validation of already-issued permits.
     ENABLE_PERMIT_REPEAT_WINDOW_ISSUANCE: bool = False
