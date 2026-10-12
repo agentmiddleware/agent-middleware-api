@@ -53,7 +53,9 @@ async def test_permit_read_and_verify_agree_at_expiry_without_resigning(
     assert fetched.status_code == 200
     current = fetched.json()
     assert current["effective_status"] == expected
-    assert current["status"] == "active"
+    # status is derived at read time too; storage still says "active" (below)
+    # and the signature still verifies, because status is not signed.
+    assert current["status"] == expected
     assert current["signature"] == permit["signature"]
     assert LocalPermitValidator.permit_signing_payload(current) == (
         LocalPermitValidator.permit_signing_payload(permit)
@@ -74,6 +76,21 @@ async def test_permit_read_and_verify_agree_at_expiry_without_resigning(
     assert verdict["valid"] is (expected == "active")
     assert verdict["reason"] == (None if expected == "active" else "permit_expired")
     assert verdict["permit"]["effective_status"] == expected
+    assert verdict["permit"]["status"] == expected
+
+    for route in ("/v1/permits", "/v1/me/permits"):
+        listed = await client.get(
+            route,
+            params={"wallet_id": owner["agent_wallet_id"]}
+            if route == "/v1/permits"
+            else None,
+            headers=owner["agent_headers"],
+        )
+        assert listed.status_code == 200, listed.text
+        rows = [
+            p for p in listed.json()["permits"] if p["permit_id"] == permit["permit_id"]
+        ]
+        assert [p["status"] for p in rows] == [expected]
 
     async with get_session_factory()() as session:
         stored = await session.get(PermitModel, permit["permit_id"])
@@ -115,6 +132,7 @@ async def test_expired_permit_lists_filter_current_lifecycle_and_revocation_wins
         f"/v1/permits/{revoked['permit_id']}", headers=owner["agent_headers"]
     )
     assert read_revoked.json()["effective_status"] == "revoked"
+    assert read_revoked.json()["status"] == "revoked"
     assert read_revoked.json()["signature"] == revoked["signature"]
     verify_revoked = await client.post(
         "/v1/permits/verify",
@@ -141,6 +159,7 @@ async def test_expired_permit_lists_filter_current_lifecycle_and_revocation_wins
             assert payload["total"] == len(expected_ids)
             assert [p["permit_id"] for p in payload["permits"]] == expected_ids
             assert all(p["effective_status"] == lifecycle for p in payload["permits"])
+            assert all(p["status"] == lifecycle for p in payload["permits"])
 
 
 @pytest.mark.anyio

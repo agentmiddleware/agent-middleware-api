@@ -97,7 +97,13 @@ POST /v1/permits
 
 # Invoke via MCP with permit + idempotency key
 POST /mcp/messages
-{"jsonrpc":"2.0","method":"tools/call","params":{...}}
+{"jsonrpc":"2.0","id":"1","method":"tools/call","params":{
+  "name":"partner.tool","arguments":{...},
+  "mcpContext":{"wallet_id":"...","permit_id":"...","idempotency_key":"..."}}}
+# JSON-RPC spells it mcpContext (camel case); mcp_context is refused with -32602.
+# Reusing idempotency_key with a different body returns -32009
+# idempotency_key_reused with error.data.expected_request_hash and
+# error.data.received_request_hash.
 
 # Export the signed receipt for offline verification
 GET /v1/receipts/{receipt_id}/portable
