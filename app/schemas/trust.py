@@ -11,6 +11,7 @@ from pydantic import (
     StrictInt,
     WithJsonSchema,
     computed_field,
+    field_serializer,
     field_validator,
     model_validator,
 )
@@ -142,7 +143,12 @@ class PermitResponse(ActionPermitFields):
     expires_at: datetime
     nonce: str
     status: str = Field(
-        description="Stored lifecycle status; expiry does not change it."
+        description=(
+            "Lifecycle status at read time, equal to effective_status: a stored "
+            "non-active status (revoked) wins; otherwise expired once expires_at "
+            "is at or before the current UTC time. Storage keeps 'active' after "
+            "expiry. Not part of the signed payload."
+        )
     )
     requires_human_approval: bool = False
     signature: str
@@ -165,6 +171,15 @@ class PermitResponse(ActionPermitFields):
         )
     )
     def effective_status(self) -> str:
+        return self._read_time_status()
+
+    @field_serializer("status")
+    def _serialize_status(self, status: str) -> str:
+        # The attribute stays the stored value for server logic; every
+        # serialized read (get, list, verify, evidence) reports expiry.
+        return self._read_time_status()
+
+    def _read_time_status(self) -> str:
         if self.status != "active":
             return self.status
         return "expired" if to_naive_utc(self.expires_at) <= utc_now() else "active"

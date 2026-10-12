@@ -181,7 +181,7 @@ question in one read:
 
 It is read-only and composes reads the caller could already make one at a
 time; listing never advances a decision or pages a human. Permits past their
-`expires_at` are excluded even while their stored status is still `active`.
+`expires_at` are excluded (they read `status: expired`; storage keeps `active`).
 The two lists are previews capped at 50 rows; the `*_total` fields say
 whether a list is complete, and `/v1/me/permits` / `/v1/me/permit-requests`
 page through the remainder.
