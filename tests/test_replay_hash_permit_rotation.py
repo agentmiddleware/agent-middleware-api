@@ -53,6 +53,13 @@ pytestmark = pytest.mark.anyio
 CONFLICT = {"code": -32009, "message": "idempotency_key_reused"}
 
 
+def _conflict_head(err):
+    """-32009 now carries request hashes in data (item 1); compare code/message."""
+    if not isinstance(err, dict):
+        return err
+    return {k: err.get(k) for k in ("code", "message")}
+
+
 @pytest.fixture
 async def client():
     async with AsyncClient(
@@ -169,7 +176,7 @@ async def test_renewed_permit_with_changed_arguments_still_conflicts(
     try:
         assert "result" in await _post(_body(tool, provisioned, old), headers)
         changed = await _post(_body(tool, provisioned, new, message="other"), headers)
-        assert changed["error"] == CONFLICT
+        assert _conflict_head(changed["error"]) == CONFLICT
         assert executor.dispatch_count == 1
         assert await _debits(provisioned["agent_wallet_id"]) == 1
     finally:
@@ -206,7 +213,7 @@ async def test_second_key_on_same_wallet_cannot_replay_through_own_permit(
             {"X-API-Key": sibling.json()["api_key"]},
         )
         assert "result" not in stolen, stolen
-        assert stolen["error"] == CONFLICT
+        assert _conflict_head(stolen["error"]) == CONFLICT
         assert executor.dispatch_count == 1
         assert await _debits(wallet_id) == 1
     finally:
@@ -248,7 +255,7 @@ async def test_pre_upgrade_permit_bound_record_still_replays(client, clean_datab
         assert (await _post(_body(tool, provisioned, old), headers)) == first
         # A legacy row can only be matched by the permit it was hashed with.
         rotated = await _post(_body(tool, provisioned, new), headers)
-        assert rotated["error"] == CONFLICT
+        assert _conflict_head(rotated["error"]) == CONFLICT
         assert executor.dispatch_count == 1
         assert await _debits(wallet_id) == 1
     finally:
