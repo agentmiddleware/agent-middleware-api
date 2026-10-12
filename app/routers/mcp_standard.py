@@ -363,7 +363,7 @@ async def _mint_auto_permit(
             request_payload=mint_payload,
         )
     except IdempotencyConflictError as exc:
-        raise _mcp_error(-32009, "idempotency_key_reused") from exc
+        raise _mcp_error(-32009, "idempotency_key_reused", exc.as_error_data()) from exc
     except IdempotencyInProgressError as exc:
         raise _mcp_error(-32005, "idempotency_in_progress") from exc
     if mint_replay and mint_replay.response_json:
@@ -683,7 +683,7 @@ async def _governed_tools_call(
         if code is None:
             error = _internal_error(e, surface="/mcp", request_id=request_id)
             raise _mcp_error(error["code"], error["message"], error["data"]) from e
-        raise _mcp_error(code, str(e)) from e
+        raise _mcp_error(code, str(e), getattr(e, "error_data", None)) from e
     except McpError:
         raise
     except Exception as e:
