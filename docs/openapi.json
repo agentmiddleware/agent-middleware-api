@@ -7960,7 +7960,7 @@
           "status": {
             "type": "string",
             "title": "Status",
-            "description": "Stored lifecycle status; expiry does not change it."
+            "description": "Lifecycle status at read time, equal to effective_status: a stored non-active status (revoked) wins; otherwise expired once expires_at is at or before the current UTC time. Storage keeps 'active' after expiry. Not part of the signed payload."
           },
           "requires_human_approval": {
             "type": "boolean",

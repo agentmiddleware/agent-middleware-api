@@ -115,10 +115,25 @@ async def test_changed_body_conflicts_without_second_execution_or_debit(
         else:
             assert conflict.status_code == 200
             assert conflict.json()["id"] == "conflict-id"
-            assert conflict.json()["error"] == {
-                "code": -32009,
-                "message": "idempotency_key_reused",
-            }
+            error = conflict.json()["error"]
+            assert error["code"] == -32009
+            assert error["message"] == "idempotency_key_reused"
+            hashes = error["data"]
+            assert set(hashes) == {"expected_request_hash", "received_request_hash"}
+            assert all(len(value) == 64 for value in hashes.values())
+            assert hashes["expected_request_hash"] != hashes["received_request_hash"]
+            # The expected hash is the original call's receipt request_hash, so
+            # an agent can match the conflict to the receipt it already holds.
+            assert hashes["expected_request_hash"] == result["receipt"]["request_hash"]
+            other = (await call("changed-again", "conflict-id-2")).json()["error"]
+            assert (
+                other["data"]["expected_request_hash"]
+                == (hashes["expected_request_hash"])
+            )
+            assert (
+                other["data"]["received_request_hash"]
+                != (hashes["received_request_hash"])
+            )
 
         final_replay = await call("first", "final-replay-id")
         final_result = final_replay.json()
@@ -164,8 +179,59 @@ async def test_standard_auto_permit_conflict_has_same_application_code(
                     response.json()["result"]["receipt"]["credits_charged"]
                 ) == Decimal("2")
             else:
-                assert response.json()["error"] == {
-                    "code": -32009,
-                    "message": "idempotency_key_reused",
-                }
+                error = response.json()["error"]
+                assert error["code"] == -32009
+                assert error["message"] == "idempotency_key_reused"
+                assert (
+                    error["data"]["expected_request_hash"]
+                    != error["data"]["received_request_hash"]
+                )
         assert tool_calls == ["first"]
+
+
+@pytest.mark.anyio
+async def test_same_key_on_another_wallet_is_not_a_conflict(clean_database, tool_calls):
+    """Keys are wallet-scoped: no conflict, and no other wallet's hash leaks."""
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        results = []
+        for index, message in enumerate(("first", "other-wallet")):
+            owner = await provision_agent_wallet(client)
+            wallet_id = owner["agent_wallet_id"]
+            permit = await create_tool_permit(
+                client,
+                wallet_id=wallet_id,
+                key_id=owner["key_id"],
+                tool_name=TOOL,
+                idem_key=f"cross-wallet-permit-{index}",
+            )
+            response = await client.post(
+                "/mcp/messages",
+                json={
+                    "jsonrpc": "2.0",
+                    "method": "tools/call",
+                    "id": message,
+                    "params": {
+                        "name": TOOL,
+                        "arguments": {"message": message},
+                        "mcpContext": {
+                            "wallet_id": wallet_id,
+                            "permit_id": permit["permit_id"],
+                        },
+                    },
+                },
+                headers={
+                    **owner["agent_headers"],
+                    "Idempotency-Key": "shared-across-wallets",
+                },
+            )
+            assert response.status_code == 200
+            body = response.json()
+            assert "error" not in body, body
+            results.append(body["result"])
+        assert tool_calls == ["first", "other-wallet"]
+        assert (
+            results[0]["receipt"]["request_hash"]
+            != results[1]["receipt"]["request_hash"]
+        )

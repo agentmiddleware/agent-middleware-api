@@ -688,9 +688,11 @@ async def test_reserve_budget_refuses_an_expired_permit(
 ):
     """reserve_budget is a second reservation path and must enforce expiry.
 
-    An expired permit keeps ``status="active"`` in storage, so a guarded update
-    without an expiry term happily spends against it. ``authorize_and_reserve``
-    grew that term; this path is the one that did not have it.
+    An expired permit keeps ``status="active"`` in storage (reads derive
+    ``status="expired"``; see the end of this test and
+    ``tests/test_permit_effective_lifecycle.py``), so a guarded update without
+    an expiry term happily spends against it. ``authorize_and_reserve`` grew
+    that term; this path is the one that did not have it.
     """
     provisioned = await provision_agent_wallet(client)
     service = get_permit_service()
@@ -726,6 +728,17 @@ async def test_reserve_budget_refuses_an_expired_permit(
         model = await session.get(PermitModel, permit.permit_id)
         assert model is not None
         assert model.spent_credits == Decimal("0")
+        # Storage still says active; every read reports the expiry.
+        assert model.status == "active"
+
+    read = await service.get_permit(permit.permit_id)
+    assert read is not None
+    assert read.model_dump(mode="json")["status"] == "expired"
+    fetched = await client.get(
+        f"/v1/permits/{permit.permit_id}", headers=provisioned["agent_headers"]
+    )
+    assert fetched.status_code == 200, fetched.text
+    assert fetched.json()["status"] == "expired"
 
 
 def _scale_permit_body(wallet_id: str, key_id: str, **overrides) -> dict:
