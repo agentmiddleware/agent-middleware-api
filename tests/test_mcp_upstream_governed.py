@@ -2181,10 +2181,13 @@ async def test_governed_upstream_conflicting_payload_reuse_never_redispatches(
         )
 
         assert "result" in first.json()
-        assert conflict.json()["error"] == {
-            "code": -32009,
-            "message": "idempotency_key_reused",
-        }
+        error = conflict.json()["error"]
+        assert error["code"] == -32009
+        assert error["message"] == "idempotency_key_reused"
+        assert (
+            error["data"]["expected_request_hash"]
+            == (first.json()["result"]["receipt"]["request_hash"])
+        )
         assert executor.dispatch_count == 1
         assert len(executor.calls) == 1
         persisted = await _load_persisted_invocation(
