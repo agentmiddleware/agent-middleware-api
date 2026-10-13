@@ -87,6 +87,17 @@ replaced by a generated one) and the `invalid_idempotency_key` refusal are
 specified in [`failure-semantics.md`](failure-semantics.md) under "What
 counts as a key".
 
+A valid key reused with a different governed request is a known conflict.
+Both `/mcp` and `/mcp/messages` return JSON-RPC code `-32009` with message
+`idempotency_key_reused` and `data: {"expected_request_hash": ...,
+"received_request_hash": ...}` (the stored hash of the key's original request
+and the hash of the rejected one); the deprecated REST invoke returns HTTP 409 with
+`detail: "idempotency_key_reused"`. The rejected request does not execute or
+add a debit. Do not retry the changed request under that key. Retrying the
+original request with the same key returns its original terminal result.
+The Python SDK continues to raise `IdempotencyConflictError` by matching
+the stable message, including responses from older server versions.
+
 An approval-gated auto-permit lives for the whole approval window
 (`SENTINEL_APPROVAL_TIMEOUT_SECONDS`) plus the standard TTL as execution
 margin, so a decision made late in the window still executes instead of
@@ -170,7 +181,7 @@ question in one read:
 
 It is read-only and composes reads the caller could already make one at a
 time; listing never advances a decision or pages a human. Permits past their
-`expires_at` are excluded even while their stored status is still `active`.
+`expires_at` are excluded (they read `status: expired`; storage keeps `active`).
 The two lists are previews capped at 50 rows; the `*_total` fields say
 whether a list is complete, and `/v1/me/permits` / `/v1/me/permit-requests`
 page through the remainder.

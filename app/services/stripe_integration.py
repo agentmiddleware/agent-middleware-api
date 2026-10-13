@@ -33,7 +33,7 @@ from .agent_money import WalletNotFoundError
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-stripe.api_key = settings.STRIPE_SECRET_KEY
+stripe.api_key = settings.STRIPE_SECRET_KEY.get_secret_value()
 
 # Explicit HTTP timeout on the shared Stripe client (the SDK's RequestsClient
 # default, stated here so it is a contract rather than an accident). The ACP
@@ -89,6 +89,7 @@ class StripeIntegration:
         wallet_id: str,
         amount_fiat: Decimal,
         currency: str = "usd",
+        idempotency_key: str | None = None,
     ) -> dict:
         """
         Create a Stripe PaymentIntent for fiat top-up.
@@ -97,6 +98,9 @@ class StripeIntegration:
             wallet_id: The wallet to credit after successful payment
             amount_fiat: Amount in fiat currency (e.g., 50.00 for $50)
             currency: ISO 4217 currency code (default: usd)
+            idempotency_key: Caller-supplied key forwarded to Stripe, so a
+                retried prepare with the same key returns the same intent
+                instead of creating a second one.
 
         Returns:
             {
@@ -144,6 +148,9 @@ class StripeIntegration:
         )
 
         def _create_top_up_payment_intent() -> Any:
+            create_kwargs: dict[str, Any] = {}
+            if idempotency_key is not None:
+                create_kwargs["idempotency_key"] = idempotency_key
             return stripe.PaymentIntent.create(
                 amount=amount_cents,
                 currency=SUPPORTED_TOP_UP_CURRENCY,
@@ -152,6 +159,7 @@ class StripeIntegration:
                     "credits": credits_metadata,
                     "idempotency_key": str(uuid4()),
                 },
+                **create_kwargs,
             )
 
         # The Stripe SDK call is synchronous network I/O; run it on a worker
@@ -291,7 +299,7 @@ class StripeIntegration:
             event = stripe.Webhook.construct_event(
                 payload,
                 sig_header,
-                settings.STRIPE_WEBHOOK_SECRET,
+                settings.STRIPE_WEBHOOK_SECRET.get_secret_value(),
             )
         except (ValueError, stripe.SignatureVerificationError) as e:
             logger.error(f"Invalid Stripe signature: {e}")
@@ -395,23 +403,32 @@ class StripeIntegration:
 
         return payment_intent_id, wallet_id, credits
 
-    async def _handle_payment_failed(self, payment_intent: dict) -> None:
+    async def _handle_payment_failed(self, payment_intent: Any) -> None:
         """Log payment failure and notify via Slack."""
         from ..services.notifications import get_notification_service
 
-        wallet_id = payment_intent["metadata"].get("wallet_id")
-        error_msg = payment_intent.get("last_payment_error", {}).get(
-            "message", "Unknown error"
-        )
+        # Stripe omits or nulls fields on unusual event shapes, so every
+        # lookup here uses the safe getter instead of direct dict access.
+        # A null last_payment_error or a missing metadata block must log
+        # sensibly, never raise and trigger a Stripe retry loop.
+        metadata = self._stripe_value(payment_intent, "metadata")
+        wallet_id = self._stripe_value(metadata, "wallet_id")
+        last_error = self._stripe_value(payment_intent, "last_payment_error")
+        error_msg = self._stripe_value(last_error, "message", "Unknown error")
+        if not isinstance(error_msg, str) or not error_msg.strip():
+            error_msg = "Unknown error"
+        payment_intent_id = self._stripe_value(payment_intent, "id", "unknown")
+        if not isinstance(payment_intent_id, str) or not payment_intent_id:
+            payment_intent_id = "unknown"
 
         logger.warning(f"Payment failed for wallet {wallet_id}: {error_msg}")
 
-        if wallet_id:
+        if isinstance(wallet_id, str) and wallet_id.strip():
             notifications = get_notification_service()
             await notifications.send_payment_failed_alert(
                 wallet_id=wallet_id,
                 error_message=error_msg,
-                payment_intent_id=payment_intent["id"],
+                payment_intent_id=payment_intent_id,
             )
 
     @staticmethod

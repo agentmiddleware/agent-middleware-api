@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — planned v1.3.0
 
+### Added — self-serve demo tenant (`POST /v1/demo/keys`)
+
+- Anonymous visitors can mint their own demo credential (tenant=`"demo"`
+  sponsor + agent wallets with synthetic out-of-thin-air credit, plus a
+  wallet-scoped API key) and run the permit → invoke → receipt loop alone.
+  Demo keys hold full permissions inside the demo tenant; containment is
+  structural: tenant is inherited wallet-to-wallet and stamped onto keys at
+  creation, permits and money movement refuse cross-tenant pairs, and a
+  short route denylist keeps demo callers off fiat, credential-minting, and
+  admin surfaces. Kill switch `ENABLE_DEMO_TENANT` (default off): off means
+  issuance 404 plus every demo credential refused at authentication.
+  Issuance carries per-IP/global/live-key caps, an Origin check, and
+  deduplicated alerts. Visitors can rotate/revoke their own key; bootstrap
+  admins get single-key revoke, revoke-all, and stats. Per-key tool
+  allowlists (`api_keys.allowed_tools_json`, enforced at permit creation
+  and invoke) ship as the general mechanism behind the optional
+  `DEMO_ALLOWED_TOOLS`. Migration `046_demo_tenant_key_allowlist` is
+  additive-only. See [`docs/demo-tenant.md`](docs/demo-tenant.md).
+
+### Changed — permit `status` reports `expired` at read time
+
+- Every serialized permit (`GET /v1/permits/{id}`, `/v1/permits`,
+  `/v1/me/permits`, the permit in `/v1/permits/verify` and receipt
+  evidence) now reports `status: "expired"` once `expires_at` has passed,
+  matching `effective_status`. Storage is unchanged (still `active`), and the
+  permit signature is unaffected (it signs a fixed `status: active`).
+  Behavior change: a client that read `status == "active"` after the deadline
+  now sees `expired`, which is what enforcement already did.
+
+### Changed — `idempotency_key_reused` (`-32009`) carries request hashes
+
+- The JSON-RPC conflict error on `/mcp` and `/mcp/messages` now includes
+  `error.data.expected_request_hash` (stored hash of the key's original
+  request, equal to the original receipt's `request_hash` on governed calls)
+  and `error.data.received_request_hash`. Additive: code and message are
+  unchanged; clients that compared the whole error object for equality will
+  see the new `data` member. The REST `409` body is unchanged.
+
 ### Changed — standard `/mcp` returns `delivery_uncertain` as a tool result
 
 - On `POST /mcp`, a lost upstream response (`delivery_uncertain`) is now a

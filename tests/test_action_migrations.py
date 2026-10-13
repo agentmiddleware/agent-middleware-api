@@ -4,8 +4,11 @@ import os
 import sqlite3
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 
 from tests.support.action_database_guard import (
     require_action_database_url,
@@ -26,6 +29,10 @@ FIELDS = (
     "action_upstream_binding_hash",
 )
 ACTION_REVISION = "042_permit_action_binding"
+_ROOT = Path(__file__).resolve().parents[1]
+_CONFIG = Config(str(_ROOT / "alembic.ini"))
+_CONFIG.set_main_option("script_location", str(_ROOT / "migrations"))
+CURRENT_HEAD = ScriptDirectory.from_config(_CONFIG).get_current_head()
 SCRUB_REVISION = "041_scrub_content_owner_keys"
 CONTENT_TABLES = ("content_pipelines", "content_campaigns")
 AUTHORITIES = [
@@ -112,7 +119,7 @@ def test_action_migration_retains_legacy_and_blocks_authority_loss(
     assert result.returncode == 0, result.stderr
     with sqlite3.connect(path) as db:
         assert db.execute("SELECT version_num FROM alembic_version").fetchone() == (
-            ACTION_REVISION,
+            CURRENT_HEAD,
         )
         assert db.execute("SELECT * FROM permits").fetchone() == (
             *before,
@@ -149,6 +156,8 @@ def test_action_migration_retains_legacy_and_blocks_authority_loss(
         assert result.returncode != 0, "downgrade discarded durable action authority"
         assert "action_authority_retained" in result.stderr
         with sqlite3.connect(path) as db:
+            # The 046, 045, and 044 downgrades succeed, then the 042 guard
+            # refuses: the version rests on 042 with all rows intact.
             assert (
                 db.execute("SELECT version_num FROM alembic_version").fetchone()[0]
                 == ACTION_REVISION
@@ -211,7 +220,7 @@ def test_postgres_legacy_roundtrip_and_fail_closed_downgrade():
     result = migrate(url, "head")
     assert result.returncode == 0, result.stderr
     assert sql("SELECT version_num FROM alembic_version") == [
-        {"version_num": ACTION_REVISION}
+        {"version_num": CURRENT_HEAD}
     ]
     for table, old in before.items():
         assert sql(f"SELECT * FROM {table}")[0] == {**old, **dict.fromkeys(FIELDS)}
@@ -227,7 +236,8 @@ def test_postgres_legacy_roundtrip_and_fail_closed_downgrade():
         {"version_num": SCRUB_REVISION}
     ]
     assert {t: sql(f"SELECT * FROM {t}")[0] for t in before} == before
-    # The second upgrade exercises the 041 -> 042 entry path independently.
+    # The second upgrade exercises the 041 -> head entry path independently
+    # (through 042).
     result = migrate(url, "head")
     assert result.returncode == 0, result.stderr
     for table, old in before.items():
@@ -246,7 +256,7 @@ def test_postgres_legacy_roundtrip_and_fail_closed_downgrade():
         result = migrate(url, SCRUB_REVISION, "downgrade")
         assert result.returncode != 0 and "action_authority_retained" in result.stderr
         assert sql("SELECT version_num FROM alembic_version") == [
-            {"version_num": ACTION_REVISION}
+            {"version_num": CURRENT_HEAD}
         ]
         for table, rows in retained.items():
             assert sql(f"SELECT * FROM {table}") == rows
@@ -261,6 +271,7 @@ def test_postgres_legacy_roundtrip_and_fail_closed_downgrade():
             {"owner_key": "w"},
         ]
     print(
-        "PostgreSQL: 040 -> 041 -> 042 and 041 -> 042; content owners scrubbed; "
-        "legacy permit/receipt bytes retained; every partial authority and owner downgrade blocked"
+        "PostgreSQL: 040 -> 041 -> head(046, through 042/044/045) and 041 -> head(046); "
+        "content owners scrubbed; legacy permit/receipt bytes retained; "
+        "every partial authority and owner downgrade blocked"
     )

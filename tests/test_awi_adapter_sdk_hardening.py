@@ -31,6 +31,7 @@ from typing import Any
 import httpx
 import pytest
 from httpx import ASGITransport, AsyncClient
+from pydantic import SecretStr
 
 import app.services.awi_external_adapter as adapter_module
 from app.core.config import get_settings
@@ -299,9 +300,9 @@ async def test_fallback_does_not_swallow_programming_errors(monkeypatch):
     monkeypatch.setattr(adapter.awi, "discover_manifest", _broken)
     monkeypatch.setattr(adapter.awi, "create_external_session", _broken)
     try:
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="bug, not an outage"):
             await adapter.discover()
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="bug, not an outage"):
             await adapter.create_session("https://shop.example", "wallet-a")
     finally:
         await adapter.awi.close()
@@ -350,7 +351,7 @@ async def test_representation_embedding_is_non_zero_deterministic_and_labelled()
 
 @pytest.mark.anyio
 async def test_rag_embedding_fallback_is_logged_without_payload(monkeypatch, caplog):
-    monkeypatch.setattr(get_settings(), "LLM_API_KEY", "sk-test-not-real")
+    monkeypatch.setattr(get_settings(), "LLM_API_KEY", SecretStr("sk-test-not-real"))
     engine = AWIRAGEngine()
 
     async def _boom(text: str) -> list[float]:
@@ -371,7 +372,7 @@ async def test_rag_embedding_fallback_is_logged_without_payload(monkeypatch, cap
 
 @pytest.mark.anyio
 async def test_rag_embedding_without_key_skips_openai(monkeypatch, caplog):
-    monkeypatch.setattr(get_settings(), "LLM_API_KEY", "")
+    monkeypatch.setattr(get_settings(), "LLM_API_KEY", SecretStr(""))
     engine = AWIRAGEngine()
     calls: list[str] = []
 
@@ -493,24 +494,24 @@ async def test_awi_sdk_execute_sends_permit_and_idempotency_headers():
 
 @pytest.mark.anyio
 @pytest.mark.parametrize(
-    ("permit_id", "idempotency_key"),
+    ("permit_id", "idempotency_key", "match"),
     [
-        ("", "idem-1"),
-        ("   ", "idem-1"),
-        ("permit-1", ""),
-        ("permit-1", "   "),
-        ("permit-1", "k" * 129),
+        ("", "idem-1", "permit_id must not be blank"),
+        ("   ", "idem-1", "permit_id must not be blank"),
+        ("permit-1", "", "idempotency_key must not be blank"),
+        ("permit-1", "   ", "idempotency_key must not be blank"),
+        ("permit-1", "k" * 129, "idempotency_key must be at most 128 characters"),
     ],
 )
 async def test_awi_sdk_execute_rejects_invalid_governance_headers(
-    permit_id, idempotency_key
+    permit_id, idempotency_key, match
 ):
     sdk = _awi_sdk()
     seen: list[httpx.Request] = []
     client = sdk.AWIClient(base_url="http://middleware.test", api_key="sk-live")
     client._client._transport = _capturing_transport(seen)
     try:
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match=match):
             await client.execute(
                 "sess-1",
                 "add_to_cart",
@@ -567,7 +568,9 @@ async def test_edge_client_execute_awi_action_sends_governed_headers():
             permit_id="permit-123",
             idempotency_key="idem-123",
         )
-        with pytest.raises(ValueError):
+        with pytest.raises(
+            ValueError, match="idempotency_key must be at most 128 characters"
+        ):
             await edge.execute_awi_action(
                 "sess-1",
                 "add_to_cart",

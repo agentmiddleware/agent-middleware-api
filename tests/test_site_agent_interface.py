@@ -251,9 +251,8 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
     # abstraction, and "refund" is the action the calculator's example prices.
     failure = (
         "An agent issues a customer refund through an internal MCP tool. The "
-        "call times out, the agent retries, and without a boundary the refund "
-        "runs twice. Someone pays in lost money, recovery time, or a customer "
-        "problem. Put a number on that cost. If preventing it cannot justify "
+        "call times out, the agent retries, and the refund runs "
+        "twice. If preventing it cannot justify "
         "this boundary, we will tell you."
     )
     # What a credit is, in one place, because the page meters calls while its
@@ -278,26 +277,26 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
     credit = (
         "A credit is a closed-loop metering unit for the pilot on an "
         "operator-provisioned wallet, not payment rails. The gateway reserves "
-        "the tool's registered credit price against the permit before "
+        "the tool's credit price against the permit before "
         "anything runs, and writes at most one ledger debit per accepted "
-        "idempotency key. A denied call is never charged. A call the gateway "
-        "can prove never reached the tool is refunded. But once it has "
-        "committed to sending on the configured upstream path, it can no "
-        "longer prove the tool did not run: a timeout or a crash from that "
-        "point stays charged, and is never retried for you — refunding an "
-        "ambiguous call automatically would pay a caller to induce timeouts "
-        "against a tool that had already done the work. Turning credits into "
-        "invoices, settlement, or payment rails is out of scope by design, "
+        "idempotency key. A denied call is never charged; a call the gateway "
+        "can prove never reached the tool is refunded. Once committed to "
+        "sending on the configured upstream path, it cannot prove the tool "
+        "did not run: a timeout or a crash from that "
+        "point stays charged, and is never retried for you. "
+        "Refunding an ambiguous call automatically would pay a caller to "
+        "induce timeouts against a tool that already did the work. "
+        "Credits never become invoices, settlement, or payment rails, "
         "and the pilot is priced separately, in writing."
     )
     # The recording uses a stand-in tool. Naming a refund in the hero without
     # saying so would let the transcript be read as a customer's refund.
     stand_in = "The tool in the recording is a stand-in echo tool, not a refund tool"
     boundary = (
-        "Agent Middleware API is a transaction boundary between your autonomous "
-        "agents and your consequential MCP (Model Context Protocol) tools. The "
-        "first call executes and is charged once; a retry carrying the same "
-        "idempotency key cannot dispatch again or debit again. Every completed "
+        "Agent Middleware API is a transaction boundary between your "
+        "agents and your consequential MCP tools. The "
+        "first call executes and is charged once; a same-key retry cannot "
+        "dispatch or debit again. Every completed "
         "call returns a signed receipt you can verify offline."
     )
     wedge = (
@@ -305,8 +304,7 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
         "authority for machine actions."
     )
     only_path = (
-        "The gateway sits between the agent and one tool, and becomes the only "
-        "path to that tool once you close the tool's other routes."
+        "The gateway becomes the only path once you close the tool's other routes."
     )
 
     assert headline in text
@@ -344,7 +342,10 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
     assert "Who owns the budget and when they decide." in text
     assert "synthetic or redacted examples only" in text.casefold()
     assert "Never send production secrets" in text
-    assert "a call is available only when a scenario needs one" in text.casefold()
+    # The pilot scope line no longer carries the call-availability clause; the
+    # optional booking link below is now its only carrier, and it is asserted
+    # alongside the CTA order below.
+    assert "one tool, one operator, one action" in text.casefold()
     # One label for the primary CTA everywhere; earlier variants drifted.
     assert "Book a pilot" not in text
     assert "Discuss fit" not in text
@@ -392,7 +393,12 @@ def test_booking_identity_names_one_product_and_one_operator(tmp_path, booking_u
     output = tmp_path / "site"
     result = _render_site(output, contacts)
     assert result.returncode == 0, result.stderr
-    for relative in ("index.html", "proof/index.html", "compare/index.html"):
+    for relative in (
+        "index.html",
+        "proof/index.html",
+        "compare/index.html",
+        "demo-key/index.html",
+    ):
         page = (output / relative).read_text()
         assert "RegEngine" not in page, (
             f"{relative} names the calendar host; the page carries one "
@@ -420,6 +426,7 @@ def test_pages_name_no_second_brand_in_visible_copy(tmp_path) -> None:
         "index.html",
         "proof/index.html",
         "compare/index.html",
+        "demo-key/index.html",
         "404.html",
     ):
         page = (output / relative).read_text(encoding="utf-8")
@@ -525,9 +532,8 @@ def test_marketing_manifest_points_to_custom_origins_and_local_proof() -> None:
     assert manifest["product_wedge"] == "governed_mcp_trust_plane"
     assert manifest["product_loop"] == get_agent_first_metadata()["product_loop"]
     assert manifest["try_it"] == _local_try_it_manifest()
-    # Public proof downloads do not imply access to the private source.
-    assert manifest["try_it"]["repository_access"] == "private"
-    assert manifest["github_access"] == "private"
+    assert manifest["try_it"]["repository_access"] == "public"
+    assert manifest["github_access"] == "public"
     assert manifest["discovery"]["llms_txt"] == f"{CANONICAL_API}/llms.txt"
     assert f"{CANONICAL_API}/llms.txt" in manifest["bootstrap_sequence"]
     assert "transaction-integrity boundary" in manifest["description"]
@@ -546,7 +552,11 @@ def test_machine_pointer_copies_match_and_state_live_access_boundary() -> None:
     assert "Transaction integrity" in llm_txt
     assert "delivery_uncertain" in llm_txt
     assert "at most one gateway dispatch and debit" in " ".join(llm_txt.split())
-    assert "The source repository is private" in llm_txt
+    assert "public source" in llm_txt
+    assert "GET /mcp/tools.json requires an" in llm_txt
+    assert "returns 401 without one" in llm_txt
+    assert "The local quickstart exposes the catalog without a key" in llm_txt
+    assert "Python 3.11+" in llm_txt
     assert "make prove-trust-plane" in llm_txt
     assert "operator-issued" in llm_txt
     assert "no public self-serve key mint" in llm_txt
@@ -579,6 +589,7 @@ def test_customer_facing_outputs_do_not_publish_provider_origins(tmp_path) -> No
         output / "proof" / "index.html",
         output / "compare" / "index.html",
         output / "concept" / "index.html",
+        output / "demo-key" / "index.html",
         output / "llm.txt",
         output / "llms.txt",
         output / ".well-known" / "agent.json",
@@ -592,25 +603,40 @@ def test_customer_facing_outputs_do_not_publish_provider_origins(tmp_path) -> No
             assert suffix not in content, f"{path} publishes {suffix}"
 
 
-REPO_URL = "https://github.com/PetrefiedThunder/agent-middleware-api"
+PUBLIC_ORG_URL = "https://github.com/agentmiddleware"
+PUBLIC_REPO_URL = "https://github.com/agentmiddleware/agent-middleware-api"
+OLD_REPO_URL = "https://github.com/PetrefiedThunder/agent-middleware-api"
+GITHUB_URL_PATTERN = re.compile(r"https://github\.com[^\s\"'<>)\]]*")
 
 
-def test_public_surfaces_separate_public_proof_from_private_source_access(
+def test_machine_discovery_names_keyed_catalog_and_scoped_tool_invoke(tmp_path) -> None:
+    output = tmp_path / "site"
+    result = _render_site(output, VALID_TEST_CONTACTS)
+    assert result.returncode == 0, result.stderr
+
+    home = (output / "index.html").read_text(encoding="utf-8")
+    machine = home.split('id="machine-discovery"', 1)[1].split("</section>", 1)[0]
+    normalized = " ".join(machine.split())
+    assert "Three unauthenticated GETs" in normalized
+    assert "/mcp/tools.json</code> returns 401" in normalized
+    assert "governed tool invocation requires an operator-issued key" in normalized
+    assert "and a scoped permit" in normalized
+    assert "protected actions need" not in normalized
+
+
+def test_public_surfaces_link_public_source_without_requiring_credentials(
     tmp_path,
 ) -> None:
-    """Repository visibility was verified private on 2026-10-02.
-
-    These local tests enforce copy consistency, not live GitHub availability.
-    Public proof downloads remain distinct from source access.
-    """
+    """Published copy and manifest point at the public source repository."""
     output = tmp_path / "site"
     result = _render_site(output, VALID_TEST_CONTACTS)
     assert result.returncode == 0, result.stderr
 
     public_paths = (
         output / "index.html",
-        output / "proof" / "index.html",
         output / "compare" / "index.html",
+        output / "proof" / "index.html",
+        output / "demo-key" / "index.html",
         output / "llm.txt",
         output / "llms.txt",
         output / "llms-full.txt",
@@ -621,13 +647,15 @@ def test_public_surfaces_separate_public_proof_from_private_source_access(
     for path in public_paths:
         content = path.read_text(encoding="utf-8").casefold()
         normalized = " ".join(content.split())
-        assert "source repository is public" not in normalized, path
-        assert "public source repository" not in normalized, path
-        assert "source repository is private" in normalized, path
+        assert "source repository is private" not in normalized, path
+        assert "source access on request" not in normalized, path
+        assert "partners with source access" not in normalized, path
+        assert "open source" not in normalized, path
+        assert "open-source repository" not in normalized, path
+        assert OLD_REPO_URL.casefold() not in content, path
 
-    source_reference_paths = (
+    source_paths = (
         output / "index.html",
-        output / "proof" / "index.html",
         output / "compare" / "index.html",
         output / "llm.txt",
         output / "llms.txt",
@@ -635,11 +663,65 @@ def test_public_surfaces_separate_public_proof_from_private_source_access(
         output / ".well-known" / "agent.json",
         ROOT / "static" / "llm.txt",
     )
-    for path in source_reference_paths:
-        content = path.read_text(encoding="utf-8").casefold()
-        assert REPO_URL.casefold() in content, (
-            f"{path} does not link to the source repository"
-        )
+    for path in source_paths:
+        content = path.read_text(encoding="utf-8")
+        assert PUBLIC_REPO_URL in content, path
+        assert "petrefiedthunder" not in content.casefold(), path
+
+    manifest = json.loads(
+        (output / ".well-known" / "agent.json").read_text(encoding="utf-8")
+    )
+    assert manifest["github"] == PUBLIC_REPO_URL
+    assert manifest["github_access"] == "public"
+    assert manifest["try_it"]["repository"] == PUBLIC_REPO_URL
+    assert manifest["try_it"]["repository_access"] == "public"
+
+    quickstart = (ROOT / "docs" / "quickstart.md").read_text(encoding="utf-8")
+    assert f"git clone {PUBLIC_REPO_URL}.git" in quickstart
+    compare = (output / "compare" / "index.html").read_text(encoding="utf-8")
+    assert "docs/market-research-2026-08.md</code> in the public source" in compare
+
+    # The shared footer still links the organization page.
+    footer = (SITE / "partials" / "footer.html").read_text(encoding="utf-8")
+    assert PUBLIC_ORG_URL in footer
+    assert OLD_REPO_URL not in footer
+
+
+OWN_GITHUB_OWNERS = ("petrefiedthunder", "agentmiddleware")
+
+
+def _github_url_uses_current_owner(url: str) -> bool:
+    """Our own GitHub links use the current organization, not the old owner."""
+    url = url.rstrip(".,;:")
+    path = url[len("https://github.com") :].strip("/")
+    owner = path.split("/", 1)[0].casefold() if path else ""
+    if owner not in OWN_GITHUB_OWNERS:
+        return True
+    return owner == "agentmiddleware"
+
+
+def test_built_site_github_links_use_current_owner(tmp_path) -> None:
+    """Published links avoid the old owner; third-party links are allowed."""
+    output = tmp_path / "site"
+    result = _render_site(output, VALID_TEST_CONTACTS)
+    assert result.returncode == 0, result.stderr
+
+    text_suffixes = {".html", ".txt", ".json", ".xml", ".js", ".md", ".css"}
+    checked = 0
+    offenders: list[str] = []
+    for path in sorted(output.rglob("*")):
+        if not path.is_file() or path.suffix not in text_suffixes:
+            continue
+        relative = path.relative_to(output)
+        if relative.parts and relative.parts[0] == "concept":
+            continue
+        content = path.read_text(encoding="utf-8", errors="replace")
+        for url in GITHUB_URL_PATTERN.findall(content):
+            checked += 1
+            if not _github_url_uses_current_owner(url):
+                offenders.append(f"{relative}: {url}")
+    assert checked > 0, "expected at least the footer GitHub link"
+    assert offenders == []
 
 
 def test_dynamic_routes_and_noncanonical_hosts_redirect_correctly() -> None:
@@ -705,13 +787,14 @@ def test_search_social_and_analytics_contracts(tmp_path) -> None:
     assert "Sitemap: https://www.thisisatest.tech/sitemap.xml" in robots
     assert "https://www.thisisatest.tech/proof/" in sitemap
     assert "https://www.thisisatest.tech/compare/" in sitemap
+    assert "https://www.thisisatest.tech/demo-key/" in sitemap
     assert _png_dimensions(output / "social-card.png") == (1200, 630)
     organization = next(
         node
         for node in _json_ld_graph(page, "index.html")
         if node["@type"] == "Organization"
     )
-    assert organization["sameAs"] == [REPO_URL]
+    assert organization["sameAs"] == [PUBLIC_ORG_URL]
     software = next(
         node
         for node in _json_ld_graph(page, "index.html")
@@ -737,7 +820,12 @@ def test_search_social_and_analytics_contracts(tmp_path) -> None:
     # Truthful events: without a booking link nothing can emit booking_click.
     email_only = tmp_path / "email-only"
     assert _render_site(email_only, EMAIL_ONLY_TEST_CONTACTS).returncode == 0
-    for relative_path in ("index.html", "proof/index.html", "compare/index.html"):
+    for relative_path in (
+        "index.html",
+        "proof/index.html",
+        "compare/index.html",
+        "demo-key/index.html",
+    ):
         rendered = (email_only / relative_path).read_text(encoding="utf-8")
         assert 'data-analytics-event="booking_click"' not in rendered
         assert 'data-analytics-event="email_click"' in rendered
@@ -751,6 +839,7 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
         "index.html",
         "proof/index.html",
         "compare/index.html",
+        "demo-key/index.html",
         "concept/index.html",
         "404.html",
     )
@@ -823,6 +912,7 @@ def test_external_links_carry_noopener_noreferrer(tmp_path) -> None:
         "index.html",
         "proof/index.html",
         "compare/index.html",
+        "demo-key/index.html",
         "concept/index.html",
     ):
         collector = _ExternalLinkCollector()
@@ -900,7 +990,12 @@ def test_cta_aria_labels_preserve_visible_text_and_contact_targets(tmp_path) -> 
         result = _render_site(output, contacts)
         assert result.returncode == 0, result.stderr
 
-        for relative_path in ("index.html", "proof/index.html", "compare/index.html"):
+        for relative_path in (
+            "index.html",
+            "proof/index.html",
+            "compare/index.html",
+            "demo-key/index.html",
+        ):
             page = (output / relative_path).read_text(encoding="utf-8")
             collector = _LabeledLinkCollector()
             collector.feed(page)
@@ -985,6 +1080,7 @@ INDEXABLE_PAGES = {
     "index.html": "https://www.thisisatest.tech/",
     "proof/index.html": "https://www.thisisatest.tech/proof/",
     "compare/index.html": "https://www.thisisatest.tech/compare/",
+    "demo-key/index.html": "https://www.thisisatest.tech/demo-key/",
 }
 
 
@@ -1049,6 +1145,7 @@ def test_pages_publish_valid_json_ld(tmp_path) -> None:
         "index.html": {"Organization", "WebSite", "SoftwareApplication", "WebPage"},
         "proof/index.html": {"WebPage", "BreadcrumbList", "HowTo"},
         "compare/index.html": {"WebPage", "BreadcrumbList", "FAQPage"},
+        "demo-key/index.html": {"WebPage", "BreadcrumbList"},
     }
     defined: set[str] = set()
     referenced: set[str] = set()
@@ -1149,12 +1246,11 @@ def test_faq_structured_data_is_generated_from_the_visible_answers(tmp_path) -> 
 
     expected_production_answer = (
         "Production beta, not production complete. The supported beta is "
-        "vendor-managed and dedicated per customer: each customer receives "
-        "separate API, PostgreSQL, Redis, signing material, and administrator "
+        "vendor-managed and dedicated per customer: separate API, "
+        "PostgreSQL, Redis, signing material, and administrator "
         "resources. It is not a shared multi-tenant SaaS, and optional "
         "proof-surface routers are outside the supported production posture. "
-        "There are no replicas or consensus. Read the security limitations "
-        "before deciding."
+        "There are no replicas or consensus."
     )
     production_answer = next(
         entry["acceptedAnswer"]["text"]
@@ -1173,7 +1269,7 @@ def test_faq_structured_data_is_generated_from_the_visible_answers(tmp_path) -> 
     exactly_once_answer = next(
         entry["acceptedAnswer"]["text"]
         for entry in questions
-        if entry["name"] == "Does exactly-once hold all the way to my tool?"
+        if entry["name"] == "Does once-only hold all the way to my tool?"
     )
     canonical_boundary = (
         "At our boundary: one accepted idempotency key maps to at most one "
@@ -1365,12 +1461,56 @@ def test_site_sends_a_content_security_policy_and_hsts() -> None:
     # The accessibility preload and the analytics shim live in same-origin files
     # precisely so no inline-script escape hatch is needed.
     assert policy["script-src"] == "script-src 'self'"
+    assert policy["connect-src"] == (
+        "connect-src 'self' https://vitals.vercel-insights.com "
+        "https://api.thisisatest.tech"
+    )
     assert "'unsafe-inline'" not in values["Content-Security-Policy"]
     # Typography is self-hosted from /fonts, so neither font CDN is permitted.
     assert policy["style-src"] == "style-src 'self'"
     assert policy["font-src"] == "font-src 'self'"
     assert "fonts.googleapis.com" not in values["Content-Security-Policy"]
     assert "fonts.gstatic.com" not in values["Content-Security-Policy"]
+
+
+def test_built_demo_key_page_has_the_key_controls_and_api_connection(tmp_path) -> None:
+    output = tmp_path / "site"
+    result = _render_site(output, VALID_TEST_CONTACTS)
+    assert result.returncode == 0, result.stderr
+
+    page_path = output / "demo-key" / "index.html"
+    script_path = output / "demo-key" / "demo-key.js"
+    assert page_path.is_file()
+    assert script_path.is_file()
+    page = page_path.read_text(encoding="utf-8")
+    assert (
+        '<button class="button button-primary" id="get-demo-key" type="button">'
+        "Get a demo key</button>"
+    ) in page
+    assert re.search(r'<input id="demo-api-key"[^>]*\breadonly\b', page)
+    assert 'id="copy-demo-key"' in page
+    assert 'id="demo-wallet-id"' in page
+    assert 'id="demo-budget-credits"' in page
+    assert (
+        "Shown once. Store it now. Confined to the demo tenant "
+        "(synthetic credits, no real money)"
+    ) in page
+    assert 'src="/demo-key/demo-key.js?v=demo-key-1"' in page
+    assert "https://api.thisisatest.tech/v1/demo/keys" in page
+    assert 'id="demo-commands"' in page
+    assert "partner.echo" in page
+    assert "/v1/receipts/$RECEIPT/portable" in page
+
+    config = json.loads((SITE / "vercel.json").read_text(encoding="utf-8"))
+    global_headers = next(
+        entry for entry in config["headers"] if entry["source"] == "/(.*)"
+    )
+    values = {header["key"]: header["value"] for header in global_headers["headers"]}
+    policy = _csp_policy(values["Content-Security-Policy"])
+    assert policy["connect-src"] == (
+        "connect-src 'self' https://vitals.vercel-insights.com "
+        "https://api.thisisatest.tech"
+    )
 
 
 def test_pages_carry_no_inline_scripts(tmp_path) -> None:
@@ -1390,6 +1530,7 @@ def test_pages_carry_no_inline_scripts(tmp_path) -> None:
             "index.html",
             "proof/index.html",
             "compare/index.html",
+            "demo-key/index.html",
             "concept/index.html",
             "404.html",
         ):
@@ -1413,6 +1554,7 @@ def test_static_assets_are_cached_and_html_is_not() -> None:
     }
     assert any("styles.css" in source for source in cached_sources)
     assert "/proof/proof.js" in cached_sources
+    assert "/demo-key/demo-key.js" in cached_sources
 
     # Fingerprinting is a query token, so every reference must carry it or the
     # week-long cache would pin visitors to a stale asset. Discover the
@@ -1426,6 +1568,7 @@ def test_static_assets_are_cached_and_html_is_not() -> None:
         "index.html",
         "proof/index.html",
         "compare/index.html",
+        "demo-key/index.html",
         "concept/index.html",
         "404.html",
     ):
@@ -1462,7 +1605,7 @@ def test_trailing_slash_is_canonical_for_subpages() -> None:
     assert "trailingSlash" not in config
     # Because the global setting is off, every directory page needs its own
     # redirect or the un-slashed URL 404s.
-    for directory in ("proof", "compare"):
+    for directory in ("proof", "compare", "demo-key"):
         page = (SITE / directory / "index.html").read_text(encoding="utf-8")
         redirect = next(
             entry
@@ -1685,6 +1828,7 @@ def test_navigation_is_identical_across_pages(tmp_path, contacts) -> None:
         "index.html",
         "proof/index.html",
         "compare/index.html",
+        "demo-key/index.html",
         "concept/index.html",
         "404.html",
     )
@@ -1697,11 +1841,12 @@ def test_navigation_is_identical_across_pages(tmp_path, contacts) -> None:
             "/#pilot",
             "/proof/",
             "/compare/",
+            "/demo-key/",
             "/#machine-discovery",
         ):
             assert f'href="{destination}"' in nav, path
         assert PRIMARY_CTA in nav
-        if path in ("proof/index.html", "compare/index.html"):
+        if path in ("proof/index.html", "compare/index.html", "demo-key/index.html"):
             current = "/" + path.removesuffix("index.html")
             assert f'href="{current}" aria-current="page"' in nav
             assert nav.count('aria-current="page"') == 1
@@ -1735,6 +1880,7 @@ def test_footer_reaches_the_same_places_on_every_page(tmp_path) -> None:
             "index.html",
             "proof/index.html",
             "compare/index.html",
+            "demo-key/index.html",
             "concept/index.html",
             "404.html",
         )
@@ -2052,6 +2198,8 @@ def test_local_site_assets_exist() -> None:
         SITE / "proof" / "index.html",
         SITE / "proof" / "proof.js",
         SITE / "compare" / "index.html",
+        SITE / "demo-key" / "index.html",
+        SITE / "demo-key" / "demo-key.js",
         SITE / "404.html",
         SITE / "a11y-preload.js",
         SITE / "arcade-boot.js",
@@ -2080,6 +2228,7 @@ def test_typography_is_self_hosted_with_no_third_party_request(tmp_path) -> None
         output / "index.html",
         output / "proof" / "index.html",
         output / "compare" / "index.html",
+        output / "demo-key" / "index.html",
         output / "404.html",
     ]
     for page in rendered:
@@ -2122,6 +2271,7 @@ def test_every_page_loads_the_accessibility_scripts(tmp_path) -> None:
         "index.html",
         "proof/index.html",
         "compare/index.html",
+        "demo-key/index.html",
         "concept/index.html",
         "404.html",
     ):
@@ -2193,7 +2343,12 @@ def test_preloaded_fonts_exist_and_are_actually_used(tmp_path) -> None:
     # font fetches per bad URL buys nothing.
     assert 'rel="preload"' not in (output / "404.html").read_text(encoding="utf-8")
 
-    for relative_path in ("index.html", "proof/index.html", "compare/index.html"):
+    for relative_path in (
+        "index.html",
+        "proof/index.html",
+        "compare/index.html",
+        "demo-key/index.html",
+    ):
         markup = (output / relative_path).read_text(encoding="utf-8")
         preloads = re.findall(r'<link rel="preload" href="(/fonts/[^"]+)"', markup)
         assert preloads, f"{relative_path} preloads no fonts"
@@ -2232,7 +2387,12 @@ def test_stylesheet_cache_key_tracks_the_generated_css(tmp_path) -> None:
     assert _render_site(output, VALID_TEST_CONTACTS).returncode == 0
 
     digest = hashlib.sha256((SITE / "fonts.css").read_bytes()).hexdigest()[:8]
-    for relative_path in ("index.html", "proof/index.html", "404.html"):
+    for relative_path in (
+        "index.html",
+        "proof/index.html",
+        "demo-key/index.html",
+        "404.html",
+    ):
         markup = (output / relative_path).read_text(encoding="utf-8")
         assert f'href="/fonts.css?v={digest}"' in markup, relative_path
         assert "@@FONTS_CSS_VERSION@@" not in markup

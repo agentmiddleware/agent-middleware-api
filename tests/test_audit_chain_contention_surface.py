@@ -62,6 +62,7 @@ from typing import Any
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from pydantic import SecretStr
 from sqlalchemy import select
 
 from app.core.config import get_settings
@@ -859,7 +860,7 @@ async def test_a_consumed_approval_still_reaches_a_terminal_answer(
     settings = get_settings()
     monkeypatch.setattr(settings, "SIMULATION_MODE_HUMAN_APPROVAL", True)
     monkeypatch.setattr(settings, "SENTINEL_API_URL", "")
-    monkeypatch.setattr(settings, "SENTINEL_API_KEY", "")
+    monkeypatch.setattr(settings, "SENTINEL_API_KEY", SecretStr(""))
     monkeypatch.setattr(settings, "SENTINEL_WAIT_SECONDS", 0.0)
 
     tool_name = "audit-contention-approval"

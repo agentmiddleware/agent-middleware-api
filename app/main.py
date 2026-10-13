@@ -47,11 +47,13 @@ from .core.product_positioning import (
 from .core.rate_limiter import RateLimitMiddleware, rate_limit_discovery
 from .core.runtime_mode import get_simulation_modes
 from .middleware.head_method import HeadMethodMiddleware
+from .middleware.operation_insight_events import OperationInsightEventsMiddleware
 from .middleware.request_body_limit import RequestBodyLimitMiddleware
 from .middleware.security_headers import SecurityHeadersMiddleware
 from .core.trust_mode import (
     is_production_like_environment,
     validate_trust_mode_guardrails,
+    warn_if_open_admin_enabled,
     warn_if_trust_mode_permissive,
 )
 from .db.database import SchemaInitError, init_db, close_db
@@ -93,9 +95,11 @@ from .routers import (
     mcp,
     mcp_public,
     mcp_standard,
+    operation_insights,
     kyc,
     api_keys,
     dev_keys,
+    demo_keys,
     keys,
     me,
     awi,
@@ -169,6 +173,7 @@ _SIGNING_KEY_REMEDIATION = {
 async def lifespan(app: FastAPI):
     validate_trust_mode_guardrails(settings)
     warn_if_trust_mode_permissive(settings)
+    warn_if_open_admin_enabled(settings)
     # Operator-facing posture record. The unauthenticated /health/dependencies
     # payload no longer publishes per-service simulation modes when proof
     # surfaces are unmounted, so this startup line is where that truth lives
@@ -558,6 +563,14 @@ app = FastAPI(
 # Rate limiting (enforces documented 120 req/min per API key)
 app.add_middleware(RateLimitMiddleware)
 
+# Stash (method, path) for auth-time demo-tenant route confinement. No
+# authentication, no branching, negligible cost: only demo-tenant
+# credentials read this value. Added after (so it wraps) the rate limiter,
+# which sets the context before any handler or auth dependency runs.
+from app.services.demo_tenant import DemoRequestContextMiddleware
+
+app.add_middleware(DemoRequestContextMiddleware)
+
 # Inbound body ceiling. Registered between the rate limiter and CORS so the
 # stack puts it outside RateLimitMiddleware — an oversized body is refused
 # before any per-key bookkeeping or handler buffers it — and inside
@@ -616,6 +629,8 @@ app.add_middleware(SecurityHeadersMiddleware)
 # layer below — routing included — sees a GET, and the response leaves with
 # the GET's status and headers but no body, per RFC 9110 §9.3.2.
 app.add_middleware(HeadMethodMiddleware)
+# Outermost: capture refused ingress before auth, routing, and body validation.
+app.add_middleware(OperationInsightEventsMiddleware)
 
 
 def _json_safe_numbers(value: Any) -> Any:
@@ -751,6 +766,9 @@ for router_module in CORE_TRUST_ROUTERS:
         ),
     )
 
+if settings.OPERATION_INSIGHTS_REPORTING_ENABLED:
+    app.include_router(operation_insights.router)
+
 # Self-serve dev keys: the handler is triple-gated at runtime (its own
 # ENABLE_DEV_KEY_SELF_PROVISION flag answers 404, production-like environments
 # fail closed with 403, and cross-origin browser calls are refused), so the
@@ -762,11 +780,20 @@ app.include_router(
     dev_keys.router, include_in_schema=settings.ENABLE_DEV_KEY_SELF_PROVISION
 )
 
+# Self-serve demo tenant: the handler is gated at runtime by its own
+# ENABLE_DEMO_TENANT kill switch (404 when off, plus every existing demo
+# credential refused at authentication), with issuance abuse controls and a
+# route denylist for demo callers — so the route stays mounted for flag
+# flips but is only *advertised* in the OpenAPI schema when the flag is on.
+# Unlike dev keys this IS allowed in production-like environments (with
+# REDIS_URL, enforced at boot).
+app.include_router(demo_keys.router, include_in_schema=settings.ENABLE_DEMO_TENANT)
+
 # Stripe webhooks answer only signed Stripe traffic; a deployment with no
 # Stripe key configured has nothing that could ever call them, so they are
 # mounted only when Stripe is actually configured (or on instances that mount
 # every surface anyway).
-if settings.STRIPE_SECRET_KEY or settings.ENABLE_PROOF_SURFACES:
+if settings.STRIPE_SECRET_KEY.get_secret_value() or settings.ENABLE_PROOF_SURFACES:
     app.include_router(webhooks.router)
 
 if settings.ENABLE_PROOF_SURFACES:

@@ -2,7 +2,11 @@
 
 SQLite does not implement ``SELECT ... FOR UPDATE`` semantics, so these tests
 only run when explicitly pointed at an isolated PostgreSQL database. The CI
-job in ``.github/workflows/ci.yml`` supplies that database and opt-in flag.
+jobs in ``.github/workflows/ci.yml`` supply that database and the opt-in
+flag. When ``REQUIRE_POSTGRES_CONCURRENCY_TESTS=1`` is set (as CI does), a
+missing PostgreSQL database or a missing opt-in flag fails loudly instead of
+skipping, so a misconfigured job goes red rather than passing by skipping
+the only tests it was added for.
 """
 
 from __future__ import annotations
@@ -142,10 +146,22 @@ class PausedUpstreamExecutor:
 
 
 def _require_opted_in_postgres() -> None:
+    required = os.environ.get("REQUIRE_POSTGRES_CONCURRENCY_TESTS") == "1"
     engine = get_engine()
     if engine is None or engine.dialect.name != "postgresql":
+        if required:
+            pytest.fail(
+                "REQUIRE_POSTGRES_CONCURRENCY_TESTS=1 but the suite is not "
+                "running on PostgreSQL; check DATABASE_URL"
+            )
         pytest.skip("requires a PostgreSQL DATABASE_URL for real row-lock semantics")
     if os.environ.get("RUN_POSTGRES_CONCURRENCY_TESTS") != "1":
+        if required:
+            pytest.fail(
+                "REQUIRE_POSTGRES_CONCURRENCY_TESTS=1 but "
+                "RUN_POSTGRES_CONCURRENCY_TESTS is not set; refusing to "
+                "silently skip the row-lock proofs"
+            )
         pytest.skip(
             "set RUN_POSTGRES_CONCURRENCY_TESTS=1 only with an isolated "
             "PostgreSQL test database"

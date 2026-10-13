@@ -141,6 +141,7 @@ def validate_trust_mode_config(
     enable_proof_surfaces: bool = True,
     static_dev_api_keys: str = "",
     enable_dev_key_self_provision: bool = False,
+    allow_unauthenticated_dev_admin: bool = False,
     enable_public_mcp_endpoint: bool = False,
     allow_private_network_targets: bool = False,
     allow_unsafe_host_python_sandbox: bool = False,
@@ -150,6 +151,7 @@ def validate_trust_mode_config(
     database_url: str = "",
     enable_dogfood_tool: bool = False,
     enable_dogfood_second_tool: bool = False,
+    enable_demo_tenant: bool = False,
 ) -> None:
     """Refuse unsafe deploy postures in production-like environments.
 
@@ -213,6 +215,12 @@ def validate_trust_mode_config(
                 "production-like environments (self-serve dev key minting "
                 "is local-only — see docs/static-dev-api-keys.md)"
             )
+        if allow_unauthenticated_dev_admin:
+            violations.append(
+                "ALLOW_UNAUTHENTICATED_DEV_ADMIN must be false in "
+                "production-like environments (unauthenticated callers must "
+                "never authenticate as admins outside local development)"
+            )
         if enable_public_mcp_endpoint:
             violations.append(
                 "ENABLE_PUBLIC_MCP_ENDPOINT must be false in production-like "
@@ -230,6 +238,17 @@ def validate_trust_mode_config(
             violations.append(
                 "ENABLE_DOGFOOD_SECOND_TOOL must be false in production-like "
                 "environments (partner.notes.count is CI-only scaffolding)"
+            )
+        if enable_demo_tenant and not (redis_url or "").strip():
+            # Demo issuance limits (per-IP, global, live-key cap) are the
+            # only thing standing between an anonymous endpoint and key
+            # farming. In-process counters do not survive a second replica,
+            # so a production-like deployment with the demo tenant on must
+            # share them through Redis.
+            violations.append(
+                "REDIS_URL is required in production-like environments when "
+                "ENABLE_DEMO_TENANT is true (demo issuance limits must be "
+                "shared across replicas)"
             )
         if allow_private_network_targets:
             violations.append(
@@ -304,6 +323,9 @@ def validate_trust_mode_guardrails(settings: Settings) -> None:
         enable_proof_surfaces=settings.ENABLE_PROOF_SURFACES,
         static_dev_api_keys=settings.STATIC_DEV_API_KEYS,
         enable_dev_key_self_provision=settings.ENABLE_DEV_KEY_SELF_PROVISION,
+        allow_unauthenticated_dev_admin=getattr(
+            settings, "ALLOW_UNAUTHENTICATED_DEV_ADMIN", False
+        ),
         enable_public_mcp_endpoint=settings.ENABLE_PUBLIC_MCP_ENDPOINT,
         allow_private_network_targets=settings.ALLOW_PRIVATE_NETWORK_TARGETS,
         allow_unsafe_host_python_sandbox=settings.ALLOW_UNSAFE_HOST_PYTHON_SANDBOX,
@@ -313,6 +335,7 @@ def validate_trust_mode_guardrails(settings: Settings) -> None:
         database_url=settings.DATABASE_URL,
         enable_dogfood_tool=settings.ENABLE_DOGFOOD_TOOL,
         enable_dogfood_second_tool=settings.ENABLE_DOGFOOD_SECOND_TOOL,
+        enable_demo_tenant=settings.ENABLE_DEMO_TENANT,
     )
 
 
@@ -339,6 +362,27 @@ def describe_permissive_trust_mode(
             "ALLOW_LEGACY_UNPERMITTED_MCP=true (ungoverned MCP calls accepted)"
         )
     return "; ".join(parts)
+
+
+def warn_if_open_admin_enabled(settings: Settings) -> None:
+    """Log a loud warning when unauthenticated local admin is opted in.
+
+    Called once at startup, after ``validate_trust_mode_guardrails``. In
+    production-like environments the validator has already refused to boot
+    with the flag set, so this only fires in local-compatible environments
+    that explicitly opted in, exactly when an operator should see that any
+    caller can administer this instance.
+    """
+    if not getattr(settings, "ALLOW_UNAUTHENTICATED_DEV_ADMIN", False):
+        return
+    if is_production_like_environment(settings.ENVIRONMENT):
+        return
+    logger.warning(
+        "open_admin_enabled: ALLOW_UNAUTHENTICATED_DEV_ADMIN is set, so "
+        "any caller reaching this instance with no configured keys in DEBUG "
+        "mode authenticates as bootstrap admin. Local development only; "
+        "production-like environments refuse to boot with this flag."
+    )
 
 
 def warn_if_trust_mode_permissive(settings: Settings) -> None:

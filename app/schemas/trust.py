@@ -9,11 +9,15 @@ from pydantic import (
     BaseModel,
     Field,
     StrictInt,
+    WithJsonSchema,
+    computed_field,
+    field_serializer,
     field_validator,
     model_validator,
 )
 
 from app.core.credits import credit_amount_fits_storage
+from app.core.time import to_naive_utc, utc_now
 from app.schemas.policies import PolicyBundleResponse
 
 # Permit and permit-request credit columns are Numeric(20, 8). A permit is
@@ -22,6 +26,7 @@ from app.schemas.policies import PolicyBundleResponse
 # permit whose stored terms no longer match its signature. Refuse those here.
 _CREDIT_DIGITS = 20
 _CREDIT_DECIMAL_PLACES = 8
+_POSITIVE_STORED_CREDIT_PATTERN = r"^(?=[0-9.]*[1-9])0*[0-9]{1,12}(?:\.[0-9]{1,8})?$"
 
 
 def _require_storable_credit(amount: Decimal) -> Decimal:
@@ -36,6 +41,15 @@ _PositiveStoredCredit = Annotated[
     Decimal,
     Field(gt=0, max_digits=_CREDIT_DIGITS, decimal_places=_CREDIT_DECIMAL_PLACES),
     AfterValidator(_require_storable_credit),
+    WithJsonSchema(
+        {
+            "anyOf": [
+                {"type": "number", "exclusiveMinimum": 0},
+                {"type": "string", "pattern": _POSITIVE_STORED_CREDIT_PATTERN},
+            ]
+        },
+        mode="validation",
+    ),
 ]
 
 
@@ -128,7 +142,14 @@ class PermitResponse(ActionPermitFields):
     spent_credits: Decimal
     expires_at: datetime
     nonce: str
-    status: str
+    status: str = Field(
+        description=(
+            "Lifecycle status at read time, equal to effective_status: a stored "
+            "non-active status (revoked) wins; otherwise expired once expires_at "
+            "is at or before the current UTC time. Storage keeps 'active' after "
+            "expiry. Not part of the signed payload."
+        )
+    )
     requires_human_approval: bool = False
     signature: str
     key_id: str
@@ -141,6 +162,27 @@ class PermitResponse(ActionPermitFields):
     recipient_domain: str | None = None
     allow_identical_repeats: bool = False
     repeat_window_seconds: int | None = Field(default=None, gt=0, le=31536000)
+
+    @computed_field(
+        description=(
+            "Current lifecycle: a non-active stored status takes precedence; otherwise "
+            "expired when expires_at is at or before the current UTC time. Active "
+            "does not establish authorization for a particular action. Unsigned."
+        )
+    )
+    def effective_status(self) -> str:
+        return self._read_time_status()
+
+    @field_serializer("status")
+    def _serialize_status(self, status: str) -> str:
+        # The attribute stays the stored value for server logic; every
+        # serialized read (get, list, verify, evidence) reports expiry.
+        return self._read_time_status()
+
+    def _read_time_status(self) -> str:
+        if self.status != "active":
+            return self.status
+        return "expired" if to_naive_utc(self.expires_at) <= utc_now() else "active"
 
 
 class QuoteCreateRequest(BaseModel):

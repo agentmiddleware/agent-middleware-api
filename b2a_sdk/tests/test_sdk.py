@@ -74,9 +74,10 @@ class TestB2AClient:
             "units": "10",
         }
         assert request.content == b""
-        # Legacy calls send no key: they are not replay-safe, and must not
-        # start sending one implicitly.
-        assert "idempotency-key" not in request.headers
+        # No caller key: the SDK mints one for this call and always sends it.
+        auto_key = request.headers["idempotency-key"]
+        assert auto_key.strip() != ""
+        assert len(auto_key) <= 128
 
     @pytest.mark.asyncio
     async def test_charge_sends_optional_request_path_and_description(self):
@@ -124,6 +125,93 @@ class TestB2AClient:
         async with client:
             with pytest.raises(ValueError, match=message):
                 await client.charge("wallet-123", "iot_bridge", idempotency_key=bad_key)
+
+        assert seen == []
+
+    def _flaky_charge_client(self, failures_before_success: int):
+        """Client whose charge route times out N times, then succeeds.
+
+        Returns the client plus the requests it actually sent.
+        """
+        seen: list[httpx.Request] = []
+        state = {"calls": 0}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request)
+            state["calls"] += 1
+            if state["calls"] <= failures_before_success:
+                raise httpx.TimeoutException("simulated timeout")
+            return httpx.Response(
+                200,
+                json={"action": "debit", "amount": -20.0, "balance_after": 4980.0},
+            )
+
+        client = AgentMiddlewareClient(
+            api_key="test-key",
+            base_url="http://test",
+            transport=httpx.MockTransport(handler),
+        )
+        return client, seen
+
+    @pytest.mark.asyncio
+    async def test_charge_retry_reuses_same_minted_key(self):
+        """A timeout then retry sends the same auto-minted key on both tries."""
+        client, seen = self._flaky_charge_client(failures_before_success=1)
+        async with client:
+            result = await client.charge("wallet-123", "iot_bridge", max_attempts=2)
+
+        assert result["action"] == "debit"
+        assert len(seen) == 2
+        first_key = seen[0].headers["idempotency-key"]
+        assert first_key.strip() != ""
+        assert seen[1].headers["idempotency-key"] == first_key
+
+    @pytest.mark.asyncio
+    async def test_charge_retry_reuses_caller_key(self):
+        """A timeout then retry with a caller key reuses that key, not a new one."""
+        client, seen = self._flaky_charge_client(failures_before_success=1)
+        async with client:
+            await client.charge(
+                "wallet-123",
+                "iot_bridge",
+                idempotency_key="caller-key-9",
+                max_attempts=2,
+            )
+
+        assert len(seen) == 2
+        assert seen[0].headers["idempotency-key"] == "caller-key-9"
+        assert seen[1].headers["idempotency-key"] == "caller-key-9"
+
+    @pytest.mark.asyncio
+    async def test_charge_gives_up_after_max_attempts(self):
+        """Exhausted retries re-raise the transport error; nothing else is sent."""
+        client, seen = self._flaky_charge_client(failures_before_success=5)
+        async with client:
+            with pytest.raises(httpx.TimeoutException):
+                await client.charge("wallet-123", "iot_bridge", max_attempts=2)
+
+        assert len(seen) == 2
+        assert seen[0].headers["idempotency-key"] == seen[1].headers["idempotency-key"]
+
+    @pytest.mark.asyncio
+    async def test_charge_distinct_calls_get_distinct_keys(self):
+        """Two separate charges mint different keys: no accidental replay."""
+        client, seen = _recording_client(_CHARGE_OK)
+        async with client:
+            await client.charge("wallet-123", "iot_bridge")
+            await client.charge("wallet-123", "iot_bridge")
+
+        assert len(seen) == 2
+        assert seen[0].headers["idempotency-key"] != seen[1].headers["idempotency-key"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("bad_attempts", [0, -1])
+    async def test_charge_rejects_non_positive_max_attempts(self, bad_attempts):
+        """max_attempts below 1 fails closed locally: no request, no charge."""
+        client, seen = _recording_client(_CHARGE_OK)
+        async with client:
+            with pytest.raises(ValueError, match="max_attempts"):
+                await client.charge("wallet-123", "iot_bridge", max_attempts=bad_attempts)
 
         assert seen == []
 
@@ -311,6 +399,53 @@ class TestB2AClient:
             "amount_fiat": "50.0",
             "currency": "USD",
         }
+        key = seen[0].headers["idempotency-key"]
+        assert key.strip() != ""
+        assert len(key) <= 128
+
+    @pytest.mark.asyncio
+    async def test_prepare_top_up_forwards_caller_key(self):
+        """A caller-owned key is sent verbatim so a retry reuses the same PaymentIntent."""
+        client, seen = _recording_client(
+            {
+                ("POST", "/v1/billing/top-up/prepare"): httpx.Response(
+                    200, json={"client_secret": "pi_xxx_secret"}
+                )
+            }
+        )
+        async with client:
+            await client.prepare_top_up("wallet-123", 50.0, idempotency_key="topup-1")
+            await client.prepare_top_up("wallet-123", 50.0, idempotency_key="topup-1")
+
+        assert [r.headers["idempotency-key"] for r in seen] == ["topup-1", "topup-1"]
+
+    @pytest.mark.asyncio
+    async def test_prepare_top_up_mints_distinct_keys_per_call(self):
+        """Without a caller key each prepare_top_up() call gets its own fresh key."""
+        client, seen = _recording_client(
+            {
+                ("POST", "/v1/billing/top-up/prepare"): httpx.Response(
+                    200, json={"client_secret": "pi_xxx_secret"}
+                )
+            }
+        )
+        async with client:
+            await client.prepare_top_up("wallet-123", 50.0)
+            await client.prepare_top_up("wallet-123", 50.0)
+
+        keys = [r.headers["idempotency-key"] for r in seen]
+        assert len(set(keys)) == 2
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("bad_key", ["", "   ", "k" * 129])
+    async def test_prepare_top_up_rejects_bad_key_without_sending(self, bad_key):
+        """A blank or overlong caller key raises ValueError and nothing is sent."""
+        client, seen = _recording_client({})
+        async with client:
+            with pytest.raises(ValueError):
+                await client.prepare_top_up("wallet-123", 50.0, idempotency_key=bad_key)
+
+        assert seen == []
 
 
 class TestDecorators:
@@ -545,3 +680,102 @@ class TestInsufficientFundsError:
         )
 
         assert error.shortfall is None
+
+    def test_error_garbage_shortfall_becomes_none(self):
+        """A non-numeric shortfall never crashes the error constructor."""
+        error = InsufficientFundsError(
+            wallet_id="wallet-123",
+            shortfall="lots",
+            top_up_url="http://test/top-up",
+        )
+
+        assert error.shortfall is None
+        assert "wallet-123" in str(error)
+
+
+class TestCharge402BodyShapes:
+    """charge() raises InsufficientFundsError for every 402 body shape."""
+
+    @pytest.mark.asyncio
+    async def test_string_detail(self):
+        """A plain-string detail (no shortfall object) still types the error."""
+        client, _ = _recording_client(
+            {
+                ("POST", "/v1/billing/charge"): httpx.Response(
+                    402, json={"detail": "insufficient_funds"}
+                )
+            }
+        )
+        async with client:
+            with pytest.raises(InsufficientFundsError) as exc_info:
+                await client.charge("wallet-123", "iot_bridge", units=100)
+
+        assert exc_info.value.wallet_id == "wallet-123"
+        assert exc_info.value.shortfall is None
+        assert "wallet-123" in exc_info.value.top_up_url
+
+    @pytest.mark.asyncio
+    async def test_missing_detail(self):
+        """A 402 with no detail key still types the error."""
+        client, _ = _recording_client(
+            {("POST", "/v1/billing/charge"): httpx.Response(402, json={})}
+        )
+        async with client:
+            with pytest.raises(InsufficientFundsError) as exc_info:
+                await client.charge("wallet-123", "iot_bridge")
+
+        assert exc_info.value.wallet_id == "wallet-123"
+        assert exc_info.value.shortfall is None
+
+    @pytest.mark.asyncio
+    async def test_non_dict_json_body(self):
+        """A 402 whose JSON body is not an object still types the error."""
+        client, _ = _recording_client(
+            {("POST", "/v1/billing/charge"): httpx.Response(402, json=["nope"])}
+        )
+        async with client:
+            with pytest.raises(InsufficientFundsError):
+                await client.charge("wallet-123", "iot_bridge")
+
+    @pytest.mark.asyncio
+    async def test_non_json_body(self):
+        """A 402 with a plain-text body still types the error."""
+        client, _ = _recording_client(
+            {("POST", "/v1/billing/charge"): httpx.Response(402, text="overdrawn")}
+        )
+        async with client:
+            with pytest.raises(InsufficientFundsError):
+                await client.charge("wallet-123", "iot_bridge")
+
+    @pytest.mark.asyncio
+    async def test_garbage_shortfall_string(self):
+        """A non-numeric shortfall string degrades to None, not a crash."""
+        client, _ = _recording_client(
+            {
+                ("POST", "/v1/billing/charge"): httpx.Response(
+                    402, json={"detail": {"shortfall": "lots"}}
+                )
+            }
+        )
+        async with client:
+            with pytest.raises(InsufficientFundsError) as exc_info:
+                await client.charge("wallet-123", "iot_bridge")
+
+        assert exc_info.value.shortfall is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("shortfall", [True, "NaN", "Infinity", -1, 10**400])
+    async def test_invalid_numeric_shortfall_does_not_crash(self, shortfall):
+        """A malformed 402 still raises the typed error without a false amount."""
+        client, _ = _recording_client(
+            {
+                ("POST", "/v1/billing/charge"): httpx.Response(
+                    402, json={"detail": {"shortfall": shortfall}}
+                )
+            }
+        )
+        async with client:
+            with pytest.raises(InsufficientFundsError) as exc_info:
+                await client.charge("wallet-123", "iot_bridge")
+
+        assert exc_info.value.shortfall is None

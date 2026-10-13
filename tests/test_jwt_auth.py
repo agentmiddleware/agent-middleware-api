@@ -55,12 +55,33 @@ async def auth_client():
 
 @pytest.fixture
 def live_key(monkeypatch):
+    from types import SimpleNamespace
+
     from app.services.api_key_service import APIKeyService
 
+    # ``consume_derived_key_use`` proves the derived credential; the auth
+    # path then loads the originating key row for its allowlist/tenant and
+    # fails closed when the row is gone. Stub both halves of that pair so
+    # the fake keys these tests mint stay live end to end.
+    bound: dict[str, str] = {}
+
     async def is_key_live(_self, _key_id: str, _wallet_id: str) -> bool:
+        bound[_key_id] = _wallet_id
         return True
 
+    async def live_row(_self, key_id: str):
+        wallet_id = bound.get(key_id)
+        if wallet_id is None:
+            return None
+        return SimpleNamespace(
+            key_id=key_id,
+            wallet_id=wallet_id,
+            allowed_tools_json=None,
+            tenant=None,
+        )
+
     monkeypatch.setattr(APIKeyService, "consume_derived_key_use", is_key_live)
+    monkeypatch.setattr(APIKeyService, "get_key_record", live_row)
 
 
 @pytest.mark.anyio

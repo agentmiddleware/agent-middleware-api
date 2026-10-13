@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     BUILD_COMMIT_SHA: str = ""
     ENVIRONMENT: str = "local"
     DEBUG: bool = False
+    OPERATION_INSIGHTS_EVENTS_ENABLED: bool = False
+    OPERATION_INSIGHTS_REPORTING_ENABLED: bool = False
+    OPERATION_INSIGHTS_ALLOWED_CLIENT_VERSIONS: str = ""
 
     # --- Server ---
     HOST: str = "0.0.0.0"
@@ -58,11 +61,24 @@ class Settings(BaseSettings):
     DATABASE_URL: str = ""
     REDIS_URL: str = ""
     SQLITE_URL: str = ""
+    # Bound every Redis round trip for the durable-state backend. Without
+    # these, a hung Redis can freeze requests that touch durable state and
+    # stall readiness. The connect timeout covers TCP/TLS handshake; the
+    # socket timeout covers each subsequent command. Same shape as the
+    # rate limiter's own REDIS_SOCKET_* constants
+    # (app/core/rate_limiter.py), which stay as the limiter's local knob.
+    REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS: float = 2.0
+    REDIS_SOCKET_TIMEOUT_SECONDS: float = 5.0
 
     # --- Database Pool Settings ---
     # Used for SQLModel/SQLAlchemy async sessions
     DB_POOL_SIZE: int = 5
     DB_MAX_OVERFLOW: int = 10
+    # SQL statement echo (SQLAlchemy ``echo=True`` logs statements WITH bound
+    # values, which can carry wallet ids, permit payloads, and other caller
+    # content). Off by default and never enabled by DEBUG alone: an operator
+    # turns it on explicitly for local query debugging.
+    SQL_ECHO: bool = False
 
     # --- Authentication ---
     API_KEY_HEADER: str = "X-API-Key"
@@ -83,6 +99,133 @@ class Settings(BaseSettings):
     # production-like environments refuse to boot when this is true, and the
     # handler independently fails closed there. See docs/static-dev-api-keys.md.
     ENABLE_DEV_KEY_SELF_PROVISION: bool = False
+    # Unauthenticated local admin (opt-in DEBUG open mode): when true, and
+    # only when no keys of any class are configured, DEBUG is on, and the
+    # environment is local-compatible, any caller authenticates as a
+    # bootstrap admin. Default off, so DEBUG alone never mints admins.
+    # Production-like environments refuse to boot with this true, and the
+    # auth path independently fails closed there. See app/core/auth.py.
+    ALLOW_UNAUTHENTICATED_DEV_ADMIN: bool = False
+
+    # --- Self-serve demo tenant (POST /v1/demo/keys) ---
+    # Lets an anonymous visitor mint a demo key (tenant="demo" wallets +
+    # wallet-scoped key) with no pre-shared secret. Default off: the issuance
+    # route answers 404 and every existing demo-tenant credential is refused
+    # at authentication. Unlike dev keys this IS allowed in production-like
+    # environments, but then REDIS_URL is required at boot so issuance
+    # limits are shared across replicas. See docs/demo-tenant.md.
+    #
+    # Demo keys hold FULL permissions inside the demo tenant: by default they
+    # are minted with no tool allowlist, no permit caps, no key expiry, no
+    # use cap, and no wallet daily limit. Each limit below is Optional — None
+    # (the default) means that limit is off; setting it turns that one limit
+    # back on with no code change. Tenant containment (same-tenant permits,
+    # same-tenant money movement, the demo route denylist) always applies.
+    ENABLE_DEMO_TENANT: bool = False
+    # Comma-separated tools a demo key may use. Default empty = all tools
+    # (unrestricted, like a normal wallet-scoped key). When set, it is
+    # applied both as the minted keys' allowlist and as the demo permit tool
+    # cap.
+    DEMO_ALLOWED_TOOLS: str = ""
+    DEMO_KEY_TTL_DAYS: int | None = None
+    DEMO_KEY_MAX_USES: int | None = None
+    # Synthetic, out-of-thin-air demo-tenant credit granted to each fresh
+    # demo sponsor/agent wallet pair. This funds demo calls; it is NOT a cap
+    # on real money (demo wallets never touch real funds). Bounded by the
+    # dev-keys ceiling.
+    DEMO_WALLET_CREDITS: Decimal = Decimal("1000")
+    DEMO_WALLET_DAILY_LIMIT: Decimal | None = None
+    DEMO_MAX_PERMIT_CREDITS: Decimal | None = None
+    DEMO_MAX_PERMIT_TTL_MINUTES: int | None = None
+    DEMO_ISSUE_PER_IP_PER_DAY: int = 3
+    DEMO_ISSUE_GLOBAL_PER_HOUR: int = 30
+    DEMO_ISSUE_GLOBAL_PER_DAY: int = 200
+    DEMO_MAX_LIVE_KEYS: int = 500
+    DEMO_ALERT_ISSUES_PER_HOUR: int = 20
+    # Comma-separated origins allowed to mint demo keys from a browser.
+    # Default empty: only no-Origin callers (CLI/SDK/curl) and same-host
+    # pages may mint, so a third-party page cannot farm keys through
+    # visitors' browsers.
+    DEMO_ALLOWED_ORIGINS: str = ""
+
+    @field_validator(
+        "DEMO_KEY_TTL_DAYS",
+        "DEMO_KEY_MAX_USES",
+        "DEMO_MAX_PERMIT_TTL_MINUTES",
+        "DEMO_ISSUE_PER_IP_PER_DAY",
+        "DEMO_ISSUE_GLOBAL_PER_HOUR",
+        "DEMO_ISSUE_GLOBAL_PER_DAY",
+        "DEMO_MAX_LIVE_KEYS",
+        "DEMO_ALERT_ISSUES_PER_HOUR",
+    )
+    @classmethod
+    def _validate_demo_ints(cls, value: int | None, info) -> int | None:
+        """Keep demo budgets positive and bounded.
+
+        The issuance guards (per-IP, global, live-key cap, alert threshold)
+        always apply, so a zero would disable the control and an absurd
+        value would neuter it. The authority limits are Optional: None
+        means that limit is off.
+        """
+        if value is None:
+            if info.field_name in (
+                "DEMO_KEY_TTL_DAYS",
+                "DEMO_KEY_MAX_USES",
+                "DEMO_MAX_PERMIT_TTL_MINUTES",
+            ):
+                return None
+            raise ValueError(f"{info.field_name} is required")
+        bounds = {
+            "DEMO_KEY_TTL_DAYS": (1, 30),
+            "DEMO_KEY_MAX_USES": (1, 10_000),
+            "DEMO_MAX_PERMIT_TTL_MINUTES": (1, 1_440),
+            "DEMO_ISSUE_PER_IP_PER_DAY": (1, 1_000),
+            "DEMO_ISSUE_GLOBAL_PER_HOUR": (1, 100_000),
+            "DEMO_ISSUE_GLOBAL_PER_DAY": (1, 1_000_000),
+            "DEMO_MAX_LIVE_KEYS": (1, 100_000),
+            "DEMO_ALERT_ISSUES_PER_HOUR": (1, 100_000),
+        }
+        low, high = bounds[info.field_name]
+        if not low <= value <= high:
+            raise ValueError(f"{info.field_name} must be between {low} and {high}")
+        return value
+
+    @field_validator(
+        "DEMO_WALLET_CREDITS", "DEMO_MAX_PERMIT_CREDITS", "DEMO_WALLET_DAILY_LIMIT"
+    )
+    @classmethod
+    def _validate_demo_credits(cls, value: Decimal | None, info) -> Decimal | None:
+        """Demo credits must be positive, finite, and bounded."""
+        if value is None:
+            if info.field_name in (
+                "DEMO_MAX_PERMIT_CREDITS",
+                "DEMO_WALLET_DAILY_LIMIT",
+            ):
+                return None
+            raise ValueError(f"{info.field_name} is required")
+        if not value.is_finite() or value <= 0 or value > Decimal("100000"):
+            raise ValueError(
+                f"{info.field_name} must be a positive amount up to 100000"
+            )
+        return value
+
+    @property
+    def demo_allowed_tools_list(self) -> list[str]:
+        """Parsed DEMO_ALLOWED_TOOLS (comma-separated env string).
+
+        Empty = no tool cap: demo keys are minted unrestricted, like a
+        normal wallet-scoped key.
+        """
+        return [t.strip() for t in self.DEMO_ALLOWED_TOOLS.split(",") if t.strip()]
+
+    # --- API key hash pepper ---
+    # Optional server-side secret mixed into stored API key digests with
+    # HMAC-SHA256. Empty (the default) keeps the legacy plain SHA-256
+    # behavior. When set, newly issued keys are stored peppered while keys
+    # stored before the pepper was set keep verifying, so no rotation of
+    # existing keys is needed. Changing or removing the pepper invalidates
+    # keys stored under it, so treat it like any other credential.
+    API_KEY_PEPPER: SecretStr = SecretStr("")
 
     # --- Enterprise IGA bridge (OIDC -> PolicyBundle) ---
     # JSON object mapping a trusted enterprise OIDC issuer URL to its pinned
@@ -216,13 +359,29 @@ class Settings(BaseSettings):
     ENABLE_PUBLIC_MCP_ENDPOINT: bool = False
 
     # --- Stripe Payment Processing ---
-    STRIPE_SECRET_KEY: str = ""
-    STRIPE_WEBHOOK_SECRET: str = ""
+    # Secret keys stay masked in repr/str so settings dumps and logs never
+    # carry them. STRIPE_PUBLISHABLE_KEY stays a plain string: it is public
+    # by design and is safe to display.
+    STRIPE_SECRET_KEY: SecretStr = SecretStr("")
+    STRIPE_WEBHOOK_SECRET: SecretStr = SecretStr("")
     STRIPE_PUBLISHABLE_KEY: str = ""
 
     # --- KYC Verification ---
     # Require KYC verification before allowing fiat top-ups (default: false for dev)
     KYC_REQUIRED_FOR_TOPUP: bool = False
+
+    # --- Money-movement idempotency ---
+    # When true, the money-moving endpoints (charge, transfer, fiat top-up
+    # prepare) refuse requests without an Idempotency-Key header instead of
+    # executing them unprotected. A retried request without a key cannot be
+    # told apart from a new one, so it would bill twice.
+    # Default false (opt-in): deployed clients that predate key support
+    # (b2a_sdk <= 0.5.0 charge without a caller key, prepare_top_up with no
+    # key at all, raw HTTP integrations) keep working. A request that does
+    # send a key is always deduplicated. Turn this on per environment only
+    # after every client sends Idempotency-Key on charge, transfer and
+    # top-up prepare.
+    REQUIRE_IDEMPOTENCY_KEY: bool = False
 
     # --- Credit Exchange Rate ---
     # Credits minted per $1.00 USD settled (1000 credits = $1.00, 1 credit =
@@ -259,7 +418,7 @@ class Settings(BaseSettings):
     # Real mode needs both URL and key; used only when
     # SIMULATION_MODE_HUMAN_APPROVAL=false.
     SENTINEL_API_URL: str = ""
-    SENTINEL_API_KEY: str = ""
+    SENTINEL_API_KEY: SecretStr = SecretStr("")
     # Forwarded to Sentinel as timeout_seconds (its magic-link expiry, 1..86400)
     # and enforced locally as the approval's expiry — Sentinel itself never
     # expires a pending approval.
@@ -317,7 +476,7 @@ class Settings(BaseSettings):
     # --- LLM / AI Agent Intelligence ---
     # Provider: openai, azure, anthropic, ollama
     LLM_PROVIDER: str = "openai"
-    LLM_API_KEY: str = ""
+    LLM_API_KEY: SecretStr = SecretStr("")
     LLM_MODEL: str = "gpt-4o"
     LLM_BASE_URL: str = "https://api.openai.com/v1"
     LLM_MAX_TOKENS: int = 4096

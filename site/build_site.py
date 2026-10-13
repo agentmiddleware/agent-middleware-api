@@ -111,6 +111,7 @@ TEXT_ASSETS = (
     "proof/index.html",
     "compare/index.html",
     "concept/index.html",
+    "demo-key/index.html",
     "404.html",
     "sitemap.xml",
     ".well-known/security.txt",
@@ -134,6 +135,7 @@ COPY_ASSETS = (
     "pilot-fit.js",
     "compare",
     "concept",
+    "demo-key",
     "favicon.svg",
     "social-card.png",
     "proof",
@@ -147,9 +149,15 @@ REQUIRED_PUBLIC_ASSETS = (
     *SITE_PARTIALS.values(),
     *TEXT_ASSETS,
     *COPY_ASSETS,
+    "demo-key/demo-key.js",
     "proof/receipt.json",
     "proof/trust-keys.json",
     "proof/transcript.json",
+    # The standalone offline verifier ships with the page that documents it.
+    # COPY_ASSETS already copies the whole proof/ directory; listing the file
+    # here fails the build if it ever goes missing instead of publishing a
+    # page whose download link 404s.
+    "proof/verify_receipt.py",
 )
 PROVISIONAL_TERMS = (
     "change me",
@@ -920,6 +928,7 @@ def render_site(output: Path, environment: dict[str, str]) -> None:
             for token, current_page in {
                 "@@NAV_PROOF_CURRENT@@": "proof/index.html",
                 "@@NAV_COMPARE_CURRENT@@": "compare/index.html",
+                "@@NAV_DEMO_KEY_CURRENT@@": "demo-key/index.html",
             }.items():
                 rendered = rendered.replace(
                     token,

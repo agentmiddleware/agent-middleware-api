@@ -90,9 +90,11 @@ from .permits import (
     PermitService,
     PermitValidation,
     PermitWriteContendedError,
+    extract_recipient_identity,
     get_permit_service,
     permit_constraints_snapshot,
     permit_model_to_response,
+    recipient_binding_matches,
 )
 from .permit_requests import (
     REQUEST_STATUS_APPROVED,
@@ -120,6 +122,7 @@ from .policy import (
     PolicyEvaluation,
     evaluate_governed_action,
     evaluate_tool_invocation,
+    evaluate_wallet_access_for_tool,
     evaluate_wallet_policy,
     list_policy_bundles,
     record_governed_action,
@@ -194,9 +197,11 @@ __all__ = [
     "PermitValidation",
     "PermitError",
     "PermitWriteContendedError",
+    "extract_recipient_identity",
     "get_permit_service",
     "permit_constraints_snapshot",
     "permit_model_to_response",
+    "recipient_binding_matches",
     # permit requests (agent asks, human approves, middleware mints)
     "ApprovalCardView",
     "PermitRequestConflictError",
@@ -278,6 +283,7 @@ __all__ = [
     "summarize_audit_events",
     # policy
     "evaluate_tool_invocation",
+    "evaluate_wallet_access_for_tool",
     "evaluate_governed_action",
     "evaluate_wallet_policy",
     "list_policy_bundles",

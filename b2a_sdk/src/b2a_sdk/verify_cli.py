@@ -44,6 +44,47 @@ EXIT_UNDETERMINED = 2
 
 _KEYS_PATH = "/.well-known/trust-keys.json"
 
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def _check_issuer_origin(issuer: str) -> str:
+    """Return the normalized key-set URL, refusing cleartext fetches.
+
+    Key material fetched over plain http from a remote host can be swapped
+    by anyone on the path, which turns verification into theater. Only
+    https origins are accepted, plus plain http to loopback hosts so local
+    development and tests keep working.
+    """
+    from urllib.parse import urlsplit
+
+    origin = issuer.strip()
+    parts = urlsplit(origin if "://" in origin else "https://" + origin)
+    scheme = parts.scheme.lower()
+    if not parts.hostname:
+        raise VerificationError(
+            "Refusing to fetch a key set without https; "
+            "use an https:// issuer, http://localhost for local work, "
+            "or --keys with a key set you already hold."
+        )
+    host = parts.hostname
+    if ":" in host:
+        host = f"[{host}]"
+    try:
+        port = parts.port
+    except ValueError:
+        raise VerificationError(f"Unusable issuer origin: {issuer.strip()!r}.") from None
+    if port:
+        host += f":{port}"
+    if scheme == "https":
+        return f"https://{host}" + _KEYS_PATH
+    if scheme == "http" and parts.hostname in _LOOPBACK_HOSTS:
+        return f"http://{host}" + _KEYS_PATH
+    raise VerificationError(
+        "Refusing to fetch a key set without https; "
+        "use an https:// issuer, http://localhost for local work, "
+        "or --keys with a key set you already hold."
+    )
+
 
 def _read_json(path: str) -> Any:
     if path == "-":
@@ -59,7 +100,7 @@ def _fetch_key_document(issuer: str, timeout: float) -> Any:
         raise VerificationError(
             "Fetching a key set requires httpx; pass --keys to verify offline."
         ) from exc
-    url = issuer.rstrip("/") + _KEYS_PATH
+    url = _check_issuer_origin(issuer)
     response = httpx.get(url, timeout=timeout)
     response.raise_for_status()
     return response.json()
@@ -89,7 +130,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     source.add_argument(
         "--issuer",
-        help="Origin to fetch /.well-known/trust-keys.json from, e.g. https://api.example.com",
+        help=(
+            "Origin to fetch /.well-known/trust-keys.json from, "
+            "e.g. https://api.example.com (https only, "
+            "except http://localhost for local work)"
+        ),
     )
     parser.add_argument(
         "--expect-issuer",

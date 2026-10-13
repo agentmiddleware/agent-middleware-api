@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import SecretStr
 
 from app.core.config import get_settings
 from app.core.sentinel_target import (
@@ -134,7 +135,7 @@ def test_unsafe_production_origin_denies_before_http_client_creation(
     settings = get_settings()
     monkeypatch.setattr(settings, "ENVIRONMENT", "production")
     monkeypatch.setattr(settings, "SENTINEL_API_URL", "https://169.254.169.254")
-    monkeypatch.setattr(settings, "SENTINEL_API_KEY", "sk_live_never_send")
+    monkeypatch.setattr(settings, "SENTINEL_API_KEY", SecretStr("sk_live_never_send"))
 
     import httpx
 
@@ -260,7 +261,7 @@ def test_invalid_key_denies_before_http_client_creation(
     settings = get_settings()
     monkeypatch.setattr(settings, "ENVIRONMENT", "production")
     monkeypatch.setattr(settings, "SENTINEL_API_URL", "https://api.pauseapi.app")
-    monkeypatch.setattr(settings, "SENTINEL_API_KEY", " sk_live_never_send")
+    monkeypatch.setattr(settings, "SENTINEL_API_KEY", SecretStr(" sk_live_never_send"))
 
     import httpx
 
@@ -314,7 +315,7 @@ async def test_sentinel_health_distinguishes_absent_and_partial_configuration(
     settings = get_settings()
     monkeypatch.setattr(settings, "ENVIRONMENT", "production")
     monkeypatch.setattr(settings, "SENTINEL_API_URL", url)
-    monkeypatch.setattr(settings, "SENTINEL_API_KEY", key)
+    monkeypatch.setattr(settings, "SENTINEL_API_KEY", SecretStr(key))
 
     import httpx
 
@@ -335,7 +336,7 @@ def test_production_loopback_is_not_configured(monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "ENVIRONMENT", "production")
     monkeypatch.setattr(settings, "SENTINEL_API_URL", "https://127.0.0.1")
-    monkeypatch.setattr(settings, "SENTINEL_API_KEY", "sk_live_safe")
+    monkeypatch.setattr(settings, "SENTINEL_API_KEY", SecretStr("sk_live_safe"))
 
     assert human_approval_configured() is False
 
@@ -344,6 +345,6 @@ def test_local_loopback_can_be_configured_explicitly_by_environment(monkeypatch)
     settings = get_settings()
     monkeypatch.setattr(settings, "ENVIRONMENT", "local")
     monkeypatch.setattr(settings, "SENTINEL_API_URL", "http://127.0.0.1:8000")
-    monkeypatch.setattr(settings, "SENTINEL_API_KEY", "sk_test_safe")
+    monkeypatch.setattr(settings, "SENTINEL_API_KEY", SecretStr("sk_test_safe"))
 
     assert human_approval_configured() is True

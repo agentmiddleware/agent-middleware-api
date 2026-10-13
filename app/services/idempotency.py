@@ -117,11 +117,39 @@ async def may_abandon_action_owner(
 
 
 class IdempotencyConflictError(RuntimeError):
-    """Raised when an idempotency key is reused for a different request."""
+    """Raised when an idempotency key is reused for a different request.
+
+    ``expected_request_hash`` is the hash stored for the key's original request
+    and ``received_request_hash`` is the hash of the rejected one. Both are set
+    only where the two were computed the same way, so a caller can compare them.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        expected_request_hash: str | None = None,
+        received_request_hash: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.expected_request_hash = expected_request_hash
+        self.received_request_hash = received_request_hash
+
+    def as_error_data(self) -> dict[str, str] | None:
+        if self.expected_request_hash is None or self.received_request_hash is None:
+            return None
+        return {
+            "expected_request_hash": self.expected_request_hash,
+            "received_request_hash": self.received_request_hash,
+        }
 
 
 class IdempotencyInProgressError(RuntimeError):
-    """Raised when an idempotency key is already executing without a result."""
+    """The optional record ID follows an exact wallet, endpoint, and hash match."""
+
+    def __init__(self, message: str, *, verified_record_id: str | None = None) -> None:
+        super().__init__(message)
+        self.verified_record_id = verified_record_id
 
 
 class IdempotencyCreationDisabledError(RuntimeError):
@@ -298,7 +326,11 @@ def _replay_from_record(
     existing: IdempotencyRecordModel, request_hash: str
 ) -> IdempotencyReplay | None:
     if existing.request_hash != request_hash:
-        raise IdempotencyConflictError("idempotency_key_reused")
+        raise IdempotencyConflictError(
+            "idempotency_key_reused",
+            expected_request_hash=existing.request_hash,
+            received_request_hash=request_hash,
+        )
     if existing.response_json:
         try:
             decoded = json.loads(existing.response_json)
@@ -310,7 +342,9 @@ def _replay_from_record(
                 response_json=decoded,
                 status_code=existing.status_code,
             )
-    raise IdempotencyInProgressError("idempotency_in_progress")
+    raise IdempotencyInProgressError(
+        "idempotency_in_progress", verified_record_id=existing.record_id
+    )
 
 
 class IdempotencyService:
@@ -323,6 +357,7 @@ class IdempotencyService:
         wallet_id: str,
         endpoint: str,
         idempotency_key: str,
+        verified_record_id: str | None,
         wait_timeout_seconds: float,
         poll_interval_seconds: float,
     ) -> IdempotencyReplay:
@@ -428,13 +463,16 @@ class IdempotencyService:
 
         # No dispatch attempt or reconciliation failed/incomplete; wait normally
         if wait_timeout_seconds <= 0:
-            raise IdempotencyInProgressError("idempotency_in_progress")
+            raise IdempotencyInProgressError(
+                "idempotency_in_progress", verified_record_id=verified_record_id
+            )
         return await self._wait_for_replay(
             session,
             wallet_id=wallet_id,
             endpoint=endpoint,
             idempotency_key=idempotency_key,
             request_hash=request_hash,
+            verified_record_id=verified_record_id,
             timeout_seconds=wait_timeout_seconds,
             poll_interval_seconds=poll_interval_seconds,
         )
@@ -447,6 +485,7 @@ class IdempotencyService:
         endpoint: str,
         idempotency_key: str,
         request_hash: str,
+        verified_record_id: str | None,
         timeout_seconds: float,
         poll_interval_seconds: float,
     ) -> IdempotencyReplay:
@@ -471,11 +510,14 @@ class IdempotencyService:
                 raise IdempotencyInProgressError("idempotency_in_progress")
             try:
                 replay = _replay_from_record(existing, request_hash)
-            except IdempotencyInProgressError:
+            except IdempotencyInProgressError as progress:
+                verified_record_id = progress.verified_record_id
                 continue
             assert replay is not None
             return replay
-        raise IdempotencyInProgressError("idempotency_in_progress")
+        raise IdempotencyInProgressError(
+            "idempotency_in_progress", verified_record_id=verified_record_id
+        )
 
     async def begin_with_record(
         self,
@@ -503,7 +545,7 @@ class IdempotencyService:
             if existing:
                 try:
                     replay = _replay_from_record(existing, request_hash)
-                except IdempotencyInProgressError:
+                except IdempotencyInProgressError as progress:
                     # Before declaring in-progress, check if there's a terminal or
                     # dispatched attempt that can be reconciled immediately.
                     replay = await self._try_reconcile_and_replay(
@@ -513,6 +555,7 @@ class IdempotencyService:
                         wallet_id=wallet_id,
                         endpoint=endpoint,
                         idempotency_key=idempotency_key,
+                        verified_record_id=progress.verified_record_id,
                         wait_timeout_seconds=wait_timeout_seconds,
                         poll_interval_seconds=poll_interval_seconds,
                     )
@@ -552,7 +595,7 @@ class IdempotencyService:
                     raise
                 try:
                     replay = _replay_from_record(existing, request_hash)
-                except IdempotencyInProgressError:
+                except IdempotencyInProgressError as progress:
                     replay = await self._try_reconcile_and_replay(
                         session,
                         existing=existing,
@@ -560,6 +603,7 @@ class IdempotencyService:
                         wallet_id=wallet_id,
                         endpoint=endpoint,
                         idempotency_key=idempotency_key,
+                        verified_record_id=progress.verified_record_id,
                         wait_timeout_seconds=wait_timeout_seconds,
                         poll_interval_seconds=poll_interval_seconds,
                     )
@@ -589,7 +633,7 @@ class IdempotencyService:
                     raise IdempotencyInProgressError("idempotency_in_progress")
                 try:
                     replay = _replay_from_record(existing, request_hash)
-                except IdempotencyInProgressError:
+                except IdempotencyInProgressError as progress:
                     replay = await self._try_reconcile_and_replay(
                         session,
                         existing=existing,
@@ -597,6 +641,7 @@ class IdempotencyService:
                         wallet_id=wallet_id,
                         endpoint=endpoint,
                         idempotency_key=idempotency_key,
+                        verified_record_id=progress.verified_record_id,
                         wait_timeout_seconds=wait_timeout_seconds,
                         poll_interval_seconds=poll_interval_seconds,
                     )

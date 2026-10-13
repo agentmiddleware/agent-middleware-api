@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, cast
+from urllib.parse import urlparse
 
 from sqlalchemy import case, func, or_, select, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -208,76 +209,30 @@ def _find_forbidden_field(arguments: Any, forbidden: set[str]) -> str | None:
     return None
 
 
-def _require_permit_caller(
-    model: PermitModel,
-    *,
-    caller_wallet_id: str | None,
-    is_bootstrap_admin: bool,
-    is_system: bool = False,
-    issuer_only: bool = False,
-) -> None:
-    """Refuse a permit mutation the caller does not own.
+def extract_recipient_identity(target: str) -> str:
+    """Reduce one recipient value to the identity the permit binds.
 
-    The web route checks today, but every service function here enforces
-    ownership on its own so a future caller cannot revoke a permit or erase
-    its spending for anyone. ``is_system`` marks trusted internal
-    compensation for a reservation the system itself created (a failed tool
-    call handing budget back); it is explicit at each call site and named in
-    the audit entry, so review can tell it apart from a wallet caller.
+    A URL contributes its hostname; a bare value with no host part (an
+    x402 pay_to chain address, a registered origin without a scheme) counts
+    as itself. This is the same reduction the upstream MCP path has always
+    applied before comparing against the permit's recipient constraint.
     """
-    if is_bootstrap_admin or is_system:
-        return
-    allowed = (
-        {model.issuer_wallet_id}
-        if issuer_only
-        else {model.issuer_wallet_id, model.subject_wallet_id}
-    )
-    if caller_wallet_id is not None and caller_wallet_id in allowed:
-        return
-    raise PermitError("permit_access_denied")
+    return urlparse(target).hostname or target
 
 
-async def _audit_budget_release(
-    *,
-    event: str,
-    permit_id: str,
-    amount: Decimal,
-    wallet_id: str | None,
-    caller_wallet_id: str | None,
-    is_bootstrap_admin: bool,
-    is_system: bool,
-    attempt_id: str | None = None,
-) -> None:
-    """Write one audit entry for a budget release. Never raises.
+def recipient_binding_matches(recipient_domain: str | None, target: str) -> bool:
+    """Check one recipient value against a permit's recipient constraint.
 
-    Releases run as compensation inside failure handlers, so an
-    observability write must not replace the caller's real answer when the
-    audit store itself is unavailable.
+    An unset constraint allows everything. Otherwise the target is reduced
+    with extract_recipient_identity and must equal the bound value
+    exactly. x402 callers pass the demand's pay_to address: x402 demands
+    name no resource host, so the payee address is the only recipient the
+    demand names, and a permit that binds x402 spending must carry that
+    address exactly as the demand presents it.
     """
-    try:
-        metadata: dict[str, Any] = {
-            "permit_id": permit_id,
-            "amount": str(amount),
-            "actor": (
-                "system"
-                if is_system
-                else ("bootstrap_admin" if is_bootstrap_admin else "owner")
-            ),
-        }
-        if caller_wallet_id is not None:
-            metadata["caller_wallet_id"] = caller_wallet_id
-        if attempt_id is not None:
-            metadata["attempt_id"] = attempt_id
-        await record_audit_event(
-            event=event,
-            wallet_id=wallet_id,
-            metadata=metadata,
-        )
-    except Exception:
-        logger.exception(
-            "permit_budget_release_audit_failed",
-            extra={"permit_id": permit_id, "event": event},
-        )
+    if not recipient_domain:
+        return True
+    return extract_recipient_identity(target) == recipient_domain
 
 
 def permit_model_to_response(model: PermitModel) -> PermitResponse:
@@ -351,7 +306,18 @@ class PermitService:
                 )
             )
         if status:
-            filters.append(cast(ColumnElement[bool], PermitModel.status == status))
+            effective_status = case(
+                (
+                    cast(ColumnElement[bool], PermitModel.status != "active"),
+                    PermitModel.status,
+                ),
+                (
+                    cast(ColumnElement[bool], PermitModel.expires_at <= utc_now()),
+                    "expired",
+                ),
+                else_="active",
+            )
+            filters.append(cast(ColumnElement[bool], effective_status == status))
         if subject_key_id:
             filters.append(
                 cast(ColumnElement[bool], PermitModel.subject_key_id == subject_key_id)
@@ -399,6 +365,7 @@ class PermitService:
         request: PermitCreateRequest,
         subject_key_id: str | None = None,
         permit_id: str | None = None,
+        auth: Any | None = None,
     ) -> PermitResponse:
         """Mint a signed permit.
 
@@ -406,13 +373,99 @@ class PermitService:
         permit-request flow reserves one when the human is paged) mint under
         it, so a retried mint collides on the primary key instead of issuing a
         second permit carrying the same authority.
+
+        ``auth`` carries the caller key's tool allowlist/tenant when known
+        (routers pass it; they also pre-check before the idempotency record
+        is begun so the denial is a 403, not a 400). The service re-checks
+        here as defense in depth for paths that mint without that pre-check
+        (e.g. standard-MCP auto-mint).
         """
         if any(
             getattr(request, field) is not None
             for field in ActionPermitFields.model_fields
         ):
             raise PermitCreationRejectedError("action_permit_requires_trusted_issuance")
+        await self._enforce_key_and_demo_bounds(request, auth)
         return await self._persist_permit(request, subject_key_id, permit_id)
+
+    async def _enforce_key_and_demo_bounds(
+        self,
+        request: PermitCreateRequest,
+        auth: Any | None,
+    ) -> None:
+        """Re-check allowlist + demo caps inside the mint path.
+
+        Raises the shared ``KeyAllowlistDenied``/``DemoPermitDenied`` errors
+        (with the ``key_tool_not_allowed`` / ``demo_permit_out_of_bounds``
+        codes) so every mint funnels through one policy, whether the caller
+        is a router (which maps them to 403 before idempotency begins) or a
+        server-side minter (mapped to ``PermitCreationRejectedError`` below).
+        """
+        from app.services.demo_tenant import (
+            DEMO_TENANT_LABEL,
+            DemoPermitDenied,
+            KeyAllowlistDenied,
+            check_demo_permit_bounds,
+            check_key_allowlist_for_permit,
+        )
+
+        key_allowlist = getattr(auth, "allowed_tools", None)
+        caller_tenant = getattr(auth, "tenant", None)
+        caller_key_expires_at = None
+        if auth is not None and getattr(auth, "key_id", None):
+            caller_key_expires_at = await self._caller_key_expires_at(auth.key_id)
+        try:
+            check_key_allowlist_for_permit(
+                key_allowlist=key_allowlist,
+                allowed_tools=list(request.allowed_tools or []),
+                scopes=list(request.scopes or []),
+            )
+        except KeyAllowlistDenied as exc:
+            raise PermitCreationRejectedError(exc.error) from exc
+        # Wallet tenants decide whether demo caps apply even when the caller
+        # is unknown (auth None): a demo wallet must never back an uncapped
+        # permit, whoever mints it.
+        factory = get_session_factory()
+        async with factory() as session:
+            issuer = await session.get(WalletModel, request.issuer_wallet_id)
+            subject = await session.get(WalletModel, request.subject_wallet_id)
+            issuer_tenant = getattr(issuer, "tenant", None) if issuer else None
+            subject_tenant = getattr(subject, "tenant", None) if subject else None
+        demo_involved = (
+            issuer_tenant == DEMO_TENANT_LABEL
+            or subject_tenant == DEMO_TENANT_LABEL
+            or caller_tenant == DEMO_TENANT_LABEL
+        )
+        if not demo_involved:
+            return
+        settings = get_settings()
+        try:
+            check_demo_permit_bounds(
+                issuer_tenant=issuer_tenant,
+                subject_tenant=subject_tenant,
+                caller_tenant=caller_tenant,
+                allowed_tools=list(request.allowed_tools or []),
+                max_credits=request.max_credits,
+                expires_at=request.expires_at,
+                caller_key_expires_at=caller_key_expires_at,
+                demo_allowed_tools=settings.demo_allowed_tools_list,
+                max_permit_credits=settings.DEMO_MAX_PERMIT_CREDITS,
+                max_permit_ttl=(
+                    timedelta(minutes=settings.DEMO_MAX_PERMIT_TTL_MINUTES)
+                    if settings.DEMO_MAX_PERMIT_TTL_MINUTES is not None
+                    else None
+                ),
+                now=utc_now(),
+            )
+        except DemoPermitDenied as exc:
+            raise PermitCreationRejectedError(exc.error) from exc
+
+    async def _caller_key_expires_at(self, key_id: str) -> datetime | None:
+        """Expiry of the caller key, for the never-outlive-the-key rule."""
+        from app.services.api_key_service import get_api_key_service
+
+        row = await get_api_key_service().get_key_record(key_id)
+        return row.expires_at if row is not None else None
 
     async def _persist_permit(
         self,

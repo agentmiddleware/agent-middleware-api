@@ -823,7 +823,7 @@ class AWIRAGEngine:
 
         if (
             self._embedding_model.startswith("text-embedding")
-            and get_settings().LLM_API_KEY
+            and get_settings().LLM_API_KEY.get_secret_value()
         ):
             try:
                 return await self._generate_openai_embedding(text)
@@ -840,10 +840,10 @@ class AWIRAGEngine:
         from ..core.config import get_settings
 
         settings = get_settings()
-        if not settings.LLM_API_KEY:
+        if not settings.LLM_API_KEY.get_secret_value():
             raise ValueError("LLM_API_KEY is not configured")
 
-        client = AsyncOpenAI(api_key=settings.LLM_API_KEY)
+        client = AsyncOpenAI(api_key=settings.LLM_API_KEY.get_secret_value())
         try:
             response = await client.embeddings.create(
                 model=self._embedding_model,

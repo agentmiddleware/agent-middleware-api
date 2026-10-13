@@ -24,6 +24,7 @@ from sqlalchemy import case, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from ..core.config import get_settings
 from ..core.time import to_naive_utc, utc_now
 from ..db.database import get_session_factory
 from ..db.models import (
@@ -83,6 +84,53 @@ class InvalidRotationRequestError(APIKeyError):
     pass
 
 
+def _configured_pepper() -> bytes | None:
+    """Server pepper for API key digests, or None when not configured.
+
+    Read lazily (not at import) so settings changes take effect without a
+    reimport. An empty pepper means legacy plain SHA-256 behavior.
+    """
+    raw = get_settings().API_KEY_PEPPER
+    secret = raw.get_secret_value() if hasattr(raw, "get_secret_value") else raw
+    if not secret:
+        return None
+    return str(secret).encode("utf-8")
+
+
+def _plain_key_hash(api_key: str) -> str:
+    """Legacy unpeppered digest, kept so existing keys keep verifying."""
+    return hashlib.sha256(api_key.encode()).hexdigest()
+
+
+def hash_api_key(api_key: str, pepper: bytes | None = None) -> str:
+    """Digest an API key for storage.
+
+    With a pepper this is HMAC-SHA256, otherwise plain SHA-256. A pepper of
+    None reads the configured pepper; pass an explicit value to override it
+    (tests use this to avoid touching settings).
+    """
+    if pepper is None:
+        pepper = _configured_pepper()
+    if pepper:
+        return hmac.new(pepper, api_key.encode(), hashlib.sha256).hexdigest()
+    return _plain_key_hash(api_key)
+
+
+def candidate_key_hashes(api_key: str) -> list[str]:
+    """All stored digests ``api_key`` could match.
+
+    Peppered first when a pepper is configured, then the legacy unpeppered
+    digest so keys stored before the pepper was set keep verifying. Both
+    forms are the same length, so no schema change is needed.
+    """
+    pepper = _configured_pepper()
+    candidates = []
+    if pepper:
+        candidates.append(hash_api_key(api_key, pepper=pepper))
+    candidates.append(_plain_key_hash(api_key))
+    return candidates
+
+
 def generate_api_key() -> tuple[str, str, str]:
     """
     Generate a new API key.
@@ -91,7 +139,7 @@ def generate_api_key() -> tuple[str, str, str]:
         tuple: (full_key, key_hash, key_prefix)
     """
     full_key = f"b2a_{secrets.token_urlsafe(API_KEY_LENGTH)}"
-    key_hash = hashlib.sha256(full_key.encode()).hexdigest()
+    key_hash = hash_api_key(full_key)
     key_prefix = full_key[:API_KEY_PREFIX_LENGTH]
     return full_key, key_hash, key_prefix
 
@@ -138,6 +186,8 @@ class APIKeyService:
         expires_in_days: int | None = None,
         max_uses: int | None = None,
         session: AsyncSession | None = None,
+        allowed_tools: list[str] | None = None,
+        tenant: str | None = None,
     ) -> dict:
         """
         Create a new API key for a wallet.
@@ -170,19 +220,30 @@ class APIKeyService:
                 "max_uses": int | None,
             }
         """
+        # Tenant is a property of the wallet: any key created on a
+        # demo-tenant wallet is a demo key, whoever mints it (demo issuance,
+        # /v1/api-keys create/rotate, emergency replacements, auto-rotate).
+        # An explicit tenant that disagrees with the wallet fails closed to
+        # the wallet's tenant.
         if session is not None:
             result = await session.execute(
                 select(WalletModel).where(col(WalletModel.wallet_id) == wallet_id)
             )
-            if result.scalar_one_or_none() is None:
+            wallet = result.scalar_one_or_none()
+            if wallet is None:
                 raise WalletNotFoundError(wallet_id)
+            if getattr(wallet, "tenant", None):
+                tenant = wallet.tenant
         else:
             async with self._session_factory()() as check_session:
                 result = await check_session.execute(
                     select(WalletModel).where(col(WalletModel.wallet_id) == wallet_id)
                 )
-                if result.scalar_one_or_none() is None:
+                wallet = result.scalar_one_or_none()
+                if wallet is None:
                     raise WalletNotFoundError(wallet_id)
+                if getattr(wallet, "tenant", None):
+                    tenant = wallet.tenant
 
         full_key, key_hash, key_prefix = generate_api_key()
         key_id = f"key_{uuid4().hex[:12]}"
@@ -201,6 +262,10 @@ class APIKeyService:
             metadata_json=json.dumps({"name": key_name}),
             expires_at=(to_naive_utc(expires_at) if expires_at else None),
             max_uses=max_uses,
+            allowed_tools_json=(
+                json.dumps(list(allowed_tools)) if allowed_tools is not None else None
+            ),
+            tenant=tenant,
         )
 
         if session is not None:
@@ -223,7 +288,27 @@ class APIKeyService:
             "created_at": now,
             "expires_at": expires_at,
             "max_uses": max_uses,
+            "allowed_tools": list(allowed_tools) if allowed_tools is not None else None,
+            "tenant": tenant,
         }
+
+    async def get_key_record(self, key_id: str) -> APIKeyModel | None:
+        """Return the stored row for ``key_id`` (detached), or None.
+
+        Lets the JWT auth path populate the key's allowlist/tenant without
+        re-verifying the secret: the caller must already have authenticated
+        the derived credential (see ``consume_derived_key_use``) and fails
+        closed when the row is gone.
+        """
+        async with self._session_factory()() as session:
+            result = await session.execute(
+                select(APIKeyModel).where(col(APIKeyModel.key_id) == key_id)
+            )
+            key = result.scalar_one_or_none()
+            if key is None:
+                return None
+            session.expunge(key)
+            return key
 
     async def get_keys(self, wallet_id: str) -> dict:
         """
@@ -369,12 +454,14 @@ class APIKeyService:
             return (cast(Any, consumed).rowcount or 0) == 1
 
     async def is_key_bounded(self, key_id: str | None) -> bool:
-        """True if this key carries a use budget (max_uses) or an expiry.
+        """True if this key carries a use budget, an expiry, a tool allowlist,
+        or a tenant label.
 
         A bounded key must not mint fresh credentials for its wallet: a new
-        key takes only the bounds its request names, so a capped or expiring
-        key could otherwise outlive its own limits through an unlimited
-        sibling. A missing or unknown key_id counts as bounded (fail closed).
+        key takes only the bounds its request names, so a capped, expiring,
+        allowlisted, or tenant-scoped key could otherwise outlive its own
+        limits through an unlimited sibling. A missing or unknown key_id
+        counts as bounded (fail closed).
         """
         if key_id is None:
             return True
@@ -385,7 +472,12 @@ class APIKeyService:
             key = result.scalar_one_or_none()
         if key is None:
             return True
-        return key.max_uses is not None or key.expires_at is not None
+        return (
+            key.max_uses is not None
+            or key.expires_at is not None
+            or getattr(key, "allowed_tools_json", None) is not None
+            or getattr(key, "tenant", None) is not None
+        )
 
     async def validate_key(self, api_key: str) -> Optional[APIKeyModel]:
         """
@@ -401,7 +493,10 @@ class APIKeyService:
             return None
 
         key_prefix = api_key[:API_KEY_PREFIX_LENGTH]
-        key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+        # Peppered digests first when a pepper is configured, then the
+        # legacy plain digest, so keys stored before the pepper was set
+        # keep verifying with no rotation and no schema change.
+        candidates = candidate_key_hashes(api_key)
 
         async with self._session_factory()() as session:
             # Look up by the indexed full digest, not the prefix alone: the
@@ -412,7 +507,7 @@ class APIKeyService:
             # failed every request for both keys with a 500.
             result = await session.execute(
                 select(APIKeyModel).where(
-                    col(APIKeyModel.key_hash) == key_hash,
+                    col(APIKeyModel.key_hash).in_(candidates),
                     col(APIKeyModel.key_prefix) == key_prefix,
                     col(APIKeyModel.status) == APIKeyStatus.ACTIVE.value,
                 )
@@ -422,7 +517,9 @@ class APIKeyService:
             if not key:
                 return None
 
-            if not hmac.compare_digest(key.key_hash, key_hash):
+            if not any(
+                hmac.compare_digest(key.key_hash, candidate) for candidate in candidates
+            ):
                 return None
 
             now = utc_now()
@@ -514,6 +611,8 @@ class APIKeyService:
             inherited_expires_at = None
             inherited_max_uses = None
             inherited_name = "rotated_key"
+            inherited_allowed_tools_json = None
+            inherited_tenant = None
 
             if key_id:
                 # FOR UPDATE so a concurrent validate_key cannot consume a
@@ -562,10 +661,16 @@ class APIKeyService:
                 # use budget, so a wallet-scoped caller cannot widen its own
                 # bounds by rotating (rotate is reachable with the wallet's
                 # own key, not just bootstrap). Operators wanting fresh bounds
-                # mint a new key explicitly instead.
+                # mint a new key explicitly instead. The tool allowlist and
+                # tenant label carry over for the same reason: rotation must
+                # never be an escape hatch out of either.
                 inherited_expires_at = old_key.expires_at
                 if old_key.max_uses is not None:
                     inherited_max_uses = max(old_key.max_uses - old_key.use_count, 0)
+                inherited_allowed_tools_json = getattr(
+                    old_key, "allowed_tools_json", None
+                )
+                inherited_tenant = getattr(old_key, "tenant", None)
                 if old_key.metadata_json:
                     try:
                         inherited_name = json.loads(old_key.metadata_json).get(
@@ -587,6 +692,8 @@ class APIKeyService:
                 expires_at=inherited_expires_at,
                 max_uses=inherited_max_uses,
                 metadata_json=json.dumps({"name": inherited_name}),
+                allowed_tools_json=inherited_allowed_tools_json,
+                tenant=inherited_tenant,
             )
             session.add(new_key)
 
@@ -834,6 +941,15 @@ class APIKeyService:
                     emergency_expires_at = donor.expires_at
                     if donor.max_uses is not None:
                         emergency_max_uses = max(donor.max_uses - donor.use_count, 0)
+                    # The donor's tool allowlist and tenant label carry over:
+                    # an emergency replacement must not escape either.
+                    emergency_allowed_tools_json = getattr(
+                        donor, "allowed_tools_json", None
+                    )
+                    emergency_tenant = getattr(donor, "tenant", None)
+                else:
+                    emergency_allowed_tools_json = None
+                    emergency_tenant = None
 
                 full_key, key_hash, key_prefix = generate_api_key()
                 new_key_id = f"key_{uuid4().hex[:12]}"
@@ -846,6 +962,8 @@ class APIKeyService:
                     metadata_json=json.dumps({"name": "emergency_key"}),
                     expires_at=emergency_expires_at,
                     max_uses=emergency_max_uses,
+                    allowed_tools_json=emergency_allowed_tools_json,
+                    tenant=emergency_tenant,
                 )
                 session.add(emergency_key)
                 new_key_data = {

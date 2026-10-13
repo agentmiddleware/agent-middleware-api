@@ -42,6 +42,31 @@ The dispatch attempt is a small state machine — `prepared → dispatch_claimed
 are absorbing. Historical `dispatched` rows have a null claim hash and remain
 classified as already sent; they are never claimable again.
 
+## Permit lifecycle inspection
+
+Permit responses expose `effective_status` as the current lifecycle:
+`revoked` takes precedence over expiry; an otherwise active permit is `expired`
+when `expires_at <= current UTC time`, and `active` before that deadline. Other
+stored non-active statuses remain non-active. `GET /v1/permits/{id}`, permit
+lists, and the permit in `/v1/permits/verify` expose this field. The `status`
+query on `/v1/permits` and `/v1/me/permits` filters this effective lifecycle,
+including the count and pagination, so `status=active` excludes expired rows.
+
+`status` in every permit read reports the same read-time lifecycle as
+`effective_status`, so a permit past its deadline reads `status: expired`
+(changed 2026-10-11; it previously echoed the stored value). Storage still
+holds `active` after the deadline: expiry is derived, never written. Neither
+field is signed: the permit signature covers a fixed `status: active`, so
+the derived value does not affect offline signature verification.
+Inspection neither changes stored state nor replaces the original signature.
+An effective status of `active` alone does not authorize a call: use
+`/v1/permits/verify` with the acting wallet, tool and estimated credits, and the
+invoke path rechecks authorization, expiry and remaining budget. Lifecycle
+inspection retains wallet authorization checks.
+
+The expiry-boundary, revocation precedence, unchanged signature and wallet
+isolation regressions are in `tests/test_permit_effective_lifecycle.py`.
+
 ## Terminal outcomes
 
 | Outcome | Trigger | Wallet | Gateway observation | HTTP / JSON-RPC | Proven by |
@@ -212,11 +237,17 @@ Two non-terminal answers matter to clients:
   The claim fence also uses this response for an uncertain
   preparation commit and for a losing dispatch claimant. That is an observable
   correction from the earlier generic upstream-prepare failure on the rare
-  uncertain-commit path. REST preserves the existing `400` response and
-  JSON-RPC preserves the existing `-32003` code.
+  uncertain-commit path. REST returns `409` and JSON-RPC returns `-32005`.
 - **`idempotency_key_reused`** — the same key arrived with a *different*
   logical payload. Fail-closed; nothing is dispatched or charged
   (`test_governed_upstream_conflicting_payload_reuse_never_redispatches`).
+  JSON-RPC returns the dedicated code `-32009` (never the generic `-32603`)
+  with `error.data.expected_request_hash` (the hash stored for the key's
+  original request — equal to the original receipt's `request_hash` on
+  governed calls) and `error.data.received_request_hash` (the hash of the
+  rejected request). Both are opaque SHA-256 hex; compare them, do not try
+  to recompute them. REST returns `409` with `detail: "idempotency_key_reused"`
+  and no hashes.
 
 The idempotency identity is the *logical* call — transport-independent, so a
 JSON-RPC call and its REST retry share one identity

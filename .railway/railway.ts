@@ -23,6 +23,7 @@ export default defineRailway(() =>
           CORS_ORIGINS: preserve(),
           DATABASE_URL: preserve(),
           DEBUG: preserve(),
+          ENABLE_DEMO_TENANT: preserve(),
           ENABLE_DOGFOOD_TOOL: preserve(),
           ENABLE_PERMIT_REPEAT_WINDOW_ISSUANCE: preserve(),
           ENABLE_PROOF_SURFACES: preserve(),
