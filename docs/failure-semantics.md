@@ -52,9 +52,12 @@ lists, and the permit in `/v1/permits/verify` expose this field. The `status`
 query on `/v1/permits` and `/v1/me/permits` filters this effective lifecycle,
 including the count and pagination, so `status=active` excludes expired rows.
 
-`status` retains the stored lifecycle value for compatibility: a permit may
-remain `status: active` in storage after its deadline. `effective_status` is
-unsigned inspection metadata; it is excluded from the signed issuance claims.
+`status` in every permit read reports the same read-time lifecycle as
+`effective_status`, so a permit past its deadline reads `status: expired`
+(changed 2026-10-11; it previously echoed the stored value). Storage still
+holds `active` after the deadline: expiry is derived, never written. Neither
+field is signed: the permit signature covers a fixed `status: active`, so
+the derived value does not affect offline signature verification.
 Inspection neither changes stored state nor replaces the original signature.
 An effective status of `active` alone does not authorize a call: use
 `/v1/permits/verify` with the acting wallet, tool and estimated credits, and the
@@ -238,6 +241,13 @@ Two non-terminal answers matter to clients:
 - **`idempotency_key_reused`** — the same key arrived with a *different*
   logical payload. Fail-closed; nothing is dispatched or charged
   (`test_governed_upstream_conflicting_payload_reuse_never_redispatches`).
+  JSON-RPC returns the dedicated code `-32009` (never the generic `-32603`)
+  with `error.data.expected_request_hash` (the hash stored for the key's
+  original request — equal to the original receipt's `request_hash` on
+  governed calls) and `error.data.received_request_hash` (the hash of the
+  rejected request). Both are opaque SHA-256 hex; compare them, do not try
+  to recompute them. REST returns `409` with `detail: "idempotency_key_reused"`
+  and no hashes.
 
 The idempotency identity is the *logical* call — transport-independent, so a
 JSON-RPC call and its REST retry share one identity

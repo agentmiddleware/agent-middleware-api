@@ -26,6 +26,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `DEMO_ALLOWED_TOOLS`. Migration `046_demo_tenant_key_allowlist` is
   additive-only. See [`docs/demo-tenant.md`](docs/demo-tenant.md).
 
+### Changed — permit `status` reports `expired` at read time
+
+- Every serialized permit (`GET /v1/permits/{id}`, `/v1/permits`,
+  `/v1/me/permits`, the permit in `/v1/permits/verify` and receipt
+  evidence) now reports `status: "expired"` once `expires_at` has passed,
+  matching `effective_status`. Storage is unchanged (still `active`), and the
+  permit signature is unaffected (it signs a fixed `status: active`).
+  Behavior change: a client that read `status == "active"` after the deadline
+  now sees `expired`, which is what enforcement already did.
+
+### Changed — `idempotency_key_reused` (`-32009`) carries request hashes
+
+- The JSON-RPC conflict error on `/mcp` and `/mcp/messages` now includes
+  `error.data.expected_request_hash` (stored hash of the key's original
+  request, equal to the original receipt's `request_hash` on governed calls)
+  and `error.data.received_request_hash`. Additive: code and message are
+  unchanged; clients that compared the whole error object for equality will
+  see the new `data` member. The REST `409` body is unchanged.
+
 ### Changed — standard `/mcp` returns `delivery_uncertain` as a tool result
 
 - On `POST /mcp`, a lost upstream response (`delivery_uncertain`) is now a
