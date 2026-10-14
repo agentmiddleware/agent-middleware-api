@@ -48,14 +48,14 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.lock') }}
           restore-keys: |
             ${{ runner.os }}-pip-
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements.lock
           pip install -e ./b2a_sdk
           pip install pytest pytest-asyncio anyio httpx
 
@@ -131,7 +131,7 @@ jobs:
       - name: Install controlled-harness dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements.lock
           pip install -e ./b2a_sdk
 
       - name: Configure isolated attack state
@@ -354,7 +354,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements.lock
           pip install pytest pytest-asyncio anyio httpx
 
       - name: Apply PostgreSQL trust migrations
@@ -443,7 +443,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements.lock
           pip install pytest pytest-asyncio anyio httpx
 
       - name: Run production-trust posture tests
@@ -492,7 +492,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements.lock
           pip install pytest pytest-asyncio
 
       - name: Apply PostgreSQL migrations
@@ -594,7 +594,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements.lock
           pip install -e ./b2a_sdk
           pip install pytest pytest-asyncio pytest-cov anyio httpx
 
@@ -620,7 +620,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements.lock
           pip install httpx
 
       - name: Run local trust-plane constant test loop (self-provision)
@@ -720,8 +720,17 @@ jobs:
       - name: Install dependencies and linters
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements.lock
           pip install ruff mypy
+
+      # Docker and CI install from requirements.lock; fail if it no longer
+      # satisfies requirements.txt. uv keeps existing pins, so this only
+      # changes the lock when requirements.txt changed. Fix with `make lock`.
+      - name: Verify requirements.lock matches requirements.txt
+        run: |
+          pip install uv==0.12.2
+          uv pip compile --quiet requirements.txt --universal --python-version 3.11 -o requirements.lock
+          git diff --exit-code requirements.lock
 
       - name: Run ruff
         run: ruff check .
