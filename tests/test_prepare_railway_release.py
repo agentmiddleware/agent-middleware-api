@@ -31,6 +31,7 @@ def detached_release_repo(tmp_path: Path) -> tuple[Path, str]:
     _git(repo, "config", "user.name", "Release Test")
     (repo / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
     (repo / "requirements.txt").write_text("", encoding="utf-8")
+    (repo / "requirements.lock").write_text("", encoding="utf-8")
     scripts = repo / "scripts"
     scripts.mkdir()
     (scripts / "docker_entrypoint.sh").write_text("#!/bin/sh\n", encoding="utf-8")
@@ -112,6 +113,7 @@ def test_rejects_archive_with_preexisting_stamp(tmp_path: Path) -> None:
     _git(repo, "config", "user.name", "Release Test")
     (repo / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
     (repo / "requirements.txt").write_text("", encoding="utf-8")
+    (repo / "requirements.lock").write_text("", encoding="utf-8")
     scripts = repo / "scripts"
     scripts.mkdir()
     (scripts / "docker_entrypoint.sh").write_text("#!/bin/sh\n", encoding="utf-8")

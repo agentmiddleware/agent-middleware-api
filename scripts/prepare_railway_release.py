@@ -23,7 +23,12 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _STAMP_NAME = ".build_commit_sha"
-_REQUIRED_FILES = ("Dockerfile", "requirements.txt", "scripts/docker_entrypoint.sh")
+_REQUIRED_FILES = (
+    "Dockerfile",
+    "requirements.txt",
+    "requirements.lock",
+    "scripts/docker_entrypoint.sh",
+)
 
 
 class ReleaseContextError(RuntimeError):
