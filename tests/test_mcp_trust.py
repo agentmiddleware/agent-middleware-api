@@ -1120,7 +1120,7 @@ async def test_reconcile_stuck_records_flags_charge_with_no_receipt_for_review(
                     "tool_name": "crash-before-receipt-tool",
                     "arguments": {},
                     "wallet_id": provisioned["agent_wallet_id"],
-                    "permit_id": permit["permit_id"],
+                    "key_id": provisioned["key_id"],
                 },
             )
     finally:

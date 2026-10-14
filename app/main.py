@@ -371,6 +371,28 @@ async def lifespan(app: FastAPI):
                             idempotency_records_needing_review=needs_review,
                         )
 
+                    # Optional provider-status reconcile for parked
+                    # delivery_uncertain calls. Records resolutions and age
+                    # alerts only; never refunds or releases budget.
+                    if settings.UPSTREAM_RECONCILE_WORKER_ENABLED:
+                        from .services.upstream_reconcile import (
+                            get_delivery_uncertain_reconcile_worker,
+                        )
+
+                        sweep = (
+                            await get_delivery_uncertain_reconcile_worker().run_once()
+                        )
+                        if sweep.probed or sweep.aged_alerts:
+                            logger.info(
+                                "cleanup_completed",
+                                delivery_uncertain_probed=sweep.probed,
+                                delivery_uncertain_resolved=(
+                                    sweep.resolved_executed
+                                    + sweep.resolved_not_executed
+                                ),
+                                delivery_uncertain_aged_alerts=sweep.aged_alerts,
+                            )
+
             except asyncio.CancelledError:
                 logger.info("cleanup_task_stopped")
                 break

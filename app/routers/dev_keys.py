@@ -108,16 +108,21 @@ def _reject_cross_origin(request: Request) -> None:
     A browser always sends ``Origin`` on such a request; non-browser dev
     agents send none and pass through. Mirrors
     ``app.routers.mcp_standard._validate_origin``.
+
+    Matching ``Origin`` against the request's own host is not enough: under
+    DNS rebinding the attacker's name resolves to loopback, so the browser
+    sends ``Host`` and ``Origin`` for that same foreign name. A browser call
+    must therefore come from a loopback name or the configured public host.
     """
     origin = request.headers.get("origin")
     if not origin:
         return
     origin_host = urlsplit(origin).hostname
-    allowed = {request.url.hostname}
+    allowed: set[str | None] = {"localhost", "127.0.0.1", "::1"}
     public_url = get_settings().PUBLIC_URL
     if public_url:
         allowed.add(urlsplit(public_url).hostname)
-    if origin_host not in allowed:
+    if origin_host not in allowed or origin_host != request.url.hostname:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={

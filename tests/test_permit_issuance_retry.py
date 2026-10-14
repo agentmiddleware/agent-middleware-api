@@ -78,7 +78,7 @@ async def test_completed_issuance_replay_refreshes_mutable_state_without_reminti
     original = first.json()
     service = get_permit_service()
     if change == "revoked":
-        await service.revoke_permit(original["permit_id"])
+        await service.revoke_permit(original["permit_id"], is_bootstrap_admin=True)
     elif change == "expired":
         checked_at = to_naive_utc(datetime.fromisoformat(original["expires_at"]))
         monkeypatch.setattr(permits, "utc_now", lambda: checked_at)
