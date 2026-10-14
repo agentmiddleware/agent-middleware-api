@@ -1800,7 +1800,10 @@ async def _execute_registered_tool_inner(
             )
             receipt_payload = None
             reason = permit_validation.reason or "permit_denied"
-            if permit_model:
+            # A permit naming another wallet is not this caller's evidence:
+            # receipting it would file the caller's denial under the permit
+            # owner's receipt list, where the owner can read it.
+            if permit_model and permit_model.subject_wallet_id == wallet_id:
                 receipt_payload = await _finalize_governed_denial(
                     unaccepted_action_owner_id=idem_begin.record_id
                     if idem_begin
@@ -2348,7 +2351,7 @@ async def _execute_registered_tool_inner(
             )
             receipt_payload = None
             reason = permit_validation.reason or "permit_denied"
-            if permit_model:
+            if permit_model and permit_model.subject_wallet_id == wallet_id:
                 receipt_payload = await _finalize_governed_denial(
                     unaccepted_iga_use=iga_granted_use,
                     unaccepted_action_owner_id=idem_begin.record_id
