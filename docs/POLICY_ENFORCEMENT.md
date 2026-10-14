@@ -51,6 +51,7 @@ only reachable in local/dev/test, and it logs a loud startup warning.
 | 5 | **Idempotency begin** (completed prior call replays its stored signed receipt) | `get_idempotency_service()` | replay short-circuit |
 | 6 | **Permit validation** (Layer B) | `PermitService.validate_for_action` | `permit_*` |
 | 7 | **Wallet policy bundles** (Layer C) | `evaluate_wallet_policy` | policy reason |
+| 7a | **Wallet re-plan guard**: cross-permit dedup plus wallet velocity (`WALLET_REPLAN_GUARD`, default `log_only` never blocks) | `app/services/replan_guard.py` | `wallet_duplicate_request` / `wallet_velocity_exceeded`; `wallet_guard_unavailable` (retryable) |
 | 8 | **Human-approval gate** (Layer D) | `_require_human_approval` | blocks / `human_approval_unavailable` |
 | 9 | **Recipient-domain binding** (Layer E) | router | `permit_recipient_domain_mismatch` |
 | 10 | **Atomic budget reservation + prepared remote attempt**; after debit, acquire the one-shot remote dispatch claim, send, then meter + sign receipt | permits + dispatch services | reconcilable failure / fail-closed claim contention |
@@ -244,6 +245,22 @@ database is configured or the count fails or times out, with
 `enforce_mode_denials_durable_unavailable` naming why, and the process-local
 counters are still served. `metric_scopes` labels each metric's durability so a
 monitor never infers it from the values.
+
+### Wallet-scoped re-plan guard (all governed tools)
+
+The duplicate guard above keys on `permit_id`, and `POST /mcp` auto-mints a
+fresh permit for every call without one. So a re-plan under a new key gets a
+new permit that guard never sees. `WALLET_REPLAN_GUARD` keys on the wallet
+instead. It holds a dedup lock on `(wallet, tool, canonical argument hash)`
+across all permits for `WALLET_DEDUP_WINDOW_SECONDS`, and it applies a wallet
+velocity cap on credits (integer minor units) and calls across all permits.
+Each is checked and recorded atomically in one Lua script (or one critical
+section in the per-process fallback). A deterministic, uncharged failure
+releases the lock and refunds the velocity atomically. Success and
+`delivery_uncertain` keep them. `log_only` (default) never blocks. `enforce`
+signs a denial receipt. A store outage under `enforce` is retryable
+(`wallet_guard_unavailable`, nothing charged, key released). See
+[`docs/replan-guard.md`](./replan-guard.md).
 
 ### Optional probabilistic risk advice
 
