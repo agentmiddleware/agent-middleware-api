@@ -530,7 +530,7 @@ async def complete_awi_http_governed(
 
 async def _release_reservation(permits: Any, ctx: AwiHttpGovernedContext) -> bool:
     try:
-        await permits.release_budget(ctx.permit_id, ctx.credits)
+        await permits.release_budget(ctx.permit_id, ctx.credits, is_system=True)
         return True
     except Exception:
         logger.exception(

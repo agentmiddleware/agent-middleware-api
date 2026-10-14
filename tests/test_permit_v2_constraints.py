@@ -392,7 +392,9 @@ async def test_aggregate_value_cap_released_reservation_frees_cap(
 
     assert (await reserve_once()).allowed is True
     assert (await reserve_once()).reason == "permit_aggregate_value_cap_exceeded"
-    await service.release_budget(permit.permit_id, Decimal("1"))
+    await service.release_budget(
+        permit.permit_id, Decimal("1"), is_bootstrap_admin=True
+    )
     assert (await reserve_once()).allowed is True
 
 
@@ -455,7 +457,9 @@ async def test_aggregate_value_cap_receipt_history_floors_concurrent_reservation
         outcome="failed_unrefunded",
         audit_event_id=None,
     )
-    await service.release_budget(permit.permit_id, Decimal("2"))
+    await service.release_budget(
+        permit.permit_id, Decimal("2"), is_bootstrap_admin=True
+    )
 
     factory = get_session_factory()
     async with factory() as session:
@@ -540,7 +544,9 @@ async def test_aggregate_value_cap_receipt_history_floor_then_sequential_reserva
         outcome="failed_unrefunded",
         audit_event_id=None,
     )
-    await service.release_budget(permit.permit_id, Decimal("2"))
+    await service.release_budget(
+        permit.permit_id, Decimal("2"), is_bootstrap_admin=True
+    )
 
     async def reserve_once():
         return await service.authorize_and_reserve(
@@ -605,7 +611,9 @@ async def test_reserve_budget_enforces_aggregate_value_cap(client, clean_databas
     assert excinfo.value.reason == "permit_aggregate_value_cap_exceeded"
 
     # Releasing the in-flight reservation makes the cap share admissible again.
-    await service.release_budget(permit.permit_id, Decimal("1"))
+    await service.release_budget(
+        permit.permit_id, Decimal("1"), is_bootstrap_admin=True
+    )
     await service.reserve_budget(permit.permit_id, Decimal("1"))
 
     # Parallel reservations against a fresh capped permit admit at most
