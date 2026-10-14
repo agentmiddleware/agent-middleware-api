@@ -220,7 +220,9 @@ class McpDispatchReconciliationService:
                 if await self._find_operation_debit(attempt) is not None:
                     continue
             try:
-                if await self._permits.release_dispatch_budget_once(attempt.attempt_id):
+                if await self._permits.release_dispatch_budget_once(
+                    attempt.attempt_id, is_system=True
+                ):
                     budget_released += 1
             except Exception as exc:
                 failed.append(attempt.attempt_id)
@@ -477,7 +479,9 @@ class McpDispatchReconciliationService:
                 raise DispatchAttemptError("dispatch_receipt_outcome_conflict")
             if attempt.budget_released_at is not None:
                 return
-        await self._permits.release_dispatch_budget_once(attempt.attempt_id)
+        await self._permits.release_dispatch_budget_once(
+            attempt.attempt_id, is_system=True
+        )
 
     async def _find_operation_debit(
         self,
@@ -580,7 +584,9 @@ class McpDispatchReconciliationService:
             metadata["approval_id"] = attempt.approval_id
         if get_settings().JEV_RISK_GUARD != DuplicateGuardMode.OFF:
             jev = await load_jev_guard_metadata(
-                jev_audit_id(attempt.wallet_id, context.endpoint, context.idempotency_key),
+                jev_audit_id(
+                    attempt.wallet_id, context.endpoint, context.idempotency_key
+                ),
                 attempt.wallet_id,
             )
             if jev is not None:
