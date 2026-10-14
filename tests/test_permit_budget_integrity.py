@@ -117,7 +117,7 @@ async def test_reserve_budget_reports_revocation_rather_than_exhaustion(
     operator to top up a permit that more money cannot revive.
     """
     _, permit = await _permit_with_budget(client)
-    await get_permit_service().revoke_permit(permit.permit_id)
+    await get_permit_service().revoke_permit(permit.permit_id, is_bootstrap_admin=True)
 
     with pytest.raises(PermitError) as denied:
         await get_permit_service().reserve_budget(permit.permit_id, Decimal("1"))

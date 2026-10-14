@@ -229,7 +229,7 @@ async def test_refund_reconciliation_retries_exactly_once_and_preserves_agent_re
 
     # The periodic stale-budget reconciler must preserve a real debit while
     # its failed refund remains pending, even after the permit is revoked.
-    await get_permit_service().revoke_permit(permit_id)
+    await get_permit_service().revoke_permit(permit_id, is_bootstrap_admin=True)
     assert await get_permit_service().reconcile_budgets(idle_seconds=0) == 0
     pending_permit = await get_permit_service().get_permit(permit_id)
     assert pending_permit is not None
@@ -679,7 +679,7 @@ async def test_lost_refund_ack_releases_budget_without_double_refund(
 
     # A background budget sweep must not release a still-pending work item;
     # the operator transaction remains the exact-once release marker.
-    await get_permit_service().revoke_permit(permit_id)
+    await get_permit_service().revoke_permit(permit_id, is_bootstrap_admin=True)
     assert await get_permit_service().reconcile_budgets(idle_seconds=0) == 0
     pending_permit = await get_permit_service().get_permit(permit_id)
     assert pending_permit is not None

@@ -110,6 +110,7 @@ from ..trust import (
     HumanApprovalUnavailableError,
     IdempotencyBegin,
     IdempotencyConflictError,
+    IdempotencyCreationDisabledError,
     IdempotencyInProgressError,
     InvalidIdempotencyKeyError,
     decode_idempotency_key_header,
@@ -932,6 +933,56 @@ async def _begin_governed_mcp_idempotency(
     legacy_request_payload: dict[str, Any] | None,
     operation_kind: str,
     wait_timeout_seconds: float = 0.0,
+    permit_bound_request_payload: dict[str, Any] | None = None,
+) -> IdempotencyBegin:
+    """Begin the canonical identity, still replaying permit-bound rows.
+
+    Before the replay hash dropped ``permit_id``, canonical rows were hashed
+    with it. ``permit_bound_request_payload`` is that historical shape: a
+    conflict under the current hash is retried against it, replay-only
+    (``allow_new_record=False``), so an in-flight or completed pre-upgrade row
+    still replays for the permit it was created with and is never re-minted.
+    """
+    try:
+        return await _begin_governed_mcp_idempotency_scope(
+            idem=idem,
+            wallet_id=wallet_id,
+            idempotency_key=idempotency_key,
+            tool_name=tool_name,
+            endpoint=endpoint,
+            logical_request_payload=logical_request_payload,
+            legacy_request_payload=legacy_request_payload,
+            operation_kind=operation_kind,
+            wait_timeout_seconds=wait_timeout_seconds,
+        )
+    except IdempotencyConflictError as conflict:
+        if permit_bound_request_payload is None:
+            raise
+        try:
+            return await idem.begin_with_record(
+                wallet_id=wallet_id,
+                endpoint=GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+                idempotency_key=idempotency_key,
+                request_payload=permit_bound_request_payload,
+                operation_kind=operation_kind,
+                wait_timeout_seconds=wait_timeout_seconds,
+                allow_new_record=False,
+            )
+        except IdempotencyCreationDisabledError:
+            raise conflict from None
+
+
+async def _begin_governed_mcp_idempotency_scope(
+    *,
+    idem: Any,
+    wallet_id: str,
+    idempotency_key: str,
+    tool_name: str,
+    endpoint: str,
+    logical_request_payload: dict[str, Any],
+    legacy_request_payload: dict[str, Any] | None,
+    operation_kind: str,
+    wait_timeout_seconds: float = 0.0,
 ) -> IdempotencyBegin:
     """Adopt a completed pre-canonical replay without creating a new identity.
 
@@ -1390,7 +1441,18 @@ async def _execute_registered_tool_inner(
     # Idempotency describes the logical invocation, not transport framing.
     # In particular, JSON-RPC correlation IDs and REST-vs-JSON-RPC routing
     # must not create a second gateway dispatch for the same caller key.
+    # The permit is provenance (it rides the receipt), not identity: a permit
+    # renewed mid-flight must not turn a legitimate retry into a key-reuse
+    # conflict. The calling key replaces it so a sibling key on the same
+    # wallet still cannot replay this key's result through its own permit.
     effective_request_payload = {
+        "tool_name": tool_name,
+        "arguments": arguments,
+        "wallet_id": wallet_id,
+        "key_id": auth.key_id,
+    }
+    # Shape canonical rows were hashed with before; replay-only fallback.
+    permit_bound_request_payload: dict[str, Any] | None = {
         "tool_name": tool_name,
         "arguments": arguments,
         "wallet_id": wallet_id,
@@ -1448,6 +1510,7 @@ async def _execute_registered_tool_inner(
         idempotency_key = action_identity.idempotency_key
         effective_request_payload = action_identity.request_payload
         effective_request_hash = sha256_hex(effective_request_payload)
+        permit_bound_request_payload = None
 
     if not service:
         # Durable replay is authoritative even if an operator has since
@@ -1464,6 +1527,7 @@ async def _execute_registered_tool_inner(
                     endpoint=endpoint,
                     logical_request_payload=effective_request_payload,
                     legacy_request_payload=request_payload,
+                    permit_bound_request_payload=permit_bound_request_payload,
                     operation_kind="unresolved",
                 )
                 replay = idem_begin.replay
@@ -1711,6 +1775,7 @@ async def _execute_registered_tool_inner(
                     endpoint=endpoint,
                     logical_request_payload=effective_request_payload,
                     legacy_request_payload=request_payload,
+                    permit_bound_request_payload=permit_bound_request_payload,
                     operation_kind=execution_backend,
                     wait_timeout_seconds=(
                         idempotency_wait_seconds
@@ -1720,6 +1785,13 @@ async def _execute_registered_tool_inner(
                 )
             replay = idem_begin.replay
             idem_started = True
+            if (
+                permit_bound_request_payload is not None
+                and idem_begin.request_hash == sha256_hex(permit_bound_request_payload)
+            ):
+                # Adopted a pre-upgrade row: keep receipts on the row's hash.
+                effective_request_payload = permit_bound_request_payload
+                effective_request_hash = idem_begin.request_hash
             mark_current_request(
                 logical_operation_id=idem_begin.record_id,
                 disposition="same_key_replay" if replay is not None else None,
@@ -1749,6 +1821,18 @@ async def _execute_registered_tool_inner(
                     logical_operation_id=exc.verified_record_id,
                 )
                 raise
+            if permit_id and action_identity is None:
+                # The replay hash binds the calling key, so a sibling key now
+                # conflicts before the replay gate runs. Keep its answer when
+                # it presents a permit bound to another key.
+                validation = await get_permit_service().validate_replay_access(
+                    permit_id=permit_id,
+                    wallet_id=wallet_id,
+                    tool_name=tool_name,
+                    key_id=auth.key_id,
+                )
+                if validation.reason == "permit_key_mismatch":
+                    raise ToolPermissionDenied("permit_key_mismatch") from None
             raise IdempotencyKeyReusedError(exc) from exc
         if replay and replay.response_json:
             if action_identity is not None:
@@ -2668,7 +2752,7 @@ async def _execute_registered_tool_inner(
             # release is best-effort, so it cannot stop the budget going back.
             await _release_iga_use(iga_granted_use, tool_name, reason=denial_reason)
             await get_permit_service().release_dispatch_budget_once(
-                dispatch_attempt.attempt_id
+                dispatch_attempt.attempt_id, is_system=True
             )
         else:
             if governed_call and permit_model:
@@ -2933,6 +3017,7 @@ async def _execute_registered_tool_inner(
                 await get_permit_service().release_budget(
                     permit_model.permit_id,
                     registered_cost,
+                    is_system=True,
                 )
             except PermitWriteContendedError:
                 # Guarded for the same reason _release_local_permit_reservation
@@ -3622,7 +3707,7 @@ async def _raise_refunded_upstream_failure(
 
     try:
         await get_permit_service().release_dispatch_budget_once(
-            dispatch_attempt.attempt_id
+            dispatch_attempt.attempt_id, is_system=True
         )
     except PermitWriteContendedError:
         # The upstream half of the guard above, and the safer of the two: this
@@ -3983,14 +4068,18 @@ async def _release_local_permit_reservation(
     """
     permits = get_permit_service()
     try:
-        await permits.release_budget(permit_model.permit_id, registered_cost)
+        await permits.release_budget(
+            permit_model.permit_id, registered_cost, is_system=True
+        )
     except Exception:
         logger.exception(
             "mcp_release_budget_failed",
             extra={"permit_id": permit_model.permit_id, "reason": reason},
         )
     try:
-        await permits.release_tool_call(permit_model.permit_id, tool_name)
+        await permits.release_tool_call(
+            permit_model.permit_id, tool_name, is_system=True
+        )
     except Exception:
         logger.exception(
             "mcp_release_tool_call_failed",
