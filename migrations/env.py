@@ -66,8 +66,9 @@ def do_run_migrations(connection: Connection) -> None:
     with context.begin_transaction():
         if connection.dialect.name == "postgresql":
             # Explicit admin mechanism for migrations: FORCE ROW LEVEL SECURITY
-            # (047_tenant_rls) binds the table owner too, so data migrations
-            # opt out of the wallet policies for this transaction only.
+            # (048_tenant_rls, enforce mode) binds the table owner too, so
+            # data migrations opt out of the wallet policies for this
+            # transaction only.
             connection.exec_driver_sql(
                 "SELECT set_config('app.rls_bypass', 'on', true)"
             )

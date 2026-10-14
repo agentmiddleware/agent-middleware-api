@@ -35,7 +35,7 @@ from ..core.config import get_settings
 from ..core.db_urls import as_sqlalchemy_url
 from ..core.time import to_naive_utc
 from ..core.trust_mode import is_production_like_environment
-from .tenant_rls import TenantScopedSession, engine_connect_args
+from .tenant_rls import TenantScopedSession
 
 logger = logging.getLogger(__name__)
 
@@ -147,11 +147,6 @@ def get_engine() -> AsyncEngine | None:
         else:
             engine_kwargs["pool_size"] = get_settings().DB_POOL_SIZE
             engine_kwargs["max_overflow"] = get_settings().DB_MAX_OVERFLOW
-            # TENANT_RLS_MODE=off: opt app connections out of the wallet
-            # policies (app.db.tenant_rls). Enforce sets nothing here.
-            connect_args = engine_connect_args(db_url)
-            if connect_args:
-                engine_kwargs["connect_args"] = connect_args
 
         _engine = create_async_engine(db_url, **engine_kwargs)
 
@@ -267,7 +262,7 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
             engine,
             class_=AsyncSession,
             # Carries the after_begin hook that sets app.current_wallet_id
-            # per transaction under TENANT_RLS_MODE=enforce.
+            # per transaction under TENANT_RLS_MODE=enforce (app.db.tenant_rls).
             sync_session_class=TenantScopedSession,
             expire_on_commit=False,
             autocommit=False,

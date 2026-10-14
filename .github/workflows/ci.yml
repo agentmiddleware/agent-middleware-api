@@ -406,6 +406,7 @@ jobs:
         run: |
           python - <<'EOF'
           import asyncio, asyncpg
+          from app.db.tenant_rls import enable_rls_statements
           async def main():
               conn = await asyncpg.connect("postgresql://postgres:postgres@localhost:5432/trust_ci")
               await conn.execute(
@@ -419,6 +420,9 @@ jobs:
               await conn.execute(
                   "GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO amw_rls_app"
               )
+              # The migration ran in the default off mode: turn RLS on.
+              for statement in enable_rls_statements():
+                  await conn.execute(statement)
               await conn.close()
           asyncio.run(main())
           EOF

@@ -463,8 +463,10 @@ async def lifespan(app: FastAPI):
                     raise
                 rls_posture = {"mode": settings.TENANT_RLS_MODE, "error": str(e)}
             logger.info("app_startup", phase="tenant_rls_posture", **rls_posture)
-            if rls_posture.get("superuser") or rls_posture.get("bypassrls"):
-                # Off mode tolerates this (the policies are inert for the app
+            if rls_posture.get("tables_with_rls_enabled") and (
+                rls_posture.get("superuser") or rls_posture.get("bypassrls")
+            ):
+                # Off mode tolerates this (the app opts out of the policies
                 # anyway); enforce mode already refused above.
                 logger.warning(
                     "tenant_rls_role_bypasses_policies: the database runtime "

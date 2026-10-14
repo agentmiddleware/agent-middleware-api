@@ -1,15 +1,19 @@
-"""Enable and force row-level security on wallet-scoped tables.
+"""Wallet row-level security policies; enabled only under TENANT_RLS_MODE=enforce.
 
-Revision ID: 047_tenant_rls
-Revises: 046_demo_tenant_key_allowlist
+Revision ID: 048_tenant_rls
+Revises: 047_dispatch_reconcile_lease
 
-PostgreSQL only; a no-op on SQLite. Each listed table gets ENABLE and FORCE
-ROW LEVEL SECURITY plus one policy whose USING and WITH CHECK admit a row only
+PostgreSQL only; a no-op on SQLite. Each listed table gets one policy whose USING and WITH CHECK admit a row only
 when an owning wallet column equals ``app.current_wallet_id`` or
 ``app.rls_bypass`` is ``'on'``. ``current_setting(..., true)`` yields NULL when
 the setting was never set and '' after a ``SET LOCAL`` ends; NULLIF folds both
 into NULL, and a NULL comparison admits nothing, so an unset scope fails
-closed. Wallet columns are character varying; the setting is text, compared with
+closed.
+
+Default off: the policies are created but row-level security stays disabled
+on every table, so no client sees any change. ENABLE and FORCE ROW LEVEL
+SECURITY run only when this migration executes with TENANT_RLS_MODE=enforce;
+enabling later is the per-table ALTER in ``docs/tenant-rls.md``. Wallet columns are character varying; the setting is text, compared with
 the built-in text equality, so no cast is needed and the wallet indexes stay
 usable.
 
@@ -31,8 +35,10 @@ The table list is a frozen copy of ``app.db.tenant_rls.RLS_TABLES``.
 
 from alembic import op
 
-revision: str = "047_tenant_rls"
-down_revision: str = "046_demo_tenant_key_allowlist"
+from app.core.config import get_settings
+
+revision: str = "048_tenant_rls"
+down_revision: str = "047_dispatch_reconcile_lease"
 branch_labels = None
 depends_on = None
 
@@ -90,10 +96,12 @@ def policy_predicate(columns: tuple[str, ...]) -> str:
 def upgrade():
     if op.get_bind().dialect.name != "postgresql":
         return
+    enforce = get_settings().TENANT_RLS_MODE == "enforce"
     for table, columns in RLS_TABLES.items():
         predicate = policy_predicate(columns)
-        op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
-        op.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
+        if enforce:
+            op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
+            op.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
         op.execute(f"DROP POLICY IF EXISTS {POLICY_NAME} ON {table}")
         op.execute(
             f"CREATE POLICY {POLICY_NAME} ON {table} AS PERMISSIVE FOR ALL "

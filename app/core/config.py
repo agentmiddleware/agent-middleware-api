@@ -80,9 +80,9 @@ class Settings(BaseSettings):
     # turns it on explicitly for local query debugging.
     SQL_ECHO: bool = False
     # PostgreSQL row-level security for wallet-scoped tables (migration
-    # 047_tenant_rls). "off" (default): every app connection opts out of the
-    # policies (RLS is inert for the app; any other client is still subject to
-    # it and sees no rows). "enforce": each transaction sets
+    # 048_tenant_rls). "off" (default): the migration leaves RLS disabled and
+    # nothing changes for any client. "enforce": migrating in this mode
+    # enables and forces RLS, and each transaction sets
     # app.current_wallet_id from the authenticated wallet with SET LOCAL
     # semantics, and only explicit admin scopes bypass. Enforce requires a
     # NOSUPERUSER NOBYPASSRLS runtime role or boot is refused. See

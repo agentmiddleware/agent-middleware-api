@@ -11,10 +11,11 @@ and audit-chain primitives.
 
 The remote pilot supports one operator-configured HTTPS Streamable HTTP MCP
 origin and one exact tool. Wallet checks provide application-layer isolation.
-On PostgreSQL, migration `047_tenant_rls` adds forced row-level security on
-the core wallet-scoped tables as defense in depth, but it only binds the app
-under the opt-in `TENANT_RLS_MODE=enforce` with a `NOSUPERUSER NOBYPASSRLS`
-non-owner runtime role; the default `off` mode leaves it inert for the app.
+On PostgreSQL, migration `048_tenant_rls` adds row-level security policies on
+the core wallet-scoped tables as defense in depth, but RLS is enabled and
+binds the app only under the opt-in `TENANT_RLS_MODE=enforce` with a
+`NOSUPERUSER NOBYPASSRLS` non-owner runtime role; the default `off` mode leaves
+RLS disabled.
 It does not cover every table (`wallets` and the audit tables are not yet
 covered), and it is not a boundary against code that can already run SQL as
 the runtime role. There is still no public multi-tenant security claim. See

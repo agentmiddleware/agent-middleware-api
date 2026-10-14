@@ -1,7 +1,10 @@
 # Tenant Row-Level Security (PostgreSQL)
 
-Migration `047_tenant_rls` enables **and forces** PostgreSQL row-level security
-on the wallet-scoped tables below. It is defense in depth under the
+Migration `048_tenant_rls` (stacked on `047_dispatch_reconcile_lease`) creates
+wallet policies on the tables below. It enables **and forces** PostgreSQL
+row-level security on them only when it runs with `TENANT_RLS_MODE=enforce`;
+in the default `off` mode the policies exist but RLS stays disabled, so no
+client sees any change. It is defense in depth under the
 application-layer wallet checks (`AuthContext.require_wallet_access`), not a
 replacement for them, and it is **not** a public multi-tenant isolation
 guarantee (see [`SECURITY_LIMITATIONS.md`](../SECURITY_LIMITATIONS.md)). SQLite
@@ -65,7 +68,7 @@ authority model), `service_registry`, `signing_keys`, and proof-surface tables.
 
 | Mode | What the app does | Effect |
 |---|---|---|
-| `off` (default) | Opens every connection with `app.rls_bypass=on` as a startup parameter. | Policies are inert for the app, exactly as before the migration. Any *other* client connecting as a policy-bound role (psql, BI tools, a leaked runtime credential used outside the app) sees no rows. |
+| `off` (default) | Nothing. If the boot posture check finds RLS already enabled on the tables (enforce was on, then switched back), the session hook sets `app.rls_bypass=on` locally in each transaction. | Unchanged behavior. No connection startup parameters are sent, so poolers that reject unknown parameters are unaffected. |
 | `enforce` | Sets nothing at connection level. A session `after_begin` hook runs `SELECT set_config('app.current_wallet_id', :wallet, true), set_config('app.rls_bypass', :bypass, true)` inside each transaction. | Every transaction is limited to the authenticated wallet, or explicitly bypassed. |
 
 `set_config(..., true)` is `SET LOCAL`: it is discarded at commit/rollback, so
@@ -91,10 +94,15 @@ On every boot against PostgreSQL the app reads `pg_roles` for `current_user`
 and `pg_class` for the covered tables, and logs `phase="tenant_rls_posture"`.
 
 * Runtime role is `SUPERUSER` or `BYPASSRLS` → warning
-  `tenant_rls_role_bypasses_policies` in `off` mode; **boot refused** in
+  `tenant_rls_role_bypasses_policies` in `off` mode (only once RLS is enabled
+  on the tables); **boot refused** in
   `enforce` mode (superusers and BYPASSRLS roles skip every policy, `FORCE`
   included, so enforcement would be a claim the database does not make).
 * A covered table without `ENABLE` + `FORCE` → boot refused in `enforce`.
+  A database migrated in `off` mode needs the ALTERs from
+  `app.db.tenant_rls.enable_rls_statements()` (`ALTER TABLE <t> ENABLE ROW
+  LEVEL SECURITY` and `... FORCE ROW LEVEL SECURITY` per covered table), run
+  as the table owner.
 * Runtime role owns the covered tables → warning only. `FORCE` keeps the owner
   bound, but an owner can `ALTER TABLE ... NO FORCE ROW LEVEL SECURITY`.
 
@@ -193,13 +201,18 @@ not, so receipt lookups through it return not found under `enforce`.
 
 ## Rollout
 
-1. Deploy the migration with `TENANT_RLS_MODE=off` (the default). Behavior is
-   unchanged; the startup log reports the role posture.
+1. Deploy the migration with `TENANT_RLS_MODE=off` (the default). Policies are
+   created, RLS stays disabled, behavior is unchanged; the startup log reports
+   the role posture.
 2. Create the runtime role, point `DATABASE_URL` at it, keep `off`. Confirm the
    log shows `superuser=false bypassrls=false`.
-3. Set `TENANT_RLS_MODE=enforce`. Boot refuses if the role can bypass.
-4. Roll back by setting `off` (no migration needed). `alembic downgrade
-   046_demo_tenant_key_allowlist` drops the policies entirely.
+3. As the table owner, run the `enable_rls_statements()` ALTERs (or migrate
+   with `TENANT_RLS_MODE=enforce` set in the migration environment).
+4. Set `TENANT_RLS_MODE=enforce`. Boot refuses if the role can bypass or a
+   table is not forced.
+5. Roll back by setting `off` (no migration needed; the app bypasses per
+   transaction while RLS remains enabled). `alembic downgrade
+   047_dispatch_reconcile_lease` drops the policies and disables RLS.
 
 ## Evidence
 
@@ -207,8 +220,8 @@ not, so receipt lookups through it return not found under `enforce`.
   `TEST_RLS_POSTGRES_ADMIN_URL` it creates owner + runtime roles, migrates as
   the owner, and proves fail-closed reads/writes, wallet narrowing, `WITH
   CHECK`, issuer/subject permits, `SET LOCAL` not surviving commit, `FORCE`
-  binding the owner, the session hook, off-mode bypass, the posture check, and
-  downgrade/upgrade.
+  binding the owner, the session hook, off-mode bypass after an enforce
+  rollout, the posture check, and downgrade/upgrade in both modes.
 * CI (`postgres_trust` job) reruns the PostgreSQL trust-primitive suite as a
   `NOSUPERUSER NOBYPASSRLS` non-owner role under `TENANT_RLS_MODE=enforce`.
 * Locally (2026-10-14, PostgreSQL 16) that suite plus 28 more governed-loop,

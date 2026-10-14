@@ -1,4 +1,4 @@
-"""Row-level security on wallet-scoped tables (migration 047_tenant_rls).
+"""Row-level security on wallet-scoped tables (migration 048_tenant_rls).
 
 The unit tests run everywhere. The PostgreSQL tests need a superuser URL in
 ``TEST_RLS_POSTGRES_ADMIN_URL``: they create a scratch database plus an owner
@@ -39,7 +39,7 @@ from app.db.tenant_rls import (
     bind_wallet_scope,
     check_tenant_rls_posture,
     current_rls_scope,
-    engine_connect_args,
+    enable_rls_statements,
     rls_admin_scope,
     rls_wallet_scope,
     scope_settings,
@@ -49,12 +49,12 @@ MIGRATION_PATH = (
     Path(__file__).resolve().parents[1]
     / "migrations"
     / "versions"
-    / "047_tenant_rls.py"
+    / "048_tenant_rls.py"
 )
 
 
 def _load_migration():
-    spec = importlib.util.spec_from_file_location("migration_047", MIGRATION_PATH)
+    spec = importlib.util.spec_from_file_location("migration_048", MIGRATION_PATH)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -133,19 +133,37 @@ async def test_scopes_nest_and_reset():
             pass
 
 
-def test_engine_connect_args_by_mode(monkeypatch):
-    settings = get_settings()
-    monkeypatch.setattr(settings, "TENANT_RLS_MODE", "off")
-    assert engine_connect_args("postgresql+asyncpg://u@h/db") == {
-        "server_settings": {"app.rls_bypass": "on"}
-    }
-    assert engine_connect_args("postgresql+psycopg://u@h/db") == {
-        "options": "-c app.rls_bypass=on"
-    }
-    assert engine_connect_args("sqlite+aiosqlite:///x.db") == {}
-    monkeypatch.setattr(settings, "TENANT_RLS_MODE", "enforce")
-    # Enforce sets nothing at connection level: per-transaction only.
-    assert engine_connect_args("postgresql+asyncpg://u@h/db") == {}
+def test_enable_rls_statements_cover_every_table():
+    statements = enable_rls_statements()
+    assert len(statements) == 2 * len(RLS_TABLES)
+    for table in RLS_TABLES:
+        assert f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY" in statements
+        assert f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY" in statements
+
+
+def test_off_mode_hook_sets_nothing_by_default(monkeypatch):
+    class _Conn:
+        class dialect:
+            name = "postgresql"
+
+        def __init__(self):
+            self.executed = []
+
+        def execute(self, statement, params=None):
+            self.executed.append(params)
+
+    monkeypatch.setattr(get_settings(), "TENANT_RLS_MODE", "off")
+    assert tenant_rls._off_mode_bypass_required is False
+    conn = _Conn()
+    tenant_rls._apply_rls_scope(None, None, conn)
+    assert conn.executed == []
+    monkeypatch.setattr(tenant_rls, "_off_mode_bypass_required", True)
+    tenant_rls._apply_rls_scope(None, None, conn)
+    assert conn.executed == [{"wallet": "", "bypass": "on"}]
+    monkeypatch.setattr(get_settings(), "TENANT_RLS_MODE", "enforce")
+    with rls_wallet_scope("w1"):
+        tenant_rls._apply_rls_scope(None, None, conn)
+    assert conn.executed[-1] == {"wallet": "w1", "bypass": "off"}
 
 
 def test_tenant_rls_mode_setting_rejects_typos():
@@ -201,6 +219,7 @@ async def test_posture_check_is_inert_on_sqlite():
         await engine.dispose()
     assert report["effective"] is False
     assert report["dialect"] == "sqlite"
+    assert tenant_rls._off_mode_bypass_required is False
 
 
 # --------------------------------------------------------------------------
@@ -248,15 +267,20 @@ async def _admin_execute(statements: list[str], database: str | None = None) -> 
         await conn.close()
 
 
-def _alembic(url: str, action: str, revision: str) -> None:
+def _alembic(url: str, action: str, revision: str, mode: str = "enforce") -> None:
     from alembic import command
     from alembic.config import Config
 
+    settings = get_settings()
     previous = os.environ.get("DATABASE_URL")
+    previous_mode = settings.TENANT_RLS_MODE
     os.environ["DATABASE_URL"] = url
+    # 048_tenant_rls enables RLS only when migrated under enforce.
+    settings.TENANT_RLS_MODE = mode
     try:
         getattr(command, action)(Config("alembic.ini"), revision)
     finally:
+        settings.TENANT_RLS_MODE = previous_mode
         if previous is None:
             os.environ.pop("DATABASE_URL", None)
         else:
@@ -615,17 +639,25 @@ async def test_app_session_hook_applies_scope_per_transaction(seeded, monkeypatc
 
 
 @pytest.mark.anyio
-async def test_off_mode_connections_bypass_without_any_scope(seeded, monkeypatch):
+async def test_off_mode_after_enforce_bypasses_once_posture_sees_rls(
+    seeded, monkeypatch
+):
+    # RLS left enabled by an earlier enforce rollout, mode switched back off:
+    # the boot posture check turns on the per-transaction bypass.
     monkeypatch.setattr(get_settings(), "TENANT_RLS_MODE", "off")
-    engine = _engine(
-        seeded["app_url"], connect_args=engine_connect_args(seeded["app_url"])
-    )
+    monkeypatch.setattr(tenant_rls, "_off_mode_bypass_required", False)
+    engine = _engine(seeded["app_url"])
     factory = async_sessionmaker(
         engine, sync_session_class=TenantScopedSession, expire_on_commit=False
     )
+    count = select(func.count()).select_from(LedgerEntryModel)
     try:
         async with factory() as session:
-            count = select(func.count()).select_from(LedgerEntryModel)
+            assert (await session.execute(count)).scalar() == 0
+        report = await check_tenant_rls_posture(engine)
+        assert report["tables_with_rls_enabled"] == sorted(RLS_TABLES)
+        assert tenant_rls._off_mode_bypass_required is True
+        async with factory() as session:
             assert (await session.execute(count)).scalar() == 3
     finally:
         await engine.dispose()
@@ -688,10 +720,29 @@ def test_downgrade_removes_policies_and_upgrade_restores(rls_db):
         finally:
             await engine.dispose()
 
-    _alembic(rls_db["owner_url"], "downgrade", "046_demo_tenant_key_allowlist")
-    assert asyncio.run(forced_tables(rls_db["owner_url"])) == set()
-    _alembic(rls_db["owner_url"], "upgrade", "head")
-    assert asyncio.run(forced_tables(rls_db["owner_url"])) == set(RLS_TABLES)
+    async def policy_tables(url: str) -> set[str]:
+        engine = _engine(url)
+        try:
+            async with engine.connect() as conn:
+                rows = await conn.execute(
+                    text("SELECT tablename FROM pg_policies WHERE policyname = :p"),
+                    {"p": tenant_rls.POLICY_NAME},
+                )
+                return {row[0] for row in rows}
+        finally:
+            await engine.dispose()
+
+    owner_url = rls_db["owner_url"]
+    _alembic(owner_url, "downgrade", "047_dispatch_reconcile_lease")
+    assert asyncio.run(forced_tables(owner_url)) == set()
+    assert asyncio.run(policy_tables(owner_url)) == set()
+    # Default off: policies exist, RLS stays disabled for every client.
+    _alembic(owner_url, "upgrade", "head", mode="off")
+    assert asyncio.run(forced_tables(owner_url)) == set()
+    assert asyncio.run(policy_tables(owner_url)) == set(RLS_TABLES)
+    _alembic(owner_url, "downgrade", "047_dispatch_reconcile_lease")
+    _alembic(owner_url, "upgrade", "head")
+    assert asyncio.run(forced_tables(owner_url)) == set(RLS_TABLES)
 
 
 def test_tenant_rls_module_exposes_documented_settings():
