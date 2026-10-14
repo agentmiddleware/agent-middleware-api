@@ -307,10 +307,11 @@ async def _mint_auto_permit(
 ) -> str:
     """Mint the bounded single-tool permit backing this call.
 
-    The governed replay hash covers the permit id, so a retried idempotency
-    key must resolve to the SAME auto-minted permit — mint through an
-    idempotency record keyed off the client's key. Generated keys are unique
-    per call and skip this bookkeeping.
+    A retried idempotency key resolves to the SAME auto-minted permit — mint
+    through an idempotency record keyed off the client's key — so retries do
+    not mint (and budget) a fresh permit each time, and rows hashed before
+    the replay hash dropped the permit id still replay. Generated keys are
+    unique per call and skip this bookkeeping.
     """
     wallet_id = auth.wallet_id
     if not wallet_id:  # narrowed by the caller; fail closed regardless

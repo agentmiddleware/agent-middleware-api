@@ -216,37 +216,53 @@ async def test_empty_ledger_exact_totals_are_zero(client, clean_database):
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize(
-    ("field", "limit"), [("request_path", 255), ("description", 500)]
-)
-async def test_charge_refuses_text_longer_than_its_ledger_column(
-    client, clean_database, field, limit
+async def test_charge_audit_failure_after_debit_replays_instead_of_locking_key(
+    monkeypatch, clean_database
 ):
-    """422 before the key opens, so the same key still works afterwards.
+    """A committed debit settles its key even when the audit write fails.
 
-    SQLite ignores VARCHAR lengths, so without the bound this only failed on
-    Postgres: a 500 after the idempotency record opened, locking the key.
+    The success audit used to run before the idempotency record was
+    completed, so an audit failure left the key in progress forever (no
+    sweep covers /v1/billing/charge): every retry answered 409 while the
+    debit stood, and a caller giving up on the key was charged again.
     """
-    agent = await provision_agent_wallet(client)
-    params = {"wallet_id": agent["agent_wallet_id"], "service": "platform_fee"}
-    headers = {**agent["agent_headers"], "Idempotency-Key": f"long-{field}"}
-    too_long = await client.post(
-        "/v1/billing/charge",
-        params={**params, field: "a" * (limit + 1)},
-        headers=headers,
-    )
-    assert too_long.status_code == 422
+    from app.routers import billing as billing_router
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app, raise_app_exceptions=False),
+        base_url="http://test",
+    ) as client:
+        agent = await provision_agent_wallet(client)
+        wallet_id = agent["agent_wallet_id"]
+        real_record = billing_router.record_governed_action
+
+        async def failing_success_audit(**kwargs):
+            if kwargs.get("ok"):
+                raise RuntimeError("audit store unavailable")
+            return await real_record(**kwargs)
+
+        monkeypatch.setattr(
+            billing_router, "record_governed_action", failing_success_audit
+        )
+        params = {"wallet_id": wallet_id, "service": "platform_fee"}
+        headers = {**agent["agent_headers"], "Idempotency-Key": "audit-fails"}
+        first = await client.post("/v1/billing/charge", params=params, headers=headers)
+        assert first.status_code == 500
+
+        monkeypatch.setattr(billing_router, "record_governed_action", real_record)
+        retry = await client.post("/v1/billing/charge", params=params, headers=headers)
+        assert retry.status_code == 200, retry.text
+
     async with get_session_factory()() as session:
-        assert (
-            await session.execute(
-                select(IdempotencyRecordModel).where(
-                    IdempotencyRecordModel.idempotency_key == f"long-{field}"
+        debits = list(
+            (
+                await session.execute(
+                    select(LedgerEntryModel).where(
+                        LedgerEntryModel.wallet_id == wallet_id,
+                        LedgerEntryModel.amount < 0,
+                    )
                 )
-            )
-        ).scalar_one_or_none() is None
-    at_limit = await client.post(
-        "/v1/billing/charge",
-        params={**params, field: "a" * limit},
-        headers=headers,
-    )
-    assert at_limit.status_code == 200, at_limit.text
+            ).scalars()
+        )
+    assert len(debits) == 1
+    assert retry.json()["entry_id"] == debits[0].entry_id

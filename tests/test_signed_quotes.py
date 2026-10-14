@@ -635,3 +635,56 @@ async def test_eight_place_prices_keep_quote_and_receipt_signatures_after_reload
     assert Decimal(str(receipt["credits_charged"])) == Decimal(str(price))
     valid, reason, _ = await get_receipt_service().verify_receipt(receipt["receipt_id"])
     assert valid, reason
+
+
+@pytest.mark.asyncio
+async def test_quote_survives_ledger_contention_so_the_advised_retry_works(
+    client, clean_database, registered_tool, monkeypatch
+):
+    """Ledger contention answers "retry this key" and charged nothing.
+
+    The quote consumed before the charge used to stay consumed, so the very
+    retry the 409 advised was refused quote_already_consumed and the caller
+    lost the locked price.
+    """
+    from tests.test_ledger_write_contention import _FlushFault
+
+    agent = await provision_agent_wallet(client)
+    permit = await create_tool_permit(
+        client,
+        wallet_id=agent["agent_wallet_id"],
+        key_id=agent["key_id"],
+        tool_name=TOOL,
+        max_credits=500,
+        idem_key="permit-quote-contended",
+    )
+    quote = (
+        await _quote(client, agent["agent_headers"], agent["agent_wallet_id"])
+    ).json()
+    before = await _balance(agent["agent_wallet_id"])
+
+    with monkeypatch.context() as patched:
+        _FlushFault(None).patch(patched)
+        contended = await _invoke(
+            client,
+            agent["agent_headers"],
+            wallet_id=agent["agent_wallet_id"],
+            permit_id=permit["permit_id"],
+            quote_id=quote["quote_id"],
+            idem="quote-contended",
+        )
+    assert contended.status_code == 409, contended.text
+    assert await _balance(agent["agent_wallet_id"]) == before
+
+    retry = await _invoke(
+        client,
+        agent["agent_headers"],
+        wallet_id=agent["agent_wallet_id"],
+        permit_id=permit["permit_id"],
+        quote_id=quote["quote_id"],
+        idem="quote-contended",
+    )
+    assert retry.status_code == 200, retry.text
+    assert await _balance(agent["agent_wallet_id"]) == before - Decimal(
+        str(quote["quoted_credits"])
+    )

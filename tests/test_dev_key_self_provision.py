@@ -165,14 +165,28 @@ async def test_cross_origin_browser_request_rejected(client, self_provision_sett
 async def test_same_origin_browser_request_allowed(
     client, self_provision_settings, clean_database
 ):
-    # An Origin whose host matches the request host is a same-origin call and
-    # must pass — the guard targets foreign origins only.
+    # A same-origin call from the local server's own loopback origin must
+    # pass — the guard targets foreign origins only.
     resp = await client.post(
-        "/v1/dev-keys/self-provision",
+        "http://localhost/v1/dev-keys/self-provision",
         json={},
-        headers={"Origin": "http://test"},
+        headers={"Origin": "http://localhost:8000"},
     )
     assert resp.status_code == 201, resp.text
+
+
+async def test_dns_rebinding_same_name_host_and_origin_rejected(
+    client, self_provision_settings, clean_database
+):
+    # DNS rebinding: the attacker's name resolves to loopback, so Host and
+    # Origin agree on that foreign name. Agreement alone used to pass.
+    resp = await client.post(
+        "http://evil.example/v1/dev-keys/self-provision",
+        json={},
+        headers={"Origin": "http://evil.example"},
+    )
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["error"] == "origin_not_allowed"
 
 
 async def test_no_origin_header_passes_through(
