@@ -376,17 +376,20 @@ async def authorize_receipt_access(
 
     Bootstrap admins and the receipt's own wallet always pass; otherwise the
     caller must be the permit's issuer or subject wallet, or hold explicit
-    access to the receipt's wallet.
+    access to the receipt's wallet. The permit only grants access to receipts
+    filed under its own subject wallet: another wallet's receipt that merely
+    names the permit is not the permit owner's to read.
     """
     if auth.is_bootstrap_admin:
         return
     if auth.wallet_id == receipt.wallet_id:
         return
     permit = await get_permit_service().get_permit(receipt.permit_id)
-    if permit and auth.wallet_id in {
-        permit.issuer_wallet_id,
-        permit.subject_wallet_id,
-    }:
+    if (
+        permit
+        and permit.subject_wallet_id == receipt.wallet_id
+        and auth.wallet_id in {permit.issuer_wallet_id, permit.subject_wallet_id}
+    ):
         return
     auth.require_wallet_access(receipt.wallet_id)
 

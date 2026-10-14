@@ -340,6 +340,9 @@ async def list_permit_receipts(
         raise _hide_permit_existence(exc) from None
     receipts, total = await get_receipt_service().list_receipts(
         permit_id=permit_id,
+        # Only receipts filed under the permit's subject are the permit
+        # owner's evidence; operators still see every receipt naming it.
+        wallet_id=None if auth.is_bootstrap_admin else permit.subject_wallet_id,
         tool=tool,
         outcome=outcome,
         limit=limit,
