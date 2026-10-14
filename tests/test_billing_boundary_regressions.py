@@ -213,3 +213,40 @@ async def test_empty_ledger_exact_totals_are_zero(client, clean_database):
     payload = response.json()
     assert payload["entries"] == []
     assert payload["period_credits_exact"] == payload["period_debits_exact"] == "0"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("field", "limit"), [("request_path", 255), ("description", 500)]
+)
+async def test_charge_refuses_text_longer_than_its_ledger_column(
+    client, clean_database, field, limit
+):
+    """422 before the key opens, so the same key still works afterwards.
+
+    SQLite ignores VARCHAR lengths, so without the bound this only failed on
+    Postgres: a 500 after the idempotency record opened, locking the key.
+    """
+    agent = await provision_agent_wallet(client)
+    params = {"wallet_id": agent["agent_wallet_id"], "service": "platform_fee"}
+    headers = {**agent["agent_headers"], "Idempotency-Key": f"long-{field}"}
+    too_long = await client.post(
+        "/v1/billing/charge",
+        params={**params, field: "a" * (limit + 1)},
+        headers=headers,
+    )
+    assert too_long.status_code == 422
+    async with get_session_factory()() as session:
+        assert (
+            await session.execute(
+                select(IdempotencyRecordModel).where(
+                    IdempotencyRecordModel.idempotency_key == f"long-{field}"
+                )
+            )
+        ).scalar_one_or_none() is None
+    at_limit = await client.post(
+        "/v1/billing/charge",
+        params={**params, field: "a" * limit},
+        headers=headers,
+    )
+    assert at_limit.status_code == 200, at_limit.text

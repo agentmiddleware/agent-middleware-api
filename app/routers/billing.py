@@ -605,8 +605,11 @@ async def charge_wallet(
         allow_inf_nan=False,
         description="Number of units consumed",
     ),
-    request_path: str | None = None,
-    description: str | None = None,
+    # Bounded by the ledger_entries columns (VARCHAR(255) / VARCHAR(500)):
+    # Postgres rejects a longer value only after the idempotency record is
+    # open, which answered 500 and left the key in progress.
+    request_path: str | None = Query(None, max_length=255),
+    description: str | None = Query(None, max_length=500),
     idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     auth: AuthContext = Depends(get_auth_context),
     money: AgentMoney = Depends(get_agent_money),
