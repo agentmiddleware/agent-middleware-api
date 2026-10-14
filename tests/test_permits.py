@@ -430,7 +430,9 @@ async def test_permit_service_budget_lifecycle_and_filters(
     assert validation.allowed is False
     assert validation.reason == "permit_budget_exceeded"
 
-    await service.release_budget(permit.permit_id, Decimal("2"))
+    await service.release_budget(
+        permit.permit_id, Decimal("2"), is_bootstrap_admin=True
+    )
     validation = await service.validate_for_action(
         permit_id=permit.permit_id,
         wallet_id=provisioned["agent_wallet_id"],
@@ -445,7 +447,7 @@ async def test_permit_service_budget_lifecycle_and_filters(
     assert missing_reserve.value.reason == "permit_not_found"
     await service.release_budget("permit-missing", Decimal("1"))
 
-    revoked = await service.revoke_permit(permit.permit_id)
+    revoked = await service.revoke_permit(permit.permit_id, is_bootstrap_admin=True)
     assert revoked.status == "revoked"
     assert revoked.revoked_at is not None
     validation = await service.validate_for_action(
