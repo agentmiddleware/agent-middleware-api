@@ -39,13 +39,15 @@ def test_red_team_trust_plane_denies_every_attack():
     assert proof["attacks_denied"] == 10
     assert proof["denial_reasons"] == EXPECTED_REASONS
 
-    # Eight of the ten attacks reach the permit-validation path that emits a
+    # Seven of the ten attacks reach the permit-validation path that emits a
     # signed denial receipt (no_permit and unknown_permit do not — there is no
-    # permit model to bind a receipt to). Every emitted receipt must already
+    # permit model to bind a receipt to — and wallet_mismatch does not, because
+    # a receipt under the victim's permit would file the attacker's denial
+    # where the victim can read it). Every emitted receipt must already
     # have been asserted to have outcome=denied and ledger_entry_id=None by the
-    # script; this fixes the count so a regression that stopped emitting them
-    # would break the test.
-    assert proof["attacks_with_signed_denial_receipts"] == 8
+    # script; this fixes the count so a regression that stopped emitting them,
+    # or started receipting a stolen permit again, would break the test.
+    assert proof["attacks_with_signed_denial_receipts"] == 7
 
     # No denied attack ever touches the ledger on either wallet, for either
     # the allowed or the blocked demo tool.

@@ -283,6 +283,22 @@ class Settings(BaseSettings):
     MCP_UPSTREAM_CONNECT_TIMEOUT_SECONDS: float = 5.0
     MCP_UPSTREAM_CALL_TIMEOUT_SECONDS: float = 30.0
     MCP_UPSTREAM_MAX_RESPONSE_BYTES: int = 1_048_576
+    # CallToolResult `_meta` key the upstream may use to report its own
+    # request/operation id. When present and well-formed it is signed onto
+    # the receipt (constraints_evaluated.upstream_dispatch); never hashed
+    # into the response, so response_hash semantics are unchanged.
+    MCP_UPSTREAM_PROVIDER_REQUEST_ID_META_KEY: str = (
+        "io.agentmiddleware/provider_request_id"
+    )
+    # Optional delivery_uncertain reconcile worker (off by default). It polls
+    # a provider status probe on a backoff and records a resolution audit
+    # event; it never redispatches, refunds, or releases budget. Ageing past
+    # the alert threshold only emits an operator alert.
+    # See docs/delivery-uncertain-reconcile-worker.md.
+    UPSTREAM_RECONCILE_WORKER_ENABLED: bool = False
+    UPSTREAM_RECONCILE_BACKOFF_SECONDS: str = "30,120,600,3600"
+    UPSTREAM_RECONCILE_ALERT_AGE_SECONDS: int = 3600
+    UPSTREAM_RECONCILE_BATCH_LIMIT: int = 50
 
     # Cross-key duplicate detection for upstream tools. Modes:
     # - "off": disabled (new-key retries with identical request hashes are allowed)
@@ -299,6 +315,14 @@ class Settings(BaseSettings):
     # Default repeat detection window in seconds. Duplicates outside this window
     # are not detected.
     MCP_UPSTREAM_DUPLICATE_WINDOW_SECONDS: int = 86400  # 24 hours
+    # Retry-loop alerting (observe-only, off by default). Logs
+    # `retry_loop_first_repeat` on the FIRST new-key repeat of the same call
+    # (same wallet + endpoint + request hash) inside the window. Covers every
+    # governed call, local and upstream; never blocks. Distinct from the
+    # duplicate guard above, which is upstream-only and logs every repeat.
+    # See docs/retry-loop-alerting-and-caps.md.
+    RETRY_LOOP_ALERT_ENABLED: bool = False
+    RETRY_LOOP_ALERT_WINDOW_SECONDS: int = 600
     # Enable only after all workers can verify and enforce repeat-window permits.
     # Disabling issuance never disables validation of already-issued permits.
     ENABLE_PERMIT_REPEAT_WINDOW_ISSUANCE: bool = False

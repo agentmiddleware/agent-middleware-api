@@ -605,8 +605,11 @@ async def charge_wallet(
         allow_inf_nan=False,
         description="Number of units consumed",
     ),
-    request_path: str | None = None,
-    description: str | None = None,
+    # Bounded by the ledger_entries columns (VARCHAR(255) / VARCHAR(500)):
+    # Postgres rejects a longer value only after the idempotency record is
+    # open, which answered 500 and left the key in progress.
+    request_path: str | None = Query(None, max_length=255),
+    description: str | None = Query(None, max_length=500),
     idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     auth: AuthContext = Depends(get_auth_context),
     money: AgentMoney = Depends(get_agent_money),
@@ -763,6 +766,11 @@ async def charge_wallet(
             )
             raise HTTPException(status_code=denial_status, detail=denial_detail)
 
+        # The debit is committed: settle the key before the audit write, so an
+        # audit failure cannot leave the key in progress forever with no
+        # replay (no sweep covers this endpoint) and push a caller who gives
+        # up on it into a second, double-charging key.
+        await _complete_idempotency(result.model_dump(mode="json"), 200)
         await _record_billing_governance(
             event="billing.charge",
             auth=auth,
@@ -783,7 +791,6 @@ async def charge_wallet(
                 "evaluated_constraints": evaluated_constraints,
             },
         )
-        await _complete_idempotency(result.model_dump(mode="json"), 200)
         return result
     except WalletNotFoundError as e:
         # Every other endpoint in this router answers 404 for an unknown
@@ -1139,6 +1146,8 @@ async def transfer_wallets(
             description=description or "",
             correlation_id=correlation_id,
         )
+        # Committed: settle the key before the audit write (see charge_wallet).
+        await guard.complete(result, 200, response_reference=result.get("transfer_id"))
         await _record_billing_governance(
             event="billing.transfer",
             auth=auth,
@@ -1155,7 +1164,6 @@ async def transfer_wallets(
                 "description": description,
             },
         )
-        await guard.complete(result, 200, response_reference=result.get("transfer_id"))
         return result
     except WalletNotFoundError as e:
         await _record_billing_governance(
