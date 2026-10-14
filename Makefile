@@ -11,23 +11,23 @@ lock:
 # published receipt. Re-record after changing the demo, the routers' response
 # shapes, or site/proof/receipt.json; the site build refuses a stale file.
 site-transcript:
-	uv run --with-requirements requirements.lock python scripts/record_site_transcript.py
+	uv run --with-requirements requirements-dev.txt python scripts/record_site_transcript.py
 
 site-transcript-check:
-	uv run --with-requirements requirements.lock python scripts/record_site_transcript.py --check
+	uv run --with-requirements requirements-dev.txt python scripts/record_site_transcript.py --check
 
 # The 15-minute golden path: boot a real local trust plane on loopback with
 # self-serve key minting and one invokable governed tool, then follow
 # docs/quickstart.md from `git clone` to an offline-verified signed receipt.
 # State persists in data/quickstart/; `--reset` via QUICKSTART_ARGS wipes it.
 quickstart:
-	uv run --with-requirements requirements.lock python scripts/quickstart.py $(QUICKSTART_ARGS)
+	uv run --with-requirements requirements-dev.txt python scripts/quickstart.py $(QUICKSTART_ARGS)
 
 # CI guard for the documented golden path: boots the quickstart server in a
 # throwaway state dir and drives every step of docs/quickstart.md over real
 # HTTP, including offline verification and the tamper check.
 quickstart-check:
-	uv run --with-requirements requirements.lock pytest tests/test_quickstart_path.py -v
+	uv run --with-requirements requirements-dev.txt pytest tests/test_quickstart_path.py -v
 
 # One-command live proof against an already-running quickstart server
 # (terminal 1: `make quickstart`). Drives discover -> authenticate ->
@@ -36,7 +36,7 @@ quickstart-check:
 # success and denial receipts offline, and writes a partner handoff bundle
 # to data/live-loop-proof/.
 live-loop-proof:
-	uv run --with-requirements requirements.lock python scripts/live_loop_proof.py $(LIVE_LOOP_PROOF_ARGS)
+	uv run --with-requirements requirements-dev.txt python scripts/live_loop_proof.py $(LIVE_LOOP_PROOF_ARGS)
 
 # Fast inner loop: trust-plane (product) tests only. Proof-surface workloads
 # are skipped here — run them with `make test-all` (what CI runs) or `make test-proof`.
@@ -44,28 +44,28 @@ live-loop-proof:
 # the code) are skipped here too — run them with `make test-perf`; CI still runs them.
 # `--with-requirements` makes these self-contained: uv installs the runtime +
 # test deps for the run, so `make test` works on a fresh checkout without a
-# separate `pip install -r requirements.lock` (deps live in requirements.txt,
-# pinned in requirements.lock — regenerate with `make lock`; not pyproject
-# [project.dependencies]).
+# separate `pip install -r requirements-dev.txt` (runtime deps live in
+# requirements.txt, pinned in requirements.lock — regenerate with `make lock`;
+# test tools in requirements-dev.txt; not pyproject [project.dependencies]).
 test:
-	uv run --with-requirements requirements.lock pytest tests/ -q -m "not proof and not perf"
+	uv run --with-requirements requirements-dev.txt pytest tests/ -q -m "not proof and not perf"
 
 test-all:
-	uv run --with-requirements requirements.lock pytest tests/ -q
+	uv run --with-requirements requirements-dev.txt pytest tests/ -q
 
 test-proof:
-	uv run --with-requirements requirements.lock pytest tests/ -q -m proof
+	uv run --with-requirements requirements-dev.txt pytest tests/ -q -m proof
 
 test-perf:
-	uv run --with-requirements requirements.lock pytest tests/ -q -m perf
+	uv run --with-requirements requirements-dev.txt pytest tests/ -q -m perf
 
 # Reproducible whole-application coverage baseline. Production-posture tests run
 # in their dedicated CI job because they require a different environment.
 coverage:
-	uv run --with-requirements requirements.lock pytest tests/ -q -m "not production_trust" --cov=app --cov-report=term-missing
+	uv run --with-requirements requirements-dev.txt pytest tests/ -q -m "not production_trust" --cov=app --cov-report=term-missing
 
 prove-trust-plane:
-	uv run --with-requirements requirements.lock python scripts/demo_trust_plane.py --assert
+	uv run --with-requirements requirements-dev.txt python scripts/demo_trust_plane.py --assert
 
 # Use the real PostgreSQL process/crash proof, including its isolation guards.
 # The in-process demo deliberately owns a throwaway SQLite database.
@@ -88,17 +88,17 @@ prove-trust-plane-postgres: prove-crash-recovery
 # lock so two runs cannot overlap. This is the same proof CI runs.
 prove-crash-recovery:
 	RUN_MCP_MULTIPROCESS_TESTS=1 \
-	uv run --with-requirements requirements.lock \
+	uv run --with-requirements requirements-dev.txt \
 	  pytest tests/test_mcp_postgres_multiprocess.py -v --tb=short
 
 # The headline demo: one consequential payout, one lost response, one retry.
 # Without the boundary the vendor is paid twice; with it the retry moves no
 # money, debits nothing, and returns the confirmation the agent lost.
 demo-ambiguous-retry:
-	uv run --with-requirements requirements.lock python scripts/demo_ambiguous_retry.py
+	uv run --with-requirements requirements-dev.txt python scripts/demo_ambiguous_retry.py
 
 demo-ambiguous-retry-check:
-	uv run --with-requirements requirements.lock python scripts/demo_ambiguous_retry.py --assert --json
+	uv run --with-requirements requirements-dev.txt python scripts/demo_ambiguous_retry.py --assert --json
 
 # The failure laboratory: one workflow (a vendor payout), one injected fault
 # (the downstream executes, then its response is lost), measured across the
@@ -108,34 +108,34 @@ demo-ambiguous-retry-check:
 # data/failure-lab/<run>/ and must say when the native baseline already
 # handles the fault. See docs/failure-lab.md.
 failure-lab:
-	uv run --with-requirements requirements.lock python scripts/failure_lab.py $(FAILURE_LAB_ARGS)
+	uv run --with-requirements requirements-dev.txt python scripts/failure_lab.py $(FAILURE_LAB_ARGS)
 
 failure-lab-check:
-	uv run --with-requirements requirements.lock python scripts/failure_lab.py --json
+	uv run --with-requirements requirements-dev.txt python scripts/failure_lab.py --json
 
 demo-trust-plane:
-	uv run --with-requirements requirements.lock python scripts/demo_trust_plane.py
+	uv run --with-requirements requirements-dev.txt python scripts/demo_trust_plane.py
 
 demo-trust-plane-check:
-	uv run --with-requirements requirements.lock python scripts/demo_trust_plane.py --assert
+	uv run --with-requirements requirements-dev.txt python scripts/demo_trust_plane.py --assert
 
 dogfood-trust-plane:
-	uv run --with-requirements requirements.lock python scripts/dogfood_trust_plane.py
+	uv run --with-requirements requirements-dev.txt python scripts/dogfood_trust_plane.py
 
 dogfood-trust-plane-check:
-	uv run --with-requirements requirements.lock python scripts/dogfood_trust_plane.py --assert
+	uv run --with-requirements requirements-dev.txt python scripts/dogfood_trust_plane.py --assert
 
 red-team-trust-plane:
-	uv run --with-requirements requirements.lock python scripts/red_team_trust_plane.py
+	uv run --with-requirements requirements-dev.txt python scripts/red_team_trust_plane.py
 
 red-team-trust-plane-check:
-	uv run --with-requirements requirements.lock python scripts/red_team_trust_plane.py --assert
+	uv run --with-requirements requirements-dev.txt python scripts/red_team_trust_plane.py --assert
 
 agent-ops-war-room:
-	uv run --with-requirements requirements.lock python scripts/agent_ops_war_room_demo.py
+	uv run --with-requirements requirements-dev.txt python scripts/agent_ops_war_room_demo.py
 
 agent-ops-war-room-check:
-	uv run --with-requirements requirements.lock python scripts/agent_ops_war_room_demo.py --assert --json
+	uv run --with-requirements requirements-dev.txt python scripts/agent_ops_war_room_demo.py --assert --json
 
 # Fail if a comment or docstring names a symbol the tree no longer defines.
 check-doc-references:
@@ -165,7 +165,7 @@ trust-release-gate:
 # The canonical production origin also requires `--confirm-production` in
 # TRUST_CONFORMANCE_ARGS.
 trust-conformance-live:
-	uv run --with-requirements requirements.lock python scripts/trust_plane_conformance.py $(TRUST_CONFORMANCE_ARGS)
+	uv run --with-requirements requirements-dev.txt python scripts/trust_plane_conformance.py $(TRUST_CONFORMANCE_ARGS)
 
 # adversarial-battery-live probes a deployment you operate for wallet
 # isolation, invalid keys, forged receipts, permit key binding, expired
@@ -177,7 +177,7 @@ trust-conformance-live:
 # invokable golden-path-echo tool is exposed; over-spend containment is not
 # exercised.
 adversarial-battery-live:
-	uv run --with-requirements requirements.lock python scripts/adversarial_battery.py $(ADVERSARIAL_BATTERY_ARGS)
+	uv run --with-requirements requirements-dev.txt python scripts/adversarial_battery.py $(ADVERSARIAL_BATTERY_ARGS)
 
 # Railway deploy gate. Run under `railway run` (or with DATABASE_URL +
 # PUBLIC_URL exported) to check migration parity and live posture together.
@@ -185,10 +185,10 @@ adversarial-battery-live:
 # so the operator runs --runtime-posture inside the deployed API container
 # (docs/deploy-railway.md).
 railway-preflight:
-	uv run --with-requirements requirements.lock python scripts/railway_preflight.py
+	uv run --with-requirements requirements-dev.txt python scripts/railway_preflight.py
 
 railway-preflight-live:
-	uv run --with-requirements requirements.lock python scripts/railway_preflight.py --live
+	uv run --with-requirements requirements-dev.txt python scripts/railway_preflight.py --live
 
 # --------------------------------------------------------------------------- #
 # Agent Gateway Failure Lab                                                     #
@@ -203,38 +203,38 @@ railway-preflight-live:
 
 # Fast tier: cheap enough for every pull request.
 failure-lab-suite:
-	uv run --with-requirements requirements.lock python -m failure_lab run --tier fast --source ci_run
+	uv run --with-requirements requirements-dev.txt python -m failure_lab run --tier fast --source ci_run
 
 # Everything, including the concurrency and crash scenarios. Main, nightly, RC.
 failure-lab-all:
-	uv run --with-requirements requirements.lock python -m failure_lab run --source ci_run
+	uv run --with-requirements requirements-dev.txt python -m failure_lab run --source ci_run
 
 # Full run that keeps its evidence bundle for inspection or publication.
 failure-lab-evidence:
-	uv run --with-requirements requirements.lock python -m failure_lab run \
+	uv run --with-requirements requirements-dev.txt python -m failure_lab run \
 	  --source internal_test --output data/failure-lab --keep --archive
 
 # List the scenario suite with its claims, tiers and documented expectations.
 failure-lab-list:
-	uv run --with-requirements requirements.lock python -m failure_lab list
+	uv run --with-requirements requirements-dev.txt python -m failure_lab list
 
 # Seeded property-based state-machine exploration with minimized repros.
 failure-lab-explore:
-	uv run --with-requirements requirements.lock python -m failure_lab explore \
+	uv run --with-requirements requirements-dev.txt python -m failure_lab explore \
 	  --seed $(or $(SEED),1) --sequences $(or $(SEQUENCES),8)
 
 # Clean-room integration judge: executable assertions, not an AI's self-report.
 failure-lab-integration-check:
-	uv run --with-requirements requirements.lock python -m failure_lab.integration_check.judge \
+	uv run --with-requirements requirements-dev.txt python -m failure_lab.integration_check.judge \
 	  --candidate $(or $(CANDIDATE),failure_lab/integration_check/reference_candidate.py)
 
 # The self-serve diagnostic, on loopback only. Refuses production-like boots.
 failure-lab-diagnostic:
-	uv run --with-requirements requirements.lock python -m failure_lab serve \
+	uv run --with-requirements requirements-dev.txt python -m failure_lab serve \
 	  --port $(or $(PORT),8900)
 
 # Re-check a published evidence bundle: manifest hashes plus an independent
 # re-verification of every receipt it carries.
 failure-lab-verify-bundle:
-	uv run --with-requirements requirements.lock python -m failure_lab verify \
+	uv run --with-requirements requirements-dev.txt python -m failure_lab verify \
 	  --bundle $(or $(BUNDLE),data/failure-lab)
