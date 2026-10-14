@@ -1198,6 +1198,28 @@ class IdempotencyRecordModel(SQLModel, table=True):
     ledger_entry_id: Optional[str] = Field(default=None, max_length=64, index=True)
 
 
+# Provider-status reconciliation of a terminal ``delivery_uncertain`` attempt
+# (``app.services.upstream_reconcile``). These never replace ``state``: the
+# attempt stays ``delivery_uncertain`` and its signed receipt stays unchanged.
+# NULL means unresolved: manual review unless the reconcile worker is enabled
+# and the tool has a status endpoint.
+RECONCILE_EXECUTED = "executed"
+# Provider attested not-executed; the operator has not enabled automatic
+# refunds, so the debit stands as a flagged refund candidate.
+RECONCILE_NOT_EXECUTED_REVIEW = "not_executed_review"
+# Provider attested not-executed after quiescence and refunds are enabled.
+# The decision is durable; refund and budget release are still finishing.
+RECONCILE_NOT_EXECUTED_REFUND_PENDING = "not_executed_refund_pending"
+RECONCILE_NOT_EXECUTED_REFUNDED = "not_executed_refunded"
+RECONCILE_TERMINAL_STATUSES = frozenset(
+    {
+        RECONCILE_EXECUTED,
+        RECONCILE_NOT_EXECUTED_REVIEW,
+        RECONCILE_NOT_EXECUTED_REFUNDED,
+    }
+)
+
+
 class McpDispatchAttemptModel(SQLModel, table=True):
     """Durable state for one governed dispatch to an upstream MCP server."""
 
@@ -1275,6 +1297,19 @@ class McpDispatchAttemptModel(SQLModel, table=True):
     completed_at: Optional[datetime] = Field(
         sa_type=NaiveUTCDateTime, default=None, index=True
     )
+    # delivery_uncertain reconciliation (migration 047). The lease is a random
+    # per-sweep owner id, not a credential; the probe authenticates with the
+    # operator-configured upstream credential, which is never stored here.
+    reconcile_status: Optional[str] = Field(default=None, max_length=32, index=True)
+    reconcile_lease_owner: Optional[str] = Field(default=None, max_length=64)
+    reconcile_lease_expires_at: Optional[datetime] = Field(
+        sa_type=NaiveUTCDateTime, default=None, index=True
+    )
+    reconcile_next_probe_at: Optional[datetime] = Field(
+        sa_type=NaiveUTCDateTime, default=None, index=True
+    )
+    reconcile_probe_count: int = Field(default=0)
+    reconciled_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
 
     model_config = {"arbitrary_types_allowed": True}
 

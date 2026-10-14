@@ -80,6 +80,26 @@ Keep these out of the wedge until a design partner requires them:
 - A timeout or disconnect after the durable dispatch checkpoint is inherently
   ambiguous. The gateway retains the debit, signs `delivery_uncertain`, never
   redispatches automatically, and requires operator/upstream reconciliation.
+  The guarantee is at-most-once dispatch, not exactly-once execution.
+  An optional reconciler (`UPSTREAM_RECONCILE_WORKER_ENABLED`, default off)
+  can ask the upstream, via an operator-configured same-origin status endpoint
+  (`MCP_UPSTREAM_STATUS_URL`), what happened. It only resolves on an explicit
+  HTTP 200 answer that echoes the forwarded identifiers. A 404, a timeout, or
+  any unattested answer is "unknown" and moves nothing. A "not executed"
+  answer is acted on only after the quiescence window (dispatch time +
+  upstream timeout allowance + clock-skew allowance). Even then it refunds the
+  debit and releases the permit reservation only under a second, separate
+  operator flag (`UPSTREAM_RECONCILE_REFUND_ON_ATTESTED_NOT_EXECUTED`, default
+  off). Otherwise it is recorded as a refund candidate.
+  That refund trusts the upstream's attestation. A provider that wrongly says
+  "not executed" causes a refund for an action that did happen, so the
+  gateway cannot independently verify a negative. Tools without a status
+  endpoint stay in manual review. The original `delivery_uncertain` receipt is
+  never rewritten. Its signed `credits_charged` records the charge at
+  signing time, and a later resolution or refund is evidenced by a signed,
+  hash-chained `mcp_delivery_uncertain_provider_resolution` audit event and a
+  correlated refund ledger entry. No second receipt is minted, so an offline
+  verifier holding only the receipt does not see the refund.
 - Gateway exactly-once behavior does not make a remote side effect exactly
   once unless the upstream honors the forwarded idempotency key.
 - The configured upstream path atomically enforces the permit's `max_credits`

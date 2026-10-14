@@ -372,8 +372,13 @@ async def lifespan(app: FastAPI):
                         )
 
                     # Optional provider-status reconcile for parked
-                    # delivery_uncertain calls. Records resolutions and age
-                    # alerts only; never refunds or releases budget.
+                    # delivery_uncertain calls. Leases rows, probes the
+                    # configured status endpoint outside any transaction,
+                    # and records resolutions. Refunds only on an explicit
+                    # post-quiescence not-executed attestation, and only
+                    # when UPSTREAM_RECONCILE_REFUND_ON_ATTESTED_NOT_EXECUTED
+                    # is also on. Tools without a status endpoint stay in
+                    # manual review.
                     if settings.UPSTREAM_RECONCILE_WORKER_ENABLED:
                         from .services.upstream_reconcile import (
                             get_delivery_uncertain_reconcile_worker,
@@ -382,7 +387,12 @@ async def lifespan(app: FastAPI):
                         sweep = (
                             await get_delivery_uncertain_reconcile_worker().run_once()
                         )
-                        if sweep.probed or sweep.aged_alerts:
+                        if (
+                            sweep.probed
+                            or sweep.aged_alerts
+                            or sweep.refunded
+                            or sweep.audits_repaired
+                        ):
                             logger.info(
                                 "cleanup_completed",
                                 delivery_uncertain_probed=sweep.probed,
@@ -390,6 +400,11 @@ async def lifespan(app: FastAPI):
                                     sweep.resolved_executed
                                     + sweep.resolved_not_executed
                                 ),
+                                delivery_uncertain_refunded=sweep.refunded,
+                                delivery_uncertain_deferred_quiescence=(
+                                    sweep.deferred_quiescence
+                                ),
+                                delivery_uncertain_probe_errors=sweep.probe_errors,
                                 delivery_uncertain_aged_alerts=sweep.aged_alerts,
                             )
 

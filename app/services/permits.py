@@ -25,6 +25,8 @@ from app.db.models import (
     BillingAlertModel,
     McpDispatchAttemptModel,
     PermitModel,
+    RECONCILE_NOT_EXECUTED_REFUND_PENDING,
+    RECONCILE_NOT_EXECUTED_REFUNDED,
     ReceiptModel,
     WalletModel,
 )
@@ -1657,7 +1659,22 @@ class PermitService:
                     # go on to spend, so the cap would be enforced against a
                     # reservation that no longer exists. This pre-check is the
                     # contract; the guarded claim below is the once-only gate.
-                    if attempt.state != "returned_error":
+                    #
+                    # The one other releasable attempt is a delivery_uncertain
+                    # call whose provider attested not-executed after the
+                    # quiescence window, whose decision is durable, and whose
+                    # debit is already refunded (upstream_reconcile). Age, a
+                    # 404, or any unattested answer never reaches this state.
+                    reconciled_not_executed = (
+                        attempt.state == "delivery_uncertain"
+                        and attempt.reconcile_status
+                        == RECONCILE_NOT_EXECUTED_REFUND_PENDING
+                        and attempt.debit_refunded_at is not None
+                    )
+                    if (
+                        attempt.state != "returned_error"
+                        and not reconciled_not_executed
+                    ):
                         raise PermitError("dispatch_budget_release_state_invalid")
                     if attempt.budget_released_at is not None:
                         return False, attempt.permit_id, None, None
@@ -1973,6 +1990,20 @@ class PermitService:
                     and state.get("ledger_entry_id") == failed_receipt_by_id[receipt_id]
                 ):
                     resolved_receipt_ids.add(receipt_id)
+        refunded_uncertain_ids = await self._reconciled_refunded_uncertain_receipts(
+            session,
+            [
+                (receipt_id, ledger_entry_id, wallet_id, Decimal(str(credits)))
+                for (
+                    receipt_id,
+                    outcome,
+                    credits,
+                    ledger_entry_id,
+                    wallet_id,
+                ) in receipt_rows
+                if outcome == "delivery_uncertain" and ledger_entry_id is not None
+            ],
+        )
         consumed_decimal = sum(
             (
                 Decimal(str(credits))
@@ -1983,7 +2014,11 @@ class PermitService:
                     _ledger_entry_id,
                     _wallet_id,
                 ) in receipt_rows
-                if outcome in {"success", "delivery_uncertain", "response_rejected"}
+                if outcome in {"success", "response_rejected"}
+                or (
+                    outcome == "delivery_uncertain"
+                    and receipt_id not in refunded_uncertain_ids
+                )
                 or (
                     outcome == "failed_unrefunded"
                     and receipt_id not in resolved_receipt_ids
@@ -1992,6 +2027,78 @@ class PermitService:
             Decimal("0"),
         )
         return consumed_decimal
+
+    @staticmethod
+    async def _reconciled_refunded_uncertain_receipts(
+        session: Any,
+        candidates: list[tuple[str, str, str, Decimal]],
+    ) -> set[str]:
+        """``delivery_uncertain`` receipts whose charge was proven given back.
+
+        Such a receipt stops counting as consumed only when the provider
+        attested not-executed and both halves of the compensation are
+        durable: the attempt carries ``debit_refunded_at`` and
+        ``budget_released_at``, and the ledger holds the exact deterministic
+        refund of that debit. A refund without the release still counts, so
+        a budget rebuild followed by the pending release cannot subtract the
+        same credits twice.
+        """
+        from app.db.models import LedgerEntryModel
+
+        if not candidates:
+            return set()
+        by_receipt = {
+            receipt_id: (ledger_entry_id, wallet_id, credits)
+            for receipt_id, ledger_entry_id, wallet_id, credits in candidates
+        }
+        attempt = McpDispatchAttemptModel
+        rows = (
+            await session.execute(
+                select(
+                    cast(Any, ReceiptModel.receipt_id),
+                    cast(Any, LedgerEntryModel.entry_id),
+                    cast(Any, LedgerEntryModel.wallet_id),
+                    cast(Any, LedgerEntryModel.amount),
+                )
+                .join(
+                    attempt,
+                    cast(
+                        ColumnElement[bool],
+                        attempt.attempt_id == ReceiptModel.dispatch_attempt_id,
+                    ),
+                )
+                .join(
+                    LedgerEntryModel,
+                    cast(
+                        ColumnElement[bool],
+                        LedgerEntryModel.correlation_id == ReceiptModel.ledger_entry_id,
+                    ),
+                )
+                .where(
+                    cast(Any, ReceiptModel.receipt_id).in_(list(by_receipt)),
+                    cast(ColumnElement[bool], attempt.state == "delivery_uncertain"),
+                    cast(Any, attempt.reconcile_status).in_(
+                        [
+                            RECONCILE_NOT_EXECUTED_REFUND_PENDING,
+                            RECONCILE_NOT_EXECUTED_REFUNDED,
+                        ]
+                    ),
+                    cast(Any, attempt.debit_refunded_at).isnot(None),
+                    cast(Any, attempt.budget_released_at).isnot(None),
+                    cast(ColumnElement[bool], LedgerEntryModel.action == "refund"),
+                )
+            )
+        ).all()
+        proven: set[str] = set()
+        for receipt_id, entry_id, wallet_id, amount in rows:
+            ledger_entry_id, expected_wallet, credits = by_receipt[receipt_id]
+            if (
+                entry_id == f"refund-{ledger_entry_id}"
+                and wallet_id == expected_wallet
+                and Decimal(str(amount)) == credits
+            ):
+                proven.add(receipt_id)
+        return proven
 
     @staticmethod
     def _should_report_live_drift(permit: PermitModel, drift: Decimal) -> bool:

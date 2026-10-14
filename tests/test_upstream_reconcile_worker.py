@@ -4,9 +4,11 @@ Pins three properties:
 - the forwarded idempotency key (and provider request id when the upstream
   reports one) is signed onto upstream receipts, outside the response hash;
 - the reconcile worker probes parked ``delivery_uncertain`` calls on a
-  backoff and records a durable, idempotent resolution audit event;
-- neither ageing nor any provider answer moves money: wallet balance, ledger
-  and permit ``spent_credits`` are unchanged by the worker.
+  durable backoff and records a durable, idempotent resolution audit event;
+- with the refund policy off (the default), neither ageing nor any provider
+  answer moves money: wallet balance, ledger and permit ``spent_credits`` are
+  unchanged by the worker. Leasing, quiescence and the opt-in refund path are
+  pinned in ``tests/test_delivery_uncertain_reconcile.py``.
 """
 
 from __future__ import annotations
@@ -24,7 +26,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from mcp.types import CallToolResult, TextContent
 from pydantic import SecretStr
-from sqlalchemy import update as sa_update
+from sqlalchemy import select, update as sa_update
 
 from app.core.config import get_settings
 from app.core.time import to_naive_utc
@@ -99,11 +101,16 @@ class ScriptedExecutor:
         )
 
 
+TEST_ORIGIN = "https://test.example.com"
+
+
 @dataclass
 class FakeProbe:
+    public_tool_id: str
     outcome: ProviderOutcome = ProviderOutcome.UNKNOWN
     provider_request_id: str | None = None
     raise_error: bool = False
+    upstream_origin: str = TEST_ORIGIN
     seen: list[ParkedCall] = field(default_factory=list)
 
     async def lookup(self, call: ParkedCall) -> ProviderLookup:
@@ -138,7 +145,7 @@ async def _invoke(
         output_schema=None,
         credits_per_unit=2.0,
         upstream_tool_name=tool_name,
-        upstream_origin="https://test.example.com",
+        upstream_origin=TEST_ORIGIN,
     )
     provisioned = await provision_agent_wallet(client)
     permit = await create_tool_permit(
@@ -171,6 +178,7 @@ async def _invoke(
         "body": response.json(),
         "wallet_id": provisioned["agent_wallet_id"],
         "permit_id": permit["permit_id"],
+        "headers": provisioned["agent_headers"],
     }
 
 
@@ -183,17 +191,21 @@ async def _money_snapshot(wallet_id: str, permit_id: str) -> tuple[Any, ...]:
 
 
 async def _parked_attempt(wallet_id: str) -> McpDispatchAttemptModel:
-    worker = DeliveryUncertainReconcileWorker(
-        FakeProbe(), backoff_seconds=[30], alert_age_seconds=3600
-    )
-    calls = [
-        c for c in await worker.list_parked_calls(limit=50) if c.wallet_id == wallet_id
-    ]
-    assert len(calls) == 1
     async with get_session_factory()() as session:
-        attempt = await session.get(McpDispatchAttemptModel, calls[0].attempt_id)
-        assert attempt is not None
-        return attempt
+        attempts = (
+            (
+                await session.execute(
+                    select(McpDispatchAttemptModel).where(
+                        McpDispatchAttemptModel.wallet_id == wallet_id,
+                        McpDispatchAttemptModel.state == "delivery_uncertain",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert len(attempts) == 1
+    return attempts[0]
 
 
 # --- receipt fields -------------------------------------------------------
@@ -311,6 +323,8 @@ def test_canonicalize_result_reads_provider_id_from_meta_without_hashing_it() ->
 def test_worker_is_off_by_default_and_backoff_validates() -> None:
     settings = get_settings()
     assert settings.UPSTREAM_RECONCILE_WORKER_ENABLED is False
+    assert settings.UPSTREAM_RECONCILE_REFUND_ON_ATTESTED_NOT_EXECUTED is False
+    assert settings.MCP_UPSTREAM_STATUS_URL == ""
     assert parse_backoff_seconds("30, 120,600") == (30, 120, 600)
     for bad in ("", "0", "30,-1", ","):
         with pytest.raises(ValueError, match="upstream_reconcile_backoff_invalid"):
@@ -337,40 +351,47 @@ async def test_worker_backoff_and_age_alert_never_release_budget(
     assert before[1] == Decimal("2")  # reservation consumed by the uncertain call
 
     clock = {"now": completed + timedelta(seconds=10)}
-    probe = FakeProbe(ProviderOutcome.UNKNOWN)
-    worker = DeliveryUncertainReconcileWorker(
-        probe,
-        backoff_seconds=[30, 120],
-        alert_age_seconds=600,
-        now=lambda: clock["now"],
-    )
+    probe = FakeProbe(tool, ProviderOutcome.UNKNOWN)
+
+    def worker() -> DeliveryUncertainReconcileWorker:
+        # A fresh worker per sweep: backoff must be durable, not in-process.
+        return DeliveryUncertainReconcileWorker(
+            probe,
+            backoff_seconds=[30, 120],
+            alert_age_seconds=600,
+            now=lambda: clock["now"],
+        )
 
     # Not due before the first backoff step.
-    assert (await worker.run_once()).probed == 0
+    assert (await worker().run_once()).probed == 0
 
     clock["now"] = completed + timedelta(seconds=31)
-    sweep = await worker.run_once()
+    sweep = await worker().run_once()
     assert (sweep.probed, sweep.still_unknown, sweep.aged_alerts) == (1, 1, 0)
     # Next probe is 120s after the first one.
     clock["now"] = completed + timedelta(seconds=100)
-    assert (await worker.run_once()).probed == 0
+    assert (await worker().run_once()).probed == 0
     clock["now"] = completed + timedelta(seconds=152)
-    assert (await worker.run_once()).probed == 1
+    assert (await worker().run_once()).probed == 1
 
-    # Age past threshold: alert exactly once, budget untouched.
+    # Age past threshold: alert exactly once per process, budget untouched.
+    aging = worker()
     clock["now"] = completed + timedelta(seconds=601)
     with caplog.at_level("WARNING", logger="app.services.upstream_reconcile"):
-        sweep = await worker.run_once()
+        sweep = await aging.run_once()
     assert sweep.aged_alerts == 1
     assert any(r.message == "mcp_delivery_uncertain_aged" for r in caplog.records)
     clock["now"] = completed + timedelta(seconds=5000)
-    assert (await worker.run_once()).aged_alerts == 0
+    assert (await aging.run_once()).aged_alerts == 0
 
     assert await _money_snapshot(result["wallet_id"], result["permit_id"]) == before
     async with get_session_factory()() as session:
         fresh = await session.get(McpDispatchAttemptModel, attempt.attempt_id)
         assert fresh is not None and fresh.state == "delivery_uncertain"
         assert fresh.budget_released_at is None
+        assert fresh.reconcile_status is None
+        assert fresh.reconcile_probe_count >= 2
+        assert fresh.reconcile_lease_owner is None
         assert (
             await session.get(
                 ControlPlaneAuditEventModel, resolution_event_id(attempt.attempt_id)
@@ -408,10 +429,15 @@ async def test_worker_resolution_is_durable_idempotent_and_moves_no_money(
         )
     ).json()["entries"]
 
+    probe = FakeProbe(tool, outcome, provider_request_id="prov-77")
     worker = DeliveryUncertainReconcileWorker(
-        FakeProbe(outcome, provider_request_id="prov-77"),
+        probe,
         backoff_seconds=[1],
         alert_age_seconds=3600,
+        quiescence_seconds=0,
+        # Refund policy off (the shipped default): not_executed is a flagged
+        # refund candidate, never a refund.
+        refund_on_attested_not_executed=False,
         now=lambda: to_naive_utc(attempt.completed_at) + timedelta(seconds=5),
     )
     sweep = await worker.run_once()
@@ -419,6 +445,7 @@ async def test_worker_resolution_is_durable_idempotent_and_moves_no_money(
         assert sweep.resolved_executed == 1
     else:
         assert sweep.resolved_not_executed == 1
+    assert sweep.refunded == 0
 
     async with get_session_factory()() as session:
         event = await session.get(
@@ -426,14 +453,21 @@ async def test_worker_resolution_is_durable_idempotent_and_moves_no_money(
         )
         assert event is not None
         metadata = json.loads(event.metadata_json or "{}")
+        fresh = await session.get(McpDispatchAttemptModel, attempt.attempt_id)
+        assert fresh is not None
     assert metadata["provider_outcome"] == outcome.value
     assert metadata["provider_request_id"] == "prov-77"
     assert metadata["budget_action"] == "none"
     assert metadata["refund_candidate"] is (outcome is ProviderOutcome.NOT_EXECUTED)
+    assert fresh.state == "delivery_uncertain"  # never rewritten
+    assert fresh.reconcile_status == (
+        "executed" if outcome is ProviderOutcome.EXECUTED else "not_executed_review"
+    )
+    assert fresh.reconciled_at is not None
 
-    # Closed: no longer listed, a second sweep (or a fresh worker) is a no-op.
-    assert await worker.list_parked_calls(limit=50) == []
+    # Closed: a second sweep (or a fresh worker) never probes it again.
     assert (await worker.run_once()).probed == 0
+    assert len(probe.seen) == 1
 
     # No refund, no release, no new ledger entry -- even for not_executed.
     assert await _money_snapshot(result["wallet_id"], result["permit_id"]) == before
@@ -462,11 +496,16 @@ async def test_worker_probe_failure_records_nothing(
         get_service_registry().unregister_local(tool)
     attempt = await _parked_attempt(result["wallet_id"])
     worker = DeliveryUncertainReconcileWorker(
-        FakeProbe(raise_error=True),
+        FakeProbe(tool, raise_error=True),
         backoff_seconds=[1],
         alert_age_seconds=3600,
         now=lambda: to_naive_utc(attempt.completed_at) + timedelta(seconds=5),
     )
     sweep = await worker.run_once()
     assert (sweep.probed, sweep.probe_errors) == (1, 1)
-    assert len(await worker.list_parked_calls(limit=50)) == 1
+    async with get_session_factory()() as session:
+        fresh = await session.get(McpDispatchAttemptModel, attempt.attempt_id)
+        assert fresh is not None
+        assert fresh.reconcile_status is None
+        assert fresh.reconcile_lease_owner is None
+        assert fresh.reconcile_next_probe_at is not None
