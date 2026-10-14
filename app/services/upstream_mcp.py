@@ -151,6 +151,22 @@ class UpstreamMcpResult:
     response_hash: str
     size_bytes: int
     is_error: bool
+    # Upstream-reported request id from CallToolResult `_meta`; not part of
+    # ``payload``/``canonical_json``/``response_hash``.
+    provider_request_id: str | None = None
+
+
+_PROVIDER_REQUEST_ID_PATTERN = re.compile(r"[A-Za-z0-9._:/@+=-]{1,128}\Z")
+
+
+def extract_provider_request_id(meta: Any, meta_key: str) -> str | None:
+    """Return a bounded, printable provider request id from ``_meta`` or None."""
+    if not meta_key or not isinstance(meta, dict):
+        return None
+    value = meta.get(meta_key)
+    if type(value) is not str or not _PROVIDER_REQUEST_ID_PATTERN.fullmatch(value):
+        return None
+    return value
 
 
 class UpstreamMcpReturnedError(UpstreamMcpError):
@@ -906,6 +922,10 @@ class UpstreamMcpAdapter:
             response_hash=hashlib.sha256(encoded).hexdigest(),
             size_bytes=len(encoded),
             is_error=bool(payload["isError"]),
+            provider_request_id=extract_provider_request_id(
+                dumped.get("_meta"),
+                get_settings().MCP_UPSTREAM_PROVIDER_REQUEST_ID_META_KEY,
+            ),
         )
 
     async def _call_tool_once(
