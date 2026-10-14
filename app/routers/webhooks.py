@@ -7,8 +7,9 @@ Local development: stripe listen --forward-to localhost:8000/v1/webhooks/stripe
 """
 
 import logging
-from fastapi import APIRouter, Request, HTTPException, status
+from fastapi import APIRouter, Depends, Request, HTTPException, status
 
+from ..db.tenant_rls import rls_admin_route
 from ..idempotency_gate import requires_idempotency
 from ..services.stripe_integration import StripeSettlementError, get_stripe_integration
 from ..services.kyc_service import get_kyc_service
@@ -21,7 +22,10 @@ router = APIRouter(
 )
 
 
-@router.post("/stripe")
+# Signature-verified provider callbacks carry no caller wallet: they settle
+# whichever wallet the verified event names, so they run under the explicit
+# row-level-security admin scope (docs/tenant-rls.md).
+@router.post("/stripe", dependencies=[Depends(rls_admin_route("stripe_webhook"))])
 @requires_idempotency(
     "POST /v1/webhooks/stripe",
     enforced=True,
@@ -74,7 +78,10 @@ async def handle_stripe_webhook(request: Request):
     return {"status": "received"}
 
 
-@router.post("/stripe/identity")
+@router.post(
+    "/stripe/identity",
+    dependencies=[Depends(rls_admin_route("stripe_identity_webhook"))],
+)
 async def handle_stripe_identity_webhook(request: Request):
     """
     Receive and process Stripe Identity webhook events.

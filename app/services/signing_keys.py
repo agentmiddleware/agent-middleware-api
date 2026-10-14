@@ -3,10 +3,11 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import importlib.util
 import json
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
@@ -36,6 +37,14 @@ class SigningKeyError(RuntimeError):
 RECEIPT_CANONICALIZATION = "awi-canonical-json/1"
 
 
+class Ed25519Signer(Protocol):
+    """The two operations signing needs: an environment seed or AWS KMS."""
+
+    def public_key(self) -> Ed25519PublicKey: ...
+
+    def sign(self, data: bytes) -> bytes: ...
+
+
 def _decode_private_key(configured: str) -> Ed25519PrivateKey:
     """Decode strict base64 Ed25519 seed material without exposing it."""
 
@@ -55,6 +64,15 @@ def validate_signing_key_configuration(settings: Settings | None = None) -> str:
     """
 
     settings = settings or get_settings()
+    if settings.TRUST_SIGNING_BACKEND == "aws_kms":
+        # Configuration only: no KMS call at validation time. The first
+        # ensure_active_key() fetches the public key and fails boot if the key
+        # is unreachable or not Ed25519.
+        if not settings.TRUST_SIGNING_KMS_KEY_ID.strip():
+            raise SigningKeyError("trust_signing_kms_key_id_required")
+        if importlib.util.find_spec("boto3") is None:
+            raise SigningKeyError("kms_boto3_unavailable")
+        return "aws_kms"
     configured = settings.TRUST_SIGNING_PRIVATE_KEY_B64.strip()
     if configured:
         _decode_private_key(configured)
@@ -112,11 +130,20 @@ class SigningKeyService:
 
     def __init__(self) -> None:
         self._settings = get_settings()
-        self._private_key: Ed25519PrivateKey | None = None
+        self._private_key: Ed25519Signer | None = None
         self._key_id = self._settings.TRUST_SIGNING_KEY_ID
 
-    def _load_private_key(self) -> Ed25519PrivateKey:
+    def _load_private_key(self) -> Ed25519Signer:
         if self._private_key:
+            return self._private_key
+
+        if self._settings.TRUST_SIGNING_BACKEND == "aws_kms":
+            from .kms_signer import KmsEd25519Signer
+
+            self._private_key = KmsEd25519Signer(
+                self._settings.TRUST_SIGNING_KMS_KEY_ID,
+                region=self._settings.TRUST_SIGNING_KMS_REGION or None,
+            )
             return self._private_key
 
         configured = self._settings.TRUST_SIGNING_PRIVATE_KEY_B64.strip()
@@ -129,18 +156,17 @@ class SigningKeyService:
 
         # Development/test fallback is deliberately process-ephemeral. It lets
         # local tests verify signatures without silently persisting a private key.
-        self._private_key = Ed25519PrivateKey.generate()
+        ephemeral = Ed25519PrivateKey.generate()
+        self._private_key = ephemeral
         # Content-address the ephemeral key's id so a restart (or a second
         # instance) publishes its distinct public key under its own key_id
         # instead of overwriting the durable metadata a previous ephemeral key
         # signed under. Old signatures keep verifying against their own stored
         # public key rather than being silently invalidated.
-        raw_public = self._private_key.public_key().public_bytes(
-            Encoding.Raw, PublicFormat.Raw
-        )
+        raw_public = ephemeral.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
         fingerprint = hashlib.sha256(raw_public).hexdigest()[:16]
         self._key_id = f"{self._settings.TRUST_SIGNING_KEY_ID}-ephemeral-{fingerprint}"
-        return self._private_key
+        return ephemeral
 
     def _public_key_b64(self) -> str:
         public_key = self._load_private_key().public_key()

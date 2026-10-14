@@ -10,8 +10,15 @@ are proof surfaces unless they consume the same permit, receipt, idempotency,
 and audit-chain primitives.
 
 The remote pilot supports one operator-configured HTTPS Streamable HTTP MCP
-origin and one exact tool. Wallet checks provide application-layer isolation;
-there is no row-level-security or public multi-tenant security claim.
+origin and one exact tool. Wallet checks provide application-layer isolation.
+On PostgreSQL, migration `047_tenant_rls` adds forced row-level security on
+the core wallet-scoped tables as defense in depth, but it only binds the app
+under the opt-in `TENANT_RLS_MODE=enforce` with a `NOSUPERUSER NOBYPASSRLS`
+non-owner runtime role; the default `off` mode leaves it inert for the app.
+It does not cover every table (`wallets` and the audit tables are not yet
+covered), and it is not a boundary against code that can already run SQL as
+the runtime role. There is still no public multi-tenant security claim. See
+[`docs/tenant-rls.md`](docs/tenant-rls.md).
 
 The supported design-partner deployment is one vendor-managed Railway project
 per customer, with dedicated API, PostgreSQL, Redis, domain, signing material,
@@ -30,7 +37,14 @@ MCP gateway for portable denial evidence.
 
 Keep these out of the wedge until a design partner requires them:
 
-- No external KMS integration is implemented.
+- External KMS signing is implemented for AWS KMS only, as an opt-in backend
+  (`TRUST_SIGNING_BACKEND=aws_kms`, `ECC_NIST_EDWARDS25519`,
+  `ED25519_SHA_512` over `RAW` bytes). The environment seed stays the default.
+  GCP KMS and Vault Transit are not implemented, KMS key rotation is
+  metadata-only as before, and the dormant JWT exchange still signs with the
+  environment seed. A KMS `Sign` call is a blocking network round trip on the
+  request path, and signing inputs over 4096 bytes fail closed. See
+  [`docs/key-management.md`](docs/key-management.md).
 - No settlement, dispute, or compliance reporting workflow is implemented.
 - Receipt signatures can be verified offline by any third party
   (`/v1/receipts/{id}/portable` plus the unauthenticated
@@ -80,8 +94,9 @@ Keep these out of the wedge until a design partner requires them:
 - A timeout or disconnect after the durable dispatch checkpoint is inherently
   ambiguous. The gateway retains the debit, signs `delivery_uncertain`, never
   redispatches automatically, and requires operator/upstream reconciliation.
-- Gateway exactly-once behavior does not make a remote side effect exactly
-  once unless the upstream honors the forwarded idempotency key.
+- The gateway provides at-most-once dispatch, not exactly-once execution: a
+  remote side effect happens once only if the upstream honors the forwarded
+  idempotency key.
 - The configured upstream path atomically enforces the permit's `max_credits`
   ceiling and `max_calls_per_tool` counters (supported since 8c95229, PR #476).
   It rejects permits carrying `aggregate_value_cap` before reservation or
@@ -126,7 +141,14 @@ repo; do not Redeploy from GitHub source).
   set both env vars explicitly; the startup log emits a `trust_mode_permissive`
   warning so the opt-out is loud.
 - Configure `TRUST_SIGNING_PRIVATE_KEY_B64` from a secret manager or KMS-backed
-  runtime injection.
+  runtime injection, or set `TRUST_SIGNING_BACKEND=aws_kms` with
+  `TRUST_SIGNING_KMS_KEY_ID` so the private key never enters the process.
+  Production-like boots accept either; with `aws_kms` the seed is not required.
+- On PostgreSQL, connect the API as a `NOSUPERUSER NOBYPASSRLS` role that does
+  not own the tables, run migrations as the owner (`MIGRATION_DATABASE_URL`),
+  then set `TENANT_RLS_MODE=enforce`. Boot logs the role posture every time,
+  warns when the role can bypass row-level security, and refuses `enforce`
+  when it can. See [`docs/tenant-rls.md`](docs/tenant-rls.md).
 - Production-like boots also refuse `DEBUG=true`, `WEBAUTHN_ALLOW_MOCK=true`,
   `ENABLE_PROOF_SURFACES=true`, `ENABLE_PUBLIC_MCP_ENDPOINT=true`,
   `ALLOW_PRIVATE_NETWORK_TARGETS=true` (it disables the outbound-URL guard's

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -260,6 +261,14 @@ async def test_verify_does_not_leak_permit_to_unauthorized_caller(
         json={"permit_id": permit["permit_id"], "tool": "trust-echo"},
         headers=other_headers,
     )
+    if os.environ.get("TENANT_RLS_MODE", "").strip().lower() == "enforce":
+        # Under row-level security the other wallet's permit is invisible
+        # to this caller's transaction, so it reads as not found: still no
+        # permit body in the response.
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["reason"] == "permit_not_found"
+        assert resp.json().get("permit") is None
+        return
     assert resp.status_code == 403
     assert (
         "permit" not in resp.text or resp.json().get("detail") == "permit_access_denied"

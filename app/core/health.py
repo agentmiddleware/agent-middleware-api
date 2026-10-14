@@ -424,6 +424,8 @@ async def _check_signing_key() -> dict[str, Any]:
         if error not in {
             "trust_signing_private_key_required",
             "invalid_trust_signing_private_key",
+            "trust_signing_kms_key_id_required",
+            "kms_boto3_unavailable",
         }:
             error = "signing_key_unavailable"
         return {"status": "down", "state": "invalid", "error": error}
@@ -441,6 +443,10 @@ async def _check_signing_key() -> dict[str, Any]:
             "state": "ephemeral",
             "reason": "trust mode disabled; process-ephemeral signing key",
         }
+    if state == "aws_kms":
+        # Configuration only; reachability is proven by the boot-time
+        # ensure_active_key(), which fetches the KMS public key.
+        return {"status": "up", "state": "aws_kms"}
     return {"status": "up", "state": "loaded"}
 
 

@@ -5,6 +5,10 @@
 #
 # Fail-closed: RUN_MIGRATIONS_ON_START=true with an empty DATABASE_URL exits
 # non-zero instead of starting uvicorn against an unmigrated database.
+#
+# MIGRATION_DATABASE_URL, when set, is used for Alembic only: migrations run as
+# the table-owner role while the app connects through DATABASE_URL as a
+# NOSUPERUSER NOBYPASSRLS non-owner role (docs/tenant-rls.md).
 
 set -e
 
@@ -14,7 +18,7 @@ if [ "${RUN_MIGRATIONS_ON_START:-}" = "true" ]; then
     exit 1
   fi
   echo "docker_entrypoint: alembic upgrade head"
-  alembic upgrade head
+  DATABASE_URL="${MIGRATION_DATABASE_URL:-$DATABASE_URL}" alembic upgrade head
 fi
 
 # Docker/Compose command overrides retain their arguments after the same

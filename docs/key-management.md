@@ -54,6 +54,57 @@ verification. The private key is never persisted.
 - Rotation requires re-deploying with a new env var, which couples key
   rotation to release cadence
 
+## AWS KMS Backend (implemented, opt-in)
+
+`TRUST_SIGNING_BACKEND=aws_kms` moves signing into AWS KMS
+(`app/services/kms_signer.py`). The environment seed stays the default; nothing
+changes unless this is set.
+
+| Setting | Value |
+|---|---|
+| `TRUST_SIGNING_BACKEND` | `aws_kms` (default `env`) |
+| `TRUST_SIGNING_KMS_KEY_ID` | Key id, ARN, or alias of the signing key |
+| `TRUST_SIGNING_KMS_REGION` | Optional; otherwise the standard AWS region chain |
+| `TRUST_SIGNING_KEY_ID` | Unchanged: the published `kid` for this key |
+
+Key requirements: `KeySpec=ECC_NIST_EDWARDS25519`, `KeyUsage=SIGN_VERIFY`.
+Every signature is one KMS `Sign` call with **`SigningAlgorithm=ED25519_SHA_512`
+and `MessageType=RAW`** — pure Ed25519 (RFC 8032) over exactly the canonical
+bytes the environment signer signs. `alg` stays `Ed25519`, the receipt format
+does not change, and `b2a-verify-receipt` verifies the result unchanged
+(`tests/test_kms_signer.py` runs a real governed invoke under a mocked KMS and
+verifies the exported receipt with the SDK verifier and the CLI).
+
+Refused on purpose:
+
+- `MessageType=DIGEST` — that is Ed25519ph (pre-hashed), a different scheme a
+  plain Ed25519 verifier rejects.
+- ECDSA key specs — DER signatures no verifier here accepts.
+- Signing inputs over 4096 bytes (the KMS `RAW` limit) fail closed with
+  `kms_message_too_large`; there is no fallback to `DIGEST`.
+
+Operational notes:
+
+- `boto3` is imported lazily and is **not** in `requirements.txt`; install it
+  in the image that opts in. Boot fails with `kms_boto3_unavailable` if it is
+  missing, and `trust_signing_kms_key_id_required` if the key id is empty.
+- The public key is fetched once (`kms:GetPublicKey`) at boot by
+  `ensure_active_key` and cached; the API needs `kms:Sign` on that key only
+  afterwards. Grant `kms:GetPublicKey` and `kms:Sign` on exactly that key ARN
+  through workload identity, not static credentials.
+- Each returned signature is verified locally against the published public key
+  before use, so a wrong key or algorithm fails at signing time.
+- `Sign` is a synchronous network call on the signing path (receipts, permits,
+  audit events). Expect added latency per signature; KMS throttling surfaces as
+  `kms_sign_failed` and fails the operation closed.
+- Production-like boots accept `aws_kms` + `TRUST_SIGNING_KMS_KEY_ID` in place
+  of `TRUST_SIGNING_PRIVATE_KEY_B64`.
+- The dormant JWT exchange (`app/core/jwt.py`) still signs with the environment
+  seed; it is unmounted in production.
+- Rotation is still metadata-only: point `TRUST_SIGNING_KMS_KEY_ID` at a new
+  key **and** set a new `TRUST_SIGNING_KEY_ID`; reusing a `kid` for a different
+  public key is rejected, as with the seed.
+
 ## Production Target: External KMS
 
 In production, signing must happen inside an external KMS, and the API worker
@@ -64,14 +115,12 @@ the choice is per-deployment.
 
 | Provider | Key type | Sign API | Audit |
 |---|---|---|---|
-| AWS KMS | `ECC_NIST_P256` (until KMS adds Ed25519) or external-key import | `Sign` with `SigningAlgorithm=ECDSA_SHA_256` or imported-key Ed25519 | CloudTrail logs every `Sign` call |
+| AWS KMS (implemented, see above) | `ECC_NIST_EDWARDS25519` | `Sign` with `SigningAlgorithm=ED25519_SHA_512`, `MessageType=RAW` | CloudTrail logs every `Sign` call |
 | GCP KMS | `ASYMMETRIC_SIGN` Ed25519 | `AsymmetricSign` | Cloud Audit Logs every `AsymmetricSign` call |
 | HashiCorp Vault Transit | `ed25519` | `transit/sign/:name` | Vault audit device |
 
-The receipt format does not change. `alg` stays `Ed25519` for Vault and GCP
-KMS. For AWS KMS until Ed25519 is native, the `alg` field becomes
-`ECDSA-P256-SHA256` and verification code must accept both algorithms keyed
-by the receipt's `alg` field.
+The receipt format does not change. `alg` stays `Ed25519` for all three
+targets; AWS KMS now signs Ed25519 natively, so no ECDSA path is needed.
 
 ### Concrete code changes
 

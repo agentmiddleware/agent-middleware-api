@@ -96,6 +96,12 @@ Required controls:
 - Treat destination wallet IDs in transfers as public identifiers, but require
   source wallet access.
 - Add regression tests for every new wallet-bound endpoint.
+- Defense in depth (PostgreSQL): forced row-level security on the core
+  wallet-scoped tables, binding the app under `TENANT_RLS_MODE=enforce` with a
+  `NOSUPERUSER NOBYPASSRLS` non-owner runtime role. Cross-wallet code paths
+  must opt into the explicit `rls_admin_scope` bypass. It contains a query
+  that forgets its wallet filter; it does not contain code that can run SQL as
+  the runtime role. See [tenant-rls.md](tenant-rls.md).
 
 ### Bootstrap Key Leakage
 
@@ -200,3 +206,6 @@ Required controls:
 - Extend `tests/test_route_auth_inventory.py` beyond the `/v1/permits`,
   `/v1/receipts`, `/v1/audit`, and `/mcp` prefixes it checks today.
 - Add ownership tests whenever new wallet-bound resources are introduced.
+- Extend row-level security to `wallets`, `control_plane_audit_events`, and
+  `audit_chain_heads` (wallet-less rows need an explicit policy first), and
+  run `TENANT_RLS_MODE=enforce` on a hosted deployment.

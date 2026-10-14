@@ -79,6 +79,15 @@ class Settings(BaseSettings):
     # content). Off by default and never enabled by DEBUG alone: an operator
     # turns it on explicitly for local query debugging.
     SQL_ECHO: bool = False
+    # PostgreSQL row-level security for wallet-scoped tables (migration
+    # 047_tenant_rls). "off" (default): every app connection opts out of the
+    # policies (RLS is inert for the app; any other client is still subject to
+    # it and sees no rows). "enforce": each transaction sets
+    # app.current_wallet_id from the authenticated wallet with SET LOCAL
+    # semantics, and only explicit admin scopes bypass. Enforce requires a
+    # NOSUPERUSER NOBYPASSRLS runtime role or boot is refused. See
+    # docs/tenant-rls.md. No effect on SQLite.
+    TENANT_RLS_MODE: str = "off"
 
     # --- Authentication ---
     API_KEY_HEADER: str = "X-API-Key"
@@ -359,6 +368,15 @@ class Settings(BaseSettings):
     ALLOW_LEGACY_UNPERMITTED_MCP: bool = False
     TRUST_SIGNING_KEY_ID: str = "local-dev-ed25519"
     TRUST_SIGNING_PRIVATE_KEY_B64: str = ""
+    # Signing backend. "env" (default) signs with TRUST_SIGNING_PRIVATE_KEY_B64.
+    # "aws_kms" signs with an AWS KMS ECC_NIST_EDWARDS25519 key
+    # (SigningAlgorithm ED25519_SHA_512, MessageType RAW): pure Ed25519 over
+    # the same canonical bytes, so existing verifiers are unchanged. Requires
+    # boto3 (not in requirements.txt; install it in the image that opts in)
+    # and standard AWS credentials. The private key never leaves KMS.
+    TRUST_SIGNING_BACKEND: str = "env"
+    TRUST_SIGNING_KMS_KEY_ID: str = ""
+    TRUST_SIGNING_KMS_REGION: str = ""
 
     # --- Standard MCP endpoint (POST /mcp) ---
     # Spec-compliant stateless Streamable HTTP surface for standard MCP
@@ -414,6 +432,23 @@ class Settings(BaseSettings):
     # re-declare it as a module constant — a second copy silently lets the
     # advertised rate drift from the rate real money converts at.
     EXCHANGE_RATE: Decimal = Decimal("1000.0")
+
+    @field_validator("TENANT_RLS_MODE")
+    @classmethod
+    def _validate_tenant_rls_mode(cls, value: str) -> str:
+        """Only the two documented modes; a typo must not silently mean off."""
+        normalized = (value or "").strip().lower()
+        if normalized not in {"off", "enforce"}:
+            raise ValueError("TENANT_RLS_MODE must be 'off' or 'enforce'")
+        return normalized
+
+    @field_validator("TRUST_SIGNING_BACKEND")
+    @classmethod
+    def _validate_trust_signing_backend(cls, value: str) -> str:
+        normalized = (value or "").strip().lower()
+        if normalized not in {"env", "aws_kms"}:
+            raise ValueError("TRUST_SIGNING_BACKEND must be 'env' or 'aws_kms'")
+        return normalized
 
     @field_validator("EXCHANGE_RATE")
     @classmethod

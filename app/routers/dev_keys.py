@@ -35,11 +35,12 @@ from decimal import Decimal
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from ..core.config import get_settings
 from ..core.trust_mode import is_production_like_environment
+from ..db.tenant_rls import rls_admin_route
 from ..services.agent_money import get_agent_money
 from ..services.api_key_service import get_api_key_service
 
@@ -139,6 +140,9 @@ def _reject_cross_origin(request: Request) -> None:
     "/self-provision",
     response_model=SelfProvisionResponse,
     status_code=status.HTTP_201_CREATED,
+    # Anonymous by design and creates rows for wallets that do not exist yet,
+    # so there is no caller wallet to scope to (docs/tenant-rls.md).
+    dependencies=[Depends(rls_admin_route("dev_key_self_provision"))],
     summary="Self-provision a wallet-scoped development API key (local only)",
     description=(
         "Mint a dev sponsor wallet, agent wallet, and wallet-scoped API key "

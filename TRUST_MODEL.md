@@ -161,3 +161,23 @@ audit integrity and detects silent mutation.
 The database stores public keys and key metadata only. Production private keys
 must come from configured secret material or KMS-backed injection. Local tests
 may use process-ephemeral keys; they are not persisted.
+
+With the opt-in `TRUST_SIGNING_BACKEND=aws_kms`, signing happens inside AWS KMS
+(`ED25519_SHA_512`, `MessageType=RAW`): pure Ed25519 over the same canonical
+bytes, so receipts, permits, and audit events verify with the unchanged
+verifiers (`b2a-verify-receipt`, `/.well-known/trust-keys.json`). The signer
+checks every KMS signature against the published public key before using it.
+Where the key lives changes custody, not semantics: the gateway still provides
+at-most-once dispatch, not exactly-once execution.
+
+## Tenant Isolation
+
+Wallet isolation is enforced in the application (`require_wallet_access`). On
+PostgreSQL, forced row-level security on the core wallet-scoped tables can
+back it up at the database: under `TENANT_RLS_MODE=enforce` each transaction
+is limited to the authenticated wallet via `SET LOCAL app.current_wallet_id`,
+an unset wallet matches no rows, and cross-wallet paths (credential lookup,
+bootstrap admins, maintenance, migrations) must opt into an explicit bypass.
+This is defense in depth against a missing wallet filter, not a boundary
+against code that can run SQL as the runtime role, and it is off by default.
+See [`docs/tenant-rls.md`](docs/tenant-rls.md).
