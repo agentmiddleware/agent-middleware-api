@@ -2597,6 +2597,16 @@ async def _execute_registered_tool_inner(
         await _release_iga_use(
             iga_granted_use, tool_name, reason="ledger_write_contended"
         )
+        # Same proof covers the quote consumed above: nothing was charged, so
+        # keeping it spent would deny the advised retry quote_already_consumed.
+        if quoted is not None and quote_id:
+            try:
+                await get_quote_service().release(quote_id)
+            except Exception:
+                logger.exception(
+                    "mcp_contended_quote_release_failed",
+                    extra={"quote_id": quote_id},
+                )
         try:
             await _audit_mcp_invocation(
                 effects_committed=False,
