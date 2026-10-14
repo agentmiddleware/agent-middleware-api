@@ -1,0 +1,62 @@
+{
+  "name": "delivery_uncertain_upstream_hang",
+  "description": "Named replay fixture for the ambiguous-timeout path (Wallet Of Agents report, 2026-10-10). The upstream MCP tool accepts the call and never answers inside MCP_UPSTREAM_CALL_TIMEOUT_SECONDS after the gateway claimed the one-shot send right. Expected: JSON-RPC -32005 delivery_uncertain carrying a signed receipt with outcome delivery_uncertain and the charge standing; a same-key retry returns these exact bytes. Placeholders: <wallet_id>/<permit_id>/<key_id> must equal this run's values; <any> matches any non-empty value.",
+  "endpoint": "POST /mcp/messages",
+  "request": {
+    "jsonrpc": "2.0",
+    "id": "woa-hang-1",
+    "method": "tools/call",
+    "params": {
+      "name": "partner.hang.write",
+      "arguments": {"note": "upstream will hang past the call timeout"},
+      "mcpContext": {
+        "wallet_id": "<wallet_id>",
+        "permit_id": "<permit_id>",
+        "idempotency_key": "woa-delivery-uncertain-upstream-hang"
+      }
+    }
+  },
+  "response_status": 200,
+  "response": {
+    "jsonrpc": "2.0",
+    "id": "woa-hang-1",
+    "error": {
+      "code": -32005,
+      "message": "delivery_uncertain",
+      "data": {
+        "dispatch": {
+          "attempt_id": "<any>",
+          "state": "delivery_uncertain"
+        },
+        "receipt": {
+          "action_contract_version": null,
+          "action_payload_hash": null,
+          "action_public_tool_id": null,
+          "action_schema_id": null,
+          "action_schema_version": null,
+          "action_upstream_binding_hash": null,
+          "approval_id": null,
+          "audit_event_id": "<any>",
+          "constraints_evaluated": {},
+          "created_at": "<any>",
+          "credits_authorized": "2.00000000",
+          "credits_charged": "2.00000000",
+          "dispatch_attempt_id": "<any>",
+          "idempotency_record_id": "<any>",
+          "key_id": "<key_id>",
+          "ledger_entry_id": "<any>",
+          "outcome": "delivery_uncertain",
+          "permit_id": "<permit_id>",
+          "reason_code": "delivery_uncertain",
+          "receipt_id": "<any>",
+          "request_hash": "<any>",
+          "response_hash": "68f1dee4eb3ba396f2392ba68319ea0edc6f05a5710eed4a2eebe5ba086e84f7",
+          "signature": "<any>",
+          "signature_key_id": "<any>",
+          "tool": "partner.hang.write",
+          "wallet_id": "<wallet_id>"
+        }
+      }
+    }
+  }
+}
