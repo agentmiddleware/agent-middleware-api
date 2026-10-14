@@ -51,7 +51,7 @@ PYTEST_CMD=()
 if [[ -n "${PYTHON:-}" ]]; then
   PYTHON_CMD=("$PYTHON")
 elif command -v uv >/dev/null 2>&1; then
-  PYTHON_CMD=(uv run --with-requirements requirements.txt)
+  PYTHON_CMD=(uv run --with-requirements requirements.lock)
   for _extra in $_python_env_extra_with; do
     PYTHON_CMD+=(--with "$_extra")
   done
@@ -69,7 +69,7 @@ if [[ ${#PYTHON_CMD[@]} -eq 0 ]]; then
   echo "[python-env] No interpreter provides: $_python_env_require" >&2
   echo "[python-env] and uv is not available. Fix with one of:" >&2
   echo "[python-env]   - install uv (https://docs.astral.sh/uv/) and re-run" >&2
-  echo "[python-env]   - python3 -m pip install -r requirements.txt $_python_env_extra_with" >&2
+  echo "[python-env]   - python3 -m pip install -r requirements.lock $_python_env_extra_with" >&2
   echo "[python-env]   - PYTHON=/path/to/python scripts/$(basename "$0")" >&2
   exit 1
 fi
