@@ -235,6 +235,78 @@ def recipient_binding_matches(recipient_domain: str | None, target: str) -> bool
     return extract_recipient_identity(target) == recipient_domain
 
 
+def _require_permit_caller(
+    model: PermitModel,
+    *,
+    caller_wallet_id: str | None,
+    is_bootstrap_admin: bool,
+    is_system: bool = False,
+    issuer_only: bool = False,
+) -> None:
+    """Refuse a permit mutation the caller does not own.
+
+    The web route checks today, but every service function here enforces
+    ownership on its own so a future caller cannot revoke a permit or erase
+    its spending for anyone. ``is_system`` marks trusted internal
+    compensation for a reservation the system itself created (a failed tool
+    call handing budget back); it is explicit at each call site and named in
+    the audit entry, so review can tell it apart from a wallet caller.
+    """
+    if is_bootstrap_admin or is_system:
+        return
+    allowed = (
+        {model.issuer_wallet_id}
+        if issuer_only
+        else {model.issuer_wallet_id, model.subject_wallet_id}
+    )
+    if caller_wallet_id is not None and caller_wallet_id in allowed:
+        return
+    raise PermitError("permit_access_denied")
+
+
+async def _audit_budget_release(
+    *,
+    event: str,
+    permit_id: str,
+    amount: Decimal,
+    wallet_id: str | None,
+    caller_wallet_id: str | None,
+    is_bootstrap_admin: bool,
+    is_system: bool,
+    attempt_id: str | None = None,
+) -> None:
+    """Write one audit entry for a budget release. Never raises.
+
+    Releases run as compensation inside failure handlers, so an
+    observability write must not replace the caller's real answer when the
+    audit store itself is unavailable.
+    """
+    try:
+        metadata: dict[str, Any] = {
+            "permit_id": permit_id,
+            "amount": str(amount),
+            "actor": (
+                "system"
+                if is_system
+                else ("bootstrap_admin" if is_bootstrap_admin else "owner")
+            ),
+        }
+        if caller_wallet_id is not None:
+            metadata["caller_wallet_id"] = caller_wallet_id
+        if attempt_id is not None:
+            metadata["attempt_id"] = attempt_id
+        await record_audit_event(
+            event=event,
+            wallet_id=wallet_id,
+            metadata=metadata,
+        )
+    except Exception:
+        logger.exception(
+            "permit_budget_release_audit_failed",
+            extra={"permit_id": permit_id, "event": event},
+        )
+
+
 def permit_model_to_response(model: PermitModel) -> PermitResponse:
     return PermitResponse(
         **ActionPermitFields.model_validate(
