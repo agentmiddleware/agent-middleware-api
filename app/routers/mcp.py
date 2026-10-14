@@ -2752,7 +2752,7 @@ async def _execute_registered_tool_inner(
             # release is best-effort, so it cannot stop the budget going back.
             await _release_iga_use(iga_granted_use, tool_name, reason=denial_reason)
             await get_permit_service().release_dispatch_budget_once(
-                dispatch_attempt.attempt_id
+                dispatch_attempt.attempt_id, is_system=True
             )
         else:
             if governed_call and permit_model:
@@ -3017,6 +3017,7 @@ async def _execute_registered_tool_inner(
                 await get_permit_service().release_budget(
                     permit_model.permit_id,
                     registered_cost,
+                    is_system=True,
                 )
             except PermitWriteContendedError:
                 # Guarded for the same reason _release_local_permit_reservation
@@ -3697,7 +3698,7 @@ async def _raise_refunded_upstream_failure(
 
     try:
         await get_permit_service().release_dispatch_budget_once(
-            dispatch_attempt.attempt_id
+            dispatch_attempt.attempt_id, is_system=True
         )
     except PermitWriteContendedError:
         # The upstream half of the guard above, and the safer of the two: this
@@ -4036,14 +4037,18 @@ async def _release_local_permit_reservation(
     """
     permits = get_permit_service()
     try:
-        await permits.release_budget(permit_model.permit_id, registered_cost)
+        await permits.release_budget(
+            permit_model.permit_id, registered_cost, is_system=True
+        )
     except Exception:
         logger.exception(
             "mcp_release_budget_failed",
             extra={"permit_id": permit_model.permit_id, "reason": reason},
         )
     try:
-        await permits.release_tool_call(permit_model.permit_id, tool_name)
+        await permits.release_tool_call(
+            permit_model.permit_id, tool_name, is_system=True
+        )
     except Exception:
         logger.exception(
             "mcp_release_tool_call_failed",

@@ -253,7 +253,7 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
         "An agent issues a customer refund through an internal MCP tool. The "
         "call times out, the agent retries, and the refund runs "
         "twice. If preventing it cannot justify "
-        "this boundary, we will tell you."
+        "this boundary, I will tell you."
     )
     # What a credit is, in one place, because the page meters calls while its
     # own limitations section refuses production settlement. Without this the
@@ -296,8 +296,8 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
         "Agent Middleware API is a transaction boundary between your "
         "agents and your consequential MCP tools. The "
         "first call executes and is charged once; a same-key retry cannot "
-        "dispatch or debit again. Every completed "
-        "call returns a signed receipt you can verify offline."
+        "dispatch or debit again. Governed calls get a signed receipt "
+        "you can verify offline."
     )
     wedge = (
         "The wedge today is metered calls. The underlying primitive is bounded "
