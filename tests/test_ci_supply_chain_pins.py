@@ -13,7 +13,9 @@ import yaml
 
 REPO_ROOT = __import__("pathlib").Path(__file__).resolve().parent.parent
 
-FROM_PIN = re.compile(r"^FROM\s+\S+@sha256:[0-9a-f]{64}\s*$")
+FROM_PIN = re.compile(
+    r"^FROM\s+\S+@sha256:[0-9a-f]{64}(\s+AS\s+\S+)?\s*$", re.IGNORECASE
+)
 SHA256_HEX = re.compile(r"\b[0-9a-f]{64}\b")
 
 
