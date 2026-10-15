@@ -157,8 +157,12 @@ class UpstreamStatusEndpointProbe:
 
 
 def build_configured_probe(settings: Settings) -> ProviderStatusProbe | None:
-    """The configured status endpoint, or None (manual review only)."""
-    if not settings.MCP_UPSTREAM_ENABLED or not settings.MCP_UPSTREAM_STATUS_URL:
+    """The configured status endpoint, or None (manual review only).
+
+    Deliberately independent of MCP_UPSTREAM_ENABLED: draining new dispatch
+    must not stop status lookups for calls that are already parked.
+    """
+    if not settings.MCP_UPSTREAM_STATUS_URL:
         return None
     configuration = UpstreamMcpConfiguration.from_settings(settings)
     return UpstreamStatusEndpointProbe(UpstreamMcpStatusProbe(configuration))

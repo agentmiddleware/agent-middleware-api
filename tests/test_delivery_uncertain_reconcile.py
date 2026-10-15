@@ -845,6 +845,12 @@ def test_configured_probe_requires_status_url_and_quiescence_floors() -> None:
         "partner.tool",
         "https://partner.example.com",
     )
+    # Draining new dispatch keeps probing calls that are already parked.
+    drained = {**base, "MCP_UPSTREAM_ENABLED": False}
+    assert isinstance(
+        build_configured_probe(Settings(**drained, MCP_UPSTREAM_STATUS_URL=STATUS_URL)),
+        UpstreamStatusEndpointProbe,
+    )
 
     # Default: fixed rolling-deployment lifetime + skew.
     assert quiescence_allowance_seconds(Settings(**base)) == 11_430 + 300
