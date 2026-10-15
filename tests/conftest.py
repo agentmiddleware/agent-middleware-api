@@ -167,6 +167,17 @@ os.environ.setdefault("ALLOW_LEGACY_UNPERMITTED_MCP", "true")
 # an explicit per-instance limit and is unaffected.
 os.environ.setdefault("RATE_LIMIT_PER_MINUTE", "1000000")
 
+# Under TENANT_RLS_MODE=enforce (a Postgres job connecting as a policy-bound
+# role), fixtures and direct service calls are test-harness setup, not tenant
+# traffic: bind them to the explicit RLS admin scope. Bound here, in the main
+# thread's context, so every test task inherits it; HTTP requests still narrow
+# to the caller's wallet in get_auth_context, so the governed paths under test
+# run under the real wallet policies.
+if os.environ.get("TENANT_RLS_MODE", "").strip().lower() == "enforce":
+    from app.db.tenant_rls import bind_wallet_scope
+
+    bind_wallet_scope(None, admin_reason="test_harness")
+
 
 def interleaving_factory(real_factory, hook, state, *, fire_on: int = 1):
     """Wrap a session factory so `hook` runs once, mid-transaction.

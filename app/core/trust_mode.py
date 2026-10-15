@@ -152,6 +152,8 @@ def validate_trust_mode_config(
     enable_dogfood_tool: bool = False,
     enable_dogfood_second_tool: bool = False,
     enable_demo_tenant: bool = False,
+    signing_backend: str = "env",
+    signing_kms_key_id: str = "",
 ) -> None:
     """Refuse unsafe deploy postures in production-like environments.
 
@@ -173,7 +175,14 @@ def validate_trust_mode_config(
                 "(permit validation cannot be disabled)"
             )
         configured_signing_key = (signing_private_key_b64 or "").strip()
-        if not configured_signing_key:
+        if signing_backend == "aws_kms":
+            # The seed never exists in this process; KMS holds the key.
+            if not (signing_kms_key_id or "").strip():
+                violations.append(
+                    "TRUST_SIGNING_KMS_KEY_ID is required when "
+                    "TRUST_SIGNING_BACKEND=aws_kms"
+                )
+        elif not configured_signing_key:
             violations.append(
                 "TRUST_SIGNING_PRIVATE_KEY_B64 is required in production-like "
                 "environments"
@@ -336,6 +345,8 @@ def validate_trust_mode_guardrails(settings: Settings) -> None:
         enable_dogfood_tool=settings.ENABLE_DOGFOOD_TOOL,
         enable_dogfood_second_tool=settings.ENABLE_DOGFOOD_SECOND_TOOL,
         enable_demo_tenant=settings.ENABLE_DEMO_TENANT,
+        signing_backend=settings.TRUST_SIGNING_BACKEND,
+        signing_kms_key_id=settings.TRUST_SIGNING_KMS_KEY_ID,
     )
 
 

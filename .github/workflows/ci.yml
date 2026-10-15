@@ -386,6 +386,59 @@ jobs:
             tests/test_security_fuzz_battery.py::test_rapid_fire_invokes_all_accounted \
             -v --tb=short
 
+      - name: Run tenant row-level security policies against Postgres
+        # Creates its own scratch database plus owner and NOBYPASSRLS runtime
+        # roles from the superuser URL, migrates as the owner, and drops them.
+        env:
+          TEST_RLS_POSTGRES_ADMIN_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/postgres
+          REQUIRE_TENANT_RLS_POSTGRES_TESTS: "1"
+        run: pytest tests/test_tenant_rls.py -v --tb=short
+
+      - name: Run trust primitives under enforced RLS as a non-superuser role
+        # Same suite as above, but connected as a NOSUPERUSER NOBYPASSRLS
+        # non-owner role with TENANT_RLS_MODE=enforce (docs/tenant-rls.md).
+        env:
+          DATABASE_URL: postgresql+asyncpg://amw_rls_app:amw_rls_app@localhost:5432/trust_ci
+          STATE_BACKEND: postgres
+          ENVIRONMENT: test
+          REQUIRE_POSTGRES_TESTS: "1"
+          TENANT_RLS_MODE: enforce
+        run: |
+          python - <<'EOF'
+          import asyncio, asyncpg
+          from app.db.tenant_rls import enable_rls_statements
+          async def main():
+              conn = await asyncpg.connect("postgresql://postgres:postgres@localhost:5432/trust_ci")
+              await conn.execute(
+                  "CREATE ROLE amw_rls_app LOGIN PASSWORD 'amw_rls_app' "
+                  "NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE"
+              )
+              await conn.execute("GRANT USAGE ON SCHEMA public TO amw_rls_app")
+              await conn.execute(
+                  "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO amw_rls_app"
+              )
+              await conn.execute(
+                  "GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO amw_rls_app"
+              )
+              # The migration ran in the default off mode: turn RLS on.
+              for statement in enable_rls_statements():
+                  await conn.execute(statement)
+              await conn.close()
+          asyncio.run(main())
+          EOF
+          pytest -p no:anyio \
+            -o asyncio_default_fixture_loop_scope=session \
+            -o asyncio_default_test_loop_scope=session \
+            tests/test_permits.py \
+            tests/test_receipts.py \
+            tests/test_mcp_trust.py \
+            tests/test_audit_chain.py \
+            tests/test_key_management.py \
+            tests/test_idempotency.py \
+            tests/test_kms_signer.py \
+            tests/test_security_fuzz_battery.py::test_rapid_fire_invokes_all_accounted \
+            -v --tb=short
+
       - name: Run PostgreSQL datetime regressions
         # This fixture deliberately rebuilds the app and owns its own loops.
         # Run it separately from the session-scoped trust primitive suite.
