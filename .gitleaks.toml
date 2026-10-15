@@ -89,4 +89,9 @@ regexes = [
   # `self._private_key: Ed25519PrivateKey | None = None` — a type annotation,
   # which the generic-api-key rule reads as an assigned secret value.
   '''Ed25519PrivateKey''',
+  # The same annotation with the KMS-capable signer protocol (signing_keys.py).
+  '''Ed25519Signer''',
+  # The public AWS KMS KeySpec enum value for Ed25519 keys (kms_signer.py); it
+  # names a key type, it is not key material.
+  '''^ECC_NIST_EDWARDS25519$''',
 ]

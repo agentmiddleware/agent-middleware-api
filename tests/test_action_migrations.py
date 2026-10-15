@@ -156,7 +156,7 @@ def test_action_migration_retains_legacy_and_blocks_authority_loss(
         assert result.returncode != 0, "downgrade discarded durable action authority"
         assert "action_authority_retained" in result.stderr
         with sqlite3.connect(path) as db:
-            # The 046, 045, and 044 downgrades succeed, then the 042 guard
+            # The 048, 046, 045, and 044 downgrades succeed, then the 042 guard
             # refuses: the version rests on 042 with all rows intact.
             assert (
                 db.execute("SELECT version_num FROM alembic_version").fetchone()[0]
@@ -271,7 +271,7 @@ def test_postgres_legacy_roundtrip_and_fail_closed_downgrade():
             {"owner_key": "w"},
         ]
     print(
-        "PostgreSQL: 040 -> 041 -> head(046, through 042/044/045) and 041 -> head(046); "
+        "PostgreSQL: 040 -> 041 -> head(048, through 042/044/045/046) and 041 -> head(048); "
         "content owners scrubbed; legacy permit/receipt bytes retained; "
         "every partial authority and owner downgrade blocked"
     )

@@ -1,6 +1,6 @@
 # Tenant Row-Level Security (PostgreSQL)
 
-Migration `048_tenant_rls` (stacked on `047_dispatch_reconcile_lease`) creates
+Migration `048_tenant_rls` (stacked on `046_demo_tenant_key_allowlist`) creates
 wallet policies on the tables below. It enables **and forces** PostgreSQL
 row-level security on them only when it runs with `TENANT_RLS_MODE=enforce`;
 in the default `off` mode the policies exist but RLS stays disabled, so no
@@ -212,7 +212,7 @@ not, so receipt lookups through it return not found under `enforce`.
    table is not forced.
 5. Roll back by setting `off` (no migration needed; the app bypasses per
    transaction while RLS remains enabled). `alembic downgrade
-   047_dispatch_reconcile_lease` drops the policies and disables RLS.
+   046_demo_tenant_key_allowlist` drops the policies and disables RLS.
 
 ## Evidence
 

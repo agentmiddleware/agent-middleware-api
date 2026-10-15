@@ -1,7 +1,10 @@
 # Schema 048: wallet row-level security policies
 
-Migration `048_tenant_rls` revises `047_dispatch_reconcile_lease` (schema
-047, the leased reconcile worker). It is PostgreSQL only and a no-op on
+Migration `048_tenant_rls` revises `046_demo_tenant_key_allowlist`. The
+number 047 is held by `047_dispatch_reconcile_lease` on the unmerged reconcile
+branch; 048 does not depend on its columns, and whichever of the two lands
+second must re-parent onto the other so the tree keeps a single head. It is
+PostgreSQL only and a no-op on
 SQLite. It creates the `amw_tenant_isolation` policy on each wallet-scoped
 table and the SELECT-only `amw_delegated_issuer_read` policy on `receipts`,
 `ledger_entries`, `mcp_dispatch_attempts`, and `idempotency_records`. No
@@ -24,12 +27,12 @@ inspected.
 | --- | --- |
 | Current database revision and current packaged head; private parity result | REQUIRED / UNVERIFIED |
 | Target database revision and packaged head: `048_tenant_rls`; private parity result | REQUIRED / UNVERIFIED |
-| Schema 047 (`047_dispatch_reconcile_lease`) applied first per its own rollout gate | REQUIRED / UNVERIFIED |
-| Rehearsal: 047 → 048 upgrade on disposable PostgreSQL with `TENANT_RLS_MODE` unset; `relrowsecurity` false on every covered table | REQUIRED / UNVERIFIED |
+| Schema 046 (`046_demo_tenant_key_allowlist`) applied first per its own rollout gate | REQUIRED / UNVERIFIED |
+| Rehearsal: 046 → 048 upgrade on disposable PostgreSQL with `TENANT_RLS_MODE` unset; `relrowsecurity` false on every covered table | REQUIRED / UNVERIFIED |
 | `TENANT_RLS_MODE` stays `off` through the release | REQUIRED / UNVERIFIED |
 
 1. Verify the actual database revision and the serving image's packaged
-   schema. 048 requires 047.
+   schema. 048 requires 046.
 2. Apply 048 through the reviewed migration entrypoint with
    `TENANT_RLS_MODE` unset or `off`. Confirm the boot log line
    `phase="tenant_rls_posture"` shows `tables_with_rls_enabled=[]`.
@@ -42,6 +45,6 @@ inspected.
 With `TENANT_RLS_MODE=off` there is nothing to roll back operationally: RLS
 is disabled and the policies are inert. If enforcement was turned on, set
 `TENANT_RLS_MODE=off` first; the app then opts out per transaction while RLS
-stays enabled. Alembic `downgrade` from 048 to 047 drops both policies and
+stays enabled. Alembic `downgrade` from 048 to 046 drops both policies and
 runs `NO FORCE` / `DISABLE ROW LEVEL SECURITY` on every covered table. It is
 schema-only and loses no data.
