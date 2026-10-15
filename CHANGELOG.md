@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — planned v1.3.0
 
+### Added — wallet re-plan guard (`WALLET_REPLAN_GUARD`, default `log_only`)
+
+- Closes the re-planning / new-key bypass at the wallet boundary.
+  - **Dedup.** Keyed on `(wallet, tool, canonical argument hash)` across
+    **all** permits, including the permit `POST /mcp` auto-mints when no
+    `permit_id` is given.
+  - **Velocity cap.** Wallet credits (integer minor units, `INCRBY`, no float)
+    and calls per window, across all permits.
+  - **Atomic.** Check-and-set is one Lua script on Redis (keys hash-tagged
+    `amw:{wallet}:...`, so all of a wallet's keys share one cluster slot), or
+    one critical section in the per-process fallback.
+  - **Release.** A deterministic, uncharged failure atomically releases the
+    lock and refunds the velocity. Success and `delivery_uncertain` keep both.
+  - **Canonicalizer.** Sorted keys, NFKC, exact `Decimal` numbers, no global
+    lowercasing or stripping. Case-folding applies only to fields listed in
+    `REPLAN_CASEFOLD_FIELDS`.
+  - **Modes.** `off|log_only|enforce`. `log_only` never blocks. `enforce`
+    signs `wallet_duplicate_request` / `wallet_velocity_exceeded` denials, and
+    a store outage is retryable `wallet_guard_unavailable`.
+- The guarantee stays at-most-once dispatch, not exactly-once execution. See
+  [`docs/replan-guard.md`](docs/replan-guard.md).
+
 ### Added — self-serve demo tenant (`POST /v1/demo/keys`)
 
 - Anonymous visitors can mint their own demo credential (tenant=`"demo"`

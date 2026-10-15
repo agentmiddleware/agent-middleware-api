@@ -82,9 +82,12 @@ _REASON_CODES = frozenset(
         "tool_permission_denied",
         "upstream_pre_dispatch_failed",
         "upstream_returned_error",
+        "wallet_duplicate_request",
         "wallet_expired",
         "wallet_frozen",
+        "wallet_guard_unavailable",
         "wallet_scoped_key_required",
+        "wallet_velocity_exceeded",
     }
 )
 
