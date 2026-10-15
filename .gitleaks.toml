@@ -1,6 +1,7 @@
 # Secret-scanning config for CI.
 #
-# Scope note: CI scans the WORKING TREE for speed. History was verified
+# Scope note: CI scans the working tree plus the commits in each push/PR
+# range (.github/workflows/ci.yml secret_scan). Older history was verified
 # separately with a full-history `gitleaks detect --log-opts=--all` under this
 # config, most recently on 2026-09-19. The only real credential ever committed
 # is the 2026-08-06 leaked key (see docs/api-key-rotation.md), and it is
