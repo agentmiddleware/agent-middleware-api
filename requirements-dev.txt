@@ -1,0 +1,9 @@
+# Agent Middleware API - Test and development dependencies
+# CI and local dev install requirements-dev.lock; the production image installs
+# only requirements.lock. Re-pin both with `make lock`.
+-r requirements.txt
+
+pytest>=9.1.1
+pytest-asyncio>=1.4.0
+pytest-cov>=7.1.0
+mypy>=2.4.0            # Type checking

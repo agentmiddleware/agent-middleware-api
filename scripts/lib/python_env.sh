@@ -6,7 +6,7 @@
 #   PYTHON_ENV_REQUIRE     space-separated modules the interpreter must import
 #                          (default: "pytest")
 #   PYTHON_ENV_EXTRA_WITH  space-separated extra packages for the uv fallback,
-#                          for tools absent from requirements.txt (e.g. "ruff")
+#                          for tools absent from requirements-dev.txt (e.g. "ruff")
 #
 # Sourcing this file sets two arrays:
 #   PYTHON_CMD  — runs a Python module/script ("${PYTHON_CMD[@]}" -m ruff check .)
@@ -31,7 +31,7 @@ _python_env_repo_root() {
 REPO_ROOT="$(_python_env_repo_root)"
 
 # The gates reference tests/ and scripts/ relatively, and uv needs to find
-# requirements.txt, so anchor everything at the repo root.
+# requirements-dev.lock, so anchor everything at the repo root.
 cd "$REPO_ROOT"
 
 _python_env_require="${PYTHON_ENV_REQUIRE:-pytest}"
@@ -51,7 +51,7 @@ PYTEST_CMD=()
 if [[ -n "${PYTHON:-}" ]]; then
   PYTHON_CMD=("$PYTHON")
 elif command -v uv >/dev/null 2>&1; then
-  PYTHON_CMD=(uv run --with-requirements requirements.lock)
+  PYTHON_CMD=(uv run --with-requirements requirements-dev.lock)
   for _extra in $_python_env_extra_with; do
     PYTHON_CMD+=(--with "$_extra")
   done
@@ -69,7 +69,7 @@ if [[ ${#PYTHON_CMD[@]} -eq 0 ]]; then
   echo "[python-env] No interpreter provides: $_python_env_require" >&2
   echo "[python-env] and uv is not available. Fix with one of:" >&2
   echo "[python-env]   - install uv (https://docs.astral.sh/uv/) and re-run" >&2
-  echo "[python-env]   - python3 -m pip install -r requirements.lock $_python_env_extra_with" >&2
+  echo "[python-env]   - python3 -m pip install -r requirements-dev.lock $_python_env_extra_with" >&2
   echo "[python-env]   - PYTHON=/path/to/python scripts/$(basename "$0")" >&2
   exit 1
 fi

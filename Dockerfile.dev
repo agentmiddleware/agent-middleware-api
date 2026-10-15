@@ -13,8 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.lock .
-RUN pip install --no-cache-dir -r requirements.lock
+COPY requirements-dev.lock .
+RUN pip install --no-cache-dir -r requirements-dev.lock
 
 COPY . .
 

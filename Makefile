@@ -1,9 +1,12 @@
 .PHONY: lock site-transcript site-transcript-check quickstart quickstart-check live-loop-proof demo-ambiguous-retry demo-ambiguous-retry-check failure-lab failure-lab-check test test-all test-proof test-perf coverage prove-trust-plane prove-trust-plane-postgres prove-crash-recovery demo-trust-plane demo-trust-plane-check dogfood-trust-plane dogfood-trust-plane-check red-team-trust-plane red-team-trust-plane-check agent-ops-war-room agent-ops-war-room-check check-doc-references check-railway-iac trust-coverage-gate trust-release-gate trust-conformance-live adversarial-battery-live railway-preflight railway-preflight-live failure-lab-suite failure-lab-all failure-lab-evidence failure-lab-list failure-lab-explore failure-lab-integration-check failure-lab-diagnostic failure-lab-verify-bundle
 
-# Re-pin requirements.lock after editing requirements.txt (keeps existing pins).
+# Re-pin requirements.lock (production image) and requirements-dev.lock (CI and
+# local tests) after editing either .txt (keeps existing pins). The dev lock is
+# constrained to the runtime lock so both share one set of runtime pins.
 # Add --upgrade to move every pin to the newest allowed version.
 lock:
 	uv pip compile requirements.txt --universal --python-version 3.11 -o requirements.lock
+	uv pip compile requirements-dev.txt -c requirements.lock --universal --python-version 3.11 -o requirements-dev.lock
 
 # The governed-loop transcript the public site renders. Re-runs the
 # trust-plane demo on a throwaway SQLite gateway, records the exchanges the
@@ -27,7 +30,7 @@ quickstart:
 # throwaway state dir and drives every step of docs/quickstart.md over real
 # HTTP, including offline verification and the tamper check.
 quickstart-check:
-	uv run --with-requirements requirements.lock pytest tests/test_quickstart_path.py -v
+	uv run --with-requirements requirements-dev.lock pytest tests/test_quickstart_path.py -v
 
 # One-command live proof against an already-running quickstart server
 # (terminal 1: `make quickstart`). Drives discover -> authenticate ->
@@ -44,25 +47,25 @@ live-loop-proof:
 # the code) are skipped here too — run them with `make test-perf`; CI still runs them.
 # `--with-requirements` makes these self-contained: uv installs the runtime +
 # test deps for the run, so `make test` works on a fresh checkout without a
-# separate `pip install -r requirements.lock` (deps live in requirements.txt,
-# pinned in requirements.lock — regenerate with `make lock`; not pyproject
-# [project.dependencies]).
+# separate `pip install -r requirements-dev.lock` (runtime deps live in
+# requirements.txt, test tools in requirements-dev.txt, pinned in the matching
+# .lock files — regenerate with `make lock`; not pyproject [project.dependencies]).
 test:
-	uv run --with-requirements requirements.lock pytest tests/ -q -m "not proof and not perf"
+	uv run --with-requirements requirements-dev.lock pytest tests/ -q -m "not proof and not perf"
 
 test-all:
-	uv run --with-requirements requirements.lock pytest tests/ -q
+	uv run --with-requirements requirements-dev.lock pytest tests/ -q
 
 test-proof:
-	uv run --with-requirements requirements.lock pytest tests/ -q -m proof
+	uv run --with-requirements requirements-dev.lock pytest tests/ -q -m proof
 
 test-perf:
-	uv run --with-requirements requirements.lock pytest tests/ -q -m perf
+	uv run --with-requirements requirements-dev.lock pytest tests/ -q -m perf
 
 # Reproducible whole-application coverage baseline. Production-posture tests run
 # in their dedicated CI job because they require a different environment.
 coverage:
-	uv run --with-requirements requirements.lock pytest tests/ -q -m "not production_trust" --cov=app --cov-report=term-missing
+	uv run --with-requirements requirements-dev.lock pytest tests/ -q -m "not production_trust" --cov=app --cov-report=term-missing
 
 prove-trust-plane:
 	uv run --with-requirements requirements.lock python scripts/demo_trust_plane.py --assert
@@ -88,7 +91,7 @@ prove-trust-plane-postgres: prove-crash-recovery
 # lock so two runs cannot overlap. This is the same proof CI runs.
 prove-crash-recovery:
 	RUN_MCP_MULTIPROCESS_TESTS=1 \
-	uv run --with-requirements requirements.lock \
+	uv run --with-requirements requirements-dev.lock \
 	  pytest tests/test_mcp_postgres_multiprocess.py -v --tb=short
 
 # The headline demo: one consequential payout, one lost response, one retry.

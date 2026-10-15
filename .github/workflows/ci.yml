@@ -48,14 +48,14 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.lock') }}
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements-dev.lock') }}
           restore-keys: |
             ${{ runner.os }}-pip-
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.lock
+          pip install -r requirements-dev.lock
           pip install -e ./b2a_sdk
           pip install pytest pytest-asyncio anyio httpx
 
@@ -354,7 +354,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.lock
+          pip install -r requirements-dev.lock
           pip install pytest pytest-asyncio anyio httpx
 
       - name: Apply PostgreSQL trust migrations
@@ -443,7 +443,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.lock
+          pip install -r requirements-dev.lock
           pip install pytest pytest-asyncio anyio httpx
 
       - name: Run production-trust posture tests
@@ -492,7 +492,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.lock
+          pip install -r requirements-dev.lock
           pip install pytest pytest-asyncio
 
       - name: Apply PostgreSQL migrations
@@ -594,7 +594,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.lock
+          pip install -r requirements-dev.lock
           pip install -e ./b2a_sdk
           pip install pytest pytest-asyncio pytest-cov anyio httpx
 
@@ -720,17 +720,19 @@ jobs:
       - name: Install dependencies and linters
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.lock
+          pip install -r requirements-dev.lock
           pip install ruff mypy
 
-      # Docker and CI install from requirements.lock; fail if it no longer
-      # satisfies requirements.txt. uv keeps existing pins, so this only
-      # changes the lock when requirements.txt changed. Fix with `make lock`.
-      - name: Verify requirements.lock matches requirements.txt
+      # Docker installs requirements.lock; CI test jobs install
+      # requirements-dev.lock, constrained to the same runtime pins. Fail if
+      # either no longer satisfies its .txt. uv keeps existing pins, so this
+      # only changes a lock when its input changed. Fix with `make lock`.
+      - name: Verify requirements locks match their inputs
         run: |
           pip install uv==0.12.2
           uv pip compile --quiet requirements.txt --universal --python-version 3.11 -o requirements.lock
-          git diff --exit-code requirements.lock
+          uv pip compile --quiet requirements-dev.txt -c requirements.lock --universal --python-version 3.11 -o requirements-dev.lock
+          git diff --exit-code requirements.lock requirements-dev.lock
 
       - name: Run ruff
         run: ruff check .

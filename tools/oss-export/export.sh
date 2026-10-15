@@ -60,7 +60,7 @@ rsync -a --delete --delete-excluded "${X[@]}" \
   --exclude publish_live_proof.py --exclude repo_guardian.py --exclude record_site_transcript.py \
   --exclude operator_analytics_export.py \
   "$SRC/scripts/" "$G/scripts/"
-for f in alembic.ini Dockerfile Dockerfile.dev docker-compose.yml Makefile requirements.txt requirements.lock pyproject.toml mypy.ini ruff.toml .env.example .dockerignore TROUBLESHOOTING.md DEMO_SCRIPT.md WEDGE.md DESIGN_PARTNER_GUIDE.md SECURITY_LIMITATIONS.md; do cp "$SRC/$f" "$G/"; done
+for f in alembic.ini Dockerfile Dockerfile.dev docker-compose.yml Makefile requirements.txt requirements.lock requirements-dev.txt requirements-dev.lock pyproject.toml mypy.ini ruff.toml .env.example .dockerignore TROUBLESHOOTING.md DEMO_SCRIPT.md WEDGE.md DESIGN_PARTNER_GUIDE.md SECURITY_LIMITATIONS.md; do cp "$SRC/$f" "$G/"; done
 python3 - "$G/pyproject.toml" <<'PY'
 from pathlib import Path
 import sys
@@ -80,18 +80,30 @@ gateway = Path(sys.argv[1])
 for name in ("Dockerfile", "Dockerfile.dev"):
     path = gateway / name
     text = path.read_text()
-    edits = {
-        "COPY requirements.lock .": "COPY gateway/requirements.lock .\nCOPY sdk/python/ /sdk/python/",
-        "RUN pip install --no-cache-dir -r requirements.lock": (
-            "RUN pip install --no-cache-dir -r requirements.lock "
-            "&& pip install --no-cache-dir /sdk/python"
-        ),
-        "COPY . .": "COPY gateway/ .",
-    }
     if name == "Dockerfile":
-        edits["COPY .build_commit_sha /app/.build_commit_sha"] = (
-            "COPY gateway/.build_commit_sha /app/.build_commit_sha"
-        )
+        # The SDK installs into the builder-stage venv the runtime stage copies.
+        edits = {
+            "COPY requirements.lock .": "COPY gateway/requirements.lock .\nCOPY sdk/python/ /sdk/python/",
+            "RUN /opt/venv/bin/pip install --no-cache-dir -r requirements.lock": (
+                "RUN /opt/venv/bin/pip install --no-cache-dir -r requirements.lock "
+                "&& /opt/venv/bin/pip install --no-cache-dir /sdk/python"
+            ),
+            "COPY . .": "COPY gateway/ .",
+            "COPY .build_commit_sha /app/.build_commit_sha": (
+                "COPY gateway/.build_commit_sha /app/.build_commit_sha"
+            ),
+        }
+    else:
+        edits = {
+            "COPY requirements-dev.lock .": (
+                "COPY gateway/requirements-dev.lock .\nCOPY sdk/python/ /sdk/python/"
+            ),
+            "RUN pip install --no-cache-dir -r requirements-dev.lock": (
+                "RUN pip install --no-cache-dir -r requirements-dev.lock "
+                "&& pip install --no-cache-dir /sdk/python"
+            ),
+            "COPY . .": "COPY gateway/ .",
+        }
     for old, new in edits.items():
         if text.count(old) != 1:
             raise SystemExit(f"expected one {old!r} in {path}")

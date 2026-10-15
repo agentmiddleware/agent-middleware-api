@@ -79,7 +79,7 @@ and anything in the freeze list in [`WEDGE.md`](WEDGE.md).
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-dev.lock
 pytest -q
 ```
 
@@ -140,9 +140,14 @@ Both surfaces are refused at boot by production-like deployments; details in
 
 ### Dependencies
 
-`requirements.txt` is the **single source of truth** for dependencies. CI,
-Docker, and `make test` (`uv run --with-requirements requirements.txt`) all
-install from it, and Dependabot updates it.
+`requirements.txt` is the **single source of truth** for runtime
+dependencies; `requirements-dev.txt` adds the test and dev tools (pytest,
+pytest-asyncio, pytest-cov, mypy) on top of it. Each is pinned in a committed
+lock: the production Docker image installs only `requirements.lock`, so test
+tooling never ships, while CI test jobs and `make test` install
+`requirements-dev.lock`. The dev lock is compiled against the runtime lock, so
+both share one set of runtime pins. After editing either `.txt`, run
+`make lock`; CI fails if a lock no longer matches its input.
 
 `uv.lock` is gitignored — `uv run` may regenerate it locally, but it must
 never be committed, and there is no `pyproject` `[project.dependencies]`.

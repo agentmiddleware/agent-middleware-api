@@ -3,11 +3,12 @@
 #
 # Reproduces the developer setup documented in AGENTS.md ("Cursor Cloud specific
 # instructions"): install uv, then prepare a gitignored .venv at the repo root
-# holding everything in requirements.txt plus ruff, so every dev tool
+# holding everything in requirements-dev.txt plus ruff, so every dev tool
 # (.venv/bin/{pytest,ruff,mypy,uvicorn,alembic,python}) is directly runnable.
 #
-# Runtime dependencies live in requirements.txt, NOT pyproject.toml. ruff is not
-# pinned there, so it is installed alongside — matching the documented layout.
+# Runtime dependencies live in requirements.txt and test/dev tools in
+# requirements-dev.txt, NOT pyproject.toml. ruff is not pinned there, so it is
+# installed alongside — matching the documented layout.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -26,6 +27,6 @@ fi
 if [ ! -x .venv/bin/python ]; then
   uv venv .venv --python 3.12
 fi
-uv pip install --python .venv/bin/python -r requirements.txt ruff
+uv pip install --python .venv/bin/python -r requirements-dev.txt ruff
 
 echo "[install] .venv ready — pytest/ruff/mypy/uvicorn/alembic available under .venv/bin"
