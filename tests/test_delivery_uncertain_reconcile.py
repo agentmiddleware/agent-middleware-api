@@ -613,6 +613,32 @@ async def test_tool_without_status_endpoint_stays_in_manual_review(
 
 
 @pytest.mark.anyio
+async def test_age_alerts_page_past_the_first_batch(
+    client: AsyncClient, clean_database, caplog: pytest.LogCaptureFixture
+) -> None:
+    parked = []
+    for index in range(2):
+        tool = f"reconcile-aged-page-{index}"
+        try:
+            parked.append(await _park(client, tool, f"ap-{index}"))
+        finally:
+            get_service_registry().unregister_local(tool)
+    clock = {"now": max(p.dispatched for p in parked) + timedelta(days=1)}
+    # Manual-review rows never resolve, so with a batch of one the second
+    # call is only reached if the alert query pages past the first.
+    worker = _worker(None, clock, alert_age_seconds=60, limit=1)
+    with caplog.at_level("WARNING", logger="app.services.upstream_reconcile"):
+        sweeps = [(await worker.run_once()).aged_alerts for _ in range(4)]
+    assert sweeps == [1, 1, 0, 0]
+    alerted = {
+        r.dispatch_attempt_id
+        for r in caplog.records
+        if r.message == "mcp_delivery_uncertain_aged"
+    }
+    assert alerted == {p.attempt.attempt_id for p in parked}
+
+
+@pytest.mark.anyio
 async def test_tampered_receipt_is_never_resolved(
     client: AsyncClient, clean_database
 ) -> None:

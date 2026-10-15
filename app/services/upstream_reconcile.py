@@ -288,6 +288,7 @@ class DeliveryUncertainReconcileWorker:
         self._dispatch = dispatch_service or get_mcp_dispatch_attempt_service()
         self._receipts = receipt_service or get_receipt_service()
         self._alerted: set[str] = set()
+        self._alert_cursor: tuple[datetime, str] | None = None
 
     @classmethod
     def from_settings(cls) -> DeliveryUncertainReconcileWorker:
@@ -866,19 +867,43 @@ class DeliveryUncertainReconcileWorker:
         attempt = McpDispatchAttemptModel
         cutoff = now - timedelta(seconds=self._alert_age)
         parked_at = func.coalesce(attempt.completed_at, attempt.updated_at)
+        conditions: list[Any] = [
+            cast(ColumnElement[bool], attempt.state == _DELIVERY_UNCERTAIN),
+            cast(Any, attempt.reconcile_status).is_(None),
+            parked_at <= cutoff,
+        ]
+        # Unresolved rows never leave this query on their own (manual-review
+        # calls stay forever), so page past the ones already seen instead of
+        # re-reading the same oldest batch every sweep.
+        if self._alert_cursor is not None:
+            cursor_at, cursor_id = self._alert_cursor
+            conditions.append(
+                or_(
+                    parked_at > cursor_at,
+                    and_(
+                        parked_at == cursor_at,
+                        cast(Any, attempt.attempt_id) > cursor_id,
+                    ),
+                )
+            )
         stmt = (
             select(attempt)
-            .where(
-                cast(ColumnElement[bool], attempt.state == _DELIVERY_UNCERTAIN),
-                cast(Any, attempt.reconcile_status).is_(None),
-                parked_at <= cutoff,
-            )
-            .order_by(parked_at.asc())
+            .where(*conditions)
+            .order_by(parked_at.asc(), cast(Any, attempt.attempt_id).asc())
             .limit(self._limit)
         )
         factory = get_session_factory()
         async with factory() as session:
             rows = list((await session.execute(stmt)).scalars())
+        # A short page means the end was reached; start over next sweep.
+        self._alert_cursor = (
+            (
+                to_naive_utc(rows[-1].completed_at or rows[-1].updated_at),
+                rows[-1].attempt_id,
+            )
+            if len(rows) == self._limit
+            else None
+        )
         alerts = 0
         for row in rows:
             if row.attempt_id in self._alerted:
