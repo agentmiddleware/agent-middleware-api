@@ -1732,8 +1732,14 @@ class PermitService:
                     if attempt.call_slot_reserved:
                         # Only release call slot if attempt never dispatched.
                         # A dispatched attempt consumed its slot even if it later
-                        # errored and was refunded - the slot was used.
-                        if attempt.dispatched_at is None:
+                        # errored and was refunded - the slot was used. A
+                        # delivery_uncertain call went out (or may have) even
+                        # when a crash-reconciled or historical row has no
+                        # dispatched_at, so a reconcile refund keeps its slot.
+                        if (
+                            attempt.dispatched_at is None
+                            and not reconciled_not_executed
+                        ):
                             # Pre-dispatch failure: release the call slot
                             permit = await session.get(PermitModel, attempt.permit_id)
                             if permit is not None:

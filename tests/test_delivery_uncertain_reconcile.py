@@ -345,6 +345,35 @@ async def test_refund_policy_off_leaves_debit_standing(
 
 
 @pytest.mark.anyio
+async def test_refund_keeps_call_slot_without_dispatch_timestamp(
+    client: AsyncClient, clean_database
+) -> None:
+    tool = "reconcile-call-slot"
+    try:
+        parked = await _park(client, tool, "rs-1")
+    finally:
+        get_service_registry().unregister_local(tool)
+    # A crash-reconciled or historical parked row: the slot was taken, but no
+    # dispatched_at was recorded.
+    async with get_session_factory()() as session:
+        async with session.begin():
+            row = await session.get(McpDispatchAttemptModel, parked.attempt.attempt_id)
+            permit = await session.get(PermitModel, parked.permit_id)
+            assert row is not None and permit is not None
+            row.call_slot_reserved = True
+            row.dispatched_at = None
+            permit.tool_call_counts_json = json.dumps({tool: 1})
+    clock = {"now": parked.dispatched + timedelta(seconds=QUIESCENCE + 60)}
+    sweep = await _worker(ScriptedProbe(tool), clock).run_once()
+    assert sweep.refunded == 1
+    async with get_session_factory()() as session:
+        permit = await session.get(PermitModel, parked.permit_id)
+        assert permit is not None
+        # The call went out (or may have): refunding it frees no call slot.
+        assert json.loads(permit.tool_call_counts_json or "{}") == {tool: 1}
+
+
+@pytest.mark.anyio
 async def test_replay_after_refund_never_redispatches(
     client: AsyncClient, clean_database
 ) -> None:
