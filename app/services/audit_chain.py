@@ -54,7 +54,7 @@ def audit_payload(
     }
 
 
-def _sign_with_previous(
+async def _sign_with_previous(
     model: ControlPlaneAuditEventModel,
     previous_hash: str | None,
     *,
@@ -85,7 +85,11 @@ def _sign_with_previous(
     )
     payload_hash = sha256_hex(payload)
     payload["payload_hash"] = payload_hash
-    signature, signature_key_id, _ = get_signing_key_service().sign_payload_with_key_id(
+    (
+        signature,
+        signature_key_id,
+        _,
+    ) = await get_signing_key_service().sign_payload_with_key_id(
         payload, signing_key_id
     )
     model.payload_hash = payload_hash
@@ -128,7 +132,7 @@ async def sign_audit_model(model: ControlPlaneAuditEventModel) -> None:
         previous = result.scalar_one_or_none()
     previous_hash = previous.chain_hash if previous else None
     model.seq = (previous.seq + 1) if previous else 1
-    _sign_with_previous(model, previous_hash, signing_key_id=key.key_id)
+    await _sign_with_previous(model, previous_hash, signing_key_id=key.key_id)
 
 
 class _HeadConflict(Exception):
@@ -279,7 +283,9 @@ async def append_chained_audit_event(
                 observed_seq = row[0] if row else 0
                 previous_hash = row[1] if row else None
                 model.seq = observed_seq + 1
-                _sign_with_previous(model, previous_hash, signing_key_id=key.key_id)
+                await _sign_with_previous(
+                    model, previous_hash, signing_key_id=key.key_id
+                )
                 now = utc_now()
                 if row is None:
                     # First event for this wallet; a unique PK collision means a

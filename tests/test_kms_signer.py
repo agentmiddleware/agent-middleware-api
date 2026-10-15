@@ -11,6 +11,7 @@ the exported receipt through :mod:`b2a_sdk.receipt_verifier` and the
 from __future__ import annotations
 
 import json
+import threading
 from typing import Any
 
 import pytest
@@ -55,6 +56,7 @@ class FakeKmsClient:
         self._private_key = private_key or Ed25519PrivateKey.generate()
         self._overrides = overrides
         self.sign_calls: list[dict[str, Any]] = []
+        self.sign_threads: list[int] = []
         self.public_key_calls = 0
 
     def get_public_key(self, *, KeyId: str) -> dict[str, Any]:  # noqa: N803
@@ -87,6 +89,7 @@ class FakeKmsClient:
                 "SigningAlgorithm": SigningAlgorithm,
             }
         )
+        self.sign_threads.append(threading.get_ident())
         # Real KMS would compute Ed25519ph for DIGEST, which a plain Ed25519
         # verifier rejects; refusing here makes a regression loud.
         if MessageType != "RAW" or SigningAlgorithm != "ED25519_SHA_512":
@@ -263,6 +266,18 @@ def kms_signing(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_kms_sign_runs_off_the_event_loop(kms_signing):
+    """The blocking boto3 Sign call must not stall every coroutine on the worker."""
+    signature, key_id, _ = await get_signing_key_service().sign_payload_with_key_id(
+        {"receipt_id": "r1"}, "kms-ed25519-test"
+    )
+
+    assert signature and key_id == "kms-ed25519-test"
+    assert kms_signing.sign_threads
+    assert threading.get_ident() not in kms_signing.sign_threads
+
+
+@pytest.mark.anyio
 async def test_kms_signed_receipt_verifies_with_existing_verifier(
     client, clean_database, kms_signing, tmp_path
 ):
@@ -285,6 +300,8 @@ async def test_kms_signed_receipt_verifies_with_existing_verifier(
     # The receipt's signing input is among the exact messages KMS signed.
     signed_messages = {c["Message"] for c in kms_signing.sign_calls}
     assert bundle["signing_input"].encode() in signed_messages
+    # Permit, audit, and receipt signatures all ran off the event-loop thread.
+    assert threading.get_ident() not in kms_signing.sign_threads
 
     result = verify_bundle(bundle, key_set_from_document(keys))
     assert result.status is VerificationStatus.VERIFIED, result.reason

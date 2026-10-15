@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import hashlib
@@ -190,9 +191,20 @@ class SigningKeyService:
         if key.status == "disabled":
             raise SigningKeyError("signing_key_disabled")
 
+    async def _off_loop(self, func: Any, *args: Any) -> Any:
+        """Run a signer call off the event loop when it can block on network I/O.
+
+        A local seed signs in microseconds; the KMS signer makes a synchronous
+        boto3 call that would otherwise stall every coroutine on the worker
+        (and any transaction held open around the signature).
+        """
+        if isinstance(self._load_private_key(), Ed25519PrivateKey):
+            return func(*args)
+        return await asyncio.to_thread(func, *args)
+
     async def ensure_active_key(self) -> SigningKeyModel:
         factory = get_session_factory()
-        public_key_b64 = self._public_key_b64()
+        public_key_b64 = await self._off_loop(self._public_key_b64)
         async with factory() as session:
             result = await session.execute(
                 select(SigningKeyModel).where(
@@ -356,7 +368,7 @@ class SigningKeyService:
 
     async def sign_payload(self, payload: dict[str, Any]) -> tuple[str, str, str]:
         key = await self.ensure_active_key()
-        return self.sign_payload_with_key_id(payload, key.key_id)
+        return await self.sign_payload_with_key_id(payload, key.key_id)
 
     async def validate_prepared_signing_key(
         self,
@@ -379,7 +391,7 @@ class SigningKeyService:
             raise SigningKeyError("signing_key_not_active")
         return key
 
-    def sign_payload_with_key_id(
+    async def sign_payload_with_key_id(
         self,
         payload: dict[str, Any],
         key_id: str,
@@ -395,8 +407,9 @@ class SigningKeyService:
         signing_payload.setdefault("kid", key_id)
         payload_hash = sha256_hex(signing_payload)
         signing_payload.setdefault("payload_hash", payload_hash)
-        signature = self._load_private_key().sign(
-            canonical_json(signing_payload).encode()
+        signature = await self._off_loop(
+            self._load_private_key().sign,
+            canonical_json(signing_payload).encode(),
         )
         return base64.b64encode(signature).decode(), key_id, payload_hash
 
