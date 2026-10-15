@@ -39,7 +39,7 @@ reports.
 | `postgres_trust` | `postgres_trust` | Trust loop failed against real PostgreSQL/asyncpg |
 | `production_trust` | `production_trust` | Production-like trust flags failed to boot fail-closed |
 | `postgres_permit_concurrency` | `postgres_permit_concurrency` | Two-process exactly-once / permit row-lock concurrency regressed |
-| `secret_scan` | `secret_scan` | A credential-shaped literal reached the working tree |
+| `secret_scan` | `secret_scan` | A credential-shaped literal reached the working tree or a commit in the push or pull-request range |
 | `lint` | `lint` | `ruff` or `mypy app/` failed |
 
 `trust_release_gate` overlaps some of what `test` already runs. That redundancy
