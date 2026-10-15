@@ -220,7 +220,9 @@ async def test_parallel_mismatched_bodies_after_completed_original_all_conflict(
         )
         responses = await _burst(mismatched, headers, monkeypatch)
 
-        assert [_conflict_head(r.get("error")) for r in responses] == [CONFLICT] * n, responses
+        assert [_conflict_head(r.get("error")) for r in responses] == [CONFLICT] * n, (
+            responses
+        )
         assert executor.dispatch_count == len(executor.calls) == 1
         assert await _money_state(
             provisioned["agent_wallet_id"], permit["permit_id"]
@@ -248,7 +250,9 @@ async def test_parallel_mismatched_bodies_during_inflight_original_all_conflict(
             tool, provisioned, permit, "mm-live", [f"changed-{i}" for i in range(n)]
         )
         responses = await _burst(mismatched, headers, monkeypatch)
-        assert [_conflict_head(r.get("error")) for r in responses] == [CONFLICT] * n, responses
+        assert [_conflict_head(r.get("error")) for r in responses] == [CONFLICT] * n, (
+            responses
+        )
         assert not original_task.done()
 
         executor.release.set()
@@ -285,7 +289,9 @@ async def test_cold_race_of_distinct_bodies_has_one_winner_and_rest_conflict(
         winning_message = executor.calls[0]["arguments"]["message"]
         assert bodies[winners[0]]["params"]["arguments"]["message"] == winning_message
         losers = [r for i, r in enumerate(responses) if i != winners[0]]
-        assert [_conflict_head(r.get("error")) for r in losers] == [CONFLICT] * (n - 1), responses
+        assert [_conflict_head(r.get("error")) for r in losers] == [CONFLICT] * (
+            n - 1
+        ), responses
         assert await _money_state(
             provisioned["agent_wallet_id"], permit["permit_id"]
         ) == (1, Decimal("2"), 1)

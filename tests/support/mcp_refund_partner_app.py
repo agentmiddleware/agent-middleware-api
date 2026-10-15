@@ -309,7 +309,9 @@ async def partner_refund(
 @server.custom_route("/__stress/health", methods=["GET"], include_in_schema=False)
 async def stress_health(request: Request) -> JSONResponse:
     if not _control_authorized(request):
-        return JSONResponse({"detail": "refund_partner_control_denied"}, status_code=403)
+        return JSONResponse(
+            {"detail": "refund_partner_control_denied"}, status_code=403
+        )
     totals = await asyncio.to_thread(_totals)
     honor = await asyncio.to_thread(_honor_idempotency)
     return JSONResponse(
@@ -326,7 +328,9 @@ async def stress_health(request: Request) -> JSONResponse:
 @server.custom_route("/__stress/effects", methods=["GET"], include_in_schema=False)
 async def stress_effects(request: Request) -> JSONResponse:
     if not _control_authorized(request):
-        return JSONResponse({"detail": "refund_partner_control_denied"}, status_code=403)
+        return JSONResponse(
+            {"detail": "refund_partner_control_denied"}, status_code=403
+        )
     refund_ref = request.query_params.get("refund_ref")
     if refund_ref is not None and (not refund_ref or len(refund_ref) > 512):
         return JSONResponse(
@@ -346,7 +350,9 @@ async def stress_effects(request: Request) -> JSONResponse:
 @server.custom_route("/__stress/mode", methods=["POST"], include_in_schema=False)
 async def stress_mode(request: Request) -> JSONResponse:
     if not _control_authorized(request):
-        return JSONResponse({"detail": "refund_partner_control_denied"}, status_code=403)
+        return JSONResponse(
+            {"detail": "refund_partner_control_denied"}, status_code=403
+        )
     try:
         payload = await request.json()
     except ValueError:
