@@ -2,7 +2,7 @@
 """
 Autonomous PR Runner
 =====================
-Standalone script called by CI/CD (auto-pr.yml) to:
+Standalone script to:
 1. Fetch critical anomalies from the Telemetry API
 2. Generate code fixes via the Auto-PR endpoint
 3. Write fix details for the GitHub Actions PR creation step
