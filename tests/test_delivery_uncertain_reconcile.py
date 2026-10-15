@@ -548,6 +548,35 @@ async def test_concurrent_workers_partition_and_lost_lease_resolves_nothing(
     charge = parked.attempt.ledger_entry_id
     assert charge is not None
     assert len(await _refunds(charge)) == 1
+    # A sweep that lost its row never asked the provider.
+    assert len(probe.seen) == 1
+
+
+@pytest.mark.anyio
+async def test_lease_is_renewed_before_a_probe_queued_behind_others(
+    client: AsyncClient, clean_database
+) -> None:
+    tool = "reconcile-lease-renew"
+    try:
+        parked = await _park(client, tool, "rn-1")
+    finally:
+        get_service_registry().unregister_local(tool)
+    clock = {"now": parked.dispatched + timedelta(seconds=5)}
+    probe = ScriptedProbe(tool, ProviderOutcome.EXECUTED)
+    worker = _worker(probe, clock)
+    claimed = await worker.claim_due_calls(owner="owner-a")
+    assert len(claimed) == 1
+
+    # Earlier probes in the batch used up this row's claim-time lease, but no
+    # other sweep took it: the answer must still be recorded.
+    clock["now"] += timedelta(seconds=61)
+    counts: dict[str, int] = dict.fromkeys(
+        ("probed", "probe_errors", "resolved_executed", "lost_leases"), 0
+    )
+    await worker._probe_and_resolve(claimed[0], owner="owner-a", counts=counts)
+    assert (counts["resolved_executed"], counts["lost_leases"]) == (1, 0)
+    row = await _attempt(parked.attempt.attempt_id)
+    assert row.reconcile_status == "executed"
 
 
 @pytest.mark.anyio
@@ -851,6 +880,16 @@ def test_configured_probe_requires_status_url_and_quiescence_floors() -> None:
         build_configured_probe(Settings(**drained, MCP_UPSTREAM_STATUS_URL=STATUS_URL)),
         UpstreamStatusEndpointProbe,
     )
+    # A lease that cannot outlive one probe (connect 5 s + status 10 s) is
+    # refused rather than letting the answer arrive after the row is free.
+    with pytest.raises(ValueError, match="lease_shorter_than_probe"):
+        build_configured_probe(
+            Settings(
+                **base,
+                MCP_UPSTREAM_STATUS_URL=STATUS_URL,
+                UPSTREAM_RECONCILE_LEASE_SECONDS=15,
+            )
+        )
 
     # Default: fixed rolling-deployment lifetime + skew.
     assert quiescence_allowance_seconds(Settings(**base)) == 11_430 + 300

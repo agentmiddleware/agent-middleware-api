@@ -165,6 +165,13 @@ def build_configured_probe(settings: Settings) -> ProviderStatusProbe | None:
     if not settings.MCP_UPSTREAM_STATUS_URL:
         return None
     configuration = UpstreamMcpConfiguration.from_settings(settings)
+    # The lease is renewed just before each probe, so it must outlive one
+    # probe's full budget or the answer arrives after the row is reclaimable.
+    probe_budget = (
+        configuration.connect_timeout_seconds + configuration.status_timeout_seconds
+    )
+    if settings.UPSTREAM_RECONCILE_LEASE_SECONDS <= probe_budget:
+        raise ValueError("upstream_reconcile_lease_shorter_than_probe")
     return UpstreamStatusEndpointProbe(UpstreamMcpStatusProbe(configuration))
 
 
@@ -323,6 +330,13 @@ class DeliveryUncertainReconcileWorker:
                 extra={"dispatch_attempt_id": call.attempt_id, "reason": reason},
             )
             await self._reschedule(call, owner=owner, now=self._clock())
+            return
+
+        # Rows are probed one after another, so a later row's claim-time
+        # lease may already be spent. Restart it now; if another sweep has
+        # reclaimed the row, leave the probe to that sweep.
+        if not await self._renew_lease(call, owner=owner, now=self._clock()):
+            counts["lost_leases"] += 1
             return
 
         counts["probed"] += 1
@@ -521,6 +535,27 @@ class DeliveryUncertainReconcileWorker:
             _parked_call(row, receipt_id, constraints_json)
             for row, receipt_id, constraints_json in rows
         ]
+
+    async def _renew_lease(
+        self, call: ParkedCall, *, owner: str, now: datetime
+    ) -> bool:
+        """Extend our lease iff no other sweep has taken the row since."""
+        attempt = McpDispatchAttemptModel
+        factory = get_session_factory()
+        async with factory() as session:
+            async with session.begin():
+                result = await session.execute(
+                    sa_update(attempt)
+                    .where(
+                        *self._owned(call, owner),
+                        cast(Any, attempt.reconcile_status).is_(None),
+                    )
+                    .values(
+                        reconcile_lease_expires_at=now + timedelta(seconds=self._lease)
+                    )
+                    .execution_options(synchronize_session=False)
+                )
+                return (cast(Any, result).rowcount or 0) == 1
 
     # --- resolution --------------------------------------------------------
 

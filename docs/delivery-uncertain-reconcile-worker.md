@@ -119,8 +119,13 @@ Runs inside the 5-minute `periodic_cleanup` loop when enabled. Per sweep:
    commits. On SQLite `FOR UPDATE` is a no-op, and the guarded lease UPDATE
    (which re-checks every condition) alone decides ownership.
 2. **Verify, then probe.** The receipt signature is checked first. A receipt
-   that fails verification is never resolved. The probe then runs with **no
-   database transaction open**.
+   that fails verification is never resolved. Rows are probed one at a time,
+   so just before each probe the lease is renewed to
+   `now + UPSTREAM_RECONCILE_LEASE_SECONDS`, guarded on this sweep still
+   owning it; a row another sweep reclaimed is skipped without a lookup. The
+   lease must exceed `MCP_UPSTREAM_CONNECT_TIMEOUT_SECONDS +
+   MCP_UPSTREAM_STATUS_TIMEOUT_SECONDS`, or the probe is refused at
+   configuration. The probe then runs with **no database transaction open**.
 3. **Resolve.** Each row gets its own transaction, a conditional UPDATE that
    matches only while `state = 'delivery_uncertain'`, `reconcile_status IS NULL`,
    the lease owner is this sweep, and the lease is unexpired. A lost lease
