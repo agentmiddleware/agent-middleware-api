@@ -111,9 +111,7 @@ async def test_permit_cache_prevents_duplicate_create_permit():
     )
 
     # Verify: create_permit called only ONCE (cached on second call)
-    assert permit_create_count["count"] == 1, (
-        "create_permit should be called once and cached"
-    )
+    assert permit_create_count["count"] == 1, "create_permit should be called once and cached"
     # Verify: invoke_tool called TWICE (different invoke keys)
     assert invoke_count["count"] == 2, "invoke_tool should be called twice"
 

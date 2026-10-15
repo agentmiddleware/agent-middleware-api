@@ -250,7 +250,7 @@ jobs:
           SDK_VERSION=$(python -c "import pathlib, re; text=pathlib.Path('b2a_sdk/pyproject.toml').read_text(); print(re.search(r'^version = \"([^\"]+)\"$', text, re.MULTILINE).group(1))")
           echo "SDK_VERSION=$SDK_VERSION" >> "$GITHUB_ENV"
           python -m pip install --upgrade pip
-          pip install uv pytest pytest-asyncio ruff mypy
+          pip install uv pytest pytest-asyncio ruff==0.9.0 mypy
           uv build b2a_sdk --out-dir sdk-dist
 
       - name: Validate clean wheel installation
@@ -526,6 +526,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # Full history so the push/PR commit range below can be scanned.
+          fetch-depth: 0
 
       - name: Install gitleaks
         env:
@@ -544,14 +547,37 @@ jobs:
           sudo install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
           gitleaks version
 
-      # Working tree only, for speed. History was verified separately on
-      # 2026-08-24 with a full-history gitleaks scan across every ref (see
-      # the scope note in .gitleaks.toml): the only real credential ever
-      # committed is the 2026-08-06 key — rotated dead at the provider, gone
-      # from main's flattened history, still reachable on stale unmerged
-      # branches until they are pruned.
+      # Working tree: catches a secret present in the tree being tested.
       - name: Scan working tree for committed secrets
         run: gitleaks detect --no-git --source . --config .gitleaks.toml --redact --verbose
+
+      # Commit history of this push/PR: catches a secret that was added in one
+      # commit and deleted in a later one, which the working-tree scan misses.
+      # Only the new commits are scanned — older history was verified
+      # separately (see the scope note in .gitleaks.toml) and still contains
+      # the rotated 2026-08-06 key, so a full-history scan would always fail.
+      - name: Scan commit range for committed secrets
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            range="${PR_BASE_SHA}..${PR_HEAD_SHA}"
+          elif [ -n "$PUSH_BEFORE_SHA" ] \
+            && [ "$PUSH_BEFORE_SHA" != "0000000000000000000000000000000000000000" ] \
+            && git cat-file -e "${PUSH_BEFORE_SHA}^{commit}" 2>/dev/null; then
+            range="${PUSH_BEFORE_SHA}..${PUSH_SHA}"
+          else
+            # New branch or force push: the old tip is unknown, so scan the
+            # pushed head commit alone rather than all of history.
+            range="${PUSH_SHA}~1..${PUSH_SHA}"
+          fi
+          echo "Scanning commits in ${range}"
+          gitleaks detect --source . --config .gitleaks.toml --redact --verbose --log-opts="${range}"
 
       # Guards the guard: proves the ruleset still catches the exact class of
       # low-entropy credential that leaked, so an over-broad allowlist edit
@@ -721,7 +747,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
-          pip install ruff mypy
+          pip install ruff==0.9.0 mypy
 
       # Docker and CI install from requirements.lock; fail if it no longer
       # satisfies requirements.txt. uv keeps existing pins, so this only
@@ -734,6 +760,9 @@ jobs:
 
       - name: Run ruff
         run: ruff check .
+
+      - name: Run ruff format check
+        run: ruff format --check .
 
       - name: Run mypy
         run: mypy app/
