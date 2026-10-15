@@ -1,12 +1,14 @@
 """CrewAI Tool for Agent Middleware API."""
 
-from datetime import datetime, timedelta, timezone
+import threading
+from collections import OrderedDict
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import Any
-from crewai.tools import BaseTool
-from pydantic import BaseModel
+from typing import Any, ClassVar
 
 from b2a_sdk.models import PermitRequest
+from crewai.tools import BaseTool
+from pydantic import BaseModel, PrivateAttr
 
 from .client import B2AClient
 
@@ -38,18 +40,32 @@ class CrewAIB2ATool(BaseTool):
     base_url: str = "https://api.thisisatest.tech"
     api_key: str
     wallet_id: str
-    permit_budget: Decimal = Decimal("100")
+    permit_budget: Decimal = Decimal(100)
     permit_ttl_minutes: int = 30
     # Cache permits to avoid 409 on replay (server hashes full permit body including expires_at)
-    _permit_cache: dict[str, str] = {}  # permit_idempotency_key → permit_id
-    _permit_requests: dict[str, PermitRequest] = {}
+    # Private per-instance state (permit_idempotency_key → permit_id); a fresh
+    # dict per instance so replays never leak across tool instances.
+    _permit_cache: dict[str, str] = PrivateAttr(default_factory=dict)
+    # Permit bodies this instance has already used (permit_idempotency_key →
+    # request), so later field mutations are checked against them.
+    _permit_requests: dict[str, PermitRequest] = PrivateAttr(default_factory=dict)
+    # Permit request bodies are shared across instances, keyed by
+    # (base_url, wallet_id, permit_idempotency_key): a logical retry through a
+    # new tool instance must resend the identical body (same expires_at) or
+    # /v1/permits rejects the replay. Unrelated wallets or gateways never
+    # share an entry. Bounded LRU so long-running processes do not grow it.
+    _shared_permit_requests: ClassVar[OrderedDict[tuple[str, str, str], PermitRequest]] = (
+        OrderedDict()
+    )
+    _shared_permit_requests_lock: ClassVar[threading.Lock] = threading.Lock()
+    _shared_permit_requests_max: ClassVar[int] = 1024
 
     def __init__(
         self,
         api_key: str,
         wallet_id: str,
         base_url: str = "https://api.thisisatest.tech",
-        permit_budget: Decimal = Decimal("100"),
+        permit_budget: Decimal = Decimal(100),
         permit_ttl_minutes: int = 30,
         **kwargs,
     ):
@@ -76,27 +92,42 @@ class CrewAIB2ATool(BaseTool):
 
     def _permit_request(self, tool_name: str, permit_key: str) -> PermitRequest:
         # Both sync and async entry points retain the body before sending it.
-        # A lost response therefore cannot change the expiry on retry.
+        # A lost response therefore cannot change the expiry on retry, even
+        # when the retry goes through a new tool instance.
+        # Once this instance has used a key, its own record wins: mutating
+        # wallet_id or permit_budget afterwards must fail the terms check
+        # below, not silently select a fresh shared entry.
         request = self._permit_requests.get(permit_key)
         if request is None:
-            request = PermitRequest(
-                issuer_wallet_id=self.wallet_id,
-                subject_wallet_id=self.wallet_id,
-                max_credits=self.permit_budget,
-                expires_at=datetime.now(timezone.utc)
-                + timedelta(minutes=self.permit_ttl_minutes),
-                allowed_tools=[tool_name],
-                scopes=[f"tool:{tool_name}:invoke", "billing:charge"],
-            )
+            request = self._shared_permit_request(tool_name, permit_key)
             self._permit_requests[permit_key] = request
-        elif (
+        if (
             request.subject_wallet_id != self.wallet_id
             or request.max_credits != self.permit_budget
             or request.allowed_tools != [tool_name]
         ):
-            raise ValueError(
-                "permit_idempotency_key reused with different permit terms"
-            )
+            raise ValueError("permit_idempotency_key reused with different permit terms")
+        return request
+
+    def _shared_permit_request(self, tool_name: str, permit_key: str) -> PermitRequest:
+        cache = type(self)._shared_permit_requests
+        cache_key = (self.base_url, self.wallet_id, permit_key)
+        with type(self)._shared_permit_requests_lock:
+            request = cache.get(cache_key)
+            if request is None:
+                request = PermitRequest(
+                    issuer_wallet_id=self.wallet_id,
+                    subject_wallet_id=self.wallet_id,
+                    max_credits=self.permit_budget,
+                    expires_at=datetime.now(UTC) + timedelta(minutes=self.permit_ttl_minutes),
+                    allowed_tools=[tool_name],
+                    scopes=[f"tool:{tool_name}:invoke", "billing:charge"],
+                )
+                cache[cache_key] = request
+                if len(cache) > type(self)._shared_permit_requests_max:
+                    cache.popitem(last=False)
+            else:
+                cache.move_to_end(cache_key)
         return request
 
     def _run(
@@ -116,12 +147,8 @@ class CrewAIB2ATool(BaseTool):
 
         try:
             if operation == "discover_tools":
-                tools = asyncio.get_event_loop().run_until_complete(
-                    client.discover_tools()
-                )
-                return str(
-                    [{"name": t.name, "description": t.description} for t in tools]
-                )
+                tools = asyncio.get_event_loop().run_until_complete(client.discover_tools())
+                return str([{"name": t.name, "description": t.description} for t in tools])
 
             elif operation == "call_tool":
                 tool_name = kwargs.get("tool_name")
@@ -140,9 +167,7 @@ class CrewAIB2ATool(BaseTool):
                     permit_id = self._permit_cache[permit_idempotency_key]
                 else:
                     permit = asyncio.get_event_loop().run_until_complete(
-                        client.create_permit(
-                            request, idempotency_key=permit_idempotency_key
-                        )
+                        client.create_permit(request, idempotency_key=permit_idempotency_key)
                     )
                     permit_id = permit.permit_id
                     self._permit_cache[permit_idempotency_key] = permit_id
@@ -176,8 +201,10 @@ class CrewAIB2ATool(BaseTool):
             else:
                 return f"Unknown operation: {operation}"
 
-        except Exception as e:
-            return f"Error: {str(e)}"
+        # The tool contract returns errors as strings, so any failure
+        # (network, auth, validation) is reported, never raised.
+        except Exception as e:  # noqa: BLE001 - errors are tool output here
+            return f"Error: {e!s}"
 
     async def _arun(
         self,
@@ -190,9 +217,7 @@ class CrewAIB2ATool(BaseTool):
         try:
             if operation == "discover_tools":
                 tools = await client.discover_tools()
-                return str(
-                    [{"name": t.name, "description": t.description} for t in tools]
-                )
+                return str([{"name": t.name, "description": t.description} for t in tools])
 
             elif operation == "call_tool":
                 tool_name = kwargs.get("tool_name")
@@ -241,5 +266,7 @@ class CrewAIB2ATool(BaseTool):
             else:
                 return f"Unknown operation: {operation}"
 
-        except Exception as e:
-            return f"Error: {str(e)}"
+        # The tool contract returns errors as strings, so any failure
+        # (network, auth, validation) is reported, never raised.
+        except Exception as e:  # noqa: BLE001 - errors are tool output here
+            return f"Error: {e!s}"
