@@ -406,6 +406,9 @@ async def lifespan(app: FastAPI):
                                 ),
                                 delivery_uncertain_probe_errors=sweep.probe_errors,
                                 delivery_uncertain_aged_alerts=sweep.aged_alerts,
+                                delivery_uncertain_audits_repaired=(
+                                    sweep.audits_repaired
+                                ),
                             )
 
             except asyncio.CancelledError:
