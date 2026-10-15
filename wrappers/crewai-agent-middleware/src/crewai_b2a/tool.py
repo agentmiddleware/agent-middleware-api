@@ -1,8 +1,10 @@
 """CrewAI Tool for Agent Middleware API."""
 
+import threading
+from collections import OrderedDict
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import Any, ClassVar
 
 from b2a_sdk.models import PermitRequest
 from crewai.tools import BaseTool
@@ -44,7 +46,16 @@ class CrewAIB2ATool(BaseTool):
     # Private per-instance state (permit_idempotency_key → permit_id); a fresh
     # dict per instance so replays never leak across tool instances.
     _permit_cache: dict[str, str] = PrivateAttr(default_factory=dict)
-    _permit_requests: dict[str, PermitRequest] = PrivateAttr(default_factory=dict)
+    # Permit request bodies are shared across instances, keyed by
+    # (base_url, wallet_id, permit_idempotency_key): a logical retry through a
+    # new tool instance must resend the identical body (same expires_at) or
+    # /v1/permits rejects the replay. Unrelated wallets or gateways never
+    # share an entry. Bounded LRU so long-running processes do not grow it.
+    _shared_permit_requests: ClassVar[OrderedDict[tuple[str, str, str], PermitRequest]] = (
+        OrderedDict()
+    )
+    _shared_permit_requests_lock: ClassVar[threading.Lock] = threading.Lock()
+    _shared_permit_requests_max: ClassVar[int] = 1024
 
     def __init__(
         self,
@@ -66,7 +77,6 @@ class CrewAIB2ATool(BaseTool):
             **kwargs,
         )
         self._permit_cache = {}  # Instance-specific cache
-        self._permit_requests = {}
 
     def _get_client(self) -> B2AClient:
         if self.client is None:
@@ -78,19 +88,27 @@ class CrewAIB2ATool(BaseTool):
 
     def _permit_request(self, tool_name: str, permit_key: str) -> PermitRequest:
         # Both sync and async entry points retain the body before sending it.
-        # A lost response therefore cannot change the expiry on retry.
-        request = self._permit_requests.get(permit_key)
-        if request is None:
-            request = PermitRequest(
-                issuer_wallet_id=self.wallet_id,
-                subject_wallet_id=self.wallet_id,
-                max_credits=self.permit_budget,
-                expires_at=datetime.now(UTC) + timedelta(minutes=self.permit_ttl_minutes),
-                allowed_tools=[tool_name],
-                scopes=[f"tool:{tool_name}:invoke", "billing:charge"],
-            )
-            self._permit_requests[permit_key] = request
-        elif (
+        # A lost response therefore cannot change the expiry on retry, even
+        # when the retry goes through a new tool instance.
+        cache = type(self)._shared_permit_requests
+        cache_key = (self.base_url, self.wallet_id, permit_key)
+        with type(self)._shared_permit_requests_lock:
+            request = cache.get(cache_key)
+            if request is None:
+                request = PermitRequest(
+                    issuer_wallet_id=self.wallet_id,
+                    subject_wallet_id=self.wallet_id,
+                    max_credits=self.permit_budget,
+                    expires_at=datetime.now(UTC) + timedelta(minutes=self.permit_ttl_minutes),
+                    allowed_tools=[tool_name],
+                    scopes=[f"tool:{tool_name}:invoke", "billing:charge"],
+                )
+                cache[cache_key] = request
+                if len(cache) > type(self)._shared_permit_requests_max:
+                    cache.popitem(last=False)
+            else:
+                cache.move_to_end(cache_key)
+        if (
             request.subject_wallet_id != self.wallet_id
             or request.max_credits != self.permit_budget
             or request.allowed_tools != [tool_name]

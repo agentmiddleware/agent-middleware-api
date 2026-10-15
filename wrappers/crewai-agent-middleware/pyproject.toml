@@ -37,7 +37,7 @@ dependencies = [
     # Installed from the local checkout (see README): b2a-sdk is not on PyPI,
     # so installing this wrapper on its own cannot resolve this dependency.
     "b2a-sdk>=0.4.0",
-    "crewai>=0.1.0,<1",
+    "crewai>=0.1.0,<2",
     "httpx>=0.25.0,<1",
 ]
 

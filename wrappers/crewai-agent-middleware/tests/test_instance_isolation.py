@@ -1,5 +1,6 @@
 """Per-instance isolation of the permit cache between tool instances."""
 
+import json
 from datetime import UTC, datetime
 
 import httpx
@@ -103,5 +104,66 @@ async def test_permit_cache_is_not_shared_between_instances():
     assert permit_create_count["count"] == 2
     assert "receipt-success" in result1
     assert "receipt-success" in result2
+
+    await base_client.close()
+
+
+@pytest.mark.asyncio
+async def test_permit_body_replays_across_instances_but_not_across_wallets():
+    """A logical retry via a new instance resends the identical permit body.
+
+    The server hashes the full permit body (including expires_at), so a new
+    instance for the same wallet and permit key must not regenerate it. A
+    different wallet using the same permit key gets its own body.
+    """
+    permit_bodies: list[bytes] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/permits":
+            permit_bodies.append(request.content)
+            return httpx.Response(201, json=_permit_payload())
+
+        if request.url.path == "/mcp/messages":
+            return httpx.Response(
+                200,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": "replay-test",
+                    "result": {
+                        "content": [{"type": "text", "text": '{"ok": true}'}],
+                        "structuredContent": {"ok": True},
+                        "isError": False,
+                        "receipt": _receipt_payload(),
+                    },
+                },
+            )
+
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+    base_client = B2AClient(api_key="test-key", transport=transport)
+    tools = [
+        CrewAIB2ATool(api_key="test-key", wallet_id=wallet_id)
+        for wallet_id in ("wallet-replay", "wallet-replay", "wallet-other")
+    ]
+    for tool in tools:
+        tool.client = base_client
+        result = await tool._arun(
+            operation="call_tool",
+            tool_name="partner.search",
+            idempotency_key=f"invoke-{tool.wallet_id}",
+            permit_idempotency_key="cross-instance-permit-key",
+            arguments={},
+        )
+        assert "receipt-success" in result
+
+    assert len(permit_bodies) == 3
+    first, retry, other_wallet = (json.loads(body) for body in permit_bodies)
+    # Same wallet + key through a new instance: byte-identical replay.
+    assert permit_bodies[0] == permit_bodies[1]
+    assert first["expires_at"] == retry["expires_at"]
+    # Different wallet, same key: isolated, not the first wallet's body.
+    assert other_wallet["issuer_wallet_id"] == "wallet-other"
+    assert first["issuer_wallet_id"] == "wallet-replay"
 
     await base_client.close()

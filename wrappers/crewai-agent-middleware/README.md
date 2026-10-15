@@ -128,7 +128,7 @@ b2a_tool = CrewAIB2ATool(
 ## Requirements
 
 - Python 3.11+
-- CrewAI 0.1.0+
+- CrewAI 0.1.0+ (0.x and 1.x; `crewai>=0.1.0,<2`)
 - httpx 0.25.0+
 
 ## Release checklist (not yet run)
