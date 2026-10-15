@@ -69,7 +69,7 @@ def validate_signing_key_configuration(settings: Settings | None = None) -> str:
         # ensure_active_key() fetches the public key and fails boot if the key
         # is unreachable or not Ed25519.
         if not settings.TRUST_SIGNING_KMS_KEY_ID.strip():
-            raise SigningKeyError("trust_signing_kms_key_id_required")
+            raise SigningKeyError("trust_signing_kms_key_required")
         if importlib.util.find_spec("boto3") is None:
             raise SigningKeyError("kms_boto3_unavailable")
         return "aws_kms"

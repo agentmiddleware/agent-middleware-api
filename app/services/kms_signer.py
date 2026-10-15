@@ -69,7 +69,7 @@ class KmsEd25519Signer:
         client: Any | None = None,
     ) -> None:
         if not key_id.strip():
-            raise _signing_key_error("trust_signing_kms_key_id_required")
+            raise _signing_key_error("trust_signing_kms_key_required")
         self._key_id = key_id.strip()
         self._region = region
         self._client_instance = client

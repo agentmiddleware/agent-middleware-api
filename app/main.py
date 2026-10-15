@@ -171,7 +171,7 @@ _SIGNING_KEY_REMEDIATION = {
         f"raw bytes. Regenerate it with: {_GENERATE_SEED_COMMAND} — and copy the value "
         "without surrounding quotes or whitespace. See docs/key-management.md."
     ),
-    "trust_signing_kms_key_id_required": (
+    "trust_signing_kms_key_required": (
         "TRUST_SIGNING_BACKEND=aws_kms needs TRUST_SIGNING_KMS_KEY_ID: the id, ARN, "
         "or alias of an ECC_NIST_EDWARDS25519 SIGN_VERIFY key. See "
         "docs/key-management.md."

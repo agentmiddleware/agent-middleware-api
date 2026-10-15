@@ -424,7 +424,7 @@ async def _check_signing_key() -> dict[str, Any]:
         if error not in {
             "trust_signing_private_key_required",
             "invalid_trust_signing_private_key",
-            "trust_signing_kms_key_id_required",
+            "trust_signing_kms_key_required",
             "kms_boto3_unavailable",
         }:
             error = "signing_key_unavailable"

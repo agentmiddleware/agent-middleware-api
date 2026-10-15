@@ -175,7 +175,7 @@ def test_kms_signer_wraps_client_errors_with_stable_code():
 
 
 def test_kms_signer_requires_key_id():
-    with pytest.raises(SigningKeyError, match="trust_signing_kms_key_id_required"):
+    with pytest.raises(SigningKeyError, match="trust_signing_kms_key_required"):
         KmsEd25519Signer("  ")
 
 
@@ -186,7 +186,7 @@ def test_kms_backend_configuration_validation(monkeypatch):
         TRUST_SIGNING_PRIVATE_KEY_B64="",
         TRUST_MODE_ENABLED=True,
     )
-    with pytest.raises(SigningKeyError, match="trust_signing_kms_key_id_required"):
+    with pytest.raises(SigningKeyError, match="trust_signing_kms_key_required"):
         validate_signing_key_configuration(settings)
 
     settings = Settings(

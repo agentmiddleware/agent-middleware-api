@@ -87,7 +87,7 @@ Operational notes:
 
 - `boto3` is imported lazily and is **not** in `requirements.txt`; install it
   in the image that opts in. Boot fails with `kms_boto3_unavailable` if it is
-  missing, and `trust_signing_kms_key_id_required` if the key id is empty.
+  missing, and `trust_signing_kms_key_required` if the key id is empty.
 - The public key is fetched once (`kms:GetPublicKey`) at boot by
   `ensure_active_key` and cached; the API needs `kms:Sign` on that key only
   afterwards. Grant `kms:GetPublicKey` and `kms:Sign` on exactly that key ARN
