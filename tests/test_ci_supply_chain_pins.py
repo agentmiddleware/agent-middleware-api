@@ -13,7 +13,11 @@ import yaml
 
 REPO_ROOT = __import__("pathlib").Path(__file__).resolve().parent.parent
 
-FROM_PIN = re.compile(r"^FROM\s+\S+@sha256:[0-9a-f]{64}\s*$")
+# A multi-stage build names its stages (`AS builder`); the digest is still
+# required on every FROM line.
+FROM_PIN = re.compile(
+    r"^FROM\s+\S+@sha256:[0-9a-f]{64}(\s+AS\s+[A-Za-z0-9_.-]+)?\s*$", re.IGNORECASE
+)
 SHA256_HEX = re.compile(r"\b[0-9a-f]{64}\b")
 
 
@@ -36,6 +40,18 @@ def test_base_image_pinned_to_digest(dockerfile):
             f"{dockerfile} uses a floating base image: {line!r}. "
             "Pin it as <image>:<tag>@sha256:<digest>."
         )
+
+
+@pytest.mark.parametrize(
+    ("line", "pinned"),
+    [
+        ("FROM python:3.12-slim@sha256:" + "a" * 64 + " AS builder", True),
+        ("FROM python:3.12-slim AS builder", False),
+        ("FROM python:3.12-slim@sha256:" + "a" * 64 + " AS", False),
+    ],
+)
+def test_from_pin_allows_stage_name_but_still_requires_digest(line, pinned):
+    assert bool(FROM_PIN.match(line)) is pinned
 
 
 def _secret_scan_install_step():
