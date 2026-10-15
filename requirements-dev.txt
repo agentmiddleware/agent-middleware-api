@@ -1,0 +1,9 @@
+# Agent Middleware API - Test and dev dependencies (CI and local dev only).
+# Not installed by the production Dockerfile. Pulls runtime deps from the
+# lock so tests run against the same pins as production.
+-r requirements.lock
+
+pytest>=9.1.1
+pytest-asyncio>=1.4.0
+pytest-cov>=7.1.0
+mypy>=2.4.0            # Type checking
