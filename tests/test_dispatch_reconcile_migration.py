@@ -85,28 +85,40 @@ def test_reconcile_migration_preserves_parked_rows_and_guards_downgrade(
         # Parked rows upgrade to "unresolved" -- manual review, as before.
         assert tuple(row) == ("delivery_uncertain", None, 0, None)
 
-        connection.execute(
-            text(
-                "UPDATE mcp_dispatch_attempts SET reconcile_status = "
-                "'not_executed_refund_pending' WHERE attempt_id = 'dsp-legacy-parked'"
-            )
-        )
     engine.dispose()
 
-    # A half-applied refund decision must not be silently dropped.
-    with pytest.raises(RuntimeError, match="047 downgrade refused"):
-        command.downgrade(config, "046_demo_tenant_key_allowlist")
+    # No recorded decision may be silently dropped: a completed refund would
+    # be re-charged by 046 budget accounting, a pending one is half applied.
+    for status in (
+        "not_executed_refund_pending",
+        "not_executed_refunded",
+        "not_executed_review",
+        "executed",
+    ):
+        engine = create_engine(sync_url)
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "UPDATE mcp_dispatch_attempts SET reconcile_status = :status "
+                    "WHERE attempt_id = 'dsp-legacy-parked'"
+                ),
+                {"status": status},
+            )
+        engine.dispose()
+        with pytest.raises(RuntimeError, match="047 downgrade refused"):
+            command.downgrade(config, "046_demo_tenant_key_allowlist")
 
     engine = create_engine(sync_url)
     with engine.begin() as connection:
         connection.execute(
             text(
-                "UPDATE mcp_dispatch_attempts SET reconcile_status = "
-                "'not_executed_refunded' WHERE attempt_id = 'dsp-legacy-parked'"
+                "UPDATE mcp_dispatch_attempts SET reconcile_status = NULL "
+                "WHERE attempt_id = 'dsp-legacy-parked'"
             )
         )
     engine.dispose()
 
+    # Unresolved rows carry nothing 046 cannot represent.
     command.downgrade(config, "046_demo_tenant_key_allowlist")
     engine = create_engine(sync_url)
     columns = {

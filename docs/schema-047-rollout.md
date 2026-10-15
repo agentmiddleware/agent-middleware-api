@@ -44,11 +44,13 @@ inspected.
 ## Rollback
 
 Downgrade from 047 to 046 drops the six columns and their indexes. It refuses
-to run while any row is `not_executed_refund_pending`, because that row holds a
-durable not-executed decision whose refund and budget release may be half
-applied, and 046 code would forget it. Let the reconciler finish (or resolve it
-by hand) first. Resolutions recorded while 047 was active survive a downgrade
-only as their signed `mcp_delivery_uncertain_provider_resolution` audit events
-and any refund ledger entries; the row-level status is lost. Never downgrade a
-database that still serves traffic, and never stamp a revision to skip the
-downgrade.
+to run while any row has a non-NULL `reconcile_status`. A
+`not_executed_refund_pending` row may hold a half-applied refund and budget
+release. A `not_executed_refunded` row's refund and release are durable, but
+046 accounting counts every `delivery_uncertain` receipt as consumed, so a
+budget rebuild would re-charge the released spend. `executed` and
+`not_executed_review` decisions would be erased and re-probed after a later
+re-upgrade. In practice, once the reconciler has resolved any row, 047 is
+forward-only; roll back by deploying a fix forward, not by downgrading. Never
+downgrade a database that still serves traffic, and never stamp a revision to
+skip the downgrade.

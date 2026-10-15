@@ -58,20 +58,23 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # A refund-pending row has a durable not-executed decision whose refund
-    # and budget release may be half applied. Older code cannot finish it and
-    # would silently forget it, so refuse rather than strand the money.
+    # Any non-NULL status is a durable provider decision. A refunded row's
+    # refund and budget release outlive the column, and 046 accounting counts
+    # every delivery_uncertain receipt as consumed, so a budget rebuild would
+    # re-charge the released spend; a pending row may be half applied; and a
+    # re-upgrade would re-probe every erased decision. Refuse rather than
+    # silently drop any of them.
     bind = op.get_bind()
-    pending = bind.execute(
+    decided = bind.execute(
         sa.text(
             "SELECT COUNT(*) FROM mcp_dispatch_attempts "
-            "WHERE reconcile_status = 'not_executed_refund_pending'"
+            "WHERE reconcile_status IS NOT NULL"
         )
     ).scalar_one()
-    if pending:
+    if decided:
         raise RuntimeError(
-            "047 downgrade refused: finish not_executed_refund_pending "
-            "reconciliations first"
+            f"047 downgrade refused: {decided} dispatch attempt(s) carry a "
+            "reconcile_status decision that 046 cannot represent"
         )
     with op.batch_alter_table("mcp_dispatch_attempts") as batch_op:
         batch_op.drop_index("ix_mcp_dispatch_attempts_reconcile_next_probe_at")
