@@ -37,7 +37,11 @@
           "action_upstream_binding_hash": null,
           "approval_id": null,
           "audit_event_id": "<any>",
-          "constraints_evaluated": {},
+          "constraints_evaluated": {
+            "upstream_dispatch": {
+              "forwarded_idempotency_key": "woa-delivery-uncertain-upstream-hang"
+            }
+          },
           "created_at": "<any>",
           "credits_authorized": "2.00000000",
           "credits_charged": "2.00000000",

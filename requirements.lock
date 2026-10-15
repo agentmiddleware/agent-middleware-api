@@ -170,7 +170,7 @@ sqlalchemy==2.0.54
     # via
     #   alembic
     #   sqlmodel
-sqlmodel==0.0.47
+sqlmodel==0.0.48
     # via -r requirements.txt
 sse-starlette==3.5.0
     # via mcp
