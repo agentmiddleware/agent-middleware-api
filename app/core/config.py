@@ -307,15 +307,36 @@ class Settings(BaseSettings):
     MCP_UPSTREAM_PROVIDER_REQUEST_ID_META_KEY: str = (
         "io.agentmiddleware/provider_request_id"
     )
-    # Optional delivery_uncertain reconcile worker (off by default). It polls
-    # a provider status probe on a backoff and records a resolution audit
-    # event; it never redispatches, refunds, or releases budget. Ageing past
-    # the alert threshold only emits an operator alert.
+    # Optional upstream status endpoint for delivery_uncertain reconciliation.
+    # Empty (the default) means the tool has no status endpoint, so its
+    # parked calls stay in manual review. Must share MCP_UPSTREAM_URL's
+    # origin: the probe sends MCP_UPSTREAM_BEARER_TOKEN, and that credential
+    # never leaves the origin it was configured for.
+    MCP_UPSTREAM_STATUS_URL: str = ""
+    MCP_UPSTREAM_STATUS_TIMEOUT_SECONDS: float = 10.0
+    # Optional delivery_uncertain reconcile worker (off by default). It leases
+    # parked calls, probes the upstream status endpoint outside any database
+    # transaction, and records a resolution. It never redispatches. Ageing
+    # past the alert threshold only emits an operator alert.
     # See docs/delivery-uncertain-reconcile-worker.md.
     UPSTREAM_RECONCILE_WORKER_ENABLED: bool = False
     UPSTREAM_RECONCILE_BACKOFF_SECONDS: str = "30,120,600,3600"
     UPSTREAM_RECONCILE_ALERT_AGE_SECONDS: int = 3600
     UPSTREAM_RECONCILE_BATCH_LIMIT: int = 50
+    UPSTREAM_RECONCILE_LEASE_SECONDS: int = 300
+    # Quiescence: a not-executed answer is acted on only once
+    # now > dispatch time + upstream timeout allowance + clock skew allowance.
+    # 0 uses the fixed rolling-deployment dispatch lifetime (11,430 s); any
+    # explicit value is floored at this deployment's own connect + 3 x call
+    # timeout so a misconfiguration cannot undercut a live call.
+    UPSTREAM_RECONCILE_UPSTREAM_TIMEOUT_SECONDS: int = 0
+    UPSTREAM_RECONCILE_CLOCK_SKEW_SECONDS: int = 300
+    # Separate, explicit operator policy (off by default): refund the debit
+    # and release the permit reservation when the provider explicitly
+    # attests not-executed after quiescence. Off, such calls are recorded as
+    # refund candidates and the debit stands. A 404 or any non-attesting
+    # answer never refunds.
+    UPSTREAM_RECONCILE_REFUND_ON_ATTESTED_NOT_EXECUTED: bool = False
 
     # Cross-key duplicate detection for upstream tools. Modes:
     # - "off": disabled (new-key retries with identical request hashes are allowed)
