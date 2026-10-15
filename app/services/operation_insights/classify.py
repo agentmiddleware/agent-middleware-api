@@ -41,6 +41,8 @@ _DENIAL_CODES = _VALIDATION_CODES | frozenset(
         "permit_recipient_domain_mismatch",
         "permit_required",
         "policy_denied",
+        "wallet_duplicate_request",
+        "wallet_velocity_exceeded",
     }
 )
 _FAULT_CODES = frozenset(

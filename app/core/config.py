@@ -18,6 +18,23 @@ class DuplicateGuardMode(str, Enum):
     ENFORCE = "enforce"
 
 
+class ReplanGuardMode(str, Enum):
+    """Wallet-scoped re-plan guard mode. ``log_only`` never blocks a call."""
+
+    OFF = "off"
+    LOG_ONLY = "log_only"
+    ENFORCE = "enforce"
+
+
+# Velocity counters are integer minor units of a credit (credits are stored as
+# Numeric(20, 8)). Redis INCRBY is exact on int64, but the Lua comparison runs
+# on doubles, so every counter value must stay below 2**53 to compare exactly.
+WALLET_VELOCITY_MINOR_UNITS_PER_CREDIT = 10**8
+WALLET_VELOCITY_MAX_CREDITS_CEILING = Decimal(2**52) / Decimal(
+    WALLET_VELOCITY_MINOR_UNITS_PER_CREDIT
+)
+
+
 class Settings(BaseSettings):
     """
     Application settings. All values sourced from environment variables.
@@ -326,6 +343,61 @@ class Settings(BaseSettings):
     # Enable only after all workers can verify and enforce repeat-window permits.
     # Disabling issuance never disables validation of already-issued permits.
     ENABLE_PERMIT_REPEAT_WINDOW_ISSUANCE: bool = False
+
+    # Wallet-scoped re-plan guard (app/services/replan_guard.py). Closes the
+    # new-key / new-permit bypass the per-permit duplicate guard above cannot
+    # see: dedup is keyed on (wallet, tool, canonical argument hash) across
+    # ALL permits, including the permit POST /mcp auto-mints per call, plus a
+    # wallet velocity cap across all permits. Modes:
+    # - "off": not evaluated
+    # - "log_only": evaluated and logged, never blocks (default)
+    # - "enforce": refuse with wallet_duplicate_request / wallet_velocity_exceeded
+    # See docs/replan-guard.md.
+    WALLET_REPLAN_GUARD: ReplanGuardMode = ReplanGuardMode.LOG_ONLY
+    WALLET_DEDUP_WINDOW_SECONDS: int = 86400
+    WALLET_VELOCITY_WINDOW_SECONDS: int = 3600
+    # Credits per velocity window across all of a wallet's permits; 0 = no cap.
+    WALLET_VELOCITY_MAX_CREDITS: Decimal = Decimal("10000")
+    # Governed calls per velocity window across all permits; 0 = no cap.
+    WALLET_VELOCITY_MAX_CALLS: int = 600
+    # Comma-separated argument field names whose string values are case-folded
+    # before hashing (e.g. "email,domain"). Nothing else is ever case-folded.
+    REPLAN_CASEFOLD_FIELDS: str = ""
+
+    @field_validator("WALLET_DEDUP_WINDOW_SECONDS", "WALLET_VELOCITY_WINDOW_SECONDS")
+    @classmethod
+    def _validate_replan_windows(cls, value: int, info) -> int:
+        if not 1 <= value <= 30 * 86400:
+            raise ValueError(f"{info.field_name} must be between 1 and 2592000")
+        return value
+
+    @field_validator("WALLET_VELOCITY_MAX_CALLS")
+    @classmethod
+    def _validate_velocity_calls(cls, value: int) -> int:
+        if not 0 <= value <= 2**52:
+            raise ValueError("WALLET_VELOCITY_MAX_CALLS must be between 0 and 2**52")
+        return value
+
+    @field_validator("WALLET_VELOCITY_MAX_CREDITS")
+    @classmethod
+    def _validate_velocity_credits(cls, value: Decimal) -> Decimal:
+        if (
+            not value.is_finite()
+            or value < 0
+            or value > WALLET_VELOCITY_MAX_CREDITS_CEILING
+        ):
+            raise ValueError(
+                "WALLET_VELOCITY_MAX_CREDITS must be a finite amount between 0 "
+                f"and {WALLET_VELOCITY_MAX_CREDITS_CEILING}"
+            )
+        return value
+
+    @property
+    def replan_casefold_fields(self) -> frozenset[str]:
+        """Parsed REPLAN_CASEFOLD_FIELDS (exact field names, comma-separated)."""
+        return frozenset(
+            f.strip() for f in self.REPLAN_CASEFOLD_FIELDS.split(",") if f.strip()
+        )
 
     # --- Inbound request size ---
     # Ceiling on any request body the API will buffer, enforced for every

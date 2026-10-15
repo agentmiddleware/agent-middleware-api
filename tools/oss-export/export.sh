@@ -60,7 +60,7 @@ rsync -a --delete --delete-excluded "${X[@]}" \
   --exclude publish_live_proof.py --exclude repo_guardian.py --exclude record_site_transcript.py \
   --exclude operator_analytics_export.py \
   "$SRC/scripts/" "$G/scripts/"
-for f in alembic.ini Dockerfile Dockerfile.dev docker-compose.yml Makefile requirements.txt pyproject.toml mypy.ini ruff.toml .env.example .dockerignore TROUBLESHOOTING.md DEMO_SCRIPT.md WEDGE.md DESIGN_PARTNER_GUIDE.md SECURITY_LIMITATIONS.md; do cp "$SRC/$f" "$G/"; done
+for f in alembic.ini Dockerfile Dockerfile.dev docker-compose.yml Makefile requirements.txt requirements.lock pyproject.toml mypy.ini ruff.toml .env.example .dockerignore TROUBLESHOOTING.md DEMO_SCRIPT.md WEDGE.md DESIGN_PARTNER_GUIDE.md SECURITY_LIMITATIONS.md; do cp "$SRC/$f" "$G/"; done
 python3 - "$G/pyproject.toml" <<'PY'
 from pathlib import Path
 import sys
@@ -81,9 +81,9 @@ for name in ("Dockerfile", "Dockerfile.dev"):
     path = gateway / name
     text = path.read_text()
     edits = {
-        "COPY requirements.txt .": "COPY gateway/requirements.txt .\nCOPY sdk/python/ /sdk/python/",
-        "RUN pip install --no-cache-dir -r requirements.txt": (
-            "RUN pip install --no-cache-dir -r requirements.txt "
+        "COPY requirements.lock .": "COPY gateway/requirements.lock .\nCOPY sdk/python/ /sdk/python/",
+        "RUN pip install --no-cache-dir -r requirements.lock": (
+            "RUN pip install --no-cache-dir -r requirements.lock "
             "&& pip install --no-cache-dir /sdk/python"
         ),
         "COPY . .": "COPY gateway/ .",

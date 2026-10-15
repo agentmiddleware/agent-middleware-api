@@ -286,8 +286,10 @@ async def test_crash_after_key_insert_lease_is_released_by_sweep(
                 McpDispatchAttemptService, "authorize_reserve_and_prepare", die
             )
             # Starlette middleware may wrap it in a BaseExceptionGroup.
-            with pytest.raises(BaseException):
+            with pytest.raises((_ProcessDied, BaseExceptionGroup)) as crashed:
                 await client.post("/mcp/messages", json=body, headers=headers)
+            if isinstance(crashed.value, BaseExceptionGroup):
+                assert crashed.value.subgroup(_ProcessDied) is not None
 
         record = await idem.get_record(
             wallet_id=wallet_id,
