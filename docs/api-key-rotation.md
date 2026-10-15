@@ -156,7 +156,9 @@ audit trail says otherwise:
 
 - CI secret scanning (`.gitleaks.toml`) fails the build on any
   credential-named variable bound to a string literal, the exact shape of
-  the 2026-08-06 leak.
+  the 2026-08-06 leak. The job scans the working tree and the commits in
+  the push or pull-request range, so a secret added and then removed inside
+  that range still fails the build.
 - `scripts/stress_test_live.py` and `scripts/trust_plane_conformance.py`
   exit non-zero when `AGENT_MIDDLEWARE_API_KEY` is unset instead of
   falling back to a default.

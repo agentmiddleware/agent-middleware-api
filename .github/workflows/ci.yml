@@ -526,6 +526,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # The history scan needs every commit in the push or pull request,
+          # not only the tip that a depth of 1 would leave behind.
+          fetch-depth: 0
 
       - name: Install gitleaks
         env:
@@ -544,14 +548,30 @@ jobs:
           sudo install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
           gitleaks version
 
-      # Working tree only, for speed. History was verified separately on
-      # 2026-08-24 with a full-history gitleaks scan across every ref (see
-      # the scope note in .gitleaks.toml): the only real credential ever
-      # committed is the 2026-08-06 key — rotated dead at the provider, gone
-      # from main's flattened history, still reachable on stale unmerged
-      # branches until they are pruned.
+      # Current files at the tip. A secret added in one commit of this push
+      # or pull request and removed in a later one is not in this tree.
       - name: Scan working tree for committed secrets
         run: gitleaks detect --no-git --source . --config .gitleaks.toml --redact --verbose
+
+      # Commits this push or pull request introduced. The range stays bounded:
+      # main's history still contains the rotated 2026-08-06 key (see the
+      # scope note in .gitleaks.toml and docs/api-key-rotation.md), so walking
+      # every ancestor would fail on every run.
+      - name: Scan push or pull request commits for secrets
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_AFTER_SHA: ${{ github.event.after }}
+          PUSH_SHA: ${{ github.sha }}
+          PUSH_DELETED: ${{ github.event.deleted }}
+          PUSH_REF: ${{ github.ref }}
+          DEFAULT_REF: origin/${{ github.event.repository.default_branch }}
+          DEFAULT_BRANCH_REF: refs/heads/${{ github.event.repository.default_branch }}
+          PUSH_COMMITS_JSON: ${{ toJSON(github.event.commits) }}
+          GITLEAKS_HISTORY_FETCH: "1"
+        run: python3 scripts/ci_gitleaks_history_scan.py
 
       # Guards the guard: proves the ruleset still catches the exact class of
       # low-entropy credential that leaked, so an over-broad allowlist edit
