@@ -1,7 +1,7 @@
 """Wallet row-level security policies; enabled only under TENANT_RLS_MODE=enforce.
 
 Revision ID: 048_tenant_rls
-Revises: 046_demo_tenant_key_allowlist
+Revises: 047_dispatch_reconcile_lease
 
 PostgreSQL only; a no-op on SQLite. Each listed table gets one policy whose USING and WITH CHECK admit a row only
 when an owning wallet column equals ``app.current_wallet_id`` or
@@ -38,7 +38,7 @@ from alembic import op
 from app.core.config import get_settings
 
 revision: str = "048_tenant_rls"
-down_revision: str = "046_demo_tenant_key_allowlist"
+down_revision: str = "047_dispatch_reconcile_lease"
 branch_labels = None
 depends_on = None
 

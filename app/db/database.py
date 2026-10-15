@@ -54,7 +54,17 @@ REQUIRED_TRUST_TABLES = frozenset(
     }
 )
 REQUIRED_TRUST_COLUMNS = {
-    "mcp_dispatch_attempts": frozenset({"dispatch_claim_hash"}),
+    "mcp_dispatch_attempts": frozenset(
+        {
+            "dispatch_claim_hash",
+            "reconcile_status",
+            "reconcile_lease_owner",
+            "reconcile_lease_expires_at",
+            "reconcile_next_probe_at",
+            "reconcile_probe_count",
+            "reconciled_at",
+        }
+    ),
     "permits": frozenset(
         {
             "repeat_window_seconds",

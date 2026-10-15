@@ -733,14 +733,14 @@ def test_downgrade_removes_policies_and_upgrade_restores(rls_db):
             await engine.dispose()
 
     owner_url = rls_db["owner_url"]
-    _alembic(owner_url, "downgrade", "046_demo_tenant_key_allowlist")
+    _alembic(owner_url, "downgrade", "047_dispatch_reconcile_lease")
     assert asyncio.run(forced_tables(owner_url)) == set()
     assert asyncio.run(policy_tables(owner_url)) == set()
     # Default off: policies exist, RLS stays disabled for every client.
     _alembic(owner_url, "upgrade", "head", mode="off")
     assert asyncio.run(forced_tables(owner_url)) == set()
     assert asyncio.run(policy_tables(owner_url)) == set(RLS_TABLES)
-    _alembic(owner_url, "downgrade", "046_demo_tenant_key_allowlist")
+    _alembic(owner_url, "downgrade", "047_dispatch_reconcile_lease")
     _alembic(owner_url, "upgrade", "head")
     assert asyncio.run(forced_tables(owner_url)) == set(RLS_TABLES)
 
