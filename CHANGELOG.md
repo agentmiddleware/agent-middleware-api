@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — planned v1.3.0
 
+### Added — leased `delivery_uncertain` reconciler with upstream status probe (default off)
+
+- `UpstreamMcpStatusProbe` asks an operator-configured, same-origin
+  `MCP_UPSTREAM_STATUS_URL` what happened to a forwarded invocation, using the
+  configured upstream bearer. Only an HTTP 200 answer that echoes the
+  forwarded identifiers is evidence. A 404 is always "unknown".
+- The reconciler leases rows (`FOR UPDATE SKIP LOCKED`, lease expiry), probes
+  outside any transaction, and resolves each row with a conditional update.
+  Backoff and resolution are now durable. A "not executed" answer is acted on
+  only after dispatch time + upstream timeout + clock-skew allowance. It
+  refunds and releases budget only under the separate
+  `UPSTREAM_RECONCILE_REFUND_ON_ATTESTED_NOT_EXECUTED` policy, through the
+  existing once-only refund and release gates. Receipts are never rewritten.
+  Tools without a status endpoint stay in manual review. Still at-most-once
+  dispatch, not exactly-once execution. Migration
+  `047_dispatch_reconcile_lease` is additive. See
+  [`docs/delivery-uncertain-reconcile-worker.md`](docs/delivery-uncertain-reconcile-worker.md).
+
 ### Added — wallet re-plan guard (`WALLET_REPLAN_GUARD`, default `log_only`)
 
 - Closes the re-planning / new-key bypass at the wallet boundary.

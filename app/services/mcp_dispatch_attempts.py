@@ -33,6 +33,7 @@ from app.db.models import (
     LedgerEntryModel,
     McpDispatchAttemptModel,
     PermitModel,
+    RECONCILE_NOT_EXECUTED_REFUND_PENDING,
     ReceiptModel,
 )
 from app.services.permits import (
@@ -1898,7 +1899,15 @@ class McpDispatchAttemptService:
                     raise DispatchAttemptConflictError(
                         "dispatch_refund_ledger_conflict"
                     )
-                if attempt.state != "returned_error":
+                # returned_error is the live refund path. The only other
+                # refundable attempt is a delivery_uncertain call whose
+                # provider attested not-executed after quiescence and whose
+                # decision is already durable (upstream_reconcile).
+                if attempt.state != "returned_error" and not (
+                    attempt.state == "delivery_uncertain"
+                    and attempt.reconcile_status
+                    == RECONCILE_NOT_EXECUTED_REFUND_PENDING
+                ):
                     raise DispatchAttemptConflictError("dispatch_refund_state_invalid")
                 refund = (
                     await session.execute(
