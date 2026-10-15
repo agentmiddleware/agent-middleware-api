@@ -572,9 +572,13 @@ jobs:
             && git cat-file -e "${PUSH_BEFORE_SHA}^{commit}" 2>/dev/null; then
             range="${PUSH_BEFORE_SHA}..${PUSH_SHA}"
           else
-            # New branch or force push: the old tip is unknown, so scan the
-            # pushed head commit alone rather than all of history.
-            range="${PUSH_SHA}~1..${PUSH_SHA}"
+            # New branch (before is all zeros) or force push (old tip is not
+            # in the clone): scan every commit reachable from the pushed head
+            # that is not on main, i.e. everything since the merge base. The
+            # head commit alone would miss a secret added then deleted in an
+            # earlier commit of the same push.
+            git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+            range="origin/main..${PUSH_SHA}"
           fi
           echo "Scanning commits in ${range}"
           gitleaks detect --source . --config .gitleaks.toml --redact --verbose --log-opts="${range}"
