@@ -2,21 +2,30 @@
 # 3.12.15-slim-trixie (looked up 2026-10-08 via
 # `docker buildx imagetools inspect python:3.12-slim`). Repin deliberately,
 # never float.
+FROM python:3.12-slim@sha256:05cda9777409a9c3ffddd94a4c476b79f0769a0b4857f0c7ed9226b6800b0d6f AS builder
+
+# Build stage: gcc is here only for any dependency that has to compile from
+# source. The runtime stage copies the finished virtualenv and never gets a
+# compiler (#801).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Runtime dependencies only. Test and dev tools are in requirements-dev.lock
+# and never enter this image (#798).
+RUN python -m venv /opt/venv
+COPY requirements.lock .
+RUN /opt/venv/bin/pip install --no-cache-dir -r requirements.lock
+
 FROM python:3.12-slim@sha256:05cda9777409a9c3ffddd94a4c476b79f0769a0b4857f0c7ed9226b6800b0d6f
 
 WORKDIR /app
 
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/opt/venv/bin:$PATH"
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Python dependencies
-COPY requirements.lock .
-RUN pip install --no-cache-dir -r requirements.lock
+COPY --from=builder /opt/venv /opt/venv
 
 # Copy application code
 COPY . .
