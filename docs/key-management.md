@@ -71,17 +71,50 @@ Key requirements: `KeySpec=ECC_NIST_EDWARDS25519`, `KeyUsage=SIGN_VERIFY`.
 Every signature is one KMS `Sign` call with **`SigningAlgorithm=ED25519_SHA_512`
 and `MessageType=RAW`** — pure Ed25519 (RFC 8032) over exactly the canonical
 bytes the environment signer signs. `alg` stays `Ed25519`, the receipt format
-does not change, and `b2a-verify-receipt` verifies the result unchanged
-(`tests/test_kms_signer.py` runs a real governed invoke under a mocked KMS and
-verifies the exported receipt with the SDK verifier and the CLI).
+does not change for payloads of 4096 bytes or less, and `b2a-verify-receipt`
+verifies the result unchanged (`tests/test_kms_signer.py` runs a real governed
+invoke under a mocked KMS and verifies the exported receipt with the SDK
+verifier and the CLI).
+
+### Bounded signing envelope (payloads over 4096 bytes)
+
+KMS signs pure Ed25519 only over a `RAW` message of at most 4096 bytes, and
+receipt `constraints_evaluated`/`action_binding` and audit `metadata_json` have
+no size bound. When the canonical payload exceeds 4096 bytes under this
+backend, `SigningKeyService` signs a small fixed-shape envelope instead:
+
+```json
+{"alg":"Ed25519-sha256-envelope","kid":"<kid>","payload_sha256":"<hex sha256 of the canonical payload bytes>"}
+```
+
+serialized with the same `awi-canonical-json/1` rules, still one pure Ed25519
+`RAW` `Sign` call. The stored and exported signature is tagged
+`Ed25519-sha256-envelope:<base64>`; an untagged signature is plain Ed25519 over
+the payload bytes. The signed payload (including its `alg: Ed25519`) is
+byte-for-byte the same either way. Verification rules, implemented in
+`SigningKeyService.verify_payload`, `b2a_sdk.receipt_verifier` (and so
+`b2a-verify-receipt`), and the SDK edge client's permit check:
+
+- Untagged: verify over the payload bytes, as before.
+- `Ed25519-sha256-envelope:`: recompute SHA-256 of the canonical payload,
+  rebuild the envelope with the signature's `kid`, verify over its bytes.
+  Accepted **only** when the payload is over 4096 bytes, so a small artifact
+  has exactly one valid signature form.
+- Any other tag is rejected (`MALFORMED` in the SDK verifier).
+
+The environment signer never produces the envelope, at any size. Verifiers
+that predate it see invalid base64 and fail closed. The standalone
+`site/proof/verify_receipt.py` does not implement it.
 
 Refused on purpose:
 
 - `MessageType=DIGEST` — that is Ed25519ph (pre-hashed), a different scheme a
   plain Ed25519 verifier rejects.
 - ECDSA key specs — DER signatures no verifier here accepts.
-- Signing inputs over 4096 bytes (the KMS `RAW` limit) fail closed with
-  `kms_message_too_large`; there is no fallback to `DIGEST`.
+- Signing inputs over 4096 bytes (the KMS `RAW` limit) are never sent to KMS
+  directly; they go through the envelope above. `KmsEd25519Signer` still
+  refuses an oversized message with `kms_message_too_large`; there is no
+  fallback to `DIGEST`.
 
 Operational notes:
 

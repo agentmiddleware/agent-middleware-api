@@ -14,8 +14,12 @@ purpose:
   scheme that a plain Ed25519 verifier rejects.
 * ECDSA key specs produce DER signatures no verifier here understands.
 
-KMS caps a RAW message at 4096 bytes. A larger signing input fails closed with
-``kms_message_too_large`` instead of silently switching to DIGEST.
+KMS caps a RAW message at 4096 bytes. ``SigningKeyService`` never sends a
+larger one: a canonical payload over the cap is signed through the bounded
+``Ed25519-sha256-envelope`` (see ``signing_keys``), still pure Ed25519 over RAW
+bytes. This signer keeps its own guard, so an oversized message from any other
+caller fails closed with ``kms_message_too_large`` instead of silently
+switching to DIGEST.
 
 ``boto3`` is imported lazily and is not in ``requirements.txt``: only an image
 that opts in needs it.

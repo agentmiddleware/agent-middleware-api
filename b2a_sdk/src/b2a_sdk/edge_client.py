@@ -58,6 +58,8 @@ from .receipt_verifier import (
     VerificationError,
     canonical_json,
     key_set_from_document,
+    signature_message,
+    split_signature,
     verify_ed25519,
 )
 
@@ -431,7 +433,8 @@ class LocalPermitValidator:
         target = self._permit if permit is None else permit
         try:
             payload = self.permit_signing_payload(target)
-            signature = base64.b64decode(str(target["signature"]), validate=True)
+            scheme, encoded = split_signature(str(target["signature"]))
+            signature = base64.b64decode(encoded, validate=True)
         except (KeyError, TypeError, ValueError, ArithmeticError):
             return False
         raw_public_key = self._key_set.get(payload["kid"])
@@ -439,11 +442,10 @@ class LocalPermitValidator:
             return False
         if len(signature) != 64:
             return False
-        return verify_ed25519(
-            raw_public_key,
-            signature,
-            canonical_json(payload).encode("utf-8"),
-        )
+        message = signature_message(scheme, payload["kid"], canonical_json(payload).encode("utf-8"))
+        if message is None:
+            return False
+        return verify_ed25519(raw_public_key, signature, message)
 
     def check(
         self,

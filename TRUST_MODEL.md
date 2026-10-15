@@ -217,6 +217,13 @@ With the opt-in `TRUST_SIGNING_BACKEND=aws_kms`, signing happens inside AWS KMS
 bytes, so receipts, permits, and audit events verify with the unchanged
 verifiers (`b2a-verify-receipt`, `/.well-known/trust-keys.json`). The signer
 checks every KMS signature against the published public key before using it.
+KMS signs pure Ed25519 over at most 4096 bytes, so a canonical payload larger
+than that is signed through a bounded envelope instead: the signature covers
+the canonical JSON of `{alg: "Ed25519-sha256-envelope", kid, payload_sha256}`
+and is stored tagged `Ed25519-sha256-envelope:<base64>`. The signed payload is
+unchanged, payloads of 4096 bytes or less keep the untagged direct signature,
+and the default environment signer never uses the envelope. Verifiers accept
+the envelope only for payloads over 4096 bytes and refuse any other tag.
 Where the key lives changes custody, not semantics: the gateway still provides
 at-most-once dispatch, not exactly-once execution.
 

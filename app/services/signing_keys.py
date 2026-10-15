@@ -37,6 +37,18 @@ class SigningKeyError(RuntimeError):
 # which are already handled by signing them only when present.
 RECEIPT_CANONICALIZATION = "awi-canonical-json/1"
 
+# Bounded signing envelope. AWS KMS signs pure Ed25519 only over a RAW message
+# of at most 4096 bytes, so under ``TRUST_SIGNING_BACKEND=aws_kms`` a larger
+# canonical payload is not signed directly: the signer signs the canonical
+# bytes of ``{alg, kid, payload_sha256}`` instead and tags the stored signature
+# ``Ed25519-sha256-envelope:<base64>``. The signed payload itself is unchanged.
+# Untagged signatures are plain Ed25519 over the payload bytes, exactly as
+# before. Verifiers accept the envelope only for payloads over the threshold,
+# so a small artifact has exactly one valid signature form.
+SIGNATURE_ALG = "Ed25519"
+SIGNATURE_ENVELOPE_ALG = "Ed25519-sha256-envelope"
+SIGNATURE_ENVELOPE_THRESHOLD_BYTES = 4096
+
 
 class Ed25519Signer(Protocol):
     """The two operations signing needs: an environment seed or AWS KMS."""
@@ -124,6 +136,43 @@ def sha256_hex(payload: dict[str, Any] | str | bytes) -> str:
     else:
         data = payload
     return hashlib.sha256(data).hexdigest()
+
+
+def split_signature(signature: str) -> tuple[str, str]:
+    """Return ``(scheme, base64)`` for a stored signature string.
+
+    Standard base64 has no ``:``, so an untagged signature is unambiguous.
+    """
+    scheme, separator, encoded = signature.partition(":")
+    if not separator:
+        return SIGNATURE_ALG, signature
+    return scheme, encoded
+
+
+def signature_envelope_bytes(kid: str, payload_bytes: bytes) -> bytes:
+    """Canonical bytes of the fixed-shape envelope signed for a large payload."""
+    envelope = {
+        "alg": SIGNATURE_ENVELOPE_ALG,
+        "kid": kid,
+        "payload_sha256": hashlib.sha256(payload_bytes).hexdigest(),
+    }
+    return canonical_json(envelope).encode()
+
+
+def signature_message(scheme: str, kid: str, payload_bytes: bytes) -> bytes | None:
+    """The bytes a signature of ``scheme`` covers, or None if it cannot apply.
+
+    None for an unknown scheme, and for an envelope over a payload small
+    enough to sign directly, so neither can be substituted for the other.
+    """
+    if scheme == SIGNATURE_ALG:
+        return payload_bytes
+    if (
+        scheme == SIGNATURE_ENVELOPE_ALG
+        and len(payload_bytes) > SIGNATURE_ENVELOPE_THRESHOLD_BYTES
+    ):
+        return signature_envelope_bytes(kid, payload_bytes)
+    return None
 
 
 class SigningKeyService:
@@ -407,11 +456,19 @@ class SigningKeyService:
         signing_payload.setdefault("kid", key_id)
         payload_hash = sha256_hex(signing_payload)
         signing_payload.setdefault("payload_hash", payload_hash)
-        signature = await self._off_loop(
-            self._load_private_key().sign,
-            canonical_json(signing_payload).encode(),
-        )
-        return base64.b64encode(signature).decode(), key_id, payload_hash
+        signer = self._load_private_key()
+        message = canonical_json(signing_payload).encode()
+        tag = ""
+        if len(message) > SIGNATURE_ENVELOPE_THRESHOLD_BYTES:
+            from .kms_signer import KmsEd25519Signer
+
+            # Only KMS has a message cap; the local seed signs any size
+            # directly, keeping the default path byte-for-byte unchanged.
+            if isinstance(signer, KmsEd25519Signer):
+                message = signature_envelope_bytes(key_id, message)
+                tag = f"{SIGNATURE_ENVELOPE_ALG}:"
+        signature = await self._off_loop(signer.sign, message)
+        return tag + base64.b64encode(signature).decode(), key_id, payload_hash
 
     async def verify_payload(
         self,
@@ -432,13 +489,16 @@ class SigningKeyService:
         # "invalid" verdict — a single corrupt row could mask tampering behind a
         # 500. Treat any decode/key/verify failure as "not verified".
         try:
+            scheme, encoded = split_signature(signature)
+            message = signature_message(
+                scheme, key_id, canonical_json(payload).encode()
+            )
+            if message is None:
+                return False
             public_key = Ed25519PublicKey.from_public_bytes(
                 base64.b64decode(key.public_key_b64, validate=True)
             )
-            public_key.verify(
-                base64.b64decode(signature, validate=True),
-                canonical_json(payload).encode(),
-            )
+            public_key.verify(base64.b64decode(encoded, validate=True), message)
             return True
         except (binascii.Error, InvalidSignature, ValueError, TypeError):
             return False

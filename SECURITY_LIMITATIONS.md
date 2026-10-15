@@ -44,7 +44,12 @@ Keep these out of the wedge until a design partner requires them:
   GCP KMS and Vault Transit are not implemented, KMS key rotation is
   metadata-only as before, and the dormant JWT exchange still signs with the
   environment seed. A KMS `Sign` call is a blocking network round trip on the
-  request path, and signing inputs over 4096 bytes fail closed. See
+  request path. Signing inputs over 4096 bytes (the KMS `RAW` cap) are signed
+  through the bounded `Ed25519-sha256-envelope` (Ed25519 over the payload's
+  SHA-256 plus `kid`), so for those artifacts integrity also rests on SHA-256
+  collision resistance, and a third-party verifier must understand the
+  envelope tag; older verifiers fail closed on it. The standalone
+  `site/proof/verify_receipt.py` does not implement the envelope. See
   [`docs/key-management.md`](docs/key-management.md).
 - No settlement, dispute, or compliance reporting workflow is implemented.
 - Receipt signatures can be verified offline by any third party
