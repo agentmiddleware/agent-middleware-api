@@ -72,3 +72,22 @@ def test_migration_failure_cannot_be_bypassed_by_command_override(
     assert result.returncode == (1 if database_url is None else 7)
     capture = Path(commands["CAPTURE_PATH"])
     assert not capture.exists() or "uvicorn" not in capture.read_text()
+
+
+def test_migration_database_url_is_used_for_alembic_only(tmp_path, commands):
+    # Alembic runs as the table owner; the app keeps its runtime-role URL.
+    for name in ("uvicorn", "alembic"):
+        (tmp_path / name).write_text(
+            "#!/bin/sh\n"
+            'printf "%s %s\\n" "${0##*/}" "$DATABASE_URL" >> "$CAPTURE_PATH"\n'
+        )
+    commands.update(
+        RUN_MIGRATIONS_ON_START="true",
+        DATABASE_URL="postgresql://app@db/amw",
+        MIGRATION_DATABASE_URL="postgresql://owner@db/amw",
+    )
+    assert _run(["uvicorn", "app.main:app"], commands).returncode == 0
+    assert Path(commands["CAPTURE_PATH"]).read_text().splitlines() == [
+        "alembic postgresql://owner@db/amw",
+        "uvicorn postgresql://app@db/amw",
+    ]

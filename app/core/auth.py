@@ -13,6 +13,7 @@ from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, Request, Security, status
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
+from ..db.tenant_rls import bind_wallet_scope, rls_admin_scope
 from .config import get_settings
 from .oidc_iga import EnterprisePrincipal, IGADecision, IGAError, is_iga_issuer_token
 from .trust_mode import is_production_like_environment
@@ -153,7 +154,15 @@ async def get_auth_context(
     """
     # HTTPBearer declares the OpenAPI alternative; raw Authorization stays
     # authoritative so malformed headers cannot fall back to an API key.
-    context = await _resolve_auth_context(api_key, authorization)
+    # Resolving a credential is cross-wallet by nature: the key row is what
+    # names the wallet. Only after it resolves is the request narrowed to that
+    # wallet for the database's row-level policies (app.db.tenant_rls).
+    with rls_admin_scope("credential_resolution"):
+        context = await _resolve_auth_context(api_key, authorization)
+    bind_wallet_scope(
+        context.wallet_id,
+        admin_reason="bootstrap_admin" if context.is_bootstrap_admin else None,
+    )
     acceptance = CREDENTIAL_ACCEPTANCE.get()
     if acceptance is not None:
         acceptance.accepted = True

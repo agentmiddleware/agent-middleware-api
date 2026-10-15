@@ -117,6 +117,14 @@ the key store is unreachable, for the same reason.
 The signature covers `signing_input` verbatim — a canonical JSON string, not a
 re-serialization of the parsed object. Verifiers must check the bytes as given.
 
+One exception: a plane signing through AWS KMS signs a `signing_input` over
+4096 bytes indirectly. Its signature is tagged
+`Ed25519-sha256-envelope:<base64>` and covers the canonical JSON of
+`{"alg":"Ed25519-sha256-envelope","kid":...,"payload_sha256":...}`, where
+`payload_sha256` is the hex SHA-256 of the `signing_input` bytes. Accept that
+tag only for a `signing_input` over 4096 bytes, and reject any other tag. See
+[`docs/key-management.md`](key-management.md).
+
 The canonicalization contract is `awi-canonical-json/1`: keys sorted at every
 level, `,`/`:` separators with no whitespace, non-ASCII escaped. Decimals and
 timestamps are already strings inside a signed payload (`"1.5"`,

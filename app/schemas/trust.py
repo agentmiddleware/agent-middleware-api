@@ -486,7 +486,14 @@ class PortableReceiptResponse(BaseModel):
             "bytes verbatim; do not re-serialize the parsed object."
         )
     )
-    signature: str = Field(description="Base64 Ed25519 signature over signing_input.")
+    signature: str = Field(
+        description=(
+            "Base64 Ed25519 signature over signing_input. A signing_input over "
+            "4096 bytes signed through AWS KMS is tagged "
+            "'Ed25519-sha256-envelope:<base64>' and covers the canonical JSON "
+            "of {alg, kid, payload_sha256} instead."
+        )
+    )
     keys_url: str = Field(description="Where to fetch the public key for `kid`.")
 
 

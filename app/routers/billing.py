@@ -9,7 +9,8 @@ This is how the API generates revenue autonomously.
 """
 
 from decimal import Decimal
-from typing import ClassVar, cast
+from collections.abc import Awaitable
+from typing import ClassVar, TypeVar, cast
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -17,6 +18,7 @@ from pydantic import BaseModel, Field
 from ..core.auth import AuthContext, get_auth_context, verify_api_key
 from ..core.config import get_settings
 from ..core.dependencies import get_agent_money
+from ..db.tenant_rls import rls_admin_scope
 from ..idempotency_gate import requires_idempotency
 from .http_idempotency import (
     begin_http_idempotency as _begin_idempotency,
@@ -66,6 +68,23 @@ from ..schemas.billing import (
     ExactDecimalFieldsMixin,
     MAX_STORABLE_AMOUNT,
 )
+
+
+T = TypeVar("T")
+
+
+async def _two_wallet_write(reason: str, operation: Awaitable[T]) -> T:
+    """Run an already-authorized two-wallet money movement.
+
+    Provisioning, reclaim, and transfers debit one wallet and credit another
+    in one transaction, after the route has checked access to the side it is
+    responsible for. Under TENANT_RLS_MODE=enforce the request is scoped to
+    the caller's wallet only, so the movement runs under a named row-level
+    security admin scope (docs/tenant-rls.md). The coroutine body, and so its
+    transaction, starts inside the scope.
+    """
+    with rls_admin_scope(f"billing:{reason}"):
+        return await operation
 
 
 def _require_wallet_access(auth: AuthContext, wallet_id: str) -> None:
@@ -308,21 +327,24 @@ async def create_agent_wallet(
     if replay is not None:
         return replay
     try:
-        wallet = await money.create_agent_wallet(
-            sponsor_wallet_id=request.sponsor_wallet_id,
-            agent_id=request.agent_id,
-            budget_credits=Decimal(str(request.budget_credits)),
-            daily_limit=(
-                # `is not None`: the schema declares ge=0, so 0 is a valid cap
-                # meaning "spend nothing", and a truthiness test turned that
-                # into None -- which the engine reads as "no cap at all".
-                Decimal(str(request.daily_limit))
-                if request.daily_limit is not None
-                else None
+        wallet = await _two_wallet_write(
+            "sponsor_agent_provisioning",
+            money.create_agent_wallet(
+                sponsor_wallet_id=request.sponsor_wallet_id,
+                agent_id=request.agent_id,
+                budget_credits=Decimal(str(request.budget_credits)),
+                daily_limit=(
+                    # `is not None`: the schema declares ge=0, so 0 is a valid cap
+                    # meaning "spend nothing", and a truthiness test turned that
+                    # into None -- which the engine reads as "no cap at all".
+                    Decimal(str(request.daily_limit))
+                    if request.daily_limit is not None
+                    else None
+                ),
+                auto_refill=request.auto_refill,
+                auto_refill_threshold=Decimal(str(request.auto_refill_threshold)),
+                auto_refill_amount=Decimal(str(request.auto_refill_amount)),
             ),
-            auto_refill=request.auto_refill,
-            auto_refill_threshold=Decimal(str(request.auto_refill_threshold)),
-            auto_refill_amount=Decimal(str(request.auto_refill_amount)),
         )
     except WalletNotFoundError as e:
         # Every terminal branch must complete the record, or the key stays
@@ -384,14 +406,17 @@ async def create_child_wallet(
 ):
     _require_wallet_access(auth, request.parent_wallet_id)
     try:
-        response = await money.create_child_wallet(
-            parent_wallet_id=request.parent_wallet_id,
-            child_agent_id=request.child_agent_id,
-            budget_credits=Decimal(str(request.budget_credits)),
-            max_spend=Decimal(str(request.max_spend)),
-            task_description=request.task_description,
-            ttl_seconds=request.ttl_seconds,
-            auto_reclaim=request.auto_reclaim,
+        response = await _two_wallet_write(
+            "parent_child_provisioning",
+            money.create_child_wallet(
+                parent_wallet_id=request.parent_wallet_id,
+                child_agent_id=request.child_agent_id,
+                budget_credits=Decimal(str(request.budget_credits)),
+                max_spend=Decimal(str(request.max_spend)),
+                task_description=request.task_description,
+                ttl_seconds=request.ttl_seconds,
+                auto_reclaim=request.auto_reclaim,
+            ),
         )
         return ChildWalletResponse(
             wallet_id=response.wallet_id,
@@ -453,7 +478,10 @@ async def reclaim_child_wallet(
 ):
     _require_wallet_access(auth, wallet_id)
     try:
-        result = await money.reclaim_child_wallet(wallet_id)
+        result = await _two_wallet_write(
+            "parent_child_reclaim",
+            money.reclaim_child_wallet(wallet_id),
+        )
         return ReclaimResponse(
             child_wallet_id=result["child_wallet_id"],
             parent_wallet_id=result["parent_wallet_id"],
@@ -1139,12 +1167,15 @@ async def transfer_wallets(
     if replay is not None:
         return replay
     try:
-        result = await money.transfer(
-            from_wallet_id=from_wallet_id,
-            to_wallet_id=to_wallet_id,
-            amount=Decimal(str(amount)),
-            description=description or "",
-            correlation_id=correlation_id,
+        result = await _two_wallet_write(
+            "wallet_transfer",
+            money.transfer(
+                from_wallet_id=from_wallet_id,
+                to_wallet_id=to_wallet_id,
+                amount=Decimal(str(amount)),
+                description=description or "",
+                correlation_id=correlation_id,
+            ),
         )
         # Committed: settle the key before the audit write (see charge_wallet).
         await guard.complete(result, 200, response_reference=result.get("transfer_id"))

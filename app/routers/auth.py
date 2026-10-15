@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, cast
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, update
 from sqlmodel import col
 
@@ -16,6 +16,7 @@ from app.core.jwt import JWTError, get_jwt_service
 from app.core.scopes import is_known_scope, unknown_scopes
 from app.db.database import get_session_factory
 from app.db.models import RefreshTokenModel
+from app.db.tenant_rls import rls_admin_route
 from app.schemas.auth import (
     TokenExchangeRequest,
     TokenExchangeResponse,
@@ -24,7 +25,14 @@ from app.schemas.auth import (
     TokenRevokeRequest,
 )
 
-router = APIRouter(prefix="/v1/auth", tags=["Authentication"])
+# Exchanging a credential for tokens is credential resolution: the key or
+# refresh-token row is what names the wallet, so these routes run under the
+# explicit row-level-security admin scope, like get_auth_context's lookup.
+router = APIRouter(
+    prefix="/v1/auth",
+    tags=["Authentication"],
+    dependencies=[Depends(rls_admin_route("jwt_credential_exchange"))],
+)
 
 
 def _exp_to_datetime(ts: int) -> datetime:
