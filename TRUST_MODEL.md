@@ -139,6 +139,31 @@ Focused state-machine, reconciliation, migration, and PostgreSQL process-kill
 tests cover the claim transition. Deployment and downstream-effect truth remain
 outside that evidence.
 
+## Re-Plans Under A New Key
+
+Everything above is keyed on the caller's idempotency key. A new key is a new
+operation. On `POST /mcp`, a call with no `permit_id` also gets a freshly
+auto-minted permit with its own budget. So an agent that restarts or
+re-plans the same action under a new key used to be authorized, dispatched,
+and debited again, and every per-key or per-permit control (idempotency
+replay, `MCP_UPSTREAM_DUPLICATE_GUARD`, `max_credits`) saw a new request.
+
+The wallet re-plan guard (`WALLET_REPLAN_GUARD`, `app/services/replan_guard.py`)
+keys on the wallet instead. It uses a dedup lock on
+`(wallet, tool, canonical argument hash)` plus a velocity cap, both across all
+of the wallet's permits. Each is checked and recorded in one atomic step. The
+lock is released and the velocity refunded atomically only when the call
+failed deterministically and was not charged. Success and charged ambiguity
+(`delivery_uncertain`) keep the lock, so a re-plan cannot redispatch a call
+that may already have landed. The default mode is `log_only`, which logs
+would-be refusals and never blocks. `enforce` refuses with a signed denial
+receipt (`wallet_duplicate_request`, `wallet_velocity_exceeded`).
+
+This narrows the new-key gap. It does not close it: the guarantee remains
+**at-most-once dispatch, not exactly-once execution**. A re-plan that changes
+any argument value is a new request, and so is one outside the window. See
+[`docs/replan-guard.md`](docs/replan-guard.md).
+
 ## Signed Receipts
 
 Every successful governed MCP call produces a signed receipt linked to the

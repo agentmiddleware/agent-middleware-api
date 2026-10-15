@@ -102,6 +102,17 @@ Keep these out of the wedge until a design partner requires them:
   verifier holding only the receipt does not see the refund.
 - Gateway exactly-once behavior does not make a remote side effect exactly
   once unless the upstream honors the forwarded idempotency key.
+- The guarantee is at-most-once dispatch, not exactly-once execution, and it
+  is bound to the caller's idempotency key. An agent that re-plans under a
+  new key (on `POST /mcp`, a keyless call also gets a freshly auto-minted
+  permit) is a new authorized operation. The wallet re-plan guard
+  (`WALLET_REPLAN_GUARD`, default `log_only`, which never blocks) narrows
+  this. Under `enforce` it refuses identical canonical arguments for the same
+  tool and wallet across all permits within `WALLET_DEDUP_WINDOW_SECONDS`, and
+  it caps wallet credits and calls per window across all permits. It does not
+  recognize a re-plan that changes any argument value, and it is not proof of
+  non-duplication. Without `REDIS_URL` its counters are per-process. See
+  [`docs/replan-guard.md`](docs/replan-guard.md).
 - The configured upstream path atomically enforces the permit's `max_credits`
   ceiling and `max_calls_per_tool` counters (supported since 8c95229, PR #476).
   It rejects permits carrying `aggregate_value_cap` before reservation or
