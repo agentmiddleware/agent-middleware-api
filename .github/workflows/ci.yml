@@ -250,7 +250,8 @@ jobs:
           SDK_VERSION=$(python -c "import pathlib, re; text=pathlib.Path('b2a_sdk/pyproject.toml').read_text(); print(re.search(r'^version = \"([^\"]+)\"$', text, re.MULTILINE).group(1))")
           echo "SDK_VERSION=$SDK_VERSION" >> "$GITHUB_ENV"
           python -m pip install --upgrade pip
-          pip install uv pytest pytest-asyncio ruff mypy
+          # Same ruff as .pre-commit-config.yaml (rev v0.9.0).
+          pip install uv pytest pytest-asyncio ruff==0.9.0 mypy
           uv build b2a_sdk --out-dir sdk-dist
 
       - name: Validate clean wheel installation
@@ -721,7 +722,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.lock
-          pip install ruff mypy
+          # Same ruff as .pre-commit-config.yaml (rev v0.9.0). An unpinned
+          # install drifts from the hook and can pass or fail differently.
+          pip install ruff==0.9.0 mypy
 
       # Docker and CI install from requirements.lock; fail if it no longer
       # satisfies requirements.txt. uv keeps existing pins, so this only
@@ -734,6 +737,9 @@ jobs:
 
       - name: Run ruff
         run: ruff check .
+
+      - name: Run ruff format check
+        run: ruff format --check .
 
       - name: Run mypy
         run: mypy app/
