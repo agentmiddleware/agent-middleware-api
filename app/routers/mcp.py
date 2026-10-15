@@ -88,6 +88,7 @@ from ..services.mcp_dispatch_attempts import (
 from ..services.mcp_dispatch_reconciliation import (
     get_mcp_dispatch_reconciliation_service,
 )
+from ..services.replan_guard import ReplanReservation, get_replan_guard
 from ..services.upstream_mcp import (
     UpstreamMcpDeliveryUncertainError,
     UpstreamMcpDispatchClaimUnavailableError,
@@ -229,6 +230,15 @@ class HumanApprovalPendingSignal(RuntimeError):
         super().__init__(reason)
         self.data = data or {}
         self.status_code = status_code
+
+
+class WalletGuardUnavailableSignal(HumanApprovalPendingSignal):
+    """The wallet re-plan guard's shared store could not answer in enforce mode.
+
+    A subclass so every handler that already maps the retryable
+    approval-pending condition (-32005, key released, nothing charged) maps
+    this one too: no receipt, nothing charged, same key retryable.
+    """
 
 
 class IdempotencyKeyReusedError(ValueError):
@@ -1145,7 +1155,8 @@ async def _execute_registered_tool(
     """
     owned_record: dict[str, Any] = {}
     try:
-        return await _execute_registered_tool_inner(
+        return await _run_inner_settling_replan_guard(
+            owned_record,
             tool_name=tool_name,
             arguments=arguments,
             wallet_id=wallet_id,
@@ -1158,7 +1169,6 @@ async def _execute_registered_tool(
             quote_id=quote_id,
             idempotency_key=idempotency_key,
             request_payload=request_payload,
-            owned_record=owned_record,
         )
     except ToolPermissionDenied as exc:
         if exc.receipt is None and permit_id and wallet_id:
@@ -1215,6 +1225,53 @@ async def _execute_registered_tool(
                         "mcp_audit_contended_idempotency_abandon_failed",
                         extra={"wallet_id": wallet_id},
                     )
+        raise
+
+
+def _replan_reservation_releasable(
+    owned_record: dict[str, Any], exc: BaseException
+) -> bool:
+    """Whether a failed call's wallet re-plan reservation should be handed back.
+
+    Before the charge commits nothing ran and nothing was charged, so the
+    reservation goes back -- except when another live activation of the same
+    operation owns it (in-progress / dispatch conflict): that owner holds the
+    same lock and still needs it. After the charge only a deterministic,
+    compensated failure releases: a refunded governed failure, or an
+    ungoverned tool failure whose charge was compensated. A charge that stands
+    (``delivery_uncertain``, a rejected response, an unrefunded failure, an
+    unclassified error) keeps the lock, so a re-plan under a new key cannot
+    dispatch the possibly-delivered call a second time.
+    """
+    if not owned_record.get("replan_effects_started"):
+        return not isinstance(
+            exc, (IdempotencyInProgressError, DispatchAttemptConflictError)
+        )
+    if isinstance(exc, ToolExecutionError):
+        return True
+    if isinstance(exc, GovernedToolError):
+        receipt = exc.receipt or {}
+        return receipt.get("outcome") == "failed_refunded"
+    return False
+
+
+async def _run_inner_settling_replan_guard(
+    owned_record: dict[str, Any], **kwargs: Any
+) -> dict:
+    """Run the governed call and settle its wallet re-plan reservation.
+
+    Success keeps the reservation (the dedup lock lives out its window and the
+    velocity stays counted); failures release it per
+    ``_replan_reservation_releasable``.
+    """
+    try:
+        return await _execute_registered_tool_inner(owned_record=owned_record, **kwargs)
+    except BaseException as exc:
+        reservation: ReplanReservation | None = owned_record.get("replan_reservation")
+        if reservation is not None and _replan_reservation_releasable(
+            owned_record, exc
+        ):
+            await get_replan_guard().release(reservation)
         raise
 
 
@@ -2128,6 +2185,98 @@ async def _execute_registered_tool_inner(
             )
         raise PermissionError(policy.reason)
 
+    # --- Wallet re-plan guard (app/services/replan_guard) --------------------
+    # The per-permit duplicate guard and the permit budget are blind to an
+    # agent that re-plans under a new idempotency key AND a new permit -- which
+    # is every keyless POST /mcp call, since that endpoint auto-mints a fresh
+    # permit per call. This gate keys on the wallet: dedup over (wallet, tool,
+    # canonical argument hash) across all permits, and a wallet velocity cap
+    # across all permits. Placed after deterministic policy and before the
+    # advisory Jev call, the human-approval page, and any reservation, so a
+    # refused re-plan pages nobody and moves nothing. Same-key retries already
+    # replayed above; the lock is owned by the idempotency key, so a same-key
+    # retry that reaches here re-enters it. log_only never blocks.
+    if governed_call and permit_model is not None:
+        replan = await get_replan_guard().check_and_reserve(
+            wallet_id=wallet_id,
+            tool_name=tool_name,
+            arguments=arguments,
+            owner=f"{idempotency_endpoint}\x00{idempotency_key or ''}",
+            credits=registered_cost,
+            allow_identical_repeats=bool(permit_model.allow_identical_repeats),
+        )
+        if replan.reservation is not None and owned_record is not None:
+            owned_record["replan_reservation"] = replan.reservation
+        if not replan.allowed:
+            reason = replan.reason or "wallet_guard_unavailable"
+            trust_metadata = _trust_metadata(
+                permit_id=permit_id,
+                idempotency_key=idempotency_key,
+                request_payload=effective_request_payload,
+                arguments=arguments,
+            )
+            if replan.retryable:
+                # The guard could not answer. Nothing terminal happened, so
+                # the key is freed and no receipt is signed; the same call is
+                # retryable once the store is back (fail closed, not burned).
+                await _audit_mcp_invocation(
+                    effects_committed=False,
+                    decision=decision,
+                    endpoint=endpoint,
+                    transport=transport,
+                    ok=False,
+                    error=reason,
+                    extra_metadata={**policy_metadata, **trust_metadata},
+                )
+                if idem_begin is not None and idempotency_key:
+                    await idem.abandon(
+                        wallet_id=wallet_id,
+                        endpoint=idempotency_endpoint,
+                        idempotency_key=idempotency_key,
+                        expected_record_id=idem_begin.record_id,
+                    )
+                await _release_iga_use(iga_granted_use, tool_name, reason=reason)
+                raise WalletGuardUnavailableSignal(
+                    reason, data=dict(replan.details), status_code=503
+                )
+            audit_event = await _audit_mcp_invocation(
+                effects_committed=False,
+                decision=decision,
+                endpoint=endpoint,
+                transport=transport,
+                ok=False,
+                error=reason,
+                extra_metadata={
+                    **policy_metadata,
+                    **trust_metadata,
+                    "replan_guard": replan.details,
+                },
+            )
+            receipt_payload = await _finalize_governed_denial(
+                unaccepted_iga_use=iga_granted_use,
+                unaccepted_action_owner_id=idem_begin.record_id if idem_begin else None,
+                idem=idem,
+                effects_committed=False,
+                approval_consumed=False,
+                permit_model=permit_model,
+                wallet_id=wallet_id,
+                key_id=auth.key_id,
+                endpoint=idempotency_endpoint,
+                idempotency_key=idempotency_key,
+                tool_name=tool_name,
+                request_payload=effective_request_payload,
+                arguments=arguments,
+                registered_cost=registered_cost,
+                audit_event_id=audit_event.event_id,
+                reason=reason,
+                reason_code=reason,
+                outcome="denied",
+                status_code=403,
+            )
+            raise ToolPermissionDenied(
+                reason, receipt=receipt_payload, details=replan.details
+            )
+
     jev_escalated = False
     jev_metadata = {}
     jev_settings = get_settings()
@@ -2852,6 +3001,11 @@ async def _execute_registered_tool_inner(
                 ),
             )
         raise ValueError(denial_reason)
+
+    # The debit committed: from here a failure only hands the wallet re-plan
+    # reservation back when it is a deterministic, compensated one.
+    if owned_record is not None:
+        owned_record["replan_effects_started"] = True
 
     # money.charge() is only ever invoked here without dry_run=True, so a real
     # (non-simulated) LedgerEntry is the only non-error outcome; this also

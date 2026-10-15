@@ -179,9 +179,17 @@ Two optional controls sit beside these guarantees and are **not** part of them:
   the same permit and tool within the window, with `duplicate_request_new_key`.
   Detection is scoped to one `permit_id`, so it only helps flows that keep the
   original permit. On `POST /mcp`, a new key without a `permit_id` mints a fresh
-  permit, so an identical retry still dispatches and debits again. It does not
-  close the restart-with-a-new-key hole. See
+  permit, which this guard cannot see. See
   [docs/POLICY_ENFORCEMENT.md](docs/POLICY_ENFORCEMENT.md).
+- **Wallet re-plan guard** (`WALLET_REPLAN_GUARD=off|log_only|enforce`, default
+  `log_only`, which never blocks). It keys on the wallet instead of the permit.
+  `enforce` refuses identical canonical arguments for the same tool across
+  *all* of the wallet's permits within the window (`wallet_duplicate_request`),
+  including the auto-minted permits on `POST /mcp`. It also caps wallet credits
+  and calls per window across all permits (`wallet_velocity_exceeded`). A
+  re-plan that changes any argument value is still a new call, so this narrows
+  the restart-with-a-new-key hole without closing it: at-most-once dispatch,
+  not exactly-once execution. See [docs/replan-guard.md](docs/replan-guard.md).
 - **Jev risk advisory** (`JEV_RISK_GUARD=off|log|enforce`, default `off`). A
   probabilistic check run only after deterministic policy has allowed the call.
   It never turns a denial into an allow, can be wrong, and fails open on vendor

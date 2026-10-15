@@ -185,7 +185,11 @@ Read across the lost-response rows:
   The gateway's two payouts are both correctly authorized, dispatched,
   debited, and receipted. Identity is the caller's key; the boundary keys on
   it and cannot recover an identity the caller lost. This is printed under
-  "Remaining limitations" on every run.
+  "Remaining limitations" on every run. The lab runs the shipped default,
+  `WALLET_REPLAN_GUARD=log_only`, which logs this repeat but never blocks it.
+  Under `enforce`, the wallet re-plan guard refuses an identical re-plan within
+  its window ([replan-guard.md](replan-guard.md)). This lab does not measure
+  that mode, and it does not help when the re-plan changes any argument value.
 - **Added latency** in this run was about 90 ms per call at the median
   (in-process, no sockets, throwaway SQLite). That bounds the gateway's own
   compute and durable-write overhead; it is not a network measurement.
