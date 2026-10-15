@@ -46,6 +46,9 @@ class CrewAIB2ATool(BaseTool):
     # Private per-instance state (permit_idempotency_key → permit_id); a fresh
     # dict per instance so replays never leak across tool instances.
     _permit_cache: dict[str, str] = PrivateAttr(default_factory=dict)
+    # Permit bodies this instance has already used (permit_idempotency_key →
+    # request), so later field mutations are checked against them.
+    _permit_requests: dict[str, PermitRequest] = PrivateAttr(default_factory=dict)
     # Permit request bodies are shared across instances, keyed by
     # (base_url, wallet_id, permit_idempotency_key): a logical retry through a
     # new tool instance must resend the identical body (same expires_at) or
@@ -77,6 +80,7 @@ class CrewAIB2ATool(BaseTool):
             **kwargs,
         )
         self._permit_cache = {}  # Instance-specific cache
+        self._permit_requests = {}
 
     def _get_client(self) -> B2AClient:
         if self.client is None:
@@ -90,6 +94,22 @@ class CrewAIB2ATool(BaseTool):
         # Both sync and async entry points retain the body before sending it.
         # A lost response therefore cannot change the expiry on retry, even
         # when the retry goes through a new tool instance.
+        # Once this instance has used a key, its own record wins: mutating
+        # wallet_id or permit_budget afterwards must fail the terms check
+        # below, not silently select a fresh shared entry.
+        request = self._permit_requests.get(permit_key)
+        if request is None:
+            request = self._shared_permit_request(tool_name, permit_key)
+            self._permit_requests[permit_key] = request
+        if (
+            request.subject_wallet_id != self.wallet_id
+            or request.max_credits != self.permit_budget
+            or request.allowed_tools != [tool_name]
+        ):
+            raise ValueError("permit_idempotency_key reused with different permit terms")
+        return request
+
+    def _shared_permit_request(self, tool_name: str, permit_key: str) -> PermitRequest:
         cache = type(self)._shared_permit_requests
         cache_key = (self.base_url, self.wallet_id, permit_key)
         with type(self)._shared_permit_requests_lock:
@@ -108,12 +128,6 @@ class CrewAIB2ATool(BaseTool):
                     cache.popitem(last=False)
             else:
                 cache.move_to_end(cache_key)
-        if (
-            request.subject_wallet_id != self.wallet_id
-            or request.max_credits != self.permit_budget
-            or request.allowed_tools != [tool_name]
-        ):
-            raise ValueError("permit_idempotency_key reused with different permit terms")
         return request
 
     def _run(
