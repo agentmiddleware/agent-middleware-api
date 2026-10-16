@@ -28,7 +28,7 @@ from typing import Any, NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AliasChoices, BaseModel, Field, model_validator
 from sqlalchemy.exc import IntegrityError
 
 from ..audit.lightweight import record_audit
@@ -471,15 +471,25 @@ class ToolCallRequest(BaseModel):
     arguments: dict[str, Any] = Field(
         default_factory=dict, description="Tool arguments"
     )
-    mcp_context: McpContext | None = Field(None, description="Billing context")
+    mcp_context: McpContext | None = Field(
+        None,
+        validation_alias=AliasChoices("mcpContext", "mcp_context"),
+        description="Billing context. mcpContext is canonical; mcp_context is "
+        "accepted as an alias.",
+    )
 
     @model_validator(mode="before")
     @classmethod
-    def _reject_jsonrpc_context(cls, value: Any) -> Any:
-        if isinstance(value, dict) and "mcpContext" in value:
-            raise ValueError(
-                "Use mcp_context for this REST route; mcpContext is JSON-RPC-only"
-            )
+    def _reject_conflicting_context(cls, value: Any) -> Any:
+        # Both spellings sent with different values: refuse instead of letting
+        # one silently win, because the context carries permit and replay key.
+        if (
+            isinstance(value, dict)
+            and "mcpContext" in value
+            and "mcp_context" in value
+            and value["mcpContext"] != value["mcp_context"]
+        ):
+            raise ValueError("mcpContext and mcp_context differ; send only mcpContext")
         return value
 
 
@@ -533,8 +543,8 @@ async def get_tools_json(
         "initialization lifecycle. Check `/.well-known/agent.json` before "
         "assuming the standard MCP Streamable HTTP endpoint at POST /mcp is "
         "available; both transports run the same governed permit→meter→receipt "
-        "path when enabled. tools/call uses params.mcpContext; mcp_context "
-        "belongs only to the deprecated REST invoke route. Preserve one "
+        "path when enabled. tools/call uses params.mcpContext (mcp_context is "
+        "accepted as an alias on every route). Preserve one "
         "Idempotency-Key across retries."
     ),
     openapi_extra={
@@ -5000,7 +5010,7 @@ async def invoke_tool(
             [
                 *_header_idempotency_key_sources(http_request),
                 *(
-                    [("mcp_context.idempotency_key", mcp_context.idempotency_key)]
+                    [("mcpContext.idempotency_key", mcp_context.idempotency_key)]
                     if mcp_context.idempotency_key is not None
                     else []
                 ),

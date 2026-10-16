@@ -30,8 +30,8 @@ for i in 1 2; do curl -s -X POST https://YOUR-HOST/mcp/tools/partner.echo/invoke
   -H "X-API-Key: $KEY" -H 'Content-Type: application/json' -d "{
     \"name\": \"partner.echo\",
     \"arguments\": {\"message\": \"hello from Product Hunt\"},
-    \"mcp_context\": {\"wallet_id\": \"$WALLET\", \"permit_id\": \"$PERMIT\",
-                      \"idempotency_key\": \"demo-run-1\"}
+    \"mcpContext\": {\"wallet_id\": \"$WALLET\", \"permit_id\": \"$PERMIT\",
+                     \"idempotency_key\": \"demo-run-1\"}
   }"; done
 
 # 4. Portable receipt + trust keys (keys endpoint is public)

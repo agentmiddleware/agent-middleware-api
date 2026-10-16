@@ -1,9 +1,9 @@
-"""Docs must spell the call context the way each route accepts it.
+"""Docs must show the canonical call-context spelling, ``mcpContext``.
 
-JSON-RPC ``tools/call`` takes ``params.mcpContext`` and refuses ``mcp_context``;
-the deprecated REST invoke takes ``mcp_context`` and refuses ``mcpContext``
-(``tests/test_mcp_idempotency_key_validation.py``). An outside tester copied
-the wrong spelling from the docs, so every fenced example is checked here.
+Every route accepts ``mcpContext`` and the ``mcp_context`` alias
+(``tests/test_mcp_idempotency_key_validation.py``), but examples teach one
+spelling so copied calls match the OpenAPI schema. Every fenced example is
+checked here.
 """
 
 from __future__ import annotations
@@ -32,17 +32,13 @@ def _code_blocks(text: str) -> list[str]:
     return FENCE.findall(text) or [text]
 
 
-def test_doc_examples_use_route_specific_context_spelling():
+def test_doc_examples_use_canonical_context_spelling():
     offenders = []
     for path in _doc_files():
         for block in _code_blocks(path.read_text(encoding="utf-8")):
             rel = path.relative_to(ROOT).as_posix()
-            is_jsonrpc = "tools/call" in block
-            is_rest = "/invoke" in block and not is_jsonrpc
-            if is_jsonrpc and re.search(r'mcp_context\\?"', block):
-                offenders.append(f"{rel}: JSON-RPC example uses mcp_context")
-            if is_rest and re.search(r'mcpContext\\?"', block):
-                offenders.append(f"{rel}: REST invoke example uses mcpContext")
+            if re.search(r'mcp_context\\?"', block):
+                offenders.append(f"{rel}: example uses mcp_context, not mcpContext")
     assert not offenders, "\n".join(offenders)
 
 
