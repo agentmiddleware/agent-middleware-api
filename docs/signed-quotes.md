@@ -85,11 +85,11 @@ spent quote to the invoke that spent it.
 
 Spending happens on the existing governed invoke — pass `quote_id` in the
 call context alongside `wallet_id`, `permit_id`, and `idempotency_key`. The
-context field is spelled per route: `params.mcpContext` (camel case) on
-JSON-RPC `tools/call` (`/mcp/messages`), and `mcp_context` (snake case) on the
+context field is `mcpContext` (camel case) on every route: `params.mcpContext`
+on JSON-RPC `tools/call` (`/mcp/messages`) and `mcpContext` in the body of the
 deprecated REST invoke `/mcp/tools/{service_id}/invoke` used in the example
-below. The other spelling is refused before execution (JSON-RPC `-32602`,
-REST `422`); neither route accepts both.
+below. `mcp_context` (snake case) is accepted as an alias; sending both with
+different values is refused before execution (JSON-RPC `-32602`, REST `422`).
 
 ## Example
 
@@ -105,7 +105,7 @@ curl -sS -X POST "$API_URL/mcp/tools/summarize/invoke" \
   -d '{
         "name": "summarize",
         "arguments": {"text": "..."},
-        "mcp_context": {
+        "mcpContext": {
           "wallet_id": "'"$WALLET"'",
           "permit_id": "'"$PERMIT"'",
           "quote_id": "'"$(echo "$QUOTE" | jq -r .quote_id)"'",
