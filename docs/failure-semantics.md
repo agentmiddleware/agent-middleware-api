@@ -246,7 +246,11 @@ Two non-terminal answers matter to clients:
   original request — equal to the original receipt's `request_hash` on
   governed calls) and `error.data.received_request_hash` (the hash of the
   rejected request). Both are opaque SHA-256 hex; compare them, do not try
-  to recompute them. REST returns `409` with `detail: "idempotency_key_reused"`
+  to recompute them. Exception: if the key is held by a pre-canonical
+  (legacy, per-transport) record — a completed record from the other
+  transport, or a legacy worker that won a rolling-upgrade insertion race —
+  the stored hash is not comparable, so `-32009` is returned with no
+  `error.data`. Clients must treat `error.data` as optional. REST returns `409` with `detail: "idempotency_key_reused"`
   and no hashes.
 
 The idempotency identity is the *logical* call — transport-independent, so a

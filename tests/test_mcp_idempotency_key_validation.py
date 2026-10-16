@@ -690,39 +690,105 @@ async def test_legacy_context_null_key_reads_as_absent(
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.parametrize("surface", ["legacy", "rest", "standard"])
-async def test_misplaced_context_spelling_is_refused_before_any_effect(
-    client, governed_legacy, counted_tool, standard_mcp_enabled, surface
-):
-    provisioned, permit = governed_legacy
-    before = await _snapshot(client, provisioned, counted_tool)
-    body = _legacy_call(counted_tool.name, provisioned, permit, key="spelling-1")
+def _spelled_call(surface, tool, provisioned, permit, key, contexts):
+    """Path, payload, and headers with the call context under ``contexts``.
+
+    ``contexts`` maps a spelling (``mcpContext``/``mcp_context``) to the
+    context object sent under it; the base context is the permit's.
+    """
+    body = _legacy_call(tool, provisioned, permit, key=key)
+    base = body["params"].pop("mcpContext")
+    for spelling, override in contexts.items():
+        body["params"][spelling] = {**base, **override}
     headers = provisioned["agent_headers"]
     if surface == "rest":
-        path = f"/mcp/tools/{counted_tool.name}/invoke"
-        payload = body["params"]
-        expected_field = "mcp_context"
-    else:
-        path = "/mcp/messages" if surface == "legacy" else "/mcp"
-        body["params"]["mcp_context"] = body["params"].pop("mcpContext")
-        payload = body
-        expected_field = "mcpContext"
-        if surface == "standard":
-            headers = {**headers, **MCP_HEADERS}
+        return f"/mcp/tools/{tool}/invoke", body["params"], headers
+    if surface == "standard":
+        return "/mcp", body, {**headers, **MCP_HEADERS}
+    return "/mcp/messages", body, headers
+
+
+def _receipt_id(surface, response) -> str:
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    if surface == "rest":
+        return payload["receipt"]["receipt_id"]
+    assert "error" not in payload, payload
+    return payload["result"]["receipt"]["receipt_id"]
+
+
+@pytest.mark.parametrize("surface", ["legacy", "rest", "standard"])
+async def test_both_context_spellings_are_one_action_on_every_route(
+    client, governed_legacy, counted_tool, standard_mcp_enabled, surface
+):
+    """mcpContext is canonical and mcp_context is its alias on every route.
+
+    The same key sent under either spelling, or under both with identical
+    values, is one action: one effect, one debit, one receipt.
+    """
+    provisioned, permit = governed_legacy
+    tool = counted_tool.name
+    key = f"spelling-{surface}"
+
+    path, payload, headers = _spelled_call(
+        surface, tool, provisioned, permit, key, {"mcp_context": {}}
+    )
+    first = await client.post(path, json=payload, headers=headers)
+    receipt_id = _receipt_id(surface, first)
+    after_first = await _snapshot(client, provisioned, counted_tool)
+    assert counted_tool.effects == ["one"]
+
+    for contexts in ({"mcpContext": {}}, {"mcpContext": {}, "mcp_context": {}}):
+        path, payload, headers = _spelled_call(
+            surface, tool, provisioned, permit, key, contexts
+        )
+        replay = await client.post(path, json=payload, headers=headers)
+        assert _receipt_id(surface, replay) == receipt_id
+    assert counted_tool.effects == ["one"]
+    assert await _snapshot(client, provisioned, counted_tool) == after_first
+
+
+@pytest.mark.parametrize("surface", ["legacy", "rest", "standard"])
+@pytest.mark.parametrize(
+    "alias_override",
+    [{"idempotency_key": "other-key"}, {"permit_id": "permit-other"}],
+    ids=["key", "permit"],
+)
+async def test_differing_context_spellings_are_refused_before_any_effect(
+    client,
+    governed_legacy,
+    counted_tool,
+    standard_mcp_enabled,
+    surface,
+    alias_override,
+):
+    """Both spellings with different values: refused, neither one wins."""
+    provisioned, permit = governed_legacy
+    before = await _snapshot(client, provisioned, counted_tool)
+    path, payload, headers = _spelled_call(
+        surface,
+        counted_tool.name,
+        provisioned,
+        permit,
+        "conflict-1",
+        {"mcpContext": {}, "mcp_context": alias_override},
+    )
 
     response = await client.post(path, json=payload, headers=headers)
+    message = "mcpContext and mcp_context differ"
     if surface == "rest":
         assert response.status_code == 422, response.text
-        assert expected_field in response.json()["detail"][0]["msg"]
+        assert message in response.json()["detail"][0]["msg"]
     else:
         assert response.status_code == 200, response.text
         error = response.json()["error"]
         assert error["code"] == -32602
-        assert f"use {expected_field}" in error["message"]
+        assert message in error["message"]
+    assert counted_tool.effects == []
     assert await _snapshot(client, provisioned, counted_tool) == before
 
 
-def test_openapi_context_fields_are_bound_to_their_transport():
+def test_openapi_documents_mcp_context_as_canonical_on_every_route():
     app.openapi_schema = None
     schema = app.openapi()
     legacy = schema["paths"]["/mcp/messages"]["post"]["requestBody"]
@@ -730,8 +796,8 @@ def test_openapi_context_fields_are_bound_to_their_transport():
     assert "mcpContext" in params["properties"]
     assert "mcp_context" not in params["properties"]
     rest = schema["components"]["schemas"]["ToolCallRequest"]["properties"]
-    assert "mcp_context" in rest
-    assert "mcpContext" not in rest
+    assert "mcpContext" in rest
+    assert "mcp_context" not in rest
 
 
 async def test_rest_invoke_refuses_blank_or_conflicting_keys_before_any_effect(

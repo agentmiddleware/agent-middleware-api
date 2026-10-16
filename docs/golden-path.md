@@ -225,10 +225,11 @@ curl "$API_URL/mcp/tools.json" \
 For a registered local or persistent MCP service, invoke through JSON-RPC with
 wallet, permit, and replay context:
 
-The legacy JSON-RPC route uses `params.mcpContext` (camel case). The deprecated
-REST route `/mcp/tools/{service_id}/invoke` uses `mcp_context` (snake case).
-Sending the other spelling is refused before execution; it cannot silently
-discard the permit or retry key. On standard `POST /mcp`, prefer the
+The call context is spelled `mcpContext` (camel case) on every route:
+`params.mcpContext` on JSON-RPC and `mcpContext` in the body of the deprecated
+REST route `/mcp/tools/{service_id}/invoke`. `mcp_context` (snake case) is
+accepted as an alias; sending both with different values is refused before
+execution, so the permit or retry key is never silently discarded. On standard `POST /mcp`, prefer the
 `Idempotency-Key` header or `params._meta["io.agentmiddleware/idempotency_key"]`.
 
 ```bash
