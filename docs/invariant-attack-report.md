@@ -116,6 +116,12 @@ Same key + **different** payload:
 
 …with **no** new note and **no** new debit (wallet still 2.00 debited).
 
+*Update 2026-10-09:* this conflict now returns the dedicated code `-32009`
+(`idempotency_key_reused`) instead of the generic `-32603`, with
+`error.data.expected_request_hash` / `received_request_hash` since 2026-10-11.
+See `docs/failure-semantics.md`. The transcript above is the 2026-08-12
+observation.
+
 **Why it holds.** Two engine-agnostic DB constraints, not an app-level
 check-then-act: idempotency dedup is `UNIQUE(wallet_id, endpoint, idempotency_key)`
 and the charge is `UNIQUE(wallet_id, operation_key)` with

@@ -157,8 +157,17 @@ well-formed).
   caller's *own* earlier arguments to that same caller leaks nothing new,
   since scope is per caller. Servers MUST NOT include the stored arguments
   themselves.
-- AMW gap: AMW's `-32009` response does not include the hashes yet. That is a
-  small follow-up on the AMW side, independent of the SEP.
+- AMW status: for conflicts against a current-format record, AMW's `-32009`
+  response carries the hashes as `error.data.expected_request_hash` and
+  `error.data.received_request_hash` (snake case; see
+  `docs/failure-semantics.md`). Exception: when the stored record predates
+  the canonical idempotency scope (a completed pre-canonical record from the
+  other transport, or a legacy worker that won a rolling-upgrade insertion
+  race), the two hashes were computed differently and are not comparable, so
+  AMW returns `-32009` with no `error.data` at all
+  (`_begin_governed_mcp_idempotency_scope` in `app/routers/mcp.py`). A
+  conforming SEP server in the same position SHOULD likewise omit the hashes
+  rather than send values a client cannot compare.
 
 ### 3.6 Retention (TTL)
 
