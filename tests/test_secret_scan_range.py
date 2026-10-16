@@ -167,7 +167,7 @@ def test_pinned_verified_base_is_on_this_history():
     """The pinned fallback base must be an ancestor of the checkout, or every
     fallback run on main would fail closed."""
     text = SCRIPT.read_text(encoding="utf-8")
-    pinned = text.split('SECRET_SCAN_VERIFIED_BASE:-', 1)[1].split("}", 1)[0]
+    pinned = text.split("SECRET_SCAN_VERIFIED_BASE:-", 1)[1].split("}", 1)[0]
     assert len(pinned) == 40
     present = subprocess.run(
         ["git", "cat-file", "-e", f"{pinned}^{{commit}}"],
