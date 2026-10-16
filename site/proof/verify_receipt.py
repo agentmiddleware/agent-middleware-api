@@ -10,6 +10,13 @@ but does not hold together (bad signature or contradicting envelope - treat
 as tampered), 2 means verification could not run (unknown key, malformed
 input, bad usage).
 
+A signature tagged `Ed25519-sha256-envelope:<base64>` (used for signing
+inputs over 4096 bytes) is plain Ed25519 over the canonical JSON of
+{"alg": "Ed25519-sha256-envelope", "kid": <kid>, "payload_sha256": <hex
+SHA-256 of signing_input>}; it is accepted only above that threshold, so a
+small receipt has exactly one valid signature form. Any other tag is
+malformed.
+
 What it does NOT prove: exit 0 proves the receipt matches the key snapshot
 you supplied. It does not authenticate who supplied that snapshot - fetch the
 keys once over a channel you trust, or pin them out of band, before relying
@@ -41,6 +48,13 @@ CANONICALIZATION = "awi-canonical-json/1"
 ED25519_RAW_LEN = 32
 ED25519_SIGNATURE_LEN = 64
 
+# Bounded signing envelope, mirrored from b2a_sdk.receipt_verifier: an
+# untagged signature covers signing_input; an envelope-tagged one covers the
+# canonical {alg, kid, payload_sha256} record, and only above the threshold.
+SIGNATURE_ALG = "Ed25519"
+SIGNATURE_ENVELOPE_ALG = "Ed25519-sha256-envelope"
+SIGNATURE_ENVELOPE_THRESHOLD_BYTES = 4096
+
 EXIT_VERIFIED = 0
 EXIT_INVALID = 1
 EXIT_UNDETERMINED = 2
@@ -64,6 +78,34 @@ def _b64decode(value, urlsafe=False):
         return base64.b64decode(value, validate=True)
     except (binascii.Error, ValueError):
         return None
+
+
+def split_signature(value):
+    """Return (scheme, base64). Standard base64 has no ':', so an untagged
+    signature is unambiguous."""
+    scheme, separator, encoded = value.partition(":")
+    if not separator:
+        return SIGNATURE_ALG, value
+    return scheme, encoded
+
+
+def signature_message(scheme, kid, signing_bytes):
+    """The bytes a signature of `scheme` covers, or None if it cannot apply:
+    an unknown scheme, or an envelope over a payload small enough to have
+    been signed directly (no downgrade confusion)."""
+    if scheme == SIGNATURE_ALG:
+        return signing_bytes
+    if (
+        scheme == SIGNATURE_ENVELOPE_ALG
+        and len(signing_bytes) > SIGNATURE_ENVELOPE_THRESHOLD_BYTES
+    ):
+        envelope = {
+            "alg": SIGNATURE_ENVELOPE_ALG,
+            "kid": kid,
+            "payload_sha256": hashlib.sha256(signing_bytes).hexdigest(),
+        }
+        return canonical_json(envelope).encode("utf-8")
+    return None
 
 
 def _has_lone_surrogate(value):
@@ -220,7 +262,18 @@ def verify_bundle(bundle, key_set, expected_issuer=None):
             {},
         )
 
-    signature = _b64decode(signature_b64)
+    signature_scheme, encoded_signature = split_signature(signature_b64)
+    if signature_scheme not in (SIGNATURE_ALG, SIGNATURE_ENVELOPE_ALG):
+        # The tag sits outside the signed bytes, so an unknown one is a
+        # damaged signature field, not a statement about this verifier.
+        return (
+            "malformed",
+            "unknown signature scheme: %r" % (signature_scheme,),
+            None,
+            key_id,
+            {},
+        )
+    signature = _b64decode(encoded_signature)
     if signature is None:
         return ("malformed", "signature is not valid base64", None, key_id, {})
     if len(signature) != ED25519_SIGNATURE_LEN:
@@ -246,6 +299,8 @@ def verify_bundle(bundle, key_set, expected_issuer=None):
                 probe = signing_input.encode("utf-8")
             except UnicodeEncodeError:
                 probe = None
+            if probe is not None:
+                probe = signature_message(signature_scheme, envelope_key_id, probe)
             if probe is not None and _ed25519_verify(envelope_key, signature, probe):
                 return (
                     "mismatch",
@@ -276,9 +331,19 @@ def verify_bundle(bundle, key_set, expected_issuer=None):
     except UnicodeEncodeError:
         return ("malformed", "signing_input is not valid UTF-8 text", None, key_id, {})
 
-    # The signature covers signing_input verbatim: the original string is
-    # used, never a re-serialization that could silently "fix" altered bytes.
-    if not _ed25519_verify(raw_public_key, signature, signing_bytes):
+    # The signature covers signing_input verbatim (or, for the envelope, its
+    # SHA-256): the original string is used, never a re-serialization that
+    # could silently "fix" altered bytes.
+    signed_message = signature_message(signature_scheme, key_id, signing_bytes)
+    if signed_message is None:
+        return (
+            "mismatch",
+            "envelope signature on a signing_input small enough to sign directly",
+            None,
+            key_id,
+            {},
+        )
+    if not _ed25519_verify(raw_public_key, signature, signed_message):
         return (
             "invalid",
             "signature does not verify over signing_input",

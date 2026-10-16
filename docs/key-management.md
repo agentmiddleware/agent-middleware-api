@@ -104,7 +104,7 @@ byte-for-byte the same either way. Verification rules, implemented in
 
 The environment signer never produces the envelope, at any size. Verifiers
 that predate it see invalid base64 and fail closed. The standalone
-`site/proof/verify_receipt.py` does not implement it.
+`site/proof/verify_receipt.py` implements the same rules.
 
 Refused on purpose:
 
