@@ -47,6 +47,7 @@ from pydantic import BaseModel, Field
 from ..core.auth import AuthContext, get_auth_context
 from ..core.config import get_settings
 from ..core.rate_limiter import _client_id
+from ..db.tenant_rls import rls_admin_route
 from ..services.api_key_service import KeyNotFoundError, get_api_key_service
 from ..services.demo_tenant import (
     DEMO_TENANT_LABEL,
@@ -189,6 +190,9 @@ def _require_demo_caller(auth: AuthContext) -> None:
     "/keys",
     response_model=DemoKeyIssueResponse,
     status_code=status.HTTP_201_CREATED,
+    # Anonymous by design and creates rows for wallets that do not exist yet,
+    # so there is no caller wallet to scope to (docs/tenant-rls.md).
+    dependencies=[Depends(rls_admin_route("demo_key_issuance"))],
     summary="Mint a self-serve demo key (anonymous)",
     description=(
         "Mint a demo sponsor wallet, agent wallet, and wallet-scoped API key "

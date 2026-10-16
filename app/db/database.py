@@ -35,6 +35,7 @@ from ..core.config import get_settings
 from ..core.db_urls import as_sqlalchemy_url
 from ..core.time import to_naive_utc
 from ..core.trust_mode import is_production_like_environment
+from .tenant_rls import TenantScopedSession
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,17 @@ REQUIRED_TRUST_TABLES = frozenset(
     }
 )
 REQUIRED_TRUST_COLUMNS = {
-    "mcp_dispatch_attempts": frozenset({"dispatch_claim_hash"}),
+    "mcp_dispatch_attempts": frozenset(
+        {
+            "dispatch_claim_hash",
+            "reconcile_status",
+            "reconcile_lease_owner",
+            "reconcile_lease_expires_at",
+            "reconcile_next_probe_at",
+            "reconcile_probe_count",
+            "reconciled_at",
+        }
+    ),
     "permits": frozenset(
         {
             "repeat_window_seconds",
@@ -260,6 +271,9 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
         _session_factory = async_sessionmaker(
             engine,
             class_=AsyncSession,
+            # Carries the after_begin hook that sets app.current_wallet_id
+            # per transaction under TENANT_RLS_MODE=enforce (app.db.tenant_rls).
+            sync_session_class=TenantScopedSession,
             expire_on_commit=False,
             autocommit=False,
             autoflush=False,

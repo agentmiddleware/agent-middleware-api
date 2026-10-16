@@ -56,7 +56,12 @@ from .core.trust_mode import (
     warn_if_open_admin_enabled,
     warn_if_trust_mode_permissive,
 )
-from .db.database import SchemaInitError, init_db, close_db
+from .db.database import SchemaInitError, init_db, close_db, get_engine
+from .db.tenant_rls import (
+    TenantRlsPostureError,
+    bind_wallet_scope,
+    check_tenant_rls_posture,
+)
 from .services.mcp_dispatch_attempts import get_duplicate_guard_metrics
 from .services.mcp_phase9_tools import sync_proof_surface_mcp_registration
 from .services.signing_keys import (
@@ -166,6 +171,16 @@ _SIGNING_KEY_REMEDIATION = {
         f"raw bytes. Regenerate it with: {_GENERATE_SEED_COMMAND} — and copy the value "
         "without surrounding quotes or whitespace. See docs/key-management.md."
     ),
+    "trust_signing_kms_key_required": (
+        "TRUST_SIGNING_BACKEND=aws_kms needs TRUST_SIGNING_KMS_KEY_ID: the id, ARN, "
+        "or alias of an ECC_NIST_EDWARDS25519 SIGN_VERIFY key. See "
+        "docs/key-management.md."
+    ),
+    "kms_boto3_unavailable": (
+        "TRUST_SIGNING_BACKEND=aws_kms needs boto3 installed in this image "
+        "(pip install boto3); it is not in requirements.txt. See "
+        "docs/key-management.md."
+    ),
 }
 
 
@@ -228,6 +243,9 @@ async def lifespan(app: FastAPI):
 
     async def periodic_cleanup():
         """Background task to cleanup expired entries from services."""
+        # Reconciliation and budget repair are cross-wallet by design: bind
+        # this task's database scope to the explicit RLS admin bypass.
+        bind_wallet_scope(None, admin_reason="maintenance")
         while True:
             try:
                 await asyncio.sleep(300)  # Run every 5 minutes
@@ -372,8 +390,13 @@ async def lifespan(app: FastAPI):
                         )
 
                     # Optional provider-status reconcile for parked
-                    # delivery_uncertain calls. Records resolutions and age
-                    # alerts only; never refunds or releases budget.
+                    # delivery_uncertain calls. Leases rows, probes the
+                    # configured status endpoint outside any transaction,
+                    # and records resolutions. Refunds only on an explicit
+                    # post-quiescence not-executed attestation, and only
+                    # when UPSTREAM_RECONCILE_REFUND_ON_ATTESTED_NOT_EXECUTED
+                    # is also on. Tools without a status endpoint stay in
+                    # manual review.
                     if settings.UPSTREAM_RECONCILE_WORKER_ENABLED:
                         from .services.upstream_reconcile import (
                             get_delivery_uncertain_reconcile_worker,
@@ -382,7 +405,12 @@ async def lifespan(app: FastAPI):
                         sweep = (
                             await get_delivery_uncertain_reconcile_worker().run_once()
                         )
-                        if sweep.probed or sweep.aged_alerts:
+                        if (
+                            sweep.probed
+                            or sweep.aged_alerts
+                            or sweep.refunded
+                            or sweep.audits_repaired
+                        ):
                             logger.info(
                                 "cleanup_completed",
                                 delivery_uncertain_probed=sweep.probed,
@@ -390,7 +418,15 @@ async def lifespan(app: FastAPI):
                                     sweep.resolved_executed
                                     + sweep.resolved_not_executed
                                 ),
+                                delivery_uncertain_refunded=sweep.refunded,
+                                delivery_uncertain_deferred_quiescence=(
+                                    sweep.deferred_quiescence
+                                ),
+                                delivery_uncertain_probe_errors=sweep.probe_errors,
                                 delivery_uncertain_aged_alerts=sweep.aged_alerts,
+                                delivery_uncertain_audits_repaired=(
+                                    sweep.audits_repaired
+                                ),
                             )
 
             except asyncio.CancelledError:
@@ -428,6 +464,35 @@ async def lifespan(app: FastAPI):
                 )
                 raise
             logger.warning("app_startup", phase="database_init_failed", error=str(e))
+
+        engine = get_engine()
+        if engine is not None:
+            try:
+                rls_posture = await check_tenant_rls_posture(engine)
+            except TenantRlsPostureError as e:
+                logger.error(
+                    "app_startup", phase="tenant_rls_posture_failed", error=str(e)
+                )
+                raise
+            except Exception as e:
+                # Posture is advisory outside enforce mode; a catalog read that
+                # fails there must not block an otherwise healthy boot.
+                if settings.TENANT_RLS_MODE == "enforce":
+                    raise
+                rls_posture = {"mode": settings.TENANT_RLS_MODE, "error": str(e)}
+            logger.info("app_startup", phase="tenant_rls_posture", **rls_posture)
+            if rls_posture.get("tables_with_rls_enabled") and (
+                rls_posture.get("superuser") or rls_posture.get("bypassrls")
+            ):
+                # Off mode tolerates this (the app opts out of the policies
+                # anyway); enforce mode already refused above.
+                logger.warning(
+                    "tenant_rls_role_bypasses_policies: the database runtime "
+                    "role is SUPERUSER or BYPASSRLS, so row-level wallet "
+                    "policies can never apply to this app. Use a NOSUPERUSER "
+                    "NOBYPASSRLS non-owner role before TENANT_RLS_MODE=enforce "
+                    "(see docs/tenant-rls.md)."
+                )
 
         if settings.TRUST_MODE_ENABLED:
             from .services.signing_keys import get_signing_key_service

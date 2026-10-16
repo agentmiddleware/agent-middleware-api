@@ -434,7 +434,11 @@ class ReceiptService:
                 prepared_signing_key_id,
                 session=target_session,
             )
-            signature, signature_key_id, _ = signing_keys.sign_payload_with_key_id(
+            (
+                signature,
+                signature_key_id,
+                _,
+            ) = await signing_keys.sign_payload_with_key_id(
                 payload,
                 prepared_signing_key_id,
             )

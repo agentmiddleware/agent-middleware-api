@@ -100,6 +100,31 @@ Local (non-upstream) governed tools have no dispatch state machine; a crash
 there fails closed into manual review instead. See
 [`docs/failure-semantics.md`](docs/failure-semantics.md).
 
+**Reconciling a parked call (optional, default off).** The guarantee is
+at-most-once dispatch, not exactly-once execution, and a `delivery_uncertain`
+call stays charged until something better than silence is known. With
+`UPSTREAM_RECONCILE_WORKER_ENABLED`, a background reconciler asks the configured
+upstream's same-origin status endpoint about the forwarded invocation. It leases
+rows with `SELECT ... FOR UPDATE SKIP LOCKED` and commits, probes with no
+database transaction open, then resolves each row in its own transaction with a
+conditional update. That update matches only while the attempt is still
+`delivery_uncertain`, still unresolved, and still leased to that worker. Only an
+HTTP 200 answer that echoes the forwarded identifiers is evidence. A 404 is
+unknown, never proof of non-execution. A "not executed" answer counts only after
+dispatch time + upstream timeout allowance + clock-skew allowance. Then, and
+only under the separate `UPSTREAM_RECONCILE_REFUND_ON_ATTESTED_NOT_EXECUTED`
+policy, the debit is refunded and the reservation released. Both steps go
+through the same once-only gates as the live failure path: the deterministic
+`refund-<entry>` ledger row, `mark_debit_refunded`, and
+`release_dispatch_budget_once`. So one accepted key still yields at most one net
+debit. The decision is committed before any money moves, so a crash mid-refund
+resumes rather than repeats. This step trusts the upstream's attestation: the
+gateway cannot prove a negative itself. The attempt's `state` and its signed
+receipt are never rewritten. The resolution is a separate signed, hash-chained
+audit event (`mcp_delivery_uncertain_provider_resolution`) that names the
+receipt. Tools without a status endpoint stay in manual review. See
+[`docs/delivery-uncertain-reconcile-worker.md`](docs/delivery-uncertain-reconcile-worker.md).
+
 This is at-most-one *gateway* dispatch plus refusal to redispatch an ambiguous
 invocation. It is **not** effect-once inside an arbitrary upstream tool, which
 requires that tool to honour the forwarded idempotency key. The claim record is
@@ -186,3 +211,30 @@ audit integrity and detects silent mutation.
 The database stores public keys and key metadata only. Production private keys
 must come from configured secret material or KMS-backed injection. Local tests
 may use process-ephemeral keys; they are not persisted.
+
+With the opt-in `TRUST_SIGNING_BACKEND=aws_kms`, signing happens inside AWS KMS
+(`ED25519_SHA_512`, `MessageType=RAW`): pure Ed25519 over the same canonical
+bytes, so receipts, permits, and audit events verify with the unchanged
+verifiers (`b2a-verify-receipt`, `/.well-known/trust-keys.json`). The signer
+checks every KMS signature against the published public key before using it.
+KMS signs pure Ed25519 over at most 4096 bytes, so a canonical payload larger
+than that is signed through a bounded envelope instead: the signature covers
+the canonical JSON of `{alg: "Ed25519-sha256-envelope", kid, payload_sha256}`
+and is stored tagged `Ed25519-sha256-envelope:<base64>`. The signed payload is
+unchanged, payloads of 4096 bytes or less keep the untagged direct signature,
+and the default environment signer never uses the envelope. Verifiers accept
+the envelope only for payloads over 4096 bytes and refuse any other tag.
+Where the key lives changes custody, not semantics: the gateway still provides
+at-most-once dispatch, not exactly-once execution.
+
+## Tenant Isolation
+
+Wallet isolation is enforced in the application (`require_wallet_access`). On
+PostgreSQL, forced row-level security on the core wallet-scoped tables can
+back it up at the database: under `TENANT_RLS_MODE=enforce` each transaction
+is limited to the authenticated wallet via `SET LOCAL app.current_wallet_id`,
+an unset wallet matches no rows, and cross-wallet paths (credential lookup,
+bootstrap admins, maintenance, migrations) must opt into an explicit bypass.
+This is defense in depth against a missing wallet filter, not a boundary
+against code that can run SQL as the runtime role, and it is off by default.
+See [`docs/tenant-rls.md`](docs/tenant-rls.md).

@@ -12,6 +12,17 @@ both with different values (see below). `parse_402_response()` always sets the
 two equal, so the normal path is unchanged. The tag is not cut by this
 change — `python-sdk-v0.5.0` is still a release decision.
 
+### Bounded signing envelope (2026-10-15)
+
+- `verify_bundle` (and so `b2a-verify-receipt`) and
+  `LocalPermitValidator.verify_permit` accept signatures tagged
+  `Ed25519-sha256-envelope:<base64>`, which a plane signing through AWS KMS
+  uses for a signing input over 4096 bytes. The signature covers the canonical
+  JSON of `{alg, kid, payload_sha256}`. The tag is accepted only above 4096
+  bytes (otherwise `MISMATCH`); any other tag is `MALFORMED`. Untagged
+  signatures verify exactly as before. New public helpers:
+  `split_signature`, `signature_message`, `SIGNATURE_ENVELOPE_ALG`.
+
 ### Audit follow-up (2026-10-01)
 
 Security and correctness fixes from the 2026-08-27 repository audit. The only

@@ -96,6 +96,15 @@ class Settings(BaseSettings):
     # content). Off by default and never enabled by DEBUG alone: an operator
     # turns it on explicitly for local query debugging.
     SQL_ECHO: bool = False
+    # PostgreSQL row-level security for wallet-scoped tables (migration
+    # 048_tenant_rls). "off" (default): the migration leaves RLS disabled and
+    # nothing changes for any client. "enforce": migrating in this mode
+    # enables and forces RLS, and each transaction sets
+    # app.current_wallet_id from the authenticated wallet with SET LOCAL
+    # semantics, and only explicit admin scopes bypass. Enforce requires a
+    # NOSUPERUSER NOBYPASSRLS runtime role or boot is refused. See
+    # docs/tenant-rls.md. No effect on SQLite.
+    TENANT_RLS_MODE: str = "off"
 
     # --- Authentication ---
     API_KEY_HEADER: str = "X-API-Key"
@@ -307,15 +316,36 @@ class Settings(BaseSettings):
     MCP_UPSTREAM_PROVIDER_REQUEST_ID_META_KEY: str = (
         "io.agentmiddleware/provider_request_id"
     )
-    # Optional delivery_uncertain reconcile worker (off by default). It polls
-    # a provider status probe on a backoff and records a resolution audit
-    # event; it never redispatches, refunds, or releases budget. Ageing past
-    # the alert threshold only emits an operator alert.
+    # Optional upstream status endpoint for delivery_uncertain reconciliation.
+    # Empty (the default) means the tool has no status endpoint, so its
+    # parked calls stay in manual review. Must share MCP_UPSTREAM_URL's
+    # origin: the probe sends MCP_UPSTREAM_BEARER_TOKEN, and that credential
+    # never leaves the origin it was configured for.
+    MCP_UPSTREAM_STATUS_URL: str = ""
+    MCP_UPSTREAM_STATUS_TIMEOUT_SECONDS: float = 10.0
+    # Optional delivery_uncertain reconcile worker (off by default). It leases
+    # parked calls, probes the upstream status endpoint outside any database
+    # transaction, and records a resolution. It never redispatches. Ageing
+    # past the alert threshold only emits an operator alert.
     # See docs/delivery-uncertain-reconcile-worker.md.
     UPSTREAM_RECONCILE_WORKER_ENABLED: bool = False
     UPSTREAM_RECONCILE_BACKOFF_SECONDS: str = "30,120,600,3600"
     UPSTREAM_RECONCILE_ALERT_AGE_SECONDS: int = 3600
     UPSTREAM_RECONCILE_BATCH_LIMIT: int = 50
+    UPSTREAM_RECONCILE_LEASE_SECONDS: int = 300
+    # Quiescence: a not-executed answer is acted on only once
+    # now > dispatch time + upstream timeout allowance + clock skew allowance.
+    # 0 uses the fixed rolling-deployment dispatch lifetime (11,430 s); any
+    # explicit value is floored at this deployment's own connect + 3 x call
+    # timeout so a misconfiguration cannot undercut a live call.
+    UPSTREAM_RECONCILE_UPSTREAM_TIMEOUT_SECONDS: int = 0
+    UPSTREAM_RECONCILE_CLOCK_SKEW_SECONDS: int = 300
+    # Separate, explicit operator policy (off by default): refund the debit
+    # and release the permit reservation when the provider explicitly
+    # attests not-executed after quiescence. Off, such calls are recorded as
+    # refund candidates and the debit stands. A 404 or any non-attesting
+    # answer never refunds.
+    UPSTREAM_RECONCILE_REFUND_ON_ATTESTED_NOT_EXECUTED: bool = False
 
     # Cross-key duplicate detection for upstream tools. Modes:
     # - "off": disabled (new-key retries with identical request hashes are allowed)
@@ -431,6 +461,15 @@ class Settings(BaseSettings):
     ALLOW_LEGACY_UNPERMITTED_MCP: bool = False
     TRUST_SIGNING_KEY_ID: str = "local-dev-ed25519"
     TRUST_SIGNING_PRIVATE_KEY_B64: str = ""
+    # Signing backend. "env" (default) signs with TRUST_SIGNING_PRIVATE_KEY_B64.
+    # "aws_kms" signs with an AWS KMS ECC_NIST_EDWARDS25519 key
+    # (SigningAlgorithm ED25519_SHA_512, MessageType RAW): pure Ed25519 over
+    # the same canonical bytes, so existing verifiers are unchanged. Requires
+    # boto3 (not in requirements.txt; install it in the image that opts in)
+    # and standard AWS credentials. The private key never leaves KMS.
+    TRUST_SIGNING_BACKEND: str = "env"
+    TRUST_SIGNING_KMS_KEY_ID: str = ""
+    TRUST_SIGNING_KMS_REGION: str = ""
 
     # --- Standard MCP endpoint (POST /mcp) ---
     # Spec-compliant stateless Streamable HTTP surface for standard MCP
@@ -486,6 +525,23 @@ class Settings(BaseSettings):
     # re-declare it as a module constant — a second copy silently lets the
     # advertised rate drift from the rate real money converts at.
     EXCHANGE_RATE: Decimal = Decimal("1000.0")
+
+    @field_validator("TENANT_RLS_MODE")
+    @classmethod
+    def _validate_tenant_rls_mode(cls, value: str) -> str:
+        """Only the two documented modes; a typo must not silently mean off."""
+        normalized = (value or "").strip().lower()
+        if normalized not in {"off", "enforce"}:
+            raise ValueError("TENANT_RLS_MODE must be 'off' or 'enforce'")
+        return normalized
+
+    @field_validator("TRUST_SIGNING_BACKEND")
+    @classmethod
+    def _validate_trust_signing_backend(cls, value: str) -> str:
+        normalized = (value or "").strip().lower()
+        if normalized not in {"env", "aws_kms"}:
+            raise ValueError("TRUST_SIGNING_BACKEND must be 'env' or 'aws_kms'")
+        return normalized
 
     @field_validator("EXCHANGE_RATE")
     @classmethod

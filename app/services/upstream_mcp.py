@@ -20,9 +20,10 @@ import threading
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation, localcontext
+from enum import Enum
 from typing import Any, Protocol, cast
 from urllib.parse import SplitResult, urlsplit
 
@@ -197,6 +198,10 @@ class UpstreamMcpConfiguration:
     call_timeout_seconds: float
     max_response_bytes: int
     environment: str
+    # Optional status endpoint for delivery_uncertain reconciliation. Same
+    # origin as ``url`` by construction; empty means no status endpoint.
+    status_url: str = ""
+    status_timeout_seconds: float = 10.0
 
     @classmethod
     def from_settings(cls, settings: Settings) -> UpstreamMcpConfiguration:
@@ -222,6 +227,7 @@ class UpstreamMcpConfiguration:
 
         public_configuration = (
             settings.MCP_UPSTREAM_URL,
+            settings.MCP_UPSTREAM_STATUS_URL,
             settings.MCP_UPSTREAM_TOOL_NAME,
             settings.MCP_UPSTREAM_PUBLIC_TOOL_ID,
             _GATEWAY_TOOL_DESCRIPTION,
@@ -291,9 +297,36 @@ class UpstreamMcpConfiguration:
             )
 
         parts = _parse_url_shape(settings.MCP_UPSTREAM_URL)
+        origin = _sanitized_origin(parts)
+        status_url = settings.MCP_UPSTREAM_STATUS_URL
+        if status_url:
+            status_parts = _parse_url_shape(
+                status_url, setting_name="MCP_UPSTREAM_STATUS_URL"
+            )
+            # The probe carries the upstream bearer credential. Pinning the
+            # status endpoint to the configured origin keeps that credential
+            # on the one origin the operator configured it for.
+            if _sanitized_origin(status_parts) != origin:
+                raise UpstreamMcpConfigurationError(
+                    "MCP_UPSTREAM_STATUS_URL must share the MCP_UPSTREAM_URL origin"
+                )
+            if status_url == settings.MCP_UPSTREAM_URL:
+                raise UpstreamMcpConfigurationError(
+                    "MCP_UPSTREAM_STATUS_URL must differ from the MCP endpoint"
+                )
+        status_timeout = settings.MCP_UPSTREAM_STATUS_TIMEOUT_SECONDS
+        if (
+            not math.isfinite(status_timeout)
+            or status_timeout <= 0
+            or status_timeout > MAX_UPSTREAM_CALL_TIMEOUT_SECONDS
+        ):
+            raise UpstreamMcpConfigurationError(
+                "MCP_UPSTREAM_STATUS_TIMEOUT_SECONDS must be finite, greater than "
+                f"zero, and no greater than {MAX_UPSTREAM_CALL_TIMEOUT_SECONDS} seconds"
+            )
         return cls(
             url=settings.MCP_UPSTREAM_URL,
-            origin=_sanitized_origin(parts),
+            origin=origin,
             tool_name=settings.MCP_UPSTREAM_TOOL_NAME,
             public_tool_id=settings.MCP_UPSTREAM_PUBLIC_TOOL_ID,
             bearer_token=settings.MCP_UPSTREAM_BEARER_TOKEN,
@@ -302,33 +335,37 @@ class UpstreamMcpConfiguration:
             call_timeout_seconds=settings.MCP_UPSTREAM_CALL_TIMEOUT_SECONDS,
             max_response_bytes=settings.MCP_UPSTREAM_MAX_RESPONSE_BYTES,
             environment=settings.ENVIRONMENT,
+            status_url=status_url,
+            status_timeout_seconds=status_timeout,
         )
 
 
-def _parse_url_shape(url: str) -> SplitResult:
+def _parse_url_shape(
+    url: str, *, setting_name: str = "MCP_UPSTREAM_URL"
+) -> SplitResult:
     if not url or url != url.strip() or any(ord(char) < 32 for char in url):
         raise UpstreamMcpConfigurationError(
-            "MCP_UPSTREAM_URL must be a non-empty URL without whitespace or control characters"
+            f"{setting_name} must be a non-empty URL without whitespace or control characters"
         )
     if "?" in url:
-        raise UpstreamMcpConfigurationError("MCP_UPSTREAM_URL must not contain a query")
+        raise UpstreamMcpConfigurationError(f"{setting_name} must not contain a query")
     if "#" in url:
         raise UpstreamMcpConfigurationError(
-            "MCP_UPSTREAM_URL must not contain a fragment"
+            f"{setting_name} must not contain a fragment"
         )
     try:
         parts = urlsplit(url)
         # Accessing ``port`` validates malformed/out-of-range port text.
         _ = parts.port
     except ValueError as exc:
-        raise UpstreamMcpConfigurationError("MCP_UPSTREAM_URL is malformed") from exc
+        raise UpstreamMcpConfigurationError(f"{setting_name} is malformed") from exc
     if parts.scheme.lower() not in {"http", "https"}:
-        raise UpstreamMcpConfigurationError("MCP_UPSTREAM_URL must use http or https")
+        raise UpstreamMcpConfigurationError(f"{setting_name} must use http or https")
     if not parts.hostname:
-        raise UpstreamMcpConfigurationError("MCP_UPSTREAM_URL must include a host")
+        raise UpstreamMcpConfigurationError(f"{setting_name} must include a host")
     if parts.username is not None or parts.password is not None:
         raise UpstreamMcpConfigurationError(
-            "MCP_UPSTREAM_URL must not contain embedded credentials"
+            f"{setting_name} must not contain embedded credentials"
         )
     return parts
 
@@ -1120,6 +1157,185 @@ class UpstreamMcpAdapter:
                 outcome=outcome,
                 latency_seconds=max(0.0, time.perf_counter() - started_at),
             )
+
+
+class UpstreamStatusOutcome(str, Enum):
+    EXECUTED = "executed"
+    NOT_EXECUTED = "not_executed"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class UpstreamStatusAnswer:
+    outcome: UpstreamStatusOutcome
+    provider_request_id: str | None = None
+    # Why an answer is what it is: "attested", "not_found", "unattested",
+    # or "binding_mismatch". Bounded vocabulary; never upstream text.
+    reason: str = "attested"
+
+
+class UpstreamStatusProbeError(RuntimeError):
+    """The status lookup itself failed; nothing was learned about the call."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
+
+
+# A status answer is a few short fields. Bounding it far below the tool
+# response cap keeps a hostile or broken endpoint from making the reconciler
+# buffer megabytes per parked call.
+_STATUS_MAX_RESPONSE_BYTES = 16_384
+
+
+class UpstreamMcpStatusProbe:
+    """Ask the configured upstream what happened to one forwarded invocation.
+
+    MCP defines no status method, so this is an operator-configured HTTPS
+    endpoint on the same origin as the MCP server. The request is a POST of
+    ``{"tool", "invocation_id", "idempotency_key"?}`` (the exact values sent
+    in the call's ``_meta``) with the configured upstream bearer credential.
+    It reuses the adapter's transport, so DNS pinning, the no-redirect rule,
+    the identity-encoding requirement, and the streamed size cap all apply.
+
+    Only an explicit HTTP 200 attestation that echoes the same identifiers is
+    a resolution. A 404 is "unknown", never "not executed": a provider that
+    has not seen a request, or cannot see it yet, cannot prove it did not
+    run. This class performs network I/O only and must be called with no
+    database transaction open.
+    """
+
+    def __init__(
+        self,
+        configuration: UpstreamMcpConfiguration,
+        *,
+        http_client: httpx.AsyncClient | None = None,
+        resolver: Resolver | None = None,
+    ) -> None:
+        if not configuration.status_url:
+            raise UpstreamMcpConfigurationError(
+                "MCP_UPSTREAM_STATUS_URL is not configured"
+            )
+        self.configuration = configuration
+        self._status_configuration = replace(
+            configuration,
+            url=configuration.status_url,
+            call_timeout_seconds=configuration.status_timeout_seconds,
+            max_response_bytes=min(
+                configuration.max_response_bytes, _STATUS_MAX_RESPONSE_BYTES
+            ),
+        )
+        self._transport_adapter = UpstreamMcpAdapter(
+            self._status_configuration,
+            http_client=http_client,
+            resolver=resolver,
+        )
+
+    @property
+    def public_tool_id(self) -> str:
+        return self.configuration.public_tool_id
+
+    @property
+    def upstream_origin(self) -> str:
+        return self.configuration.origin
+
+    async def lookup(
+        self,
+        *,
+        invocation_id: str,
+        idempotency_key: str | None,
+    ) -> UpstreamStatusAnswer:
+        if not invocation_id:
+            raise UpstreamStatusProbeError("upstream_status_invocation_missing")
+        request_body: dict[str, str] = {
+            "tool": self.configuration.tool_name,
+            "invocation_id": invocation_id,
+        }
+        if idempotency_key:
+            request_body["idempotency_key"] = idempotency_key
+        response_guard = _ResponseGuardState()
+        budget = (
+            self._status_configuration.connect_timeout_seconds
+            + self._status_configuration.call_timeout_seconds
+        )
+        try:
+            async with asyncio.timeout(budget):
+                async with self._transport_adapter._http_client(
+                    response_guard=response_guard
+                ) as client:
+                    response = await client.post(
+                        self._status_configuration.url,
+                        json=request_body,
+                        headers={"Accept": "application/json"},
+                    )
+                    status_code = response.status_code
+                    body = response.content
+        except UpstreamMcpConfigurationError:
+            raise UpstreamStatusProbeError(
+                "upstream_status_destination_rejected"
+            ) from None
+        except _GuardedResponseRejected:
+            raise UpstreamStatusProbeError(
+                response_guard.rejection_code or "upstream_response_invalid"
+            ) from None
+        except Exception:
+            if response_guard.rejection_code is not None:
+                raise UpstreamStatusProbeError(response_guard.rejection_code) from None
+            raise UpstreamStatusProbeError("upstream_status_unreachable") from None
+        return self._classify(status_code, body, request_body)
+
+    def _classify(
+        self,
+        status_code: int,
+        body: bytes,
+        request_body: Mapping[str, str],
+    ) -> UpstreamStatusAnswer:
+        if status_code == 404:
+            # Deliberately ignores the body: a 404 is never an attestation.
+            return UpstreamStatusAnswer(
+                UpstreamStatusOutcome.UNKNOWN, reason="not_found"
+            )
+        if status_code != 200:
+            if 200 <= status_code < 300:
+                return UpstreamStatusAnswer(
+                    UpstreamStatusOutcome.UNKNOWN, reason="unattested"
+                )
+            raise UpstreamStatusProbeError("upstream_status_http_error")
+        try:
+            decoded = json.loads(body)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            raise UpstreamStatusProbeError("upstream_response_invalid") from None
+        if not isinstance(decoded, dict):
+            raise UpstreamStatusProbeError("upstream_response_invalid")
+        if _contains_exact_secret(
+            decoded, self.configuration.bearer_token.get_secret_value()
+        ):
+            raise UpstreamStatusProbeError("upstream_response_invalid")
+        # The answer must be about exactly the call we asked about. An echo
+        # mismatch is a provider bug or a misrouted answer, not evidence.
+        for key, sent in request_body.items():
+            if key == "tool":
+                continue
+            echoed = decoded.get(key)
+            if type(echoed) is not str or echoed != sent:
+                return UpstreamStatusAnswer(
+                    UpstreamStatusOutcome.UNKNOWN, reason="binding_mismatch"
+                )
+        provider_request_id = extract_provider_request_id(
+            decoded, "provider_request_id"
+        )
+        status = decoded.get("status")
+        if type(status) is str and status == UpstreamStatusOutcome.EXECUTED.value:
+            return UpstreamStatusAnswer(
+                UpstreamStatusOutcome.EXECUTED, provider_request_id
+            )
+        if type(status) is str and status == UpstreamStatusOutcome.NOT_EXECUTED.value:
+            return UpstreamStatusAnswer(
+                UpstreamStatusOutcome.NOT_EXECUTED, provider_request_id
+            )
+        return UpstreamStatusAnswer(
+            UpstreamStatusOutcome.UNKNOWN, provider_request_id, reason="unattested"
+        )
 
 
 async def register_configured_upstream_mcp(

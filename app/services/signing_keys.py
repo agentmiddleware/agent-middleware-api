@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import hashlib
+import importlib.util
 import json
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
@@ -35,6 +37,26 @@ class SigningKeyError(RuntimeError):
 # which are already handled by signing them only when present.
 RECEIPT_CANONICALIZATION = "awi-canonical-json/1"
 
+# Bounded signing envelope. AWS KMS signs pure Ed25519 only over a RAW message
+# of at most 4096 bytes, so under ``TRUST_SIGNING_BACKEND=aws_kms`` a larger
+# canonical payload is not signed directly: the signer signs the canonical
+# bytes of ``{alg, kid, payload_sha256}`` instead and tags the stored signature
+# ``Ed25519-sha256-envelope:<base64>``. The signed payload itself is unchanged.
+# Untagged signatures are plain Ed25519 over the payload bytes, exactly as
+# before. Verifiers accept the envelope only for payloads over the threshold,
+# so a small artifact has exactly one valid signature form.
+SIGNATURE_ALG = "Ed25519"
+SIGNATURE_ENVELOPE_ALG = "Ed25519-sha256-envelope"
+SIGNATURE_ENVELOPE_THRESHOLD_BYTES = 4096
+
+
+class Ed25519Signer(Protocol):
+    """The two operations signing needs: an environment seed or AWS KMS."""
+
+    def public_key(self) -> Ed25519PublicKey: ...
+
+    def sign(self, data: bytes) -> bytes: ...
+
 
 def _decode_private_key(configured: str) -> Ed25519PrivateKey:
     """Decode strict base64 Ed25519 seed material without exposing it."""
@@ -55,6 +77,15 @@ def validate_signing_key_configuration(settings: Settings | None = None) -> str:
     """
 
     settings = settings or get_settings()
+    if settings.TRUST_SIGNING_BACKEND == "aws_kms":
+        # Configuration only: no KMS call at validation time. The first
+        # ensure_active_key() fetches the public key and fails boot if the key
+        # is unreachable or not Ed25519.
+        if not settings.TRUST_SIGNING_KMS_KEY_ID.strip():
+            raise SigningKeyError("trust_signing_kms_key_required")
+        if importlib.util.find_spec("boto3") is None:
+            raise SigningKeyError("kms_boto3_unavailable")
+        return "aws_kms"
     configured = settings.TRUST_SIGNING_PRIVATE_KEY_B64.strip()
     if configured:
         _decode_private_key(configured)
@@ -107,16 +138,62 @@ def sha256_hex(payload: dict[str, Any] | str | bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def split_signature(signature: str) -> tuple[str, str]:
+    """Return ``(scheme, base64)`` for a stored signature string.
+
+    Standard base64 has no ``:``, so an untagged signature is unambiguous.
+    """
+    scheme, separator, encoded = signature.partition(":")
+    if not separator:
+        return SIGNATURE_ALG, signature
+    return scheme, encoded
+
+
+def signature_envelope_bytes(kid: str, payload_bytes: bytes) -> bytes:
+    """Canonical bytes of the fixed-shape envelope signed for a large payload."""
+    envelope = {
+        "alg": SIGNATURE_ENVELOPE_ALG,
+        "kid": kid,
+        "payload_sha256": hashlib.sha256(payload_bytes).hexdigest(),
+    }
+    return canonical_json(envelope).encode()
+
+
+def signature_message(scheme: str, kid: str, payload_bytes: bytes) -> bytes | None:
+    """The bytes a signature of ``scheme`` covers, or None if it cannot apply.
+
+    None for an unknown scheme, and for an envelope over a payload small
+    enough to sign directly, so neither can be substituted for the other.
+    """
+    if scheme == SIGNATURE_ALG:
+        return payload_bytes
+    if (
+        scheme == SIGNATURE_ENVELOPE_ALG
+        and len(payload_bytes) > SIGNATURE_ENVELOPE_THRESHOLD_BYTES
+    ):
+        return signature_envelope_bytes(kid, payload_bytes)
+    return None
+
+
 class SigningKeyService:
     """Ed25519 signing helper with DB-backed public key metadata."""
 
     def __init__(self) -> None:
         self._settings = get_settings()
-        self._private_key: Ed25519PrivateKey | None = None
+        self._private_key: Ed25519Signer | None = None
         self._key_id = self._settings.TRUST_SIGNING_KEY_ID
 
-    def _load_private_key(self) -> Ed25519PrivateKey:
+    def _load_private_key(self) -> Ed25519Signer:
         if self._private_key:
+            return self._private_key
+
+        if self._settings.TRUST_SIGNING_BACKEND == "aws_kms":
+            from .kms_signer import KmsEd25519Signer
+
+            self._private_key = KmsEd25519Signer(
+                self._settings.TRUST_SIGNING_KMS_KEY_ID,
+                region=self._settings.TRUST_SIGNING_KMS_REGION or None,
+            )
             return self._private_key
 
         configured = self._settings.TRUST_SIGNING_PRIVATE_KEY_B64.strip()
@@ -129,18 +206,17 @@ class SigningKeyService:
 
         # Development/test fallback is deliberately process-ephemeral. It lets
         # local tests verify signatures without silently persisting a private key.
-        self._private_key = Ed25519PrivateKey.generate()
+        ephemeral = Ed25519PrivateKey.generate()
+        self._private_key = ephemeral
         # Content-address the ephemeral key's id so a restart (or a second
         # instance) publishes its distinct public key under its own key_id
         # instead of overwriting the durable metadata a previous ephemeral key
         # signed under. Old signatures keep verifying against their own stored
         # public key rather than being silently invalidated.
-        raw_public = self._private_key.public_key().public_bytes(
-            Encoding.Raw, PublicFormat.Raw
-        )
+        raw_public = ephemeral.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
         fingerprint = hashlib.sha256(raw_public).hexdigest()[:16]
         self._key_id = f"{self._settings.TRUST_SIGNING_KEY_ID}-ephemeral-{fingerprint}"
-        return self._private_key
+        return ephemeral
 
     def _public_key_b64(self) -> str:
         public_key = self._load_private_key().public_key()
@@ -164,9 +240,20 @@ class SigningKeyService:
         if key.status == "disabled":
             raise SigningKeyError("signing_key_disabled")
 
+    async def _off_loop(self, func: Any, *args: Any) -> Any:
+        """Run a signer call off the event loop when it can block on network I/O.
+
+        A local seed signs in microseconds; the KMS signer makes a synchronous
+        boto3 call that would otherwise stall every coroutine on the worker
+        (and any transaction held open around the signature).
+        """
+        if isinstance(self._load_private_key(), Ed25519PrivateKey):
+            return func(*args)
+        return await asyncio.to_thread(func, *args)
+
     async def ensure_active_key(self) -> SigningKeyModel:
         factory = get_session_factory()
-        public_key_b64 = self._public_key_b64()
+        public_key_b64 = await self._off_loop(self._public_key_b64)
         async with factory() as session:
             result = await session.execute(
                 select(SigningKeyModel).where(
@@ -330,7 +417,7 @@ class SigningKeyService:
 
     async def sign_payload(self, payload: dict[str, Any]) -> tuple[str, str, str]:
         key = await self.ensure_active_key()
-        return self.sign_payload_with_key_id(payload, key.key_id)
+        return await self.sign_payload_with_key_id(payload, key.key_id)
 
     async def validate_prepared_signing_key(
         self,
@@ -353,7 +440,7 @@ class SigningKeyService:
             raise SigningKeyError("signing_key_not_active")
         return key
 
-    def sign_payload_with_key_id(
+    async def sign_payload_with_key_id(
         self,
         payload: dict[str, Any],
         key_id: str,
@@ -369,10 +456,19 @@ class SigningKeyService:
         signing_payload.setdefault("kid", key_id)
         payload_hash = sha256_hex(signing_payload)
         signing_payload.setdefault("payload_hash", payload_hash)
-        signature = self._load_private_key().sign(
-            canonical_json(signing_payload).encode()
-        )
-        return base64.b64encode(signature).decode(), key_id, payload_hash
+        signer = self._load_private_key()
+        message = canonical_json(signing_payload).encode()
+        tag = ""
+        if len(message) > SIGNATURE_ENVELOPE_THRESHOLD_BYTES:
+            from .kms_signer import KmsEd25519Signer
+
+            # Only KMS has a message cap; the local seed signs any size
+            # directly, keeping the default path byte-for-byte unchanged.
+            if isinstance(signer, KmsEd25519Signer):
+                message = signature_envelope_bytes(key_id, message)
+                tag = f"{SIGNATURE_ENVELOPE_ALG}:"
+        signature = await self._off_loop(signer.sign, message)
+        return tag + base64.b64encode(signature).decode(), key_id, payload_hash
 
     async def verify_payload(
         self,
@@ -393,13 +489,16 @@ class SigningKeyService:
         # "invalid" verdict — a single corrupt row could mask tampering behind a
         # 500. Treat any decode/key/verify failure as "not verified".
         try:
+            scheme, encoded = split_signature(signature)
+            message = signature_message(
+                scheme, key_id, canonical_json(payload).encode()
+            )
+            if message is None:
+                return False
             public_key = Ed25519PublicKey.from_public_bytes(
                 base64.b64decode(key.public_key_b64, validate=True)
             )
-            public_key.verify(
-                base64.b64decode(signature, validate=True),
-                canonical_json(payload).encode(),
-            )
+            public_key.verify(base64.b64decode(encoded, validate=True), message)
             return True
         except (binascii.Error, InvalidSignature, ValueError, TypeError):
             return False
