@@ -54,4 +54,6 @@ def test_installed_wheel_carries_mit_license() -> None:
         if file.name == "LICENSE" and ".dist-info/licenses/" in str(file)
     ]
     assert license_files, "installed wheel must include the MIT LICENSE file"
-    assert any(installed.locate_file(file).read_text() == CANONICAL_MIT_LICENSE for file in license_files)
+    assert any(
+        installed.locate_file(file).read_text() == CANONICAL_MIT_LICENSE for file in license_files
+    )
