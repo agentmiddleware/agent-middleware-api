@@ -157,8 +157,9 @@ well-formed).
   caller's *own* earlier arguments to that same caller leaks nothing new,
   since scope is per caller. Servers MUST NOT include the stored arguments
   themselves.
-- AMW gap: AMW's `-32009` response does not include the hashes yet. That is a
-  small follow-up on the AMW side, independent of the SEP.
+- AMW status: AMW's `-32009` response carries the hashes as
+  `error.data.expected_request_hash` and `error.data.received_request_hash`
+  (snake case; see `docs/failure-semantics.md`).
 
 ### 3.6 Retention (TTL)
 
