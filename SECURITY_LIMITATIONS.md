@@ -49,7 +49,7 @@ Keep these out of the wedge until a design partner requires them:
   SHA-256 plus `kid`), so for those artifacts integrity also rests on SHA-256
   collision resistance, and a third-party verifier must understand the
   envelope tag; older verifiers fail closed on it. The standalone
-  `site/proof/verify_receipt.py` does not implement the envelope. See
+  `site/proof/verify_receipt.py` implements the envelope too. See
   [`docs/key-management.md`](docs/key-management.md).
 - No settlement, dispute, or compliance reporting workflow is implemented.
 - Receipt signatures can be verified offline by any third party
