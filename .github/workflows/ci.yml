@@ -616,23 +616,12 @@ jobs:
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PUSH_BEFORE_SHA: ${{ github.event.before }}
           PUSH_SHA: ${{ github.sha }}
+        # Range selection, including the missing-base fallback (branch
+        # creation or a force push whose old tip is gone), lives in the script
+        # so tests/test_secret_scan_range.py can exercise it.
         run: |
           set -euo pipefail
-          if [ "$EVENT_NAME" = "pull_request" ]; then
-            range="${PR_BASE_SHA}..${PR_HEAD_SHA}"
-          elif [ -n "$PUSH_BEFORE_SHA" ] \
-            && [ "$PUSH_BEFORE_SHA" != "0000000000000000000000000000000000000000" ] \
-            && git cat-file -e "${PUSH_BEFORE_SHA}^{commit}" 2>/dev/null; then
-            range="${PUSH_BEFORE_SHA}..${PUSH_SHA}"
-          else
-            # New branch (before is all zeros) or force push (old tip is not
-            # in the clone): scan every commit reachable from the pushed head
-            # that is not on main, i.e. everything since the merge base. The
-            # head commit alone would miss a secret added then deleted in an
-            # earlier commit of the same push.
-            git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
-            range="origin/main..${PUSH_SHA}"
-          fi
+          range="$(bash scripts/secret_scan_range.sh)"
           echo "Scanning commits in ${range}"
           gitleaks detect --source . --config .gitleaks.toml --redact --verbose --log-opts="${range}"
 
