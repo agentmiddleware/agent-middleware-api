@@ -58,6 +58,23 @@ class GovernedRequestInvalid(ValueError):
 _CONTEXT_STRING_FIELDS = ("wallet_id", "permit_id", "quote_id", "request_path")
 
 
+def resolve_context_spelling(params: dict[str, Any]) -> Any:
+    """Return the call context: ``mcpContext`` canonical, ``mcp_context`` alias.
+
+    Both spellings are accepted on every transport. When both are sent they
+    must be identical; differing values are refused rather than one silently
+    winning, because the context carries the permit, wallet, and replay key.
+    """
+    if "mcp_context" not in params:
+        return params.get("mcpContext")
+    alias = params["mcp_context"]
+    if "mcpContext" in params and params["mcpContext"] != alias:
+        raise GovernedRequestInvalid(
+            "Invalid params: mcpContext and mcp_context differ; send only mcpContext"
+        )
+    return alias
+
+
 def validate_tools_call_params(raw: Any) -> dict[str, Any]:
     """Return the ``tools/call`` params as a well-shaped mapping, or refuse.
 
@@ -85,11 +102,6 @@ def validate_tools_call_params(raw: Any) -> dict[str, Any]:
     if not isinstance(params, dict):
         raise GovernedRequestInvalid("Invalid params: params must be an object")
 
-    if "mcp_context" in params:
-        raise GovernedRequestInvalid(
-            "Invalid params: use mcpContext for JSON-RPC; mcp_context is REST-only"
-        )
-
     name = params.get("name")
     if name is None or name == "":
         # Same message the pipeline has always used for an absent tool name.
@@ -103,7 +115,7 @@ def validate_tools_call_params(raw: Any) -> dict[str, Any]:
     elif not isinstance(arguments, dict):
         raise GovernedRequestInvalid("Invalid params: arguments must be an object")
 
-    mcp_context = params.get("mcpContext")
+    mcp_context = resolve_context_spelling(params)
     if mcp_context is None:
         mcp_context = {}
     elif not isinstance(mcp_context, dict):
@@ -120,6 +132,7 @@ def validate_tools_call_params(raw: Any) -> dict[str, Any]:
         # machine-actionable detail; callers surface it as invalid params.
         validate_client_idempotency_key(key, source="mcpContext.idempotency_key")
 
+    params = {k: v for k, v in params.items() if k != "mcp_context"}
     return {
         **params,
         "name": name,

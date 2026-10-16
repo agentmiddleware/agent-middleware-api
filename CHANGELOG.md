@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — planned v1.3.0
 
+### Changed — `mcpContext` and `mcp_context` accepted on every MCP route
+
+- The call context is `mcpContext` (canonical) on JSON-RPC `tools/call`
+  (`/mcp/messages`, `/mcp`) and on the deprecated REST invoke
+  `/mcp/tools/{service_id}/invoke`; `mcp_context` is accepted as an alias on
+  all of them. Previously each route refused the other route's spelling.
+- Sending both spellings is accepted only when they are identical; differing
+  values are refused before any effect (JSON-RPC `-32602`, REST `422`). The
+  replay identity does not depend on the spelling.
+- The REST OpenAPI schema (`ToolCallRequest`) now names the field
+  `mcpContext`, and its idempotency-key source label is
+  `mcpContext.idempotency_key`. Docs and examples show `mcpContext`.
+
 ### Added — leased `delivery_uncertain` reconciler with upstream status probe (default off)
 
 - `UpstreamMcpStatusProbe` asks an operator-configured, same-origin

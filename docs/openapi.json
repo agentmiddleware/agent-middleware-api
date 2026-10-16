@@ -3211,7 +3211,7 @@
           "MCP"
         ],
         "summary": "Mcp Json-Rpc Messages",
-        "description": "Legacy project JSON-RPC endpoint, kept for existing clients and the local proof scripts. It does not implement the standard MCP initialization lifecycle. Check `/.well-known/agent.json` before assuming the standard MCP Streamable HTTP endpoint at POST /mcp is available; both transports run the same governed permit→meter→receipt path when enabled. tools/call uses params.mcpContext; mcp_context belongs only to the deprecated REST invoke route. Preserve one Idempotency-Key across retries.",
+        "description": "Legacy project JSON-RPC endpoint, kept for existing clients and the local proof scripts. It does not implement the standard MCP initialization lifecycle. Check `/.well-known/agent.json` before assuming the standard MCP Streamable HTTP endpoint at POST /mcp is available; both transports run the same governed permit→meter→receipt path when enabled. tools/call uses params.mcpContext (mcp_context is accepted as an alias on every route). Preserve one Idempotency-Key across retries.",
         "operationId": "MCP_JSON_RPC_Messages_mcp_messages_post",
         "deprecated": true,
         "security": [
@@ -9783,7 +9783,7 @@
             "title": "Arguments",
             "description": "Tool arguments"
           },
-          "mcp_context": {
+          "mcpContext": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/McpContext"
@@ -9792,7 +9792,7 @@
                 "type": "null"
               }
             ],
-            "description": "Billing context"
+            "description": "Billing context. mcpContext is canonical; mcp_context is accepted as an alias."
           }
         },
         "type": "object",
