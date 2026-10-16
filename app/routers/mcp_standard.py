@@ -133,7 +133,7 @@ from app.services.permits import (
 )
 from app.services.service_registry import get_service_registry
 from app.trust import approval_window_seconds, wallet_human_approval_required
-from app.trust.adapters import GovernedRequestInvalid
+from app.trust.adapters import GovernedRequestInvalid, resolve_context_spelling
 
 logger = logging.getLogger(__name__)
 
@@ -242,10 +242,17 @@ def _meta_idempotency_key_source(
     return (_META_KEY_SOURCE, value)
 
 
+def _legacy_context(params: mcp_types.CallToolRequestParams) -> Any:
+    """``params.mcpContext`` (or its ``mcp_context`` alias), as sent."""
+    try:
+        return resolve_context_spelling(params.model_extra or {})
+    except GovernedRequestInvalid as exc:
+        raise _mcp_error(-32602, str(exc)) from exc
+
+
 def _action_permit_reference(params: mcp_types.CallToolRequestParams) -> str | None:
     meta = getattr(params.meta, "model_extra", None) or {}
-    extra = params.model_extra or {}
-    legacy = extra.get("mcpContext", {})
+    legacy = _legacy_context(params) or {}
     values = []
     if "io.agentmiddleware/permit_id" in meta:
         values.append(meta["io.agentmiddleware/permit_id"])
@@ -269,11 +276,6 @@ def _client_idempotency_key(
     """
     sources: list[tuple[str, object]] = []
     try:
-        if "mcp_context" in (params.model_extra or {}):
-            raise _mcp_error(
-                -32602,
-                "Invalid params: use mcpContext or the idempotency _meta field; mcp_context is REST-only",
-            )
         if http_request is not None:
             sources.extend(_header_idempotency_key_sources(http_request))
         meta_source = _meta_idempotency_key_source(params)
@@ -285,7 +287,7 @@ def _client_idempotency_key(
         # not be silently dropped: it is one more source, validated and
         # conflict-checked like the others. JSON null reads as absent, as
         # everywhere else.
-        legacy_context = (params.model_extra or {}).get("mcpContext")
+        legacy_context = _legacy_context(params)
         if isinstance(legacy_context, dict):
             context_value = legacy_context.get("idempotency_key")
             if context_value is not None:

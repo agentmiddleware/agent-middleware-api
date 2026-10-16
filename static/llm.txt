@@ -100,7 +100,8 @@ POST /mcp/messages
 {"jsonrpc":"2.0","id":"1","method":"tools/call","params":{
   "name":"partner.tool","arguments":{...},
   "mcpContext":{"wallet_id":"...","permit_id":"...","idempotency_key":"..."}}}
-# JSON-RPC spells it mcpContext (camel case); mcp_context is refused with -32602.
+# mcpContext (camel case) is canonical on every route; mcp_context is accepted
+# as an alias, and sending both with different values is refused (-32602).
 # Reusing idempotency_key with a different body returns -32009
 # idempotency_key_reused with error.data.expected_request_hash and
 # error.data.received_request_hash.
