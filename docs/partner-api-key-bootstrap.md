@@ -1,8 +1,9 @@
 # Design-partner API key bootstrap (gated)
 
-There is **no public self-serve API key mint**. Discovery (`/.well-known/agent.json`,
-`/llm.txt`, `/mcp/tools.json`) is open; authenticated calls return `401` until an
-**operator** provisions a wallet-scoped key.
+Free sandbox demo keys are available at
+[the demo page](https://www.thisisatest.tech/demo-key/) with no account.
+Production keys are issued to design partners. Production authenticated calls
+return `401` until an operator provisions a wallet-scoped key.
 
 ## Roles
 
@@ -65,9 +66,8 @@ Same steps as [`golden-path.md`](golden-path.md) §2–4:
 
 ## What agents should do on 401
 
-1. Re-read `/.well-known/agent.json` → `authentication` (`public_self_serve: false`).  
-2. Stop — do not invent keys or hit random mint endpoints.  
-3. Ask the human operator for a wallet-scoped key (this doc).
+1. For sandbox testing, get a free demo key at https://www.thisisatest.tech/demo-key/.
+2. For production access, ask the design partner's operator for a wallet-scoped key.
 
 ## Related
 

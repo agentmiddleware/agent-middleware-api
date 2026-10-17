@@ -19,7 +19,7 @@
      token lives in the HTML with every other asset reference and the build's
      token check covers them.
    - Once arcade.js has loaded it owns the launcher: it attaches its own click
-     handler and handles ?arcade= itself, exactly as it did when it loaded
+     handler and handles ?arcade= itself, as it did when it loaded
      eagerly. This file steps aside after the first load.
    ========================================================================== */
 (function () {

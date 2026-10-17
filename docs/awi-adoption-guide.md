@@ -19,7 +19,7 @@ AWI is a standardized, stateful interface layer that lets autonomous agents inte
 
 **Benefits:**
 - Agents can discover and use your services without reverse-engineering your UI
-- Progressive representations let agents request exactly the data they need
+- Progressive representations let agents request the data they need
 - Built-in safety: human pause/steer, KYC verification, wallet billing, and execution governance
 - No changes to your human UX required
 
@@ -128,7 +128,7 @@ Example manifest mapping:
 
 ## Progressive Representations
 
-Agents can request exactly the data they need:
+Agents can request the data they need:
 
 ```bash
 # Get a summary (low bandwidth)

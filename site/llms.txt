@@ -1,9 +1,11 @@
 # Agent Middleware API: machine discovery
 
-This origin is the human design-partner site. It does not mint credentials or
-execute protected tools. Platform engineering, AI infrastructure, and security
-teams operating consequential autonomous actions are the buyers; autonomous
-clients consume the discovery contract below.
+This origin is the human design-partner site. It offers free sandbox demo keys
+at https://www.thisisatest.tech/demo-key/ with no account needed. Production
+keys are issued to design partners. The site does not execute protected tools.
+Platform engineering, AI infrastructure, and security teams operating
+consequential autonomous actions are the buyers; autonomous clients consume
+the discovery contract below.
 
 ## Transaction-integrity boundary
 
@@ -36,8 +38,8 @@ Fetch in this order:
 3. GET https://api.thisisatest.tech/mcp/tools.json
 4. GET https://api.thisisatest.tech/openapi.json
 
-On production-like API deployments, GET /mcp/tools.json requires an
-operator-issued key and returns 401 without one. The other bootstrap GETs are
+On production-like API deployments, GET /mcp/tools.json requires a key and
+returns 401 without one. The other bootstrap GETs are
 unauthenticated. The local quickstart exposes the catalog without a key.
 
 Before assuming real side effects, fetch:
@@ -50,8 +52,9 @@ authentication or permit checks.
 
 ## Authority
 
-Protected routes use the X-API-Key header. Live keys are operator-issued; there
-is no public self-serve key mint on this site.
+Protected routes use the X-API-Key header. Free sandbox demo keys are available
+at https://www.thisisatest.tech/demo-key/ with no account needed. Production
+keys are issued to design partners.
 
 ## Published receipt proof
 
@@ -78,7 +81,8 @@ Verify the published receipt offline, as on /proof/:
 Keyless live calls: curl -sS https://api.thisisatest.tech/health and
 https://api.thisisatest.tech/.well-known/trust-keys.json. Public API contract:
 https://api.thisisatest.tech/openapi.json and https://api.thisisatest.tech/docs.
-Permits and tool calls on the live API need an operator-issued key.
+The free sandbox demo key can run the demo tool. Production tool calls need a
+design partner key.
 
 ## Try the complete loop locally (public source)
 

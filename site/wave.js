@@ -18,7 +18,7 @@
    surface. UI hooks: hovering a governed-loop card fires a pulse through
    the stream from that card's position; the primary (email) CTA emits one
    from center. A page with no data-wave sections (the concept study) renders
-   the constant sea exactly as before.
+   the constant sea as before.
 
    Debug/design hooks (URL query): ?t=SECONDS freezes time for
    deterministic frames, ?grid=WxH pins the lattice, ?noadapt disables

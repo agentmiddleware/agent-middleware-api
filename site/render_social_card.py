@@ -15,7 +15,7 @@ Stdlib only, like ``vendor_fonts.py``. Needs a Chromium binary:
 
 The binary is found from ``$CHROMIUM``, then ``$PLAYWRIGHT_BROWSERS_PATH``
 (the layout Playwright installs in CI containers — its ``headless_shell``
-build is preferred because its viewport is exactly ``--window-size``), then
+build is preferred because its viewport matches ``--window-size``), then
 common executable names on ``PATH``. Rerun this whenever ``social-card.svg``
 or the vendored fonts change, and commit the PNG alongside the SVG.
 """
@@ -51,7 +51,7 @@ INK_RGB = (0x0B, 0x10, 0x20)
 
 
 class RenderError(RuntimeError):
-    """Raised when the card cannot be rendered exactly as specified."""
+    """Raised when the card cannot be rendered as specified."""
 
 
 def find_chromium(explicit: str | None = None) -> str:

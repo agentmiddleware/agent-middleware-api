@@ -100,7 +100,9 @@ Keep these out of the wedge until a design partner requires them:
 - A timeout or disconnect after the durable dispatch checkpoint is inherently
   ambiguous. The gateway retains the debit, signs `delivery_uncertain`, never
   redispatches automatically, and requires operator/upstream reconciliation.
-  The guarantee is at-most-once dispatch, not exactly-once execution.
+  Once the gateway has issued a receipt, a retry with the same accepted key
+  and payload returns that receipt instead of dispatching again. The receipt
+  does not prove whether the remote tool executed.
   An optional reconciler (`UPSTREAM_RECONCILE_WORKER_ENABLED`, default off)
   can ask the upstream, via an operator-configured same-origin status endpoint
   (`MCP_UPSTREAM_STATUS_URL`), what happened. It only resolves on an explicit
@@ -120,12 +122,12 @@ Keep these out of the wedge until a design partner requires them:
   hash-chained `mcp_delivery_uncertain_provider_resolution` audit event and a
   correlated refund ledger entry. No second receipt is minted, so an offline
   verifier holding only the receipt does not see the refund.
-- The gateway provides at-most-once dispatch, not exactly-once execution: a
-  remote side effect happens once only if the upstream honors the forwarded
-  idempotency key.
-- The at-most-once guarantee is bound to the caller's idempotency key. An agent that re-plans under a
-  new key (on `POST /mcp`, a keyless call also gets a freshly auto-minted
-  permit) is a new authorized operation. The wallet re-plan guard
+- Once the gateway has issued a receipt, a retry with the same accepted key
+  and payload returns that receipt instead of dispatching again. The remote
+  tool must honor the forwarded key to avoid duplicate upstream effects.
+- A new key is a new request. An agent that re-plans under a new key (on
+  `POST /mcp`, a keyless call also gets a freshly auto-minted permit) starts a
+  new authorized operation. The wallet re-plan guard
   (`WALLET_REPLAN_GUARD`, default `log_only`, which never blocks) narrows
   this. Under `enforce` it refuses identical canonical arguments for the same
   tool and wallet across all permits within `WALLET_DEDUP_WINDOW_SECONDS`, and
@@ -302,8 +304,8 @@ missing control.
     if the credentials were accepted. Reading the bucket and charging it after
     the response would let every request already in flight pass the same read,
     so the ceiling would only bound callers who arrive one request at a time.
-  - A request whose credentials the app accepts leaves the bucket exactly as
-    it found it. Client identity is the ingress peer address (Railway's
+  - A request whose credentials the app accepts leaves the bucket unchanged.
+    Client identity is the ingress peer address (Railway's
     `X-Real-IP` only where the platform marker is present, per the public-MCP
     rule above), so callers sharing one egress address share that bucket — and
     callers spread across many source addresses get one such bucket each. A

@@ -372,7 +372,7 @@
      updates, and all four are two lines each once they live somewhere shared.
 
      Every one of them is suppressed under reduced motion: shake in particular
-     is exactly the kind of involuntary movement that preference exists to
+     is the kind of involuntary movement that preference exists to
      stop, and a cabinet is still perfectly playable without it. */
   function makeFx() {
     var shakeAmount = 0;
@@ -1506,8 +1506,8 @@
       var spread = Math.atan2(Math.abs(relX * cam.dirY - relY * cam.dirX), relX * cam.dirX + relY * cam.dirY);
       // A fixed angular cone covers less and less of a target the closer it
       // stands, so an enemy that walks into your face becomes unhittable at
-      // exactly the moment it is most dangerous — which is how it read on the
-      // corridor cabinets, as a gun that stops working under pressure. Accept
+      // the moment it is most dangerous. On the corridor cabinets, this reads
+      // as a gun that stops working under pressure. Accept
       // either the cone or a small lateral miss distance; beyond ~2.5 units
       // the cone is the narrower of the two and nothing changes.
       if (spread > 0.16 && Math.sin(spread) * dist > 0.4) return;
@@ -2382,7 +2382,7 @@
 
   /* ---- 10. NONCE BURN ----------------------------------------------------
 
-     A grid of nonces, each good exactly once and only until it expires. Move
+     A grid of nonces. Each can be used once, until it expires. Move
      the cursor, burn the live ones. Burning a spent cell is a replay, and
      replays are what the nonce exists to stop. */
   function cabinetNonceBurn(random) {
@@ -6660,7 +6660,7 @@
           items.splice(i, 1);
           if (!it.bad && !it.cut) {
             // Only signed payloads cost anything when missed: letting an
-            // unsigned one fall past is exactly the right call.
+            // unsigned one fall past is the right call.
             game.lives -= 1;
             combo = 0;
             fx.flash("danger", 0.6);
@@ -7980,7 +7980,7 @@
 
   /* ---- 39. IDEMPOTENCY ---------------------------------------------------
 
-     Memory pairs. Every request has exactly one twin, and turning the same
+     Memory pairs. Every request has one matching twin, and turning the same
      pair up twice is the definition of the property this cabinet is named
      after: doing it again changes nothing. */
   function cabinetIdempotency(random) {
@@ -8253,7 +8253,7 @@
   /* ---- 41. MATCH POLICY --------------------------------------------------
 
      Swap adjacent rules to line three of a kind up. Cleared rules fall out of
-     the stack and the ones above drop into their place, which is exactly what
+     the stack and the ones above drop into their place, which is what
      happens to a policy file nobody is maintaining. */
   function cabinetMatchPolicy(random) {
     var COLS = 7;
@@ -9813,7 +9813,7 @@
   /* ---- 53. UPTIME --------------------------------------------------------
 
      Climb by bouncing. Every platform is a release that holds your weight
-     exactly once, the camera only goes up, and falling past the bottom of the
+     for one landing. The camera only goes up, and falling past the bottom of the
      window is the outage. */
   function cabinetUptime(random) {
     var game = { id: "uptime", score: 0, lives: 3, over: false };
@@ -11975,7 +11975,7 @@
 
      Span the gap with a beam you extend by holding. Too short and the load
      falls in; too long and it topples past the far side. One button, and the
-     genre's whole appeal is that you can see exactly how wrong you were. */
+     genre's whole appeal is that you can see how wrong you were. */
   function cabinetBridgeBuild(random) {
     var game = { id: "bridge-build", score: 0, lives: 3, over: false };
     var fx = makeFx();
@@ -15961,7 +15961,7 @@
       name: "DOUBLE SPEND",
       genre: "ARCADE",
       family: "TIMING",
-      tagline: "Cross the settlement lanes. Get charged exactly once.",
+      tagline: "Retry a finished call with the same key and payload: original receipt, no new dispatch.",
       controls: "arrows step",
       pad: "dpad",
       make: cabinetDoubleSpend
@@ -16291,7 +16291,7 @@
       name: "IDEMPOTENCY",
       genre: "MEMORY",
       family: "PUZZLE",
-      tagline: "Every request has exactly one twin.",
+      tagline: "Every request has one matching twin.",
       controls: "arrows move · SPACE turn",
       pad: "dpad+fire",
       make: cabinetIdempotency
@@ -16431,7 +16431,7 @@
       name: "UPTIME",
       genre: "CLIMBER",
       family: "RUN",
-      tagline: "Every release holds your weight exactly once.",
+      tagline: "Every release holds your weight for one landing.",
       controls: "← → drift",
       pad: "lr",
       make: cabinetUptime
@@ -16601,7 +16601,7 @@
       name: "BRIDGE BUILD",
       genre: "SPAN",
       family: "MANAGE",
-      tagline: "You can see exactly how wrong you were.",
+      tagline: "You can see how wrong you were.",
       controls: "SPACE hold to extend",
       pad: "tap",
       make: cabinetBridgeBuild
@@ -17581,7 +17581,7 @@
 
   function setBackgroundInert(on) {
     // The skip link is a body-level sibling rather than part of any of these
-    // landmarks, so listing only the landmarks would leave exactly one
+    // landmarks, so listing only the landmarks would leave one
     // tabbable control outside the dialog.
     var regions = [
       doc.querySelector(".skip-link"),
@@ -17614,7 +17614,7 @@
     nodes.boot.textContent = "";
     if (prefersStaticMotion()) {
       // One frame, no typing: the boot sequence is decoration, and decoration
-      // is exactly what reduced motion asks us to drop.
+      // is what reduced motion asks us to drop.
       nodes.boot.textContent = BOOT_LINES.join("\n");
       bootIndex = BOOT_LINES.length;
       showSelect();
@@ -17807,7 +17807,7 @@
       nodes.attractCtx = nodes.attractCanvas.getContext("2d");
     }
     if (prefersStaticMotion()) {
-      // One still frame rather than a running demo: an attract loop is exactly
+      // One still frame rather than a running demo: an attract loop is
       // the kind of unrequested motion this preference exists to stop.
       if (!attract) pickAttract();
       drawAttract();

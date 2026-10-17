@@ -252,8 +252,8 @@
                 <td>No</td>
               </tr>
               <tr>
-                <th scope="row">Free and self-serve</th>
-                <td><strong>No</strong></td>
+                <th scope="row">Free way to try it</th>
+                <td><strong>Sandbox demo key, no account</strong></td>
                 <td>Often</td>
                 <td>Varies</td>
                 <td><strong>Yes</strong></td>
@@ -388,11 +388,12 @@
             mappings and hold no certifications. If a mapped compliance report
             is what you need, buy an audit-layer product.
           </dd>
-          <dt>Why is there no pricing page or free tier?</dt>
+          <dt>Can I try it for free?</dt>
           <dd>
-            Because we qualify fit before we deploy. This is a design-partner
-            stage product: the first deployments teach us what to build next.
-            A self-serve signup would bring installations we cannot support.
+            Yes. Get a free sandbox demo key at <a href="/demo-key/">/demo-key/</a>
+            with no account needed. It runs the demo tool with synthetic credits.
+            Production keys are issued to design partners. Paid pilots are scoped
+            and priced after fit.
           </dd>
           <dt>Is this production-ready?</dt>
           <dd>
@@ -403,17 +404,16 @@
             proof-surface routers are outside the supported production posture.
             There are no replicas or consensus.
           </dd>
-          <dt>Does once-only hold all the way to my tool?</dt>
+          <dt>What happens when an agent retries?</dt>
           <dd>
-            At our boundary: one accepted idempotency key maps to at most one
-            gateway dispatch and debit, and to one terminal receipt on the
-            upstream path and every reconcilable outcome. The exception is a
-            local governed tool that crashes after its side effect: that leaves
-            one execution and one debit with no receipt, pending manual review.
-            Whether your <em>upstream</em> tool's own side effect happens only once depends
-            on that tool honoring the forwarded key. An unknowable
-            outcome after dispatch is marked uncertain for manual
-            review, never guessed.
+            For a finalized gateway request, a retry with the same accepted
+            key and payload returns the original receipt instead of dispatching
+            again. A new key is a new request. A local governed tool that
+            crashes after its side effect can leave one debit with no receipt,
+            pending manual review.
+            The gateway cannot prove whether your <em>upstream</em> tool repeated
+            its own side effect. An unknown outcome after dispatch is marked
+            uncertain for manual review.
           </dd>
         </dl>
         <p class="machine-note">

@@ -11,7 +11,7 @@
    widget drives through data-a11y-* attributes on <html>.
 
    Two rules from the design system decide most of what follows: there are
-   exactly two border weights (--edge for anything that reads as a plate, 2px
+   two border weights (--edge for anything that reads as a plate, 2px
    for rules and dividers) and no shadow is ever blurred. The display face
    (Press Start 2P) is spent only on short strings — cabinet names, badges,
    button labels. Taglines and body copy stay mono.
@@ -281,7 +281,7 @@
   width: 3px;
   height: 14px;
   /* Drawn as a filled block rather than as a bordered box: a hairline border
-     here would be a third border weight in a system that has exactly two. */
+     here would be a third border weight in a system that uses two. */
   background: var(--shadow-ink);
 }
 
@@ -291,7 +291,7 @@
 }
 
 .arcade-filter:active {
-  /* Face lands exactly where its shadow was, so the plate reads as depressed
+  /* Face lands where its shadow was, so the plate reads as depressed
      into the panel rather than as sliding across it. */
   transform: translate(2px, 2px);
   box-shadow: 0 0 0 var(--shadow-ink);
@@ -679,7 +679,7 @@
 
 /* Scanlines over the bezel. Decorative, pointer-transparent, and switched off
    wholesale below rather than dimmed: a fine repeating band over a moving
-   canvas is exactly the pattern motion sensitivity reacts to, and under high
+   canvas is the pattern motion sensitivity reacts to, and under high
    contrast it is a veil across content that has none to spare. */
 .arcade-attract::after {
   content: "";
