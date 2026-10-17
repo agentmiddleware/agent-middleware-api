@@ -203,7 +203,7 @@
             >
             <span class="eyebrow-mark" aria-hidden="true"></span>
           </p>
-          <h1>Authorize one agent action. Charge it once. Prove what happened.</h1>
+          <h1>Authorize one agent action. Retry with the same key, no new dispatch.</h1>
           <p class="hero-body hero-body-lead">
             An agent issues a customer refund through an internal MCP tool.
             The call times out, the agent retries, and the refund runs
@@ -256,10 +256,10 @@
         <div class="offer-copy">
           <p class="hero-body">
             Agent Middleware API is a transaction boundary between your
-            agents and your consequential MCP tools. The first
-            call executes and is charged once; a same-key retry cannot
-            dispatch or debit again. Governed calls get a signed receipt
-            you can verify offline.
+            agents and your consequential MCP tools. For a finalized request,
+            a retry with the same accepted key and payload returns the original
+            signed receipt instead of dispatching again. A new key is a new
+            request.
           </p>
           <p class="wedge-line">
             The wedge today is metered calls. The underlying primitive is
@@ -380,7 +380,7 @@
           </li>
           <li>
             <span>During</span>
-            <strong>Charge the call once</strong>
+            <strong>Prevent a second debit</strong>
             <p>One accepted request key cannot become a second debit.</p>
           </li>
           <li>
@@ -602,10 +602,10 @@
           <p class="section-kicker">04 / Machine discovery</p>
           <h2 id="machine-title">Public pointers for agents and operators.</h2>
           <p>
-            Public discovery pointers need no key. On production-like
-            deployments, the tool catalog needs an operator-issued key. A
-            governed tool invocation requires an operator-issued key and a
-            scoped permit.
+            Public discovery pointers need no key. Get a free sandbox demo key
+            at <a href="/demo-key/">/demo-key/</a> with no account needed.
+            Production keys are issued to design partners. Governed tool calls
+            require a key and a scoped permit.
           </p>
         </div>
         <div class="machine-links">
@@ -651,8 +651,8 @@
         <p class="machine-note">
           Three unauthenticated GETs open directly: the agent manifest,
           llms.txt, and dependency status. On production-like deployments,
-          <code>/mcp/tools.json</code> returns 401 without an operator-issued
-          key. The local quickstart exposes the catalog without a key.
+          <code>/mcp/tools.json</code> returns 401 without a key.
+          The local quickstart exposes the catalog without a key.
         </p>
       </section>
 
@@ -666,7 +666,7 @@
             <li>Customer traction or production adoption</li>
             <li>Production settlement or payment rails</li>
             <li>Compliance-grade ledger storage</li>
-            <li>Once-only upstream side effects without upstream support</li>
+            <li>Proof that upstream tools avoid duplicate side effects</li>
             <li>Universal governance across every agent framework</li>
           </ul>
         </div>

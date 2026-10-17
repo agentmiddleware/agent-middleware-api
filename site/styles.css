@@ -13,7 +13,7 @@
    badges, receipt rows, code.
 
    This system replaced the full arcade-cabinet treatment. The 8-bit idea was
-   fun, and it survives in exactly two places: the footer's PRESS START
+   fun, and it survives in two places: the footer's PRESS START
    control and the waiting room it opens (/arcade.css). Everything the buyer
    reads is set in a sans and a mono, on hairlines and soft corners, with no
    scanlines, no hard-offset shadows, and no pixel upscaling.
@@ -1713,7 +1713,7 @@ main,
 }
 
 /* While the waiting room is open the page recedes rather than unmounts, so
-   closing it restores scroll position and focus exactly. Hiding the canvas is
+   closing it restores scroll position and focus. Hiding the canvas is
    also what pauses the particle field: /wave.js unschedules its frame loop
    when an IntersectionObserver reports the canvas out of view. */
 html.arcade-open,

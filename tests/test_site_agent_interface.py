@@ -245,7 +245,7 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
 
     page = (output / "index.html").read_text(encoding="utf-8")
     text = _page_text(page)
-    headline = "Authorize one agent action. Charge it once. Prove what happened."
+    headline = "Authorize one agent action. Retry with the same key, no new dispatch."
     # The hero names one concrete tool before it shows any JSON. A reader who
     # does not already know they have this problem needs the scenario, not the
     # abstraction, and "refund" is the action the calculator's example prices.
@@ -294,10 +294,10 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
     stand_in = "The tool in the recording is a stand-in echo tool, not a refund tool"
     boundary = (
         "Agent Middleware API is a transaction boundary between your "
-        "agents and your consequential MCP tools. The "
-        "first call executes and is charged once; a same-key retry cannot "
-        "dispatch or debit again. Governed calls get a signed receipt "
-        "you can verify offline."
+        "agents and your consequential MCP tools. For a finalized request, "
+        "a retry with the same accepted key and payload returns the original "
+        "signed receipt instead of dispatching again. A new key is a new "
+        "request."
     )
     wedge = (
         "The wedge today is metered calls. The underlying primitive is bounded "
@@ -545,23 +545,25 @@ def test_machine_pointer_copies_match_and_state_live_access_boundary() -> None:
     llm_txt = (SITE / "llm.txt").read_text(encoding="utf-8")
     llms_txt = (SITE / "llms.txt").read_text(encoding="utf-8")
     api_llm_txt = (ROOT / "static" / "llm.txt").read_text(encoding="utf-8")
+    normalized_llm = " ".join(llm_txt.split())
 
     assert llm_txt == llms_txt
-    assert "human design-partner site" in llm_txt
-    assert "teams operating consequential autonomous actions are the buyers" in llm_txt
-    assert "Transaction integrity" in llm_txt
-    assert "delivery_uncertain" in llm_txt
-    assert "at most one gateway dispatch and debit" in " ".join(llm_txt.split())
-    assert "public source" in llm_txt
-    assert "GET /mcp/tools.json requires an" in llm_txt
-    assert "returns 401 without one" in llm_txt
-    assert "The local quickstart exposes the catalog without a key" in llm_txt
-    assert "Python 3.11+" in llm_txt
-    assert "make prove-trust-plane" in llm_txt
-    assert "operator-issued" in llm_txt
-    assert "no public self-serve key mint" in llm_txt
-    assert CANONICAL_API in llm_txt
-    assert CANONICAL_MARKETING_SITE in llm_txt
+    assert "human design-partner site" in normalized_llm
+    assert "teams operating consequential autonomous actions are the buyers" in normalized_llm
+    assert "Transaction integrity" in normalized_llm
+    assert "delivery_uncertain" in normalized_llm
+    assert "at most one gateway dispatch and debit" in normalized_llm
+    assert "public source" in normalized_llm
+    assert "GET /mcp/tools.json requires a key" in normalized_llm
+    assert "returns 401 without one" in normalized_llm
+    assert "The local quickstart exposes the catalog without a key" in normalized_llm
+    assert "Python 3.11+" in normalized_llm
+    assert "make prove-trust-plane" in normalized_llm
+    assert "The free sandbox demo key can run the demo tool" in normalized_llm
+    assert "Free sandbox demo keys are available" in normalized_llm
+    assert "Production keys are issued to design partners" in normalized_llm
+    assert CANONICAL_API in normalized_llm
+    assert CANONICAL_MARKETING_SITE in normalized_llm
     for hostname in KNOWN_PROVIDER_HOSTS:
         assert hostname not in llm_txt
     for suffix in PROVIDER_HOST_SUFFIXES:
@@ -619,8 +621,9 @@ def test_machine_discovery_names_keyed_catalog_and_scoped_tool_invoke(tmp_path) 
     normalized = " ".join(machine.split())
     assert "Three unauthenticated GETs" in normalized
     assert "/mcp/tools.json</code> returns 401" in normalized
-    assert "governed tool invocation requires an operator-issued key" in normalized
-    assert "and a scoped permit" in normalized
+    assert "Get a free sandbox demo key" in normalized
+    assert "Production keys are issued to design partners" in normalized
+    assert "require a key and a scoped permit" in normalized
     assert "protected actions need" not in normalized
 
 
@@ -1266,28 +1269,35 @@ def test_faq_structured_data_is_generated_from_the_visible_answers(tmp_path) -> 
         assert stale_claim not in text
         assert stale_claim not in production_answer
 
-    exactly_once_answer = next(
+    free_answer = next(
         entry["acceptedAnswer"]["text"]
         for entry in questions
-        if entry["name"] == "Does once-only hold all the way to my tool?"
+        if entry["name"] == "Can I try it for free?"
     )
-    canonical_boundary = (
-        "At our boundary: one accepted idempotency key maps to at most one "
-        "gateway dispatch and debit, and to one terminal receipt on the "
-        "upstream path and every reconcilable outcome."
+    assert "free sandbox demo key at /demo-key/ with no account needed" in free_answer
+    assert "Production keys are issued to design partners" in free_answer
+
+    retry_answer = next(
+        entry["acceptedAnswer"]["text"]
+        for entry in questions
+        if entry["name"] == "What happens when an agent retries?"
     )
-    assert canonical_boundary in text
-    assert canonical_boundary in exactly_once_answer
+    retry_boundary = (
+        "For a finalized gateway request, a retry with the same accepted "
+        "key and payload returns the original receipt instead of dispatching "
+        "again. A new key is a new request."
+    )
+    assert retry_boundary in text
+    assert retry_boundary in retry_answer
     # A local governed tool that crashes after its side effect leaves one debit
     # and no receipt (TRUST_MODEL.md; test_mcp_postgres_multiprocess asserts
     # receipt_ids == ()), so neither the FAQ nor the CONTEXT.md vocabulary it
     # is drawn from may promise a receipt unconditionally.
     local_crash_exception = (
-        "The exception is a local governed tool that crashes after its side "
-        "effect: that leaves one execution and one debit with no receipt, "
-        "pending manual review."
+        "A local governed tool that crashes after its side effect can leave "
+        "one debit with no receipt, pending manual review."
     )
-    assert local_crash_exception in exactly_once_answer
+    assert local_crash_exception in retry_answer
     context = " ".join((ROOT / "CONTEXT.md").read_text(encoding="utf-8").split())
     unqualified_receipt_claim = "gateway dispatch and debit plus one terminal receipt"
     assert unqualified_receipt_claim not in text
@@ -1298,7 +1308,7 @@ def test_faq_structured_data_is_generated_from_the_visible_answers(tmp_path) -> 
     )
     assert "a local governed tool that crashes after its side effect" in context
     assert "produces one dispatch, one debit, one receipt" not in text
-    assert "produces one dispatch, one debit, one receipt" not in exactly_once_answer
+    assert "produces one dispatch, one debit, one receipt" not in retry_answer
 
 
 def test_every_indexable_page_is_canonical_localized_and_in_the_sitemap(
@@ -1642,14 +1652,15 @@ def test_llms_full_extends_the_short_pointer_without_contradicting_it(
     assert "business-to-agent" in full
     # The long brief must carry the same refusals as the human page, so an agent
     # reading only this file cannot infer past them.
+    normalized_full = " ".join(full.split())
     for limitation in (
         "No customer traction",
         "No production settlement",
         "compliance-grade ledger storage",
-        "exactly-once upstream side effects",
-        "no public self-serve mint",
+        "a retry with the same accepted key and payload returns the original receipt instead of dispatching again",
+        "Production keys are issued to design partners",
     ):
-        assert limitation in full
+        assert limitation in normalized_full
     for suffix in PROVIDER_HOST_SUFFIXES:
         assert suffix not in full
 
@@ -1752,7 +1763,7 @@ def test_landing_hero_wave_is_progressive_enhancement(tmp_path) -> None:
     # The funnel's tested copy still leads the page: the wave is a treatment,
     # not a content change.
     text = _page_text(page)
-    assert "Authorize one agent action. Charge it once. Prove what happened." in text
+    assert "Authorize one agent action. Retry with the same key, no new dispatch." in text
 
     stylesheet = (output / "styles.css").read_text(encoding="utf-8")
     assert 'html[data-a11y-contrast="high"] .wave-canvas' in stylesheet

@@ -25,8 +25,8 @@ rotating in the first place:
   2. The auth path (`app.core.auth.get_auth_context`) ignores static dev
      keys whenever `ENVIRONMENT` is production-like, even if the guardrail
      were somehow bypassed.
-  A leaked dev key therefore compromises nothing that matters — which is
-  exactly why it is allowed to be static.
+  A leaked dev key therefore compromises nothing that matters, so it can be
+  static.
 - **Never confusable with a live key.** Static dev keys must carry the
   `amw_dev_` prefix; entries without it are ignored by the auth path. A
   rotated `amw_live_` bootstrap key pasted into `STATIC_DEV_API_KEYS` never
@@ -48,7 +48,7 @@ rotating in the first place:
    STATIC_DEV_API_KEYS=amw_dev_...,amw_dev_...
    ```
 
-3. **Use** the key exactly like any other API key (shown via an env var —
+3. **Use** the key like any other API key (shown via an env var,
    keeping the literal out of shell history and scanner reports):
 
    ```bash
@@ -72,8 +72,9 @@ if it did.
 ## Rules
 
 - **Never** put an `amw_dev_` key in `VALID_API_KEYS`, and never "promote" a
-  dev key to production use. Production keys come from
-  `scripts/rotate_api_keys.py generate` and live in the host secret manager.
+  dev key to production use. Operators issue production keys to design partners;
+  bootstrap keys come from `scripts/rotate_api_keys.py generate` and live in
+  the host secret manager.
 - **Never** set `STATIC_DEV_API_KEYS` on a shared or hosted deployment.
   Production-like environments fail startup on it by design; local-shaped
   shared instances (e.g. a team demo box) should use `VALID_API_KEYS` with

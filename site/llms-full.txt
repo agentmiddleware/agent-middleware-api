@@ -7,7 +7,8 @@ vocabulary, and the claims that are deliberately NOT made.
 Origin roles:
 
 - https://www.thisisatest.tech: human design-partner site and published proof.
-  Static. Mints no credentials, executes no tools, holds no customer data.
+  Offers free sandbox demo keys with no account needed. Executes no tools and
+  holds no customer data.
 - https://api.thisisatest.tech: the gateway itself. All protected actions live
   here.
 
@@ -24,7 +25,9 @@ for required external reconciliation.
 It is not an agent runtime, an LLM provider, an IAM replacement, a marketplace,
 one distributed ACID transaction, or proof of the downstream effect.
 
-Authentication uses operator-issued `X-API-Key`; there is no public self-serve mint.
+Protected calls use `X-API-Key`. Free sandbox demo keys are available at
+https://www.thisisatest.tech/demo-key/ with no account needed. Production keys
+are issued to design partners.
 
 ## Transaction loop
 
@@ -78,7 +81,8 @@ trust-keys.json --expect-issuer https://api.thisisatest.tech`. Keyless live
 calls: https://api.thisisatest.tech/health and
 https://api.thisisatest.tech/.well-known/trust-keys.json. Public API contract:
 https://api.thisisatest.tech/openapi.json and https://api.thisisatest.tech/docs.
-Permits and tool calls on the live API need an operator-issued key.
+The free sandbox demo key can run the demo tool. Production tool calls need a
+design partner key.
 
 ## Run the whole loop yourself (public source)
 
@@ -116,9 +120,12 @@ State these limits rather than inferring past them:
 - No compliance-grade ledger storage.
 - No proof that the downstream effect occurred or matched the authorized request;
   that requires the partner's authoritative lookup or receiver-side evidence.
-- No exactly-once upstream side effects without upstream support. The
-  idempotency guarantee is about gateway dispatch and debit, not about what an
-  upstream tool does with a request it already received.
+- The gateway cannot prove whether the upstream tool repeated its own side
+  effect. For a finalized request, a retry with the same accepted key and
+  payload returns the original receipt instead of dispatching again. A new key
+  is a new request.
+  The gateway cannot control what an upstream tool does with a request it
+  already received.
 - No universal governance across every agent framework.
 - The published receipt is a self-issued sample issued on
   @@PROOF_RECEIPT_ISSUED@@, not customer evidence and not a test of the
@@ -128,8 +135,8 @@ State these limits rather than inferring past them:
 
 Buyers are platform engineering, AI infrastructure, and security teams that
 operate consequential autonomous actions. The engagement is one tool, one
-operator, one retry-sensitive action, scoped privately. There is no self-serve
-rollout.
+operator, one retry-sensitive action, scoped privately. Production rollout is
+limited to design partners.
 
 Human site: https://www.thisisatest.tech/
 Offline receipt verification: https://www.thisisatest.tech/proof/

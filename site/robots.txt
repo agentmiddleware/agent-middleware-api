@@ -1,10 +1,10 @@
 User-agent: *
 Allow: /
 
-# AI crawlers are welcome on this origin. Everything here is public marketing
-# and public evidence: there is no gated content, and no protected action can
-# be taken from this host. Protected routes live on api.thisisatest.tech and
-# require an operator-issued API key plus a scoped permit regardless of crawler.
+# AI crawlers are welcome on this origin. This site has public marketing,
+# proof, and free sandbox demo keys at /demo-key/ with no account needed.
+# Protected tool calls use api.thisisatest.tech with a key and scoped permit.
+# Production keys are issued to design partners.
 User-agent: GPTBot
 Allow: /
 
