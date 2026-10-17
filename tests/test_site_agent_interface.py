@@ -549,7 +549,10 @@ def test_machine_pointer_copies_match_and_state_live_access_boundary() -> None:
 
     assert llm_txt == llms_txt
     assert "human design-partner site" in normalized_llm
-    assert "teams operating consequential autonomous actions are the buyers" in normalized_llm
+    assert (
+        "teams operating consequential autonomous actions are the buyers"
+        in normalized_llm
+    )
     assert "Transaction integrity" in normalized_llm
     assert "delivery_uncertain" in normalized_llm
     assert "at most one gateway dispatch and debit" in normalized_llm
@@ -1763,7 +1766,9 @@ def test_landing_hero_wave_is_progressive_enhancement(tmp_path) -> None:
     # The funnel's tested copy still leads the page: the wave is a treatment,
     # not a content change.
     text = _page_text(page)
-    assert "Authorize one agent action. Retry with the same key, no new dispatch." in text
+    assert (
+        "Authorize one agent action. Retry with the same key, no new dispatch." in text
+    )
 
     stylesheet = (output / "styles.css").read_text(encoding="utf-8")
     assert 'html[data-a11y-contrast="high"] .wave-canvas' in stylesheet
