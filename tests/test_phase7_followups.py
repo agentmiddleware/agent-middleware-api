@@ -56,7 +56,8 @@ def test_canonical_api_empty_when_public_url_unset(monkeypatch):
 async def test_partner_api_key_bootstrap_doc_is_served(client):
     resp = await client.get("/docs/partner-api-key-bootstrap.md")
     assert resp.status_code == 200
-    assert "public self-serve" in resp.text.lower()
+    assert "Free sandbox demo keys are available" in resp.text
+    assert "Production keys are issued to design partners" in resp.text
     assert "partner_api_key_bootstrap.py" in resp.text
     assert "DELETE" in resp.text
     assert "/v1/api-keys/" in resp.text

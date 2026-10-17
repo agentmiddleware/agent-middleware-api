@@ -1,26 +1,25 @@
-# Wedge: Replay-safe MCP permits and exactly-once debits
+# Wedge: Replay-safe MCP permits and receipts
 
 Agent Middleware API should not initially sell itself as a full platform for
 autonomous economic actors. The credible wedge is narrower:
 
-> Exactly-once gateway authorization, debit, and receipt finalization for
-> metered MCP calls.
+> Once a metered MCP call has a receipt, a retry with the same accepted key and
+> payload returns that receipt instead of dispatching again. A new key is a new
+> request.
 
 Or in one line:
 
-> Authorize one agent action. Charge it once. Prove what happened.
+> Authorize one agent action. Retry with the same key, no new dispatch.
 
 Start with the [documentation guide](docs/README.md) for the supported
 evaluation, integration, SDK, security, and pilot paths.
 
-**What "exactly-once" means here, precisely.** It is the distributed-systems
-term of art for the *deduplication* guarantee — no duplicate dispatch, no
-duplicate debit — not a promise that every accepted call results in a charge.
-Two paths produce no net debit at all: a crash before dispatch reconciles to a
-refund, and an out-of-scope or over-budget call is denied before money moves.
-The enforceable claim is **never a duplicate charge, not always a charge.**
-Every precise statement of the guarantee below says "at most one" for that
-reason. See [`docs/failure-semantics.md`](docs/failure-semantics.md).
+**What a retry does.** Once a gateway request has a receipt, a retry with the
+same accepted key and payload returns that receipt instead of dispatching
+again. A new key is a new request. Some paths produce no net debit: a crash
+before dispatch reconciles to a refund, and an out-of-scope or over-budget
+call is denied before money moves. A receipt does not prove what the upstream
+tool did. See [`docs/failure-semantics.md`](docs/failure-semantics.md).
 
 The core job is to put one enforceable **economic** boundary between autonomous
 agents and tools:
@@ -44,10 +43,11 @@ mints an ordinary signed permit, and the quote is honored by the ordinary
 metered charge. Neither adds a second way to authorize or to spend.
 
 Category language (“MCP trust plane,” “governance gateway”) is occupied. The
-differentiating primitive is exactly-once economic authorization at the
-gateway boundary: one idempotency key returns the original receipt without a
-second gateway dispatch or debit. A remote tool's own side effect is exactly
-once only when that tool also honors the forwarded idempotency key.
+differentiating primitive is retry-safe economic authorization at the gateway
+boundary: once a request has a receipt, a retry with the same accepted key and
+payload returns that receipt instead of dispatching again. A new key is a new
+request. The gateway cannot prove what the remote tool did; avoiding
+duplicate upstream effects depends on that tool honoring the forwarded key.
 
 ## Positioning vs nearby products
 
@@ -197,7 +197,7 @@ Partner motion:
   duplicate gateway dispatch or debit.
 - A request outside the permit scope can be denied with a concrete reason.
 - An agent with no authority can ask a human for a scoped, budgeted permit, and
-  the permit that gets minted carries exactly the terms the human reviewed.
+  the permit that gets minted carries the same terms the human reviewed.
 - A signed quote can fix the price of one call, and the charge honors it even
   after the tool's registered price moves.
 
@@ -280,7 +280,7 @@ Agent-executable remediation of known spine/discovery/deploy debt:
 - Compliance-grade ledger storage.
 - Full autonomous economic actor infrastructure.
 - Universal policy enforcement across every agent framework.
-- Distributed exactly-once side effects in arbitrary upstream MCP servers.
+- Proof that arbitrary upstream MCP servers avoid duplicate side effects.
 - Proof that a durable gateway dispatch claim caused any downstream effect.
 - Quotes as a pricing or settlement product. A quote fixes what this gateway
   will debit from an internal wallet for one call; it is not a market price, a

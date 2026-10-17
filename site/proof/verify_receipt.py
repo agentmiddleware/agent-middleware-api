@@ -14,7 +14,7 @@ A signature tagged `Ed25519-sha256-envelope:<base64>` (used for signing
 inputs over 4096 bytes) is plain Ed25519 over the canonical JSON of
 {"alg": "Ed25519-sha256-envelope", "kid": <kid>, "payload_sha256": <hex
 SHA-256 of signing_input>}; it is accepted only above that threshold, so a
-small receipt has exactly one valid signature form. Any other tag is
+small receipt has one valid signature form. Any other tag is
 malformed.
 
 What it does NOT prove: exit 0 proves the receipt matches the key snapshot

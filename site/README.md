@@ -202,7 +202,7 @@ sample it is.
 
 ## Structured data
 
-Each indexable page publishes exactly one `application/ld+json` block holding a
+Each indexable page publishes one `application/ld+json` block holding a
 `@graph`. One block per page is the point: separate blocks cannot reference one
 another's nodes, and the subpages resolve the shared `#organization`,
 `#website`, `#software`, and `#logo` definitions the homepage declares rather
@@ -285,7 +285,7 @@ landing page only) reveals the launcher and fetches both the first time
 someone presses START, hovers or focuses the control, or arrives on a
 `?arcade=` deep link. The arcade is by far the heaviest asset on the site
 (~145 KB gzipped), and nobody needs it until they ask for it. Once loaded,
-`arcade.js` owns the launcher exactly as it did when it loaded eagerly; the
+`arcade.js` owns the launcher as it did when it loaded eagerly; the
 bootstrap steps aside. The asset URLs live on the launcher's `data-arcade-script`
 and `data-arcade-style` attributes so they carry the page's cache token like
 every other reference.
@@ -345,7 +345,7 @@ twenty-five is built out of them:
   system that allocates per emit is the easiest way to make a fixed-timestep
   canvas stutter every few seconds when the collector runs.
 - **`fx`** carries shake, colour flash, hitstop and floating numbers. All four
-  are suppressed under reduced motion — shake in particular is exactly the
+  are suppressed under reduced motion; shake in particular is the kind of
   involuntary movement that preference exists to stop.
 - **Backdrops**: starfield, parallax bands, horizon grid and a chunky vignette.
   A cabinet drawn on flat `bg` reads as a prototype no matter how good its
@@ -428,7 +428,7 @@ cabinet rather than a recording because that is the one piece of arcade
 furniture CSS cannot fake. The demo cycles on death or after about fourteen
 seconds — some cabinets are survivable enough that a mediocre hand would sit on
 one board forever — and it draws only from the cabinets the active genre filter
-leaves visible. Under reduced motion it draws exactly one still frame and the
+leaves visible. Under reduced motion it draws one still frame and the
 loop never starts: an attract loop is precisely the unrequested motion that
 preference exists to suppress.
 
@@ -539,7 +539,7 @@ is a pixel grid whatever the page looks like; the social card is set in the
 page's own Instrument Serif and IBM Plex Mono on soft corners, matching the
 pages it previews.
 `test_brand_graphics_use_the_design_system_palette` fails if either file
-reintroduces an off-system color; that is exactly how the original graphics
+reintroduces an off-system color; that is how the original graphics
 drifted, keeping a retired charcoal-and-ember palette long after the pages
 moved on, so tab icon and link preview advertised a different product than the
 page that loaded.
@@ -558,7 +558,7 @@ headless Chromium, so the card's Instrument Serif headline and IBM Plex Mono
 labels are the site's own typography rather than an exporting machine's
 substitutes. It prefers a Playwright `headless_shell` build (found under
 `$PLAYWRIGHT_BROWSERS_PATH`; or point `$CHROMIUM` at any binary), whose
-viewport is exactly `--window-size`; a full-UI Chromium reserves toolbar
+viewport matches `--window-size`; a full-UI Chromium reserves toolbar
 height inside that size, so the script probes the render's bottom row for the
 ink ground and refuses a short viewport instead of committing a card with a
 blank band. Re-run it whenever `social-card.svg` or the vendored fonts
@@ -584,7 +584,7 @@ include the email address, booking URL, receipt fields, or link destination.
 
 The `/_vercel/insights/script.js` loader is emitted only when
 `PUBLIC_ENABLE_VERCEL_ANALYTICS=true` is set at build time; the default build
-omits it. The flag accepts exactly `true` or `false` (case-insensitive) or
+omits it. The flag accepts `true`, `false` (case-insensitive), or
 being unset — any other value fails the build. Vercel serves that script only for projects whose Web Analytics is
 enabled in the dashboard — deploying the tag without that produces a 404 plus
 a MIME-type refusal in the browser console on every page load. Enable Web

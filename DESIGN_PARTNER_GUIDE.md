@@ -41,8 +41,10 @@ make demo-trust-plane
 
 ### API key bootstrap (gated)
 
-There is **no public self-serve key mint**. After discovery, agents get `401`
-until an operator provisions a wallet-scoped key with a bootstrap admin key.
+Free sandbox demo keys are available at
+[the demo page](https://www.thisisatest.tech/demo-key/) with no account.
+Production keys are issued to design partners. Production agent calls return
+`401` until an operator provisions a wallet-scoped key.
 
 Documented flow + script:
 
@@ -138,8 +140,9 @@ make red-team-trust-plane
 It drives one valid permit and attacks it ten ways — no permit, unknown
 permit, out-of-scope tool, missing scope, over-budget, stolen permit (wrong
 wallet), wrong key, expired, revoked, and tampered signature — and asserts
-each is denied with a concrete reason code, that none produces a ledger debit,
-and that a final valid call still charges exactly once.
+each is denied with a concrete reason code, and that none produces a ledger
+debit. A final valid call is charged. A retry with the same accepted key and
+payload returns its original receipt instead of dispatching again.
 
 Then walk the partner through the live flow:
 
@@ -200,9 +203,8 @@ tool and engineer, not agreeing that the demo is interesting.
 
 Use:
 
-- "Authorize one agent action. Charge it once. Prove what happened."
-- "Exactly-once gateway authorization, debit, and receipt finalization for
-  metered MCP calls."
+- "Authorize one agent action. Retry with the same key, no new dispatch."
+- "A new key is a new request."
 - "Signed proof of authorization, execution, and credit debit for one tool."
 - "Replay-safe metering: same idempotency key, same receipt, no second gateway
   dispatch or debit."
@@ -215,8 +217,8 @@ Avoid:
 - "Complete policy layer for all agent frameworks."
 - "Compliance-grade ledger or audit storage."
 - Claiming a marketing-page signature is live cryptographic proof.
-- Claiming an arbitrary remote tool's side effect is exactly once when that
-  tool does not honor the forwarded idempotency key.
+- Claiming the gateway receipt proves the remote tool's side effect or prevents
+  duplicate effects when that tool does not honor the forwarded key.
 ## Do Not Promise Yet
 
 - Settlement rails.
