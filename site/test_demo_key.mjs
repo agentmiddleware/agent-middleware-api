@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { runInNewContext } from "node:vm";
+import { createContext, runInContext, runInNewContext } from "node:vm";
 
 const script = readFileSync(new URL("./demo-key/demo-key.js", import.meta.url), "utf8");
+const captureScript = readFileSync(new URL("./utm-capture.js", import.meta.url), "utf8");
 const commandTemplate = `API=https://api.thisisatest.tech
 KEY='YOUR_DEMO_KEY'
 WALLET='YOUR_WALLET_ID'
@@ -225,4 +226,37 @@ test("issuance failures show actionable messages and allow retry", async () => {
   assert.equal(network.elements.get("demo-key-status").textContent,
     "Could not reach the demo API. Check your connection and try again.");
   assert.equal(network.elements.get("get-demo-key").disabled, false);
+});
+
+test("utm-capture.js and demo-key.js share one classic-script global", () => {
+  const session = new Map();
+  const listeners = {};
+  const context = createContext({
+    document: {
+      referrer: "https://news.example/item",
+      getElementById(id) {
+        return {
+          disabled: false,
+          hidden: true,
+          textContent: id === "demo-commands" ? commandTemplate : "",
+          value: "",
+          addEventListener(event, listener) { listeners[id] = listener; },
+        };
+      },
+    },
+    location: {
+      search: "?utm_source=newsletter",
+      origin: "https://www.thisisatest.tech",
+    },
+    URLSearchParams,
+    URL,
+    sessionStorage: {
+      getItem(key) { return session.has(key) ? session.get(key) : null; },
+      setItem(key, value) { session.set(key, String(value)); },
+    },
+  });
+  runInContext(captureScript, context, { filename: "utm-capture.js" });
+  runInContext(script, context, { filename: "demo-key.js" });
+  assert.equal(typeof listeners["get-demo-key"], "function");
+  assert.equal(JSON.parse(session.get("amwDemoKeyUtm")).utm_source, "newsletter");
 });

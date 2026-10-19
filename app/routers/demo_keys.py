@@ -202,6 +202,17 @@ def _require_enabled() -> None:
         raise HTTPException(status_code=404, detail="Not Found")
 
 
+async def _require_enabled_before_body() -> None:
+    """Run the kill switch before FastAPI validates the issuance body.
+
+    A body parameter is validated while dependencies are solved, and that
+    happens before the endpoint function. Without this dependency an
+    overlong or mistyped body returns 422 while the tenant is disabled,
+    which admits the route exists.
+    """
+    _require_enabled()
+
+
 def _reject_cross_origin(request: Request) -> None:
     """Reject browser minting from origins the operator did not allow.
 
@@ -279,6 +290,7 @@ def _require_demo_caller(auth: AuthContext) -> None:
 )
 async def issue_demo_key(
     request: Request,
+    _: None = Depends(_require_enabled_before_body),
     body: DemoKeyIssueRequest | None = None,
 ) -> DemoKeyIssueResponse:
     _require_enabled()

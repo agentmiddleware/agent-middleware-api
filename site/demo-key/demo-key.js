@@ -1,3 +1,8 @@
+// Classic scripts share one global lexical scope. This page loads
+// /utm-capture.js first, and that file declares the same const names, so
+// this copy stays inside a function. A direct visit that never loaded
+// utm-capture.js still attributes from this copy.
+(function () {
 const issueButton = document.getElementById("get-demo-key");
 const copyButton = document.getElementById("copy-demo-key");
 const status = document.getElementById("demo-key-status");
@@ -177,3 +182,4 @@ copyButton.addEventListener("click", async () => {
     status.textContent = "Copy was unavailable. The key is selected so you can copy it manually.";
   }
 });
+})();

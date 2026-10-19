@@ -1508,7 +1508,7 @@ def test_built_demo_key_page_has_the_key_controls_and_api_connection(tmp_path) -
         "Shown once. Store it now. Confined to the demo tenant "
         "(synthetic credits, no real money)"
     ) in page
-    assert 'src="/demo-key/demo-key.js?v=demo-key-3"' in page
+    assert 'src="/demo-key/demo-key.js?v=demo-key-4"' in page
     assert "https://api.thisisatest.tech/v1/demo/keys" in page
     assert 'id="demo-commands"' in page
     assert "partner.echo" in page

@@ -480,6 +480,24 @@ async def test_kill_switch_off_404_and_refuses_existing_key(
 
 
 @pytest.mark.anyio
+async def test_kill_switch_off_invalid_body_is_404(
+    client: AsyncClient, demo_settings
+) -> None:
+    """A disabled tenant answers 404 before the issuance body is validated."""
+    get_settings().ENABLE_DEMO_TENANT = False
+    try:
+        overlong = await client.post("/v1/demo/keys", json={"utm_campaign": "c" * 129})
+        assert overlong.status_code == 404
+        malformed = await client.post(
+            "/v1/demo/keys",
+            json={"utm_source": 1, "referrer": ["not-a-string"]},
+        )
+        assert malformed.status_code == 404
+    finally:
+        get_settings().ENABLE_DEMO_TENANT = True
+
+
+@pytest.mark.anyio
 async def test_origin_check(
     client: AsyncClient, clean_database: None, demo_settings
 ) -> None:
