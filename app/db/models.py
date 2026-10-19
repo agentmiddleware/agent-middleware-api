@@ -380,6 +380,8 @@ class APIKeyModel(SQLModel, table=True):
 
     last_used_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
     last_used_ip: Optional[str] = Field(default=None, max_length=45)
+    # Set once, on the first authenticated use; never overwritten afterwards.
+    first_used_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
 
     created_at: datetime = Field(
         sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True

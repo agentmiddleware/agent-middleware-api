@@ -60,6 +60,10 @@ Everything is OFF by default: merging changes nothing until the flag flips.
   or raw IP). A Slack/email alert fires at most once per hour when the
   global hourly limit or the live-key cap is hit, or hourly issuance
   crosses `DEMO_ALERT_ISSUES_PER_HOUR`.
+- **Funnel by source:** `GET /v1/admin/demo-keys/funnel?since=&until=`
+  (bootstrap admin) returns demo keys issued vs. used (first authenticated
+  call recorded in `api_keys.first_used_at`) grouped by UTM source, medium,
+  campaign, and referrer host. See [schema-050-rollout.md](schema-050-rollout.md).
 - **Visitors manage their own key:** `POST /v1/demo/keys/rotate` (same
   expiry / remaining uses / allowlist / tenant carried over, old key dead
   immediately) and `POST /v1/demo/keys/revoke`, both authenticated with the
