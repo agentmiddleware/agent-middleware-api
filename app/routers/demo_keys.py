@@ -60,6 +60,7 @@ from ..services.demo_tenant import (
     check_issuance_limits,
     count_live_demo_keys,
     count_recent_issues,
+    demo_key_funnel,
     hash_client_id,
     log_demo_event,
     maybe_send_demo_alert,
@@ -69,6 +70,12 @@ from ..services.demo_tenant import (
 
 router = APIRouter(
     prefix="/v1/demo",
+    tags=["Demo"],
+)
+
+# Operator reporting on demo keys. Bootstrap-only, like /v1/demo/admin.
+admin_router = APIRouter(
+    prefix="/v1/admin/demo-keys",
     tags=["Demo"],
 )
 
@@ -195,6 +202,26 @@ class DemoAdminStatsResponse(BaseModel):
     live_demo_keys: int
     issued_last_hour: int
     issued_last_day: int
+
+
+class DemoKeyFunnelRow(BaseModel):
+    utm_source: str = Field(description="utm_source, or '(none)' when absent.")
+    utm_medium: str | None = None
+    utm_campaign: str | None = None
+    referrer_host: str | None = Field(
+        default=None,
+        description="Referrer host for absolute URLs, else the raw referrer.",
+    )
+    keys_issued: int
+    keys_used: int = Field(description="Keys with at least one authenticated call.")
+    first_issued_at: datetime
+    last_issued_at: datetime
+
+
+class DemoKeyFunnelResponse(BaseModel):
+    since: datetime | None = None
+    until: datetime | None = None
+    rows: list[DemoKeyFunnelRow]
 
 
 def _require_enabled() -> None:
@@ -488,4 +515,30 @@ async def admin_demo_stats(
         live_demo_keys=live or 0,
         issued_last_hour=await count_recent_issues(1),
         issued_last_day=await count_recent_issues(24),
+    )
+
+
+@admin_router.get(
+    "/funnel",
+    response_model=DemoKeyFunnelResponse,
+    summary="Admin: demo keys issued vs. used by source (bootstrap only)",
+    description=(
+        "Group demo-tenant keys by utm_source, utm_medium, utm_campaign and "
+        "referrer host. keys_used counts keys with a first authenticated "
+        "call. Optional since (inclusive) and until (exclusive) filter on "
+        "issuance time."
+    ),
+)
+async def admin_demo_key_funnel(
+    since: datetime | None = None,
+    until: datetime | None = None,
+    auth: AuthContext = Depends(get_auth_context),
+) -> DemoKeyFunnelResponse:
+    # Reporting works with the kill switch OFF too, like /v1/demo/admin/stats.
+    _require_bootstrap_admin(auth)
+    rows = await demo_key_funnel(since=since, until=until)
+    return DemoKeyFunnelResponse(
+        since=since,
+        until=until,
+        rows=[DemoKeyFunnelRow(**row) for row in rows],
     )
