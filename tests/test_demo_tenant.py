@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import shlex
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
@@ -266,6 +268,196 @@ async def test_issue_demo_key_defaults(
     assert me.status_code == 200, me.text
 
 
+_ATTRIBUTION_COLUMNS = (
+    "utm_source",
+    "utm_medium",
+    "utm_campaign",
+    "utm_content",
+    "utm_term",
+    "referrer",
+)
+
+
+async def _load_demo_key(key_id: str) -> APIKeyModel:
+    factory = get_session_factory()
+    async with factory() as session:
+        key = (
+            await session.execute(
+                select(APIKeyModel).where(APIKeyModel.key_id == key_id)
+            )
+        ).scalar_one()
+        session.expunge(key)
+        return key
+
+
+@pytest.mark.anyio
+async def test_issue_demo_key_stores_utm_and_referrer(
+    client: AsyncClient,
+    clean_database: None,
+    demo_settings,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    payload = {
+        "utm_source": "  newsletter  ",
+        "utm_medium": "email",
+        "utm_campaign": "launch",
+        "utm_content": "hero",
+        "utm_term": "t" * 128,
+        "referrer": " https://news.example/item ",
+    }
+    caplog.set_level(logging.INFO, logger="app.demo_tenant")
+    resp = await client.post("/v1/demo/keys", json=payload)
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert "utm_source" not in body
+    assert "referrer" not in body
+
+    key = await _load_demo_key(body["key_id"])
+    assert key.utm_source == "newsletter"
+    assert key.utm_medium == "email"
+    assert key.utm_campaign == "launch"
+    assert key.utm_content == "hero"
+    assert key.utm_term == "t" * 128
+    assert key.referrer == "https://news.example/item"
+
+    issued = [
+        record.getMessage()
+        for record in caplog.records
+        if record.getMessage().startswith("demo_key_issued")
+    ]
+    assert len(issued) == 1
+    assert f"utm_source={json.dumps('newsletter')}" in issued[0]
+    assert f"utm_medium={json.dumps('email')}" in issued[0]
+    assert f"utm_campaign={json.dumps('launch')}" in issued[0]
+    assert f"utm_content={json.dumps('hero')}" in issued[0]
+    assert f"utm_term={json.dumps('t' * 128)}" in issued[0]
+    assert f"referrer={json.dumps('https://news.example/item')}" in issued[0]
+    assert body["api_key"] not in issued[0]
+    assert body["api_key"] not in caplog.text
+
+
+@pytest.mark.anyio
+async def test_issue_demo_key_log_quotes_utm_with_space_and_quote(
+    client: AsyncClient,
+    clean_database: None,
+    demo_settings,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Spaces, quotes, and '=' in attribution stay one splittable field."""
+    utm_source = 'paid search "q4"'
+    referrer = "https://news.example/a=b c"
+    caplog.set_level(logging.INFO, logger="app.demo_tenant")
+    resp = await client.post(
+        "/v1/demo/keys",
+        json={"utm_source": utm_source, "referrer": referrer},
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    key = await _load_demo_key(body["key_id"])
+    assert key.utm_source == utm_source
+    assert key.referrer == referrer
+
+    issued = [
+        record.getMessage()
+        for record in caplog.records
+        if record.getMessage().startswith("demo_key_issued")
+    ]
+    assert len(issued) == 1
+    assert f"utm_source={json.dumps(utm_source)}" in issued[0]
+    assert f"referrer={json.dumps(referrer)}" in issued[0]
+    parsed = {
+        field.split("=", 1)[0]: field.split("=", 1)[1]
+        for field in shlex.split(issued[0])
+        if "=" in field
+    }
+    assert parsed["utm_source"] == utm_source
+    assert parsed["referrer"] == referrer
+    assert body["api_key"] not in issued[0]
+
+
+@pytest.mark.anyio
+async def test_issue_demo_key_without_attribution_still_issues(
+    client: AsyncClient,
+    clean_database: None,
+    demo_settings,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger="app.demo_tenant")
+    empty = await client.post("/v1/demo/keys", json={})
+    assert empty.status_code == 201, empty.text
+    omitted = await client.post("/v1/demo/keys")
+    assert omitted.status_code == 201, omitted.text
+    blanks = await client.post(
+        "/v1/demo/keys",
+        json={"utm_source": "   ", "utm_medium": "", "referrer": "  "},
+    )
+    assert blanks.status_code == 201, blanks.text
+
+    for body in (empty.json(), omitted.json(), blanks.json()):
+        key = await _load_demo_key(body["key_id"])
+        assert all(getattr(key, column) is None for column in _ATTRIBUTION_COLUMNS)
+        assert body["api_key"] not in caplog.text
+
+    issued = [
+        record.getMessage()
+        for record in caplog.records
+        if record.getMessage().startswith("demo_key_issued")
+    ]
+    assert len(issued) == 3
+    assert all(
+        "utm_" not in message and "referrer=" not in message for message in issued
+    )
+
+
+@pytest.mark.anyio
+async def test_issue_demo_key_rejects_overlong_utm_and_truncates_referrer(
+    client: AsyncClient,
+    clean_database: None,
+    demo_settings,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from sqlalchemy import func
+
+    caplog.set_level(logging.INFO, logger="app.demo_tenant")
+    too_long = await client.post("/v1/demo/keys", json={"utm_campaign": "c" * 129})
+    assert too_long.status_code == 422
+    assert "utm_campaign" in too_long.text
+
+    factory = get_session_factory()
+    async with factory() as session:
+        count = int(
+            (
+                await session.execute(select(func.count()).select_from(APIKeyModel))
+            ).scalar_one()
+        )
+    assert count == 0
+    assert not any(
+        record.getMessage().startswith("demo_key_issued") for record in caplog.records
+    )
+
+    referrer = "https://example.com/" + ("a" * 600)
+    assert len(referrer) > 512
+    minted = await client.post(
+        "/v1/demo/keys",
+        json={"utm_source": "s" * 128, "referrer": referrer},
+    )
+    assert minted.status_code == 201, minted.text
+    body = minted.json()
+    key = await _load_demo_key(body["key_id"])
+    assert key.utm_source == "s" * 128
+    assert key.referrer == referrer[:512]
+    assert len(key.referrer) == 512
+    issued = [
+        record.getMessage()
+        for record in caplog.records
+        if record.getMessage().startswith("demo_key_issued")
+    ]
+    assert len(issued) == 1
+    assert referrer not in issued[0]
+    assert key.referrer is not None and key.referrer in issued[0]
+    assert body["api_key"] not in caplog.text
+
+
 @pytest.mark.anyio
 async def test_kill_switch_off_404_and_refuses_existing_key(
     client: AsyncClient, clean_database: None, demo_settings
@@ -285,6 +477,24 @@ async def test_kill_switch_off_404_and_refuses_existing_key(
 
     me = await client.get("/v1/me/authority", headers=headers)
     assert me.status_code == 200
+
+
+@pytest.mark.anyio
+async def test_kill_switch_off_invalid_body_is_404(
+    client: AsyncClient, demo_settings
+) -> None:
+    """A disabled tenant answers 404 before the issuance body is validated."""
+    get_settings().ENABLE_DEMO_TENANT = False
+    try:
+        overlong = await client.post("/v1/demo/keys", json={"utm_campaign": "c" * 129})
+        assert overlong.status_code == 404
+        malformed = await client.post(
+            "/v1/demo/keys",
+            json={"utm_source": 1, "referrer": ["not-a-string"]},
+        )
+        assert malformed.status_code == 404
+    finally:
+        get_settings().ENABLE_DEMO_TENANT = True
 
 
 @pytest.mark.anyio

@@ -580,7 +580,10 @@ async def maybe_send_demo_alert(scope: str, message: str) -> bool:
         return False
 
 
-async def mint_demo_keypair() -> dict[str, Any]:
+async def mint_demo_keypair(
+    *,
+    attribution: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """Mint a fresh demo sponsor wallet + agent wallet + key, atomically.
 
     Both wallets carry tenant="demo" with synthetic, out-of-thin-air credit
@@ -629,6 +632,7 @@ async def mint_demo_keypair() -> dict[str, Any]:
                 max_uses=settings.DEMO_KEY_MAX_USES,
                 allowed_tools=(demo_tools if demo_tools else None),
                 tenant=DEMO_TENANT_LABEL,
+                attribution=attribution,
                 session=session,
             )
     return {

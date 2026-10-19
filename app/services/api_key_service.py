@@ -44,6 +44,18 @@ API_KEY_LENGTH = 32
 API_KEY_PREFIX_LENGTH = 8
 
 
+def _demo_attribution_field(
+    attribution: dict[str, str] | None, field: str
+) -> Optional[str]:
+    """Return one known attribution field, or None when it is blank or absent."""
+    if not attribution:
+        return None
+    value = attribution.get(field)
+    if isinstance(value, str) and value:
+        return value
+    return None
+
+
 class APIKeyError(Exception):
     """Base exception for API key operations."""
 
@@ -188,6 +200,7 @@ class APIKeyService:
         session: AsyncSession | None = None,
         allowed_tools: list[str] | None = None,
         tenant: str | None = None,
+        attribution: dict[str, str] | None = None,
     ) -> dict:
         """
         Create a new API key for a wallet.
@@ -266,6 +279,12 @@ class APIKeyService:
                 json.dumps(list(allowed_tools)) if allowed_tools is not None else None
             ),
             tenant=tenant,
+            utm_source=_demo_attribution_field(attribution, "utm_source"),
+            utm_medium=_demo_attribution_field(attribution, "utm_medium"),
+            utm_campaign=_demo_attribution_field(attribution, "utm_campaign"),
+            utm_content=_demo_attribution_field(attribution, "utm_content"),
+            utm_term=_demo_attribution_field(attribution, "utm_term"),
+            referrer=_demo_attribution_field(attribution, "referrer"),
         )
 
         if session is not None:

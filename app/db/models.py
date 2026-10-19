@@ -400,6 +400,15 @@ class APIKeyModel(SQLModel, table=True):
     # self-serve demo tenant (route-confined, kill-switchable).
     tenant: Optional[str] = Field(default=None, max_length=32, index=True)
 
+    # Acquisition attribution captured only when a demo key is minted from
+    # the public issuance endpoint. NULL on every other key.
+    utm_source: Optional[str] = Field(default=None, max_length=128)
+    utm_medium: Optional[str] = Field(default=None, max_length=128)
+    utm_campaign: Optional[str] = Field(default=None, max_length=128)
+    utm_content: Optional[str] = Field(default=None, max_length=128)
+    utm_term: Optional[str] = Field(default=None, max_length=128)
+    referrer: Optional[str] = Field(default=None, max_length=512)
+
     revoked_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
     revoke_reason: Optional[str] = Field(default=None, max_length=255)
 
