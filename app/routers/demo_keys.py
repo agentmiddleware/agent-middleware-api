@@ -37,12 +37,13 @@ docs/demo-tenant.md.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from decimal import Decimal
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from ..core.auth import AuthContext, get_auth_context
 from ..core.config import get_settings
@@ -70,6 +71,81 @@ router = APIRouter(
     prefix="/v1/demo",
     tags=["Demo"],
 )
+
+_UTM_MAX_LENGTH = 128
+_REFERRER_MAX_LENGTH = 512
+_UTM_FIELDS = (
+    "utm_source",
+    "utm_medium",
+    "utm_campaign",
+    "utm_content",
+    "utm_term",
+)
+
+
+def _optional_text(value: object, *, limit: int, truncate: bool) -> str | None:
+    """Strip an optional attribution string.
+
+    Blank values become ``None`` so old clients and empty query params do
+    not write empty columns. Over-long UTM values are rejected; referrers
+    are truncated to the column width.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("must be a string")
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    if len(cleaned) <= limit:
+        return cleaned
+    if truncate:
+        return cleaned[:limit]
+    raise ValueError(f"must be at most {limit} characters")
+
+
+class DemoKeyIssueRequest(BaseModel):
+    """Optional acquisition attribution. Every field is omit-able."""
+
+    utm_source: str | None = None
+    utm_medium: str | None = None
+    utm_campaign: str | None = None
+    utm_content: str | None = None
+    utm_term: str | None = None
+    referrer: str | None = Field(
+        default=None,
+        description="document.referrer of the page that requested the key.",
+    )
+
+    @field_validator(*_UTM_FIELDS, mode="before")
+    @classmethod
+    def _normalize_utm(cls, value: object) -> str | None:
+        return _optional_text(value, limit=_UTM_MAX_LENGTH, truncate=False)
+
+    @field_validator("referrer", mode="before")
+    @classmethod
+    def _normalize_referrer(cls, value: object) -> str | None:
+        return _optional_text(value, limit=_REFERRER_MAX_LENGTH, truncate=True)
+
+    def attribution(self) -> dict[str, str]:
+        fields: dict[str, str] = {}
+        for name in (*_UTM_FIELDS, "referrer"):
+            value = getattr(self, name)
+            if value:
+                fields[name] = value
+        return fields
+
+
+def _quoted_attribution(attribution: dict[str, str]) -> dict[str, str]:
+    """JSON-quote UTM and referrer values for the issuance log.
+
+    ``log_demo_event`` joins ``key=value`` with spaces. A value that
+    contains a space, a quote, or ``=`` would otherwise glue itself to
+    the next field. ``json.dumps`` emits one double-quoted token and
+    backslash-escapes interior quotes, which a quote-aware split can
+    recover.
+    """
+    return {key: json.dumps(value) for key, value in attribution.items()}
 
 
 class DemoKeyIssueResponse(BaseModel):
@@ -197,10 +273,14 @@ def _require_demo_caller(auth: AuthContext) -> None:
     description=(
         "Mint a demo sponsor wallet, agent wallet, and wallet-scoped API key "
         "with no pre-shared secret. Requires ENABLE_DEMO_TENANT. The key is "
-        "shown once. Rate-limited per IP and globally."
+        "shown once. Rate-limited per IP and globally. Optional UTM and "
+        "referrer fields are stored for lane attribution and are never required."
     ),
 )
-async def issue_demo_key(request: Request) -> DemoKeyIssueResponse:
+async def issue_demo_key(
+    request: Request,
+    body: DemoKeyIssueRequest | None = None,
+) -> DemoKeyIssueResponse:
     _require_enabled()
     _reject_cross_origin(request)
     settings = get_settings()
@@ -234,12 +314,14 @@ async def issue_demo_key(request: Request) -> DemoKeyIssueResponse:
             headers={"Retry-After": "3600" if scope != ISSUE_SCOPE_IP else "86400"},
         )
 
-    minted = await mint_demo_keypair()
+    attribution = body.attribution() if body is not None else {}
+    minted = await mint_demo_keypair(attribution=attribution)
     log_demo_event(
         "demo_key_issued",
         key_id=minted["key_id"],
         wallet_id=minted["wallet_id"],
         ip_hash=ip_hash,
+        **_quoted_attribution(attribution),
     )
     if scope is None:
         issued_hour = await count_recent_issues(1)

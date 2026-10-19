@@ -8,20 +8,118 @@ const budgetCredits = document.getElementById("demo-budget-credits");
 const commands = document.getElementById("demo-commands");
 const commandTemplate = commands.textContent;
 
+const UTM_PARAMS = ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term"];
+const UTM_STORAGE_KEY = "amwDemoKeyUtm";
+const UTM_MAX_LENGTH = 128;
+const REFERRER_MAX_LENGTH = 512;
+
 function shellQuote(value) {
   return "'" + value.replace(/'/g, "'\"'\"'") + "'";
 }
+
+// Same record as /utm-capture.js. Repeated here so a direct visit still
+// attributes when that script never ran (standalone copy of this page).
+function capped(value, max) {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  return trimmed.length > max ? trimmed.slice(0, max) : trimmed;
+}
+
+function isExternalReferrer(referrer) {
+  if (!referrer) return false;
+  try {
+    return new URL(referrer).origin !== location.origin;
+  } catch {
+    return false;
+  }
+}
+
+function readStoredAttribution() {
+  try {
+    const raw = sessionStorage.getItem(UTM_STORAGE_KEY);
+    if (!raw) return { utm: {}, referrer: "" };
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return { utm: {}, referrer: "" };
+    const utm = {};
+    for (const key of UTM_PARAMS) {
+      const value = capped(parsed[key], UTM_MAX_LENGTH);
+      if (value) utm[key] = value;
+    }
+    const referrer = capped(parsed.referrer, REFERRER_MAX_LENGTH);
+    return { utm, referrer: isExternalReferrer(referrer) ? referrer : "" };
+  } catch {
+    return { utm: {}, referrer: "" };
+  }
+}
+
+function utmFromLocation() {
+  const params = new URLSearchParams(location.search || "");
+  const found = {};
+  for (const key of UTM_PARAMS) {
+    const value = capped(params.get(key), UTM_MAX_LENGTH);
+    if (value) found[key] = value;
+  }
+  return found;
+}
+
+function pageReferrer() {
+  return capped(typeof document.referrer === "string" ? document.referrer : "", REFERRER_MAX_LENGTH);
+}
+
+function captureAttribution() {
+  const stored = readStoredAttribution();
+  // URL values override the same key already stored; absent URL params do not clear it.
+  const utm = { ...stored.utm, ...utmFromLocation() };
+  const current = pageReferrer();
+  const referrer = stored.referrer || (isExternalReferrer(current) ? current : "");
+  const record = { ...utm };
+  if (referrer) record.referrer = referrer;
+  return record;
+}
+
+function persistAttribution(record) {
+  if (Object.keys(record).length === 0) return;
+  try {
+    sessionStorage.setItem(UTM_STORAGE_KEY, JSON.stringify(record));
+  } catch {
+    // Storage can be blocked; the request still sends this page's values.
+  }
+}
+
+function attributionPayload() {
+  const record = captureAttribution();
+  persistAttribution(record);
+  const payload = {};
+  for (const key of UTM_PARAMS) {
+    if (record[key]) payload[key] = record[key];
+  }
+  // A same-origin referrer is not stored (it would hide the first external
+  // one), but a direct visit with only that referrer still reports it.
+  const referrer = record.referrer || pageReferrer();
+  if (referrer) payload.referrer = referrer;
+  return payload;
+}
+
+persistAttribution(captureAttribution());
 
 issueButton.addEventListener("click", async () => {
   issueButton.disabled = true;
   status.textContent = "Requesting a demo key…";
 
+  const attribution = attributionPayload();
+  const request = {
+    method: "POST",
+    credentials: "omit",
+  };
+  if (Object.keys(attribution).length > 0) {
+    request.headers = { "Content-Type": "application/json" };
+    request.body = JSON.stringify(attribution);
+  }
+
   let response;
   try {
-    response = await fetch("https://api.thisisatest.tech/v1/demo/keys", {
-      method: "POST",
-      credentials: "omit",
-    });
+    response = await fetch("https://api.thisisatest.tech/v1/demo/keys", request);
   } catch {
     status.textContent = "Could not reach the demo API. Check your connection and try again.";
     issueButton.disabled = false;
