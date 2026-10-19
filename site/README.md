@@ -250,8 +250,10 @@ stylesheet uses an independent `?v=concept-N` token: bump it when
 The pilot calculator uses its own `?v=pilot-2` token and the default revalidating
 cache policy; bump its token when `pilot-fit.js` changes.
 
-The demo key page's script uses its own `?v=demo-key-2` token; bump it when
-`demo-key/demo-key.js` changes.
+The demo key page's script uses its own `?v=demo-key-3` token; bump it when
+`demo-key/demo-key.js` changes. `utm-capture.js` uses `?v=utm-1`; bump it when
+that file changes. It is loaded on every page, including 404, so a landing URL's
+`utm_*` parameters survive a later click to `/demo-key/`.
 
 Explicit `/proof` → `/proof/`, `/compare` → `/compare/`, and
 `/demo-key` → `/demo-key/` redirects match
