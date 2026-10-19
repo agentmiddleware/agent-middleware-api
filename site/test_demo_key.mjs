@@ -105,7 +105,7 @@ test("issuance uses an empty credential-free POST and renders one key as text", 
 });
 
 test("issuance sends stored UTM overridden by the page URL plus referrer", async () => {
-  const key = "amw_demo_secret_value";
+  const key = "not a real key";
   const page = makePage(async () => ({
     status: 201,
     async json() {
@@ -153,7 +153,7 @@ test("overlong UTM and referrer are capped before storage and before POST", asyn
   const page = makePage(async () => ({
     status: 201,
     async json() {
-      return { api_key: "amw_demo_secret_value", wallet_id: "wallet_demo_1", budget_credits: 25 };
+      return { api_key: "not a real key", wallet_id: "wallet_demo_1", budget_credits: 25 };
     },
   }), {
     search: `?utm_source=${encodeURIComponent(`  ${"s".repeat(140)}  `)}&utm_campaign=${"c".repeat(200)}&utm_medium=%20%20`,
@@ -177,7 +177,7 @@ test("the first external referrer sticks and a same-origin referrer is only post
   const issued = async () => ({
     status: 201,
     async json() {
-      return { api_key: "amw_demo_secret_value", wallet_id: "wallet_demo_1", budget_credits: 25 };
+      return { api_key: "not a real key", wallet_id: "wallet_demo_1", budget_credits: 25 };
     },
   });
   const kept = makePage(issued, {
