@@ -42,8 +42,12 @@ function makePage(fetchResponse, options = {}) {
   };
   runInNewContext(script, {
     document,
-    location: { search: options.search || "" },
+    location: {
+      search: options.search || "",
+      origin: options.origin || "https://www.thisisatest.tech",
+    },
     URLSearchParams,
+    URL,
     async fetch(url, options) {
       requests.push([url, options]);
       return fetchResponse();
@@ -115,7 +119,6 @@ test("issuance sends stored UTM overridden by the page URL plus referrer", async
         utm_source: "old-source",
         utm_campaign: "launch",
         utm_content: "  ",
-        referrer: "https://should-not-stick.example",
       }),
     },
   });
@@ -125,6 +128,7 @@ test("issuance sends stored UTM overridden by the page URL plus referrer", async
     utm_source: "newsletter",
     utm_campaign: "launch",
     utm_term: "receipts",
+    referrer: "https://news.example/item",
   });
 
   await page.click("get-demo-key");
@@ -140,8 +144,65 @@ test("issuance sends stored UTM overridden by the page URL plus referrer", async
     utm_source: "newsletter",
     utm_campaign: "launch",
     utm_term: "receipts",
+    referrer: "https://news.example/item",
   });
   assert.equal([...page.session.values()].some((value) => value.includes(key)), false);
+});
+
+test("overlong UTM and referrer are capped before storage and before POST", async () => {
+  const page = makePage(async () => ({
+    status: 201,
+    async json() {
+      return { api_key: "amw_demo_secret_value", wallet_id: "wallet_demo_1", budget_credits: 25 };
+    },
+  }), {
+    search: `?utm_source=${encodeURIComponent(`  ${"s".repeat(140)}  `)}&utm_campaign=${"c".repeat(200)}&utm_medium=%20%20`,
+    referrer: ` https://news.example/${"r".repeat(600)} `,
+  });
+
+  const stored = JSON.parse(page.session.get("amwDemoKeyUtm"));
+  assert.equal(stored.utm_source, "s".repeat(128));
+  assert.equal(stored.utm_campaign, "c".repeat(128));
+  assert.equal("utm_medium" in stored, false);
+  assert.equal(stored.referrer.length, 512);
+  assert.equal(stored.referrer, `https://news.example/${"r".repeat(600)}`.slice(0, 512));
+  assert.equal([...page.session.values()].some((value) => value.includes("c".repeat(129))), false);
+
+  await page.click("get-demo-key");
+  const [, request] = page.requests[0];
+  assert.deepEqual(JSON.parse(request.body), stored);
+});
+
+test("the first external referrer sticks and a same-origin referrer is only posted", async () => {
+  const issued = async () => ({
+    status: 201,
+    async json() {
+      return { api_key: "amw_demo_secret_value", wallet_id: "wallet_demo_1", budget_credits: 25 };
+    },
+  });
+  const kept = makePage(issued, {
+    referrer: "https://www.thisisatest.tech/compare/",
+    session: {
+      amwDemoKeyUtm: JSON.stringify({
+        utm_source: "newsletter",
+        referrer: `https://first.example/${"p".repeat(600)}`,
+      }),
+    },
+  });
+  const stored = JSON.parse(kept.session.get("amwDemoKeyUtm"));
+  assert.equal(stored.referrer, `https://first.example/${"p".repeat(600)}`.slice(0, 512));
+  await kept.click("get-demo-key");
+  assert.equal(JSON.parse(kept.requests[0][1].body).referrer, stored.referrer);
+
+  const sameOrigin = makePage(issued, {
+    referrer: " https://www.thisisatest.tech/ ",
+  });
+  assert.equal(sameOrigin.session.size, 0);
+  await sameOrigin.click("get-demo-key");
+  assert.deepEqual(JSON.parse(sameOrigin.requests[0][1].body), {
+    referrer: "https://www.thisisatest.tech/",
+  });
+  assert.equal(sameOrigin.session.size, 0);
 });
 
 test("issuance failures show actionable messages and allow retry", async () => {

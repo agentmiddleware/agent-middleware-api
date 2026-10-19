@@ -1508,7 +1508,7 @@ def test_built_demo_key_page_has_the_key_controls_and_api_connection(tmp_path) -
         "Shown once. Store it now. Confined to the demo tenant "
         "(synthetic credits, no real money)"
     ) in page
-    assert 'src="/demo-key/demo-key.js?v=demo-key-2"' in page
+    assert 'src="/demo-key/demo-key.js?v=demo-key-3"' in page
     assert "https://api.thisisatest.tech/v1/demo/keys" in page
     assert 'id="demo-commands"' in page
     assert "partner.echo" in page
@@ -2303,6 +2303,49 @@ def test_every_page_loads_the_accessibility_scripts(tmp_path) -> None:
         assert re.search(r'<script defer src="/a11y\.js\?v=[^"]+"></script>', markup), (
             f"{relative_path} does not load the accessibility controls"
         )
+
+
+def test_every_page_captures_landing_utm(tmp_path) -> None:
+    """Entry pages must store utm_* before a click drops the query string.
+
+    A visitor who lands on /, /compare/, or any other page and then follows
+    an unadorned /demo-key/ link would otherwise lose the campaign. The
+    capture script is same-origin so script-src 'self' allows it, and the
+    week-long cache rule must name it or the ?v= token cannot bust it.
+    """
+    output = tmp_path / "site"
+    assert _render_site(output, VALID_TEST_CONTACTS).returncode == 0
+
+    script = output / "utm-capture.js"
+    assert script.is_file()
+    script_text = script.read_text(encoding="utf-8")
+    assert "amwDemoKeyUtm" in script_text
+    assert "128" in script_text
+    assert "512" in script_text
+
+    for relative_path in (
+        "index.html",
+        "proof/index.html",
+        "compare/index.html",
+        "demo-key/index.html",
+        "concept/index.html",
+        "404.html",
+    ):
+        markup = (output / relative_path).read_text(encoding="utf-8")
+        assert '<script defer src="/utm-capture.js?v=utm-1"></script>' in markup, (
+            f"{relative_path} does not capture landing UTM parameters"
+        )
+
+    config = json.loads((SITE / "vercel.json").read_text(encoding="utf-8"))
+    cached_sources = {
+        entry["source"]
+        for entry in config["headers"]
+        for header in entry["headers"]
+        if header["key"] == "Cache-Control" and "max-age=604800" in header["value"]
+    }
+    assert any("utm-capture.js" in source for source in cached_sources), (
+        "utm-capture.js has no long-lived cache rule"
+    )
 
 
 def test_font_stylesheet_and_files_agree() -> None:
