@@ -26,14 +26,22 @@ rows; the organization rows can only be read in the GitHub UI.
 
    This turns on "delete branch on merge" and the pull-request requirement on
    `main` (0 approvals, see below), and tries to enable secret scanning.
-3. **Clean up the 500+ stale branches** once "delete branch on merge" is on,
-   so they stop accumulating:
+3. **Clean up the 550 branches** once "delete branch on merge" is on, so they
+   stop accumulating:
 
    ```bash
    python scripts/github_branch_cleanup.py                 # lists what is fully merged
    python scripts/github_branch_cleanup.py --apply         # deletes only those
    python scripts/github_branch_cleanup.py --stale-days 90 # review the rest by hand
    ```
+
+   Dry run on 2026-10-19: 550 branches; 103 fully merged into `main` (the
+   `--apply` set); 26 unmerged with no commit in 90 days (oldest from
+   2026-04-17, mostly `feat/*-pg` and `codex/*` work that never landed); 45
+   `backup/local-2026-10-07/*` kept by prefix; the remaining 375 are unmerged
+   branches from the last 90 days, nearly all agent-generated. Those need a
+   decision, not a script: either open the pull request or delete the
+   branch. The 26 stale ones are the first batch to decide on.
 
 4. **Work through the [organization settings](#organization-settings)
    table.** None of it can be scripted from a repository-scoped token.
@@ -88,6 +96,9 @@ and turn on code-owner review the day a second maintainer has commit access.
 - The workflow files did not change between the last green push run
   (`44cd144`, 2026-10-16) and the current head, which rules out a broken
   workflow file.
+- By 2026-10-19 07:30 UTC the block had cleared: the pull request that adds
+  this document started all 20 checks normally. The lock is intermittent,
+  which is the point: it returns whenever the month's minutes run out.
 
 ### Why it keeps happening
 
