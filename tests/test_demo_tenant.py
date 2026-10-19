@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import shlex
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
@@ -325,14 +326,53 @@ async def test_issue_demo_key_stores_utm_and_referrer(
         if record.getMessage().startswith("demo_key_issued")
     ]
     assert len(issued) == 1
-    assert "utm_source=newsletter" in issued[0]
-    assert "utm_medium=email" in issued[0]
-    assert "utm_campaign=launch" in issued[0]
-    assert "utm_content=hero" in issued[0]
-    assert f"utm_term={'t' * 128}" in issued[0]
-    assert "referrer=https://news.example/item" in issued[0]
+    assert f"utm_source={json.dumps('newsletter')}" in issued[0]
+    assert f"utm_medium={json.dumps('email')}" in issued[0]
+    assert f"utm_campaign={json.dumps('launch')}" in issued[0]
+    assert f"utm_content={json.dumps('hero')}" in issued[0]
+    assert f"utm_term={json.dumps('t' * 128)}" in issued[0]
+    assert f"referrer={json.dumps('https://news.example/item')}" in issued[0]
     assert body["api_key"] not in issued[0]
     assert body["api_key"] not in caplog.text
+
+
+@pytest.mark.anyio
+async def test_issue_demo_key_log_quotes_utm_with_space_and_quote(
+    client: AsyncClient,
+    clean_database: None,
+    demo_settings,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Spaces, quotes, and '=' in attribution stay one splittable field."""
+    utm_source = 'paid search "q4"'
+    referrer = "https://news.example/a=b c"
+    caplog.set_level(logging.INFO, logger="app.demo_tenant")
+    resp = await client.post(
+        "/v1/demo/keys",
+        json={"utm_source": utm_source, "referrer": referrer},
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    key = await _load_demo_key(body["key_id"])
+    assert key.utm_source == utm_source
+    assert key.referrer == referrer
+
+    issued = [
+        record.getMessage()
+        for record in caplog.records
+        if record.getMessage().startswith("demo_key_issued")
+    ]
+    assert len(issued) == 1
+    assert f"utm_source={json.dumps(utm_source)}" in issued[0]
+    assert f"referrer={json.dumps(referrer)}" in issued[0]
+    parsed = {
+        field.split("=", 1)[0]: field.split("=", 1)[1]
+        for field in shlex.split(issued[0])
+        if "=" in field
+    }
+    assert parsed["utm_source"] == utm_source
+    assert parsed["referrer"] == referrer
+    assert body["api_key"] not in issued[0]
 
 
 @pytest.mark.anyio

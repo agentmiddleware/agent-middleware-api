@@ -37,6 +37,7 @@ docs/demo-tenant.md.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from decimal import Decimal
 from urllib.parse import urlsplit
@@ -133,6 +134,18 @@ class DemoKeyIssueRequest(BaseModel):
             if value:
                 fields[name] = value
         return fields
+
+
+def _quoted_attribution(attribution: dict[str, str]) -> dict[str, str]:
+    """JSON-quote UTM and referrer values for the issuance log.
+
+    ``log_demo_event`` joins ``key=value`` with spaces. A value that
+    contains a space, a quote, or ``=`` would otherwise glue itself to
+    the next field. ``json.dumps`` emits one double-quoted token and
+    backslash-escapes interior quotes, which a quote-aware split can
+    recover.
+    """
+    return {key: json.dumps(value) for key, value in attribution.items()}
 
 
 class DemoKeyIssueResponse(BaseModel):
@@ -308,7 +321,7 @@ async def issue_demo_key(
         key_id=minted["key_id"],
         wallet_id=minted["wallet_id"],
         ip_hash=ip_hash,
-        **attribution,
+        **_quoted_attribution(attribution),
     )
     if scope is None:
         issued_hour = await count_recent_issues(1)
