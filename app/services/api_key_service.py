@@ -43,28 +43,17 @@ logger = logging.getLogger(__name__)
 API_KEY_LENGTH = 32
 API_KEY_PREFIX_LENGTH = 8
 
-_DEMO_ATTRIBUTION_FIELDS = (
-    "utm_source",
-    "utm_medium",
-    "utm_campaign",
-    "utm_content",
-    "utm_term",
-    "referrer",
-)
 
-
-def _demo_attribution_columns(
-    attribution: dict[str, str] | None,
-) -> dict[str, str]:
-    """Copy known attribution fields onto an api_keys row. Drops blanks."""
+def _demo_attribution_field(
+    attribution: dict[str, str] | None, field: str
+) -> Optional[str]:
+    """Return one known attribution field, or None when it is blank or absent."""
     if not attribution:
-        return {}
-    columns: dict[str, str] = {}
-    for field in _DEMO_ATTRIBUTION_FIELDS:
-        value = attribution.get(field)
-        if isinstance(value, str) and value:
-            columns[field] = value
-    return columns
+        return None
+    value = attribution.get(field)
+    if isinstance(value, str) and value:
+        return value
+    return None
 
 
 class APIKeyError(Exception):
@@ -290,7 +279,12 @@ class APIKeyService:
                 json.dumps(list(allowed_tools)) if allowed_tools is not None else None
             ),
             tenant=tenant,
-            **_demo_attribution_columns(attribution),
+            utm_source=_demo_attribution_field(attribution, "utm_source"),
+            utm_medium=_demo_attribution_field(attribution, "utm_medium"),
+            utm_campaign=_demo_attribution_field(attribution, "utm_campaign"),
+            utm_content=_demo_attribution_field(attribution, "utm_content"),
+            utm_term=_demo_attribution_field(attribution, "utm_term"),
+            referrer=_demo_attribution_field(attribution, "referrer"),
         )
 
         if session is not None:
