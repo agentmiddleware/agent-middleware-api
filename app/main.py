@@ -875,6 +875,9 @@ app.include_router(
 # Unlike dev keys this IS allowed in production-like environments (with
 # REDIS_URL, enforced at boot).
 app.include_router(demo_keys.router, include_in_schema=settings.ENABLE_DEMO_TENANT)
+app.include_router(
+    demo_keys.admin_router, include_in_schema=settings.ENABLE_DEMO_TENANT
+)
 
 # Stripe webhooks answer only signed Stripe traffic; a deployment with no
 # Stripe key configured has nothing that could ever call them, so they are

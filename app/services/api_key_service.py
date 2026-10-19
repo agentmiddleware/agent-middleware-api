@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 from typing import Any, Optional, cast
 from uuid import uuid4
 
-from sqlalchemy import case, or_, select, update
+from sqlalchemy import case, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -466,6 +466,7 @@ class APIKeyService:
                         else_=APIKeyModel.use_count + 1,
                     ),
                     last_used_at=now,
+                    first_used_at=func.coalesce(APIKeyModel.first_used_at, now),
                 )
                 .execution_options(synchronize_session=False)
             )
@@ -561,6 +562,9 @@ class APIKeyService:
                     .values(
                         use_count=APIKeyModel.use_count + 1,
                         last_used_at=to_naive_utc(now),
+                        first_used_at=func.coalesce(
+                            APIKeyModel.first_used_at, to_naive_utc(now)
+                        ),
                     )
                     .execution_options(synchronize_session=False)
                 )
@@ -569,6 +573,8 @@ class APIKeyService:
                     return None
             else:
                 key.last_used_at = to_naive_utc(now)
+                if key.first_used_at is None:
+                    key.first_used_at = key.last_used_at
                 session.add(key)
                 await session.commit()
 
