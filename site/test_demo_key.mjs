@@ -11,7 +11,7 @@ curl -fsS "$API/v1/permits"
 curl -fsS "$API/mcp/tools/partner.echo/invoke"
 curl -fsS "$API/v1/receipts/$RECEIPT/portable"`;
 
-function makePage(fetchResponse) {
+function makePage(fetchResponse, options = {}) {
   const ids = [
     "get-demo-key",
     "copy-demo-key",
@@ -33,26 +33,34 @@ function makePage(fetchResponse) {
   }]));
   const requests = [];
   const copies = [];
+  const session = new Map(Object.entries(options.session || {}));
   const forbidden = () => { throw new Error("key must not be persisted or logged"); };
   const document = {
+    referrer: options.referrer || "",
     getElementById(id) { return elements.get(id); },
     set cookie(_) { forbidden(); },
   };
   runInNewContext(script, {
     document,
+    location: { search: options.search || "" },
+    URLSearchParams,
     async fetch(url, options) {
       requests.push([url, options]);
       return fetchResponse();
     },
     navigator: { clipboard: { async writeText(value) { copies.push(value); } } },
-    localStorage: { setItem: forbidden },
-    sessionStorage: { setItem: forbidden },
+    localStorage: { setItem: forbidden, getItem: forbidden },
+    sessionStorage: {
+      getItem(key) { return session.has(key) ? session.get(key) : null; },
+      setItem(key, value) { session.set(key, String(value)); },
+    },
     console: { log: forbidden },
   }, { filename: "demo-key.js" });
   return {
     elements,
     requests,
     copies,
+    session,
     async click(id) {
       const element = elements.get(id);
       if (!element.disabled) await element.listeners.click();
@@ -88,6 +96,52 @@ test("issuance uses an empty credential-free POST and renders one key as text", 
   assert.deepEqual(page.copies, [key]);
   await page.click("get-demo-key");
   assert.equal(page.requests.length, 1);
+  assert.equal(page.session.size, 0);
+  assert.equal([...page.session.values()].some((value) => value.includes(key)), false);
+});
+
+test("issuance sends stored UTM overridden by the page URL plus referrer", async () => {
+  const key = "amw_demo_secret_value";
+  const page = makePage(async () => ({
+    status: 201,
+    async json() {
+      return { api_key: key, wallet_id: "wallet_demo_1", budget_credits: 25 };
+    },
+  }), {
+    search: "?utm_source=newsletter&utm_medium=%20&utm_term=receipts",
+    referrer: " https://news.example/item ",
+    session: {
+      amwDemoKeyUtm: JSON.stringify({
+        utm_source: "old-source",
+        utm_campaign: "launch",
+        utm_content: "  ",
+        referrer: "https://should-not-stick.example",
+      }),
+    },
+  });
+
+  const storedBeforeClick = JSON.parse(page.session.get("amwDemoKeyUtm"));
+  assert.deepEqual(storedBeforeClick, {
+    utm_source: "newsletter",
+    utm_campaign: "launch",
+    utm_term: "receipts",
+  });
+
+  await page.click("get-demo-key");
+  const [, request] = page.requests[0];
+  assert.equal(request.headers["Content-Type"], "application/json");
+  assert.deepEqual(JSON.parse(request.body), {
+    utm_source: "newsletter",
+    utm_campaign: "launch",
+    utm_term: "receipts",
+    referrer: "https://news.example/item",
+  });
+  assert.deepEqual(JSON.parse(page.session.get("amwDemoKeyUtm")), {
+    utm_source: "newsletter",
+    utm_campaign: "launch",
+    utm_term: "receipts",
+  });
+  assert.equal([...page.session.values()].some((value) => value.includes(key)), false);
 });
 
 test("issuance failures show actionable messages and allow retry", async () => {

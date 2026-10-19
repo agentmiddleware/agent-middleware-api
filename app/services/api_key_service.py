@@ -43,6 +43,29 @@ logger = logging.getLogger(__name__)
 API_KEY_LENGTH = 32
 API_KEY_PREFIX_LENGTH = 8
 
+_DEMO_ATTRIBUTION_FIELDS = (
+    "utm_source",
+    "utm_medium",
+    "utm_campaign",
+    "utm_content",
+    "utm_term",
+    "referrer",
+)
+
+
+def _demo_attribution_columns(
+    attribution: dict[str, str] | None,
+) -> dict[str, str]:
+    """Copy known attribution fields onto an api_keys row. Drops blanks."""
+    if not attribution:
+        return {}
+    columns: dict[str, str] = {}
+    for field in _DEMO_ATTRIBUTION_FIELDS:
+        value = attribution.get(field)
+        if isinstance(value, str) and value:
+            columns[field] = value
+    return columns
+
 
 class APIKeyError(Exception):
     """Base exception for API key operations."""
@@ -188,6 +211,7 @@ class APIKeyService:
         session: AsyncSession | None = None,
         allowed_tools: list[str] | None = None,
         tenant: str | None = None,
+        attribution: dict[str, str] | None = None,
     ) -> dict:
         """
         Create a new API key for a wallet.
@@ -266,6 +290,7 @@ class APIKeyService:
                 json.dumps(list(allowed_tools)) if allowed_tools is not None else None
             ),
             tenant=tenant,
+            **_demo_attribution_columns(attribution),
         )
 
         if session is not None:

@@ -8,20 +8,82 @@ const budgetCredits = document.getElementById("demo-budget-credits");
 const commands = document.getElementById("demo-commands");
 const commandTemplate = commands.textContent;
 
+const UTM_PARAMS = ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term"];
+const UTM_STORAGE_KEY = "amwDemoKeyUtm";
+
 function shellQuote(value) {
   return "'" + value.replace(/'/g, "'\"'\"'") + "'";
 }
+
+function readStoredUtm() {
+  try {
+    const raw = sessionStorage.getItem(UTM_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    const stored = {};
+    for (const key of UTM_PARAMS) {
+      const value = parsed[key];
+      if (typeof value === "string" && value.trim()) stored[key] = value.trim();
+    }
+    return stored;
+  } catch {
+    return {};
+  }
+}
+
+function utmFromLocation() {
+  const params = new URLSearchParams(location.search || "");
+  const found = {};
+  for (const key of UTM_PARAMS) {
+    const value = params.get(key);
+    if (typeof value === "string" && value.trim()) found[key] = value.trim();
+  }
+  return found;
+}
+
+function mergedUtm() {
+  // URL values override the same key already stored; absent URL params do not clear it.
+  return { ...readStoredUtm(), ...utmFromLocation() };
+}
+
+function persistUtm(utm) {
+  if (Object.keys(utm).length === 0) return;
+  try {
+    sessionStorage.setItem(UTM_STORAGE_KEY, JSON.stringify(utm));
+  } catch {
+    // Storage can be blocked; the request still sends this page's values.
+  }
+}
+
+function attributionPayload() {
+  const utm = mergedUtm();
+  persistUtm(utm);
+  const payload = { ...utm };
+  const referrer = typeof document.referrer === "string" ? document.referrer.trim() : "";
+  if (referrer) payload.referrer = referrer;
+  return payload;
+}
+
+persistUtm(mergedUtm());
 
 issueButton.addEventListener("click", async () => {
   issueButton.disabled = true;
   status.textContent = "Requesting a demo key…";
 
+  const attribution = attributionPayload();
+  const request = {
+    method: "POST",
+    credentials: "omit",
+  };
+  if (Object.keys(attribution).length > 0) {
+    request.headers = { "Content-Type": "application/json" };
+    request.body = JSON.stringify(attribution);
+  }
+
   let response;
   try {
-    response = await fetch("https://api.thisisatest.tech/v1/demo/keys", {
-      method: "POST",
-      credentials: "omit",
-    });
+    response = await fetch("https://api.thisisatest.tech/v1/demo/keys", request);
   } catch {
     status.textContent = "Could not reach the demo API. Check your connection and try again.";
     issueButton.disabled = false;

@@ -250,7 +250,7 @@ stylesheet uses an independent `?v=concept-N` token: bump it when
 The pilot calculator uses its own `?v=pilot-2` token and the default revalidating
 cache policy; bump its token when `pilot-fit.js` changes.
 
-The demo key page's script uses its own `?v=demo-key-1` token; bump it when
+The demo key page's script uses its own `?v=demo-key-2` token; bump it when
 `demo-key/demo-key.js` changes.
 
 Explicit `/proof` → `/proof/`, `/compare` → `/compare/`, and
