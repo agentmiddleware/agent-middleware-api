@@ -466,7 +466,9 @@ class TestAdminUsageEndpoint:
         assert response.status_code == 403
         # Demo tenant is disabled in test environment
         detail = response.json()["detail"]
-        assert "demo" in detail["message"].lower() or "admin" in detail["message"].lower()
+        assert (
+            "demo" in detail["message"].lower() or "admin" in detail["message"].lower()
+        )
 
     @pytest.mark.asyncio
     async def test_non_admin_key_forbidden(self, client, db_session: AsyncSession):
