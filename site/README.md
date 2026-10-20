@@ -613,7 +613,8 @@ dependency-free `package.json` gives Vercel's static builder an explicit build
 entrypoint; without it, a standalone JavaScript asset can be mistaken for the
 entrypoint and the contact gate can be skipped.
 
-The apex domain and known Vercel aliases redirect to
-`https://www.agentmiddleware.dev/`. Marketing discovery redirects target the
+The apex domains, `www.thisisatest.tech`, and known Vercel aliases redirect to
+`https://www.agentmiddleware.dev/`. `www.agentmiddleware.dev` is not a redirect
+source. Marketing discovery redirects target the
 custom API origin. The infrastructure provider hostname remains a compatibility
 origin only and must not appear on customer-facing pages.

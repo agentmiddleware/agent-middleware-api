@@ -26,7 +26,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.trust_mode import TrustModeGuardrailError, validate_trust_mode_config
 from app.db.database import get_session_factory
 from app.db.models import APIKeyModel, WalletModel
@@ -506,6 +506,33 @@ async def test_origin_check(
     )
     assert evil.status_code == 403
     assert evil.json()["detail"]["error"] == "origin_not_allowed"
+
+
+@pytest.mark.anyio
+async def test_marketing_site_origin_may_mint_demo_key(
+    client: AsyncClient, clean_database: None, demo_settings
+) -> None:
+    """The current marketing host is on the shipped browser allowlist."""
+    default_origins = Settings.model_fields["DEMO_ALLOWED_ORIGINS"].default
+    assert "https://www.thisisatest.tech" in default_origins
+    assert "https://thisisatest.tech" in default_origins
+    assert "https://www.agentmiddleware.dev" in default_origins
+    assert "https://agentmiddleware.dev" in default_origins
+    demo_settings.DEMO_ALLOWED_ORIGINS = default_origins
+
+    allowed = await client.post(
+        "/v1/demo/keys",
+        json={},
+        headers={"Origin": "https://www.agentmiddleware.dev"},
+    )
+    assert allowed.status_code == 201, allowed.text
+
+    still_allowed = await client.post(
+        "/v1/demo/keys",
+        json={},
+        headers={"Origin": "https://www.thisisatest.tech"},
+    )
+    assert still_allowed.status_code == 201, still_allowed.text
 
 
 # --- Default full permissions ----------------------------------------------

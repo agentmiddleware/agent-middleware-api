@@ -759,10 +759,12 @@ def test_dynamic_routes_and_noncanonical_hosts_redirect_correctly() -> None:
     by_host = {entry["has"][0]["value"]: entry for entry in host_redirects}
     assert set(by_host) == {
         "thisisatest.tech",
+        "www.thisisatest.tech",
         "agentmiddleware.dev",
         "agent-middleware-web.vercel.app",
         "site-tawny-seven-33.vercel.app",
     }
+    assert "www.agentmiddleware.dev" not in by_host
     for redirect in by_host.values():
         assert redirect["source"] == "/:path*"
         assert redirect["destination"] == f"{CANONICAL_MARKETING_SITE}:path*"
