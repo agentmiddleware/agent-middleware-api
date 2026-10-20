@@ -77,7 +77,7 @@ def upgrade():
                            COUNT(*) OVER () as cnt
                     FROM api_key_usage_events e2
                     WHERE e2.key_id = e1.key_id AND DATE(e2.created_at) = DATE(e1.created_at)
-                )
+                ) sub
                 WHERE rn = (cnt + 1) / 2
             ) AS p50_latency_ms,
             (
@@ -88,7 +88,7 @@ def upgrade():
                            COUNT(*) OVER () as cnt
                     FROM api_key_usage_events e2
                     WHERE e2.key_id = e1.key_id AND DATE(e2.created_at) = DATE(e1.created_at)
-                )
+                ) sub
                 WHERE rn = CAST(cnt * 0.95 AS INTEGER)
             ) AS p95_latency_ms,
             MIN(created_at) AS first_call,
