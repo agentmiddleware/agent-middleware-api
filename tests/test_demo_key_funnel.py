@@ -29,10 +29,7 @@ demo_settings = _demo_settings
 FUNNEL = "/v1/admin/demo-keys/funnel"
 
 
-async def _issue(
-    client: AsyncClient,  # noqa: F811
-    **attribution: str,
-) -> dict:
+async def _issue(client: AsyncClient, **attribution: str) -> dict:
     resp = await client.post("/v1/demo/keys", json=attribution)
     assert resp.status_code == 201, resp.text
     return resp.json()
@@ -46,10 +43,7 @@ async def _key_row(key_id: str) -> APIKeyModel:
         return result.scalar_one()
 
 
-async def _use(
-    client: AsyncClient,  # noqa: F811
-    body: dict,
-) -> None:
+async def _use(client: AsyncClient, body: dict) -> None:
     resp = await client.get("/v1/me/authority", headers=demo_headers(body))
     assert resp.status_code == 200, resp.text
 
@@ -60,10 +54,7 @@ async def _use(
 @pytest.mark.anyio
 @pytest.mark.parametrize("max_uses", [None, 10])
 async def test_first_used_at_set_once_and_never_overwritten(
-    client: AsyncClient,  # noqa: F811
-    clean_database: None,
-    demo_settings,  # noqa: F811
-    max_uses,
+    client: AsyncClient, clean_database: None, demo_settings, max_uses
 ) -> None:
     # None = unbounded key (ORM path); 10 = guarded UPDATE path.
     demo_settings.DEMO_KEY_MAX_USES = max_uses
@@ -86,9 +77,7 @@ async def test_first_used_at_set_once_and_never_overwritten(
 
 @pytest.mark.anyio
 async def test_funnel_counts_issued_vs_used_by_source(
-    client: AsyncClient,  # noqa: F811
-    clean_database: None,
-    demo_settings,  # noqa: F811
+    client: AsyncClient, clean_database: None, demo_settings
 ) -> None:
     # Five keys from one test client exceed the default per-IP cap of 3.
     demo_settings.DEMO_ISSUE_PER_IP_PER_DAY = 10
@@ -131,9 +120,7 @@ async def test_funnel_counts_issued_vs_used_by_source(
 
 @pytest.mark.anyio
 async def test_funnel_since_until_filter_on_issuance_time(
-    client: AsyncClient,  # noqa: F811
-    clean_database: None,
-    demo_settings,  # noqa: F811
+    client: AsyncClient, clean_database: None, demo_settings
 ) -> None:
     await _issue(client, utm_source="a")
     now = datetime.now(timezone.utc)
@@ -159,9 +146,7 @@ async def test_funnel_since_until_filter_on_issuance_time(
 
 @pytest.mark.anyio
 async def test_funnel_requires_bootstrap_admin(
-    client: AsyncClient,  # noqa: F811
-    clean_database: None,
-    demo_settings,  # noqa: F811
+    client: AsyncClient, clean_database: None, demo_settings
 ) -> None:
     demo = await _issue(client)
     normal = await provision_agent_wallet(client)
@@ -181,9 +166,7 @@ async def test_funnel_requires_bootstrap_admin(
 
 @pytest.mark.anyio
 async def test_funnel_works_with_kill_switch_off(
-    client: AsyncClient,  # noqa: F811
-    clean_database: None,
-    demo_settings,  # noqa: F811
+    client: AsyncClient, clean_database: None, demo_settings
 ) -> None:
     await _issue(client, utm_source="a")
     demo_settings.ENABLE_DEMO_TENANT = False
