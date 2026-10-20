@@ -394,6 +394,17 @@ class Settings(BaseSettings):
     # before hashing (e.g. "email,domain"). Nothing else is ever case-folded.
     REPLAN_CASEFOLD_FIELDS: str = ""
 
+    # Optional OpenTelemetry traces for the governed MCP path. Off by default.
+    # When false, or when the otel extra is not installed, tracing is a no-op
+    # and no exporter is configured. See docs/opentelemetry-tracing.md.
+    OTEL_TRACING_ENABLED: bool = False
+    # Standard OTLP HTTP base URL (port 4318). Empty leaves the exporter's
+    # own OTEL_EXPORTER_OTLP_ENDPOINT / OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+    # resolution in place, which is the same variable when set in the
+    # environment. Never copied onto spans.
+    OTEL_EXPORTER_OTLP_ENDPOINT: str = ""
+    OTEL_SERVICE_NAME: str = "agent-middleware-api"
+
     @field_validator("WALLET_DEDUP_WINDOW_SECONDS", "WALLET_VELOCITY_WINDOW_SECONDS")
     @classmethod
     def _validate_replan_windows(cls, value: int, info) -> int:
@@ -421,6 +432,30 @@ class Settings(BaseSettings):
                 f"and {WALLET_VELOCITY_MAX_CREDITS_CEILING}"
             )
         return value
+
+    @field_validator("OTEL_EXPORTER_OTLP_ENDPOINT")
+    @classmethod
+    def _validate_otlp_endpoint(cls, value: str) -> str:
+        endpoint = value.strip()
+        if not endpoint:
+            return ""
+        if any(ord(char) < 32 or ord(char) == 127 for char in endpoint):
+            raise ValueError("OTEL_EXPORTER_OTLP_ENDPOINT contains control characters")
+        if len(endpoint) > 512:
+            raise ValueError("OTEL_EXPORTER_OTLP_ENDPOINT is too long")
+        if not endpoint.startswith(("http://", "https://")):
+            raise ValueError("OTEL_EXPORTER_OTLP_ENDPOINT must be an http(s) URL")
+        return endpoint
+
+    @field_validator("OTEL_SERVICE_NAME")
+    @classmethod
+    def _validate_otel_service_name(cls, value: str) -> str:
+        name = value.strip()
+        if not name or len(name) > 128:
+            raise ValueError("OTEL_SERVICE_NAME must be 1 to 128 characters")
+        if any(ord(char) < 32 or ord(char) == 127 for char in name):
+            raise ValueError("OTEL_SERVICE_NAME contains control characters")
+        return name
 
     @property
     def replan_casefold_fields(self) -> frozenset[str]:

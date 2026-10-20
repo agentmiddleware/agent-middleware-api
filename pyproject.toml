@@ -18,6 +18,13 @@ chromadb = []
 rag = []
 observability = ["structlog>=24.1.0"]
 resilience = ["tenacity>=8.0.0"]
+# Optional traces. Absent from requirements.txt so production boots without
+# these packages; the app treats a missing import as tracing disabled.
+otel = [
+    "opentelemetry-api>=1.27.0,<2",
+    "opentelemetry-sdk>=1.27.0,<2",
+    "opentelemetry-exporter-otlp>=1.27.0,<2",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
