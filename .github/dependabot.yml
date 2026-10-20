@@ -6,10 +6,14 @@ version: 2
 # package. Six separate pip pull requests in one week (#783 to #788) cost
 # roughly 450 minutes of a 2,000 minute monthly allowance.
 #
-# requirements.lock is produced by `make lock` (uv), not by Dependabot. After
-# merging a grouped pip update, run `make lock` and commit the result; the
-# lint job's "Verify requirements.lock matches requirements.txt" step fails
-# until the lock satisfies the new floors.
+# requirements.lock is produced by `make lock` (uv), not by Dependabot. The
+# required lint job fails a pull request whose requirements.txt no longer
+# matches the lock, and admins cannot bypass required checks, so a grouped
+# pip update cannot merge until the lock is regenerated on its own branch:
+#   git fetch origin && git checkout <dependabot branch>
+#   make lock && git commit -am "build(deps): regenerate requirements.lock"
+#   git push
+# Dependabot keeps that commit unless the branch is rebased.
 updates:
   - package-ecosystem: "pip"
     directory: "/"
@@ -31,8 +35,11 @@ updates:
         patterns:
           - "*"
 
-  # Published packages with their own manifests. Grouped into one pull
-  # request so a wrapper floor bump and an SDK floor bump land together.
+  # Published packages with their own manifests. Grouped per directory: at
+  # most one pull request each for the SDK and the four wrappers, instead of
+  # one per package. (A group spanning directories exists only as
+  # `group-by: dependency-name`, which is one pull request per dependency,
+  # worse for this purpose.)
   - package-ecosystem: "pip"
     directories:
       - "/b2a_sdk"
