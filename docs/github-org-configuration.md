@@ -29,8 +29,8 @@ organization rows can only be read in the GitHub UI.
 
    This turns on "delete branch on merge" and the pull-request requirement on
    `main` (0 approvals, see below). Secret scanning is already on.
-3. **Clean up the 550 branches** once "delete branch on merge" is on, so they
-   stop accumulating:
+3. **Clean up the remaining branches** once "delete branch on merge" is on,
+   so they stop accumulating:
 
    ```bash
    python scripts/github_branch_cleanup.py                 # lists what is fully merged
@@ -38,13 +38,16 @@ organization rows can only be read in the GitHub UI.
    python scripts/github_branch_cleanup.py --stale-days 90 # review the rest by hand
    ```
 
-   Dry run on 2026-10-19: 550 branches; 103 fully merged into `main` (the
-   `--apply` set); 26 unmerged with no commit in 90 days (oldest from
-   2026-04-17, mostly `feat/*-pg` and `codex/*` work that never landed); 45
-   `backup/local-2026-10-07/*` kept by prefix; the remaining 375 are unmerged
-   branches from the last 90 days, nearly all agent-generated. Those need a
-   decision, not a script: either open the pull request or delete the
-   branch. The 26 stale ones are the first batch to decide on.
+   Dry run on 2026-10-19: 550 branches, 103 fully merged into `main`, 26
+   unmerged with no commit in 90 days, 45 `backup/local-2026-10-07/*` kept
+   by prefix. Dry run on 2026-10-20, after about 240 branches had been
+   deleted by hand in between: 310 branches; 4 fully merged (the `--apply`
+   set); 3 unmerged with no commit in 90 days
+   (`codex/regengine-governed-mcp-bridge`, `feat/trust-primitives`,
+   `codex/trust-readiness-gap-map`); 45 `backup/` kept; the remaining 257
+   are unmerged branches with a commit in the last 90 days, nearly all
+   agent-generated. Those need a decision, not a script: either open the
+   pull request or delete the branch.
 
 4. **Work through the [organization settings](#organization-settings)
    table.** None of it can be scripted from a repository-scoped token.
@@ -70,7 +73,7 @@ organization rows can only be read in the GitHub UI.
 | `main` force push / deletion | Both blocked | Keep | Already correct |
 | `main` conversation resolution | Required | Keep | Already correct |
 | `main` requires a pull request | **Off** | On, 0 approvals, code-owner review off | `github_repo_settings.py --apply` |
-| Delete branch on merge | **Off** (why 500+ branches exist) | On | `github_repo_settings.py --apply` |
+| Delete branch on merge | **Off** (why 550 branches had accumulated by 2026-10-19) | On | `github_repo_settings.py --apply` |
 | Auto-merge, update branch | On | Keep | Already correct |
 | Web commit sign-off (DCO) | On | Keep | Already correct |
 | Secret scanning, push protection | Disabled while private; **enabled** (with validity checks and non-provider patterns) the moment the repository went public on 2026-10-20 | Keep | Already correct; see [Secret scanning](#secret-scanning) |
