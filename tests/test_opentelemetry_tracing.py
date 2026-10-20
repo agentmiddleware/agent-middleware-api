@@ -189,6 +189,161 @@ assert tracing_enabled() is False
     assert completed.returncode == 0, completed.stderr
 
 
+def test_broken_otel_import_type_error_fail_open() -> None:
+    """A protobuf-style TypeError during import must not abort startup."""
+    code = """
+import builtins
+import logging
+from fastapi import FastAPI
+
+real = builtins.__import__
+
+def broken(name, globals=None, locals=None, fromlist=(), level=0):
+    if name == "opentelemetry" or name.startswith("opentelemetry."):
+        raise TypeError("Descriptors cannot be created directly")
+    return real(name, globals, locals, fromlist, level)
+
+builtins.__import__ = broken
+logging.basicConfig()
+from app.core.tracing import (
+    install_tracing,
+    otel_packages_available,
+    start_span,
+    tracing_enabled,
+)
+
+assert otel_packages_available() is False
+assert tracing_enabled() is False
+app = FastAPI()
+before = list(app.user_middleware)
+install_tracing(app)
+assert app.user_middleware == before
+
+import asyncio
+
+runs = {"n": 0}
+
+async def exercise():
+    async with start_span("mcp.invoke", tool_name="partner.notes.write"):
+        runs["n"] += 1
+        return "ok"
+
+assert asyncio.run(exercise()) == "ok"
+assert runs["n"] == 1
+"""
+    env = os.environ.copy()
+    env["OTEL_TRACING_ENABLED"] = "true"
+    env["PYTHONPATH"] = str(REPO_ROOT)
+    completed = subprocess.run(
+        [sys.executable, "-c", code],
+        check=False,
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
+def test_install_tracing_warns_when_packages_unavailable(
+    monkeypatch, caplog
+) -> None:
+    monkeypatch.setenv("OTEL_TRACING_ENABLED", "true")
+    get_settings.cache_clear()
+    monkeypatch.setattr(
+        tracing_module, "otel_packages_available", lambda: False
+    )
+    app = FastAPI()
+    before = list(app.user_middleware)
+    with caplog.at_level(logging.WARNING, logger="app.core.tracing"):
+        install_tracing(app)
+    assert app.user_middleware == before
+    assert any(
+        record.msg == "otel_tracing_install_failed" for record in caplog.records
+    )
+    get_settings.cache_clear()
+
+
+def test_install_tracing_fail_open_when_enabled_check_raises(
+    monkeypatch, caplog
+) -> None:
+    monkeypatch.setenv("OTEL_TRACING_ENABLED", "true")
+    get_settings.cache_clear()
+
+    def boom() -> bool:
+        raise TypeError("broken otel import")
+
+    monkeypatch.setattr(tracing_module, "otel_packages_available", boom)
+    app = FastAPI()
+    before = list(app.user_middleware)
+    with caplog.at_level(logging.WARNING, logger="app.core.tracing"):
+        install_tracing(app)
+    assert app.user_middleware == before
+    assert any(
+        record.msg == "otel_tracing_install_failed" for record in caplog.records
+    )
+    get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_start_span_runs_body_once_when_enabled_check_raises(
+    monkeypatch, caplog
+) -> None:
+    monkeypatch.setenv("OTEL_TRACING_ENABLED", "true")
+    get_settings.cache_clear()
+
+    def boom() -> bool:
+        raise TypeError("broken otel import")
+
+    monkeypatch.setattr(tracing_module, "tracing_enabled", boom)
+    body_runs = {"n": 0}
+    with caplog.at_level(logging.WARNING, logger="app.core.tracing"):
+        async with start_span("mcp.invoke", tool_name="partner.notes.write"):
+            body_runs["n"] += 1
+    assert body_runs["n"] == 1
+    assert any(
+        record.msg == "otel_tracing_unavailable" for record in caplog.records
+    )
+    get_settings.cache_clear()
+
+
+def test_fail_open_span_enter_exit_preserve_body_result(caplog) -> None:
+    """Processor-style enter/exit failures must not alter the governed result."""
+    tracing_module._tracing_failure_logged = False
+    caplog.set_level(logging.DEBUG, logger="app.core.tracing")
+
+    class BoomCM:
+        def __enter__(self):
+            raise RuntimeError("otel-enter")
+
+        def __exit__(self, exc_type, exc, tb):
+            raise RuntimeError("otel-exit")
+
+    body_runs = {"n": 0}
+    with tracing_module._FailOpenSpan(BoomCM) as span:
+        body_runs["n"] += 1
+        assert span is tracing_module._NOOP
+        result = "governed-ok"
+    assert body_runs["n"] == 1
+    assert result == "governed-ok"
+
+    class EnterOkExitBoom:
+        def __enter__(self):
+            return SimpleNamespace(set_attribute=lambda *a, **k: None)
+
+        def __exit__(self, exc_type, exc, tb):
+            raise RuntimeError("otel-exit")
+
+    with pytest.raises(_BodyError, match="^governed-body$") as raised:
+        with tracing_module._FailOpenSpan(EnterOkExitBoom):
+            body_runs["n"] += 1
+            raise _BodyError("governed-body")
+    assert body_runs["n"] == 2
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
+    assert len(_tracing_failure_logs(caplog)) == 1
+
+
 def test_otlp_endpoint_appends_traces_path() -> None:
     assert otlp_traces_endpoint("") is None
     assert (

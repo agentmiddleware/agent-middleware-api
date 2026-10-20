@@ -78,21 +78,29 @@ _NOOP = _NoopSpan()
 
 
 def otel_packages_available() -> bool:
-    """True only when api, sdk, and the OTLP exporter all import."""
+    """True only when api, sdk, and the OTLP exporter all import.
+
+    A broken install can raise more than ``ImportError`` (for example a
+    ``TypeError`` from protobuf descriptors). Any failure means tracing is
+    unavailable, not that the process should abort.
+    """
     try:
         import opentelemetry.exporter.otlp.proto.http.trace_exporter  # noqa: F401
         import opentelemetry.sdk.trace  # noqa: F401
         import opentelemetry.trace  # noqa: F401
-    except ImportError:
+    except Exception:
         return False
     return True
 
 
 def tracing_enabled() -> bool:
     """Enabled only when the operator opted in and the packages import."""
-    if not get_settings().OTEL_TRACING_ENABLED:
+    try:
+        if not get_settings().OTEL_TRACING_ENABLED:
+            return False
+        return otel_packages_available()
+    except Exception:
         return False
-    return otel_packages_available()
 
 
 def _safe_token(value: Any) -> str | None:
@@ -249,7 +257,12 @@ async def start_span(
     processor failure while starting, entering, ending, or writing the span
     yields a no-op instead of failing the governed call. The body runs once.
     """
-    if name not in _SPAN_NAMES or not tracing_enabled():
+    try:
+        active = name in _SPAN_NAMES and tracing_enabled()
+    except Exception:
+        logger.warning("otel_tracing_unavailable")
+        active = False
+    if not active:
         yield _NOOP
         return
 
@@ -286,7 +299,6 @@ async def start_span(
                     _PROPAGATE.reset(propagate)
                 except Exception:
                     _log_tracing_failure_once()
-
 
 def traced_span(
     name: str, **field_map: str
@@ -349,7 +361,12 @@ class TracingMiddleware:
         receive: Callable[[], Awaitable[dict[str, Any]]],
         send: Callable[[dict[str, Any]], Awaitable[None]],
     ) -> None:
-        if scope.get("type") != "http" or not tracing_enabled():
+        try:
+            active = scope.get("type") == "http" and tracing_enabled()
+        except Exception:
+            logger.warning("otel_tracing_unavailable")
+            active = False
+        if not active:
             await self.app(scope, receive, send)
             return
 
@@ -371,12 +388,17 @@ def install_tracing(app: Any) -> None:
     """Attach the HTTP span middleware when tracing is on and packages import.
 
     Disabled tracing does not add middleware and does not configure a provider.
+    A broken OpenTelemetry install leaves tracing off and logs a warning
+    instead of aborting startup.
     """
-    if not tracing_enabled():
-        return
     try:
+        if not get_settings().OTEL_TRACING_ENABLED:
+            return
+        if not otel_packages_available():
+            logger.warning("otel_tracing_install_failed")
+            return
         _ensure_configured()
+        app.add_middleware(TracingMiddleware)
     except Exception:
-        _log_tracing_failure_once()
+        logger.warning("otel_tracing_install_failed")
         return
-    app.add_middleware(TracingMiddleware)
