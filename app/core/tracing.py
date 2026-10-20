@@ -148,15 +148,17 @@ def otlp_traces_endpoint(configured: str) -> str | None:
     """HTTP OTLP traces URL from ``OTEL_EXPORTER_OTLP_ENDPOINT``.
 
     The standard variable is a base URL (``http://host:4318``). The HTTP
-    exporter sends traces to ``{base}/v1/traces``. A value that already ends
-    in that path is kept. Empty means "let the exporter read the environment".
+    exporter sends traces to ``{base}/v1/traces``. Trailing slashes are
+    stripped first, so a value that already ends in that path is kept
+    whether or not it has a trailing slash. Empty means "let the exporter
+    read the environment".
     """
-    endpoint = configured.strip()
+    endpoint = configured.strip().rstrip("/")
     if not endpoint:
         return None
     if endpoint.endswith("/v1/traces"):
         return endpoint
-    return endpoint.rstrip("/") + "/v1/traces"
+    return endpoint + "/v1/traces"
 
 
 def _install_otlp_provider() -> None:
