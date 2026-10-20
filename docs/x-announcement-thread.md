@@ -25,14 +25,14 @@ The next outbound message is not a launch thread. It is a personalized request
 to a qualified platform engineering, AI infrastructure, or security operator to
 bring one real internal MCP tool to a scoped design-partner pilot. Use the
 verified booking and monitored email contacts on
-`https://www.thisisatest.tech/`; do not publish until both flows work.
+`https://www.agentmiddleware.dev/`; do not publish until both flows work.
 
 Canonical links:
 
-- Marketing: `https://www.thisisatest.tech/`
+- Marketing: `https://www.agentmiddleware.dev/`
 - API discovery: `https://api.thisisatest.tech/.well-known/agent.json`
 - MCP tools: `https://api.thisisatest.tech/mcp/tools.json`
-- Proof: `https://www.thisisatest.tech/proof/`
+- Proof: `https://www.agentmiddleware.dev/proof/`
 
 The proof must be labeled “self-issued live gateway proof, not customer
 traction.” Pricing remains private during fit qualification.
