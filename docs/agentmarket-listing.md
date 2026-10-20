@@ -55,7 +55,7 @@ IAM replacement, or broad agent-framework governance.
 | Product | Replay-safe gateway debit + dispatch evidence + signed receipts |
 | Mechanism | Permit → governed invoke → wallet charge → receipt → audit |
 | Pricing | Controlled design-partner pilot; no public tier or SLA committed |
-| Repo | https://github.com/PetrefiedThunder/agent-middleware-api |
+| Repo | https://github.com/agentmiddleware/agent-middleware-api |
 
 ---
 

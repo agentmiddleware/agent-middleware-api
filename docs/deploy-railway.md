@@ -578,7 +578,7 @@ git merge-base --is-ancestor "$DEPLOY_SHA" origin/main
 
 # Exact-SHA CI is a hard gate. Do not substitute a green PR-head run.
 ci_conclusion="$(gh api \
-  "repos/PetrefiedThunder/agent-middleware-api/actions/workflows/ci.yml/runs?head_sha=$DEPLOY_SHA&status=completed" \
+  "repos/agentmiddleware/agent-middleware-api/actions/workflows/ci.yml/runs?head_sha=$DEPLOY_SHA&status=completed" \
   --jq '[.workflow_runs[] | select(.event == "push" and .conclusion != null)][0].conclusion // "none"')"
 test "$ci_conclusion" = "success"
 

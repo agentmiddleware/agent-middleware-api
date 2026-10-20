@@ -1,6 +1,6 @@
 # Agent Middleware API
 
-[![CI](https://github.com/PetrefiedThunder/agent-middleware-api/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/PetrefiedThunder/agent-middleware-api/actions/workflows/ci.yml)
+[![CI](https://github.com/agentmiddleware/agent-middleware-api/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/agentmiddleware/agent-middleware-api/actions/workflows/ci.yml)
 ![Version](https://img.shields.io/badge/version-v1.3.0--unreleased-lightgrey)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License](https://img.shields.io/badge/license-BUSL--1.1%20core%20%2F%20MIT%20SDKs-blue)
@@ -92,7 +92,7 @@ Per-release detail: [CHANGELOG.md](CHANGELOG.md).
 Prerequisites: Python 3.11+, [`uv`](https://docs.astral.sh/uv/), and `make`.
 
 ```bash
-git clone https://github.com/PetrefiedThunder/agent-middleware-api.git
+git clone https://github.com/agentmiddleware/agent-middleware-api.git
 cd agent-middleware-api
 make demo-ambiguous-retry
 ```
