@@ -174,10 +174,10 @@ async def get_auth_context(
     acceptance = CREDENTIAL_ACCEPTANCE.get()
     if acceptance is not None:
         acceptance.accepted = True
-    
+
     # Store auth context for usage tracking middleware
     CURRENT_AUTH_CONTEXT.set(context)
-    
+
     return context
 
 

@@ -111,9 +111,7 @@ class TestAPIKeyUsageEventModel:
 
         # Verify it was stored
         result = await db_session.execute(
-            select(APIKeyUsageEventModel).where(
-                APIKeyUsageEventModel.id == event_id
-            )
+            select(APIKeyUsageEventModel).where(APIKeyUsageEventModel.id == event_id)
         )
         stored = result.scalar_one()
 
@@ -195,9 +193,7 @@ class TestRecordAPIKeyUsageEvent:
 
         # Verify the event was stored
         result = await db_session.execute(
-            select(APIKeyUsageEventModel).where(
-                APIKeyUsageEventModel.key_id == key_id
-            )
+            select(APIKeyUsageEventModel).where(APIKeyUsageEventModel.key_id == key_id)
         )
         event = result.scalar_one()
 
@@ -234,9 +230,7 @@ class TestRecordAPIKeyUsageEvent:
 
         # Verify all three were stored
         result = await db_session.execute(
-            select(APIKeyUsageEventModel).where(
-                APIKeyUsageEventModel.key_id == key_id
-            )
+            select(APIKeyUsageEventModel).where(APIKeyUsageEventModel.key_id == key_id)
         )
         events = result.scalars().all()
         assert len(events) == 3
@@ -359,9 +353,7 @@ class TestAPIKeyUsageDailyView:
         assert row[2] == 2  # 5xx count (500, 503)
 
     @pytest.mark.asyncio
-    async def test_view_calculates_latency_percentiles(
-        self, db_session: AsyncSession
-    ):
+    async def test_view_calculates_latency_percentiles(self, db_session: AsyncSession):
         """Test the view calculates p50 and p95 latency correctly."""
         wallet_data = await create_test_wallet_and_key()
         key_id = wallet_data["key_id"]

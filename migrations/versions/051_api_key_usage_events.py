@@ -70,7 +70,7 @@ def upgrade():
         GROUP BY key_id, DATE(created_at)
         """
         if op.get_bind().dialect.name == "postgresql"
-        else         """
+        else """
         CREATE VIEW api_key_usage_daily AS
         SELECT
             key_id,
@@ -115,5 +115,7 @@ def upgrade():
 
 def downgrade():
     op.execute("DROP VIEW IF EXISTS api_key_usage_daily")
-    op.drop_index("ix_api_key_usage_events_key_id_created_at", table_name="api_key_usage_events")
+    op.drop_index(
+        "ix_api_key_usage_events_key_id_created_at", table_name="api_key_usage_events"
+    )
     op.drop_table("api_key_usage_events")

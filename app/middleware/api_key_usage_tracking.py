@@ -36,7 +36,7 @@ class APIKeyUsageTrackingMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         start_time = time.time()
-        
+
         # Store start time in request state so we can track it after auth
         request.state.usage_tracking_start = start_time
 
