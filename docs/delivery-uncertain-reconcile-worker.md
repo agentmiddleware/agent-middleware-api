@@ -28,6 +28,7 @@ These are code facts, not new behaviour:
 | The permit reservation stays consumed (`delivery_uncertain` counts as spent) | `PermitService._sum_permit_charges` (`app/services/permits.py`) |
 | Same-key replay returns the same receipt and never redispatches | `tests/test_delivery_uncertain_replay.py` |
 | A periodic `mcp_dispatch_operator_alert` log fires while any `delivery_uncertain` rows exist | `periodic_cleanup` (`app/main.py`) |
+| Age-bucketed `stuck_work_alert` (and the expired-lease alert) run from that same loop even when this worker is off | `run_stuck_work_sweep` (`app/services/stuck_work_sweep.py`); [stuck-work-sweep.md](stuck-work-sweep.md) |
 
 The gap was the "checked against the provider" half: nothing ever asked the
 upstream, and the receipt did not carry the handles a provider lookup needs.
