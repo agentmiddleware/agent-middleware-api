@@ -10,16 +10,16 @@
     />
     <meta name="robots" content="index, follow" />
     <meta name="theme-color" content="#0b1020" />
-    <link rel="canonical" href="https://www.thisisatest.tech/proof/" />
+    <link rel="canonical" href="https://www.agentmiddleware.dev/proof/" />
     <link
       rel="alternate"
       hreflang="en"
-      href="https://www.thisisatest.tech/proof/"
+      href="https://www.agentmiddleware.dev/proof/"
     />
     <link
       rel="alternate"
       hreflang="x-default"
-      href="https://www.thisisatest.tech/proof/"
+      href="https://www.agentmiddleware.dev/proof/"
     />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link
@@ -48,10 +48,10 @@
       property="og:description"
       content="Download the receipt and public-key snapshot, then verify the signature offline."
     />
-    <meta property="og:url" content="https://www.thisisatest.tech/proof/" />
+    <meta property="og:url" content="https://www.agentmiddleware.dev/proof/" />
     <meta
       property="og:image"
-      content="https://www.thisisatest.tech/social-card.png"
+      content="https://www.agentmiddleware.dev/social-card.png"
     />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
@@ -67,7 +67,7 @@
     />
     <meta
       name="twitter:image"
-      content="https://www.thisisatest.tech/social-card.png"
+      content="https://www.agentmiddleware.dev/social-card.png"
     />
     <script type="application/ld+json">
       {
@@ -75,40 +75,40 @@
         "@graph": [
           {
             "@type": "WebPage",
-            "@id": "https://www.thisisatest.tech/proof/#webpage",
+            "@id": "https://www.agentmiddleware.dev/proof/#webpage",
             "name": "Verify an agent-action receipt yourself",
-            "url": "https://www.thisisatest.tech/proof/",
+            "url": "https://www.agentmiddleware.dev/proof/",
             "description": "Download a portable Agent Middleware API receipt and verify its Ed25519 signature offline.",
             "inLanguage": "en",
-            "isPartOf": { "@id": "https://www.thisisatest.tech/#website" },
-            "about": { "@id": "https://www.thisisatest.tech/#software" },
-            "primaryImageOfPage": { "@id": "https://www.thisisatest.tech/#logo" },
+            "isPartOf": { "@id": "https://www.agentmiddleware.dev/#website" },
+            "about": { "@id": "https://www.agentmiddleware.dev/#software" },
+            "primaryImageOfPage": { "@id": "https://www.agentmiddleware.dev/#logo" },
             "breadcrumb": {
-              "@id": "https://www.thisisatest.tech/proof/#breadcrumb"
+              "@id": "https://www.agentmiddleware.dev/proof/#breadcrumb"
             },
-            "mainEntity": { "@id": "https://www.thisisatest.tech/proof/#howto" }
+            "mainEntity": { "@id": "https://www.agentmiddleware.dev/proof/#howto" }
           },
           {
             "@type": "BreadcrumbList",
-            "@id": "https://www.thisisatest.tech/proof/#breadcrumb",
+            "@id": "https://www.agentmiddleware.dev/proof/#breadcrumb",
             "itemListElement": [
               {
                 "@type": "ListItem",
                 "position": 1,
                 "name": "Agent Middleware API",
-                "item": "https://www.thisisatest.tech/"
+                "item": "https://www.agentmiddleware.dev/"
               },
               {
                 "@type": "ListItem",
                 "position": 2,
                 "name": "Verify this receipt",
-                "item": "https://www.thisisatest.tech/proof/"
+                "item": "https://www.agentmiddleware.dev/proof/"
               }
             ]
           },
           {
             "@type": "HowTo",
-            "@id": "https://www.thisisatest.tech/proof/#howto",
+            "@id": "https://www.agentmiddleware.dev/proof/#howto",
             "name": "Verify an agent-action receipt offline",
             "description": "Check an Ed25519-signed Agent Middleware API receipt against a published key snapshot with networking disabled. Exit 0 means verified, 1 means the signature is invalid, and 2 means the verifier cannot determine.",
             "inLanguage": "en",
@@ -121,17 +121,17 @@
               {
                 "@type": "HowToSupply",
                 "name": "receipt.json",
-                "url": "https://www.thisisatest.tech/proof/receipt.json"
+                "url": "https://www.agentmiddleware.dev/proof/receipt.json"
               },
               {
                 "@type": "HowToSupply",
                 "name": "trust-keys.json",
-                "url": "https://www.thisisatest.tech/proof/trust-keys.json"
+                "url": "https://www.agentmiddleware.dev/proof/trust-keys.json"
               },
               {
                 "@type": "HowToSupply",
                 "name": "verify_receipt.py",
-                "url": "https://www.thisisatest.tech/proof/verify_receipt.py"
+                "url": "https://www.agentmiddleware.dev/proof/verify_receipt.py"
               }
             ],
             "step": [
@@ -140,21 +140,21 @@
                 "position": 1,
                 "name": "Download the signed bundle and the key snapshot",
                 "text": "Save receipt.json, trust-keys.json, and verify_receipt.py from this page with curl. All three stay downloadable by anyone, with no account and no key.",
-                "url": "https://www.thisisatest.tech/proof/#artifact-title"
+                "url": "https://www.agentmiddleware.dev/proof/#artifact-title"
               },
               {
                 "@type": "HowToStep",
                 "position": 2,
                 "name": "Install the verifier dependency",
                 "text": "Install only the cryptography package with pip. The verifier itself is the standalone script downloaded in step 1.",
-                "url": "https://www.thisisatest.tech/proof/#verify-title"
+                "url": "https://www.agentmiddleware.dev/proof/#verify-title"
               },
               {
                 "@type": "HowToStep",
                 "position": 3,
                 "name": "Verify the signed bytes with networking disabled",
                 "text": "Run python3 verify_receipt.py with the bundle, the key snapshot, and the expected issuer. Exit 0 proves the receipt matches the supplied key snapshot; it does not independently authenticate who supplied that snapshot, so pin the key through a trusted channel first.",
-                "url": "https://www.thisisatest.tech/proof/#verify-title"
+                "url": "https://www.agentmiddleware.dev/proof/#verify-title"
               }
             ]
           }
@@ -272,9 +272,9 @@
             <code>--expect-issuer</code> checks the claimed origin as an
             additional consistency guard.
           </p>
-          <pre tabindex="0"><code>curl -fsSLO https://www.thisisatest.tech/proof/receipt.json
-curl -fsSLO https://www.thisisatest.tech/proof/trust-keys.json
-curl -fsSLO https://www.thisisatest.tech/proof/verify_receipt.py
+          <pre tabindex="0"><code>curl -fsSLO https://www.agentmiddleware.dev/proof/receipt.json
+curl -fsSLO https://www.agentmiddleware.dev/proof/trust-keys.json
+curl -fsSLO https://www.agentmiddleware.dev/proof/verify_receipt.py
 python3 -m pip install cryptography
 python3 verify_receipt.py \
   --bundle receipt.json \

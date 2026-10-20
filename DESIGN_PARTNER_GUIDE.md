@@ -42,7 +42,7 @@ make demo-trust-plane
 ### API key bootstrap (gated)
 
 Free sandbox demo keys are available at
-[the demo page](https://www.thisisatest.tech/demo-key/) with no account.
+[the demo page](https://www.agentmiddleware.dev/demo-key/) with no account.
 Production keys are issued to design partners. Production agent calls return
 `401` until an operator provisions a wallet-scoped key.
 
