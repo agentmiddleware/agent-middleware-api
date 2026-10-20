@@ -42,7 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   honored. See [`docs/opentelemetry-tracing.md`](docs/opentelemetry-tracing.md).
 - A tracer, provider, or span-processor exception during span start, enter,
   exit, attribute write, end, or `traceparent` injection is logged once at
-  debug and ignored. The governed call still runs once, and an exception
+  debug and ignored. A broken OpenTelemetry install (including non-`ImportError`
+  failures while importing) leaves tracing off with a warning instead of
+  aborting startup or skipping a governed body. The governed call still runs
+  once, and an exception
   raised by that call propagates unchanged. Tracing cannot mark a call that
   was not sent as `delivery_uncertain`.
 
