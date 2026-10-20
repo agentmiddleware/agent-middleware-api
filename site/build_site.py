@@ -267,6 +267,8 @@ def validated_contacts(
             "api.thisisatest.tech",
             "thisisatest.tech",
             "www.thisisatest.tech",
+            "agentmiddleware.dev",
+            "www.agentmiddleware.dev",
         }
         if booking.hostname.casefold() in blocked_booking_hosts:
             raise LaunchConfigurationError(
