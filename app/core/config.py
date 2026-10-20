@@ -347,6 +347,36 @@ class Settings(BaseSettings):
     # answer never refunds.
     UPSTREAM_RECONCILE_REFUND_ON_ATTESTED_NOT_EXECUTED: bool = False
 
+    # Stuck-work sweep inside periodic_cleanup. Independent of
+    # UPSTREAM_RECONCILE_WORKER_ENABLED. Logs aged delivery_uncertain rows,
+    # aged idempotency records that still need review, and reconcile leases
+    # past the grace window. It does not null lease columns: claim already
+    # treats an expired lease as free. It never changes delivery_uncertain
+    # state, money, or budget. See docs/stuck-work-sweep.md.
+    STUCK_WORK_SWEEP_ENABLED: bool = True
+    STUCK_WORK_UNCERTAIN_ALERT_AGE_SECONDS: int = 3600
+    STUCK_WORK_LEASE_GRACE_SECONDS: int = 300
+    # Gates the expired-lease alert only. Does not clear lease columns.
+    STUCK_WORK_LEASE_REAPER_ENABLED: bool = True
+
+    @field_validator("STUCK_WORK_UNCERTAIN_ALERT_AGE_SECONDS")
+    @classmethod
+    def _validate_stuck_work_age(cls, value: int) -> int:
+        if not 1 <= value <= 30 * 86400:
+            raise ValueError(
+                "STUCK_WORK_UNCERTAIN_ALERT_AGE_SECONDS must be between 1 and 2592000"
+            )
+        return value
+
+    @field_validator("STUCK_WORK_LEASE_GRACE_SECONDS")
+    @classmethod
+    def _validate_stuck_work_grace(cls, value: int) -> int:
+        if not 0 <= value <= 86400:
+            raise ValueError(
+                "STUCK_WORK_LEASE_GRACE_SECONDS must be between 0 and 86400"
+            )
+        return value
+
     # Cross-key duplicate detection for upstream tools. Modes:
     # - "off": disabled (new-key retries with identical request hashes are allowed)
     # - "log": detect and log duplicates but allow them (observe mode, default)
