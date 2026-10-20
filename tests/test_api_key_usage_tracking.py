@@ -41,7 +41,7 @@ async def db_session():
 
 async def create_test_wallet_and_key(tenant=None):
     """Helper to create a test wallet and API key."""
-    from app.services.billing import get_agent_money
+    from app.core.dependencies import get_agent_money
     from app.services.api_key_service import get_api_key_service
 
     billing = get_agent_money()
@@ -504,16 +504,27 @@ class TestMigration051:
     @pytest.mark.asyncio
     async def test_migration_creates_table(self, db_session: AsyncSession):
         """Test the migration creates the api_key_usage_events table."""
-        # Check table exists
-        result = await db_session.execute(
-            text(
-                """
-                SELECT table_name
-                FROM information_schema.tables
-                WHERE table_name = 'api_key_usage_events'
-                """
+        # Check table exists (works for PostgreSQL and SQLite differently)
+        if db_session.bind.dialect.name == "postgresql":
+            result = await db_session.execute(
+                text(
+                    """
+                    SELECT table_name
+                    FROM information_schema.tables
+                    WHERE table_name = 'api_key_usage_events'
+                    """
+                )
             )
-        )
+        else:
+            result = await db_session.execute(
+                text(
+                    """
+                    SELECT name
+                    FROM sqlite_master
+                    WHERE type = 'table' AND name = 'api_key_usage_events'
+                    """
+                )
+            )
         table = result.scalar_one_or_none()
         assert table == "api_key_usage_events"
 

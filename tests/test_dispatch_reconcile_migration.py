@@ -31,9 +31,9 @@ def test_model_and_boot_check_cover_reconcile_columns():
 
 def test_049_is_the_parent_of_the_single_head():
     script = ScriptDirectory.from_config(Config("alembic.ini"))
-    assert script.get_heads() == ["050_demo_key_first_used"]
-    assert script.get_revision("050_demo_key_first_used").down_revision == (
-        "049_demo_key_attribution"
+    assert script.get_heads() == ["051_api_key_usage_events"]
+    assert script.get_revision("051_api_key_usage_events").down_revision == (
+        "050_demo_key_first_used"
     )
 
 
