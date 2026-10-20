@@ -27,6 +27,23 @@ service in the **staging** environment only.
   returns at most 1000 rows; `count` is the true total, `returned` is the row
   count, and `truncated` says whether rows were cut. All `/__stress/*` routes
   require the `X-MCP-Refund-Control` header.
+- `POST /status` is the delivery-uncertain status probe. It uses the same
+  bearer as `/mcp` (`MCP_REFUND_PARTNER_BEARER_TOKEN`). Body
+  `{"tool","invocation_id","idempotency_key"}`. An effect row for that
+  invocation id and key answers `200 {"status":"executed", ...echoed ids}`,
+  including while `hang` is still holding the response after the effect
+  committed. A decision row written before any effect, and still open,
+  answers `{"status":"pending"}` (the gateway treats that as unknown). That
+  same row, completed with no effect row, answers
+  `{"status":"not_executed"}`. No row at all answers `{"status":"unknown"}`.
+  A missing record is not `not_executed`: an erased database cannot prove
+  the invocation was observed and finished without an effect.
+
+## Reconcile pilot
+
+Staging steps for the delivery-uncertain reconcile worker, which calls this
+fixture's `POST /status`:
+[reconcile-staging-pilot.md](reconcile-staging-pilot.md).
 
 ## Deploy (staging only)
 
@@ -40,22 +57,27 @@ railway link            # project agent-middleware-api, environment staging
 railway add --service partner-refund-staging
 railway domain --service partner-refund-staging   # note the hostname
 
+railway volume add --service partner-refund-staging --environment staging \
+  --mount-path /data
+
 BEARER="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
 CONTROL="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
 railway variables --service partner-refund-staging --environment staging \
   --set "MCP_REFUND_PARTNER_ALLOWED_HOST=<hostname from the domain step>" \
   --set "MCP_REFUND_PARTNER_BEARER_TOKEN=$BEARER" \
   --set "MCP_REFUND_PARTNER_CONTROL_TOKEN=$CONTROL" \
-  --set "MCP_REFUND_PARTNER_DB_PATH=/tmp/refund-partner.sqlite3"
+  --set "MCP_REFUND_PARTNER_DB_PATH=/data/refund-partner.sqlite3"
 
 railway up --service partner-refund-staging --environment staging
 ```
 
 Notes:
 
-- `MCP_REFUND_PARTNER_DB_PATH` is on ephemeral disk, so effect counts reset on
-  every redeploy or restart. Attach a volume and point the path at it if counts
-  must survive restarts.
+- `MCP_REFUND_PARTNER_DB_PATH` must be a file on the Railway volume mounted at
+  `/data`. The pilot requires that volume. `/tmp` is erased when the service
+  restarts or redeploys. Effect rows and the pre-effect decision rows then
+  disappear together, and `POST /status` answers `unknown` for invocations
+  this database can no longer prove. Do not point the path at ephemeral disk.
 - Keep `$BEARER` and `$CONTROL` out of commits and chat. Give the control token
   to the reviewer by a private channel.
 
