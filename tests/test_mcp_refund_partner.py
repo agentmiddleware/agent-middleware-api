@@ -160,3 +160,72 @@ def test_control_endpoints_require_the_control_token_and_switch_mode(
         "assert effects['count'] == 1\n"
         "assert client.get('/mcp').status_code == 401\n",
     )
+
+
+def test_status_probe_reports_executed_not_executed_and_denies_auth(
+    tmp_path: Path,
+) -> None:
+    _run(
+        tmp_path,
+        "from starlette.testclient import TestClient\n"
+        "from tests.support import mcp_refund_partner_app as p\n"
+        "client = TestClient(p.app)\n"
+        "body = {'tool': p.REFUND_TOOL_NAME, 'invocation_id': 'inv-1',\n"
+        "    'idempotency_key': 'key-1'}\n"
+        "denied = client.post('/status', json=body)\n"
+        "assert denied.status_code == 401\n"
+        "wrong = client.post('/status', json=body,\n"
+        "    headers={'Authorization': 'Bearer wrong-token'})\n"
+        "assert wrong.status_code == 401\n"
+        "control = client.post('/status', json=body,\n"
+        "    headers={p.CONTROL_HEADER: 'refund-control'})\n"
+        "assert control.status_code == 401\n"
+        "headers = {'Authorization': 'Bearer refund-bearer'}\n"
+        "missing = client.post('/status', headers=headers, json={\n"
+        "    'tool': p.REFUND_TOOL_NAME, 'invocation_id': 'never',\n"
+        "    'idempotency_key': 'never'}).json()\n"
+        "assert missing == {'status': 'not_executed', 'tool': p.REFUND_TOOL_NAME,\n"
+        "    'invocation_id': 'never', 'idempotency_key': 'never'}\n"
+        "p._apply_refund(refund_ref='r1', amount_cents=500,\n"
+        "    invocation_id='inv-1', idempotency_key='key-1',\n"
+        "    honor_idempotency=False)\n"
+        "executed = client.post('/status', headers=headers, json=body).json()\n"
+        "assert executed == {'status': 'executed', 'tool': p.REFUND_TOOL_NAME,\n"
+        "    'invocation_id': 'inv-1', 'idempotency_key': 'key-1'}\n"
+        "other_key = client.post('/status', headers=headers, json={\n"
+        "    'tool': p.REFUND_TOOL_NAME, 'invocation_id': 'inv-1',\n"
+        "    'idempotency_key': 'other'}).json()\n"
+        "assert other_key['status'] == 'not_executed'\n"
+        "p._open_decision('inv-open', 'key-open')\n"
+        "pending = client.post('/status', headers=headers, json={\n"
+        "    'tool': p.REFUND_TOOL_NAME, 'invocation_id': 'inv-open',\n"
+        "    'idempotency_key': 'key-open'}).json()\n"
+        "assert pending['status'] == 'pending'\n"
+        "p._apply_refund(refund_ref='r-hang', amount_cents=100,\n"
+        "    invocation_id='inv-hang', idempotency_key='key-hang',\n"
+        "    honor_idempotency=False)\n"
+        "p._open_decision('inv-hang', 'key-hang')\n"
+        "hanging = client.post('/status', headers=headers, json={\n"
+        "    'tool': p.REFUND_TOOL_NAME, 'invocation_id': 'inv-hang',\n"
+        "    'idempotency_key': 'key-hang'}).json()\n"
+        "assert hanging['status'] == 'executed'\n",
+    )
+
+
+def test_refund_partner_fixture_stays_out_of_the_production_image() -> None:
+    ignored = [
+        line.strip()
+        for line in (REPO_ROOT / ".dockerignore")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    assert "tests" in ignored
+    dockerfile = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+    assert "mcp_refund_partner_app" not in dockerfile
+    assert "COPY tests" not in dockerfile
+    bundle = (REPO_ROOT / "scripts" / "build_refund_partner_bundle.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "tests/support/mcp_refund_partner_app.py" in bundle
+    assert ".dockerignore excludes" in bundle

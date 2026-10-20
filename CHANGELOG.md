@@ -20,6 +20,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `mcpContext`, and its idempotency-key source label is
   `mcpContext.idempotency_key`. Docs and examples show `mcpContext`.
 
+### Added — staging pilot for the `delivery_uncertain` reconcile worker (defaults unchanged)
+
+- The refund-partner fixture (`tests/support/mcp_refund_partner_app.py`,
+  excluded from the production image) now answers `POST /status` for the
+  reconciler's status probe. An effect row is `executed`, including while
+  `after_effect=hang` is still holding the response. An invocation that has
+  not finished deciding answers `pending` (treated as unknown). Production
+  defaults stay `UPSTREAM_RECONCILE_WORKER_ENABLED=false` and
+  `UPSTREAM_RECONCILE_REFUND_ON_ATTESTED_NOT_EXECUTED=false`. Staging steps:
+  [`docs/reconcile-staging-pilot.md`](docs/reconcile-staging-pilot.md).
+
 ### Added — leased `delivery_uncertain` reconciler with upstream status probe (default off)
 
 - `UpstreamMcpStatusProbe` asks an operator-configured, same-origin

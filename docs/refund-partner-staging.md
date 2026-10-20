@@ -27,6 +27,20 @@ service in the **staging** environment only.
   returns at most 1000 rows; `count` is the true total, `returned` is the row
   count, and `truncated` says whether rows were cut. All `/__stress/*` routes
   require the `X-MCP-Refund-Control` header.
+- `POST /status` is the delivery-uncertain status probe. It uses the same
+  bearer as `/mcp` (`MCP_REFUND_PARTNER_BEARER_TOKEN`). Body
+  `{"tool","invocation_id","idempotency_key"}`. An effect row for that
+  invocation id and key answers `200 {"status":"executed", ...echoed ids}`,
+  including while `hang` is still holding the response after the effect
+  committed. An invocation that has not finished deciding answers
+  `{"status":"pending"}` (the gateway treats that as unknown). A finished
+  invocation with no effect row answers `{"status":"not_executed"}`.
+
+## Reconcile pilot
+
+Staging steps for the delivery-uncertain reconcile worker, which calls this
+fixture's `POST /status`:
+[reconcile-staging-pilot.md](reconcile-staging-pilot.md).
 
 ## Deploy (staging only)
 
