@@ -46,6 +46,7 @@ from .core.product_positioning import (
 )
 from .core.rate_limiter import RateLimitMiddleware, rate_limit_discovery
 from .core.runtime_mode import get_simulation_modes
+from .core.tracing import install_tracing
 from .middleware.head_method import HeadMethodMiddleware
 from .middleware.operation_insight_events import OperationInsightEventsMiddleware
 from .middleware.request_body_limit import RequestBodyLimitMiddleware
@@ -728,6 +729,9 @@ app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(HeadMethodMiddleware)
 # Outermost: capture refused ingress before auth, routing, and body validation.
 app.add_middleware(OperationInsightEventsMiddleware)
+# Outermost only when OTEL_TRACING_ENABLED and the otel extra imports.
+# Disabled tracing does not register this middleware.
+install_tracing(app)
 
 
 def _json_safe_numbers(value: Any) -> Any:
