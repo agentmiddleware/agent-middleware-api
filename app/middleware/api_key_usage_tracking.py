@@ -15,7 +15,7 @@ from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
-from ..core.auth import AuthContext, CREDENTIAL_ACCEPTANCE
+from ..core.auth import AuthContext, CREDENTIAL_ACCEPTANCE, CURRENT_AUTH_CONTEXT
 
 logger = logging.getLogger(__name__)
 
@@ -49,10 +49,9 @@ class APIKeyUsageTrackingMiddleware(BaseHTTPMiddleware):
         if acceptance is None or not acceptance.accepted:
             return response
 
-        # Extract AuthContext from request state (set by route handlers via get_auth_context dependency)
-        # Since get_auth_context is called as a dependency, its result is accessible via request scope
-        auth_context = getattr(request.state, "_auth_context", None)
-        if auth_context is None or not isinstance(auth_context, AuthContext):
+        # Extract AuthContext from ContextVar (set by get_auth_context)
+        auth_context = CURRENT_AUTH_CONTEXT.get()
+        if auth_context is None:
             # Not authenticated or auth context not available
             return response
 

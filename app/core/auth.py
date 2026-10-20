@@ -135,12 +135,19 @@ CREDENTIAL_ACCEPTANCE: ContextVar[CredentialAcceptance | None] = ContextVar(
     "credential_acceptance", default=None
 )
 
+# ContextVar to store the authenticated context for usage tracking middleware.
+# Set by get_auth_context when credentials are accepted, so middleware can
+# access key_id and tenant without re-parsing headers.
+CURRENT_AUTH_CONTEXT: ContextVar[AuthContext | None] = ContextVar(
+    "current_auth_context", default=None
+)
+
 
 async def get_auth_context(
-    request: Request,
     api_key: str | None = Security(api_key_header),
     authorization: Annotated[str | None, Header()] = None,
     _bearer: HTTPAuthorizationCredentials | None = Security(bearer_header),
+    request: Request | None = None,
 ) -> AuthContext:
     """
     Validate credentials and return caller context.
@@ -169,8 +176,8 @@ async def get_auth_context(
     if acceptance is not None:
         acceptance.accepted = True
     
-    # Store auth context in request state for usage tracking middleware
-    request.state._auth_context = context
+    # Store auth context for usage tracking middleware
+    CURRENT_AUTH_CONTEXT.set(context)
     
     return context
 
