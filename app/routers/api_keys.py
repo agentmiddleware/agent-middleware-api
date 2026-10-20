@@ -430,3 +430,71 @@ async def get_rotation_logs(
             status_code=404,
             detail=_not_found("wallet_not_found", str(e)),
         )
+
+
+@router.get(
+    "/usage/daily",
+    summary="Get daily API key usage statistics",
+    description=(
+        "Get aggregated daily usage statistics for API keys. "
+        "Admin-only endpoint; demo keys receive 403. "
+        "Returns call counts, error rates, latency percentiles, and first/last call timestamps."
+    ),
+)
+async def get_daily_usage_stats(
+    key_id: str | None = None,
+    limit: int = 100,
+    auth: AuthContext = Depends(get_auth_context),
+):
+    """
+    Get daily API key usage statistics.
+
+    Admin-only endpoint. Demo tenant keys are refused.
+    Exposes the api_key_usage_daily view aggregated by key_id and day.
+    """
+    auth.require_bootstrap_admin()
+
+    from sqlalchemy import select, text
+    from ..db.database import get_session_factory
+
+    session_factory = get_session_factory()
+    async with session_factory()() as session:
+        # Query the view directly
+        query = text(
+            """
+            SELECT
+                key_id,
+                day,
+                calls,
+                count_4xx,
+                count_5xx,
+                p50_latency_ms,
+                p95_latency_ms,
+                first_call,
+                last_call
+            FROM api_key_usage_daily
+            WHERE (:key_id IS NULL OR key_id = :key_id)
+            ORDER BY day DESC, key_id
+            LIMIT :limit
+            """
+        )
+        result = await session.execute(
+            query,
+            {"key_id": key_id, "limit": limit},
+        )
+        rows = result.fetchall()
+
+        return [
+            {
+                "key_id": row[0],
+                "day": row[1].isoformat() if row[1] else None,
+                "calls": row[2],
+                "count_4xx": row[3],
+                "count_5xx": row[4],
+                "p50_latency_ms": row[5],
+                "p95_latency_ms": row[6],
+                "first_call": row[7].isoformat() if row[7] else None,
+                "last_call": row[8].isoformat() if row[8] else None,
+            }
+            for row in rows
+        ]

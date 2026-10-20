@@ -11,7 +11,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from typing import Annotated
 
-from fastapi import Depends, Header, HTTPException, Request, Security, status
+from fastapi import Depends, Header, HTTPException, Security, status, Request
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 from ..db.tenant_rls import bind_wallet_scope, rls_admin_scope
 from .config import get_settings
@@ -139,6 +139,7 @@ async def get_auth_context(
     api_key: str | None = Security(api_key_header),
     authorization: Annotated[str | None, Header()] = None,
     _bearer: HTTPAuthorizationCredentials | None = Security(bearer_header),
+    request: Request | None = None,
 ) -> AuthContext:
     """
     Validate credentials and return caller context.
@@ -166,6 +167,11 @@ async def get_auth_context(
     acceptance = CREDENTIAL_ACCEPTANCE.get()
     if acceptance is not None:
         acceptance.accepted = True
+    
+    # Store context in request.state for usage tracking
+    if request is not None:
+        request.state.auth_context = context
+    
     return context
 
 
