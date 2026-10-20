@@ -17,6 +17,8 @@ consequential MCP tool behind a governed boundary. Start with the
 | Run fourteen injected failures and get a signed evidence bundle | [Failure lab suite](failure-lab-suite.md) |
 | Review security claims and limits | [Security limitations](../SECURITY_LIMITATIONS.md) and [security review kit](security-review-kit.md) |
 | Read the public article on what the boundary does and does not guarantee | [Intent is not authority](articles/intent-is-not-authority.md) |
+| Evaluate the gateway against the MCP threat catalog | [MCP security posture](mcp-security-posture.md) |
+| Know what you keep if you migrate off | [Exit and export](exit-and-export.md) |
 | Confirm which commit production is actually running | [Deployment verification checklist](deployment-verification-checklist.md) |
 | Plan a design-partner evaluation | [Design partner guide](../DESIGN_PARTNER_GUIDE.md) |
 | Contribute to the repository | [Contributing guide](../CONTRIBUTING.md) |

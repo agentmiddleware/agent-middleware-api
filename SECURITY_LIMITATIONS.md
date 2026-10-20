@@ -28,6 +28,13 @@ low-sensitivity data: PHI, PCI data, regulated production records, and
 sensitive tool arguments are out of scope. Shared SaaS, customer-VPC/BYOC, and
 customer-operated on-premises deployments are not supported in this pilot.
 
+For the MCP-specific attack classes (tool poisoning, shadowing, confused
+deputy, token passthrough, session hijack), this deployment's exposure to the
+April 2026 MCP SDK STDIO disclosure, and the SDK advisories that touch the
+transports in use, see [`docs/mcp-security-posture.md`](docs/mcp-security-posture.md).
+For what a customer keeps on exit, see
+[`docs/exit-and-export.md`](docs/exit-and-export.md).
+
 High-risk AWI HTTP routes (`/v1/awi/execute`, passkey, rag index/query,
 `dom/sync`) also require `X-Permit-Id` + `Idempotency-Key`; successful metered
 calls emit receipts. Their current abort paths do not have the durable
