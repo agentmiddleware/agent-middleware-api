@@ -27,7 +27,7 @@ from app.routers.well_known import _local_try_it_manifest, get_agent_first_metad
 ROOT = Path(__file__).resolve().parents[1]
 SITE = ROOT / "site"
 CANONICAL_API = "https://api.thisisatest.tech"
-CANONICAL_MARKETING_SITE = "https://www.thisisatest.tech/"
+CANONICAL_MARKETING_SITE = "https://www.agentmiddleware.dev/"
 KNOWN_PROVIDER_HOSTS = (
     "api-service-production-433c.up.railway.app",
     "agent-middleware-web.vercel.app",
@@ -197,6 +197,13 @@ def test_site_build_blocks_missing_and_provisional_contacts(tmp_path) -> None:
         reserved[field] = value
         rejected = _render_site(tmp_path / f"reserved-{field}-{len(value)}", reserved)
         assert rejected.returncode == 2
+
+    for host in ("www.agentmiddleware.dev", "www.thisisatest.tech"):
+        own_site = dict(VALID_TEST_CONTACTS)
+        own_site["PUBLIC_BOOKING_URL"] = f"https://{host}/pilot"
+        rejected_site = _render_site(tmp_path / f"booking-{host}", own_site)
+        assert rejected_site.returncode == 2
+        assert "must point to a booking service" in rejected_site.stderr
 
 
 def test_site_build_refuses_repo_and_existing_temp_delete_targets(tmp_path) -> None:
@@ -433,6 +440,7 @@ def test_pages_name_no_second_brand_in_visible_copy(tmp_path) -> None:
         assert "Marketing:" not in page, (
             f"{relative} still spells the hostnames out as visible copy"
         )
+        assert "<code>www.agentmiddleware.dev</code>" not in page
         assert "<code>www.thisisatest.tech</code>" not in page
         assert "<code>api.thisisatest.tech</code>" not in page
 
@@ -764,7 +772,8 @@ def test_dynamic_routes_and_noncanonical_hosts_redirect_correctly() -> None:
     }
     for redirect in by_host.values():
         assert redirect["source"] == "/:path*"
-        assert redirect["destination"] == f"{CANONICAL_MARKETING_SITE}:path*"
+        # The old domain stays attached. These host rules still land on it.
+        assert redirect["destination"] == "https://www.thisisatest.tech/:path*"
         assert redirect["permanent"] is True
 
 
@@ -779,21 +788,21 @@ def test_search_social_and_analytics_contracts(tmp_path) -> None:
     sitemap = (output / "sitemap.xml").read_text(encoding="utf-8")
     analytics = (output / "analytics.js").read_text(encoding="utf-8")
 
-    assert '<link rel="canonical" href="https://www.thisisatest.tech/"' in page
-    assert 'property="og:url" content="https://www.thisisatest.tech/"' in page
+    assert '<link rel="canonical" href="https://www.agentmiddleware.dev/"' in page
+    assert 'property="og:url" content="https://www.agentmiddleware.dev/"' in page
     assert 'name="twitter:card" content="summary_large_image"' in page
     assert (
         "<title>Agent Middleware API | Transaction integrity for agent actions</title>"
         in page
     )
     assert "explicit delivery uncertainty" in page
-    assert "https://www.thisisatest.tech/social-card.png" in page
+    assert "https://www.agentmiddleware.dev/social-card.png" in page
     assert '<link rel="icon" href="/favicon.svg"' in page
     assert "/_vercel/insights/script.js" not in page
-    assert "Sitemap: https://www.thisisatest.tech/sitemap.xml" in robots
-    assert "https://www.thisisatest.tech/proof/" in sitemap
-    assert "https://www.thisisatest.tech/compare/" in sitemap
-    assert "https://www.thisisatest.tech/demo-key/" in sitemap
+    assert "Sitemap: https://www.agentmiddleware.dev/sitemap.xml" in robots
+    assert "https://www.agentmiddleware.dev/proof/" in sitemap
+    assert "https://www.agentmiddleware.dev/compare/" in sitemap
+    assert "https://www.agentmiddleware.dev/demo-key/" in sitemap
     assert _png_dimensions(output / "social-card.png") == (1200, 630)
     organization = next(
         node
@@ -902,7 +911,7 @@ class _ExternalLinkCollector(HTMLParser):
             return
         if not parsed.netloc:
             return
-        if (parsed.hostname or "").casefold() == "www.thisisatest.tech":
+        if (parsed.hostname or "").casefold() == "www.agentmiddleware.dev":
             return
         rel_tokens = set((attributes.get("rel") or "").split())
         if not {"noopener", "noreferrer"} <= rel_tokens:
@@ -1083,10 +1092,10 @@ class _JsonLdCollector(HTMLParser):
 
 
 INDEXABLE_PAGES = {
-    "index.html": "https://www.thisisatest.tech/",
-    "proof/index.html": "https://www.thisisatest.tech/proof/",
-    "compare/index.html": "https://www.thisisatest.tech/compare/",
-    "demo-key/index.html": "https://www.thisisatest.tech/demo-key/",
+    "index.html": "https://www.agentmiddleware.dev/",
+    "proof/index.html": "https://www.agentmiddleware.dev/proof/",
+    "compare/index.html": "https://www.agentmiddleware.dev/compare/",
+    "demo-key/index.html": "https://www.agentmiddleware.dev/demo-key/",
 }
 
 
@@ -1628,7 +1637,7 @@ def test_trailing_slash_is_canonical_for_subpages() -> None:
         assert redirect["destination"] == f"/{directory}/"
         assert redirect["permanent"] is True
         assert (
-            f'rel="canonical" href="https://www.thisisatest.tech/{directory}/"' in page
+            f'rel="canonical" href="https://www.agentmiddleware.dev/{directory}/"' in page
         )
 
     # Every dot-prefixed path the headers block configures must actually be
@@ -1648,7 +1657,7 @@ def test_llms_full_extends_the_short_pointer_without_contradicting_it(
     full = (output / "llms-full.txt").read_text(encoding="utf-8")
 
     # The short file has to point at the long one, or nothing will find it.
-    assert "https://www.thisisatest.tech/llms-full.txt" in short
+    assert "https://www.agentmiddleware.dev/llms-full.txt" in short
     assert len(full) > len(short)
     assert CANONICAL_API in full
     assert CANONICAL_MARKETING_SITE in full

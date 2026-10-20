@@ -1,19 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
-    <loc>https://www.thisisatest.tech/</loc>
+    <loc>https://www.agentmiddleware.dev/</loc>
     <lastmod>@@BUILD_DATE@@</lastmod>
   </url>
   <url>
-    <loc>https://www.thisisatest.tech/proof/</loc>
+    <loc>https://www.agentmiddleware.dev/proof/</loc>
     <lastmod>@@BUILD_DATE@@</lastmod>
   </url>
   <url>
-    <loc>https://www.thisisatest.tech/compare/</loc>
+    <loc>https://www.agentmiddleware.dev/compare/</loc>
     <lastmod>@@BUILD_DATE@@</lastmod>
   </url>
   <url>
-    <loc>https://www.thisisatest.tech/demo-key/</loc>
+    <loc>https://www.agentmiddleware.dev/demo-key/</loc>
     <lastmod>@@BUILD_DATE@@</lastmod>
   </url>
 </urlset>
