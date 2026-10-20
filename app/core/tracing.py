@@ -300,6 +300,7 @@ async def start_span(
                 except Exception:
                     _log_tracing_failure_once()
 
+
 def traced_span(
     name: str, **field_map: str
 ) -> Callable[[Callable[..., Awaitable[Any]]], Callable[..., Awaitable[Any]]]:

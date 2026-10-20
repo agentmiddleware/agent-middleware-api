@@ -245,22 +245,16 @@ assert runs["n"] == 1
     assert completed.returncode == 0, completed.stderr
 
 
-def test_install_tracing_warns_when_packages_unavailable(
-    monkeypatch, caplog
-) -> None:
+def test_install_tracing_warns_when_packages_unavailable(monkeypatch, caplog) -> None:
     monkeypatch.setenv("OTEL_TRACING_ENABLED", "true")
     get_settings.cache_clear()
-    monkeypatch.setattr(
-        tracing_module, "otel_packages_available", lambda: False
-    )
+    monkeypatch.setattr(tracing_module, "otel_packages_available", lambda: False)
     app = FastAPI()
     before = list(app.user_middleware)
     with caplog.at_level(logging.WARNING, logger="app.core.tracing"):
         install_tracing(app)
     assert app.user_middleware == before
-    assert any(
-        record.msg == "otel_tracing_install_failed" for record in caplog.records
-    )
+    assert any(record.msg == "otel_tracing_install_failed" for record in caplog.records)
     get_settings.cache_clear()
 
 
@@ -279,9 +273,7 @@ def test_install_tracing_fail_open_when_enabled_check_raises(
     with caplog.at_level(logging.WARNING, logger="app.core.tracing"):
         install_tracing(app)
     assert app.user_middleware == before
-    assert any(
-        record.msg == "otel_tracing_install_failed" for record in caplog.records
-    )
+    assert any(record.msg == "otel_tracing_install_failed" for record in caplog.records)
     get_settings.cache_clear()
 
 
@@ -301,9 +293,7 @@ async def test_start_span_runs_body_once_when_enabled_check_raises(
         async with start_span("mcp.invoke", tool_name="partner.notes.write"):
             body_runs["n"] += 1
     assert body_runs["n"] == 1
-    assert any(
-        record.msg == "otel_tracing_unavailable" for record in caplog.records
-    )
+    assert any(record.msg == "otel_tracing_unavailable" for record in caplog.records)
     get_settings.cache_clear()
 
 
