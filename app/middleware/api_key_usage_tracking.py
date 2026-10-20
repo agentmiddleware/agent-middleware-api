@@ -15,7 +15,7 @@ from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
-from ..core.auth import AuthContext, CREDENTIAL_ACCEPTANCE, CURRENT_AUTH_CONTEXT
+from ..core.auth import CREDENTIAL_ACCEPTANCE, CURRENT_AUTH_CONTEXT
 
 logger = logging.getLogger(__name__)
 
