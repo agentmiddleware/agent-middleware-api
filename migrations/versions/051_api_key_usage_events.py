@@ -3,9 +3,9 @@
 Revision ID: 051_api_key_usage_events
 Revises: 050_demo_key_first_used
 
-Adds an append-only ``api_key_usage_events`` table to record per-call usage
+Adds an append-only `api_key_usage_events` table to record per-call usage
 metadata (no request bodies, IPs, or PII), a read-only view
-``api_key_usage_daily`` that aggregates events per key per UTC day, and the
+`api_key_usage_daily` that aggregates events per key per UTC day, and the
 supporting infrastructure for an admin-only endpoint that surfaces the view.
 
 Downgrade drops the view and the table.
