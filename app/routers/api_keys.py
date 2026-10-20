@@ -454,7 +454,7 @@ async def get_daily_usage_stats(
     """
     auth.require_bootstrap_admin()
 
-    from sqlalchemy import select, text
+    from sqlalchemy import text
     from ..db.database import get_session_factory
 
     session_factory = get_session_factory()

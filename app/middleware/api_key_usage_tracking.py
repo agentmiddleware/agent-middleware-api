@@ -13,7 +13,6 @@ from typing import Callable
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.types import ASGIApp
 
 from ..core.auth import CREDENTIAL_ACCEPTANCE, CURRENT_AUTH_CONTEXT
 

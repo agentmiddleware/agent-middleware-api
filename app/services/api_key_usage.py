@@ -7,11 +7,8 @@ A failed write never fails the request.
 """
 
 import logging
-from datetime import datetime
 from typing import Optional
 from uuid import uuid4
-
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.time import to_naive_utc, utc_now
 from ..db.database import get_session_factory

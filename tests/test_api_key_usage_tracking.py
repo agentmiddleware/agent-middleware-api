@@ -5,7 +5,7 @@ Tests the migration, event recording, view aggregation, and admin endpoint.
 """
 
 import pytest
-from datetime import datetime, timedelta
+from datetime import timedelta
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.time import utc_now, to_naive_utc
 from app.db.database import get_session_factory
-from app.db.models import APIKeyUsageEventModel, APIKeyModel
+from app.db.models import APIKeyUsageEventModel
 from app.main import app
 from app.services.api_key_usage import record_api_key_usage_event
 
