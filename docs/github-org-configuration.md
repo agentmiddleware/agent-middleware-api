@@ -5,17 +5,20 @@ be configured, what was actually configured when this was audited, and the
 exact clicks or commands that close each gap. Written for one maintainer with
 admin on everything and no second reviewer.
 
-Audit date: 2026-10-19. Re-run the two scripts below to refresh the repository
-rows; the organization rows can only be read in the GitHub UI.
+Audit date: 2026-10-19, updated 2026-10-20 after the repositories were made
+public. Re-run the two scripts below to refresh the repository rows; the
+organization rows can only be read in the GitHub UI.
 
 ## Do these first, in this order
 
-1. **Unblock GitHub Actions on the organization account.** Pushes to `main`
-   since 2026-10-17 produced no CI run, only a `startup_failure` run with no
-   workflow name. `railway-deploy.yml` refuses to prepare a release for a
-   commit without a green push run, so `main` is unreleasable until this is
-   fixed. See [Actions budget](#actions-budget) for the cause and the choice
-   to make.
+1. **Done 2026-10-20: the repositories are public.** That removes the
+   Actions minutes bill on standard runners and switched on secret scanning,
+   push protection and private vulnerability reporting by itself. Two
+   follow-ups: watch the push run of the next `main` merge (if the no-name
+   `startup_failure` in [Actions budget](#actions-budget) recurs on a public
+   repository, billing was not the cause), and fix the descriptions that
+   still say "private" on public repositories (see
+   [Repositories](#repositories)).
 2. **Apply the repository settings** from a machine where `gh auth status`
    shows your account:
 
@@ -25,7 +28,7 @@ rows; the organization rows can only be read in the GitHub UI.
    ```
 
    This turns on "delete branch on merge" and the pull-request requirement on
-   `main` (0 approvals, see below), and tries to enable secret scanning.
+   `main` (0 approvals, see below). Secret scanning is already on.
 3. **Clean up the 550 branches** once "delete branch on merge" is on, so they
    stop accumulating:
 
@@ -54,8 +57,8 @@ rows; the organization rows can only be read in the GitHub UI.
 |---|---|---|
 | Members | 1 (`PetrefiedThunder`, owner) | Same, until there is a second maintainer |
 | Teams | none | A `maintainers` team as soon as a second person joins, so `CODEOWNERS` can name a team instead of a person |
-| Repositories | 6: `agent-middleware-api` (private), `agent-middleware` (private, 54 open issues), `agent-middleware-public` (private despite the name), `agent-middleware-spec` (public), `amw-demo` (public), `amw-paypal-agent-demo` (public) | Decide which repository is the product repository; see [Repositories](#repositories) |
-| Actions runs on `main` pushes | `startup_failure`, no workflow name, since 2026-10-17 20:19 UTC. Scheduled and Dependabot runs still succeed | Green push run on every `main` commit |
+| Repositories | 6. Since 2026-10-20 five are public; `agent-middleware-public` is still private. Three public repositories still describe themselves as private | Decide which repository is the product repository and fix the descriptions; see [Repositories](#repositories) |
+| Actions runs on `main` pushes | `startup_failure`, no workflow name, on every `main` push from 2026-10-17 to 2026-10-19. Scheduled, Dependabot and most pull-request runs succeed | Green push run on every `main` commit; confirm on the first merge after going public |
 | Two-factor requirement, base permission, Actions policies, security configuration | Not readable from here | See [Organization settings](#organization-settings) |
 
 ### `agent-middleware-api`
@@ -70,7 +73,8 @@ rows; the organization rows can only be read in the GitHub UI.
 | Delete branch on merge | **Off** (why 500+ branches exist) | On | `github_repo_settings.py --apply` |
 | Auto-merge, update branch | On | Keep | Already correct |
 | Web commit sign-off (DCO) | On | Keep | Already correct |
-| Secret scanning, push protection | **Disabled** | Enabled where the plan allows; otherwise the gitleaks pre-commit hook plus the CI `secret_scan` job | `github_repo_settings.py --apply`, see [Secret scanning](#secret-scanning) |
+| Secret scanning, push protection | Disabled while private; **enabled** (with validity checks and non-provider patterns) the moment the repository went public on 2026-10-20 | Keep | Already correct; see [Secret scanning](#secret-scanning) |
+| Private vulnerability reporting | Enabled | Keep; it is what `SECURITY.md` asks reporters to use | Already correct |
 | Dependabot security updates | Enabled | Keep | Already correct |
 | Dependabot version updates | One pull request per package, pip and Actions only | Grouped weekly pull requests; Docker digest, SDK, wrappers and Railway IaC covered | Done in `.github/dependabot.yml` on this branch |
 | Rulesets | None | None needed; the classic rule above covers `main` | – |
@@ -115,11 +119,12 @@ and turn on code-owner review the day a second maintainer has commit access.
   the commit cannot be released until CI has a manual trigger (`ci.yml` has
   no `workflow_dispatch`) or the release gate accepts a re-run.
 
-### Why it keeps happening
+### Why it kept happening (while the repository was private)
 
 Private repositories pay for Actions minutes. This repository's CI is heavy by
 design (every push runs the full release gate), and every Dependabot pull
-request runs it too.
+request runs it too. The numbers stay here because they are also the
+wall-clock cost of every pull request.
 
 | Measured on run 2179 (2026-10-16, `main`) | Minutes |
 |---|---|
@@ -137,55 +142,55 @@ month for private repositories; Team includes 3,000. Overage on standard
 Linux runners is about $0.008 per minute, so a month at the recent cadence is
 roughly 10,000 to 15,000 minutes, or $65 to $105 of overage.
 
-### The choice
+### The decision
 
-Pick one. The first is the only option that costs nothing and removes the
-problem rather than budgeting for it.
+**Taken on 2026-10-20: the repository is public.** Public repositories get
+unlimited Actions minutes on standard runners, free secret scanning and push
+protection, and private vulnerability reporting, and GitHub switched all of
+those on by itself at the flip. The repository already carried the BUSL
+license, a `SECURITY.md`, and tests asserting that public surfaces link to
+`github.com/agentmiddleware/agent-middleware-api`. The commit history is now
+public too, including the 2026-08-06 key that was rotated dead the next day
+and is deliberately published in [api-key-rotation.md](api-key-rotation.md);
+every other historical finding is allowlisted synthetic material
+(`.gitleaks.toml`).
 
-1. **Make `agent-middleware-api` public.** Public repositories get unlimited
-   Actions minutes on standard runners, free secret scanning, free push
-   protection, and private vulnerability reporting. The repository already
-   carries the BUSL license, a `SECURITY.md`, and tests that assert the public
-   surfaces link to `github.com/agentmiddleware/agent-middleware-api`, so this
-   was the plan. Before flipping: run
-   `gitleaks detect --config .gitleaks.toml --log-opts=--all` on a fresh clone
-   and confirm the only findings are the allowlisted ones recorded in
-   `.gitleaks.toml` (the 2026-08-06 key was rotated dead the next day and is
-   deliberately published in [api-key-rotation.md](api-key-rotation.md)).
-   Visibility: repository Settings → General → Danger Zone → Change
-   visibility.
-2. **Set a spending limit and leave it private.** Organization Settings →
-   Billing and licensing → Budgets and alerts: create an Actions budget with
-   "stop usage when reached" off (or a limit you can afford) and an alert at
-   75%. A limit of $0, the default, is what produces the lock. Check the
-   current month under Billing → Usage, product "Actions".
-3. **Reduce the bill per push** (works with either of the above). The
-   non-required legs `test (3.13)`, `python_sdk (3.13)` and the four
-   `wrapper_unit` jobs are about 15 minutes of each run; gating them on
-   `github.event_name == 'push'` keeps them on `main` and drops them from pull
-   requests. The two required `test` legs are the other 30 minutes and would
-   need test parallelization to shrink. Not done on this branch: it changes
-   what runs on pull requests and belongs in its own reviewed change.
+The two options not taken, kept for the record:
 
-Whichever you pick, after the block clears, `main` still has no green push
-run for `railway-deploy.yml` to gate on. `ci.yml` has no manual trigger, so
-merge the next pull request (this one will do) and confirm its push run is
-green before preparing a release.
+- A spending limit on a private repository (Organization Settings → Billing
+  and licensing → Budgets and alerts). A $0 limit, the default, is what
+  produces the lock.
+- Reducing the bill per push: the non-required legs `test (3.13)`,
+  `python_sdk (3.13)` and the four `wrapper_unit` jobs are about 15 minutes of
+  each run and could be gated on `github.event_name == 'push'`. No longer a
+  cost question; still a wall-clock one if pull-request feedback feels slow.
+
+`main` still has no green push run for `railway-deploy.yml` to gate on.
+`ci.yml` has no manual trigger, so merge the next pull request (this one will
+do) and confirm its push run is green before preparing a release.
 
 ## Secret scanning
 
-GitHub's own secret scanning and push protection are off on this repository.
-On a private repository they require the Secret Protection add-on; on a public
-one they are free. `github_repo_settings.py --apply` tries to enable both and
-prints GitHub's refusal if the plan does not allow it.
+GitHub's secret scanning, push protection, validity checks and non-provider
+patterns have been on since the repository went public on 2026-10-20 (they
+were off while it was private, where they need the paid Secret Protection
+add-on). `github_repo_settings.py` reports them and would re-enable them if
+they were ever switched off.
 
-Until then the controls are:
+Three layers now cover the same risk, and all three stay:
 
-- `.pre-commit-config.yaml` now runs gitleaks on the staged diff with the same
-  `.gitleaks.toml` and the same gitleaks release as CI. Install once with
-  `pre-commit install`. This is the local equivalent of push protection.
+- GitHub push protection rejects a push that contains a known provider
+  secret pattern before it lands.
+- `.pre-commit-config.yaml` runs gitleaks on the staged diff with the same
+  `.gitleaks.toml` and the same gitleaks release as CI, which also catches the
+  repository's own low-entropy patterns that GitHub does not know. Install
+  once with `pre-commit install`.
 - The CI `secret_scan` job scans the working tree and the pushed commit range
   and is a required check on `main`.
+
+Alerts from GitHub's scanner appear under the repository's Security tab.
+Expect the 2026-08-06 retired key to be flagged from history; close that
+alert as "revoked" with a link to [api-key-rotation.md](api-key-rotation.md).
 
 ## Remove master
 
@@ -215,13 +220,13 @@ with, so it is a checklist, not a script.
 | Authentication security | Require two-factor authentication for everyone | On | One compromised password is the whole organization |
 | Member privileges | Base permissions | Read | New members should not get write everywhere by default |
 | Member privileges | Repository creation | Owners only (uncheck public and private for members) | Keeps the repository list deliberate |
-| Member privileges | Repository forking | Off for private repositories | Matches `allow_forking: false` already set on the private repositories |
+| Member privileges | Repository forking | Off for private repositories | Only `agent-middleware-public` is still private; public repositories can always be forked |
 | Actions → General | Policies | "Allow agentmiddleware, and select non-agentmiddleware, actions and reusable workflows", with "Allow actions created by GitHub" and "Allow actions by Marketplace verified creators" | Every workflow already pins actions to a commit SHA; this stops a future workflow from pulling an unpinned third-party action |
 | Actions → General | Workflow permissions | "Read repository contents and packages permissions"; uncheck "Allow GitHub Actions to create and approve pull requests" | Workflows that need more declare it in their `permissions:` block, as they already do |
-| Actions → General | Fork pull request workflows | "Require approval for all external contributors" | Relevant the day a repository is public |
-| Code security → Configurations | Apply "GitHub recommended" to all repositories, and set it as the default for new repositories | Dependabot alerts, security updates, secret scanning and push protection where the plan allows | One place instead of six repository pages |
-| Code security → Global settings | Private vulnerability reporting for new public repositories | On | `SECURITY.md` tells reporters to open a private advisory; that only works for non-collaborators when this is on |
-| Billing and licensing | Actions budget and alert | See [Actions budget](#actions-budget) | The current block |
+| Actions → General | Fork pull request workflows | "Require approval for all external contributors" | Now live: every public repository accepts fork pull requests, and a fork's workflow run would otherwise start on its own |
+| Code security → Configurations | Apply "GitHub recommended" to all repositories, and set it as the default for new repositories | Dependabot alerts, security updates, secret scanning and push protection | One place instead of six repository pages; also covers the one repository still private |
+| Code security → Global settings | Private vulnerability reporting for new public repositories | On | `SECURITY.md` tells reporters to open a private advisory; that only works for non-collaborators when this is on. Already on for `agent-middleware-api` |
+| Billing and licensing | Actions budget and alert | A small budget with an alert, no hard stop | No longer the block for standard runners on public repositories; still what would bite if a private repository or larger runner is used later |
 | Profile | Verified domain | Add `thisisatest.tech` (the repository homepage) | Shows the "verified" badge next to the organization |
 
 ## Repositories
@@ -230,13 +235,14 @@ Run `python scripts/github_repo_settings.py --repo agentmiddleware/<name>` on
 each. For a repository without a branch rule, pass `--required-check` once
 per check its CI reports, or leave it empty to require only a pull request.
 
-| Repository | Visibility | Notes |
+| Repository | Visibility (2026-10-20) | Notes |
 |---|---|---|
-| `agent-middleware-api` | Private | This document |
-| `agent-middleware` | Private | 54 open issues. Created 2026-10-04 as "pre-release, private". If it is the successor of this repository, say so in both READMEs; if not, archive one of them |
-| `agent-middleware-public` | Private | The name says public and the description says "private staging repo". Rename or flip visibility so the name is true |
-| `agent-middleware-spec` | Public | Enable secret scanning, push protection and private vulnerability reporting; all free on a public repository |
-| `amw-demo`, `amw-paypal-agent-demo` | Public | Same as the spec repository |
+| `agent-middleware-api` | Public | This document |
+| `agent-middleware` | Public | 45 open issues. Description still says "pre-release, private": fix it. If it is the successor of this repository, say so in both READMEs; if not, archive one of them |
+| `agent-middleware-public` | **Private** | The only one left private, and the one whose name says public. Description still says "private staging repo". Flip it or rename it so the name is true |
+| `agent-middleware-spec` | Public | Confirm secret scanning and private vulnerability reporting are on (GitHub enables them on public repositories, but check the Security tab once) |
+| `amw-demo` | Public | Description still says "private until approved": fix it. Same Security-tab check |
+| `amw-paypal-agent-demo` | Public | Same Security-tab check |
 
 ## Stale references still in the tree
 
