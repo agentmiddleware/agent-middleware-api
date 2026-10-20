@@ -18,6 +18,13 @@ Two behaviors are switchable so the same deployment answers both questions:
   ``delivery_uncertain`` window. ``hang_seconds`` must exceed the gateway's
   ``MCP_UPSTREAM_CALL_TIMEOUT_SECONDS`` by a safe margin (default 90 against
   the gateway default of 30).
+* Provider status (``POST /status``). Same bearer as the MCP transport. An
+  effect row for that invocation id and idempotency key is ``executed``,
+  including while ``hang`` is still holding the response. A decision row
+  written before any effect and still open answers ``pending`` (the gateway
+  treats that as unknown). That same row, completed with no effect, is
+  ``not_executed``. No row at all — an invocation this database cannot prove
+  it observed, including after the file is erased — is ``unknown``.
 
 This is a synthetic fixture, not evidence of partner-owned customer validation.
 """
@@ -119,6 +126,25 @@ def _initialize_database() -> None:
             "INSERT OR IGNORE INTO refund_settings (name, value) VALUES (?, ?)",
             ("honor_idempotency", "1" if _truthy(_DEFAULT_HONOR) else "0"),
         )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS refund_open_decisions (
+                invocation_id TEXT NOT NULL,
+                idempotency_key TEXT NOT NULL,
+                completed_without_effect INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (invocation_id, idempotency_key)
+            )
+            """
+        )
+        decision_columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(refund_open_decisions)")
+        }
+        if "completed_without_effect" not in decision_columns:
+            connection.execute(
+                "ALTER TABLE refund_open_decisions "
+                "ADD COLUMN completed_without_effect INTEGER NOT NULL DEFAULT 0"
+            )
         connection.commit()
 
 
@@ -235,6 +261,77 @@ def _totals() -> dict[str, int]:
     }
 
 
+def _open_decision(invocation_id: str, idempotency_key: str) -> None:
+    """Record that this process observed the invocation, before any effect.
+
+    The row is the only proof ``POST /status`` may later use to attest
+    ``not_executed``. Re-opening clears a previous skip so an in-progress
+    call stays ``pending`` until it finishes again.
+    """
+    with _connect() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute(
+            "INSERT INTO refund_open_decisions "
+            "(invocation_id, idempotency_key, completed_without_effect) "
+            "VALUES (?, ?, 0) "
+            "ON CONFLICT(invocation_id, idempotency_key) DO UPDATE "
+            "SET completed_without_effect = 0",
+            (invocation_id, idempotency_key),
+        )
+        connection.commit()
+
+
+def _close_decision(invocation_id: str, idempotency_key: str) -> None:
+    """Finish the pre-effect decision without inventing one.
+
+    An effect row proves execution, so the decision row is removed. A
+    decision that finishes with no effect stays in this database. Closing
+    an invocation that was never opened writes nothing.
+    """
+    with _connect() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        effect = connection.execute(
+            "SELECT 1 FROM refund_effects "
+            "WHERE invocation_id = ? AND idempotency_key = ? LIMIT 1",
+            (invocation_id, idempotency_key),
+        ).fetchone()
+        if effect is not None:
+            connection.execute(
+                "DELETE FROM refund_open_decisions "
+                "WHERE invocation_id = ? AND idempotency_key = ?",
+                (invocation_id, idempotency_key),
+            )
+        else:
+            connection.execute(
+                "UPDATE refund_open_decisions SET completed_without_effect = 1 "
+                "WHERE invocation_id = ? AND idempotency_key = ?",
+                (invocation_id, idempotency_key),
+            )
+        connection.commit()
+
+
+def _effect_status(invocation_id: str, idempotency_key: str) -> str:
+    """executed, pending, not_executed, or unknown from this database only."""
+    with _connect() as connection:
+        effect = connection.execute(
+            "SELECT 1 FROM refund_effects "
+            "WHERE invocation_id = ? AND idempotency_key = ? LIMIT 1",
+            (invocation_id, idempotency_key),
+        ).fetchone()
+        if effect is not None:
+            return "executed"
+        decision = connection.execute(
+            "SELECT completed_without_effect FROM refund_open_decisions "
+            "WHERE invocation_id = ? AND idempotency_key = ? LIMIT 1",
+            (invocation_id, idempotency_key),
+        ).fetchone()
+        if decision is None:
+            return "unknown"
+        if int(decision["completed_without_effect"]) == 1:
+            return "not_executed"
+        return "pending"
+
+
 def _control_authorized(request: Request) -> bool:
     provided = request.headers.get(CONTROL_HEADER)
     return provided is not None and hmac.compare_digest(provided, _CONTROL_TOKEN)
@@ -283,27 +380,32 @@ async def partner_refund(
     if not isinstance(idempotency_key, str) or not idempotency_key:
         raise ValueError("forwarded idempotency metadata is required")
 
-    honor = await asyncio.to_thread(_honor_idempotency)
-    result = await asyncio.to_thread(
-        _apply_refund,
-        refund_ref=refund_ref,
-        amount_cents=amount_cents,
-        invocation_id=invocation_id,
-        idempotency_key=idempotency_key,
-        honor_idempotency=honor,
-    )
-    # The effect is durable from here on; everything below is response loss.
-    if after_effect == "error":
-        raise RuntimeError("refund_partner_error_after_effect")
-    if after_effect == "hang":
-        await asyncio.sleep(hang_seconds)
-    return {
-        "refund_ref": refund_ref,
-        "effect_id": result["effect_id"],
-        "deduplicated": result["deduplicated"],
-        "honor_idempotency": honor,
-        "partner_pid": os.getpid(),
-    }
+    await asyncio.to_thread(_open_decision, invocation_id, idempotency_key)
+    try:
+        honor = await asyncio.to_thread(_honor_idempotency)
+        result = await asyncio.to_thread(
+            _apply_refund,
+            refund_ref=refund_ref,
+            amount_cents=amount_cents,
+            invocation_id=invocation_id,
+            idempotency_key=idempotency_key,
+            honor_idempotency=honor,
+        )
+        # The effect is durable from here on; everything below is response loss.
+        # A hang still in progress is ``executed`` on POST /status.
+        if after_effect == "error":
+            raise RuntimeError("refund_partner_error_after_effect")
+        if after_effect == "hang":
+            await asyncio.sleep(hang_seconds)
+        return {
+            "refund_ref": refund_ref,
+            "effect_id": result["effect_id"],
+            "deduplicated": result["deduplicated"],
+            "honor_idempotency": honor,
+            "partner_pid": os.getpid(),
+        }
+    finally:
+        await asyncio.to_thread(_close_decision, invocation_id, idempotency_key)
 
 
 @server.custom_route("/__stress/health", methods=["GET"], include_in_schema=False)
@@ -367,8 +469,67 @@ async def stress_mode(request: Request) -> JSONResponse:
     return JSONResponse({"honor_idempotency": enabled})
 
 
+def _status_body(
+    *, tool: str, invocation_id: str, idempotency_key: str, status: str
+) -> dict[str, str]:
+    return {
+        "status": status,
+        "tool": tool,
+        "invocation_id": invocation_id,
+        "idempotency_key": idempotency_key,
+    }
+
+
+@server.custom_route("/status", methods=["POST"], include_in_schema=False)
+async def provider_status(request: Request) -> JSONResponse:
+    """Status probe from docs/delivery-uncertain-reconcile-worker.md.
+
+    Bearer auth is enforced by ``_BearerAuthMiddleware`` with the same token
+    as ``/mcp``. An effect row is ``executed`` even when the tool call is
+    still hanging after that commit. An open decision with no effect row is
+    ``pending``. ``not_executed`` requires that same decision row, written
+    before any effect, completed with no effect row. Anything this database
+    did not record is ``unknown``.
+    """
+    try:
+        payload = await request.json()
+    except ValueError:
+        payload = None
+    if not isinstance(payload, dict):
+        return JSONResponse(
+            {"detail": "refund_partner_status_body_invalid"}, status_code=400
+        )
+    tool = payload.get("tool")
+    invocation_id = payload.get("invocation_id")
+    idempotency_key = payload.get("idempotency_key")
+    if (
+        not isinstance(tool, str)
+        or not tool
+        or not isinstance(invocation_id, str)
+        or not invocation_id
+        or not isinstance(idempotency_key, str)
+        or not idempotency_key
+    ):
+        return JSONResponse(
+            {"detail": "refund_partner_status_body_invalid"}, status_code=400
+        )
+    if tool != REFUND_TOOL_NAME:
+        return JSONResponse(
+            {"detail": "refund_partner_status_tool_unknown"}, status_code=404
+        )
+    outcome = await asyncio.to_thread(_effect_status, invocation_id, idempotency_key)
+    return JSONResponse(
+        _status_body(
+            tool=tool,
+            invocation_id=invocation_id,
+            idempotency_key=idempotency_key,
+            status=outcome,
+        )
+    )
+
+
 class _BearerAuthMiddleware:
-    """Require the configured gateway credential only on the MCP transport."""
+    """Require the MCP bearer on ``/mcp`` and on the status probe."""
 
     def __init__(self, wrapped_app: Any) -> None:
         self._wrapped_app = wrapped_app
@@ -376,7 +537,9 @@ class _BearerAuthMiddleware:
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         path = str(scope.get("path", ""))
-        if scope.get("type") == "http" and (path == "/mcp" or path.startswith("/mcp/")):
+        if scope.get("type") == "http" and (
+            path == "/mcp" or path.startswith("/mcp/") or path == "/status"
+        ):
             authorization_values = [
                 value
                 for key, value in scope.get("headers", [])
@@ -397,4 +560,5 @@ class _BearerAuthMiddleware:
         await self._wrapped_app(scope, receive, send)
 
 
-app = _BearerAuthMiddleware(server.streamable_http_app())
+mcp_app = server.streamable_http_app()
+app = _BearerAuthMiddleware(mcp_app)
