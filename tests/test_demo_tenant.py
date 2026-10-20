@@ -514,10 +514,11 @@ async def test_marketing_site_origin_may_mint_demo_key(
 ) -> None:
     """The current marketing host is on the shipped browser allowlist."""
     default_origins = Settings.model_fields["DEMO_ALLOWED_ORIGINS"].default
-    assert "https://www.thisisatest.tech" in default_origins
-    assert "https://thisisatest.tech" in default_origins
-    assert "https://www.agentmiddleware.dev" in default_origins
-    assert "https://agentmiddleware.dev" in default_origins
+    allowed_origins = [origin.strip() for origin in default_origins.split(",")]
+    assert "https://www.thisisatest.tech" in allowed_origins
+    assert "https://thisisatest.tech" in allowed_origins
+    assert "https://www.agentmiddleware.dev" in allowed_origins
+    assert "https://agentmiddleware.dev" in allowed_origins
     demo_settings.DEMO_ALLOWED_ORIGINS = default_origins
 
     allowed = await client.post(
