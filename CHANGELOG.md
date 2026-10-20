@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — planned v1.3.0
 
+### Added — per-upstream concurrency limit and circuit breaker (default off)
+
+- `UPSTREAM_MAX_CONCURRENCY_PER_UPSTREAM` (default `0`, unlimited) caps
+  in-flight calls to one upstream MCP server with a process-local
+  `asyncio.Semaphore` keyed by the upstream base URL. It is not shared
+  across processes.
+- `UPSTREAM_CIRCUIT_BREAKER_ENABLED` (default `false`) with
+  `UPSTREAM_CIRCUIT_BREAKER_FAILURE_THRESHOLD` (default `5`) and
+  `UPSTREAM_CIRCUIT_BREAKER_RECOVERY_SECONDS` (default `30`) opens that
+  process's breaker after transport failures or timeouts before the
+  dispatch checkpoint, and after `delivery_uncertain` outcomes. Counting
+  `delivery_uncertain` does not change that call: the debit stands, the
+  receipt stays, and the gateway does not redispatch.
+- When either control refuses, it does so before permit reservation,
+  debit, or dispatch claim. The response is a retryable JSON-RPC error
+  (`-32005`) with `retry_after_seconds`, nothing is charged, no receipt
+  is minted, and the idempotency key is released. With both controls at
+  their defaults the dispatch path is unchanged. See
+  [`docs/upstream-concurrency-and-breaker.md`](docs/upstream-concurrency-and-breaker.md).
+
 ### Changed — `mcpContext` and `mcp_context` accepted on every MCP route
 
 - The call context is `mcpContext` (canonical) on JSON-RPC `tools/call`

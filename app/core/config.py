@@ -3,6 +3,7 @@ Central configuration for Agent Middleware API.
 All settings are loaded from environment variables for zero-GUI deployment.
 """
 
+import math
 from decimal import Decimal
 from enum import Enum
 from pydantic import SecretStr, field_validator
@@ -347,6 +348,20 @@ class Settings(BaseSettings):
     # answer never refunds.
     UPSTREAM_RECONCILE_REFUND_ON_ATTESTED_NOT_EXECUTED: bool = False
 
+    # Per-process cap on in-flight calls to one upstream MCP server.
+    # 0 (the default) is unlimited: the dispatch path is unchanged.
+    # The semaphore is local to this process, keyed by upstream origin.
+    # See docs/upstream-concurrency-and-breaker.md.
+    UPSTREAM_MAX_CONCURRENCY_PER_UPSTREAM: int = 0
+    # Per-process circuit breaker for that same upstream key. Off by
+    # default. Transport failures and timeouts before the dispatch
+    # checkpoint, and delivery_uncertain outcomes after it, count as
+    # failures. Counting a delivery_uncertain outcome never changes that
+    # call's result, debit, or receipt.
+    UPSTREAM_CIRCUIT_BREAKER_ENABLED: bool = False
+    UPSTREAM_CIRCUIT_BREAKER_FAILURE_THRESHOLD: int = 5
+    UPSTREAM_CIRCUIT_BREAKER_RECOVERY_SECONDS: float = 30.0
+
     # Cross-key duplicate detection for upstream tools. Modes:
     # - "off": disabled (new-key retries with identical request hashes are allowed)
     # - "log": detect and log duplicates but allow them (observe mode, default)
@@ -393,6 +408,39 @@ class Settings(BaseSettings):
     # Comma-separated argument field names whose string values are case-folded
     # before hashing (e.g. "email,domain"). Nothing else is ever case-folded.
     REPLAN_CASEFOLD_FIELDS: str = ""
+
+    @field_validator("UPSTREAM_MAX_CONCURRENCY_PER_UPSTREAM")
+    @classmethod
+    def _validate_upstream_concurrency(cls, value: int) -> int:
+        if not 0 <= value <= 10_000:
+            raise ValueError(
+                "UPSTREAM_MAX_CONCURRENCY_PER_UPSTREAM must be between 0 and 10000"
+            )
+        return value
+
+    @field_validator("UPSTREAM_CIRCUIT_BREAKER_FAILURE_THRESHOLD")
+    @classmethod
+    def _validate_upstream_breaker_threshold(cls, value: int) -> int:
+        if not 1 <= value <= 10_000:
+            raise ValueError(
+                "UPSTREAM_CIRCUIT_BREAKER_FAILURE_THRESHOLD must be between 1 and 10000"
+            )
+        return value
+
+    @field_validator("UPSTREAM_CIRCUIT_BREAKER_RECOVERY_SECONDS")
+    @classmethod
+    def _validate_upstream_breaker_recovery(cls, value: float) -> float:
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or not 0 < value <= 86_400
+        ):
+            raise ValueError(
+                "UPSTREAM_CIRCUIT_BREAKER_RECOVERY_SECONDS must be a finite "
+                "number of seconds greater than 0 and at most 86400"
+            )
+        return float(value)
 
     @field_validator("WALLET_DEDUP_WINDOW_SECONDS", "WALLET_VELOCITY_WINDOW_SECONDS")
     @classmethod
