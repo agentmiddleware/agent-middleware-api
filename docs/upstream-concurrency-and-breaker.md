@@ -64,6 +64,11 @@ call. A trial that reaches the upstream and gets a normal answer (success
 or a tool-level error result) closes the breaker. A trial that is a
 counted failure opens it again.
 
+A call admitted before the breaker opened can still finish. Its outcome
+does not close or reopen the half-open breaker, and it is not counted
+after the breaker has opened. Only that one trial call may close the
+breaker or open it again.
+
 ### What counts as a failure
 
 - A transport failure or timeout **before** the dispatch checkpoint. The

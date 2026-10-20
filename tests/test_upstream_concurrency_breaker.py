@@ -23,6 +23,7 @@ from app.core.resilience import CircuitBreaker
 from app.db.database import get_session_factory
 from app.db.models import McpDispatchAttemptModel, ReceiptModel, WalletModel
 from app.main import app
+from app.routers.mcp import _abandon_for_upstream_admission
 from app.schemas.billing import ServiceCategory
 from app.services.idempotency import (
     GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
@@ -488,6 +489,137 @@ def test_breaker_opens_and_half_opens_after_recovery(
     follow = gate.try_admit(key)
     assert isinstance(follow, UpstreamAdmissionSlot)
     follow.close()
+
+
+def test_pre_open_outcomes_do_not_override_the_half_open_trial(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = {"now": 2_000.0}
+    monkeypatch.setattr("app.core.resilience.time.monotonic", lambda: clock["now"])
+    _enable(monkeypatch, breaker=True, threshold=1, recovery=10)
+    gate = get_upstream_admission_gate()
+    key = "https://partner.example"
+
+    stale_success = gate.try_admit(key)
+    stale_failure = gate.try_admit(key)
+    after_trial = gate.try_admit(key)
+    opener = gate.try_admit(key)
+    assert isinstance(stale_success, UpstreamAdmissionSlot)
+    assert isinstance(stale_failure, UpstreamAdmissionSlot)
+    assert isinstance(after_trial, UpstreamAdmissionSlot)
+    assert isinstance(opener, UpstreamAdmissionSlot)
+    opener.observe_failure()
+    opener.close()
+
+    clock["now"] = 2_010.0
+    probe = gate.try_admit(key)
+    assert isinstance(probe, UpstreamAdmissionSlot)
+    stale_success.observe_success()
+    stale_failure.observe_failure()
+    breaker = gate._breakers[key]
+    assert breaker.state == CircuitBreaker.HALF_OPEN
+    blocked = gate.try_admit(key)
+    assert isinstance(blocked, UpstreamAdmissionRefusal)
+    assert blocked.reason == "upstream_circuit_open"
+
+    probe.observe_success()
+    probe.close()
+    assert breaker.state == CircuitBreaker.CLOSED
+    after_trial.observe_failure()
+    assert breaker.state == CircuitBreaker.CLOSED
+    stale_success.close()
+    stale_failure.close()
+    after_trial.close()
+
+    fresh = gate.try_admit(key)
+    assert isinstance(fresh, UpstreamAdmissionSlot)
+    fresh.observe_failure()
+    fresh.close()
+    reopened = gate.try_admit(key)
+    assert isinstance(reopened, UpstreamAdmissionRefusal)
+    assert reopened.reason == "upstream_circuit_open"
+
+
+def test_pre_open_success_does_not_close_a_probe_that_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = {"now": 3_000.0}
+    monkeypatch.setattr("app.core.resilience.time.monotonic", lambda: clock["now"])
+    _enable(monkeypatch, breaker=True, threshold=1, recovery=10)
+    gate = get_upstream_admission_gate()
+    key = "https://partner.example"
+
+    stale = gate.try_admit(key)
+    opener = gate.try_admit(key)
+    assert isinstance(stale, UpstreamAdmissionSlot)
+    assert isinstance(opener, UpstreamAdmissionSlot)
+    opener.observe_failure()
+    opener.close()
+
+    clock["now"] = 3_010.0
+    probe = gate.try_admit(key)
+    assert isinstance(probe, UpstreamAdmissionSlot)
+    stale.observe_success()
+    breaker = gate._breakers[key]
+    assert breaker.state == CircuitBreaker.HALF_OPEN
+    probe.observe_failure()
+    probe.close()
+    assert breaker.state == CircuitBreaker.OPEN
+    still_open = gate.try_admit(key)
+    assert isinstance(still_open, UpstreamAdmissionRefusal)
+    assert still_open.reason == "upstream_circuit_open"
+    assert still_open.retry_after_seconds == 10
+    stale.close()
+
+
+@pytest.mark.anyio
+async def test_refusal_abandons_idempotency_when_audit_is_cancelled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = asyncio.Event()
+
+    async def _hang_until_cancelled(**kwargs: Any) -> None:
+        started.set()
+        await asyncio.sleep(30)
+
+    monkeypatch.setattr("app.routers.mcp._audit_mcp_invocation", _hang_until_cancelled)
+    abandoned: list[dict[str, Any]] = []
+
+    class _Idem:
+        async def abandon(self, **kwargs: Any) -> bool:
+            abandoned.append(kwargs)
+            return True
+
+    class _Begin:
+        record_id = "record-1"
+
+    task = asyncio.create_task(
+        _abandon_for_upstream_admission(
+            idem=_Idem(),
+            idem_begin=_Begin(),
+            wallet_id="wallet-1",
+            idempotency_endpoint="/mcp",
+            idempotency_key="key-1",
+            decision=object(),
+            endpoint="/mcp",
+            transport="jsonrpc",
+            permit_id="permit-1",
+            reason="upstream_circuit_open",
+            retry_after_seconds=10,
+        )
+    )
+    await started.wait()
+    task.cancel("audit cancelled")
+    with pytest.raises(asyncio.CancelledError, match="audit cancelled"):
+        await task
+    assert abandoned == [
+        {
+            "wallet_id": "wallet-1",
+            "endpoint": "/mcp",
+            "idempotency_key": "key-1",
+            "expected_record_id": "record-1",
+        }
+    ]
 
 
 @pytest.mark.anyio

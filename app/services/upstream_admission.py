@@ -80,16 +80,18 @@ class UpstreamAdmissionSlot:
         semaphore: asyncio.Semaphore | None,
         *,
         half_open_probe: bool,
+        generation: int,
     ) -> None:
         self._gate = gate
         self.key = key
         self._semaphore = semaphore
         self._half_open_probe = half_open_probe
+        self._generation = generation
         self._observed = False
         self._closed = False
 
     def observe_success(self) -> None:
-        """The upstream answered. A half-open probe can close the breaker."""
+        """The upstream answered. Only a half-open probe can close the breaker."""
         self._gate.observe(self, failure=False)
 
     def observe_failure(self) -> None:
@@ -113,6 +115,10 @@ class UpstreamAdmissionGate:
         self._semaphores: dict[str, tuple[int, asyncio.Semaphore]] = {}
         self._breakers: dict[str, CircuitBreaker] = {}
         self._half_open_inflight: dict[str, int] = {}
+        # Bumped when a counted outcome opens the breaker. Slots admitted
+        # earlier keep the old generation, so their later results cannot
+        # close or reopen the half-open trial.
+        self._breaker_generation: dict[str, int] = {}
 
     def clear(self) -> None:
         """Drop process-local state. Tests use this between cases."""
@@ -120,6 +126,7 @@ class UpstreamAdmissionGate:
             self._semaphores.clear()
             self._breakers.clear()
             self._half_open_inflight.clear()
+            self._breaker_generation.clear()
 
     def try_admit(self, key: str) -> UpstreamAdmissionSlot | UpstreamAdmissionRefusal:
         """Admit one call, or refuse before the caller reserves anything.
@@ -164,9 +171,18 @@ class UpstreamAdmissionGate:
                 key,
                 semaphore,
                 half_open_probe=half_open_probe,
+                generation=self._breaker_generation.get(key, 0),
             )
 
     def observe(self, slot: UpstreamAdmissionSlot, *, failure: bool) -> None:
+        """Count one outcome, unless it would override the half-open trial.
+
+        Calls admitted before the breaker opened keep that generation. Once
+        a counted outcome opens the breaker, those calls can still finish,
+        but their success or failure is not recorded. While the breaker is
+        half-open, only the slot admitted as the probe may close it or
+        open it again.
+        """
         with self._lock:
             if slot._observed:
                 return
@@ -174,12 +190,34 @@ class UpstreamAdmissionGate:
             if not get_settings().UPSTREAM_CIRCUIT_BREAKER_ENABLED:
                 return
             breaker = self._breakers.get(slot.key)
-            if breaker is None:
+            if breaker is None or not self._observation_counts_locked(slot, breaker):
                 return
+            state_before = breaker._state
             if failure:
                 breaker.record_failure()
             else:
                 breaker.record_success()
+            if (
+                state_before != CircuitBreaker.OPEN
+                and breaker._state == CircuitBreaker.OPEN
+            ):
+                self._breaker_generation[slot.key] = slot._generation + 1
+
+    def _observation_counts_locked(
+        self, slot: UpstreamAdmissionSlot, breaker: CircuitBreaker
+    ) -> bool:
+        # A pre-open call is stale even if this read has not yet moved OPEN
+        # to HALF_OPEN. Skip it before ``state`` so it cannot start the trial.
+        if (
+            not slot._half_open_probe
+            and slot._generation != self._breaker_generation.get(slot.key, 0)
+        ):
+            return False
+        # ``state`` may move OPEN to HALF_OPEN once the recovery window
+        # has elapsed. Only the designated probe may record after that.
+        if breaker.state == CircuitBreaker.HALF_OPEN:
+            return slot._half_open_probe
+        return True
 
     def close_slot(self, slot: UpstreamAdmissionSlot) -> None:
         with self._lock:
