@@ -22,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and attempt id. Secrets, API keys, request bodies, and arguments are not
   attributes. `OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_SERVICE_NAME` are
   honored. See [`docs/opentelemetry-tracing.md`](docs/opentelemetry-tracing.md).
+- A tracer, provider, or span-processor exception during span start, enter,
+  exit, attribute write, end, or `traceparent` injection is logged once at
+  debug and ignored. The governed call still runs once, and an exception
+  raised by that call propagates unchanged. Tracing cannot mark a call that
+  was not sent as `delivery_uncertain`.
 
 ### Changed — `mcpContext` and `mcp_context` accepted on every MCP route
 

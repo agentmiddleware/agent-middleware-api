@@ -47,9 +47,13 @@ the invoke parents the phase spans that actually run:
   assignment. A client that refuses the write still dispatches.
 - `mcp.receipt` — the signed receipt write on the MCP path.
 
-A tracer error is logged and skipped. It does not change the permit,
-charge, dispatch, or receipt result. Idempotency is unchanged: a retry with
-the same key returns the original receipt instead of dispatching again.
+A tracer, provider, or span-processor failure while starting a span,
+entering or leaving it, writing an attribute, ending it, or injecting
+`traceparent` is logged once at debug and ignored. The governed code still
+runs once, and an exception it raises propagates unchanged. That failure
+does not change the permit, charge, dispatch, or receipt result, and it
+cannot mark a call that was not sent as `delivery_uncertain`. Idempotency
+is unchanged: a retry with the same key returns the original receipt instead of dispatching again.
 Tracing does not release budget and does not redispatch a `delivery_uncertain`
 row.
 

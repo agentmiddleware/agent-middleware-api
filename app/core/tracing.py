@@ -14,11 +14,12 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from contextvars import ContextVar, Token
 from inspect import signature
-from typing import Any
+from typing import Any, Literal
 
 from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
+_tracing_failure_logged = False
 
 _SPAN_NAMES = frozenset(
     {
@@ -56,6 +57,7 @@ class _FilteredSpan:
         try:
             self._span.set_attribute(key, value)
         except Exception:
+            _log_tracing_failure_once()
             return
 
     def __getattr__(self, name: str) -> Any:
@@ -130,6 +132,7 @@ def note(
         try:
             setter(key, value)
         except Exception:
+            _log_tracing_failure_once()
             return
 
 
@@ -167,6 +170,54 @@ def _install_otlp_provider() -> None:
     trace.set_tracer_provider(provider)
 
 
+def _log_tracing_failure_once() -> None:
+    """Log the first tracing failure at debug and ignore the rest.
+
+    A broken tracer, provider, or processor must not flood logs, and the
+    message carries no span data.
+    """
+    global _tracing_failure_logged
+    if _tracing_failure_logged:
+        return
+    _tracing_failure_logged = True
+    logger.debug("otel_tracing_failure")
+
+
+class _FailOpenSpan:
+    """Run the body even when the tracer fails on start, enter, or end.
+
+    ``start_as_current_span`` returns a lazy context manager. Processor
+    callbacks run on ``__enter__`` and ``__exit__``, outside the call that
+    merely constructs it. Those exceptions are swallowed. The wrapped body
+    still runs once, and an exception it raises propagates unchanged.
+    """
+
+    def __init__(self, opener: Callable[[], Any]) -> None:
+        self._opener = opener
+        self._context_manager: Any = None
+        self._entered = False
+
+    def __enter__(self) -> Any:
+        try:
+            self._context_manager = self._opener()
+            span = self._context_manager.__enter__()
+        except Exception:
+            _log_tracing_failure_once()
+            self._context_manager = None
+            self._entered = False
+            return _NOOP
+        self._entered = True
+        return _FilteredSpan(span)
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> Literal[False]:
+        if self._entered and self._context_manager is not None:
+            try:
+                self._context_manager.__exit__(exc_type, exc, tb)
+            except Exception:
+                _log_tracing_failure_once()
+        return False
+
+
 def _ensure_configured() -> None:
     """Install the OTLP provider once, unless a provider is already active."""
     global _configured
@@ -193,43 +244,48 @@ async def start_span(
 ) -> AsyncIterator[Any]:
     """Open a current span, or yield a no-op when tracing is off.
 
-    Exceptions from the wrapped body propagate. The span does not record
-    exception messages or request data. A tracer failure yields a no-op
-    instead of failing the governed call.
+    Exceptions from the wrapped body propagate unchanged. The span does not
+    record exception messages or request data. A tracer, provider, or
+    processor failure while starting, entering, ending, or writing the span
+    yields a no-op instead of failing the governed call. The body runs once.
     """
     if name not in _SPAN_NAMES or not tracing_enabled():
         yield _NOOP
         return
-    propagate: Token[bool] | None = None
-    try:
+
+    def open_span() -> Any:
         _ensure_configured()
         from opentelemetry import trace
 
-        context_manager = trace.get_tracer("agent-middleware").start_as_current_span(
+        return trace.get_tracer("agent-middleware").start_as_current_span(
             name,
             record_exception=False,
             set_status_on_exception=False,
         )
-    except Exception:
-        logger.warning("otel_span_unavailable", extra={"span": name})
-        yield _NOOP
-        return
-    if name == "mcp.upstream_dispatch":
-        propagate = _PROPAGATE.set(True)
-    try:
-        with context_manager as span:
-            filtered = _FilteredSpan(span)
+
+    propagate: Token[bool] | None = None
+    with _FailOpenSpan(open_span) as span:
+        if name == "mcp.upstream_dispatch" and span is not _NOOP:
+            try:
+                propagate = _PROPAGATE.set(True)
+            except Exception:
+                _log_tracing_failure_once()
+                propagate = None
+        try:
             note(
-                filtered,
+                span,
                 tool_name=tool_name,
                 outcome_state=outcome_state,
                 wallet_id=wallet_id,
                 attempt_id=attempt_id,
             )
-            yield filtered
-    finally:
-        if propagate is not None:
-            _PROPAGATE.reset(propagate)
+            yield span
+        finally:
+            if propagate is not None:
+                try:
+                    _PROPAGATE.reset(propagate)
+                except Exception:
+                    _log_tracing_failure_once()
 
 
 def traced_span(
@@ -277,6 +333,7 @@ def inject_w3c_traceparent(carrier: Any) -> None:
 
         inject(carrier)
     except Exception:
+        _log_tracing_failure_once()
         return
 
 
@@ -295,22 +352,18 @@ class TracingMiddleware:
         if scope.get("type") != "http" or not tracing_enabled():
             await self.app(scope, receive, send)
             return
-        try:
+
+        def open_span() -> Any:
             _ensure_configured()
             from opentelemetry import trace
 
-            context_manager = trace.get_tracer(
-                "agent-middleware"
-            ).start_as_current_span(
+            return trace.get_tracer("agent-middleware").start_as_current_span(
                 "http.request",
                 record_exception=False,
                 set_status_on_exception=False,
             )
-        except Exception:
-            logger.warning("otel_span_unavailable", extra={"span": "http.request"})
-            await self.app(scope, receive, send)
-            return
-        with context_manager:
+
+        with _FailOpenSpan(open_span):
             await self.app(scope, receive, send)
 
 
@@ -324,8 +377,6 @@ def install_tracing(app: Any) -> None:
     try:
         _ensure_configured()
     except Exception:
-        logger.warning(
-            "otel_tracing_disabled", extra={"reason": "exporter_init_failed"}
-        )
+        _log_tracing_failure_once()
         return
     app.add_middleware(TracingMiddleware)

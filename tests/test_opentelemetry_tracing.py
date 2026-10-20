@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import logging
 import os
 import subprocess
 import sys
@@ -18,8 +19,10 @@ from fastapi import FastAPI
 from mcp.types import CallToolResult
 from pydantic import SecretStr
 
+import app.core.tracing as tracing_module
 from app.core.config import get_settings
 from app.core.tracing import (
+    TracingMiddleware,
     inject_w3c_traceparent,
     install_tracing,
     note,
@@ -31,11 +34,13 @@ from app.services.mcp_dispatch_attempts import (
     DispatchAttemptError,
     McpDispatchAttemptService,
 )
-from app.services.permits import PermitService
+from app.services.permits import PermitService, PermitValidation
 from app.services.upstream_mcp import (
     DiscoveredUpstreamTool,
     UpstreamMcpAdapter,
     UpstreamMcpConfiguration,
+    UpstreamMcpDeliveryUncertainError,
+    UpstreamMcpPreDispatchError,
     _PinnedAsyncTransport,
     _ResponseGuardState,
 )
@@ -486,3 +491,319 @@ async def test_header_injection_skipped_when_client_refuses(otel_on) -> None:
 
 async def _async_noop() -> None:
     return None
+
+
+class _BodyError(RuntimeError):
+    """Exception raised by governed code, not by the tracer."""
+
+
+class _RaisingSpanProcessor:
+    """Span processor whose start and end hooks both raise."""
+
+    def __init__(self) -> None:
+        self.starts = 0
+        self.ends = 0
+        self.enabled = True
+        self.raise_on_start = True
+        self.raise_on_end = True
+
+    def on_start(self, span: object, parent_context: object = None) -> None:
+        del span, parent_context
+        if not self.enabled:
+            return
+        self.starts += 1
+        if self.raise_on_start:
+            raise RuntimeError("otel-on-start")
+
+    def on_end(self, span: object) -> None:
+        del span
+        if not self.enabled:
+            return
+        self.ends += 1
+        if self.raise_on_end:
+            raise RuntimeError("otel-on-end")
+
+    def _on_ending(self, span: object) -> None:
+        del span
+
+    def shutdown(self) -> None:
+        return None
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        del timeout_millis
+        return True
+
+
+def _tracing_failure_logs(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [
+        record
+        for record in caplog.records
+        if record.name == "app.core.tracing" and record.msg == "otel_tracing_failure"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_span_processor_failures_do_not_affect_governed_calls(
+    otel_on, monkeypatch, caplog
+) -> None:
+    """Reserve, dispatch, and receipt finish when span hooks raise.
+
+    ``on_start`` runs during context entry, after ``dispatch_started`` is set
+    and before the upstream send. A raising processor must not skip that send
+    or mark it ``delivery_uncertain``. ``on_end`` must not replace the body's
+    exception or the successful result.
+    """
+    del otel_on
+    from opentelemetry import trace
+
+    processor = _RaisingSpanProcessor()
+    trace.get_tracer_provider().add_span_processor(processor)  # type: ignore[arg-type]
+    tracing_module._tracing_failure_logged = False
+    caplog.set_level(logging.DEBUG, logger="app.core.tracing")
+    try:
+        reserved = {"n": 0}
+        claimed = {"n": 0}
+        created = {"n": 0}
+        sent = {"n": 0}
+
+        async def fake_retry(self, operation):
+            del self, operation
+            reserved["n"] += 1
+            return PermitValidation(True, None, None)
+
+        monkeypatch.setattr(PermitService, "_run_with_write_retry", fake_retry)
+        monkeypatch.setattr(
+            "app.services.permits.get_session_factory", lambda: object()
+        )
+
+        async def fake_claim(self, attempt_id):
+            del self
+            claimed["n"] += 1
+            assert attempt_id == "dsp-0123456789abcdef"
+            return SimpleNamespace(
+                attempt_id=attempt_id,
+                public_tool_id="partner.notes.write",
+                wallet_id=_WALLET,
+                idempotency_record_id="rec-1",
+                state="dispatch_claimed",
+            )
+
+        monkeypatch.setattr(McpDispatchAttemptService, "_claim_dispatch", fake_claim)
+        monkeypatch.setattr(
+            "app.services.mcp_dispatch_attempts.schedule_attempt",
+            lambda **kwargs: None,
+        )
+
+        async def fake_create(**kwargs):
+            created["n"] += 1
+            assert kwargs["outcome"] == "success"
+            assert kwargs["tool"] == "partner.notes.write"
+            return SimpleNamespace(outcome="success", tool="partner.notes.write")
+
+        monkeypatch.setattr(
+            "app.routers.mcp.get_receipt_service",
+            lambda: SimpleNamespace(create_receipt=fake_create),
+        )
+
+        configuration = UpstreamMcpConfiguration(
+            url="https://partner.example/mcp",
+            origin="https://partner.example",
+            tool_name="notes.write",
+            public_tool_id="partner.notes.write",
+            bearer_token=SecretStr(_SECRET),
+            credits_per_call=Decimal("1"),
+            connect_timeout_seconds=1.0,
+            call_timeout_seconds=1.0,
+            max_response_bytes=4096,
+            environment="local",
+        )
+        adapter = UpstreamMcpAdapter(configuration)
+        adapter._discovered_tool = DiscoveredUpstreamTool(
+            name="notes.write",
+            description="notes",
+            input_schema={"type": "object"},
+            output_schema=None,
+        )
+
+        @asynccontextmanager
+        async def fake_session(**kwargs):
+            del kwargs
+
+            class Session:
+                async def call_tool(
+                    self, name, arguments, read_timeout_seconds=None, meta=None
+                ):
+                    del name, read_timeout_seconds, meta
+                    sent["n"] += 1
+                    assert arguments == _ARGUMENTS
+                    return CallToolResult(content=[], isError=False)
+
+            yield Session()
+
+        async def noop_init(self, session, *, response_guard):
+            del self, session, response_guard
+
+        monkeypatch.setattr(adapter, "_session", fake_session)
+        monkeypatch.setattr(UpstreamMcpAdapter, "_initialize_session", noop_init)
+
+        validation = await PermitService().authorize_and_reserve(
+            permit_id="permit-1",
+            wallet_id=_WALLET,
+            tool_name="partner.notes.write",
+            estimated_credits=Decimal("1"),
+        )
+        assert validation.allowed is True
+        assert validation.reason is None
+        assert reserved["n"] == 1
+
+        attempt = await McpDispatchAttemptService().claim_dispatch(
+            "dsp-0123456789abcdef"
+        )
+        assert attempt.state == "dispatch_claimed"
+        assert attempt.attempt_id == "dsp-0123456789abcdef"
+        assert claimed["n"] == 1
+
+        result = await adapter._call_tool_once(
+            _ARGUMENTS,
+            invocation_id="inv-1",
+            idempotency_key="idem-1",
+            before_dispatch=_async_noop,
+        )
+        assert result.is_error is False
+        assert sent["n"] == 1
+
+        async def never_sent() -> None:
+            raise RuntimeError("checkpoint")
+
+        with pytest.raises(
+            UpstreamMcpPreDispatchError,
+            match="^upstream_dispatch_checkpoint_failed$",
+        ) as pre_dispatch:
+            await adapter._call_tool_once(
+                _ARGUMENTS,
+                invocation_id="inv-2",
+                idempotency_key="idem-2",
+                before_dispatch=never_sent,
+            )
+        assert sent["n"] == 1
+        assert not isinstance(pre_dispatch.value, UpstreamMcpDeliveryUncertainError)
+
+        from app.routers.mcp import _traced_mcp_receipt
+
+        receipt = await _traced_mcp_receipt(
+            permit_id="permit-1",
+            wallet_id=_WALLET,
+            key_id=None,
+            tool="partner.notes.write",
+            request_payload={"arguments": _ARGUMENTS},
+            response_payload={"content": [], "isError": False},
+            ledger_entry_id=None,
+            credits_authorized=Decimal("1"),
+            credits_charged=Decimal("0"),
+            outcome="success",
+            dispatch_attempt_id="dsp-0123456789abcdef",
+        )
+        assert receipt.outcome == "success"
+        assert receipt.tool == "partner.notes.write"
+        assert created["n"] == 1
+        assert processor.starts == 4
+        assert processor.ends == 0
+
+        body_runs = {"n": 0}
+
+        async def receive():
+            return {"type": "http.disconnect"}
+
+        async def send(message):
+            del message
+
+        async def ok_app(scope, receive_fn, send_fn):
+            del scope, receive_fn
+            body_runs["n"] += 1
+            await send_fn({"type": "http.response.start", "status": 200, "headers": []})
+            await send_fn({"type": "http.response.body", "body": b"ok"})
+
+        await TracingMiddleware(ok_app)({"type": "http"}, receive, send)
+        assert body_runs["n"] == 1
+        assert len(_tracing_failure_logs(caplog)) == 1
+        assert _tracing_failure_logs(caplog)[0].levelno == logging.DEBUG
+
+        processor.raise_on_start = False
+        ends_before_exit_failures = processor.ends
+        caplog.clear()
+        tracing_module._tracing_failure_logged = False
+
+        async with start_span("mcp.invoke", tool_name="partner.notes.write") as span:
+            body_runs["n"] += 1
+
+            def boom_attribute(key, value):
+                del key, value
+                raise RuntimeError("attr-write")
+
+            span._span.set_attribute = boom_attribute
+            span.set_attribute("tool.name", "partner.notes.write")
+            note(span, outcome_state="success")
+        assert body_runs["n"] == 2
+
+        class Locked:
+            def __setitem__(self, key, value):
+                del key, value
+                raise TypeError("client does not support header injection")
+
+        async with start_span("mcp.upstream_dispatch", tool_name="partner.notes.write"):
+            inject_w3c_traceparent(Locked())
+
+        with pytest.raises(_BodyError, match="^governed-body$") as body_error:
+            async with start_span("mcp.receipt", tool_name="partner.notes.write"):
+                body_runs["n"] += 1
+                raise _BodyError("governed-body")
+        assert body_runs["n"] == 3
+        assert body_error.value.__cause__ is None
+        assert body_error.value.__context__ is None
+
+        async def failing_app(scope, receive_fn, send_fn):
+            del scope, receive_fn, send_fn
+            body_runs["n"] += 1
+            raise _BodyError("governed-body")
+
+        with pytest.raises(_BodyError, match="^governed-body$") as middleware_error:
+            await TracingMiddleware(failing_app)({"type": "http"}, receive, send)
+        assert body_runs["n"] == 4
+        assert middleware_error.value.__cause__ is None
+        assert middleware_error.value.__context__ is None
+
+        ended = await adapter._call_tool_once(
+            _ARGUMENTS,
+            invocation_id="inv-3",
+            idempotency_key="idem-3",
+            before_dispatch=_async_noop,
+        )
+        assert ended.is_error is False
+        assert sent["n"] == 2
+        receipt_again = await _traced_mcp_receipt(
+            permit_id="permit-1",
+            wallet_id=_WALLET,
+            key_id=None,
+            tool="partner.notes.write",
+            request_payload={"arguments": _ARGUMENTS},
+            response_payload={"content": [], "isError": False},
+            ledger_entry_id=None,
+            credits_authorized=Decimal("1"),
+            credits_charged=Decimal("0"),
+            outcome="success",
+            dispatch_attempt_id="dsp-0123456789abcdef",
+        )
+        assert receipt_again.outcome == "success"
+        assert created["n"] == 2
+        assert reserved["n"] == 1
+        assert claimed["n"] == 1
+        assert processor.starts == 11
+        assert processor.ends == ends_before_exit_failures + 6
+        assert len(_tracing_failure_logs(caplog)) == 1
+        caplog.clear()
+        async with start_span("mcp.invoke", tool_name="partner.notes.write"):
+            body_runs["n"] += 1
+        assert body_runs["n"] == 5
+        assert _tracing_failure_logs(caplog) == []
+    finally:
+        processor.enabled = False
