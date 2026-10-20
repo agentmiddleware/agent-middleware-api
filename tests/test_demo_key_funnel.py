@@ -1,5 +1,8 @@
 """SEL-320: demo-key first use, the admin funnel endpoint, and migration 050."""
 
+# Imported pytest fixtures intentionally share test parameter names.
+# ruff: noqa: F811
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -14,12 +17,17 @@ from sqlalchemy import create_engine, inspect, select, text
 
 from app.db.database import get_session_factory
 from app.db.models import APIKeyModel
-from tests.test_demo_tenant import (  # noqa: F401 - pytest fixtures
-    client,
+from tests.test_demo_tenant import (
+    client as _client,
     demo_headers,
-    demo_settings,
+    demo_settings as _demo_settings,
 )
 from tests.test_trust_helpers import BOOTSTRAP_HEADERS, provision_agent_wallet
+
+# Rebind so pytest discovers the fixtures without importing those names.
+# A same-named parameter would be an F811 redefinition of an unused import.
+client = _client
+demo_settings = _demo_settings
 
 FUNNEL = "/v1/admin/demo-keys/funnel"
 
@@ -224,9 +232,7 @@ def test_050_upgrade_backfills_creates_view_and_downgrades(
     assert "demo_key_funnel_by_source" in inspect(engine).get_view_names()
     with engine.begin() as connection:
         backfilled = dict(
-            connection.execute(
-                text("SELECT key_id, first_used_at FROM api_keys")
-            ).all()
+            connection.execute(text("SELECT key_id, first_used_at FROM api_keys")).all()
         )
         view_rows = connection.execute(
             text(

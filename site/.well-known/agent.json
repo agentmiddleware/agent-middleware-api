@@ -62,7 +62,7 @@
     "govern"
   ],
   "canonical_api": "https://api.thisisatest.tech",
-  "human_site": "https://www.thisisatest.tech/",
+  "human_site": "https://www.agentmiddleware.dev/",
   "github": "https://github.com/agentmiddleware/agent-middleware-api",
   "github_access": "public",
   "discovery": {

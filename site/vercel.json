@@ -148,19 +148,31 @@
     {
       "source": "/:path*",
       "has": [{ "type": "host", "value": "thisisatest.tech" }],
-      "destination": "https://www.thisisatest.tech/:path*",
+      "destination": "https://www.agentmiddleware.dev/:path*",
+      "permanent": true
+    },
+    {
+      "source": "/:path*",
+      "has": [{ "type": "host", "value": "www.thisisatest.tech" }],
+      "destination": "https://www.agentmiddleware.dev/:path*",
+      "permanent": true
+    },
+    {
+      "source": "/:path*",
+      "has": [{ "type": "host", "value": "agentmiddleware.dev" }],
+      "destination": "https://www.agentmiddleware.dev/:path*",
       "permanent": true
     },
     {
       "source": "/:path*",
       "has": [{ "type": "host", "value": "agent-middleware-web.vercel.app" }],
-      "destination": "https://www.thisisatest.tech/:path*",
+      "destination": "https://www.agentmiddleware.dev/:path*",
       "permanent": true
     },
     {
       "source": "/:path*",
       "has": [{ "type": "host", "value": "site-tawny-seven-33.vercel.app" }],
-      "destination": "https://www.thisisatest.tech/:path*",
+      "destination": "https://www.agentmiddleware.dev/:path*",
       "permanent": true
     },
     {
