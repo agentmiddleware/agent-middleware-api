@@ -38,4 +38,4 @@ Allow: /
 User-agent: meta-externalagent
 Allow: /
 
-Sitemap: https://www.thisisatest.tech/sitemap.xml
+Sitemap: https://www.agentmiddleware.dev/sitemap.xml

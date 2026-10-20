@@ -159,7 +159,9 @@ def test_built_proof_page_needs_no_private_access(tmp_path) -> None:
     assert "PetrefiedThunder" not in proof
     assert "pip install ./" not in proof
     assert "\u2014" not in proof and "\u2013" not in proof
-    assert "curl -fsSLO https://www.thisisatest.tech/proof/verify_receipt.py" in proof
+    assert (
+        "curl -fsSLO https://www.agentmiddleware.dev/proof/verify_receipt.py" in proof
+    )
     assert "python3 -m pip install cryptography" in proof
     assert "python3 verify_receipt.py" in proof
     assert "--expect-issuer https://api.thisisatest.tech" in proof
