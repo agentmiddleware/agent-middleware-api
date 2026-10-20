@@ -1,5 +1,8 @@
 """SEL-320: demo-key first use, the admin funnel endpoint, and migration 050."""
 
+# Imported pytest fixtures intentionally share test parameter names.
+# ruff: noqa: F811
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
