@@ -11,8 +11,9 @@ from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from typing import Annotated
 
-from fastapi import Depends, Header, HTTPException, Security, status, Request
+from fastapi import Depends, Header, HTTPException, Security, status
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
+from starlette.requests import Request
 from ..db.tenant_rls import bind_wallet_scope, rls_admin_scope
 from .config import get_settings
 from .oidc_iga import EnterprisePrincipal, IGADecision, IGAError, is_iga_issuer_token
@@ -136,10 +137,10 @@ CREDENTIAL_ACCEPTANCE: ContextVar[CredentialAcceptance | None] = ContextVar(
 
 
 async def get_auth_context(
+    request: Request,
     api_key: str | None = Security(api_key_header),
     authorization: Annotated[str | None, Header()] = None,
     _bearer: HTTPAuthorizationCredentials | None = Security(bearer_header),
-    request: Request | None = None,
 ) -> AuthContext:
     """
     Validate credentials and return caller context.
@@ -168,9 +169,8 @@ async def get_auth_context(
     if acceptance is not None:
         acceptance.accepted = True
     
-    # Store context in request.state for usage tracking
-    if request is not None:
-        request.state.auth_context = context
+    # Store auth context in request state for usage tracking middleware
+    request.state._auth_context = context
     
     return context
 

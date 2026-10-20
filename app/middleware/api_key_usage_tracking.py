@@ -37,8 +37,11 @@ class APIKeyUsageTrackingMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         start_time = time.time()
+        
+        # Store start time in request state so we can track it after auth
+        request.state.usage_tracking_start = start_time
 
-        # Process the request
+        # Process the request (this will call auth and handlers)
         response = await call_next(request)
 
         # Only record for authenticated requests
@@ -46,10 +49,11 @@ class APIKeyUsageTrackingMiddleware(BaseHTTPMiddleware):
         if acceptance is None or not acceptance.accepted:
             return response
 
-        # Extract AuthContext if available
-        auth_context = request.state.__dict__.get("auth_context")
+        # Extract AuthContext from request state (set by route handlers via get_auth_context dependency)
+        # Since get_auth_context is called as a dependency, its result is accessible via request scope
+        auth_context = getattr(request.state, "_auth_context", None)
         if auth_context is None or not isinstance(auth_context, AuthContext):
-            # Not authenticated via API key or JWT
+            # Not authenticated or auth context not available
             return response
 
         if auth_context.key_id is None:
