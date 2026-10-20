@@ -1,7 +1,7 @@
 # Design-partner API key bootstrap (gated)
 
 Free sandbox demo keys are available at
-[the demo page](https://www.thisisatest.tech/demo-key/) with no account.
+[the demo page](https://www.agentmiddleware.dev/demo-key/) with no account.
 Production keys are issued to design partners. Production authenticated calls
 return `401` until an operator provisions a wallet-scoped key.
 
@@ -66,7 +66,7 @@ Same steps as [`golden-path.md`](golden-path.md) §2–4:
 
 ## What agents should do on 401
 
-1. For sandbox testing, get a free demo key at https://www.thisisatest.tech/demo-key/.
+1. For sandbox testing, get a free demo key at https://www.agentmiddleware.dev/demo-key/.
 2. For production access, ask the design partner's operator for a wallet-scoped key.
 
 ## Related

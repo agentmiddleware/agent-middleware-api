@@ -390,6 +390,16 @@ async def lifespan(app: FastAPI):
                             idempotency_records_needing_review=needs_review,
                         )
 
+                    # Age alerts and the expired-lease alert. Runs whether or
+                    # not the reconcile worker is enabled. Alert only for
+                    # delivery_uncertain and idempotency review; lease columns
+                    # are left in place because claim already treats an
+                    # expired lease as free. See docs/stuck-work-sweep.md.
+                    if settings.STUCK_WORK_SWEEP_ENABLED:
+                        from .services.stuck_work_sweep import run_stuck_work_sweep
+
+                        await run_stuck_work_sweep()
+
                     # Optional provider-status reconcile for parked
                     # delivery_uncertain calls. Leases rows, probes the
                     # configured status endpoint outside any transaction,

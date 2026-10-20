@@ -1,7 +1,7 @@
 # Agent Middleware API design-partner site
 
 Static, human-buyer-first marketing and proof surface for the governed MCP
-trust-plane wedge. The public site is `https://www.thisisatest.tech/`; the
+trust-plane wedge. The public site is `https://www.agentmiddleware.dev/`; the
 canonical API is `https://api.thisisatest.tech/`.
 
 The intended buyer is a platform engineering, AI infrastructure, or security
@@ -613,7 +613,8 @@ dependency-free `package.json` gives Vercel's static builder an explicit build
 entrypoint; without it, a standalone JavaScript asset can be mistaken for the
 entrypoint and the contact gate can be skipped.
 
-The apex domain and known Vercel aliases redirect to
-`https://www.thisisatest.tech/`. Marketing discovery redirects target the
+The apex domains, `www.thisisatest.tech`, and known Vercel aliases redirect to
+`https://www.agentmiddleware.dev/`. `www.agentmiddleware.dev` is not a redirect
+source. Marketing discovery redirects target the
 custom API origin. The infrastructure provider hostname remains a compatibility
 origin only and must not appear on customer-facing pages.

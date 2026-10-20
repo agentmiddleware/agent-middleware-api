@@ -373,7 +373,7 @@ matter most:
 | See the hardening record | [docs/tech-debt-remediation-plan.md](docs/tech-debt-remediation-plan.md) (complete; a historical record, not a backlog) |
 | Contribute | [CONTRIBUTING.md](CONTRIBUTING.md) |
 
-Product site: <https://www.thisisatest.tech> · API: <https://api.thisisatest.tech>
+Product site: <https://www.agentmiddleware.dev> · API: <https://api.thisisatest.tech>
 
 ## License
 

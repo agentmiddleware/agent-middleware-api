@@ -169,10 +169,15 @@ class Settings(BaseSettings):
     DEMO_MAX_LIVE_KEYS: int = 500
     DEMO_ALERT_ISSUES_PER_HOUR: int = 20
     # Comma-separated origins allowed to mint demo keys from a browser.
-    # Default empty: only no-Origin callers (CLI/SDK/curl) and same-host
-    # pages may mint, so a third-party page cannot farm keys through
-    # visitors' browsers.
-    DEMO_ALLOWED_ORIGINS: str = ""
+    # The default keeps the thisisatest.tech marketing hosts and adds the
+    # agentmiddleware.dev hosts. Callers with no Origin (CLI/SDK/curl) and
+    # same-host pages may also mint. Any other browser origin is refused.
+    DEMO_ALLOWED_ORIGINS: str = (
+        "https://www.thisisatest.tech,"
+        "https://thisisatest.tech,"
+        "https://www.agentmiddleware.dev,"
+        "https://agentmiddleware.dev"
+    )
 
     @field_validator(
         "DEMO_KEY_TTL_DAYS",
@@ -346,6 +351,36 @@ class Settings(BaseSettings):
     # refund candidates and the debit stands. A 404 or any non-attesting
     # answer never refunds.
     UPSTREAM_RECONCILE_REFUND_ON_ATTESTED_NOT_EXECUTED: bool = False
+
+    # Stuck-work sweep inside periodic_cleanup. Independent of
+    # UPSTREAM_RECONCILE_WORKER_ENABLED. Logs aged delivery_uncertain rows,
+    # aged idempotency records that still need review, and reconcile leases
+    # past the grace window. It does not null lease columns: claim already
+    # treats an expired lease as free. It never changes delivery_uncertain
+    # state, money, or budget. See docs/stuck-work-sweep.md.
+    STUCK_WORK_SWEEP_ENABLED: bool = True
+    STUCK_WORK_UNCERTAIN_ALERT_AGE_SECONDS: int = 3600
+    STUCK_WORK_LEASE_GRACE_SECONDS: int = 300
+    # Gates the expired-lease alert only. Does not clear lease columns.
+    STUCK_WORK_LEASE_REAPER_ENABLED: bool = True
+
+    @field_validator("STUCK_WORK_UNCERTAIN_ALERT_AGE_SECONDS")
+    @classmethod
+    def _validate_stuck_work_age(cls, value: int) -> int:
+        if not 1 <= value <= 30 * 86400:
+            raise ValueError(
+                "STUCK_WORK_UNCERTAIN_ALERT_AGE_SECONDS must be between 1 and 2592000"
+            )
+        return value
+
+    @field_validator("STUCK_WORK_LEASE_GRACE_SECONDS")
+    @classmethod
+    def _validate_stuck_work_grace(cls, value: int) -> int:
+        if not 0 <= value <= 86400:
+            raise ValueError(
+                "STUCK_WORK_LEASE_GRACE_SECONDS must be between 0 and 86400"
+            )
+        return value
 
     # Cross-key duplicate detection for upstream tools. Modes:
     # - "off": disabled (new-key retries with identical request hashes are allowed)
