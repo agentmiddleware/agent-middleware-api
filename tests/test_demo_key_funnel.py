@@ -1,5 +1,8 @@
 """SEL-320: demo-key first use, the admin funnel endpoint, and migration 050."""
 
+# Imported pytest fixtures intentionally share test parameter names.
+# ruff: noqa: F811
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -224,9 +227,7 @@ def test_050_upgrade_backfills_creates_view_and_downgrades(
     assert "demo_key_funnel_by_source" in inspect(engine).get_view_names()
     with engine.begin() as connection:
         backfilled = dict(
-            connection.execute(
-                text("SELECT key_id, first_used_at FROM api_keys")
-            ).all()
+            connection.execute(text("SELECT key_id, first_used_at FROM api_keys")).all()
         )
         view_rows = connection.execute(
             text(
