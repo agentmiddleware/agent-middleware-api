@@ -20,10 +20,11 @@ Two behaviors are switchable so the same deployment answers both questions:
   the gateway default of 30).
 * Provider status (``POST /status``). Same bearer as the MCP transport. An
   effect row for that invocation id and idempotency key is ``executed``,
-  including while ``hang`` is still holding the response. An invocation that
-  has not finished deciding answers ``pending`` (the gateway treats that as
-  unknown). Anything else this process has finished without an effect is
-  ``not_executed``.
+  including while ``hang`` is still holding the response. A decision row
+  written before any effect and still open answers ``pending`` (the gateway
+  treats that as unknown). That same row, completed with no effect, is
+  ``not_executed``. No row at all — an invocation this database cannot prove
+  it observed, including after the file is erased — is ``unknown``.
 
 This is a synthetic fixture, not evidence of partner-owned customer validation.
 """
@@ -130,10 +131,20 @@ def _initialize_database() -> None:
             CREATE TABLE IF NOT EXISTS refund_open_decisions (
                 invocation_id TEXT NOT NULL,
                 idempotency_key TEXT NOT NULL,
+                completed_without_effect INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (invocation_id, idempotency_key)
             )
             """
         )
+        decision_columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(refund_open_decisions)")
+        }
+        if "completed_without_effect" not in decision_columns:
+            connection.execute(
+                "ALTER TABLE refund_open_decisions "
+                "ADD COLUMN completed_without_effect INTEGER NOT NULL DEFAULT 0"
+            )
         connection.commit()
 
 
@@ -251,30 +262,56 @@ def _totals() -> dict[str, int]:
 
 
 def _open_decision(invocation_id: str, idempotency_key: str) -> None:
-    """Mark a call in progress so status cannot attest not_executed yet."""
+    """Record that this process observed the invocation, before any effect.
+
+    The row is the only proof ``POST /status`` may later use to attest
+    ``not_executed``. Re-opening clears a previous skip so an in-progress
+    call stays ``pending`` until it finishes again.
+    """
     with _connect() as connection:
         connection.execute("BEGIN IMMEDIATE")
         connection.execute(
-            "INSERT OR IGNORE INTO refund_open_decisions "
-            "(invocation_id, idempotency_key) VALUES (?, ?)",
+            "INSERT INTO refund_open_decisions "
+            "(invocation_id, idempotency_key, completed_without_effect) "
+            "VALUES (?, ?, 0) "
+            "ON CONFLICT(invocation_id, idempotency_key) DO UPDATE "
+            "SET completed_without_effect = 0",
             (invocation_id, idempotency_key),
         )
         connection.commit()
 
 
 def _close_decision(invocation_id: str, idempotency_key: str) -> None:
+    """Finish the pre-effect decision without inventing one.
+
+    An effect row proves execution, so the decision row is removed. A
+    decision that finishes with no effect stays in this database. Closing
+    an invocation that was never opened writes nothing.
+    """
     with _connect() as connection:
         connection.execute("BEGIN IMMEDIATE")
-        connection.execute(
-            "DELETE FROM refund_open_decisions "
-            "WHERE invocation_id = ? AND idempotency_key = ?",
+        effect = connection.execute(
+            "SELECT 1 FROM refund_effects "
+            "WHERE invocation_id = ? AND idempotency_key = ? LIMIT 1",
             (invocation_id, idempotency_key),
-        )
+        ).fetchone()
+        if effect is not None:
+            connection.execute(
+                "DELETE FROM refund_open_decisions "
+                "WHERE invocation_id = ? AND idempotency_key = ?",
+                (invocation_id, idempotency_key),
+            )
+        else:
+            connection.execute(
+                "UPDATE refund_open_decisions SET completed_without_effect = 1 "
+                "WHERE invocation_id = ? AND idempotency_key = ?",
+                (invocation_id, idempotency_key),
+            )
         connection.commit()
 
 
 def _effect_status(invocation_id: str, idempotency_key: str) -> str:
-    """executed if the effect is durable; pending while the call is open."""
+    """executed, pending, not_executed, or unknown from this database only."""
     with _connect() as connection:
         effect = connection.execute(
             "SELECT 1 FROM refund_effects "
@@ -283,14 +320,16 @@ def _effect_status(invocation_id: str, idempotency_key: str) -> str:
         ).fetchone()
         if effect is not None:
             return "executed"
-        open_decision = connection.execute(
-            "SELECT 1 FROM refund_open_decisions "
+        decision = connection.execute(
+            "SELECT completed_without_effect FROM refund_open_decisions "
             "WHERE invocation_id = ? AND idempotency_key = ? LIMIT 1",
             (invocation_id, idempotency_key),
         ).fetchone()
-        if open_decision is not None:
-            return "pending"
-    return "not_executed"
+        if decision is None:
+            return "unknown"
+        if int(decision["completed_without_effect"]) == 1:
+            return "not_executed"
+        return "pending"
 
 
 def _control_authorized(request: Request) -> bool:
@@ -448,7 +487,9 @@ async def provider_status(request: Request) -> JSONResponse:
     Bearer auth is enforced by ``_BearerAuthMiddleware`` with the same token
     as ``/mcp``. An effect row is ``executed`` even when the tool call is
     still hanging after that commit. An open decision with no effect row is
-    ``pending``, never ``not_executed``.
+    ``pending``. ``not_executed`` requires that same decision row, written
+    before any effect, completed with no effect row. Anything this database
+    did not record is ``unknown``.
     """
     try:
         payload = await request.json()

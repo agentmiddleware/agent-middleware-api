@@ -184,7 +184,7 @@ def test_status_probe_reports_executed_not_executed_and_denies_auth(
         "missing = client.post('/status', headers=headers, json={\n"
         "    'tool': p.REFUND_TOOL_NAME, 'invocation_id': 'never',\n"
         "    'idempotency_key': 'never'}).json()\n"
-        "assert missing == {'status': 'not_executed', 'tool': p.REFUND_TOOL_NAME,\n"
+        "assert missing == {'status': 'unknown', 'tool': p.REFUND_TOOL_NAME,\n"
         "    'invocation_id': 'never', 'idempotency_key': 'never'}\n"
         "p._apply_refund(refund_ref='r1', amount_cents=500,\n"
         "    invocation_id='inv-1', idempotency_key='key-1',\n"
@@ -195,7 +195,7 @@ def test_status_probe_reports_executed_not_executed_and_denies_auth(
         "other_key = client.post('/status', headers=headers, json={\n"
         "    'tool': p.REFUND_TOOL_NAME, 'invocation_id': 'inv-1',\n"
         "    'idempotency_key': 'other'}).json()\n"
-        "assert other_key['status'] == 'not_executed'\n"
+        "assert other_key['status'] == 'unknown'\n"
         "p._open_decision('inv-open', 'key-open')\n"
         "pending = client.post('/status', headers=headers, json={\n"
         "    'tool': p.REFUND_TOOL_NAME, 'invocation_id': 'inv-open',\n"
@@ -209,6 +209,48 @@ def test_status_probe_reports_executed_not_executed_and_denies_auth(
         "    'tool': p.REFUND_TOOL_NAME, 'invocation_id': 'inv-hang',\n"
         "    'idempotency_key': 'key-hang'}).json()\n"
         "assert hanging['status'] == 'executed'\n",
+    )
+
+
+def test_status_not_executed_requires_a_durable_observation(tmp_path: Path) -> None:
+    _run(
+        tmp_path,
+        "from pathlib import Path\n"
+        "from starlette.testclient import TestClient\n"
+        "from tests.support import mcp_refund_partner_app as p\n"
+        "client = TestClient(p.app)\n"
+        "headers = {'Authorization': 'Bearer refund-bearer'}\n"
+        "def status(invocation_id, idempotency_key):\n"
+        "    return client.post('/status', headers=headers, json={\n"
+        "        'tool': p.REFUND_TOOL_NAME,\n"
+        "        'invocation_id': invocation_id,\n"
+        "        'idempotency_key': idempotency_key,\n"
+        "    }).json()['status']\n"
+        "assert status('absent', 'absent') == 'unknown'\n"
+        "p._close_decision('never-opened', 'never-opened')\n"
+        "assert status('never-opened', 'never-opened') == 'unknown'\n"
+        "p._open_decision('inv-skip', 'key-skip')\n"
+        "with p._connect() as connection:\n"
+        "    opened = connection.execute(\n"
+        "        'SELECT completed_without_effect FROM refund_open_decisions '\n"
+        "        'WHERE invocation_id = ? AND idempotency_key = ?',\n"
+        "        ('inv-skip', 'key-skip'),\n"
+        "    ).fetchone()\n"
+        "assert opened is not None and int(opened['completed_without_effect']) == 0\n"
+        "assert status('inv-skip', 'key-skip') == 'pending'\n"
+        "p._close_decision('inv-skip', 'key-skip')\n"
+        "assert status('inv-skip', 'key-skip') == 'not_executed'\n"
+        "p._apply_refund(refund_ref='r1', amount_cents=500,\n"
+        "    invocation_id='inv-done', idempotency_key='key-done',\n"
+        "    honor_idempotency=False)\n"
+        "assert status('inv-done', 'key-done') == 'executed'\n"
+        "database = Path(p._DATABASE_PATH)\n"
+        "for suffix in ('', '-wal', '-shm'):\n"
+        "    Path(str(database) + suffix).unlink(missing_ok=True)\n"
+        "p._initialize_database()\n"
+        "assert status('inv-done', 'key-done') == 'unknown'\n"
+        "assert status('inv-skip', 'key-skip') == 'unknown'\n"
+        "assert status('absent', 'absent') == 'unknown'\n",
     )
 
 

@@ -14,6 +14,15 @@ parked call and never releases its budget because the row got old.
 Design: [delivery-uncertain-reconcile-worker.md](delivery-uncertain-reconcile-worker.md).
 The fixture deploy is [refund-partner-staging.md](refund-partner-staging.md).
 
+`MCP_REFUND_PARTNER_DB_PATH` must be a file on a Railway volume attached to
+the refund-partner service. The documented mount is `/data` and the path is
+`/data/refund-partner.sqlite3`. Ephemeral disk such as `/tmp` is erased on
+restart, and the gateway can still hold the parked `delivery_uncertain`
+attempt. With no decision row and no effect row, `POST /status` answers
+`unknown`. It answers `not_executed` only when that volume still holds the
+decision row written before any effect and that decision completed without
+an effect. An erased database must not be read as a terminal non-execution.
+
 ## Railway variables (`api-service-staging` only)
 
 Record the current values first. Set these two. Leave

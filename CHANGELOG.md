@@ -26,8 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   excluded from the production image) now answers `POST /status` for the
   reconciler's status probe. An effect row is `executed`, including while
   `after_effect=hang` is still holding the response. An invocation that has
-  not finished deciding answers `pending` (treated as unknown). Production
-  defaults stay `UPSTREAM_RECONCILE_WORKER_ENABLED=false` and
+  not finished deciding answers `pending` (treated as unknown).
+  `not_executed` is returned only when the fixture database still holds the
+  decision row written before any effect and that decision completed with no
+  effect row. An empty or erased database answers `unknown`. The staging
+  pilot requires a Railway volume for `MCP_REFUND_PARTNER_DB_PATH`.
+  Production defaults stay `UPSTREAM_RECONCILE_WORKER_ENABLED=false` and
   `UPSTREAM_RECONCILE_REFUND_ON_ATTESTED_NOT_EXECUTED=false`. Staging steps:
   [`docs/reconcile-staging-pilot.md`](docs/reconcile-staging-pilot.md).
 
