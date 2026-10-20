@@ -45,7 +45,7 @@ function makePage(fetchResponse, options = {}) {
     document,
     location: {
       search: options.search || "",
-      origin: options.origin || "https://www.thisisatest.tech",
+      origin: options.origin || "https://www.agentmiddleware.dev",
     },
     URLSearchParams,
     URL,
@@ -182,7 +182,7 @@ test("the first external referrer sticks and a same-origin referrer is only post
     },
   });
   const kept = makePage(issued, {
-    referrer: "https://www.thisisatest.tech/compare/",
+    referrer: "https://www.agentmiddleware.dev/compare/",
     session: {
       amwDemoKeyUtm: JSON.stringify({
         utm_source: "newsletter",
@@ -196,12 +196,12 @@ test("the first external referrer sticks and a same-origin referrer is only post
   assert.equal(JSON.parse(kept.requests[0][1].body).referrer, stored.referrer);
 
   const sameOrigin = makePage(issued, {
-    referrer: " https://www.thisisatest.tech/ ",
+    referrer: " https://www.agentmiddleware.dev/ ",
   });
   assert.equal(sameOrigin.session.size, 0);
   await sameOrigin.click("get-demo-key");
   assert.deepEqual(JSON.parse(sameOrigin.requests[0][1].body), {
-    referrer: "https://www.thisisatest.tech/",
+    referrer: "https://www.agentmiddleware.dev/",
   });
   assert.equal(sameOrigin.session.size, 0);
 });
@@ -246,7 +246,7 @@ test("utm-capture.js and demo-key.js share one classic-script global", () => {
     },
     location: {
       search: "?utm_source=newsletter",
-      origin: "https://www.thisisatest.tech",
+      origin: "https://www.agentmiddleware.dev",
     },
     URLSearchParams,
     URL,

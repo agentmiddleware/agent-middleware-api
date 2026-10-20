@@ -27,6 +27,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   their defaults the dispatch path is unchanged. See
   [`docs/upstream-concurrency-and-breaker.md`](docs/upstream-concurrency-and-breaker.md).
 
+### Added — stuck-work sweep (SEL-330)
+
+- `periodic_cleanup` runs `run_stuck_work_sweep` whether or not
+  `UPSTREAM_RECONCILE_WORKER_ENABLED` is on. It logs one
+  `stuck_work_alert` warning with age buckets and the oldest age for
+  unresolved `delivery_uncertain` rows past
+  `STUCK_WORK_UNCERTAIN_ALERT_AGE_SECONDS` (default 3600), the same age
+  threshold for idempotency records that still need review, and a count of
+  reconcile leases past `STUCK_WORK_LEASE_GRACE_SECONDS` (default 300).
+- Expired leases are alert-only. Claim already treats
+  `reconcile_lease_expires_at IS NULL OR <= now` as free, so the sweep does
+  not null `reconcile_lease_owner` or `reconcile_lease_expires_at`.
+  `STUCK_WORK_LEASE_REAPER_ENABLED` (default true) gates that alert.
+- The sweep does not change attempt state, ledger rows, wallet balance, or
+  permit budget, and it does not redispatch. Master switch
+  `STUCK_WORK_SWEEP_ENABLED` defaults to true. See
+  [`docs/stuck-work-sweep.md`](docs/stuck-work-sweep.md).
+
 ### Changed — `mcpContext` and `mcp_context` accepted on every MCP route
 
 - The call context is `mcpContext` (canonical) on JSON-RPC `tools/call`

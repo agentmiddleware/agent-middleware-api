@@ -43,8 +43,8 @@ dependencies = [
 dev = ["pytest", "pytest-asyncio", "ruff"]
 
 [project.urls]
-Homepage = "https://www.thisisatest.tech/"
-Documentation = "https://www.thisisatest.tech/"
+Homepage = "https://www.agentmiddleware.dev/"
+Documentation = "https://www.agentmiddleware.dev/"
 Repository = "https://github.com/agentmiddleware/agent-middleware-api"
 Issues = "https://github.com/agentmiddleware/agent-middleware-api/issues"
 
