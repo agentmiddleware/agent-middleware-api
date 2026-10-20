@@ -5,7 +5,7 @@ Handles API key creation, rotation, and revocation for wallet security.
 """
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession  # noqa: F401
 
 from ..core.dependencies import get_agent_money
 
