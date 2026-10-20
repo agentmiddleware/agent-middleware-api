@@ -34,6 +34,7 @@ from mcp.types import CallToolResult
 from pydantic import SecretStr, ValidationError
 
 from ..core.config import Settings, get_settings
+from ..core.tracing import inject_w3c_traceparent, start_span
 from ..core.trust_mode import is_production_like_environment
 from ..schemas.billing import ServiceCategory
 from .mcp_dispatch_attempts import (
@@ -580,6 +581,7 @@ class _PinnedAsyncTransport(httpx.AsyncBaseTransport):
 
         extensions = dict(request.extensions)
         extensions["sni_hostname"] = self._server_name
+        inject_w3c_traceparent(request.headers)
         pinned_request = httpx.Request(
             request.method,
             request.url.copy_with(host=self._pinned_address),
@@ -1009,22 +1011,28 @@ class UpstreamMcpAdapter:
                     ) from None
                 dispatch_started = True
                 try:
-                    async with asyncio.timeout(self.configuration.call_timeout_seconds):
-                        result = await _await_guarded_response(
-                            session.call_tool(
-                                self.configuration.tool_name,
-                                arguments,
-                                read_timeout_seconds=timedelta(
-                                    seconds=self.configuration.call_timeout_seconds
+                    async with start_span(
+                        "mcp.upstream_dispatch",
+                        tool_name=self.configuration.public_tool_id,
+                    ):
+                        async with asyncio.timeout(
+                            self.configuration.call_timeout_seconds
+                        ):
+                            result = await _await_guarded_response(
+                                session.call_tool(
+                                    self.configuration.tool_name,
+                                    arguments,
+                                    read_timeout_seconds=timedelta(
+                                        seconds=self.configuration.call_timeout_seconds
+                                    ),
+                                    meta={
+                                        "io.agentmiddleware/invocation_id": invocation_id,
+                                        "io.agentmiddleware/idempotency_key": idempotency_key,
+                                    },
                                 ),
-                                meta={
-                                    "io.agentmiddleware/invocation_id": invocation_id,
-                                    "io.agentmiddleware/idempotency_key": idempotency_key,
-                                },
-                            ),
-                            response_guard=response_guard,
-                        )
-                    canonical_result = self._canonicalize_result(result)
+                                response_guard=response_guard,
+                            )
+                        canonical_result = self._canonicalize_result(result)
                 except UpstreamMcpResponseRejectedError as exc:
                     response_rejected = exc
         except UpstreamMcpError:

@@ -33,6 +33,7 @@ from sqlalchemy.exc import IntegrityError
 
 from ..audit.lightweight import record_audit
 from ..core.config import DuplicateGuardMode, get_settings
+from ..core.tracing import start_span
 from ..policy.jev_guard import evaluate_jev_guard
 from ..services.jev_guard_metadata import jev_audit_id, load_jev_guard_metadata
 from ..core.auth import (
@@ -1349,7 +1350,7 @@ async def _action_request_denial_receipt(
             "request_hash": sha256_hex(denied_request),
         },
     )
-    receipt = await get_receipt_service().create_receipt(
+    receipt = await _traced_mcp_receipt(
         permit_id=permit_id,
         wallet_id=wallet_id,
         key_id=auth.key_id,
@@ -3335,7 +3336,7 @@ async def _execute_registered_tool_inner(
             if governed_call and permit_model:
                 if receipt is None:
                     try:
-                        receipt = await get_receipt_service().create_receipt(
+                        receipt = await _traced_mcp_receipt(
                             permit_id=permit_model.permit_id,
                             wallet_id=wallet_id,
                             key_id=auth.key_id,
@@ -3752,7 +3753,7 @@ async def _execute_upstream_after_charge(
         },
     )
     try:
-        receipt = await get_receipt_service().create_receipt(
+        receipt = await _traced_mcp_receipt(
             permit_id=permit_model.permit_id,
             wallet_id=wallet_id,
             key_id=key_id,
@@ -4018,7 +4019,7 @@ async def _raise_charged_upstream_failure(
         },
     )
     try:
-        receipt = await get_receipt_service().create_receipt(
+        receipt = await _traced_mcp_receipt(
             permit_id=permit_model.permit_id,
             wallet_id=wallet_id,
             key_id=key_id,
@@ -4110,6 +4111,22 @@ def _charge_units_for_registered_cost(
     category: ServiceCategory,
 ) -> Decimal:
     return charge_units_for(registered_cost, category)
+
+
+async def _traced_mcp_receipt(**kwargs: Any) -> Any:
+    """Write a governed MCP receipt inside an ``mcp.receipt`` span.
+
+    The span records the tool name, outcome, wallet-id hash, and attempt id.
+    The payload and arguments stay off the span.
+    """
+    async with start_span(
+        "mcp.receipt",
+        tool_name=kwargs.get("tool"),
+        outcome_state=kwargs.get("outcome"),
+        wallet_id=kwargs.get("wallet_id"),
+        attempt_id=kwargs.get("dispatch_attempt_id"),
+    ):
+        return await get_receipt_service().create_receipt(**kwargs)
 
 
 def _receipt_response_payload(receipt: Any) -> dict[str, Any]:
@@ -4346,7 +4363,7 @@ async def _finalize_governed_denial(
         )
         idempotency_record_id = record.record_id if record is not None else None
     try:
-        receipt = await get_receipt_service().create_receipt(
+        receipt = await _traced_mcp_receipt(
             permit_id=permit_model.permit_id,
             wallet_id=wallet_id,
             key_id=key_id,

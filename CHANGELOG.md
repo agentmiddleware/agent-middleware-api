@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — planned v1.3.0
 
+### Added — optional OpenTelemetry tracing (default off)
+
+- `OTEL_TRACING_ENABLED` defaults to false. When it is false, or when the
+  `otel` extra is not installed, the governed path does not configure a
+  tracer and does not add HTTP middleware. Install with the `otel` extra
+  (`opentelemetry-api`, `opentelemetry-sdk`, `opentelemetry-exporter-otlp`);
+  those packages are not in `requirements.txt`.
+- When enabled, spans are `http.request`, `mcp.invoke`, `mcp.reserve`,
+  `mcp.dispatch_claim`, `mcp.upstream_dispatch`, and `mcp.receipt`.
+  `mcp.upstream_dispatch` adds a W3C `traceparent` header on the upstream
+  request when the HTTP client accepts header assignment.
+- Span attributes are limited to tool name, outcome state, wallet id hash,
+  and attempt id. Secrets, API keys, request bodies, and arguments are not
+  attributes. `OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_SERVICE_NAME` are
+  honored. See [`docs/opentelemetry-tracing.md`](docs/opentelemetry-tracing.md).
+
 ### Changed — `mcpContext` and `mcp_context` accepted on every MCP route
 
 - The call context is `mcpContext` (canonical) on JSON-RPC `tools/call`
