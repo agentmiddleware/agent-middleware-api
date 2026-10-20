@@ -37,12 +37,13 @@ docs/demo-tenant.md.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from decimal import Decimal
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from ..core.auth import AuthContext, get_auth_context
 from ..core.config import get_settings
@@ -59,6 +60,7 @@ from ..services.demo_tenant import (
     check_issuance_limits,
     count_live_demo_keys,
     count_recent_issues,
+    demo_key_funnel,
     hash_client_id,
     log_demo_event,
     maybe_send_demo_alert,
@@ -70,6 +72,87 @@ router = APIRouter(
     prefix="/v1/demo",
     tags=["Demo"],
 )
+
+# Operator reporting on demo keys. Bootstrap-only, like /v1/demo/admin.
+admin_router = APIRouter(
+    prefix="/v1/admin/demo-keys",
+    tags=["Demo"],
+)
+
+_UTM_MAX_LENGTH = 128
+_REFERRER_MAX_LENGTH = 512
+_UTM_FIELDS = (
+    "utm_source",
+    "utm_medium",
+    "utm_campaign",
+    "utm_content",
+    "utm_term",
+)
+
+
+def _optional_text(value: object, *, limit: int, truncate: bool) -> str | None:
+    """Strip an optional attribution string.
+
+    Blank values become ``None`` so old clients and empty query params do
+    not write empty columns. Over-long UTM values are rejected; referrers
+    are truncated to the column width.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("must be a string")
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    if len(cleaned) <= limit:
+        return cleaned
+    if truncate:
+        return cleaned[:limit]
+    raise ValueError(f"must be at most {limit} characters")
+
+
+class DemoKeyIssueRequest(BaseModel):
+    """Optional acquisition attribution. Every field is omit-able."""
+
+    utm_source: str | None = None
+    utm_medium: str | None = None
+    utm_campaign: str | None = None
+    utm_content: str | None = None
+    utm_term: str | None = None
+    referrer: str | None = Field(
+        default=None,
+        description="document.referrer of the page that requested the key.",
+    )
+
+    @field_validator(*_UTM_FIELDS, mode="before")
+    @classmethod
+    def _normalize_utm(cls, value: object) -> str | None:
+        return _optional_text(value, limit=_UTM_MAX_LENGTH, truncate=False)
+
+    @field_validator("referrer", mode="before")
+    @classmethod
+    def _normalize_referrer(cls, value: object) -> str | None:
+        return _optional_text(value, limit=_REFERRER_MAX_LENGTH, truncate=True)
+
+    def attribution(self) -> dict[str, str]:
+        fields: dict[str, str] = {}
+        for name in (*_UTM_FIELDS, "referrer"):
+            value = getattr(self, name)
+            if value:
+                fields[name] = value
+        return fields
+
+
+def _quoted_attribution(attribution: dict[str, str]) -> dict[str, str]:
+    """JSON-quote UTM and referrer values for the issuance log.
+
+    ``log_demo_event`` joins ``key=value`` with spaces. A value that
+    contains a space, a quote, or ``=`` would otherwise glue itself to
+    the next field. ``json.dumps`` emits one double-quoted token and
+    backslash-escapes interior quotes, which a quote-aware split can
+    recover.
+    """
+    return {key: json.dumps(value) for key, value in attribution.items()}
 
 
 class DemoKeyIssueResponse(BaseModel):
@@ -121,9 +204,40 @@ class DemoAdminStatsResponse(BaseModel):
     issued_last_day: int
 
 
+class DemoKeyFunnelRow(BaseModel):
+    utm_source: str = Field(description="utm_source, or '(none)' when absent.")
+    utm_medium: str | None = None
+    utm_campaign: str | None = None
+    referrer_host: str | None = Field(
+        default=None,
+        description="Referrer host for absolute URLs, else the raw referrer.",
+    )
+    keys_issued: int
+    keys_used: int = Field(description="Keys with at least one authenticated call.")
+    first_issued_at: datetime
+    last_issued_at: datetime
+
+
+class DemoKeyFunnelResponse(BaseModel):
+    since: datetime | None = None
+    until: datetime | None = None
+    rows: list[DemoKeyFunnelRow]
+
+
 def _require_enabled() -> None:
     if not get_settings().ENABLE_DEMO_TENANT:
         raise HTTPException(status_code=404, detail="Not Found")
+
+
+async def _require_enabled_before_body() -> None:
+    """Run the kill switch before FastAPI validates the issuance body.
+
+    A body parameter is validated while dependencies are solved, and that
+    happens before the endpoint function. Without this dependency an
+    overlong or mistyped body returns 422 while the tenant is disabled,
+    which admits the route exists.
+    """
+    _require_enabled()
 
 
 def _reject_cross_origin(request: Request) -> None:
@@ -197,10 +311,15 @@ def _require_demo_caller(auth: AuthContext) -> None:
     description=(
         "Mint a demo sponsor wallet, agent wallet, and wallet-scoped API key "
         "with no pre-shared secret. Requires ENABLE_DEMO_TENANT. The key is "
-        "shown once. Rate-limited per IP and globally."
+        "shown once. Rate-limited per IP and globally. Optional UTM and "
+        "referrer fields are stored for lane attribution and are never required."
     ),
 )
-async def issue_demo_key(request: Request) -> DemoKeyIssueResponse:
+async def issue_demo_key(
+    request: Request,
+    _: None = Depends(_require_enabled_before_body),
+    body: DemoKeyIssueRequest | None = None,
+) -> DemoKeyIssueResponse:
     _require_enabled()
     _reject_cross_origin(request)
     settings = get_settings()
@@ -234,12 +353,14 @@ async def issue_demo_key(request: Request) -> DemoKeyIssueResponse:
             headers={"Retry-After": "3600" if scope != ISSUE_SCOPE_IP else "86400"},
         )
 
-    minted = await mint_demo_keypair()
+    attribution = body.attribution() if body is not None else {}
+    minted = await mint_demo_keypair(attribution=attribution)
     log_demo_event(
         "demo_key_issued",
         key_id=minted["key_id"],
         wallet_id=minted["wallet_id"],
         ip_hash=ip_hash,
+        **_quoted_attribution(attribution),
     )
     if scope is None:
         issued_hour = await count_recent_issues(1)
@@ -394,4 +515,30 @@ async def admin_demo_stats(
         live_demo_keys=live or 0,
         issued_last_hour=await count_recent_issues(1),
         issued_last_day=await count_recent_issues(24),
+    )
+
+
+@admin_router.get(
+    "/funnel",
+    response_model=DemoKeyFunnelResponse,
+    summary="Admin: demo keys issued vs. used by source (bootstrap only)",
+    description=(
+        "Group demo-tenant keys by utm_source, utm_medium, utm_campaign and "
+        "referrer host. keys_used counts keys with a first authenticated "
+        "call. Optional since (inclusive) and until (exclusive) filter on "
+        "issuance time."
+    ),
+)
+async def admin_demo_key_funnel(
+    since: datetime | None = None,
+    until: datetime | None = None,
+    auth: AuthContext = Depends(get_auth_context),
+) -> DemoKeyFunnelResponse:
+    # Reporting works with the kill switch OFF too, like /v1/demo/admin/stats.
+    _require_bootstrap_admin(auth)
+    rows = await demo_key_funnel(since=since, until=until)
+    return DemoKeyFunnelResponse(
+        since=since,
+        until=until,
+        rows=[DemoKeyFunnelRow(**row) for row in rows],
     )

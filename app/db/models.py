@@ -380,6 +380,8 @@ class APIKeyModel(SQLModel, table=True):
 
     last_used_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
     last_used_ip: Optional[str] = Field(default=None, max_length=45)
+    # Set once, on the first authenticated use; never overwritten afterwards.
+    first_used_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
 
     created_at: datetime = Field(
         sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
@@ -399,6 +401,15 @@ class APIKeyModel(SQLModel, table=True):
     # Tenant label mirroring the owning wallet. NULL = normal; "demo" =
     # self-serve demo tenant (route-confined, kill-switchable).
     tenant: Optional[str] = Field(default=None, max_length=32, index=True)
+
+    # Acquisition attribution captured only when a demo key is minted from
+    # the public issuance endpoint. NULL on every other key.
+    utm_source: Optional[str] = Field(default=None, max_length=128)
+    utm_medium: Optional[str] = Field(default=None, max_length=128)
+    utm_campaign: Optional[str] = Field(default=None, max_length=128)
+    utm_content: Optional[str] = Field(default=None, max_length=128)
+    utm_term: Optional[str] = Field(default=None, max_length=128)
+    referrer: Optional[str] = Field(default=None, max_length=512)
 
     revoked_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
     revoke_reason: Optional[str] = Field(default=None, max_length=255)

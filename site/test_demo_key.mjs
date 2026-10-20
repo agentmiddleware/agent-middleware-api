@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { runInNewContext } from "node:vm";
+import { createContext, runInContext, runInNewContext } from "node:vm";
 
 const script = readFileSync(new URL("./demo-key/demo-key.js", import.meta.url), "utf8");
+const captureScript = readFileSync(new URL("./utm-capture.js", import.meta.url), "utf8");
 const commandTemplate = `API=https://api.thisisatest.tech
 KEY='YOUR_DEMO_KEY'
 WALLET='YOUR_WALLET_ID'
@@ -11,7 +12,7 @@ curl -fsS "$API/v1/permits"
 curl -fsS "$API/mcp/tools/partner.echo/invoke"
 curl -fsS "$API/v1/receipts/$RECEIPT/portable"`;
 
-function makePage(fetchResponse) {
+function makePage(fetchResponse, options = {}) {
   const ids = [
     "get-demo-key",
     "copy-demo-key",
@@ -33,26 +34,38 @@ function makePage(fetchResponse) {
   }]));
   const requests = [];
   const copies = [];
+  const session = new Map(Object.entries(options.session || {}));
   const forbidden = () => { throw new Error("key must not be persisted or logged"); };
   const document = {
+    referrer: options.referrer || "",
     getElementById(id) { return elements.get(id); },
     set cookie(_) { forbidden(); },
   };
   runInNewContext(script, {
     document,
+    location: {
+      search: options.search || "",
+      origin: options.origin || "https://www.thisisatest.tech",
+    },
+    URLSearchParams,
+    URL,
     async fetch(url, options) {
       requests.push([url, options]);
       return fetchResponse();
     },
     navigator: { clipboard: { async writeText(value) { copies.push(value); } } },
-    localStorage: { setItem: forbidden },
-    sessionStorage: { setItem: forbidden },
+    localStorage: { setItem: forbidden, getItem: forbidden },
+    sessionStorage: {
+      getItem(key) { return session.has(key) ? session.get(key) : null; },
+      setItem(key, value) { session.set(key, String(value)); },
+    },
     console: { log: forbidden },
   }, { filename: "demo-key.js" });
   return {
     elements,
     requests,
     copies,
+    session,
     async click(id) {
       const element = elements.get(id);
       if (!element.disabled) await element.listeners.click();
@@ -88,6 +101,109 @@ test("issuance uses an empty credential-free POST and renders one key as text", 
   assert.deepEqual(page.copies, [key]);
   await page.click("get-demo-key");
   assert.equal(page.requests.length, 1);
+  assert.equal(page.session.size, 0);
+  assert.equal([...page.session.values()].some((value) => value.includes(key)), false);
+});
+
+test("issuance sends stored UTM overridden by the page URL plus referrer", async () => {
+  const key = "not a real key";
+  const page = makePage(async () => ({
+    status: 201,
+    async json() {
+      return { api_key: key, wallet_id: "wallet_demo_1", budget_credits: 25 };
+    },
+  }), {
+    search: "?utm_source=newsletter&utm_medium=%20&utm_term=receipts",
+    referrer: " https://news.example/item ",
+    session: {
+      amwDemoKeyUtm: JSON.stringify({
+        utm_source: "old-source",
+        utm_campaign: "launch",
+        utm_content: "  ",
+      }),
+    },
+  });
+
+  const storedBeforeClick = JSON.parse(page.session.get("amwDemoKeyUtm"));
+  assert.deepEqual(storedBeforeClick, {
+    utm_source: "newsletter",
+    utm_campaign: "launch",
+    utm_term: "receipts",
+    referrer: "https://news.example/item",
+  });
+
+  await page.click("get-demo-key");
+  const [, request] = page.requests[0];
+  assert.equal(request.headers["Content-Type"], "application/json");
+  assert.deepEqual(JSON.parse(request.body), {
+    utm_source: "newsletter",
+    utm_campaign: "launch",
+    utm_term: "receipts",
+    referrer: "https://news.example/item",
+  });
+  assert.deepEqual(JSON.parse(page.session.get("amwDemoKeyUtm")), {
+    utm_source: "newsletter",
+    utm_campaign: "launch",
+    utm_term: "receipts",
+    referrer: "https://news.example/item",
+  });
+  assert.equal([...page.session.values()].some((value) => value.includes(key)), false);
+});
+
+test("overlong UTM and referrer are capped before storage and before POST", async () => {
+  const page = makePage(async () => ({
+    status: 201,
+    async json() {
+      return { api_key: "not a real key", wallet_id: "wallet_demo_1", budget_credits: 25 };
+    },
+  }), {
+    search: `?utm_source=${encodeURIComponent(`  ${"s".repeat(140)}  `)}&utm_campaign=${"c".repeat(200)}&utm_medium=%20%20`,
+    referrer: ` https://news.example/${"r".repeat(600)} `,
+  });
+
+  const stored = JSON.parse(page.session.get("amwDemoKeyUtm"));
+  assert.equal(stored.utm_source, "s".repeat(128));
+  assert.equal(stored.utm_campaign, "c".repeat(128));
+  assert.equal("utm_medium" in stored, false);
+  assert.equal(stored.referrer.length, 512);
+  assert.equal(stored.referrer, `https://news.example/${"r".repeat(600)}`.slice(0, 512));
+  assert.equal([...page.session.values()].some((value) => value.includes("c".repeat(129))), false);
+
+  await page.click("get-demo-key");
+  const [, request] = page.requests[0];
+  assert.deepEqual(JSON.parse(request.body), stored);
+});
+
+test("the first external referrer sticks and a same-origin referrer is only posted", async () => {
+  const issued = async () => ({
+    status: 201,
+    async json() {
+      return { api_key: "not a real key", wallet_id: "wallet_demo_1", budget_credits: 25 };
+    },
+  });
+  const kept = makePage(issued, {
+    referrer: "https://www.thisisatest.tech/compare/",
+    session: {
+      amwDemoKeyUtm: JSON.stringify({
+        utm_source: "newsletter",
+        referrer: `https://first.example/${"p".repeat(600)}`,
+      }),
+    },
+  });
+  const stored = JSON.parse(kept.session.get("amwDemoKeyUtm"));
+  assert.equal(stored.referrer, `https://first.example/${"p".repeat(600)}`.slice(0, 512));
+  await kept.click("get-demo-key");
+  assert.equal(JSON.parse(kept.requests[0][1].body).referrer, stored.referrer);
+
+  const sameOrigin = makePage(issued, {
+    referrer: " https://www.thisisatest.tech/ ",
+  });
+  assert.equal(sameOrigin.session.size, 0);
+  await sameOrigin.click("get-demo-key");
+  assert.deepEqual(JSON.parse(sameOrigin.requests[0][1].body), {
+    referrer: "https://www.thisisatest.tech/",
+  });
+  assert.equal(sameOrigin.session.size, 0);
 });
 
 test("issuance failures show actionable messages and allow retry", async () => {
@@ -110,4 +226,37 @@ test("issuance failures show actionable messages and allow retry", async () => {
   assert.equal(network.elements.get("demo-key-status").textContent,
     "Could not reach the demo API. Check your connection and try again.");
   assert.equal(network.elements.get("get-demo-key").disabled, false);
+});
+
+test("utm-capture.js and demo-key.js share one classic-script global", () => {
+  const session = new Map();
+  const listeners = {};
+  const context = createContext({
+    document: {
+      referrer: "https://news.example/item",
+      getElementById(id) {
+        return {
+          disabled: false,
+          hidden: true,
+          textContent: id === "demo-commands" ? commandTemplate : "",
+          value: "",
+          addEventListener(event, listener) { listeners[id] = listener; },
+        };
+      },
+    },
+    location: {
+      search: "?utm_source=newsletter",
+      origin: "https://www.thisisatest.tech",
+    },
+    URLSearchParams,
+    URL,
+    sessionStorage: {
+      getItem(key) { return session.has(key) ? session.get(key) : null; },
+      setItem(key, value) { session.set(key, String(value)); },
+    },
+  });
+  runInContext(captureScript, context, { filename: "utm-capture.js" });
+  runInContext(script, context, { filename: "demo-key.js" });
+  assert.equal(typeof listeners["get-demo-key"], "function");
+  assert.equal(JSON.parse(session.get("amwDemoKeyUtm")).utm_source, "newsletter");
 });

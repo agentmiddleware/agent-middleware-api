@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 from typing import Any, Optional, cast
 from uuid import uuid4
 
-from sqlalchemy import case, or_, select, update
+from sqlalchemy import case, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -42,6 +42,18 @@ logger = logging.getLogger(__name__)
 
 API_KEY_LENGTH = 32
 API_KEY_PREFIX_LENGTH = 8
+
+
+def _demo_attribution_field(
+    attribution: dict[str, str] | None, field: str
+) -> Optional[str]:
+    """Return one known attribution field, or None when it is blank or absent."""
+    if not attribution:
+        return None
+    value = attribution.get(field)
+    if isinstance(value, str) and value:
+        return value
+    return None
 
 
 class APIKeyError(Exception):
@@ -188,6 +200,7 @@ class APIKeyService:
         session: AsyncSession | None = None,
         allowed_tools: list[str] | None = None,
         tenant: str | None = None,
+        attribution: dict[str, str] | None = None,
     ) -> dict:
         """
         Create a new API key for a wallet.
@@ -266,6 +279,12 @@ class APIKeyService:
                 json.dumps(list(allowed_tools)) if allowed_tools is not None else None
             ),
             tenant=tenant,
+            utm_source=_demo_attribution_field(attribution, "utm_source"),
+            utm_medium=_demo_attribution_field(attribution, "utm_medium"),
+            utm_campaign=_demo_attribution_field(attribution, "utm_campaign"),
+            utm_content=_demo_attribution_field(attribution, "utm_content"),
+            utm_term=_demo_attribution_field(attribution, "utm_term"),
+            referrer=_demo_attribution_field(attribution, "referrer"),
         )
 
         if session is not None:
@@ -447,6 +466,7 @@ class APIKeyService:
                         else_=APIKeyModel.use_count + 1,
                     ),
                     last_used_at=now,
+                    first_used_at=func.coalesce(APIKeyModel.first_used_at, now),
                 )
                 .execution_options(synchronize_session=False)
             )
@@ -542,6 +562,9 @@ class APIKeyService:
                     .values(
                         use_count=APIKeyModel.use_count + 1,
                         last_used_at=to_naive_utc(now),
+                        first_used_at=func.coalesce(
+                            APIKeyModel.first_used_at, to_naive_utc(now)
+                        ),
                     )
                     .execution_options(synchronize_session=False)
                 )
@@ -550,6 +573,8 @@ class APIKeyService:
                     return None
             else:
                 key.last_used_at = to_naive_utc(now)
+                if key.first_used_at is None:
+                    key.first_used_at = key.last_used_at
                 session.add(key)
                 await session.commit()
 

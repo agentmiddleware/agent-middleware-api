@@ -29,11 +29,11 @@ def test_model_and_boot_check_cover_reconcile_columns():
     assert RECONCILE_COLUMNS <= REQUIRED_TRUST_COLUMNS["mcp_dispatch_attempts"]
 
 
-def test_047_is_the_parent_of_the_single_head():
+def test_049_is_the_parent_of_the_single_head():
     script = ScriptDirectory.from_config(Config("alembic.ini"))
-    assert script.get_heads() == ["048_tenant_rls"]
-    assert script.get_revision("048_tenant_rls").down_revision == (
-        "047_dispatch_reconcile_lease"
+    assert script.get_heads() == ["050_demo_key_first_used"]
+    assert script.get_revision("050_demo_key_first_used").down_revision == (
+        "049_demo_key_attribution"
     )
 
 

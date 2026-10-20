@@ -142,6 +142,7 @@ COPY_ASSETS = (
     "robots.txt",
     "sitemap.xml",
     "styles.css",
+    "utm-capture.js",
     "va-init.js",
     "wave.js",
 )

@@ -40,6 +40,7 @@ from contextvars import ContextVar
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
+from urllib.parse import urlsplit
 
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -278,6 +279,7 @@ _DEMO_DENIED_PREFIXES = (
     # Trust-plane signing keys and demo admin: tenant-boundary / admin.
     "/v1/signing-keys",
     "/v1/demo/admin",
+    "/v1/admin",
 )
 
 
@@ -554,6 +556,97 @@ async def count_recent_issues(hours: int) -> int:
         return int(result.scalar_one())
 
 
+def _referrer_host(referrer: str | None) -> str | None:
+    """Host of an absolute referrer URL, else the raw value.
+
+    Mirrors the PostgreSQL expression in the ``demo_key_funnel_by_source``
+    view (migration 050) so the endpoint and the view group the same way.
+    """
+    if not referrer:
+        return referrer
+    try:
+        parts = urlsplit(referrer)
+    except ValueError:
+        return referrer
+    if parts.scheme and parts.hostname:
+        return parts.hostname
+    return referrer
+
+
+async def demo_key_funnel(
+    since: datetime | None = None, until: datetime | None = None
+) -> list[dict[str, Any]]:
+    """Demo keys issued vs. used, grouped by acquisition source.
+
+    Portable equivalent of the ``demo_key_funnel_by_source`` view: SQL groups
+    by the raw attribution columns, then rows sharing a referrer host are
+    merged here. ``since`` is inclusive and ``until`` exclusive, both on
+    ``created_at`` (naive UTC).
+    """
+    from sqlalchemy import func, select
+    from sqlmodel import col
+
+    from app.core.time import to_naive_utc
+    from app.db.database import get_session_factory
+    from app.db.models import APIKeyModel
+
+    # Group by the raw column and label NULL in Python: a bound "(none)" in
+    # both SELECT and GROUP BY becomes two distinct parameters on PostgreSQL.
+    query = (
+        select(
+            col(APIKeyModel.utm_source),
+            col(APIKeyModel.utm_medium),
+            col(APIKeyModel.utm_campaign),
+            col(APIKeyModel.referrer),
+            func.count(),
+            func.count(col(APIKeyModel.first_used_at)),
+            func.min(col(APIKeyModel.created_at)),
+            func.max(col(APIKeyModel.created_at)),
+        )
+        .where(col(APIKeyModel.tenant) == DEMO_TENANT_LABEL)
+        .group_by(
+            col(APIKeyModel.utm_source),
+            col(APIKeyModel.utm_medium),
+            col(APIKeyModel.utm_campaign),
+            col(APIKeyModel.referrer),
+        )
+    )
+    if since is not None:
+        query = query.where(col(APIKeyModel.created_at) >= to_naive_utc(since))
+    if until is not None:
+        query = query.where(col(APIKeyModel.created_at) < to_naive_utc(until))
+
+    factory = get_session_factory()
+    async with factory() as session:
+        result = await session.execute(query)
+        raw_rows = result.all()
+
+    merged: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for src, medium, campaign, referrer, issued, used, first, last in raw_rows:
+        key = (src or "(none)", medium, campaign, _referrer_host(referrer))
+        row = merged.get(key)
+        if row is None:
+            merged[key] = {
+                "utm_source": key[0],
+                "utm_medium": medium,
+                "utm_campaign": campaign,
+                "referrer_host": key[3],
+                "keys_issued": int(issued),
+                "keys_used": int(used),
+                "first_issued_at": first,
+                "last_issued_at": last,
+            }
+            continue
+        row["keys_issued"] += int(issued)
+        row["keys_used"] += int(used)
+        row["first_issued_at"] = min(row["first_issued_at"], first)
+        row["last_issued_at"] = max(row["last_issued_at"], last)
+    return sorted(
+        merged.values(),
+        key=lambda r: (-r["keys_issued"], r["utm_source"], r["referrer_host"] or ""),
+    )
+
+
 async def maybe_send_demo_alert(scope: str, message: str) -> bool:
     """Send at most one alert per scope per hour. Returns True if sent.
 
@@ -580,7 +673,10 @@ async def maybe_send_demo_alert(scope: str, message: str) -> bool:
         return False
 
 
-async def mint_demo_keypair() -> dict[str, Any]:
+async def mint_demo_keypair(
+    *,
+    attribution: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """Mint a fresh demo sponsor wallet + agent wallet + key, atomically.
 
     Both wallets carry tenant="demo" with synthetic, out-of-thin-air credit
@@ -629,6 +725,7 @@ async def mint_demo_keypair() -> dict[str, Any]:
                 max_uses=settings.DEMO_KEY_MAX_USES,
                 allowed_tools=(demo_tools if demo_tools else None),
                 tenant=DEMO_TENANT_LABEL,
+                attribution=attribution,
                 session=session,
             )
     return {
