@@ -175,7 +175,15 @@ and only raise `mcp_delivery_uncertain_aged` (`manual_review: true`).
 
 Tests: `tests/test_delivery_uncertain_reconcile.py`,
 `tests/test_upstream_reconcile_worker.py`,
-`tests/test_dispatch_reconcile_migration.py`.
+`tests/test_dispatch_reconcile_migration.py`,
+`tests/test_reconcile_staging_pilot.py`.
+
+## Staging pilot
+
+Production defaults stay off. Staging-only Railway variables, the
+`after_effect=hang` call, log lines, and rollback are in
+[reconcile-staging-pilot.md](reconcile-staging-pilot.md). That pilot points
+`MCP_UPSTREAM_STATUS_URL` at the refund-partner fixture's `POST /status`.
 
 ## Not done (next steps)
 
