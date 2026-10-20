@@ -147,7 +147,6 @@ async def get_auth_context(
     api_key: str | None = Security(api_key_header),
     authorization: Annotated[str | None, Header()] = None,
     _bearer: HTTPAuthorizationCredentials | None = Security(bearer_header),
-    _request: Request | None = None,
 ) -> AuthContext:
     """
     Validate credentials and return caller context.
