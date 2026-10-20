@@ -187,7 +187,7 @@ Per task requirements:
 
 ## Pull Request
 
-**URL:** https://github.com/PetrefiedThunder/agent-middleware-api/pull/331
+**URL:** https://github.com/agentmiddleware/agent-middleware-api/pull/331
 
 **Title:** Verify quote-locked pricing vertical slice (already complete on main)
 

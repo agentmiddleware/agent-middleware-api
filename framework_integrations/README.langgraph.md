@@ -7,7 +7,7 @@ Use Agent Middleware API tools directly in LangGraph agents.
 No PyPI package is published. Work from a checkout of this repository:
 
 ```bash
-git clone https://github.com/PetrefiedThunder/agent-middleware-api.git
+git clone https://github.com/agentmiddleware/agent-middleware-api.git
 cd agent-middleware-api
 python -m pip install -r requirements.txt
 python -m pip install langgraph langchain-core
