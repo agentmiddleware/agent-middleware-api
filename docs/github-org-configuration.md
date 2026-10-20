@@ -150,13 +150,13 @@ roughly 10,000 to 15,000 minutes, or $65 to $105 of overage.
 **Taken on 2026-10-20: the repository is public.** Public repositories get
 unlimited Actions minutes on standard runners, free secret scanning and push
 protection, and private vulnerability reporting, and GitHub switched all of
-those on by itself at the flip. The repository already carried the BUSL
-license, a `SECURITY.md`, and tests asserting that public surfaces link to
-`github.com/agentmiddleware/agent-middleware-api`. The commit history is now
-public too, including the 2026-08-06 key that was rotated dead the next day
-and is deliberately published in [api-key-rotation.md](api-key-rotation.md);
-every other historical finding is allowlisted synthetic material
-(`.gitleaks.toml`).
+those on by itself at the flip. The repository already carried a
+`SECURITY.md` and tests asserting that public surfaces link to
+`github.com/agentmiddleware/agent-middleware-api`. Later the same day the
+maintainer rewrote the entire history (every commit SHA changed) to replace
+the 2026-08-06 retired key value with `***REMOVED***`, and replaced `LICENSE`
+(Business Source License 1.1) with the Apache License 2.0 in commit `861d46c`.
+The fallout is listed under [After the history rewrite](#after-the-history-rewrite).
 
 The two options not taken, kept for the record:
 
@@ -168,9 +168,49 @@ The two options not taken, kept for the record:
   each run and could be gated on `github.event_name == 'push'`. No longer a
   cost question; still a wall-clock one if pull-request feedback feels slow.
 
-`main` still has no green push run for `railway-deploy.yml` to gate on.
-`ci.yml` has no manual trigger, so merge the next pull request (this one will
-do) and confirm its push run is green before preparing a release.
+`main` had green push runs again on 2026-10-20 (12:01 and 12:26 UTC), then
+the force-push of the rewritten history at 22:19 UTC produced a run that is
+red on `secret_scan` (see below) with the other jobs cancelled. `ci.yml` has
+no manual trigger, so the next merge (this pull request will do) is what gives
+`railway-deploy.yml` a green push run to gate on; a normal merge carries a
+known `before` SHA, so its `secret_scan` range is well defined.
+
+## After the history rewrite
+
+The 2026-10-20 22:19 UTC force-push replaced every commit on `main` (1,404
+of them) and on this branch. These are the consequences found so far; none
+is fixed by this pull request because each is a decision for the maintainer.
+
+- **`secret_scan` fails closed on `main`'s rewrite push.**
+  `scripts/secret_scan_range.sh` pins `dd16051` (#811) as the verified-clean
+  base for the fallback range used when the push's old tip is unknown. That
+  SHA is no longer an ancestor of `main`, so the "Scan commit range" step
+  failed on run 39507256676. Normal pushes are unaffected (they carry a real
+  `before` SHA). To restore the fallback: run a full-history scan on a fresh
+  clone (`gitleaks detect --config .gitleaks.toml --log-opts=--all`), confirm
+  it is clean, then re-pin `VERIFIED_BASE` to the rewritten commit of #811
+  (`git log --oneline origin/main --grep "#811"`) and update any SHA
+  `tests/test_secret_scan_range.py` asserts.
+- **Two documents now describe the old history.** The scope note in
+  `.gitleaks.toml` and the "Correction (2026-09-19)" section of
+  [api-key-rotation.md](api-key-rotation.md) say the retired key is reachable
+  from `main` through commit `9e45009`. After the rewrite neither the value
+  nor that commit exists on `main`. Rewrite both to say the value was scrubbed
+  on 2026-10-20 (and that the key was already dead at the provider since
+  2026-08-07, which was always the real remediation).
+- **The license documents disagree with `LICENSE`.** `LICENSE` is Apache
+  License 2.0 since `861d46c`; `LICENSING.md`, `CONTRIBUTING.md` ("Licensing
+  of contributions"), `GOVERNANCE.md` and the `README.md` badge and licensing
+  paragraph still say Business Source License 1.1 for the core. If the
+  relicense is intended, update those four; if not, restore `LICENSE`. Either
+  way the change should be a deliberate commit, because it decides whether a
+  competitor may host the gateway as a service.
+- **Every clone and unmerged branch is on dead history.** A branch that has
+  not been rebased onto the rewritten `main` has no merge base with it, so
+  GitHub shows its pull request as tens of thousands of lines changed (this
+  pull request showed 94,797 until its branch was rewritten too).
+  `github_branch_cleanup.py` is unaffected in the safe direction: such
+  branches compare as "ahead", so `--apply` never deletes them.
 
 ## Secret scanning
 
@@ -191,9 +231,10 @@ Three layers now cover the same risk, and all three stay:
 - The CI `secret_scan` job scans the working tree and the pushed commit range
   and is a required check on `main`.
 
-Alerts from GitHub's scanner appear under the repository's Security tab.
-Expect the 2026-08-06 retired key to be flagged from history; close that
-alert as "revoked" with a link to [api-key-rotation.md](api-key-rotation.md).
+Alerts from GitHub's scanner appear under the repository's Security tab. The
+2026-08-06 retired key was scrubbed from history on 2026-10-20, so it should
+no longer be flagged; if an alert for it was raised before the rewrite, close
+it as "revoked" with a link to [api-key-rotation.md](api-key-rotation.md).
 
 ## Remove master
 
