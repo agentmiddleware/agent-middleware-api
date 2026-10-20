@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — planned v1.3.0
 
+### Added — per-upstream concurrency limit and circuit breaker (default off)
+
+- `UPSTREAM_MAX_CONCURRENCY_PER_UPSTREAM` (default `0`, unlimited) caps
+  in-flight calls to one upstream MCP server with a process-local
+  `asyncio.Semaphore` keyed by the upstream base URL. It is not shared
+  across processes.
+- `UPSTREAM_CIRCUIT_BREAKER_ENABLED` (default `false`) with
+  `UPSTREAM_CIRCUIT_BREAKER_FAILURE_THRESHOLD` (default `5`) and
+  `UPSTREAM_CIRCUIT_BREAKER_RECOVERY_SECONDS` (default `30`) opens that
+  process's breaker after transport failures or timeouts before the
+  dispatch checkpoint, and after `delivery_uncertain` outcomes. Counting
+  `delivery_uncertain` does not change that call: the debit stands, the
+  receipt stays, and the gateway does not redispatch.
+- When either control refuses, it does so before permit reservation,
+  debit, or dispatch claim. The response is a retryable JSON-RPC error
+  (`-32005`) with `retry_after_seconds`, nothing is charged, no receipt
+  is minted, and the idempotency key is released. With both controls at
+  their defaults the dispatch path is unchanged. See
+  [`docs/upstream-concurrency-and-breaker.md`](docs/upstream-concurrency-and-breaker.md).
+
 ### Added — stuck-work sweep (SEL-330)
 
 - `periodic_cleanup` runs `run_stuck_work_sweep` whether or not
@@ -25,6 +45,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `STUCK_WORK_SWEEP_ENABLED` defaults to true. See
   [`docs/stuck-work-sweep.md`](docs/stuck-work-sweep.md).
 
+### Added — optional OpenTelemetry tracing (default off)
+
+- `OTEL_TRACING_ENABLED` defaults to false. When it is false, or when the
+  `otel` extra is not installed, the governed path does not configure a
+  tracer and does not add HTTP middleware. Install with the `otel` extra
+  (`opentelemetry-api`, `opentelemetry-sdk`, `opentelemetry-exporter-otlp`);
+  those packages are not in `requirements.txt`.
+- When enabled, spans are `http.request`, `mcp.invoke`, `mcp.reserve`,
+  `mcp.dispatch_claim`, `mcp.upstream_dispatch`, and `mcp.receipt`.
+  `mcp.upstream_dispatch` adds a W3C `traceparent` header on the upstream
+  request when the HTTP client accepts header assignment.
+- Span attributes are limited to tool name, outcome state, wallet id hash,
+  and attempt id. Secrets, API keys, request bodies, and arguments are not
+  attributes. `OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_SERVICE_NAME` are
+  honored. See [`docs/opentelemetry-tracing.md`](docs/opentelemetry-tracing.md).
+- A tracer, provider, or span-processor exception during span start, enter,
+  exit, attribute write, end, or `traceparent` injection is logged once at
+  debug and ignored. A broken OpenTelemetry install (including non-`ImportError`
+  failures while importing) leaves tracing off with a warning instead of
+  aborting startup or skipping a governed body. The governed call still runs
+  once, and an exception
+  raised by that call propagates unchanged. Tracing cannot mark a call that
+  was not sent as `delivery_uncertain`.
+
 ### Changed — `mcpContext` and `mcp_context` accepted on every MCP route
 
 - The call context is `mcpContext` (canonical) on JSON-RPC `tools/call`
@@ -37,6 +81,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The REST OpenAPI schema (`ToolCallRequest`) now names the field
   `mcpContext`, and its idempotency-key source label is
   `mcpContext.idempotency_key`. Docs and examples show `mcpContext`.
+
+### Added — staging pilot for the `delivery_uncertain` reconcile worker (defaults unchanged)
+
+- The refund-partner fixture (`tests/support/mcp_refund_partner_app.py`,
+  excluded from the production image) now answers `POST /status` for the
+  reconciler's status probe. An effect row is `executed`, including while
+  `after_effect=hang` is still holding the response. An invocation that has
+  not finished deciding answers `pending` (treated as unknown).
+  `not_executed` is returned only when the fixture database still holds the
+  decision row written before any effect and that decision completed with no
+  effect row. An empty or erased database answers `unknown`. The staging
+  pilot requires a Railway volume for `MCP_REFUND_PARTNER_DB_PATH`.
+  Production defaults stay `UPSTREAM_RECONCILE_WORKER_ENABLED=false` and
+  `UPSTREAM_RECONCILE_REFUND_ON_ATTESTED_NOT_EXECUTED=false`. Staging steps:
+  [`docs/reconcile-staging-pilot.md`](docs/reconcile-staging-pilot.md).
 
 ### Added — leased `delivery_uncertain` reconciler with upstream status probe (default off)
 

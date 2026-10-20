@@ -3,6 +3,7 @@ Central configuration for Agent Middleware API.
 All settings are loaded from environment variables for zero-GUI deployment.
 """
 
+import math
 from decimal import Decimal
 from enum import Enum
 from pydantic import SecretStr, field_validator
@@ -352,6 +353,20 @@ class Settings(BaseSettings):
     # answer never refunds.
     UPSTREAM_RECONCILE_REFUND_ON_ATTESTED_NOT_EXECUTED: bool = False
 
+    # Per-process cap on in-flight calls to one upstream MCP server.
+    # 0 (the default) is unlimited: the dispatch path is unchanged.
+    # The semaphore is local to this process, keyed by upstream origin.
+    # See docs/upstream-concurrency-and-breaker.md.
+    UPSTREAM_MAX_CONCURRENCY_PER_UPSTREAM: int = 0
+    # Per-process circuit breaker for that same upstream key. Off by
+    # default. Transport failures and timeouts before the dispatch
+    # checkpoint, and delivery_uncertain outcomes after it, count as
+    # failures. Counting a delivery_uncertain outcome never changes that
+    # call's result, debit, or receipt.
+    UPSTREAM_CIRCUIT_BREAKER_ENABLED: bool = False
+    UPSTREAM_CIRCUIT_BREAKER_FAILURE_THRESHOLD: int = 5
+    UPSTREAM_CIRCUIT_BREAKER_RECOVERY_SECONDS: float = 30.0
+
     # Stuck-work sweep inside periodic_cleanup. Independent of
     # UPSTREAM_RECONCILE_WORKER_ENABLED. Logs aged delivery_uncertain rows,
     # aged idempotency records that still need review, and reconcile leases
@@ -429,6 +444,50 @@ class Settings(BaseSettings):
     # before hashing (e.g. "email,domain"). Nothing else is ever case-folded.
     REPLAN_CASEFOLD_FIELDS: str = ""
 
+    # Optional OpenTelemetry traces for the governed MCP path. Off by default.
+    # When false, or when the otel extra is not installed, tracing is a no-op
+    # and no exporter is configured. See docs/opentelemetry-tracing.md.
+    OTEL_TRACING_ENABLED: bool = False
+    # Standard OTLP HTTP base URL (port 4318). Empty leaves the exporter's
+    # own OTEL_EXPORTER_OTLP_ENDPOINT / OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+    # resolution in place, which is the same variable when set in the
+    # environment. Never copied onto spans.
+    OTEL_EXPORTER_OTLP_ENDPOINT: str = ""
+    OTEL_SERVICE_NAME: str = "agent-middleware-api"
+
+    @field_validator("UPSTREAM_MAX_CONCURRENCY_PER_UPSTREAM")
+    @classmethod
+    def _validate_upstream_concurrency(cls, value: int) -> int:
+        if not 0 <= value <= 10_000:
+            raise ValueError(
+                "UPSTREAM_MAX_CONCURRENCY_PER_UPSTREAM must be between 0 and 10000"
+            )
+        return value
+
+    @field_validator("UPSTREAM_CIRCUIT_BREAKER_FAILURE_THRESHOLD")
+    @classmethod
+    def _validate_upstream_breaker_threshold(cls, value: int) -> int:
+        if not 1 <= value <= 10_000:
+            raise ValueError(
+                "UPSTREAM_CIRCUIT_BREAKER_FAILURE_THRESHOLD must be between 1 and 10000"
+            )
+        return value
+
+    @field_validator("UPSTREAM_CIRCUIT_BREAKER_RECOVERY_SECONDS")
+    @classmethod
+    def _validate_upstream_breaker_recovery(cls, value: float) -> float:
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or not 0 < value <= 86_400
+        ):
+            raise ValueError(
+                "UPSTREAM_CIRCUIT_BREAKER_RECOVERY_SECONDS must be a finite "
+                "number of seconds greater than 0 and at most 86400"
+            )
+        return float(value)
+
     @field_validator("WALLET_DEDUP_WINDOW_SECONDS", "WALLET_VELOCITY_WINDOW_SECONDS")
     @classmethod
     def _validate_replan_windows(cls, value: int, info) -> int:
@@ -456,6 +515,30 @@ class Settings(BaseSettings):
                 f"and {WALLET_VELOCITY_MAX_CREDITS_CEILING}"
             )
         return value
+
+    @field_validator("OTEL_EXPORTER_OTLP_ENDPOINT")
+    @classmethod
+    def _validate_otlp_endpoint(cls, value: str) -> str:
+        endpoint = value.strip()
+        if not endpoint:
+            return ""
+        if any(ord(char) < 32 or ord(char) == 127 for char in endpoint):
+            raise ValueError("OTEL_EXPORTER_OTLP_ENDPOINT contains control characters")
+        if len(endpoint) > 512:
+            raise ValueError("OTEL_EXPORTER_OTLP_ENDPOINT is too long")
+        if not endpoint.startswith(("http://", "https://")):
+            raise ValueError("OTEL_EXPORTER_OTLP_ENDPOINT must be an http(s) URL")
+        return endpoint
+
+    @field_validator("OTEL_SERVICE_NAME")
+    @classmethod
+    def _validate_otel_service_name(cls, value: str) -> str:
+        name = value.strip()
+        if not name or len(name) > 128:
+            raise ValueError("OTEL_SERVICE_NAME must be 1 to 128 characters")
+        if any(ord(char) < 32 or ord(char) == 127 for char in name):
+            raise ValueError("OTEL_SERVICE_NAME contains control characters")
+        return name
 
     @property
     def replan_casefold_fields(self) -> frozenset[str]:

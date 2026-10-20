@@ -7,3 +7,7 @@ pytest>=9.1.1
 pytest-asyncio>=1.4.0
 pytest-cov>=7.1.0
 mypy>=2.4.0            # Type checking
+# Optional OpenTelemetry extra, installed for tests only. Not a runtime dep.
+opentelemetry-api>=1.27.0,<2
+opentelemetry-sdk>=1.27.0,<2
+opentelemetry-exporter-otlp>=1.27.0,<2

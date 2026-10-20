@@ -33,6 +33,7 @@ from sqlalchemy.exc import IntegrityError
 
 from ..audit.lightweight import record_audit
 from ..core.config import DuplicateGuardMode, get_settings
+from ..core.tracing import start_span
 from ..policy.jev_guard import evaluate_jev_guard
 from ..services.jev_guard_metadata import jev_audit_id, load_jev_guard_metadata
 from ..core.auth import (
@@ -89,6 +90,14 @@ from ..services.mcp_dispatch_reconciliation import (
     get_mcp_dispatch_reconciliation_service,
 )
 from ..services.replan_guard import ReplanReservation, get_replan_guard
+from ..services.upstream_admission import (
+    PRE_DISPATCH_TRANSPORT_FAILURE_CODE,
+    UpstreamAdmissionRefusal,
+    UpstreamAdmissionSlot,
+    get_upstream_admission_gate,
+    upstream_admission_key,
+    upstream_limits_enabled,
+)
 from ..services.upstream_mcp import (
     UpstreamMcpDeliveryUncertainError,
     UpstreamMcpDispatchClaimUnavailableError,
@@ -238,6 +247,15 @@ class WalletGuardUnavailableSignal(HumanApprovalPendingSignal):
     A subclass so every handler that already maps the retryable
     approval-pending condition (-32005, key released, nothing charged) maps
     this one too: no receipt, nothing charged, same key retryable.
+    """
+
+
+class UpstreamAdmissionRejected(HumanApprovalPendingSignal):
+    """Upstream concurrency or circuit breaker refused the call before effects.
+
+    No permit reservation, no debit, no dispatch, and no receipt. The
+    idempotency key was released, so the same invoke can be retried after
+    ``retry_after_seconds``.
     """
 
 
@@ -696,7 +714,12 @@ async def handle_messages(
             )
         except HumanApprovalPendingSignal as e:
             mark_current_request(
-                gateway_outcome="unknown", reason_code="human_approval_pending"
+                gateway_outcome="unknown",
+                reason_code=(
+                    str(e)
+                    if isinstance(e, UpstreamAdmissionRejected)
+                    else "human_approval_pending"
+                ),
             )
             error_payload: dict[str, Any] = {
                 "code": e.jsonrpc_code,
@@ -1265,6 +1288,91 @@ def _replan_reservation_releasable(
     return False
 
 
+def _observe_upstream_admission(
+    slot: UpstreamAdmissionSlot | None, *, failure: bool
+) -> None:
+    """Record breaker state without changing the call that is in flight.
+
+    A bug in the breaker must not turn ``delivery_uncertain`` into a
+    different error, so observation failures are logged and swallowed.
+    """
+    if slot is None:
+        return
+    try:
+        if failure:
+            slot.observe_failure()
+        else:
+            slot.observe_success()
+    except Exception:
+        logger.exception("upstream_admission_observe_failed")
+
+
+async def _abandon_for_upstream_admission(
+    *,
+    idem: Any,
+    idem_begin: Any,
+    wallet_id: str,
+    idempotency_endpoint: str,
+    idempotency_key: str | None,
+    decision: Any,
+    endpoint: str,
+    transport: str,
+    permit_id: str | None,
+    reason: str,
+    retry_after_seconds: int,
+) -> None:
+    """Free the in-progress key after a pre-effect upstream admission refusal.
+
+    Nothing has been reserved or charged. The audit row is not a receipt.
+    The key is released even when the audit write fails or the task is
+    cancelled, so the retry is not stuck on ``idempotency_in_progress``.
+    ``CancelledError`` is re-raised after the abandon.
+
+    Abandon runs on its own task behind ``asyncio.shield``. On Python 3.11+
+    a cancelling task raises ``CancelledError`` at the next await, so a bare
+    ``await idem.abandon(...)`` during cleanup can be interrupted (especially
+    by a second cancel while the delete is in flight). Shielding keeps the
+    delete running; we then await that task to completion and re-raise.
+    """
+    try:
+        try:
+            await _audit_mcp_invocation(
+                effects_committed=False,
+                decision=decision,
+                endpoint=endpoint,
+                transport=transport,
+                ok=False,
+                error=reason,
+                extra_metadata={
+                    "permit_id": permit_id,
+                    "idempotency_key": idempotency_key,
+                    "retry_after_seconds": retry_after_seconds,
+                },
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(
+                "upstream_admission_audit_failed",
+                extra={"wallet_id": wallet_id, "reason": reason},
+            )
+    finally:
+        if idem_begin is not None and idempotency_key:
+            abandon_task = asyncio.create_task(
+                idem.abandon(
+                    wallet_id=wallet_id,
+                    endpoint=idempotency_endpoint,
+                    idempotency_key=idempotency_key,
+                    expected_record_id=idem_begin.record_id,
+                )
+            )
+            try:
+                await asyncio.shield(abandon_task)
+            except asyncio.CancelledError:
+                await abandon_task
+                raise
+
+
 async def _run_inner_settling_replan_guard(
     owned_record: dict[str, Any], **kwargs: Any
 ) -> dict:
@@ -1283,6 +1391,12 @@ async def _run_inner_settling_replan_guard(
         ):
             await get_replan_guard().release(reservation)
         raise
+    finally:
+        # Sync release: cancellation during the replan await above still runs
+        # this, and close() does not await, so the concurrency slot cannot leak.
+        slot = owned_record.get("upstream_admission")
+        if slot is not None:
+            slot.close()
 
 
 async def _action_request_denial_receipt(
@@ -1349,7 +1463,7 @@ async def _action_request_denial_receipt(
             "request_hash": sha256_hex(denied_request),
         },
     )
-    receipt = await get_receipt_service().create_receipt(
+    receipt = await _traced_mcp_receipt(
         permit_id=permit_id,
         wallet_id=wallet_id,
         key_id=auth.key_id,
@@ -1994,6 +2108,44 @@ async def _execute_registered_tool_inner(
                 receipt=receipt_payload,
                 details=permit_validation.details,
             )
+
+    # Upstream concurrency and circuit breaker, before any reservation.
+    # Permit validation above does not reserve. IGA use, the wallet re-plan
+    # lock, permit budget, the debit, and the dispatch claim all sit below
+    # this point. With the default settings this block does not run, so the
+    # call proceeds exactly as it did without the gate.
+    # Live settings, not the object captured at import. Tests clear the
+    # settings cache; the gate must see the same object try_admit reads.
+    if execution_backend == "upstream_mcp" and upstream_limits_enabled():
+        gate_decision = get_upstream_admission_gate().try_admit(
+            upstream_admission_key(service)
+        )
+        if isinstance(gate_decision, UpstreamAdmissionRefusal):
+            await _abandon_for_upstream_admission(
+                idem=idem,
+                idem_begin=idem_begin,
+                wallet_id=wallet_id,
+                idempotency_endpoint=idempotency_endpoint,
+                idempotency_key=idempotency_key,
+                decision=decision,
+                endpoint=endpoint,
+                transport=transport,
+                permit_id=permit_id,
+                reason=gate_decision.reason,
+                retry_after_seconds=gate_decision.retry_after_seconds,
+            )
+            raise UpstreamAdmissionRejected(
+                gate_decision.reason,
+                data={
+                    "reason_code": gate_decision.reason,
+                    "retry_after_seconds": gate_decision.retry_after_seconds,
+                },
+                status_code=503,
+            )
+        if owned_record is None:
+            gate_decision.close()
+            raise RuntimeError("upstream_admission_owner_missing")
+        owned_record["upstream_admission"] = gate_decision
 
     # --- Enterprise IGA gate (app/core/oidc_iga) ---------------------------
     # When the call rode in with an Authorization bearer whose issuer is a
@@ -3050,6 +3202,11 @@ async def _execute_registered_tool_inner(
             native_idempotency_key=(
                 action_identity.native_idempotency_key if action_identity else None
             ),
+            upstream_admission=(
+                owned_record.get("upstream_admission")
+                if owned_record is not None
+                else None
+            ),
             tool_name=tool_name,
             request_payload=effective_request_payload,
             arguments=arguments,
@@ -3335,7 +3492,7 @@ async def _execute_registered_tool_inner(
             if governed_call and permit_model:
                 if receipt is None:
                     try:
-                        receipt = await get_receipt_service().create_receipt(
+                        receipt = await _traced_mcp_receipt(
                             permit_id=permit_model.permit_id,
                             wallet_id=wallet_id,
                             key_id=auth.key_id,
@@ -3510,6 +3667,7 @@ async def _execute_upstream_after_charge(
     policy_metadata: dict[str, Any],
     approval_check: Any | None,
     native_idempotency_key: str | None = None,
+    upstream_admission: UpstreamAdmissionSlot | None = None,
 ) -> dict[str, Any]:
     """Dispatch once and durably classify every post-charge remote outcome."""
 
@@ -3577,6 +3735,9 @@ async def _execute_upstream_after_charge(
             before_dispatch=claim_dispatch,
         )
     except UpstreamMcpReturnedError as exc:
+        # A tool-level error means the upstream answered. That is not a
+        # transport failure, so it must not open the breaker.
+        _observe_upstream_admission(upstream_admission, failure=False)
         try:
             terminal = await dispatch_service.complete(
                 attempt_id=dispatch_attempt.attempt_id,
@@ -3623,6 +3784,8 @@ async def _execute_upstream_after_charge(
         # shared charge, budget, attempt, receipt, or idempotency record.
         raise IdempotencyInProgressError("idempotency_in_progress") from None
     except UpstreamMcpPreDispatchError as exc:
+        if exc.code == PRE_DISPATCH_TRANSPORT_FAILURE_CODE:
+            _observe_upstream_admission(upstream_admission, failure=True)
         terminal_payload = {
             "error": "failed_refunded",
             "error_code": exc.code,
@@ -3669,6 +3832,10 @@ async def _execute_upstream_after_charge(
         )
         raise AssertionError("unreachable")
     except UpstreamMcpDeliveryUncertainError:
+        # The call already passed the dispatch checkpoint. Counting it toward
+        # the breaker must not change the charged delivery_uncertain outcome
+        # below: no refund, no redispatch, same receipt.
+        _observe_upstream_admission(upstream_admission, failure=True)
         terminal_payload = {"error": "delivery_uncertain"}
         terminal = await dispatch_service.complete(
             attempt_id=dispatch_attempt.attempt_id,
@@ -3716,6 +3883,7 @@ async def _execute_upstream_after_charge(
         await raise_response_rejected(exc.code)
         raise AssertionError("unreachable")
 
+    _observe_upstream_admission(upstream_admission, failure=False)
     try:
         terminal = await dispatch_service.complete(
             attempt_id=dispatch_attempt.attempt_id,
@@ -3752,7 +3920,7 @@ async def _execute_upstream_after_charge(
         },
     )
     try:
-        receipt = await get_receipt_service().create_receipt(
+        receipt = await _traced_mcp_receipt(
             permit_id=permit_model.permit_id,
             wallet_id=wallet_id,
             key_id=key_id,
@@ -4018,7 +4186,7 @@ async def _raise_charged_upstream_failure(
         },
     )
     try:
-        receipt = await get_receipt_service().create_receipt(
+        receipt = await _traced_mcp_receipt(
             permit_id=permit_model.permit_id,
             wallet_id=wallet_id,
             key_id=key_id,
@@ -4110,6 +4278,22 @@ def _charge_units_for_registered_cost(
     category: ServiceCategory,
 ) -> Decimal:
     return charge_units_for(registered_cost, category)
+
+
+async def _traced_mcp_receipt(**kwargs: Any) -> Any:
+    """Write a governed MCP receipt inside an ``mcp.receipt`` span.
+
+    The span records the tool name, outcome, wallet-id hash, and attempt id.
+    The payload and arguments stay off the span.
+    """
+    async with start_span(
+        "mcp.receipt",
+        tool_name=kwargs.get("tool"),
+        outcome_state=kwargs.get("outcome"),
+        wallet_id=kwargs.get("wallet_id"),
+        attempt_id=kwargs.get("dispatch_attempt_id"),
+    ):
+        return await get_receipt_service().create_receipt(**kwargs)
 
 
 def _receipt_response_payload(receipt: Any) -> dict[str, Any]:
@@ -4346,7 +4530,7 @@ async def _finalize_governed_denial(
         )
         idempotency_record_id = record.record_id if record is not None else None
     try:
-        receipt = await get_receipt_service().create_receipt(
+        receipt = await _traced_mcp_receipt(
             permit_id=permit_model.permit_id,
             wallet_id=wallet_id,
             key_id=key_id,
@@ -5051,6 +5235,16 @@ async def invoke_tool(
         if response_payload.get("isError") is False:
             mark_current_request(gateway_outcome="succeeded")
         return ToolCallResponse(**response_payload)
+    except UpstreamAdmissionRejected as exc:
+        mark_current_request(gateway_outcome="unknown", reason_code=str(exc))
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={
+                "error": str(exc),
+                "reason_code": str(exc),
+                "retry_after_seconds": exc.data.get("retry_after_seconds"),
+            },
+        ) from exc
     except HumanApprovalPendingSignal as exc:
         mark_current_request(
             gateway_outcome="unknown", reason_code="human_approval_pending"
