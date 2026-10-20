@@ -6,7 +6,7 @@ vocabulary, and the claims that are deliberately NOT made.
 
 Origin roles:
 
-- https://www.thisisatest.tech: human design-partner site and published proof.
+- https://www.agentmiddleware.dev: human design-partner site and published proof.
   Offers free sandbox demo keys with no account needed. Executes no tools and
   holds no customer data.
 - https://api.thisisatest.tech: the gateway itself. All protected actions live
@@ -26,7 +26,7 @@ It is not an agent runtime, an LLM provider, an IAM replacement, a marketplace,
 one distributed ACID transaction, or proof of the downstream effect.
 
 Protected calls use `X-API-Key`. Free sandbox demo keys are available at
-https://www.thisisatest.tech/demo-key/ with no account needed. Production keys
+https://www.agentmiddleware.dev/demo-key/ with no account needed. Production keys
 are issued to design partners.
 
 ## Transaction loop
@@ -59,7 +59,7 @@ logical action -> authorize -> reserve allowance -> debit -> claim dispatch
 
 ## Published proof
 
-https://www.thisisatest.tech/proof/
+https://www.agentmiddleware.dev/proof/
 
 Two files are published there: the portable receipt and the exact public-key
 snapshot that matches it. `b2a-verify-receipt --bundle receipt.json --keys
@@ -75,7 +75,7 @@ trusted channel before relying on issuer identity.
 
 The standalone verifier is published next to the receipt, so no repository
 access is needed: download receipt.json, trust-keys.json, and verify_receipt.py
-from https://www.thisisatest.tech/proof/, run `python3 -m pip install
+from https://www.agentmiddleware.dev/proof/, run `python3 -m pip install
 cryptography`, then `python3 verify_receipt.py --bundle receipt.json --keys
 trust-keys.json --expect-issuer https://api.thisisatest.tech`. Keyless live
 calls: https://api.thisisatest.tech/health and
@@ -138,9 +138,9 @@ operate consequential autonomous actions. The engagement is one tool, one
 operator, one retry-sensitive action, scoped privately. Production rollout is
 limited to design partners.
 
-Human site: https://www.thisisatest.tech/
-Offline receipt verification: https://www.thisisatest.tech/proof/
+Human site: https://www.agentmiddleware.dev/
+Offline receipt verification: https://www.agentmiddleware.dev/proof/
 Comparison with named alternatives, including the rows this loses:
-https://www.thisisatest.tech/compare/
+https://www.agentmiddleware.dev/compare/
 Source repository: https://github.com/agentmiddleware/agent-middleware-api (public)
-Security contact: https://www.thisisatest.tech/.well-known/security.txt
+Security contact: https://www.agentmiddleware.dev/.well-known/security.txt
