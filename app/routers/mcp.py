@@ -1323,35 +1323,40 @@ async def _abandon_for_upstream_admission(
     """Free the in-progress key after a pre-effect upstream admission refusal.
 
     Nothing has been reserved or charged. The audit row is not a receipt.
-    The key is released even when the audit write fails, so the retry is
-    not stuck on ``idempotency_in_progress``.
+    The key is released even when the audit write fails or the task is
+    cancelled, so the retry is not stuck on ``idempotency_in_progress``.
+    ``CancelledError`` is re-raised after the abandon.
     """
     try:
-        await _audit_mcp_invocation(
-            effects_committed=False,
-            decision=decision,
-            endpoint=endpoint,
-            transport=transport,
-            ok=False,
-            error=reason,
-            extra_metadata={
-                "permit_id": permit_id,
-                "idempotency_key": idempotency_key,
-                "retry_after_seconds": retry_after_seconds,
-            },
-        )
-    except Exception:
-        logger.exception(
-            "upstream_admission_audit_failed",
-            extra={"wallet_id": wallet_id, "reason": reason},
-        )
-    if idem_begin is not None and idempotency_key:
-        await idem.abandon(
-            wallet_id=wallet_id,
-            endpoint=idempotency_endpoint,
-            idempotency_key=idempotency_key,
-            expected_record_id=idem_begin.record_id,
-        )
+        try:
+            await _audit_mcp_invocation(
+                effects_committed=False,
+                decision=decision,
+                endpoint=endpoint,
+                transport=transport,
+                ok=False,
+                error=reason,
+                extra_metadata={
+                    "permit_id": permit_id,
+                    "idempotency_key": idempotency_key,
+                    "retry_after_seconds": retry_after_seconds,
+                },
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(
+                "upstream_admission_audit_failed",
+                extra={"wallet_id": wallet_id, "reason": reason},
+            )
+    finally:
+        if idem_begin is not None and idempotency_key:
+            await idem.abandon(
+                wallet_id=wallet_id,
+                endpoint=idempotency_endpoint,
+                idempotency_key=idempotency_key,
+                expected_record_id=idem_begin.record_id,
+            )
 
 
 async def _run_inner_settling_replan_guard(
