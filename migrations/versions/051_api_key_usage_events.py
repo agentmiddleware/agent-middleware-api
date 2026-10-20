@@ -51,23 +51,35 @@ def upgrade():
             key_id,
             DATE(created_at) AS day,
             COUNT(*) AS calls,
-            SUM(CASE WHEN status_code >= 400 AND status_code < 500 THEN 1 ELSE 0 END) AS count_4xx,
+            SUM(
+                CASE WHEN status_code >= 400 AND status_code < 500
+                THEN 1 ELSE 0 END
+            ) AS count_4xx,
             SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END) AS count_5xx,
-            CAST(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY latency_ms) AS INTEGER) AS p50_latency_ms,
-            CAST(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY latency_ms) AS INTEGER) AS p95_latency_ms,
+            CAST(
+                PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY latency_ms)
+                AS INTEGER
+            ) AS p50_latency_ms,
+            CAST(
+                PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY latency_ms)
+                AS INTEGER
+            ) AS p95_latency_ms,
             MIN(created_at) AS first_call,
             MAX(created_at) AS last_call
         FROM api_key_usage_events
         GROUP BY key_id, DATE(created_at)
         """
         if op.get_bind().dialect.name == "postgresql"
-        else """
+        else         """
         CREATE VIEW api_key_usage_daily AS
         SELECT
             key_id,
             DATE(created_at) AS day,
             COUNT(*) AS calls,
-            SUM(CASE WHEN status_code >= 400 AND status_code < 500 THEN 1 ELSE 0 END) AS count_4xx,
+            SUM(
+                CASE WHEN status_code >= 400 AND status_code < 500
+                THEN 1 ELSE 0 END
+            ) AS count_4xx,
             SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END) AS count_5xx,
             (
                 SELECT latency_ms
@@ -76,7 +88,8 @@ def upgrade():
                            ROW_NUMBER() OVER (ORDER BY latency_ms) as rn,
                            COUNT(*) OVER () as cnt
                     FROM api_key_usage_events e2
-                    WHERE e2.key_id = e1.key_id AND DATE(e2.created_at) = DATE(e1.created_at)
+                    WHERE e2.key_id = e1.key_id
+                      AND DATE(e2.created_at) = DATE(e1.created_at)
                 ) sub
                 WHERE rn = (cnt + 1) / 2
             ) AS p50_latency_ms,
@@ -87,7 +100,8 @@ def upgrade():
                            ROW_NUMBER() OVER (ORDER BY latency_ms) as rn,
                            COUNT(*) OVER () as cnt
                     FROM api_key_usage_events e2
-                    WHERE e2.key_id = e1.key_id AND DATE(e2.created_at) = DATE(e1.created_at)
+                    WHERE e2.key_id = e1.key_id
+                      AND DATE(e2.created_at) = DATE(e1.created_at)
                 ) sub
                 WHERE rn = CAST(cnt * 0.95 AS INTEGER)
             ) AS p95_latency_ms,

@@ -572,7 +572,8 @@ class TestMigration051:
                     """
                     SELECT name
                     FROM sqlite_master
-                    WHERE type = 'index' AND name = 'ix_api_key_usage_events_key_id_created_at'
+                    WHERE type = 'index'
+                      AND name = 'ix_api_key_usage_events_key_id_created_at'
                     """
                 )
             )
