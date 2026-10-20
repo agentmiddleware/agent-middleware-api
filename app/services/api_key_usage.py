@@ -57,7 +57,7 @@ async def record_api_key_usage_event(
         )
 
         session_factory = get_session_factory()
-        async with session_factory()() as session:
+        async with session_factory() as session:
             session.add(event)
             await session.commit()
 

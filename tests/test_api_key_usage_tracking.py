@@ -35,7 +35,7 @@ def admin_key():
 async def db_session():
     """Provide a database session for tests."""
     session_factory = get_session_factory()
-    async with session_factory()() as session:
+    async with session_factory() as session:
         yield session
 
 
@@ -61,7 +61,7 @@ async def create_test_wallet_and_key(tenant=None):
         from app.db.models import WalletModel
 
         session_factory = get_session_factory()
-        async with session_factory()() as session:
+        async with session_factory() as session:
             await session.execute(
                 update(WalletModel)
                 .where(WalletModel.wallet_id == wallet.wallet_id)

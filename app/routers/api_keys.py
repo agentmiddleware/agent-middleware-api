@@ -459,7 +459,7 @@ async def get_daily_usage_stats(
     from ..db.database import get_session_factory
 
     session_factory = get_session_factory()
-    async with session_factory()() as session:
+    async with session_factory() as session:
         # Query the view directly
         query = text(
             """
