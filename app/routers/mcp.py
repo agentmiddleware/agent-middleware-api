@@ -1326,6 +1326,12 @@ async def _abandon_for_upstream_admission(
     The key is released even when the audit write fails or the task is
     cancelled, so the retry is not stuck on ``idempotency_in_progress``.
     ``CancelledError`` is re-raised after the abandon.
+
+    Abandon runs on its own task behind ``asyncio.shield``. On Python 3.11+
+    a cancelling task raises ``CancelledError`` at the next await, so a bare
+    ``await idem.abandon(...)`` during cleanup can be interrupted (especially
+    by a second cancel while the delete is in flight). Shielding keeps the
+    delete running; we then await that task to completion and re-raise.
     """
     try:
         try:
@@ -1351,12 +1357,19 @@ async def _abandon_for_upstream_admission(
             )
     finally:
         if idem_begin is not None and idempotency_key:
-            await idem.abandon(
-                wallet_id=wallet_id,
-                endpoint=idempotency_endpoint,
-                idempotency_key=idempotency_key,
-                expected_record_id=idem_begin.record_id,
+            abandon_task = asyncio.create_task(
+                idem.abandon(
+                    wallet_id=wallet_id,
+                    endpoint=idempotency_endpoint,
+                    idempotency_key=idempotency_key,
+                    expected_record_id=idem_begin.record_id,
+                )
             )
+            try:
+                await asyncio.shield(abandon_task)
+            except asyncio.CancelledError:
+                await abandon_task
+                raise
 
 
 async def _run_inner_settling_replan_guard(

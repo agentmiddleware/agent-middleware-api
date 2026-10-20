@@ -574,32 +574,62 @@ def test_pre_open_success_does_not_close_a_probe_that_failed(
 
 @pytest.mark.anyio
 async def test_refusal_abandons_idempotency_when_audit_is_cancelled(
+    client: AsyncClient,
+    clean_database: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    started = asyncio.Event()
+    """Cancel during audit, then again while abandon awaits; the record must go.
+
+    A non-yielding mock would pass even without ``asyncio.shield``. A second
+    cancel during a real (yielding) abandon is what used to leave the
+    in-progress key stuck.
+    """
+    provisioned = await provision_agent_wallet(client)
+    idem = get_idempotency_service()
+    wallet_id = provisioned["agent_wallet_id"]
+    endpoint = GOVERNED_MCP_IDEMPOTENCY_ENDPOINT
+    idempotency_key = "admission-abandon-cancel"
+    begun = await idem.begin_with_record(
+        wallet_id=wallet_id,
+        endpoint=endpoint,
+        idempotency_key=idempotency_key,
+        request_payload={"tool": "admission-cancel", "arguments": {}},
+    )
+    assert (
+        await idem.get_record(
+            wallet_id=wallet_id,
+            endpoint=endpoint,
+            idempotency_key=idempotency_key,
+        )
+        is not None
+    )
+
+    audit_started = asyncio.Event()
+    abandon_started = asyncio.Event()
+    abandon_release = asyncio.Event()
+    original_abandon = idem.abandon
 
     async def _hang_until_cancelled(**kwargs: Any) -> None:
-        started.set()
+        audit_started.set()
         await asyncio.sleep(30)
 
+    async def _yielding_abandon(**kwargs: Any) -> bool:
+        abandon_started.set()
+        # Block until the test fires a second cancel, so a bare await would
+        # raise CancelledError here and never delete the row.
+        await abandon_release.wait()
+        return await original_abandon(**kwargs)
+
     monkeypatch.setattr("app.routers.mcp._audit_mcp_invocation", _hang_until_cancelled)
-    abandoned: list[dict[str, Any]] = []
-
-    class _Idem:
-        async def abandon(self, **kwargs: Any) -> bool:
-            abandoned.append(kwargs)
-            return True
-
-    class _Begin:
-        record_id = "record-1"
+    monkeypatch.setattr(idem, "abandon", _yielding_abandon)
 
     task = asyncio.create_task(
         _abandon_for_upstream_admission(
-            idem=_Idem(),
-            idem_begin=_Begin(),
-            wallet_id="wallet-1",
-            idempotency_endpoint="/mcp",
-            idempotency_key="key-1",
+            idem=idem,
+            idem_begin=begun,
+            wallet_id=wallet_id,
+            idempotency_endpoint=endpoint,
+            idempotency_key=idempotency_key,
             decision=object(),
             endpoint="/mcp",
             transport="jsonrpc",
@@ -608,18 +638,21 @@ async def test_refusal_abandons_idempotency_when_audit_is_cancelled(
             retry_after_seconds=10,
         )
     )
-    await started.wait()
+    await audit_started.wait()
     task.cancel("audit cancelled")
-    with pytest.raises(asyncio.CancelledError, match="audit cancelled"):
+    await abandon_started.wait()
+    task.cancel("abandon cancelled")
+    abandon_release.set()
+    with pytest.raises(asyncio.CancelledError):
         await task
-    assert abandoned == [
-        {
-            "wallet_id": "wallet-1",
-            "endpoint": "/mcp",
-            "idempotency_key": "key-1",
-            "expected_record_id": "record-1",
-        }
-    ]
+    assert (
+        await idem.get_record(
+            wallet_id=wallet_id,
+            endpoint=endpoint,
+            idempotency_key=idempotency_key,
+        )
+        is None
+    )
 
 
 @pytest.mark.anyio
