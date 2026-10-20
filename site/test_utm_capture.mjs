@@ -12,7 +12,7 @@ function capture(options = {}) {
     document: { referrer: options.referrer || "" },
     location: {
       search: options.search || "",
-      origin: options.origin || "https://www.thisisatest.tech",
+      origin: options.origin || "https://www.agentmiddleware.dev",
     },
     URLSearchParams,
     URL,
@@ -67,13 +67,13 @@ test("the first external referrer is stored once and same-origin referrers are n
 
   const internal = capture({
     search: "?utm_campaign=home",
-    referrer: "https://www.thisisatest.tech/compare/",
+    referrer: "https://www.agentmiddleware.dev/compare/",
   });
   assert.deepEqual(JSON.parse(internal.session.get("amwDemoKeyUtm")), {
     utm_campaign: "home",
   });
 
-  const bare = capture({ referrer: "https://www.thisisatest.tech/" });
+  const bare = capture({ referrer: "https://www.agentmiddleware.dev/" });
   assert.equal(bare.session.size, 0);
   assert.equal(bare.writes, 0);
 });

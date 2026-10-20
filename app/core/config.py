@@ -169,10 +169,15 @@ class Settings(BaseSettings):
     DEMO_MAX_LIVE_KEYS: int = 500
     DEMO_ALERT_ISSUES_PER_HOUR: int = 20
     # Comma-separated origins allowed to mint demo keys from a browser.
-    # Default empty: only no-Origin callers (CLI/SDK/curl) and same-host
-    # pages may mint, so a third-party page cannot farm keys through
-    # visitors' browsers.
-    DEMO_ALLOWED_ORIGINS: str = ""
+    # The default keeps the thisisatest.tech marketing hosts and adds the
+    # agentmiddleware.dev hosts. Callers with no Origin (CLI/SDK/curl) and
+    # same-host pages may also mint. Any other browser origin is refused.
+    DEMO_ALLOWED_ORIGINS: str = (
+        "https://www.thisisatest.tech,"
+        "https://thisisatest.tech,"
+        "https://www.agentmiddleware.dev,"
+        "https://agentmiddleware.dev"
+    )
 
     @field_validator(
         "DEMO_KEY_TTL_DAYS",

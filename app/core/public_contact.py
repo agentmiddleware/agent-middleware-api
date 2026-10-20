@@ -19,6 +19,8 @@ _BLOCKED_BOOKING_HOSTS = {
     "api.thisisatest.tech",
     "thisisatest.tech",
     "www.thisisatest.tech",
+    "agentmiddleware.dev",
+    "www.agentmiddleware.dev",
 }
 
 

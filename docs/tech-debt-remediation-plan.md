@@ -19,7 +19,7 @@
 4. Do **not** introduce new dependencies unless justified.
 5. After each phase: update this checklist (`[x]`), run targeted tests, report with AGENTS.md final-summary format.
 6. Live API: `https://api.thisisatest.tech`;
-   marketing: `https://www.thisisatest.tech/`.
+   marketing: `https://www.agentmiddleware.dev/`.
    Prefer `railway up` from this repo — **do not** “Redeploy from GitHub source” (can roll back to an old image).
 
 ### Global freeze (entire plan)

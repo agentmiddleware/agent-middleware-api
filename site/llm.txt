@@ -1,7 +1,7 @@
 # Agent Middleware API: machine discovery
 
 This origin is the human design-partner site. It offers free sandbox demo keys
-at https://www.thisisatest.tech/demo-key/ with no account needed. Production
+at https://www.agentmiddleware.dev/demo-key/ with no account needed. Production
 keys are issued to design partners. The site does not execute protected tools.
 Platform engineering, AI infrastructure, and security teams operating
 consequential autonomous actions are the buyers; autonomous clients consume
@@ -53,14 +53,14 @@ authentication or permit checks.
 ## Authority
 
 Protected routes use the X-API-Key header. Free sandbox demo keys are available
-at https://www.thisisatest.tech/demo-key/ with no account needed. Production
+at https://www.agentmiddleware.dev/demo-key/ with no account needed. Production
 keys are issued to design partners.
 
 ## Published receipt proof
 
 The public proof page is:
 
-https://www.thisisatest.tech/proof/
+https://www.agentmiddleware.dev/proof/
 
 It labels the evidence as a self-issued sample issued on @@PROOF_RECEIPT_ISSUED@@,
 not customer traction and not a test of the deployment running today. The exact portable receipt and matching key snapshot can be checked
@@ -71,9 +71,9 @@ and verifier files are all public.
 
 Verify the published receipt offline, as on /proof/:
 
-    curl -fsSLO https://www.thisisatest.tech/proof/receipt.json
-    curl -fsSLO https://www.thisisatest.tech/proof/trust-keys.json
-    curl -fsSLO https://www.thisisatest.tech/proof/verify_receipt.py
+    curl -fsSLO https://www.agentmiddleware.dev/proof/receipt.json
+    curl -fsSLO https://www.agentmiddleware.dev/proof/trust-keys.json
+    curl -fsSLO https://www.agentmiddleware.dev/proof/verify_receipt.py
     python3 -m pip install cryptography
     python3 verify_receipt.py --bundle receipt.json --keys trust-keys.json \
       --expect-issuer https://api.thisisatest.tech
@@ -110,17 +110,17 @@ evidence.
 
 ## Humans and operators
 
-https://www.thisisatest.tech/
-https://www.thisisatest.tech/proof/ (download a receipt and verify it offline)
-https://www.thisisatest.tech/compare/ (named alternatives, including the rows this loses)
+https://www.agentmiddleware.dev/
+https://www.agentmiddleware.dev/proof/ (download a receipt and verify it offline)
+https://www.agentmiddleware.dev/compare/ (named alternatives, including the rows this loses)
 https://github.com/agentmiddleware/agent-middleware-api (public source repository)
 
 ## Longer machine brief
 
 The product boundary, the vocabulary, and the claims deliberately NOT made:
 
-https://www.thisisatest.tech/llms-full.txt
+https://www.agentmiddleware.dev/llms-full.txt
 
 ## Security contact
 
-https://www.thisisatest.tech/.well-known/security.txt
+https://www.agentmiddleware.dev/.well-known/security.txt
