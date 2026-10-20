@@ -96,9 +96,24 @@ and turn on code-owner review the day a second maintainer has commit access.
 - The workflow files did not change between the last green push run
   (`44cd144`, 2026-10-16) and the current head, which rules out a broken
   workflow file.
-- By 2026-10-19 07:30 UTC the block had cleared: the pull request that adds
-  this document started all 20 checks normally. The lock is intermittent,
-  which is the point: it returns whenever the month's minutes run out.
+- The block comes and goes in windows. The same no-name `startup_failure`
+  run (GitHub's placeholder when it refuses to start any workflow for an
+  event) fired 139 times since 2026-09-15, clustered on 2026-10-14
+  19:54 to 21:26, 2026-10-17 20:19 to 20:35, 2026-10-19 11:23 to 11:28 and
+  2026-10-19 21:26 to 21:28 UTC, on push and pull-request events alike,
+  including the push of every `main` commit since 2026-10-17. Between those
+  windows (for example this pull request's runs on 2026-10-19 07:30 and
+  2026-10-20 08:50) everything starts normally. The API does not expose the
+  reason; the run page does, as a banner above the empty job list. Open the
+  latest one and read it:
+  <https://github.com/agentmiddleware/agent-middleware-api/actions/runs/39327821138>.
+  A spending-limit message confirms the billing explanation; anything else
+  changes the fix.
+- Until that is settled, every merge into `main` that lands inside a window
+  has no push run, and `railway-deploy.yml` will refuse to release it. Check
+  the Actions tab after each merge; if the push run is the no-name failure,
+  the commit cannot be released until CI has a manual trigger (`ci.yml` has
+  no `workflow_dispatch`) or the release gate accepts a re-run.
 
 ### Why it keeps happening
 
