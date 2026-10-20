@@ -335,15 +335,13 @@ def test_fail_open_span_enter_exit_preserve_body_result(caplog) -> None:
 
 
 def test_otlp_endpoint_appends_traces_path() -> None:
+    base = "http://collector.example:4318"
+    traces = f"{base}/v1/traces"
     assert otlp_traces_endpoint("") is None
-    assert (
-        otlp_traces_endpoint("http://collector.example:4318")
-        == "http://collector.example:4318/v1/traces"
-    )
-    assert (
-        otlp_traces_endpoint("http://collector.example:4318/v1/traces")
-        == "http://collector.example:4318/v1/traces"
-    )
+    assert otlp_traces_endpoint(base) == traces
+    assert otlp_traces_endpoint(f"{base}/") == traces
+    assert otlp_traces_endpoint(traces) == traces
+    assert otlp_traces_endpoint(f"{traces}/") == traces
 
 
 def test_disabled_emits_nothing_and_adds_no_middleware(monkeypatch) -> None:
