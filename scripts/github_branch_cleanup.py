@@ -78,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"gh api failed: {exc}", file=sys.stderr)
         return 2
 
-    merged: list[str] = []
+    merged: list[tuple[str, str]] = []  # (name, sha seen during the scan)
     stale: list[tuple[str, str, int]] = []
     skipped = {"protected": 0, "kept": 0, "base": 0}
     cutoff = None
@@ -106,11 +106,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  ? {name}: compare failed ({exc})")
             continue
         if compare.get("ahead_by") == 0:
-            merged.append(name)
+            merged.append((name, branch["commit"]["sha"]))
         elif cutoff is not None:
-            commits = compare.get("commits") or []
-            last = commits[-1]["commit"]["committer"]["date"] if commits else None
-            if last and datetime.fromisoformat(last.replace("Z", "+00:00")) < cutoff:
+            # The compare response lists at most one page of commits, oldest
+            # first, so its last entry is not the tip of a long branch. Read
+            # the tip commit itself.
+            tip = gh_api("GET", f"repos/{args.repo}/commits/{branch['commit']['sha']}")
+            last = tip["commit"]["committer"]["date"]
+            if datetime.fromisoformat(last.replace("Z", "+00:00")) < cutoff:
                 stale.append((name, last[:10], int(compare.get("ahead_by", 0))))
         if index % 50 == 0:
             print(f"  ... {index}/{len(branches)}")
@@ -120,7 +123,7 @@ def main(argv: list[str] | None = None) -> int:
         f"{skipped['base']} base."
     )
     print(f"\nMerged into {args.base} (safe to delete): {len(merged)}")
-    for name in merged:
+    for name, _sha in merged:
         print(f"  {name}")
     if cutoff is not None:
         print(
@@ -134,15 +137,34 @@ def main(argv: list[str] | None = None) -> int:
             print("\nDry run. Re-run with --apply to delete the merged branches.")
         return 0
 
+    # The scan above takes minutes on a large repository. A branch that moved
+    # in the meantime is re-checked right before its ref is deleted: same tip
+    # as during the scan, and still zero commits ahead of the base.
     failures = 0
-    for name in merged:
+    deleted = 0
+    for name, scanned_sha in merged:
+        encoded = quote(name, safe="")
         try:
-            gh_api("DELETE", f"repos/{args.repo}/git/refs/heads/{quote(name, safe='')}")
+            tip = gh_api("GET", f"repos/{args.repo}/branches/{encoded}")["commit"][
+                "sha"
+            ]
+            if tip != scanned_sha:
+                print(f"  skipped {name}: moved since the scan ({tip[:8]})")
+                continue
+            recheck = gh_api(
+                "GET",
+                f"repos/{args.repo}/compare/{quote(args.base, safe='')}...{encoded}",
+            )
+            if recheck.get("ahead_by") != 0:
+                print(f"  skipped {name}: now {recheck.get('ahead_by')} ahead")
+                continue
+            gh_api("DELETE", f"repos/{args.repo}/git/refs/heads/{encoded}")
+            deleted += 1
             print(f"  deleted {name}")
         except RuntimeError as exc:
             failures += 1
             print(f"  failed {name}: {exc}")
-    print(f"\nDeleted {len(merged) - failures} of {len(merged)} merged branches.")
+    print(f"\nDeleted {deleted} of {len(merged)} merged branches.")
     return 1 if failures else 0
 
 

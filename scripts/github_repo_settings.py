@@ -146,6 +146,15 @@ def check_branch_protection(
             raise
         rule = None
 
+    # Fields this script does not manage but the PUT would reset to false if
+    # left out; replayed from the live rule so an unrelated fix cannot
+    # silently switch them off.
+    passthrough = {
+        "required_linear_history": False,
+        "block_creations": False,
+        "lock_branch": False,
+        "allow_fork_syncing": False,
+    }
     if rule is None:
         contexts = sorted(fallback_checks)
         strict = True
@@ -156,6 +165,8 @@ def check_branch_protection(
         contexts = sorted(checks.get("contexts") or [])
         strict = bool(checks.get("strict", True))
         current = _protection_view(rule)
+        for key in passthrough:
+            passthrough[key] = bool((rule.get(key) or {}).get("enabled"))
 
     print(
         f"  required checks kept as-is ({len(contexts)}): {', '.join(contexts) or '-'}"
@@ -181,6 +192,7 @@ def check_branch_protection(
         "restrictions": None,
         "allow_force_pushes": PROTECTION_TARGET["allow_force_pushes"],
         "allow_deletions": PROTECTION_TARGET["allow_deletions"],
+        **passthrough,
     }
     if apply:
         gh_api("PUT", f"repos/{repo}/branches/{branch}/protection", body)
