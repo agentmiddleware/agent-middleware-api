@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { runInNewContext } from "node:vm";
+import { createContext, runInContext } from "node:vm";
 
 const script = readFileSync(new URL("./home-key.js", import.meta.url), "utf8");
+const captureScript = readFileSync(new URL("./utm-capture.js", import.meta.url), "utf8");
 const template = `git clone https://github.com/agentmiddleware/amw-demo.git
 cd amw-demo
 python3 -m venv .venv
@@ -13,7 +14,7 @@ export AMW_API_KEY='YOUR_DEMO_KEY'
 export AMW_WALLET_ID='YOUR_WALLET_ID'
 python examples/permit_echo_retry.py`;
 
-function makePage(fetchResponse, { copyFails = false } = {}) {
+function makePage(fetchResponse, { copyFails = false, capture = true, search = "", referrer = "", session: stored = {} } = {}) {
   const ids = [
     "home-key-trigger", "home-key-panel", "home-key-close", "home-key-status",
     "home-key-title", "home-key-result", "home-key-error", "home-key-error-message",
@@ -44,12 +45,17 @@ function makePage(fetchResponse, { copyFails = false } = {}) {
   elements.get("home-quickstart-code").select = undefined;
   const requests = [];
   const copies = [];
+  const session = new Map(Object.entries(stored));
   const forbidden = () => { throw new Error("key must not be stored or logged"); };
-  runInNewContext(script, {
+  const context = createContext({
     document: {
+      referrer,
       getElementById(id) { return elements.get(id); },
       set cookie(_) { forbidden(); },
     },
+    location: { search, origin: "https://www.agentmiddleware.dev" },
+    URL,
+    URLSearchParams,
     async fetch(url, options) {
       requests.push([url, options]);
       return fetchResponse();
@@ -63,14 +69,20 @@ function makePage(fetchResponse, { copyFails = false } = {}) {
       },
     },
     localStorage: { getItem: forbidden, setItem: forbidden },
-    sessionStorage: { getItem: forbidden, setItem: forbidden },
+    sessionStorage: {
+      getItem(key) { return session.has(key) ? session.get(key) : null; },
+      setItem(key, value) { session.set(key, String(value)); },
+    },
     console: { log: forbidden, warn: forbidden, error: forbidden, info: forbidden, debug: forbidden, table: forbidden },
     window: { va: forbidden },
-  }, { filename: "home-key.js" });
+  });
+  if (capture) runInContext(captureScript, context, { filename: "utm-capture.js" });
+  runInContext(script, context, { filename: "home-key.js" });
   return {
     elements,
     requests,
     copies,
+    session,
     async click(id) {
       const element = elements.get(id);
       if (element.disabled || element.hidden) return;
@@ -79,7 +91,7 @@ function makePage(fetchResponse, { copyFails = false } = {}) {
   };
 }
 
-function issuedResponse(apiKey = "b2a_test", walletId = "agt-test", credits = "1000") {
+function issuedResponse(apiKey = "b2a_" + "test", walletId = "agt-test", credits = "1000") {
   return {
     status: 201,
     async json() {
@@ -134,6 +146,49 @@ test("idle, loading, and success issue one empty POST and fill the live quicksta
   await page.click("home-key-trigger");
   assert.equal(get("home-key-panel").hidden, false);
   assert.equal(page.requests.length, 1);
+});
+
+test("inline issuance sends UTM and referrer without storing the issued key", async () => {
+  const issuedKey = "not a real key";
+  const page = makePage(() => issuedResponse(issuedKey), {
+    search: "?utm_source=newsletter&utm_medium=%20&utm_term=receipts",
+    referrer: " https://news.example/item ",
+    session: {
+      amwDemoKeyUtm: JSON.stringify({ utm_source: "old-source", utm_campaign: "launch" }),
+    },
+  });
+  const expected = {
+    utm_source: "newsletter",
+    utm_campaign: "launch",
+    utm_term: "receipts",
+    referrer: "https://news.example/item",
+  };
+  await page.click("home-key-trigger");
+  assert.equal(page.requests.length, 1);
+  const [, request] = page.requests[0];
+  assert.equal(request.headers["Content-Type"], "application/json");
+  assert.deepEqual(JSON.parse(request.body), expected);
+  assert.deepEqual(JSON.parse(page.session.get("amwDemoKeyUtm")), expected);
+  assert.equal(page.elements.get("home-key-value").value, issuedKey);
+  assert.equal(request.body.includes(issuedKey), false);
+  assert.equal([...page.session.values()].some((value) => value.includes(issuedKey)), false);
+
+  const sameOrigin = makePage(() => issuedResponse(), {
+    referrer: "https://www.agentmiddleware.dev/docs",
+  });
+  await sameOrigin.click("home-key-trigger");
+  assert.deepEqual(JSON.parse(sameOrigin.requests[0][1].body), {
+    referrer: "https://www.agentmiddleware.dev/docs",
+  });
+  assert.equal(sameOrigin.session.size, 0);
+});
+
+test("issuance still works if the attribution script does not load", async () => {
+  const page = makePage(() => issuedResponse(), { capture: false });
+  await page.click("home-key-trigger");
+  assert.equal(page.requests.length, 1);
+  assert.deepEqual(Object.keys(page.requests[0][1]).sort(), ["credentials", "method"]);
+  assert.equal(page.elements.get("home-key-result").hidden, false);
 });
 
 test("reveal and copy controls use full values and quote shell commands", async () => {

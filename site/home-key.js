@@ -100,12 +100,20 @@
     result.hidden = true;
     error.hidden = true;
 
+    const attribution = typeof captureAttribution === "function" ? captureAttribution() : {};
+    if (typeof persistAttribution === "function") persistAttribution(attribution);
+    const referrer = attribution.referrer ||
+      (typeof pageReferrer === "function" ? pageReferrer() : "");
+    if (referrer) attribution.referrer = referrer;
+    const request = { method: "POST", credentials: "omit" };
+    if (Object.keys(attribution).length > 0) {
+      request.headers = { "Content-Type": "application/json" };
+      request.body = JSON.stringify(attribution);
+    }
+
     let response;
     try {
-      response = await fetch("https://api.thisisatest.tech/v1/demo/keys", {
-        method: "POST",
-        credentials: "omit",
-      });
+      response = await fetch("https://api.thisisatest.tech/v1/demo/keys", request);
     } catch {
       showFailure(false);
       return;
