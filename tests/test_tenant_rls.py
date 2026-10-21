@@ -33,6 +33,7 @@ from app.db import tenant_rls
 from app.db.models import LedgerEntryModel, PermitModel, SigningKeyModel, WalletModel
 from app.db.tenant_rls import (
     RLS_TABLES,
+    RLS_POSTURE_TABLES,
     RlsScope,
     TenantRlsPostureError,
     TenantScopedSession,
@@ -135,8 +136,8 @@ async def test_scopes_nest_and_reset():
 
 def test_enable_rls_statements_cover_every_table():
     statements = enable_rls_statements()
-    assert len(statements) == 2 * len(RLS_TABLES)
-    for table in RLS_TABLES:
+    assert len(statements) == 2 * len(RLS_POSTURE_TABLES)
+    for table in RLS_POSTURE_TABLES:
         assert f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY" in statements
         assert f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY" in statements
 
@@ -562,6 +563,43 @@ async def test_explicit_bypass_sees_every_wallet(seeded):
 
 
 @pytest.mark.anyio
+async def test_api_key_usage_view_requires_admin_bypass(rls_db):
+    engine = _engine(rls_db["app_url"])
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text("SELECT set_config('app.rls_bypass', 'on', true)"))
+            await conn.execute(
+                text(
+                    "INSERT INTO api_key_usage_events "
+                    "(id, key_id, tenant, method, endpoint, status_code, "
+                    "latency_ms, created_at) VALUES "
+                    "('rls-usage-event', 'rls-key', 'demo', 'GET', "
+                    "'/v1/me/authority', 200, 7, '2026-10-20 12:00:00')"
+                )
+            )
+            assert (
+                await conn.scalar(text("SELECT calls FROM api_key_usage_daily"))
+            ) == 1
+
+        async with engine.connect() as conn:
+            assert (
+                await conn.scalar(text("SELECT COUNT(*) FROM api_key_usage_events"))
+                == 0
+            )
+            assert (
+                await conn.scalar(text("SELECT COUNT(*) FROM api_key_usage_daily")) == 0
+            )
+            await conn.execute(
+                text("SELECT set_config('app.current_wallet_id', 'rls-wallet-a', true)")
+            )
+            assert (
+                await conn.scalar(text("SELECT COUNT(*) FROM api_key_usage_daily")) == 0
+            )
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_set_local_scope_does_not_survive_commit(seeded):
     """A pooled connection must not carry the last request's wallet."""
     engine = _engine(seeded["app_url"])
@@ -655,7 +693,7 @@ async def test_off_mode_after_enforce_bypasses_once_posture_sees_rls(
         async with factory() as session:
             assert (await session.execute(count)).scalar() == 0
         report = await check_tenant_rls_posture(engine)
-        assert report["tables_with_rls_enabled"] == sorted(RLS_TABLES)
+        assert report["tables_with_rls_enabled"] == sorted(RLS_POSTURE_TABLES)
         assert tenant_rls._off_mode_bypass_required is True
         async with factory() as session:
             assert (await session.execute(count)).scalar() == 3
@@ -684,7 +722,7 @@ async def test_posture_accepts_runtime_role_and_refuses_superuser(seeded, monkey
         await engine.dispose()
     # The owner is still bound (FORCE), so not refused, but reported.
     assert report["effective"] is True
-    assert sorted(report["owns_rls_tables"]) == sorted(RLS_TABLES)
+    assert sorted(report["owns_rls_tables"]) == sorted(RLS_POSTURE_TABLES)
 
     from sqlalchemy.engine import make_url
 

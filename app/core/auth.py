@@ -116,9 +116,11 @@ _CREDENTIAL_REJECTED = {CREDENTIAL_REJECTED_HEADER: "1"}
 
 @dataclass
 class CredentialAcceptance:
-    """Whether ``get_auth_context`` accepted credentials during one request."""
+    """Accepted credentials and any DB key resolved before route denial."""
 
     accepted: bool = False
+    key_id: str | None = None
+    tenant: str | None = None
 
 
 # The converse signal, for RateLimitMiddleware's shared pre-auth bucket. A
@@ -133,6 +135,14 @@ class CredentialAcceptance:
 CREDENTIAL_ACCEPTANCE: ContextVar[CredentialAcceptance | None] = ContextVar(
     "credential_acceptance", default=None
 )
+
+
+def _note_resolved_key(key_id: str, tenant: str | None) -> None:
+    """Mark a valid DB key even if route authorization later denies it."""
+    acceptance = CREDENTIAL_ACCEPTANCE.get()
+    if acceptance is not None:
+        acceptance.key_id = key_id
+        acceptance.tenant = tenant
 
 
 async def get_auth_context(
@@ -166,6 +176,8 @@ async def get_auth_context(
     acceptance = CREDENTIAL_ACCEPTANCE.get()
     if acceptance is not None:
         acceptance.accepted = True
+        acceptance.key_id = context.key_id
+        acceptance.tenant = context.tenant
     return context
 
 
@@ -310,6 +322,7 @@ async def _resolve_auth_context(
                     "message": "The demo tenant is currently disabled.",
                 },
             )
+        _note_resolved_key(db_key.key_id, tenant)
         if tenant == DEMO_TENANT_LABEL:
             current = current_demo_request()
             if current is None or not demo_route_allowed(*current):
@@ -511,6 +524,7 @@ async def _auth_from_jwt(token: str) -> AuthContext:
                 "message": "The demo tenant is currently disabled.",
             },
         )
+    _note_resolved_key(payload.key_id, tenant)
     if tenant == DEMO_TENANT_LABEL:
         current = current_demo_request()
         if current is None or not demo_route_allowed(*current):

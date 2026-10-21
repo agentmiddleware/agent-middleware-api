@@ -658,6 +658,12 @@ app = FastAPI(
 
 # --- Middleware Stack ---
 
+# Run inside the rate limiter so its accepted-credential holder is shared
+# with auth; this records at most one event after the routed call completes.
+from .core.api_key_usage import APIKeyUsageMiddleware
+
+app.add_middleware(APIKeyUsageMiddleware)
+
 # Rate limiting (enforces documented 120 req/min per API key)
 app.add_middleware(RateLimitMiddleware)
 
@@ -892,6 +898,7 @@ app.include_router(demo_keys.router, include_in_schema=settings.ENABLE_DEMO_TENA
 app.include_router(
     demo_keys.admin_router, include_in_schema=settings.ENABLE_DEMO_TENANT
 )
+app.include_router(api_keys.admin_router)
 
 # Stripe webhooks answer only signed Stripe traffic; a deployment with no
 # Stripe key configured has nothing that could ever call them, so they are
