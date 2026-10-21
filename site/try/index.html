@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Try Agent Middleware | Agent Middleware API</title>
+    <meta name="description" content="Get a free test key and try the Agent Middleware demo with synthetic credits." />
+    <meta name="robots" content="index, follow" />
+    <meta name="theme-color" content="#f6f8fc" />
+    <link rel="canonical" href="https://www.agentmiddleware.dev/try/" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/try/try.css" />
+    <script defer src="/utm-capture.js?v=utm-1"></script>
+    <script defer src="/try/try.js?v=try-1"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <a href="/" aria-label="Agent Middleware home">Agent Middleware</a>
+    </header>
+    <main id="main">
+      <div class="page-intro">
+        <p class="eyebrow">Free demo access</p>
+        <h1>Try one governed tool call.</h1>
+        <p>Get a key, then use the quickstart to create a permit, call a tool, and check its receipt. This key uses synthetic credits in the demo tenant.</p>
+      </div>
+
+      <section class="key-panel" aria-label="Get your test key">
+        <button id="get-try-key" class="primary-button" type="button">Get a free test key</button>
+        <p id="try-key-status" role="status" aria-live="polite">No account or payment needed.</p>
+
+        <div id="try-key-result" hidden>
+          <p class="result-heading">Your test key is ready.</p>
+          <p class="result-note">The key appears once. Copy it now.</p>
+
+          <label for="try-api-key">API key</label>
+          <div class="copy-row">
+            <input id="try-api-key" type="text" readonly autocomplete="off" autocapitalize="off" spellcheck="false" />
+            <button id="copy-try-key" class="copy-button" type="button" aria-label="Copy API key">Copy</button>
+          </div>
+
+          <label for="try-wallet-id">Wallet ID</label>
+          <div class="copy-row">
+            <input id="try-wallet-id" type="text" readonly autocomplete="off" autocapitalize="off" spellcheck="false" />
+            <button id="copy-try-wallet" class="copy-button" type="button" aria-label="Copy wallet ID">Copy</button>
+          </div>
+
+          <a id="quickstart-link" class="quickstart-link" href="https://github.com/agentmiddleware/amw-demo#quickstart-under-5-minutes">Continue with the quickstart</a>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

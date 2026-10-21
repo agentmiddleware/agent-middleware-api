@@ -201,6 +201,11 @@
       "permanent": true
     },
     {
+      "source": "/try",
+      "destination": "/try/",
+      "permanent": true
+    },
+    {
       "source": "/concept",
       "destination": "/concept/",
       "permanent": true
