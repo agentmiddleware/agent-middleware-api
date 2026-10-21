@@ -1,10 +1,10 @@
 {
   "latency": {
-    "max_ms": 100.0,
-    "mean_ms": 69.7,
-    "min_ms": 59.9,
-    "p50_ms": 67.3,
-    "p95_ms": 83.7,
+    "max_ms": 18.3,
+    "mean_ms": 16.5,
+    "min_ms": 14.9,
+    "p50_ms": 16.3,
+    "p95_ms": 17.8,
     "path": "POST /mcp/messages",
     "samples": 100,
     "tool": "trust-plane-echo",
@@ -18,7 +18,7 @@
     "receipt_id": "rcpt-9daf745e477d45ab",
     "trust_document_sha256": "aa03192fb048e2c8fca5ba6feb7be0cf2ed6461f21f60a9a5673afe66398b92e"
   },
-  "recorded_at": "2026-09-08T07:33:25+00:00",
+  "recorded_at": "2026-10-21T19:39:40+00:00",
   "recorded_by": "python scripts/record_site_transcript.py",
   "schema_version": "1.1",
   "source": {
@@ -61,7 +61,7 @@
       "response": [
         [
           "permit_id",
-          "permit-74d8473ec86c4b42"
+          "permit-570594d738194059"
         ],
         [
           "allowed_tools",
@@ -73,7 +73,7 @@
         ],
         [
           "expires_at",
-          "2026-09-08T08:03:18"
+          "2026-10-21T20:09:38"
         ],
         [
           "key_id",
@@ -90,7 +90,7 @@
       "response": [
         [
           "receipt_id",
-          "rcpt-038c84a3d94d4a34"
+          "rcpt-641b10a5d96547bb"
         ],
         [
           "outcome",
@@ -102,11 +102,11 @@
         ],
         [
           "ledger_entry_id",
-          "60055228-a465-4d11-84c2-16b72ea26e3c"
+          "d72d7e51-7566-4e67-98a7-11c57465e03b"
         ],
         [
           "permit_id",
-          "permit-74d8473ec86c4b42"
+          "permit-570594d738194059"
         ]
       ],
       "title": "The call executes and is charged once."
@@ -114,12 +114,12 @@
     {
       "id": "replay",
       "loop": "05 \u00b7 Meter, again",
-      "note": "For a finalized request, a retry with the same key returns the original receipt instead of dispatching again.",
+      "note": "After a timeout, a retry with the same key returns the original receipt instead of dispatching again.",
       "request": "POST /mcp/messages\nX-API-Key: $AGENT_API_KEY",
       "response": [
         [
           "receipt_id",
-          "rcpt-038c84a3d94d4a34"
+          "rcpt-641b10a5d96547bb"
         ],
         [
           "outcome",
@@ -140,7 +140,7 @@
       "id": "verify",
       "loop": "06 \u00b7 Receipt, offline",
       "note": "The SDK verifier checks the Ed25519 signature against the published key set. It never imports the gateway.",
-      "output": "VERIFIED  rcpt-038c84a3d94d4a34\n  signed by   demo-ed25519\n  permit      permit-74d8473ec86c4b42\n  tool        trust-plane-echo\n  outcome     success\n  credits     2 charged of 2 authorized\n  at          2026-09-08T07:33:18.252834+00:00",
+      "output": "VERIFIED  rcpt-641b10a5d96547bb\n  signed by   demo-ed25519\n  permit      permit-570594d738194059\n  tool        trust-plane-echo\n  outcome     success\n  credits     2 charged of 2 authorized\n  at          2026-10-21T19:39:38.966632+00:00",
       "request": "b2a-verify-receipt --bundle receipt.json --keys trust-keys.json",
       "title": "The receipt verifies with no credential and no callback."
     },
@@ -173,7 +173,7 @@
         ],
         [
           "receipt_id",
-          "rcpt-f9f49fdda0294493"
+          "rcpt-63485d4b63bc49c4"
         ],
         [
           "outcome",
@@ -190,8 +190,8 @@
   "summary": {
     "denial_reason": "permit_tool_not_allowed",
     "offline_verified": true,
-    "permit_id": "permit-74d8473ec86c4b42",
-    "receipt_id": "rcpt-038c84a3d94d4a34",
-    "replay_receipt_id": "rcpt-038c84a3d94d4a34"
+    "permit_id": "permit-570594d738194059",
+    "receipt_id": "rcpt-641b10a5d96547bb",
+    "replay_receipt_id": "rcpt-641b10a5d96547bb"
   }
 }

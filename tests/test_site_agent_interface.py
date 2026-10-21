@@ -609,7 +609,7 @@ def test_customer_facing_outputs_do_not_publish_provider_origins(tmp_path) -> No
 
 
 PUBLIC_ORG_URL = "https://github.com/agentmiddleware"
-PUBLIC_REPO_URL = "https://github.com/agentmiddleware/agent-middleware-api"
+PUBLIC_REPO_URL = "https://github.com/agentmiddleware/agent-middleware"
 OLD_REPO_URL = "https://github.com/PetrefiedThunder/agent-middleware-api"
 GITHUB_URL_PATTERN = re.compile(r"https://github\.com[^\s\"'<>)\]]*")
 
