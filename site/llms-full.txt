@@ -1,4 +1,4 @@
-# Agent Middleware API: full machine brief
+# Agent Middleware: full machine brief
 
 The long-form companion to /llms.txt on this host. Read /llms.txt first for the
 bootstrap sequence; read this when you need the product boundary, the
@@ -6,9 +6,9 @@ vocabulary, and the claims that are deliberately NOT made.
 
 Origin roles:
 
-- https://www.agentmiddleware.dev: human design-partner site and published proof.
-  Offers free sandbox demo keys with no account needed. Executes no tools and
-  holds no customer data.
+- https://www.agentmiddleware.dev: human site and published proof. Its homepage
+  issues free sandbox demo keys inline with no account needed. It executes no
+  tools and holds no customer data.
 - https://api.thisisatest.tech: the gateway itself. All protected actions live
   here.
 
@@ -25,9 +25,15 @@ for required external reconciliation.
 It is not an agent runtime, an LLM provider, an IAM replacement, a marketplace,
 one distributed ACID transaction, or proof of the downstream effect.
 
-Protected calls use `X-API-Key`. Free sandbox demo keys are available at
-https://www.agentmiddleware.dev/demo-key/ with no account needed. Production keys
-are issued to design partners.
+Protected calls use `X-API-Key`. Free sandbox demo keys are available inline at
+https://www.agentmiddleware.dev/ with no account needed. The /demo-key/ page is
+the fallback without JavaScript. Production keys are issued to design partners.
+
+The homepage's single quickstart uses https://github.com/agentmiddleware/amw-demo
+and Python 3.10+. It needs both api_key and wallet_id from the demo key
+response. The script issues a permit, calls partner.echo, retries with the
+same request key, and verifies the receipt offline. The curl invoke tab is
+marked Coming soon because the shorter server path is not deployed yet.
 
 ## Transaction loop
 
@@ -139,6 +145,7 @@ operator, one retry-sensitive action, scoped privately. Production rollout is
 limited to design partners.
 
 Human site: https://www.agentmiddleware.dev/
+Pilot details: https://www.agentmiddleware.dev/pilot/
 Offline receipt verification: https://www.agentmiddleware.dev/proof/
 Comparison with named alternatives, including the rows this loses:
 https://www.agentmiddleware.dev/compare/

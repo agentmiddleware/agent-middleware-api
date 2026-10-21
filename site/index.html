@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Agent Middleware API | Transaction integrity for agent actions</title>
+    <title>Let agents retry safely | Agent Middleware</title>
     <meta
       name="description"
-      content="Transaction integrity for consequential autonomous actions on the configured upstream-MCP path: at-most-one gateway dispatch and debit, explicit delivery uncertainty, and linked evidence."
+      content="Put Agent Middleware in front of a risky tool. A retry with the same key returns the original receipt instead of dispatching again."
     />
     <meta name="robots" content="index, follow" />
     <meta name="theme-color" content="#0b1020" />
@@ -23,14 +23,14 @@
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <meta property="og:type" content="website" />
     <meta property="og:locale" content="en_US" />
-    <meta property="og:site_name" content="Agent Middleware API" />
+    <meta property="og:site_name" content="Agent Middleware" />
     <meta
       property="og:title"
-      content="Make consequential agent actions transactional."
+      content="Let agents retry safely."
     />
     <meta
       property="og:description"
-      content="On the configured upstream-MCP path: one logical action, bounded authority consumption, at-most-one dispatch and debit, and explicit delivery uncertainty."
+      content="Put Agent Middleware in front of a risky tool. A retry with the same key returns the original receipt instead of dispatching again."
     />
     <meta property="og:url" content="https://www.agentmiddleware.dev/" />
     <meta
@@ -41,16 +41,16 @@
     <meta property="og:image:height" content="630" />
     <meta
       property="og:image:alt"
-      content="Agent Middleware API: make consequential agent actions transactional"
+      content="Agent Middleware API: authorize one agent action and retry with the same key"
     />
     <meta name="twitter:card" content="summary_large_image" />
     <meta
       name="twitter:title"
-      content="Make consequential agent actions transactional."
+      content="Let agents retry safely."
     />
     <meta
       name="twitter:description"
-      content="On the configured upstream-MCP path: one logical action, bounded authority consumption, at-most-one dispatch and debit, and explicit delivery uncertainty."
+      content="Put Agent Middleware in front of a risky tool. A retry with the same key returns the original receipt instead of dispatching again."
     />
     <meta
       name="twitter:image"
@@ -68,7 +68,7 @@
           {
             "@type": "Organization",
             "@id": "https://www.agentmiddleware.dev/#organization",
-            "name": "Agent Middleware API",
+            "name": "Agent Middleware",
             "url": "https://www.agentmiddleware.dev/",
             "sameAs": [
               "https://github.com/agentmiddleware"
@@ -81,7 +81,7 @@
               "contentUrl": "https://www.agentmiddleware.dev/social-card.png",
               "width": 1200,
               "height": 630,
-              "caption": "Agent Middleware API"
+              "caption": "Agent Middleware"
             },
             "image": { "@id": "https://www.agentmiddleware.dev/#logo" },
             "knowsLanguage": "en"
@@ -89,16 +89,16 @@
           {
             "@type": "WebSite",
             "@id": "https://www.agentmiddleware.dev/#website",
-            "name": "Agent Middleware API",
+            "name": "Agent Middleware",
             "url": "https://www.agentmiddleware.dev/",
-            "description": "Transaction integrity for consequential autonomous actions on the configured upstream-MCP path: one logical action, bounded authority consumption, explicit delivery uncertainty, and linked gateway evidence.",
+            "description": "A gateway for risky agent tools with permits, safe retries, and receipts that can be checked offline.",
             "inLanguage": "en",
             "publisher": { "@id": "https://www.agentmiddleware.dev/#organization" }
           },
           {
             "@type": "SoftwareApplication",
             "@id": "https://www.agentmiddleware.dev/#software",
-            "name": "Agent Middleware API",
+            "name": "Agent Middleware",
             "applicationCategory": "DeveloperApplication",
             "applicationSubCategory": "Transaction integrity for consequential autonomous actions",
             "operatingSystem": "Linux, macOS, Windows (Docker or Python 3.11+)",
@@ -124,8 +124,8 @@
             "@type": "WebPage",
             "@id": "https://www.agentmiddleware.dev/#webpage",
             "url": "https://www.agentmiddleware.dev/",
-            "name": "Make consequential agent actions transactional.",
-            "description": "Transaction integrity for consequential autonomous actions on the configured upstream-MCP path: one logical action, at-most-one dispatch and debit, explicit delivery uncertainty, and linked evidence.",
+            "name": "Let agents retry safely.",
+            "description": "Put Agent Middleware in front of a risky tool. A retry with the same key returns the original receipt instead of dispatching again.",
             "inLanguage": "en",
             "isPartOf": { "@id": "https://www.agentmiddleware.dev/#website" },
             "about": { "@id": "https://www.agentmiddleware.dev/#software" },
@@ -171,8 +171,7 @@
     <script defer src="/arcade-boot.js?v=gateway-19"></script>
     <script defer src="/analytics.js?v=gateway-19"></script>
     <script defer src="/utm-capture.js?v=utm-1"></script>
-    <script defer src="/proof/proof.js?v=gateway-19"></script>
-    <script defer src="/pilot-fit.js?v=pilot-2"></script>
+    <script defer src="/home-key.js?v=home-1"></script>
     <script defer src="/a11y.js?v=gateway-19"></script>
   </head>
   <body>
@@ -193,579 +192,167 @@
     @@SITE_NAV@@
 
     <main id="main">
-      <header class="hero" id="top" data-wave="sea">
-        <div class="hero-grid">
-        <div class="hero-copy">
-          <p class="eyebrow">
-            <span class="eyebrow-mark" aria-hidden="true"></span>
-            <span class="eyebrow-text"
-              >For platform engineering, AI infrastructure, and security teams
-              running MCP tools</span
-            >
-            <span class="eyebrow-mark" aria-hidden="true"></span>
-          </p>
-          <h1>Authorize one agent action. Retry with the same key, no new dispatch.</h1>
+      <header class="hero home-hero" id="top" data-wave="sea">
+        <div class="home-hero-inner">
+          <p class="eyebrow"><span class="eyebrow-mark" aria-hidden="true"></span>Agent Middleware for risky tools</p>
+          <h1>Let agents retry safely.</h1>
           <p class="hero-body hero-body-lead">
-            An agent issues a customer refund through an internal MCP tool.
-            The call times out, the agent retries, and the refund runs
-            twice. If preventing it cannot justify this boundary, I
-            will tell you.
+            Put Agent Middleware in front of a risky tool. Each action needs a permit, a retry with the same key returns the original receipt instead of dispatching again, and every receipt can be checked offline.
           </p>
           <div class="cta-row">
-            <a
-              class="button-wave"
-              href="@@PILOT_EMAIL_HREF@@"
-              data-analytics-event="email_click"
-              aria-label="Start a pilot by email (opens your mail app)"
-              ><span class="button-wave-face">Start a pilot by email</span></a
-            >
-            <a
-              class="button button-secondary"
-              href="/proof/"
-              data-analytics-event="proof_click"
-              aria-label="Run the local proof: opens the verification page"
-              >Run the local proof</a
-            >
+            <button class="button button-primary" id="home-key-trigger" type="button" hidden>Get a free demo key</button>
+            <noscript><a class="button button-primary" href="/demo-key/">Get a free demo key</a></noscript>
+            <a class="button button-secondary" href="#quickstart">Run the 3 minute quickstart</a>
           </div>
-          <p class="email-fallback">
-            Write to
-            <a
-              href="mailto:@@PUBLIC_CONTACT_EMAIL@@"
-              data-analytics-event="email_click"
-              >@@PUBLIC_CONTACT_EMAIL@@</a
-            >.
-          </p>
-          <p class="constraint-line">
-            Paid pilot · one internal MCP tool · production rollout by pilot ·
-            <a href="https://www.agentmiddleware.dev/demo-key/"
-              >Try it free: get a demo key</a
-            >
-          </p>
-        </div>
-        <!-- The governed loop as it actually ran. Rendered at build time from
-             /proof/transcript.json, which scripts/record_site_transcript.py
-             writes from a real local gateway run; nothing here is typed in.
-             The hero shows the spine (permit → invoke → replay → verify);
-             the governed-path section below shows every step. -->
-        <div class="hero-console">
-          @@HERO_CONSOLE@@
-        </div>
+          <p class="home-hero-note">No account. Demo credits only.</p>
+          <div class="home-receipt-preview" aria-label="Illustrative matching receipt ids">
+            <p>Example retry</p>
+            <div><span>First call</span><code>rcpt-example</code></div>
+            <div><span>Same key retry</span><code>rcpt-example</code></div>
+          </div>
         </div>
       </header>
 
-      <section class="section offer-band" aria-label="How the gateway works and the pilot offer" data-wave="condense">
-        <div class="offer-copy">
-          <p class="hero-body">
-            Agent Middleware API is a transaction boundary between your
-            agents and your consequential MCP tools. For a finalized request,
-            a retry with the same accepted key and payload returns the original
-            signed receipt instead of dispatching again. A new key is a new
-            request.
-          </p>
-          <p class="wedge-line">
-            The wedge today is metered calls. The underlying primitive is
-            bounded authority for machine actions.
-          </p>
-          <p class="offer-note">
-            A credit is a closed-loop metering unit for the pilot on an
-            operator-provisioned wallet, not payment rails. The gateway
-            reserves the tool's credit price against the permit
-            before anything runs, and writes at most one ledger debit per
-            accepted idempotency key. A denied call is never charged; a call
-            the gateway can prove never reached the tool is refunded. Once
-            committed to sending on the configured upstream path, it
-            cannot prove the tool did not run: a timeout or a crash
-            from that point stays charged, and is never retried for you.
-            Refunding an ambiguous call automatically would pay a caller to
-            induce timeouts against a tool that already did the work.
-            Credits never become invoices, settlement, or payment rails, and
-            the pilot is priced separately, in writing.
-          </p>
+      <aside class="home-key-drawer" id="home-key-panel" aria-labelledby="home-key-title" tabindex="-1" hidden>
+        <div class="home-key-drawer-head">
+          <h2 id="home-key-title">Get your demo key</h2>
+          <button class="home-icon-button" id="home-key-close" type="button" aria-label="Close demo key panel">Close</button>
         </div>
-
-        <aside class="agent-entry pilot-card" aria-labelledby="pilot-card-title">
-          <div class="agent-entry-head">
-            <div>
-              <p class="panel-kicker">The design-partner offer</p>
-              <h2 id="pilot-card-title">Bring one real MCP tool.</h2>
+        <p id="home-key-status" role="status" aria-live="polite"></p>
+        <div id="home-key-result" hidden>
+          <div class="home-key-field">
+            <label for="home-key-value">Key</label>
+            <div class="home-key-field-row">
+              <input id="home-key-value" type="password" readonly autocomplete="off" autocapitalize="off" spellcheck="false" />
+              <button id="home-key-reveal" type="button" aria-label="Reveal key" aria-pressed="false">Reveal</button>
+              <button id="home-key-copy" type="button">Copy</button>
             </div>
           </div>
-          <p class="agent-entry-copy">
-            I map one governed action end to end: authority before
-            execution, one debit, portable evidence after.
-          </p>
-          <div class="agent-entry-foot">
-            <a
-              href="@@PILOT_EMAIL_HREF@@"
-              data-analytics-event="email_click"
-              >Start a pilot by email</a
-            >
+          <div class="home-key-field">
+            <label for="home-wallet-value">Wallet</label>
+            <div class="home-key-field-row">
+              <input id="home-wallet-value" type="password" readonly autocomplete="off" autocapitalize="off" spellcheck="false" />
+              <button id="home-wallet-reveal" type="button" aria-label="Reveal wallet" aria-pressed="false">Reveal</button>
+              <button id="home-wallet-copy" type="button">Copy</button>
+            </div>
           </div>
-        </aside>
+          <p><span id="home-key-budget"></span> demo credits. This key only works in the demo sandbox.</p>
+          <p class="home-key-warning">Save the key now. We show it only once.</p>
+          <button class="button button-primary" id="home-key-copy-both" type="button">Copy both as shell commands</button>
+        </div>
+        <div class="home-key-error" id="home-key-error" hidden>
+          <p id="home-key-error-message"></p>
+          <button class="button button-secondary" id="home-key-retry" type="button" hidden>Try again</button>
+          <a class="button button-secondary" id="home-key-email" href="mailto:@@PUBLIC_CONTACT_EMAIL@@?subject=Demo%20key%20request" hidden>Email us</a>
+        </div>
+      </aside>
 
-        <!-- The non-bypassability claim, drawn. Colors come from the design
-             tokens via var() so the diagram follows the high-contrast and
-             print palettes; the CSP forbids style attributes, so everything
-             is SVG presentation attributes. -->
-        <figure class="boundary-figure">
-          <div
-            class="boundary-scroll"
-            tabindex="0"
-            role="group"
-            aria-label="Diagram: the governed boundary is the only path from the agent to the tool"
-          >
-            <svg
-              viewBox="0 0 920 316"
-              role="img"
-              aria-labelledby="bf-title bf-desc"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <title id="bf-title">The governed boundary</title>
-              <desc id="bf-desc">
-                An agent's tools/call passes through the governed boundary
-                (permit, scope, budget and expiry, replay protection, signed
-                receipt) before it reaches the tool. A dashed direct route
-                from the agent to the tool is marked closed by the operator,
-                so the boundary is the only path.
-              </desc>
-              <rect x="30" y="110" width="160" height="84" rx="6" fill="var(--panel)" stroke="var(--rule)" />
-              <text x="110" y="148" text-anchor="middle" font-family="'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace" font-size="17" font-weight="600" letter-spacing="2" fill="var(--text)">AGENT</text>
-              <text x="110" y="172" text-anchor="middle" font-family="'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace" font-size="12" fill="var(--text-dim)">decides intent</text>
-              <line x1="190" y1="152" x2="318" y2="152" stroke="var(--text-dim)" stroke-width="1.5" />
-              <polygon points="318,146 330,152 318,158" fill="var(--text-dim)" />
-              <text x="260" y="138" text-anchor="middle" font-family="'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace" font-size="12" fill="var(--text-dim)">tools/call</text>
-              <rect x="330" y="42" width="260" height="220" rx="6" fill="var(--panel)" stroke="var(--brass)" stroke-width="1.5" />
-              <text x="460" y="72" text-anchor="middle" font-family="'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace" font-size="13.5" font-weight="600" letter-spacing="2" fill="var(--brass)">GOVERNED BOUNDARY</text>
-              <line x1="350" y1="86" x2="570" y2="86" stroke="var(--rule-soft)" />
-              <rect x="356" y="107" width="6" height="6" fill="var(--brass)" transform="rotate(45 359 110)" />
-              <text x="374" y="115" font-family="'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace" font-size="14" fill="var(--text)">permit</text>
-              <rect x="356" y="137" width="6" height="6" fill="var(--brass)" transform="rotate(45 359 140)" />
-              <text x="374" y="145" font-family="'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace" font-size="14" fill="var(--text)">scope</text>
-              <rect x="356" y="167" width="6" height="6" fill="var(--brass)" transform="rotate(45 359 170)" />
-              <text x="374" y="175" font-family="'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace" font-size="14" fill="var(--text)">budget · expiry</text>
-              <rect x="356" y="197" width="6" height="6" fill="var(--brass)" transform="rotate(45 359 200)" />
-              <text x="374" y="205" font-family="'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace" font-size="14" fill="var(--text)">replay protection</text>
-              <rect x="356" y="227" width="6" height="6" fill="var(--brass)" transform="rotate(45 359 230)" />
-              <text x="374" y="235" font-family="'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace" font-size="14" fill="var(--text)">signed receipt</text>
-              <line x1="590" y1="152" x2="718" y2="152" stroke="var(--text-dim)" stroke-width="1.5" />
-              <polygon points="718,146 730,152 718,158" fill="var(--text-dim)" />
-              <text x="660" y="138" text-anchor="middle" font-family="'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace" font-size="12" fill="var(--text-dim)">authorized</text>
-              <text x="660" y="174" text-anchor="middle" font-family="'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace" font-size="12" fill="var(--text-dim)">metered</text>
-              <rect x="730" y="110" width="160" height="84" rx="6" fill="var(--panel)" stroke="var(--rule)" />
-              <text x="810" y="148" text-anchor="middle" font-family="'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace" font-size="17" font-weight="600" letter-spacing="2" fill="var(--text)">TOOL</text>
-              <text x="810" y="172" text-anchor="middle" font-family="'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace" font-size="12" fill="var(--text-dim)">consequential action</text>
-              <path d="M110 194 V280 H444" fill="none" stroke="var(--text-dim)" stroke-opacity="0.55" stroke-width="1.25" stroke-dasharray="5 6" />
-              <path d="M476 280 H810 V194" fill="none" stroke="var(--text-dim)" stroke-opacity="0.55" stroke-width="1.25" stroke-dasharray="5 6" />
-              <line x1="452" y1="272" x2="468" y2="288" stroke="var(--danger)" stroke-width="2" />
-              <line x1="468" y1="272" x2="452" y2="288" stroke="var(--danger)" stroke-width="2" />
-              <text x="460" y="308" text-anchor="middle" font-family="'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace" font-size="12" fill="var(--danger)">direct route: closed by the operator</text>
-            </svg>
+      <section class="section home-quickstart" id="quickstart" aria-labelledby="quickstart-title" data-wave="condense">
+        <div class="home-section-heading">
+          <p class="section-kicker">01 / The quickstart</p>
+          <h2 id="quickstart-title">Make your first call</h2>
+          <p>This runs one call through the gateway with a fresh permit and a request key. It needs Python 3.10 or newer.</p>
+        </div>
+        <div class="home-code-panel">
+          <div class="home-code-toolbar">
+            <div class="home-tabs" role="tablist" aria-label="Quickstart language">
+              <button class="home-tab home-tab-active" type="button" role="tab" aria-selected="true" aria-controls="home-python-panel" id="home-python-tab">Python</button>
+              <button class="home-tab" type="button" role="tab" aria-selected="false" disabled>curl <span>Coming soon</span></button>
+            </div>
+            <button class="button button-secondary" id="home-copy-quickstart" type="button" disabled>Copy setup</button>
           </div>
-          <figcaption>
-            The gateway becomes the only path once you close the tool's
-            other routes.
-          </figcaption>
+          <div id="home-python-panel" role="tabpanel" aria-labelledby="home-python-tab">
+            <pre class="home-code-scroll" tabindex="0"><code id="home-quickstart-code" tabindex="-1">git clone https://github.com/agentmiddleware/amw-demo.git
+cd amw-demo
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+export AMW_API_KEY='YOUR_DEMO_KEY'
+export AMW_WALLET_ID='YOUR_WALLET_ID'
+python examples/permit_echo_retry.py</code></pre>
+          </div>
+          <p class="home-code-help" id="home-copy-status" role="status" aria-live="polite">Get a demo key to fill in the two export lines.</p>
+        </div>
+        <details class="home-terminal-option">
+          <summary>Prefer the terminal?</summary>
+          <p>Use this command to get a key, then put its api_key and wallet_id in the export lines above.</p>
+          <pre><code>curl -s -X POST https://api.thisisatest.tech/v1/demo/keys</code></pre>
+        </details>
+        <p class="home-mobile-steps"><a href="mailto:@@PUBLIC_CONTACT_EMAIL@@?subject=Send%20me%20the%20demo%20steps">Send me the steps</a> if you are reading on a phone. This opens your mail app.</p>
+        <div class="home-output-grid">
+          <div class="home-output-card">
+            <h3>Expected output</h3>
+            <pre><code>1. Creating a permit scoped to partner.echo ...
+   Permit permit-... issued.
+2. Calling partner.echo through the gateway ...
+   Receipt id: rcpt-...</code></pre>
+            <p>Your permit was created. The call ran once. The receipt id is your proof of the gateway result.</p>
+          </div>
+          <div class="home-output-card">
+            <h3>Retry with the same key</h3>
+            <pre><code>3. Retrying with the SAME key and SAME arguments ...
+   Receipt id: rcpt-...</code></pre>
+            <p><strong>Same receipt. The tool did not run again.</strong></p>
+          </div>
+          <div class="home-output-card home-verify-card">
+            <h3>Check the receipt offline</h3>
+            <pre><code>4. Fetching the portable receipt and verifying it offline ...
+   Verified receipt rcpt-... offline.</code></pre>
+            <p>The script fetches the receipt and public keys, then checks the signature on your machine. <a href="/proof/">See a published sample and verifier.</a></p>
+            <p class="home-exit-codes"><code>0</code> verified · <code>1</code> signature does not match · <code>2</code> cannot tell</p>
+          </div>
+        </div>
+        <p class="home-quickstart-limit">Receipts sign hashes of the request and response, not their content. They do not prove the tool was right.</p>
+      </section>
+
+      <section class="section home-how" id="how-it-works" aria-labelledby="how-title" data-wave="order">
+        <div class="home-section-heading">
+          <p class="section-kicker">02 / How it works</p>
+          <h2 id="how-title">Three things to know</h2>
+        </div>
+        <div class="home-glossary">
+          <article class="home-concept-card"><h3>Permit</h3><p>A signed note that says what your agent may do: which tool, how many credits, and until when.</p></article>
+          <article class="home-concept-card"><h3>Request key</h3><p>A name you pick for one action. Send the same key again and you get the first result back instead of a new action. It is sent as <code>Idempotency-Key</code>, or <code>idempotency_key</code> in the call body.</p></article>
+          <article class="home-concept-card"><h3>Receipt</h3><p>Signed proof of what happened on a call. Anyone can check it offline with our public key.</p></article>
+        </div>
+        <figure class="home-flow">
+          <div><span>Permit + request key</span><span aria-hidden="true">→</span><span>Gateway call</span><span aria-hidden="true">→</span><span>Receipt</span></div>
+          <figcaption>A retry with the same key returns the original receipt instead of dispatching again.</figcaption>
         </figure>
+        <details class="home-recording">
+          <summary>See one recorded local gateway run</summary>
+          <div class="home-recording-body">@@LOOP_TRANSCRIPT@@</div>
+        </details>
       </section>
 
-      <section class="section thesis-section" aria-labelledby="thesis-title" data-wave="order">
-        <p class="section-kicker">00 / Operational problem</p>
-        <div class="thesis-layout">
-          <h2 id="thesis-title">Agent intent is not authority or evidence.</h2>
+      <section class="section home-use" id="when-to-use" aria-labelledby="when-to-use-title" data-wave="quiet">
+        <div class="home-section-heading">
+          <p class="section-kicker">03 / When to use it</p>
+          <h2 id="when-to-use-title">Put a boundary around costly retries.</h2>
+          <p>Start with one tool where repeating an action has a real cost.</p>
         </div>
-        <ol class="thesis-signals">
-          <li>
-            <span>Before</span>
-            <strong>Bound the authority</strong>
-            <p>Agent identity, tool, scope, budget, and expiry.</p>
-          </li>
-          <li>
-            <span>During</span>
-            <strong>Prevent a second debit</strong>
-            <p>One accepted request key cannot become a second debit.</p>
-          </li>
-          <li>
-            <span>After</span>
-            <strong>Return portable proof</strong>
-            <p>A signed receipt links the governed call to auditable evidence.</p>
-          </li>
-        </ol>
+        <div class="home-use-grid">
+          <article><h3>Refunds</h3><p>Keep a retry tied to the original refund request.</p></article>
+          <article><h3>Payouts</h3><p>Keep one request key tied to one payout action.</p></article>
+          <article><h3>Deploys</h3><p>Keep a deployment retry tied to its first result.</p></article>
+        </div>
+        <p><a href="/pilot/">Explore a pilot for your tool</a></p>
       </section>
 
-      <section class="protocol-section" aria-labelledby="protocol-title" data-wave="stream">
-        <div class="section protocol-heading">
-          <p class="section-kicker section-kicker-inverse">01 / Governed path</p>
-          <h2 id="protocol-title">One control loop from intent to evidence.</h2>
-          <p>
-            Discover, authenticate, authorize, invoke, meter, receipt, audit,
-            govern, recorded from <code>make prove-trust-plane</code>.
-            The tool in the recording is a stand-in
-            echo tool, not a refund tool.
-          </p>
-        </div>
-        <div class="section protocol-console">
-          @@LOOP_TRANSCRIPT@@
+      <section class="section home-limits" id="limits" aria-labelledby="limits-title" data-wave="dark">
+        <div class="home-section-heading">
+          <p class="section-kicker">04 / When not to use it</p>
+          <h2 id="limits-title">Know where the boundary ends.</h2>
+          <p>The gateway receipt records what happened at the gateway. Your tool remains the source of truth for its own effect. <a href="https://api.thisisatest.tech/SECURITY_LIMITATIONS.md" rel="noopener noreferrer">Read the limits.</a></p>
         </div>
       </section>
 
-      <section class="section proof-section" id="proof" aria-labelledby="proof-title" data-wave="crystal">
-        <div class="proof-heading">
-          <div>
-            <p class="section-kicker">02 / Portable evidence</p>
-            <h2 id="proof-title">Inspect the receipt, then verify it offline.</h2>
-          </div>
-          <p>
-            This self-issued gateway receipt is published as a historical
-            sample from a non-sensitive <code>partner.echo</code> call on
-            <time datetime="@@PROOF_RECEIPT_ISSUED@@">@@PROOF_RECEIPT_ISSUED@@</time>,
-            and it is not customer traction. The bundle ships the
-            public-key snapshot the offline verifier used. Verifying it
-            proves that signature against that key; it is not a test of the
-            deployment running today.
-          </p>
-        </div>
-
-        <div class="proof-grid artifact-grid" aria-live="polite">
-          <article class="proof-col">
-            <span class="receipt-seal" aria-hidden="true">Ed25519 · self-issued</span>
-            <div class="proof-label">
-              <span>Published signed claims</span>
-              <span class="badge" data-proof-status>loading artifact</span>
-            </div>
-            <dl>
-              <div class="row"><dt>receipt</dt><dd data-proof-field="receipt_id">loading…</dd></div>
-              <div class="row"><dt>tool</dt><dd data-proof-field="tool">loading…</dd></div>
-              <div class="row"><dt>charged</dt><dd data-proof-field="credits_charged">loading…</dd></div>
-              <div class="row"><dt>key</dt><dd data-proof-field="kid">loading…</dd></div>
-            </dl>
-          </article>
-          <div class="proof-verify">
-            <!-- The verifier's real stdout for the published receipt, captured
-                 by scripts/record_site_transcript.py. The build refuses to ship
-                 it if receipt.json no longer names the same receipt. -->
-            @@LIVE_VERIFICATION@@
-            <p class="proof-verify-note">
-              The SDK verifier checks the Ed25519 signature with no API
-              credential and no callback to the issuer. Authenticate the key
-              snapshot through a trusted channel first.
-              <a
-                class="text-link"
-                href="/proof/"
-                data-analytics-event="proof_click"
-                >Download the artifacts and run it yourself.</a
-              >
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <section class="section pilot-section" id="pilot" aria-labelledby="pilot-title" data-wave="quiet">
-        <div>
-          <p class="section-kicker">03 / Design-partner pilot</p>
-          <h2 id="pilot-title">Start with one tool, not a platform migration.</h2>
-        </div>
-        <div class="pilot-copy">
-          <p>
-            Bring one internal MCP tool, such as a refund tool, a deploy
-            trigger, or a payout call, with a retry or audit concern. Send
-            the scenario by email for a written answer on fit; if it
-            fits, I walk the action through the full loop.
-          </p>
-          <h3>What the pilot includes</h3>
-          <ul class="intake-list">
-            <li>One partner-owned agent, one staging MCP tool, one consequential action, one named partner engineer.</li>
-            <li>A staging environment on synthetic or redacted data, with a written scope and end date.</li>
-            <li>
-              An acceptance flow: a retry with the same key returns the original
-              receipt instead of dispatching again. Verify the receipt offline.
-            </li>
-          </ul>
-          <h3>Five things for your email</h3>
-          <ol class="intake-list">
-            <li>
-              <strong>The tool or action.</strong> What the agent calls and
-              what changes, for example a refund tool, a deploy
-              trigger, or a payout call.
-            </li>
-            <li>
-              <strong>What goes wrong on retry.</strong>
-            </li>
-            <li>
-              <strong>How you check it happened.</strong> How you check
-              whether the action ran, and ran once.
-            </li>
-            <li>
-              <strong>What one duplicate or unproven call costs.</strong>
-              Lost money, recovery hours, or a concrete customer
-              consequence. Unknown is an acceptable answer.
-            </li>
-            <li>
-              <strong>Who owns the budget and when they decide.</strong>
-            </li>
-          </ol>
-          <p>
-            Use synthetic or redacted examples only. Never send production
-            secrets, credentials, or customer data.
-          </p>
-          <p class="constraint-line">
-            One tool, one operator, one action. Clone the public source
-            repository to run
-            <code>make prove-trust-plane</code> locally without live API
-            credentials.
-          </p>
-          <div class="pilot-links">
-            <a
-              class="button button-primary"
-              href="@@PILOT_EMAIL_HREF@@"
-              data-analytics-event="email_click"
-              aria-label="Start a pilot by email (opens your mail app)"
-              >Start a pilot by email</a
-            >
-            <a
-              href="mailto:@@PUBLIC_CONTACT_EMAIL@@"
-              data-analytics-event="email_click"
-              >Email @@PUBLIC_CONTACT_EMAIL@@</a
-            >
-            <!-- booking:start -->
-            <a
-              href="@@PUBLIC_BOOKING_URL@@"
-              target="_blank"
-              rel="noopener noreferrer"
-              data-analytics-event="booking_click"
-              aria-label="Book a call if your scenario needs one (opens in a new tab)"
-              >Book a call if your scenario needs one <span aria-hidden="true">↗</span></a
-            >
-            <span class="booking-context">@@BOOKING_CONTEXT@@</span>
-            <!-- booking:end -->
-          </div>
-        </div>
-
-        <div class="pilot-fit" id="economic-fit" aria-labelledby="economic-fit-title">
-          <h3 id="economic-fit-title">Does avoiding duplicates justify the cost?</h3>
-          <p>
-            Take the refund example: each duplicate is one refund paid twice,
-            plus recovery hours.
-            Monthly actions × duplicate rate × loss per duplicate ×
-            expected reduction = estimated monthly avoided loss.
-            Use the loss you bear, not
-            the full transaction value.
-          </p>
-          <p id="fit-assumptions">
-            Expected reduction is an assumption about your whole adopted
-            workflow to validate in a pilot,
-            not a gateway guarantee. These numbers stay in your browser and
-            are never sent to me.
-          </p>
-          <fieldset class="fit-fields" aria-describedby="fit-assumptions" data-fit-inputs hidden>
-            <legend>Your workflow assumptions</legend>
-            <label for="fit-actions">Consequential actions / month
-              <input id="fit-actions" type="number" min="0" step="1" required inputmode="numeric" />
-            </label>
-            <label for="fit-rate">Baseline duplicate rate (%)
-              <input id="fit-rate" type="number" min="0" max="100" step="any" required inputmode="decimal" aria-describedby="fit-rate-help" />
-              <span id="fit-rate-help">Enter 0.1 for 0.1%, or one duplicate in 1,000 actions.</span>
-            </label>
-            <label for="fit-loss">Loss per duplicate (USD)
-              <input id="fit-loss" type="number" min="0" step="any" required inputmode="decimal" />
-            </label>
-            <label for="fit-reduction">Expected reduction (%)
-              <input id="fit-reduction" type="number" min="0" max="100" step="any" required inputmode="decimal" />
-            </label>
-            <label for="fit-cost">Total monthly cost (USD, optional)
-              <input id="fit-cost" type="number" min="0" step="any" inputmode="decimal" aria-describedby="fit-cost-help" />
-              <span id="fit-cost-help">Include the service quote, your operations, and setup costs. Leave blank if unknown.</span>
-            </label>
-          </fieldset>
-          <div class="fit-result" role="status" aria-live="polite" aria-atomic="true" data-fit-result hidden>
-            <p data-fit-summary>Enter the four workflow assumptions to estimate avoided loss.</p>
-            <p data-fit-guidance></p>
-          </div>
-          <p data-fit-next hidden><a href="#pilot">Include these assumptions in your pilot email</a></p>
-          <p data-fit-alternative hidden><a href="/compare/">Compare simpler reliability options</a></p>
-          <details class="fit-example">
-            <summary>Illustrative example: how a $35 threshold is calculated</summary>
-            <p>
-              100,000 actions/month × 0.1% duplicates × $50 actual loss × 80%
-              reduction = $4,000/month avoided. At $2,800 monthly cost,
-              break-even is $35 per duplicate. At 0.01% duplication, the
-              threshold rises to $350. Illustrative assumptions, not my
-              pricing or measured results.
-            </p>
-          </details>
-          <noscript><p>Use the formula and example above to estimate fit, then include your assumptions in your email.</p></noscript>
-        </div>
-      </section>
-
-      <section
-        class="section machine-section"
-        id="machine-discovery"
-        aria-labelledby="machine-title"
-        data-wave="gridquiet"
-      >
-        <div class="machine-heading">
-          <p class="section-kicker">04 / Machine discovery</p>
-          <h2 id="machine-title">Public pointers for agents and operators.</h2>
-          <p>
-            Public discovery pointers need no key. Get a free sandbox demo key
-            at <a href="/demo-key/">/demo-key/</a> with no account needed.
-            Production keys are issued to design partners. Governed tool calls
-            require a key and a scoped permit.
-          </p>
-        </div>
-        <div class="machine-links">
-          <a
-            href="https://api.thisisatest.tech/.well-known/agent.json"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <span
-              >Agent manifest <span class="ext" aria-hidden="true">↗</span></span
-            ><code>GET /.well-known/agent.json</code>
-          </a>
-          <a
-            href="https://api.thisisatest.tech/llms.txt"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <span
-              >Agent instructions
-              <span class="ext" aria-hidden="true">↗</span></span
-            ><code>GET /llms.txt</code>
-          </a>
-          <a
-            href="https://api.thisisatest.tech/mcp/tools.json"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <span
-              >MCP discovery <span class="ext" aria-hidden="true">↗</span></span
-            ><code>GET /mcp/tools.json</code>
-          </a>
-          <a
-            href="https://api.thisisatest.tech/health/dependencies"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <span
-              >Live dependency status
-              <span class="ext" aria-hidden="true">↗</span></span
-            ><code>GET /health/dependencies</code>
-          </a>
-        </div>
-        <p class="machine-note">
-          Three unauthenticated GETs open directly: the agent manifest,
-          llms.txt, and dependency status. On production-like deployments,
-          <code>/mcp/tools.json</code> returns 401 without a key.
-          The local quickstart exposes the catalog without a key.
-        </p>
-      </section>
-
-      <section class="boundary-section" aria-labelledby="boundary-title" data-wave="dark">
-        <div class="section boundary-layout">
-          <div>
-            <p class="section-kicker">05 / Honest limitations</p>
-            <h2 id="boundary-title">What this proof does not establish.</h2>
-          </div>
-          <ul>
-            <li>Customer traction or production adoption</li>
-            <li>Production settlement or payment rails</li>
-            <li>Compliance-grade ledger storage</li>
-            <li>Proof that upstream tools avoid duplicate side effects</li>
-            <li>Universal governance across every agent framework</li>
-          </ul>
-        </div>
-      </section>
-
-      <section
-        class="provenance-section"
-        id="provenance"
-        aria-labelledby="provenance-title"
-        data-wave="ember"
-      >
-        <div class="section provenance-layout">
-          <div class="provenance-copy">
-            <p class="section-kicker">06 / Who is behind this</p>
-            <h2 id="provenance-title">Built and run by one accountable operator.</h2>
-            <p>
-              Built and run by @@PUBLIC_DISPLAY_NAME@@.
-            </p>
-            <p>
-              <a
-                href="https://api.thisisatest.tech/WEDGE.md"
-                target="_blank"
-                rel="noopener noreferrer"
-                >Product wedge</a
-              >
-              ·
-              <a
-                href="https://api.thisisatest.tech/SECURITY_LIMITATIONS.md"
-                target="_blank"
-                rel="noopener noreferrer"
-                >Security limitations</a
-              >
-              ·
-              <a
-                href="https://github.com/agentmiddleware/agent-middleware"
-                target="_blank"
-                rel="noopener noreferrer"
-                >Source repository</a
-              >
-            </p>
-          </div>
-          <div class="closing-cta">
-            <h2>Bring one tool. Keep the evidence.</h2>
-            <div class="pilot-links">
-              <a
-                class="button button-primary"
-                href="@@PILOT_EMAIL_HREF@@"
-                data-analytics-event="email_click"
-                aria-label="Start a pilot by email (opens your mail app)"
-                >Start a pilot by email</a
-              >
-              <a
-                class="button button-secondary"
-                href="/proof/"
-                data-analytics-event="proof_click"
-                >Run the local proof</a
-              >
-              <!-- booking:start -->
-              <a
-                href="@@PUBLIC_BOOKING_URL@@"
-                target="_blank"
-                rel="noopener noreferrer"
-                data-analytics-event="booking_click"
-                aria-label="Book a call if your scenario needs one (opens in a new tab)"
-                >Book a call if your scenario needs one <span aria-hidden="true">↗</span></a
-              >
-              <span class="booking-context">@@BOOKING_CONTEXT@@</span>
-              <!-- booking:end -->
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- The waiting room. It closes the page's own content rather than the
-           footer, so the arcade never sits beside the security-disclosure
-           link. Hidden until /arcade-boot.js proves it can run, so a visitor
-           without JavaScript never sees a dead control. The bootstrap reads
-           the arcade's assets from the launcher's data attributes and
-           fetches them on first use. -->
       <div class="waiting-room">
         <div class="footer-arcade" hidden>
-          <button
-            type="button"
-            id="arcade-launch"
-            class="arcade-launch"
-            data-arcade-script="/arcade.js?v=gateway-19"
-            data-arcade-style="/arcade.css?v=gateway-19"
-            hidden
-          >
+          <button type="button" id="arcade-launch" class="arcade-launch" data-arcade-script="/arcade.js?v=gateway-19" data-arcade-style="/arcade.css?v=gateway-19" hidden>
             <span aria-hidden="true">▶</span> HUMANS: PRESS START
           </button>
-          <p class="footer-arcade-note">
-            Built for agents. The human has nothing to do. Nothing in
-            there is billed, metered, or real.
-          </p>
+          <p class="footer-arcade-note">Built for agents. The human has nothing to do. Nothing in there is billed, metered, or real.</p>
         </div>
       </div>
     </main>
