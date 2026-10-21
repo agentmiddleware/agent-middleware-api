@@ -102,6 +102,13 @@
       ]
     },
     {
+      "source": "/docs/llms.txt",
+      "headers": [
+        { "key": "Content-Type", "value": "text/plain; charset=utf-8" },
+        { "key": "Cache-Control", "value": "public, max-age=300" }
+      ]
+    },
+    {
       "source": "/robots.txt",
       "headers": [
         { "key": "Content-Type", "value": "text/plain; charset=utf-8" },
@@ -188,6 +195,11 @@
     {
       "source": "/proof",
       "destination": "/proof/",
+      "permanent": true
+    },
+    {
+      "source": "/docs",
+      "destination": "/docs/",
       "permanent": true
     },
     {

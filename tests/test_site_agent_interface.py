@@ -1333,11 +1333,18 @@ def test_every_indexable_page_is_canonical_localized_and_in_the_sitemap(
 
     sitemap = (output / "sitemap.xml").read_text(encoding="utf-8")
     listed = set(re.findall(r"<loc>([^<]+)</loc>", sitemap))
-    assert listed == set(INDEXABLE_PAGES.values()), (
-        f"sitemap lists {sorted(listed)}, expected {sorted(INDEXABLE_PAGES.values())}"
+    docs_pages = {
+        page.relative_to(output).as_posix(): (
+            f"https://www.agentmiddleware.dev/{page.parent.relative_to(output).as_posix()}/"
+        )
+        for page in (output / "docs").rglob("index.html")
+    }
+    expected_urls = set(INDEXABLE_PAGES.values()) | set(docs_pages.values())
+    assert listed == expected_urls, (
+        f"sitemap lists {sorted(listed)}, expected {sorted(expected_urls)}"
     )
 
-    for relative_path, url in INDEXABLE_PAGES.items():
+    for relative_path, url in {**INDEXABLE_PAGES, **docs_pages}.items():
         page = (output / relative_path).read_text(encoding="utf-8")
         assert f'<link rel="canonical" href="{url}"' in page
         assert f'content="{url}"' in page, f"{relative_path} og:url disagrees"
@@ -1370,11 +1377,13 @@ def test_html_pages_point_crawlers_at_the_machine_readable_briefings(
     output = tmp_path / "site"
     assert _render_site(output, VALID_TEST_CONTACTS).returncode == 0
 
-    for relative_path in INDEXABLE_PAGES:
-        page = " ".join((output / relative_path).read_text(encoding="utf-8").split())
+    pages = [output / relative_path for relative_path in INDEXABLE_PAGES]
+    pages.extend((output / "docs").rglob("index.html"))
+    for path in pages:
+        page = " ".join(path.read_text(encoding="utf-8").split())
         for href in ("/.well-known/agent.json", "/llms.txt", "/llms-full.txt"):
             assert 'rel="alternate"' in page and f'href="{href}"' in page, (
-                f"{relative_path} does not advertise {href}"
+                f"{path} does not advertise {href}"
             )
 
 
