@@ -475,7 +475,10 @@
           <ul class="intake-list">
             <li>One partner-owned agent, one staging MCP tool, one consequential action, one named partner engineer.</li>
             <li>A staging environment on synthetic or redacted data, with a written scope and end date.</li>
-            <li>An acceptance flow: repeat the request, confirm no second dispatch or debit, verify the receipt offline.</li>
+            <li>
+              An acceptance flow: a retry with the same key returns the original
+              receipt instead of dispatching again. Verify the receipt offline.
+            </li>
           </ul>
           <h3>Five things for your email</h3>
           <ol class="intake-list">
@@ -702,7 +705,7 @@
               >
               ·
               <a
-                href="https://github.com/agentmiddleware/agent-middleware-api"
+                href="https://github.com/agentmiddleware/agent-middleware"
                 target="_blank"
                 rel="noopener noreferrer"
                 >Source repository</a
