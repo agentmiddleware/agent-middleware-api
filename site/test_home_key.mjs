@@ -238,6 +238,28 @@ test("network and service failures show retry and a later request can succeed", 
   }
 });
 
+test("failed issuance focuses the visible action when open or trigger when closed", async () => {
+  for (const [status, action] of [[503, "home-key-retry"], [429, "home-key-email"]]) {
+    const page = makePage(() => ({ status }));
+    const get = (id) => page.elements.get(id);
+    await page.click("home-key-trigger");
+    assert.equal(get("home-key-panel").hidden, false);
+    assert.equal(get(action).hidden, false);
+    assert.equal(get(action).focusCount, 1);
+    assert.equal(get("home-key-trigger").focusCount, 0);
+  }
+
+  let resolveResponse;
+  const page = makePage(() => new Promise((resolve) => { resolveResponse = resolve; }));
+  const pending = page.click("home-key-trigger");
+  await page.click("home-key-close");
+  resolveResponse({ status: 503 });
+  await pending;
+  assert.equal(page.elements.get("home-key-panel").hidden, true);
+  assert.equal(page.elements.get("home-key-trigger").focusCount, 1);
+  assert.equal(page.elements.get("home-key-retry").focusCount, 0);
+});
+
 test("rate limit and disabled responses show email without another issuance", async () => {
   for (const code of [403, 404, 429]) {
     const page = makePage(() => ({ status: code }));

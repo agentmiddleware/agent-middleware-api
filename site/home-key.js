@@ -50,6 +50,7 @@
     email.hidden = !isPaused;
     finishRequest();
     if (panel.hidden) trigger.focus();
+    else (isPaused ? email : retry).focus();
   }
 
   function usableIssue(data) {
