@@ -87,7 +87,7 @@ design partner key.
 ## Run the whole loop yourself (public source)
 
 No live API credentials required. Clone
-https://github.com/agentmiddleware/agent-middleware-api. Install Python 3.11+,
+https://github.com/agentmiddleware/agent-middleware. Install Python 3.11+,
 git, make, curl, and uv first; see docs/quickstart.md. Then from the repository
 root:
 
@@ -142,5 +142,5 @@ Human site: https://www.agentmiddleware.dev/
 Offline receipt verification: https://www.agentmiddleware.dev/proof/
 Comparison with named alternatives, including the rows this loses:
 https://www.agentmiddleware.dev/compare/
-Source repository: https://github.com/agentmiddleware/agent-middleware-api (public)
+Source repository: https://github.com/agentmiddleware/agent-middleware (public)
 Security contact: https://www.agentmiddleware.dev/.well-known/security.txt

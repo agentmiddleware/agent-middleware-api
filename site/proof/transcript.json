@@ -114,7 +114,7 @@
     {
       "id": "replay",
       "loop": "05 \u00b7 Meter, again",
-      "note": "Same receipt id, no second dispatch, no second debit. A timed-out client can retry without fear.",
+      "note": "For a finalized request, a retry with the same key returns the original receipt instead of dispatching again.",
       "request": "POST /mcp/messages\nX-API-Key: $AGENT_API_KEY",
       "response": [
         [
