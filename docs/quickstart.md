@@ -31,8 +31,8 @@ automatically on first run.
 ## 1. Boot the trust plane (~2 minutes)
 
 ```bash
-git clone https://github.com/agentmiddleware/agent-middleware.git
-cd agent-middleware
+git clone https://github.com/agentmiddleware/agent-middleware-api.git
+cd agent-middleware-api
 make quickstart
 ```
 

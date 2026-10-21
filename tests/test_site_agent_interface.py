@@ -683,7 +683,10 @@ def test_public_surfaces_link_public_source_without_requiring_credentials(
     assert manifest["try_it"]["repository_access"] == "public"
 
     quickstart = (ROOT / "docs" / "quickstart.md").read_text(encoding="utf-8")
-    assert f"git clone {PUBLIC_REPO_URL}.git" in quickstart
+    assert (
+        "git clone https://github.com/agentmiddleware/agent-middleware-api.git"
+        in quickstart
+    )
     compare = (output / "compare" / "index.html").read_text(encoding="utf-8")
     assert "docs/market-research-2026-08.md</code> in the public source" in compare
 
