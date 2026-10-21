@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 
 
-SITE = Path(__file__).resolve().parent
+SITE = Path(__file__).resolve().parents[1] / "site"
 PUBLIC_REPO = "https://github.com/agentmiddleware/agent-middleware"
 APPROVED_RETRY = (
     "a retry with the same key returns the original receipt instead of "
