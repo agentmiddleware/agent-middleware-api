@@ -380,6 +380,16 @@ def test_docs_redirect_and_launch_gate(tmp_path: Path) -> None:
     assert not (blocked_output / "docs").exists()
 
 
+def test_published_docs_pages_redirect_to_trailing_slash() -> None:
+    config = json.loads((SITE / "vercel.json").read_text(encoding="utf-8"))
+    for _, _, slug, _, _ in _published_pages():
+        assert {
+            "source": f"/docs/{slug}",
+            "destination": f"/docs/{slug}/",
+            "permanent": True,
+        } in config["redirects"], f"/docs/{slug} needs a trailing-slash redirect"
+
+
 def test_markdown_renderer_escapes_html_and_unsafe_links() -> None:
     module = runpy.run_path(str(SITE / "build_docs.py"))
     render_markdown = module["render_markdown"]
