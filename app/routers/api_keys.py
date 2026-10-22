@@ -488,14 +488,14 @@ async def get_daily_usage_stats(
         return [
             {
                 "key_id": row[0],
-                "day": row[1].isoformat() if row[1] else None,
+                "day": row[1] if isinstance(row[1], str) else (row[1].isoformat() if row[1] else None),
                 "calls": row[2],
                 "count_4xx": row[3],
                 "count_5xx": row[4],
                 "p50_latency_ms": row[5],
                 "p95_latency_ms": row[6],
-                "first_call": row[7].isoformat() if row[7] else None,
-                "last_call": row[8].isoformat() if row[8] else None,
+                "first_call": row[7] if isinstance(row[7], str) else (row[7].isoformat() if row[7] else None),
+                "last_call": row[8] if isinstance(row[8], str) else (row[8].isoformat() if row[8] else None),
             }
             for row in rows
         ]
