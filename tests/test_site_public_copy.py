@@ -9,12 +9,13 @@ SITE = Path(__file__).resolve().parents[1] / "site"
 PUBLIC_REPO = "https://github.com/agentmiddleware/agent-middleware"
 APPROVED_RETRY = (
     "a retry with the same key returns the original receipt instead of "
-    "dispatching again."
+    "dispatching again"
 )
 ALLOWED_GITHUB_URLS = {
     "https://github.com/agentmiddleware",
     PUBLIC_REPO,
     "https://github.com/agentmiddleware/amw-demo",
+    "https://github.com/agentmiddleware/amw-demo.git",
     "https://github.com/agentmiddleware/amw-paypal-agent-demo",
 }
 

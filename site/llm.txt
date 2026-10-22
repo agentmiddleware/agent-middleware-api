@@ -1,8 +1,9 @@
-# Agent Middleware API: machine discovery
+# Agent Middleware: machine discovery
 
-This origin is the human design-partner site. It offers free sandbox demo keys
-at https://www.agentmiddleware.dev/demo-key/ with no account needed. Production
-keys are issued to design partners. The site does not execute protected tools.
+This origin is the human site. Its homepage offers free sandbox demo keys inline
+at https://www.agentmiddleware.dev/ with no account needed. The /demo-key/ page
+is the fallback without JavaScript. Production keys are issued to design
+partners. The site does not execute protected tools.
 Platform engineering, AI infrastructure, and security teams operating
 consequential autonomous actions are the buyers; autonomous clients consume
 the discovery contract below.
@@ -53,8 +54,18 @@ authentication or permit checks.
 ## Authority
 
 Protected routes use the X-API-Key header. Free sandbox demo keys are available
-at https://www.agentmiddleware.dev/demo-key/ with no account needed. Production
-keys are issued to design partners.
+at https://www.agentmiddleware.dev/ with no account needed. Production keys
+are issued to design partners.
+
+## Three minute hosted demo
+
+The homepage presents one Python path using https://github.com/agentmiddleware/amw-demo.
+Get a demo key inline, save both api_key and wallet_id, then clone the demo,
+create a Python 3.10+ virtual environment, install it with `pip install -e .`,
+export AMW_API_KEY and AMW_WALLET_ID, and run
+`python examples/permit_echo_retry.py`. The script issues a permit for
+partner.echo, calls it, retries with the same request key, and checks the
+receipt offline. The curl invoke path is not published yet.
 
 ## Published receipt proof
 
@@ -112,6 +123,7 @@ production settlement, or compliance evidence.
 ## Humans and operators
 
 https://www.agentmiddleware.dev/
+https://www.agentmiddleware.dev/pilot/ (pilot details and calculator)
 https://www.agentmiddleware.dev/proof/ (download a receipt and verify it offline)
 https://www.agentmiddleware.dev/compare/ (named alternatives, including the rows this loses)
 https://github.com/agentmiddleware/agent-middleware (public source repository)

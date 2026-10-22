@@ -47,7 +47,6 @@ EMAIL_ONLY_TEST_CONTACTS = {
     if key != "PUBLIC_BOOKING_URL"
 }
 PRIMARY_CTA = "Start a pilot by email"
-SECONDARY_CTA = "Run the local proof"
 OPTIONAL_BOOKING_CTA = "Book a call if your scenario needs one"
 MAILTO = f"mailto:{VALID_TEST_CONTACTS['PUBLIC_CONTACT_EMAIL']}"
 
@@ -223,150 +222,71 @@ def test_site_build_refuses_repo_and_existing_temp_delete_targets(tmp_path) -> N
 
 
 def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> None:
-    """The landing page's load-bearing sentences, pinned verbatim.
-
-    This is the funnel's contract with a reader: the promise in the headline,
-    the scenario that makes the problem concrete, what the boundary actually
-    does, what a credit is and when a caller pays for one, and the five things
-    an intake email has to carry. Each string is asserted whole rather than by
-    keyword, because the failure mode this guards against is not deletion —
-    it is a well-meaning edit that softens a claim by a word or two until the
-    page promises more than the gateway does.
-
-    The DOM-order assertions below it hold the argument in sequence: the
-    non-bypassability diagram before the thesis, the pilot ask before the
-    machine-discovery links, and the proof section before the page admits
-    what it has not established.
-    """
-
+    """The homepage offers one first call and leaves pilot detail on /pilot/."""
     output = tmp_path / "site"
     result = _render_site(output, VALID_TEST_CONTACTS)
     assert result.returncode == 0, result.stderr
 
     page = (output / "index.html").read_text(encoding="utf-8")
     text = _page_text(page)
-    headline = "Authorize one agent action. Retry with the same key, no new dispatch."
-    # The hero names one concrete tool before it shows any JSON. A reader who
-    # does not already know they have this problem needs the scenario, not the
-    # abstraction, and "refund" is the action the calculator's example prices.
-    failure = (
-        "An agent issues a customer refund through an internal MCP tool. The "
-        "call times out, the agent retries, and the refund runs "
-        "twice. If preventing it cannot justify "
-        "this boundary, I will tell you."
-    )
-    # What a credit is, in one place, because the page meters calls while its
-    # own limitations section refuses production settlement. Without this the
-    # two read as a contradiction rather than a deliberate boundary.
-    #
-    # The boundary is stated as what the gateway can still prove, not as an
-    # event: before_dispatch commits the durable claim immediately before
-    # ClientSession.call_tool (app/services/upstream_mcp.py), so a worker that
-    # dies in between leaves delivery_uncertain — charged — without the send
-    # ever having happened. Saying the call "was dispatched" would claim
-    # evidence that does not exist, and would read as though that crash window
-    # were covered by the refund sentence above it.
-    #
-    # It must name the case where the caller pays without a proven downstream
-    # effect. docs/failure-semantics.md is explicit that delivery_uncertain
-    # and response_rejected stay charged, and this page invites the reader to
-    # go and check the repository — so a paragraph that listed only the two
-    # ways a caller does not pay would read as shading on the one page whose
-    # differentiator is that it does not shade. The incentive argument is the
-    # honest reason and is also the stronger pitch.
-    credit = (
-        "A credit is a closed-loop metering unit for the pilot on an "
-        "operator-provisioned wallet, not payment rails. The gateway reserves "
-        "the tool's credit price against the permit before "
-        "anything runs, and writes at most one ledger debit per accepted "
-        "idempotency key. A denied call is never charged; a call the gateway "
-        "can prove never reached the tool is refunded. Once committed to "
-        "sending on the configured upstream path, it cannot prove the tool "
-        "did not run: a timeout or a crash from that "
-        "point stays charged, and is never retried for you. "
-        "Refunding an ambiguous call automatically would pay a caller to "
-        "induce timeouts against a tool that already did the work. "
-        "Credits never become invoices, settlement, or payment rails, "
-        "and the pilot is priced separately, in writing."
-    )
-    # The recording uses a stand-in tool. Naming a refund in the hero without
-    # saying so would let the transcript be read as a customer's refund.
-    stand_in = "The tool in the recording is a stand-in echo tool, not a refund tool"
-    boundary = (
-        "Agent Middleware API is a transaction boundary between your "
-        "agents and your consequential MCP tools. For a finalized request, "
-        "a retry with the same accepted key and payload returns the original "
-        "signed receipt instead of dispatching again. A new key is a new "
-        "request."
-    )
-    wedge = (
-        "The wedge today is metered calls. The underlying primitive is bounded "
-        "authority for machine actions."
-    )
-    only_path = (
-        "The gateway becomes the only path once you close the tool's other routes."
-    )
+    pilot = (output / "pilot" / "index.html").read_text(encoding="utf-8")
+    pilot_text = _page_text(pilot)
 
-    assert headline in text
-    assert failure in text
-    assert boundary in text
-    assert wedge in text
-    assert credit in text
-    assert stand_in in text
-    # Belt and braces: the unfavourable half of the credit paragraph is the
-    # reason it exists, so it is pinned separately from the whole string.
-    assert "stays charged" in text, (
-        "the credit paragraph no longer says a caller can pay for a call whose "
-        "outcome was never established; that omission is the exact shading "
-        "this page refuses elsewhere"
-    )
-    # The scenario is carried through: the pilot ask and the intake question
-    # name the same kind of tool the hero opens with.
-    assert "such as a refund tool, a deploy trigger, or a payout call" in text
-    assert "for example a refund tool, a deploy trigger, or a payout call" in text
-    # The non-bypassability claim rides directly under the offer copy with its
-    # diagram, before the numbered sections begin.
-    assert only_path in text
-    assert page.index('class="boundary-figure"') < page.index('id="thesis-title"')
-    # Intake is email-first: the primary CTA is the monitored address, the
-    # secondary CTA is the local proof, and no mandatory call is offered.
-    assert PRIMARY_CTA in text
-    assert SECONDARY_CTA in text
-    assert "Book a one-tool pilot" not in text
-    assert "30-minute" not in text
-    # Technical and economic qualification, plus the no-secrets rule.
-    assert "The tool or action." in text
-    assert "What goes wrong on retry." in text
-    assert "How you check it happened." in text
-    assert "What one duplicate or unproven call costs." in text
-    assert "Who owns the budget and when they decide." in text
-    assert "synthetic or redacted examples only" in text.casefold()
-    assert "Never send production secrets" in text
-    # The pilot scope line no longer carries the call-availability clause; the
-    # optional booking link below is now its only carrier, and it is asserted
-    # alongside the CTA order below.
-    assert "one tool, one operator, one action" in text.casefold()
-    # One label for the primary CTA everywhere; earlier variants drifted.
-    assert "Book a pilot" not in text
-    assert "Discuss fit" not in text
-    assert "platform engineering, AI infrastructure, and security teams" in text
-    assert f'href="{MAILTO}"' in page
-    assert VALID_TEST_CONTACTS["PUBLIC_DISPLAY_NAME"] in page
-    # With a booking link configured it is rendered as the optional, secondary
-    # "if your scenario needs one" link — never as the primary path.
-    assert f'href="{VALID_TEST_CONTACTS["PUBLIC_BOOKING_URL"]}"' in page
-    assert OPTIONAL_BOOKING_CTA in text
-    assert page.index(PRIMARY_CTA) < page.index(OPTIONAL_BOOKING_CTA)
+    assert "Let agents retry safely." in text
+    assert (
+        "Put Agent Middleware in front of a risky tool. Each action needs a "
+        "permit, a retry with the same key returns the original receipt "
+        "instead of dispatching again, and every receipt can be checked offline."
+    ) in text
+    assert "Get a free demo key" in text
+    assert "Run the 3 minute quickstart" in text
+    assert "No account. Demo credits only." in text
+    assert re.search(r'<button\b[^>]*id="home-key-trigger"[^>]*>', page)
+    assert re.search(r'<noscript>.*?href="/demo-key/?"[^>]*>.*?</noscript>', page, re.S)
+    assert 'href="#quickstart"' in page
+    assert 'id="quickstart"' in page
+    assert "Make your first call" in text
+    assert "git clone https://github.com/agentmiddleware/amw-demo.git" in page
+    assert "python examples/permit_echo_retry.py" in page
+    assert "Coming soon" in text
+    assert "curl -s -X POST https://api.thisisatest.tech/v1/demo/keys" in page
+    assert "Same receipt. The tool did not run again." in text
+    assert 'id="how-it-works"' in page
+    for heading in ("Permit", "Request key", "Receipt"):
+        assert heading in text
+    assert 'id="when-to-use"' in page
+    for action in ("refunds", "payouts", "deploys"):
+        assert action in text.casefold()
+    assert "https://api.thisisatest.tech/SECURITY_LIMITATIONS.md" in page
+    assert 'href="/pilot/"' in page
+    assert 'id="pilot"' not in page
+    assert 'id="economic-fit"' not in page
 
-    assert page.index(headline) < page.index('id="pilot"')
-    assert page.index('id="pilot"') < page.index('id="machine-discovery"')
-    assert page.index('id="proof"') < page.index("Honest limitations")
-    assert "@@PUBLIC_" not in page
-    assert "Permit provisional" not in page
-    for hostname in KNOWN_PROVIDER_HOSTS:
-        assert hostname not in page
-    for suffix in PROVIDER_HOST_SUFFIXES:
-        assert suffix not in page
+    assert 'id="pilot"' in pilot
+    assert 'id="economic-fit"' in pilot
+    assert PRIMARY_CTA in pilot_text
+    for question in (
+        "The tool or action.",
+        "What goes wrong on retry.",
+        "How you check it happened.",
+        "What one duplicate or unproven call costs.",
+        "Who owns the budget and when they decide.",
+    ):
+        assert question in pilot_text
+    assert "synthetic or redacted examples only" in pilot_text.casefold()
+    assert "Never send production secrets" in pilot_text
+    assert f'href="{MAILTO}"' in pilot
+    assert VALID_TEST_CONTACTS["PUBLIC_DISPLAY_NAME"] in pilot
+    assert f'href="{VALID_TEST_CONTACTS["PUBLIC_BOOKING_URL"]}"' in pilot
+    assert OPTIONAL_BOOKING_CTA in pilot_text
+    assert pilot.index(PRIMARY_CTA) < pilot.index(OPTIONAL_BOOKING_CTA)
+
+    for content in (page, pilot):
+        assert "@@PUBLIC_" not in content
+        for hostname in KNOWN_PROVIDER_HOSTS:
+            assert hostname not in content
+        for suffix in PROVIDER_HOST_SUFFIXES:
+            assert suffix not in content
 
 
 @pytest.mark.parametrize(
@@ -484,25 +404,21 @@ def test_rendered_site_has_truthful_proof_and_no_browser_secret_storage(
             "signing_input"
         ]
     )["created_at"][:10]
-    landing_text = _page_text(landing)
     proof_text = _page_text(proof)
-    assert "published as a historical sample" in landing_text
-    assert f'<time datetime="{issued}">{issued}</time>' in landing
     assert f'<time datetime="{issued}">{issued}</time>' in proof
-    assert "not a test of the deployment running today" in landing_text
+    assert "published historical sample" in proof_text
     assert "not a test of the deployment running today" in proof_text
-    assert "live gateway proof" not in landing_text
+    assert "live gateway proof" not in _page_text(landing)
     assert "offline verifier · live receipt" not in landing
-    assert "published sample receipt" in landing
     assert "This receipt is self-issued from a non-sensitive" in proof_text
     assert "not customer evidence" in proof_text
-    assert "partner.echo" in landing
+    assert "partner.echo" in proof
     assert "/proof/receipt.json" in proof
     assert "/proof/trust-keys.json" in proof
     assert "b2a-verify-receipt" in proof
     assert "--expect-issuer https://api.thisisatest.tech" in proof
-    assert 'data-proof-field="receipt_id"' in landing
-    assert 'data-proof-field="credits_charged"' in landing
+    assert 'data-proof-field="receipt_id"' in proof
+    assert 'data-proof-field="credits_charged"' in proof
     assert "not published" in proof_script
     assert "No verification claim is being made" in proof_script
     assert "localStorage" not in proof_script
@@ -548,7 +464,8 @@ def test_machine_pointer_copies_match_and_state_live_access_boundary() -> None:
     normalized_llm = " ".join(llm_txt.split())
 
     assert llm_txt == llms_txt
-    assert "human design-partner site" in normalized_llm
+    assert "human site" in normalized_llm
+    assert "Its homepage offers free sandbox demo keys inline" in normalized_llm
     assert (
         "teams operating consequential autonomous actions are the buyers"
         in normalized_llm
@@ -614,20 +531,19 @@ OLD_REPO_URL = "https://github.com/PetrefiedThunder/agent-middleware-api"
 GITHUB_URL_PATTERN = re.compile(r"https://github\.com[^\s\"'<>)\]]*")
 
 
-def test_machine_discovery_names_keyed_catalog_and_scoped_tool_invoke(tmp_path) -> None:
+def test_homepage_links_machine_brief_and_has_one_quickstart(tmp_path) -> None:
     output = tmp_path / "site"
     result = _render_site(output, VALID_TEST_CONTACTS)
     assert result.returncode == 0, result.stderr
 
     home = (output / "index.html").read_text(encoding="utf-8")
-    machine = home.split('id="machine-discovery"', 1)[1].split("</section>", 1)[0]
-    normalized = " ".join(machine.split())
-    assert "Three unauthenticated GETs" in normalized
-    assert "/mcp/tools.json</code> returns 401" in normalized
-    assert "Get a free sandbox demo key" in normalized
-    assert "Production keys are issued to design partners" in normalized
-    assert "require a key and a scoped permit" in normalized
-    assert "protected actions need" not in normalized
+    llms = (output / "llms.txt").read_text(encoding="utf-8")
+    assert 'href="/llms.txt"' in home
+    assert 'id="machine-discovery"' not in home
+    assert home.count('id="quickstart"') == 1
+    assert "GET /mcp/tools.json requires a key" in llms
+    assert "returns 401 without one" in llms
+    assert "Production keys are issued to design partners" in " ".join(llms.split())
 
 
 def test_public_surfaces_link_public_source_without_requiring_credentials(
@@ -744,10 +660,11 @@ def test_dynamic_routes_and_noncanonical_hosts_redirect_correctly() -> None:
 
     redirects = config["redirects"]
     dynamic = {entry["source"]: entry for entry in redirects if "has" not in entry}
-    for source in ("/pilot", "/pilot/"):
-        assert dynamic[source]["destination"] == "/#pilot"
-        assert dynamic[source]["permanent"] is True
-    assert 'id="pilot"' in (SITE / "index.html").read_text()
+    assert dynamic["/pilot"]["destination"] == "/pilot/"
+    assert dynamic["/pilot"]["permanent"] is True
+    assert "/pilot/" not in dynamic
+    assert 'id="pilot"' in (SITE / "pilot" / "index.html").read_text()
+    assert 'id="pilot"' not in (SITE / "index.html").read_text()
     expected = {
         "/mcp/tools.json": f"{CANONICAL_API}/mcp/tools.json",
         "/v1/discover": f"{CANONICAL_API}/v1/discover",
@@ -788,16 +705,14 @@ def test_search_social_and_analytics_contracts(tmp_path) -> None:
     assert '<link rel="canonical" href="https://www.agentmiddleware.dev/"' in page
     assert 'property="og:url" content="https://www.agentmiddleware.dev/"' in page
     assert 'name="twitter:card" content="summary_large_image"' in page
-    assert (
-        "<title>Agent Middleware API | Transaction integrity for agent actions</title>"
-        in page
-    )
-    assert "explicit delivery uncertainty" in page
+    assert "<title>Let agents retry safely | Agent Middleware</title>" in page
+    assert "preserves ambiguous delivery for required external reconciliation" in page
     assert "https://www.agentmiddleware.dev/social-card.png" in page
     assert '<link rel="icon" href="/favicon.svg"' in page
     assert "/_vercel/insights/script.js" not in page
     assert "Sitemap: https://www.agentmiddleware.dev/sitemap.xml" in robots
     assert "https://www.agentmiddleware.dev/proof/" in sitemap
+    assert "https://www.agentmiddleware.dev/pilot/" in sitemap
     assert "https://www.agentmiddleware.dev/compare/" in sitemap
     assert "https://www.agentmiddleware.dev/demo-key/" in sitemap
     assert _png_dimensions(output / "social-card.png") == (1200, 630)
@@ -922,6 +837,7 @@ def test_external_links_carry_noopener_noreferrer(tmp_path) -> None:
 
     for relative_path in (
         "index.html",
+        "pilot/index.html",
         "proof/index.html",
         "compare/index.html",
         "demo-key/index.html",
@@ -1090,6 +1006,7 @@ class _JsonLdCollector(HTMLParser):
 
 INDEXABLE_PAGES = {
     "index.html": "https://www.agentmiddleware.dev/",
+    "pilot/index.html": "https://www.agentmiddleware.dev/pilot/",
     "proof/index.html": "https://www.agentmiddleware.dev/proof/",
     "compare/index.html": "https://www.agentmiddleware.dev/compare/",
     "demo-key/index.html": "https://www.agentmiddleware.dev/demo-key/",
@@ -1155,6 +1072,7 @@ def test_pages_publish_valid_json_ld(tmp_path) -> None:
 
     required_types = {
         "index.html": {"Organization", "WebSite", "SoftwareApplication", "WebPage"},
+        "pilot/index.html": {"WebPage", "BreadcrumbList"},
         "proof/index.html": {"WebPage", "BreadcrumbList", "HowTo"},
         "compare/index.html": {"WebPage", "BreadcrumbList", "FAQPage"},
         "demo-key/index.html": {"WebPage", "BreadcrumbList"},
@@ -1547,6 +1465,7 @@ def test_pages_carry_no_inline_scripts(tmp_path) -> None:
     for root in (output, enabled_output):
         for relative_path in (
             "index.html",
+            "pilot/index.html",
             "proof/index.html",
             "compare/index.html",
             "demo-key/index.html",
@@ -1585,6 +1504,7 @@ def test_static_assets_are_cached_and_html_is_not() -> None:
     )
     for relative_path in (
         "index.html",
+        "pilot/index.html",
         "proof/index.html",
         "compare/index.html",
         "demo-key/index.html",
@@ -1721,7 +1641,7 @@ def test_branded_404_offers_a_way_back(tmp_path) -> None:
     page = (output / "404.html").read_text(encoding="utf-8")
     assert 'name="robots" content="noindex' in page
     assert 'href="/proof/"' in page
-    assert 'href="/#machine-discovery"' in page
+    assert 'href="/#quickstart"' in page
     assert "@@" not in page
 
 
@@ -1741,30 +1661,10 @@ def test_landing_hero_wave_is_progressive_enhancement(tmp_path) -> None:
     assert re.search(r'<script defer src="/wave\.js\?v=[^"]+"></script>', page)
     assert (output / "wave.js").is_file()
 
-    # The scroll narrative is wired: sections declare field states and the
-    # renderer knows every one of them. All eight documented states must be
-    # present (site/README.md names the full arc), and no section may name
-    # a preset the renderer lacks. An unknown preset would not crash the
-    # renderer — measureSections skips names missing from PRESETS — but it
-    # would silently drop that section from the narrative, so the build
-    # contract refuses it here instead.
+    # The shorter homepage still declares only field states the renderer knows.
     wave_js = (output / "wave.js").read_text(encoding="utf-8")
     declared = re.findall(r'data-wave="([a-z]+)"', page)
-    required = {
-        "sea",
-        "condense",
-        "order",
-        "stream",
-        "crystal",
-        "quiet",
-        "gridquiet",
-        "dark",
-        "ember",
-    }
-    assert required.issubset(set(declared)), (
-        "landing page is missing field states: "
-        + ", ".join(sorted(required - set(declared)))
-    )
+    assert "sea" in declared
     for preset in declared:
         assert re.search(rf"\b{re.escape(preset)}: \{{", wave_js), (
             f'index.html declares data-wave="{preset}" but wave.js has no such preset'
@@ -1773,9 +1673,7 @@ def test_landing_hero_wave_is_progressive_enhancement(tmp_path) -> None:
     # The funnel's tested copy still leads the page: the wave is a treatment,
     # not a content change.
     text = _page_text(page)
-    assert (
-        "Authorize one agent action. Retry with the same key, no new dispatch." in text
-    )
+    assert "Let agents retry safely." in text
 
     stylesheet = (output / "styles.css").read_text(encoding="utf-8")
     assert 'html[data-a11y-contrast="high"] .wave-canvas' in stylesheet
@@ -1849,6 +1747,7 @@ def test_navigation_is_identical_across_pages(tmp_path, contacts) -> None:
     assert _render_site(output, contacts).returncode == 0
     paths = (
         "index.html",
+        "pilot/index.html",
         "proof/index.html",
         "compare/index.html",
         "demo-key/index.html",
@@ -1861,15 +1760,19 @@ def test_navigation_is_identical_across_pages(tmp_path, contacts) -> None:
         nav = re.search(r'<nav class="site-nav".*?</nav>', page, re.DOTALL).group()
         for destination in (
             "/",
-            "/#pilot",
+            "/pilot/",
             "/proof/",
             "/compare/",
             "/demo-key/",
-            "/#machine-discovery",
         ):
             assert f'href="{destination}"' in nav, path
         assert PRIMARY_CTA in nav
-        if path in ("proof/index.html", "compare/index.html", "demo-key/index.html"):
+        if path in (
+            "pilot/index.html",
+            "proof/index.html",
+            "compare/index.html",
+            "demo-key/index.html",
+        ):
             current = "/" + path.removesuffix("index.html")
             assert f'href="{current}" aria-current="page"' in nav
             assert nav.count('aria-current="page"') == 1
@@ -1901,6 +1804,7 @@ def test_footer_reaches_the_same_places_on_every_page(tmp_path) -> None:
         relative_path: (output / relative_path).read_text(encoding="utf-8")
         for relative_path in (
             "index.html",
+            "pilot/index.html",
             "proof/index.html",
             "compare/index.html",
             "demo-key/index.html",
@@ -2292,6 +2196,7 @@ def test_every_page_loads_the_accessibility_scripts(tmp_path) -> None:
 
     for relative_path in (
         "index.html",
+        "pilot/index.html",
         "proof/index.html",
         "compare/index.html",
         "demo-key/index.html",
@@ -2332,6 +2237,7 @@ def test_every_page_captures_landing_utm(tmp_path) -> None:
 
     for relative_path in (
         "index.html",
+        "pilot/index.html",
         "proof/index.html",
         "compare/index.html",
         "demo-key/index.html",
@@ -3497,12 +3403,7 @@ def _console_text(markup: str) -> str:
 
 
 def test_landing_console_renders_the_recorded_transcript_verbatim(tmp_path) -> None:
-    """Every request, response value, and note on the page is in the recording.
-
-    The hero shows the loop's spine; the governed-path section shows every
-    step. Both are generated from the same file, so a step the page shows
-    but the recording lacks — or a value edited in the HTML — cannot ship.
-    """
+    """The one collapsed recording comes from the real local transcript."""
     output = tmp_path / "site"
     result = _render_site(output, VALID_TEST_CONTACTS)
     assert result.returncode == 0, result.stderr
@@ -3511,30 +3412,25 @@ def test_landing_console_renders_the_recorded_transcript_verbatim(tmp_path) -> N
     transcript = _transcript()
     steps = {step["id"]: step for step in transcript["steps"]}
 
-    hero = re.search(
-        r'<figure class="console" aria-labelledby="hero-console-title">(.*?)</figure>',
-        page,
-        re.S,
-    )
     full = re.search(
         r'<figure class="console console-full" aria-labelledby="loop-console-title">(.*?)</figure>',
         page,
         re.S,
     )
-    assert hero and full, "landing page lacks the hero console or the full transcript"
-    assert page.index('id="hero-console-title"') < page.index('id="thesis-title"')
-    assert page.index('id="loop-console-title"') < page.index('id="proof"')
+    assert full, "landing page lacks the recorded transcript"
+    assert page.count('id="loop-console-title"') == 1
+    assert 'id="hero-console-title"' not in page
+    assert page.index('id="how-it-works"') < full.start() < page.index("<footer")
+    details_start = page.rfind("<details", 0, full.start())
+    details_end = page.find("</details>", full.end())
+    assert details_start >= 0 and details_end > full.end()
+    assert page.rfind("</details>", 0, full.start()) < details_start
+    details_tag = page[details_start : page.index(">", details_start) + 1]
+    assert not re.search(r"\bopen\b", details_tag)
+    assert "<summary" in page[details_start : full.start()]
 
-    hero_steps = re.findall(r'data-step="([a-z]+)"', hero.group(1))
     full_steps = re.findall(r'data-step="([a-z]+)"', full.group(1))
-    assert hero_steps == ["authorize", "invoke", "replay", "verify"]
     assert full_steps == [step["id"] for step in transcript["steps"]]
-    # Loop order, not run order. The section's whole job is demonstrating
-    # rigour, so its own step numbers have to climb: the demo denies the
-    # out-of-scope call before it checks the audit chain, and the page shows
-    # the offline receipt check (06), then the audit chain (07), then the
-    # denial (08). Pinned explicitly rather than against the recording alone,
-    # so a re-record cannot quietly reintroduce the jumble.
     assert full_steps == [
         "discover",
         "authorize",
@@ -3546,9 +3442,7 @@ def test_landing_console_renders_the_recorded_transcript_verbatim(tmp_path) -> N
     ]
     labels = re.findall(r'<p class="console-loop">([^<]+)</p>', full.group(1))
     numbers = [int(label.split(" ", 1)[0]) for label in labels]
-    assert numbers == sorted(numbers), (
-        f"the governed-path panel counts backwards: {labels}"
-    )
+    assert numbers == sorted(numbers)
 
     for step_id, step in steps.items():
         for line in step["request"].splitlines():
@@ -3569,15 +3463,11 @@ def test_landing_console_renders_the_recorded_transcript_verbatim(tmp_path) -> N
         assert html.escape(step["note"]) in full.group(1)
         assert html.escape(step["title"]) in full.group(1)
 
-    # A gateway in the execution path has to say what it costs in time. The
-    # figure is recorded by the demo and rendered from the transcript like
-    # every other number here, and it carries the caveat that makes it
-    # honest: a local reference point, not a production measurement.
     build_module = runpy.run_path(str(SITE / "build_site.py"))
     format_latency_ms = build_module["format_latency_ms"]
     latency = transcript["latency"]
     latency_line = re.search(r'<p class="console-latency">([^<]+)</p>', full.group(1))
-    assert latency_line, "the governed-path panel publishes no latency figure"
+    assert latency_line, "the recording publishes no latency figure"
     rendered = latency_line.group(1)
     assert f"p50 {format_latency_ms(latency['p50_ms'])} ms" in rendered
     assert f"p95 {format_latency_ms(latency['p95_ms'])} ms" in rendered
@@ -3586,13 +3476,9 @@ def test_landing_console_renders_the_recorded_transcript_verbatim(tmp_path) -> N
     assert "not a production number" in rendered
     assert latency["samples"] >= 1
     assert 0 < latency["p50_ms"] <= latency["p95_ms"]
-    # The hero shows the loop's spine, not its instrumentation.
-    assert "console-latency" not in hero.group(1)
 
-    # The panel says where it came from, and links the full recording, which
-    # the build publishes beside the receipt with the same short cache life.
-    assert html.escape(transcript["source"]["label"]) in page
-    assert 'href="/proof/transcript.json"' in page
+    assert html.escape(transcript["source"]["label"]) in full.group(1)
+    assert 'href="/proof/transcript.json"' in full.group(1)
     assert (output / "proof" / "transcript.json").read_bytes() == (
         SITE / "proof" / "transcript.json"
     ).read_bytes()
@@ -3603,18 +3489,13 @@ def test_landing_console_renders_the_recorded_transcript_verbatim(tmp_path) -> N
         == rules["/proof/receipt.json"]["headers"]
     )
 
-    # The demo's replay proves the product's central claim, in the recording
-    # itself rather than in prose: the same receipt id came back, and the
-    # ledger still holds exactly one debit for the tool.
     invoke = dict(steps["invoke"]["response"])
     replay = dict(steps["replay"]["response"])
     assert replay["receipt_id"] == invoke["receipt_id"]
     assert replay["ledger debits for this tool"] == "1"
     discover = dict(steps["discover"]["response"])
     assert discover["name"] == "trust-plane-echo"
-    assert discover["creditsPerCall"] == "2" and discover["requirePermit"] == "true", (
-        "discovery must show what the call costs and that it needs a permit"
-    )
+    assert discover["creditsPerCall"] == "2" and discover["requirePermit"] == "true"
     deny = dict(steps["deny"]["response"])
     assert deny["error"] == "permit_tool_not_allowed"
     assert deny["ledger_entry_id"] == "null"
@@ -3638,7 +3519,7 @@ def test_transcript_carries_no_credentials() -> None:
 
 
 def test_live_verifier_output_matches_the_published_receipt(tmp_path) -> None:
-    """The proof section prints the verifier's real stdout for receipt.json.
+    """The published proof and recorded verdict refer to the same receipt.
 
     The verdict is only proof if it is for the artifact beside it. The build
     refuses a transcript whose live verification names a different receipt
@@ -3649,7 +3530,7 @@ def test_live_verifier_output_matches_the_published_receipt(tmp_path) -> None:
     result = _render_site(output, VALID_TEST_CONTACTS)
     assert result.returncode == 0, result.stderr
 
-    page = (output / "index.html").read_text(encoding="utf-8")
+    page = (output / "proof" / "index.html").read_text(encoding="utf-8")
     transcript = _transcript()
     live = transcript["live_receipt_verification"]
     bundle = json.loads((SITE / "proof" / "receipt.json").read_text(encoding="utf-8"))
@@ -3667,11 +3548,9 @@ def test_live_verifier_output_matches_the_published_receipt(tmp_path) -> None:
     assert live["exit_code"] == 0
     assert live["output"].startswith(f"VERIFIED  {published_id}")
     assert "--expect-issuer https://api.thisisatest.tech" in live["command"]
-    panel = re.search(r'<figure class="console console-live"(.*?)</figure>', page, re.S)
-    assert panel, "landing page lacks the live verifier panel"
-    for line in live["output"].splitlines():
-        assert html.escape(line.strip()) in _console_text(panel.group(1))
-    assert page.index('id="live-verify-title"') > page.index('id="proof"')
+    for artifact in ("receipt.json", "trust-keys.json", "verify_receipt.py"):
+        assert f'href="/proof/{artifact}"' in page
+    assert "--expect-issuer https://api.thisisatest.tech" in page
 
     # Now the guard: a transcript for another receipt must fail the build.
     # load_transcript resolves TRANSCRIPT from its own globals (runpy hands
