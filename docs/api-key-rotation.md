@@ -24,9 +24,14 @@ removes it from neither git history nor existing clones.
 
 | Date | Key | Exposure | Action |
 | --- | --- | --- | --- |
-| 2026-08-06 | `***REMOVED***` | Hardcoded in `scripts/stress_test_live.py`, reachable on public `main`. Removed from HEAD in #201. **Still reachable from `main`'s own history** — see the correction below | 2026-08-07: `VALID_API_KEYS` fully replaced on Railway and cutover completed via dashboard Redeploy of the last good deployment (variable-triggered rebuilds were crash-looping on the stale `master` trigger — see warning below). Verified with `rotate_api_keys.py verify`: retired key rejected (403), replacement accepted (200) |
+| 2026-08-06 | `***REMOVED***` | Hardcoded in `scripts/stress_test_live.py`, reachable on public `main`. Removed from HEAD in #201; still reachable from `main`'s history until the 2026-10-20 rewrite (see the two notes below). The Key column shows `***REMOVED***` because the rewrite replaced the value everywhere in the repository, this table included | 2026-08-07: `VALID_API_KEYS` fully replaced on Railway and cutover completed via dashboard Redeploy of the last good deployment (variable-triggered rebuilds were crash-looping on the stale `master` trigger — see warning below). Verified with `rotate_api_keys.py verify`: retired key rejected (403), replacement accepted (200) |
 
 ### Correction (2026-09-19): the key is still reachable from `main`
+
+> Historical. The claims in this section were true on 2026-09-19 and stopped
+> being true with the 2026-10-20 rewrite described in the next section. The
+> section is kept unchanged as the record, except that the rewrite replaced
+> the key's value inside it with `***REMOVED***`.
 
 An earlier version of this record, and the scope note in `.gitleaks.toml`,
 said `main`'s flattened history no longer contained the retired key and that
@@ -67,6 +72,34 @@ Pruning the stale branches is still worth doing before the repository is made
 public, for signal rather than secrecy: 200 branches, most of them abandoned
 agent sessions, is not what a reader should find in a project whose
 credibility is the product.
+
+### Update (2026-10-20): the history was rewritten after all
+
+On 2026-10-20 the maintainer force-pushed a rewrite of the whole repository
+(every commit SHA changed, every branch included) that replaces the retired
+key's value with the literal `***REMOVED***` wherever it appeared, including
+in this table and in the console transcript above. Verified on 2026-10-22 on
+a fresh clone:
+
+- `git cat-file -t 9e45009` reports "Not a valid object name": the commit the
+  correction cites no longer exists.
+- A full-history gitleaks scan (`gitleaks detect --log-opts=--all` under
+  `.gitleaks.toml`, every branch, 1,410 commits) reports nothing outside the
+  allowlist. Its only findings were the `***REMOVED***` marker itself, in the
+  2026-08-04 commit of `scripts/stress_test_live.py`, and a synthetic
+  `amw_demo_secret_value` in a site test on an unmerged branch; both are
+  allowlisted as non-secrets.
+- `scripts/secret_scan_range.sh` now pins the `main` tip that scan covered as
+  its verified-clean base; the previous pin was a SHA that no longer exists.
+
+What this changes in what to claim: the value is no longer in this
+repository's history. It is still in every clone and fork taken before
+2026-10-20, and it was published in plaintext in this file from 2026-08-06
+until the rewrite, so treat it as public knowledge. The remediation is
+unchanged: the key was rotated on 2026-08-07, is dead at the provider, and
+`rotate_api_keys.py verify` confirms it is refused. The honest statement is
+now: leaked, rotated within a day, verified dead, removed from the
+repository's history on 2026-10-20, and still present in pre-rewrite copies.
 
 ## Rotation procedure (Railway)
 
