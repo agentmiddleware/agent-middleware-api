@@ -117,6 +117,7 @@
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "omit",
+        keepalive: true,
         body: JSON.stringify(signup),
       });
     } catch {
