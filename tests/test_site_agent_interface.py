@@ -261,7 +261,10 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
     assert page.count("git clone https://github.com/agentmiddleware/amw-demo.git") == 1
     assert "python examples/permit_echo_retry.py" in page
     assert "coming soon" in text
-    assert 'class="hero-v2-tab hero-v2-tab-disabled"><code>curl</code><span>coming soon</span>' in page
+    assert (
+        'class="hero-v2-tab hero-v2-tab-disabled"><code>curl</code><span>coming soon</span>'
+        in page
+    )
     assert "curl -s -X POST https://api.thisisatest.tech/v1/demo/keys" not in page
     assert 'id="home-hero-curl-copy"' not in page
     assert "The gateway does not dispatch again." in text
