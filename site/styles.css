@@ -2604,8 +2604,8 @@ body.site-light #main code {
   color: inherit;
 }
 body.site-light #main :focus-visible { outline: 2px solid var(--home-text); }
-body.site-light .wave-fallback,
-body.site-light .wave-canvas { display: none; }
+body.home-light .wave-fallback,
+body.home-light .wave-canvas { display: none; }
 
 body.site-light .site-nav {
   min-height: 88px;
@@ -3202,6 +3202,13 @@ body.site-light:not(.home-light) #main .hero::before { display: none; }
 body.site-light:not(.home-light) #main .hero h1,
 body.site-light:not(.home-light) #main .hero .constraint-line { text-shadow: none; }
 
+body.site-light #main.concept-hero { --text-dim: var(--home-confirm); }
+body.site-light .concept-hero .wave-fallback,
+body.site-light .concept-hero .wave-canvas {
+  filter: invert(1);
+  opacity: 0.28;
+}
+
 body.site-light:not(.home-light) .site-footer {
   color: var(--text);
 }
@@ -3212,10 +3219,11 @@ body.site-light:not(.home-light) .site-footer::before {
   z-index: -1;
   top: 0;
   bottom: 0;
-  left: 50%;
-  width: 100vw;
-  transform: translateX(-50%);
+  left: 0;
+  right: 0;
   background: var(--ink);
+  box-shadow: 0 0 0 100vmax var(--ink);
+  clip-path: inset(0 -100vmax);
 }
 
 /* ==========================================================================
