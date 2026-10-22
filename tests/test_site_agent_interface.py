@@ -237,24 +237,35 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
         "configured upstream tool and at most one debit. Each finalized or "
         "reconciled path has a receipt."
     ) in text
-    assert "Each action runs once" not in text
+    assert "Each action runs once and leaves a receipt." in text
+    assert re.search(
+        r"<p>Each action runs once and leaves a receipt\.</p>\s*"
+        r'<p class="hero-v2-boundary">One accepted request key',
+        page,
+    )
     assert "Get a demo key" in text
     assert "Run the quickstart: amw-demo" in text
     assert re.search(r'<button\b[^>]*id="home-key-trigger"[^>]*>', page)
-    assert '<script defer src="/home-key.js?v=home-light-2"></script>' in page
+    assert '<script defer src="/home-key.js?v=home-light-3"></script>' in page
     assert re.search(r'<noscript>.*?href="/demo-key/?"[^>]*>.*?</noscript>', page, re.S)
     assert 'href="https://github.com/agentmiddleware/amw-demo"' in page
     assert 'id="quickstart"' in page
-    assert page.count("rcpt_7Kq2mX9</code>") == 2
+    assert page.count("rcpt_7Kq2mX9") == 3
+    assert "receipt_id: rcpt_7Kq2mX9\nSame receipt. The tool did not run again." in page
     assert "rcpt_7Kq2mX9.</code>" not in page
     assert page.index('class="home-v2-glossary"') < page.index('id="how-it-works"')
-    assert page.count('class="home-v2-guide-step"') == 5
-    assert "git clone https://github.com/agentmiddleware/amw-demo.git" in page
+    checklist = page.split('<ul class="home-v2-steps">', 1)[1].split("</ul>", 1)[0]
+    assert checklist.count("<li") == 5
+    assert "<pre" not in checklist
+    assert "<code" not in checklist
+    assert page.count("git clone https://github.com/agentmiddleware/amw-demo.git") == 1
     assert "python examples/permit_echo_retry.py" in page
     assert "coming soon" in text
-    assert "curl -s -X POST https://api.thisisatest.tech/v1/demo/keys" in page
+    assert 'class="hero-v2-tab hero-v2-tab-disabled"><code>curl</code><span>coming soon</span>' in page
+    assert "curl -s -X POST https://api.thisisatest.tech/v1/demo/keys" not in page
+    assert 'id="home-hero-curl-copy"' not in page
     assert "The gateway does not dispatch again." in text
-    assert "The tool did not run again." not in text
+    assert "Same receipt. The tool did not run again." in text
     assert 'id="how-it-works"' in page
     for heading in ("Permit", "Request key", "Receipt"):
         assert heading in text
@@ -3435,7 +3446,7 @@ def test_landing_keeps_one_illustrative_retry_without_recording(tmp_path) -> Non
     assert result.returncode == 0, result.stderr
 
     page = (output / "index.html").read_text(encoding="utf-8")
-    assert page.count("rcpt_7Kq2mX9</code>") == 2
+    assert page.count("rcpt_7Kq2mX9") == 3
     assert '<figure class="console console-full"' not in page
     assert 'class="home-recording"' not in page
     assert page.index('class="hero-v2-flow"') < page.index('class="home-v2-glossary"')
