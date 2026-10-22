@@ -1417,7 +1417,8 @@ def test_site_sends_a_content_security_policy_and_hsts() -> None:
     assert policy["script-src"] == "script-src 'self'"
     assert policy["connect-src"] == (
         "connect-src 'self' https://vitals.vercel-insights.com "
-        "https://api.thisisatest.tech"
+        "https://api.thisisatest.tech "
+        "https://cqtlzicxmaklslvxderm.supabase.co"
     )
     assert "'unsafe-inline'" not in values["Content-Security-Policy"]
     # Typography is self-hosted from /fonts, so neither font CDN is permitted.
@@ -1463,7 +1464,8 @@ def test_built_demo_key_page_has_the_key_controls_and_api_connection(tmp_path) -
     policy = _csp_policy(values["Content-Security-Policy"])
     assert policy["connect-src"] == (
         "connect-src 'self' https://vitals.vercel-insights.com "
-        "https://api.thisisatest.tech"
+        "https://api.thisisatest.tech "
+        "https://cqtlzicxmaklslvxderm.supabase.co"
     )
 
 

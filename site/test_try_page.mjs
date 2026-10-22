@@ -6,6 +6,8 @@ import { createContext, runInContext } from "node:vm";
 const script = readFileSync(new URL("./try/try.js", import.meta.url), "utf8");
 const captureScript = readFileSync(new URL("./utm-capture.js", import.meta.url), "utf8");
 const html = readFileSync(new URL("./try/index.html", import.meta.url), "utf8");
+const DEMO_KEY_URL = "https://api.thisisatest.tech/v1/demo/keys";
+const SIGNUP_URL = "https://cqtlzicxmaklslvxderm.supabase.co/functions/v1/amw-test-signup";
 
 function makePage(fetchResponse, options = {}) {
   const ids = [
@@ -14,12 +16,14 @@ function makePage(fetchResponse, options = {}) {
     "try-key-result",
     "try-api-key",
     "try-wallet-id",
+    "try-email",
+    "try-email-error",
     "copy-try-key",
     "copy-try-wallet",
   ];
   const elements = new Map(ids.map((id) => [id, {
     disabled: false,
-    hidden: id === "try-key-result",
+    hidden: id === "try-key-result" || id === "try-email-error",
     textContent: "",
     value: "",
     listeners: {},
@@ -46,7 +50,11 @@ function makePage(fetchResponse, options = {}) {
     URL,
     async fetch(url, request) {
       requests.push([url, request]);
-      return fetchResponse();
+      if (url === DEMO_KEY_URL) return fetchResponse();
+      if (url === SIGNUP_URL) {
+        return options.signupResponse ? options.signupResponse() : { status: 201 };
+      }
+      throw new Error(`unexpected fetch URL: ${url}`);
     },
     navigator: {
       clipboard: { async writeText(value) { copies.push(value); } },
@@ -78,6 +86,20 @@ function makePage(fetchResponse, options = {}) {
       if (!element.disabled) await element.listeners.click();
     },
   };
+}
+
+function signupRequests(page) {
+  return page.requests.filter(([url]) => url === SIGNUP_URL);
+}
+
+function signupPayload(page) {
+  const requests = signupRequests(page);
+  assert.equal(requests.length, 1);
+  const [, request] = requests[0];
+  assert.equal(request.method, "POST");
+  assert.equal(request.credentials, "omit");
+  assert.equal(request.headers["Content-Type"], "application/json");
+  return JSON.parse(request.body);
 }
 
 function issued(key = "test_key", wallet = "wallet_test") {
@@ -146,15 +168,15 @@ function pageTokens(markup) {
   return { tags, visibleMainText };
 }
 
-test("one empty credential free POST shows key and wallet once and copies both", async () => {
+test("one demo POST shows key and wallet once, copies both, and sends one credential free signup", async () => {
   const key = "demo_<img src=x onerror=alert(1)>";
   const wallet = "wallet_<script>bad()</script>";
   const page = makePage(async () => issued(key, wallet));
 
   await page.click("get-try-key");
-  assert.equal(page.requests.length, 1);
+  assert.equal(page.requests.length, 2);
   const [url, request] = page.requests[0];
-  assert.equal(url, "https://api.thisisatest.tech/v1/demo/keys");
+  assert.equal(url, DEMO_KEY_URL);
   assert.equal(request.method, "POST");
   assert.equal(request.credentials, "omit");
   assert.deepEqual(Object.keys(request).sort(), ["credentials", "method"]);
@@ -165,13 +187,18 @@ test("one empty credential free POST shows key and wallet once and copies both",
   const displayed = [...page.elements.values()].map((element) => `${element.value}${element.textContent}`).join(" ");
   assert.equal(displayed.split(key).length - 1, 1);
   assert.equal(displayed.split(wallet).length - 1, 1);
+  const payload = signupPayload(page);
+  assert.deepEqual(payload, { wallet_id: wallet });
+  assert.equal(Object.hasOwn(payload, "api_key"), false);
+  assert.equal(JSON.stringify(payload).includes(key), false);
 
   await page.click("copy-try-key");
   await page.click("copy-try-wallet");
   assert.deepEqual(page.copies, [key, wallet]);
   assert.doesNotMatch(page.elements.get("try-key-status").textContent, /[-\u2013\u2014]/);
   await page.click("get-try-key");
-  assert.equal(page.requests.length, 1);
+  assert.equal(page.requests.length, 2);
+  assert.equal(signupRequests(page).length, 1);
   assert.equal(page.session.size, 0);
 });
 
@@ -199,6 +226,58 @@ test("stored UTM is overridden by URL values and first external referrer is reta
   });
   assert.deepEqual(JSON.parse(page.session.get("amwDemoKeyUtm")), JSON.parse(request.body));
   assert.equal([...page.session.values()].some((value) => value.includes("test_key")), false);
+  assert.deepEqual(signupPayload(page), {
+    wallet_id: "wallet_test",
+    utm_source: "newsletter",
+    utm_campaign: "launch",
+    utm_term: "receipts",
+    referrer: "https://first.example/landing",
+  });
+});
+
+test("valid optional email is trimmed and sent with wallet attribution", async () => {
+  const page = makePage(async () => issued("secret_key", "wallet_email"), {
+    search: "?utm_source=docs",
+    referrer: "https://partner.example/guide",
+  });
+  page.elements.get("try-email").value = "  user@example.com  ";
+
+  await page.click("get-try-key");
+  assert.deepEqual(signupPayload(page), {
+    wallet_id: "wallet_email",
+    email: "user@example.com",
+    utm_source: "docs",
+    referrer: "https://partner.example/guide",
+  });
+  assert.equal(page.elements.get("try-email-error").textContent, "");
+  assert.equal(page.elements.get("try-email-error").hidden, true);
+});
+
+test("invalid optional email is omitted while wallet signup and key display continue", async () => {
+  for (const email of ["not-an-email", `${"a".repeat(250)}@x.co`]) {
+    const page = makePage(async () => issued("secret_key", "wallet_invalid"));
+    page.elements.get("try-email").value = email;
+
+    await page.click("get-try-key");
+    assert.deepEqual(signupPayload(page), { wallet_id: "wallet_invalid" });
+    assert.notEqual(page.elements.get("try-email-error").textContent, "");
+    assert.equal(page.elements.get("try-email-error").hidden, false);
+    assert.equal(page.elements.get("try-key-result").hidden, false);
+    assert.equal(shownValue(page.elements.get("try-api-key")), "secret_key");
+  }
+});
+
+test("signup failure is silent and leaves the issued key visible", async () => {
+  const page = makePage(async () => issued("secret_key", "wallet_failure"), {
+    signupResponse: async () => { throw new Error("signup unavailable"); },
+  });
+
+  await page.click("get-try-key");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(signupPayload(page), { wallet_id: "wallet_failure" });
+  assert.equal(page.elements.get("try-key-result").hidden, false);
+  assert.equal(shownValue(page.elements.get("try-api-key")), "secret_key");
+  assert.equal(page.elements.get("try-key-status").textContent, "Test key ready. Copy it now.");
 });
 
 test("UTM and referrer are capped before storage and request", async () => {
@@ -245,7 +324,8 @@ test("failed requests leave the key hidden and allow retry", async () => {
     assert.ok(page.elements.get("try-key-status").textContent);
     assert.doesNotMatch(page.elements.get("try-key-status").textContent, /[-\u2013\u2014]/);
     await page.click("get-try-key");
-    assert.equal(page.requests.length, 2);
+    assert.equal(page.requests.filter(([url]) => url === DEMO_KEY_URL).length, 2);
+    assert.equal(signupRequests(page).length, 1);
     assert.equal(page.elements.get("try-key-result").hidden, false);
   }
 
@@ -283,6 +363,10 @@ test("page uses external assets and visible copy contains no dashes", () => {
     }
   }
   assert.ok(openingTags.some((tag) => tag.name === "button" && tag.raw.includes('id="get-try-key"')));
+  assert.ok(openingTags.some((tag) => tag.name === "label" && tag.raw.includes('for="try-email"')));
+  assert.ok(openingTags.some((tag) => tag.name === "input" && tag.raw.includes('id="try-email"') && tag.raw.includes('type="email"') && tag.raw.includes('autocomplete="email"')));
+  assert.ok(visibleMainText.includes("Email (optional)"));
+  assert.ok(visibleMainText.includes("Leave it blank"));
   assert.ok(visibleMainText.includes("Get a free test key"));
   for (const id of ["copy-try-key", "copy-try-wallet"]) {
     assert.ok(openingTags.some((tag) => tag.name === "button" && tag.raw.includes(`id="${id}"`)));

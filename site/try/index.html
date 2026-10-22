@@ -54,13 +54,13 @@
     @@FONT_PRELOADS@@
     <link rel="stylesheet" href="/fonts.css?v=@@FONTS_CSS_VERSION@@" />
     <link rel="stylesheet" href="/styles.css?v=@@STYLES_CSS_VERSION@@" />
-    <link rel="stylesheet" href="/try/try.css?v=try-2" />
+    <link rel="stylesheet" href="/try/try.css?v=try-3" />
     <script src="/a11y-preload.js?v=gateway-19"></script>
     @@VERCEL_ANALYTICS_SCRIPTS@@
     <script defer src="/analytics.js?v=gateway-19"></script>
     <script defer src="/utm-capture.js?v=utm-1"></script>
     <script defer src="/a11y.js?v=gateway-19"></script>
-    <script defer src="/try/try.js?v=try-1"></script>
+    <script defer src="/try/try.js?v=try-2"></script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -73,6 +73,10 @@
       </div>
 
       <section class="key-panel" aria-label="Get your test key">
+        <label for="try-email">Email (optional)</label>
+        <input id="try-email" class="email-input" type="email" autocomplete="email" aria-describedby="try-email-help try-email-error" />
+        <p id="try-email-help" class="email-help">Add your email if you want updates from us about AMW. Leave it blank to continue without sharing an email.</p>
+        <p id="try-email-error" class="email-error" role="status" hidden></p>
         <button id="get-try-key" class="button button-primary primary-button" type="button">Get a free test key</button>
         <p id="try-key-status" role="status" aria-live="polite">No account or payment needed.</p>
 
