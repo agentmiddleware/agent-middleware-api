@@ -21,6 +21,10 @@
     <lastmod>@@BUILD_DATE@@</lastmod>
   </url>
   <url>
+    <loc>https://www.agentmiddleware.dev/try/</loc>
+    <lastmod>@@BUILD_DATE@@</lastmod>
+  </url>
+  <url>
     <loc>https://www.agentmiddleware.dev/docs/</loc>
     <lastmod>@@BUILD_DATE@@</lastmod>
   </url>
