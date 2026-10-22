@@ -233,8 +233,78 @@
       "permanent": true
     },
     {
+      "source": "/docs/put-a-refund-tool-behind-amw",
+      "destination": "/docs/put-a-refund-tool-behind-amw/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/mcp-client-setup",
+      "destination": "/docs/mcp-client-setup/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/langchain",
+      "destination": "/docs/langchain/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/crewai",
+      "destination": "/docs/crewai/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/autogen",
+      "destination": "/docs/autogen/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/openai-agents",
+      "destination": "/docs/openai-agents/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/paypal-sandbox-demo",
+      "destination": "/docs/paypal-sandbox-demo/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/http-api",
+      "destination": "/docs/http-api/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/errors",
+      "destination": "/docs/errors/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/python-sdk",
+      "destination": "/docs/python-sdk/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/ts-verifier",
+      "destination": "/docs/ts-verifier/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/receipt-spec-v0-1",
+      "destination": "/docs/receipt-spec-v0-1/",
+      "permanent": true
+    },
+    {
       "source": "/docs/limits",
       "destination": "/docs/limits/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/security-limitations",
+      "destination": "/docs/security-limitations/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/proof-and-published-receipts",
+      "destination": "/docs/proof-and-published-receipts/",
       "permanent": true
     },
     {

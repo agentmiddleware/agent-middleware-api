@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import html
 import json
 import os
 import re
@@ -234,29 +233,35 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
 
     assert "Let agents retry safely." in text
     assert (
-        "Put Agent Middleware in front of a risky tool. Each action needs a "
-        "permit, a retry with the same key returns the original receipt "
-        "instead of dispatching again, and every receipt can be checked offline."
+        "One accepted request key permits at most one gateway dispatch to the "
+        "configured upstream tool and at most one debit. Each finalized or "
+        "reconciled path has a receipt."
     ) in text
-    assert "Get a free demo key" in text
-    assert "Run the 3 minute quickstart" in text
-    assert "No account. Demo credits only." in text
+    assert "Each action runs once" not in text
+    assert "Get a demo key" in text
+    assert "Run the quickstart: amw-demo" in text
     assert re.search(r'<button\b[^>]*id="home-key-trigger"[^>]*>', page)
+    assert '<script defer src="/home-key.js?v=home-light-2"></script>' in page
     assert re.search(r'<noscript>.*?href="/demo-key/?"[^>]*>.*?</noscript>', page, re.S)
-    assert 'href="#quickstart"' in page
+    assert 'href="https://github.com/agentmiddleware/amw-demo"' in page
     assert 'id="quickstart"' in page
-    assert "Make your first call" in text
+    assert page.count("rcpt_7Kq2mX9</code>") == 2
+    assert "rcpt_7Kq2mX9.</code>" not in page
+    assert page.index('class="home-v2-glossary"') < page.index('id="how-it-works"')
+    assert page.count('class="home-v2-guide-step"') == 5
     assert "git clone https://github.com/agentmiddleware/amw-demo.git" in page
     assert "python examples/permit_echo_retry.py" in page
-    assert "Coming soon" in text
+    assert "coming soon" in text
     assert "curl -s -X POST https://api.thisisatest.tech/v1/demo/keys" in page
-    assert "Same receipt. The tool did not run again." in text
+    assert "The gateway does not dispatch again." in text
+    assert "The tool did not run again." not in text
     assert 'id="how-it-works"' in page
     for heading in ("Permit", "Request key", "Receipt"):
         assert heading in text
-    assert 'id="when-to-use"' in page
-    for action in ("refunds", "payouts", "deploys"):
-        assert action in text.casefold()
+    assert "AMW is not exactly once." in text
+    assert "We never resend it on our own." in text
+    assert "Apache 2.0 (gateway is Fair Source, FSL-1.1)" in text
+    assert 'href="https://github.com/agentmiddleware"' in page
     assert "https://api.thisisatest.tech/SECURITY_LIMITATIONS.md" in page
     assert 'href="/pilot/"' in page
     assert 'id="pilot"' not in page
@@ -782,7 +787,8 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
         assert "/_vercel/insights/script.js" not in page
         assert "/va-init.js" not in page
         assert "@@VERCEL_ANALYTICS_SCRIPTS@@" not in page
-        assert '<script defer src="/analytics.js?v=gateway-19"></script>' in page
+        token = "home-light-1" if relative_path == "index.html" else "gateway-19"
+        assert f'<script defer src="/analytics.js?v={token}"></script>' in page
 
     enabled_output = tmp_path / "enabled"
     enabled_contacts = dict(VALID_TEST_CONTACTS)
@@ -2271,7 +2277,8 @@ def test_every_page_captures_landing_utm(tmp_path) -> None:
         "404.html",
     ):
         markup = (output / relative_path).read_text(encoding="utf-8")
-        assert '<script defer src="/utm-capture.js?v=utm-1"></script>' in markup, (
+        token = "home-light-1" if relative_path == "index.html" else "utm-1"
+        assert f'<script defer src="/utm-capture.js?v={token}"></script>' in markup, (
             f"{relative_path} does not capture landing UTM parameters"
         )
 
@@ -2406,6 +2413,7 @@ def test_all_pages_share_the_current_design_stylesheet(tmp_path) -> None:
     digest = hashlib.sha256((SITE / "styles.css").read_bytes()).hexdigest()[:8]
     for path in output.rglob("*.html"):
         page = path.read_text(encoding="utf-8")
+        assert re.search(r'<body\s+class="[^"]*\bsite-light\b[^"]*">', page), path
         assert f'href="/styles.css?v={digest}"' in page, path
         assert "@@" not in page, path
     concept_digest = hashlib.sha256(
@@ -3411,55 +3419,37 @@ def test_wave_pixel_width_attribute_rejects_malformed_values() -> None:
 
 # The governed loop as evidence -------------------------------------------------
 #
-# The landing page renders the governed loop as a terminal transcript. The
-# contract is that nothing in that panel is typed in: every line comes from
-# site/proof/transcript.json, which scripts/record_site_transcript.py writes
-# from a real local gateway run and the SDK's real offline verifier.
+# The homepage now uses an illustrative retry. The published transcript stays
+# in site/proof/transcript.json, recorded from a local gateway run and the
+# SDK's offline verifier.
 
 
 def _transcript() -> dict:
     return json.loads((SITE / "proof" / "transcript.json").read_text(encoding="utf-8"))
 
 
-def _console_text(markup: str) -> str:
-    """A console panel's visible text: tags stripped, entities left escaped.
-
-    The renderer wraps the verifier's verdict word in its own span, so a
-    verifier line has to be matched against text, not markup.
-    """
-    return re.sub(r"<[^>]+>", "", markup)
-
-
-def test_landing_console_renders_the_recorded_transcript_verbatim(tmp_path) -> None:
-    """The one collapsed recording comes from the real local transcript."""
+def test_landing_keeps_one_illustrative_retry_without_recording(tmp_path) -> None:
+    """The light homepage uses the approved receipt example without the old loop."""
     output = tmp_path / "site"
     result = _render_site(output, VALID_TEST_CONTACTS)
     assert result.returncode == 0, result.stderr
 
     page = (output / "index.html").read_text(encoding="utf-8")
+    assert page.count("rcpt_7Kq2mX9</code>") == 2
+    assert '<figure class="console console-full"' not in page
+    assert 'class="home-recording"' not in page
+    assert page.index('class="hero-v2-flow"') < page.index('class="home-v2-glossary"')
+    assert page.index('class="home-v2-glossary"') < page.index('id="how-it-works"')
+
+
+def test_published_transcript_retains_gateway_evidence(tmp_path) -> None:
+    output = tmp_path / "site"
+    result = _render_site(output, VALID_TEST_CONTACTS)
+    assert result.returncode == 0, result.stderr
+
     transcript = _transcript()
     steps = {step["id"]: step for step in transcript["steps"]}
-
-    full = re.search(
-        r'<figure class="console console-full" aria-labelledby="loop-console-title">(.*?)</figure>',
-        page,
-        re.S,
-    )
-    assert full, "landing page lacks the recorded transcript"
-    assert page.count('id="loop-console-title"') == 1
-    assert 'id="hero-console-title"' not in page
-    assert page.index('id="how-it-works"') < full.start() < page.index("<footer")
-    details_start = page.rfind("<details", 0, full.start())
-    details_end = page.find("</details>", full.end())
-    assert details_start >= 0 and details_end > full.end()
-    assert page.rfind("</details>", 0, full.start()) < details_start
-    details_tag = page[details_start : page.index(">", details_start) + 1]
-    assert not re.search(r"\bopen\b", details_tag)
-    assert "<summary" in page[details_start : full.start()]
-
-    full_steps = re.findall(r'data-step="([a-z]+)"', full.group(1))
-    assert full_steps == [step["id"] for step in transcript["steps"]]
-    assert full_steps == [
+    assert list(steps) == [
         "discover",
         "authorize",
         "invoke",
@@ -3468,45 +3458,8 @@ def test_landing_console_renders_the_recorded_transcript_verbatim(tmp_path) -> N
         "audit",
         "deny",
     ]
-    labels = re.findall(r'<p class="console-loop">([^<]+)</p>', full.group(1))
-    numbers = [int(label.split(" ", 1)[0]) for label in labels]
+    numbers = [int(step["loop"].split(" ", 1)[0]) for step in transcript["steps"]]
     assert numbers == sorted(numbers)
-
-    for step_id, step in steps.items():
-        for line in step["request"].splitlines():
-            assert html.escape(line.strip()) in full.group(1), (
-                f"step {step_id}: request line {line!r} is not on the page"
-            )
-        if "output" in step:
-            for line in step["output"].splitlines():
-                assert html.escape(line.strip()) in _console_text(full.group(1)), (
-                    f"step {step_id}: verifier line {line!r} is not on the page"
-                )
-        else:
-            for key, value in step["response"]:
-                assert (
-                    f"<dt>{html.escape(str(key))}</dt><dd>{html.escape(str(value))}</dd>"
-                    in full.group(1)
-                ), f"step {step_id}: {key}={value!r} is not on the page"
-        assert html.escape(step["note"]) in full.group(1)
-        assert html.escape(step["title"]) in full.group(1)
-
-    build_module = runpy.run_path(str(SITE / "build_site.py"))
-    format_latency_ms = build_module["format_latency_ms"]
-    latency = transcript["latency"]
-    latency_line = re.search(r'<p class="console-latency">([^<]+)</p>', full.group(1))
-    assert latency_line, "the recording publishes no latency figure"
-    rendered = latency_line.group(1)
-    assert f"p50 {format_latency_ms(latency['p50_ms'])} ms" in rendered
-    assert f"p95 {format_latency_ms(latency['p95_ms'])} ms" in rendered
-    assert f"{latency['samples']} fresh calls" in rendered
-    assert html.escape(latency["transport"]) in rendered
-    assert "not a production number" in rendered
-    assert latency["samples"] >= 1
-    assert 0 < latency["p50_ms"] <= latency["p95_ms"]
-
-    assert html.escape(transcript["source"]["label"]) in full.group(1)
-    assert 'href="/proof/transcript.json"' in full.group(1)
     assert (output / "proof" / "transcript.json").read_bytes() == (
         SITE / "proof" / "transcript.json"
     ).read_bytes()

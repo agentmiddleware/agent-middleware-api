@@ -12,6 +12,7 @@ Use the repository quickstart for local work. It starts a strict trust server on
 From the [repository](https://github.com/agentmiddleware/agent-middleware) root:
 
 ```bash
+cd gateway
 make quickstart
 ```
 
@@ -23,6 +24,6 @@ curl -s "$API_URL/.well-known/agent.json"
 curl -s "$API_URL/mcp/tools.json"
 ```
 
-The local catalog identifies the available tool. Follow the [repository quickstart](https://github.com/agentmiddleware/agent-middleware/blob/main/docs/quickstart.md) for the tested sequence that provisions a wallet key, creates a Permit, makes a Call, checks a retry, and verifies the Receipt offline. Do not assume the public sample tool `partner.echo` is installed in the local quickstart.
+The local catalog identifies the available tool. Follow the [gateway quickstart](https://github.com/agentmiddleware/agent-middleware/blob/main/gateway/docs/quickstart.md) for the tested sequence that provisions a wallet key, creates a Permit, makes a Call, checks a retry, and verifies the Receipt offline. Do not assume the public sample tool `partner.echo` is installed in the local quickstart.
 
 The raw server has separate signing key setup. `make quickstart` handles that setup for this local path. Its state persists across restarts under `data/quickstart/`.

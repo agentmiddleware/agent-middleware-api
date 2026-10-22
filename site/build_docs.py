@@ -181,7 +181,7 @@ def _page_template(
     <title>{html.escape(title)} | Agent Middleware docs</title>
     <meta name="description" content="{html.escape(description, quote=True)}" />
     <meta name="robots" content="index, follow" />
-    <meta name="theme-color" content="#0b1020" />
+    <meta name="theme-color" content="#ffffff" />
     <link rel="canonical" href="{page_url}" />
     <link rel="alternate" hreflang="en" href="{page_url}" />
     <link rel="alternate" hreflang="x-default" href="{page_url}" />
@@ -205,7 +205,7 @@ def _page_template(
     <script defer src="/utm-capture.js?v=utm-1"></script>
     <script defer src="/a11y.js?v=gateway-19"></script>
   </head>
-  <body>
+  <body class="site-light">
     <a class="skip-link" href="#main">Skip to content</a>
     @@SITE_NAV@@
     <main id="main" class="docs-layout">
