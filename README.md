@@ -8,9 +8,9 @@
 [![CI](https://github.com/PetrefiedThunder/agent-middleware-api/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/PetrefiedThunder/agent-middleware-api/actions/workflows/ci.yml)
 ![Version](https://img.shields.io/badge/version-v1.3.0--unreleased-lightgrey)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
-![License](https://img.shields.io/badge/license-BUSL--1.1%20core%20%2F%20MIT%20SDKs-blue)
+![License](https://img.shields.io/badge/license-Apache%202.0%20(gateway%20is%20Fair%20Source%2C%20FSL--1.1)-blue)
 
-> **Agents retry. Consequential tools should not execute or charge twice.**
+> **Agents retry. For consequential tools, a retry with the same key returns the original receipt instead of dispatching again.**
 
 Agent Middleware API puts an authorization and transaction boundary in front of
 MCP tools.
