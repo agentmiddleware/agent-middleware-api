@@ -2762,6 +2762,7 @@ body.home-light .hero-v2-command-row button {
   font: 600 0.6875rem "Public Sans", sans-serif;
   cursor: pointer;
 }
+body.home-light .hero-v2-command-row button:disabled { cursor: not-allowed; opacity: 0.55; }
 body.home-light .hero-v2-curl-row {
   margin: 18px 23px 0;
   border-top: 1px solid var(--home-line);
