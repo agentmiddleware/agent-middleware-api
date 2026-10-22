@@ -53,7 +53,63 @@
     <lastmod>@@BUILD_DATE@@</lastmod>
   </url>
   <url>
+    <loc>https://www.agentmiddleware.dev/docs/put-a-refund-tool-behind-amw/</loc>
+    <lastmod>@@BUILD_DATE@@</lastmod>
+  </url>
+  <url>
+    <loc>https://www.agentmiddleware.dev/docs/mcp-client-setup/</loc>
+    <lastmod>@@BUILD_DATE@@</lastmod>
+  </url>
+  <url>
+    <loc>https://www.agentmiddleware.dev/docs/langchain/</loc>
+    <lastmod>@@BUILD_DATE@@</lastmod>
+  </url>
+  <url>
+    <loc>https://www.agentmiddleware.dev/docs/crewai/</loc>
+    <lastmod>@@BUILD_DATE@@</lastmod>
+  </url>
+  <url>
+    <loc>https://www.agentmiddleware.dev/docs/autogen/</loc>
+    <lastmod>@@BUILD_DATE@@</lastmod>
+  </url>
+  <url>
+    <loc>https://www.agentmiddleware.dev/docs/openai-agents/</loc>
+    <lastmod>@@BUILD_DATE@@</lastmod>
+  </url>
+  <url>
+    <loc>https://www.agentmiddleware.dev/docs/paypal-sandbox-demo/</loc>
+    <lastmod>@@BUILD_DATE@@</lastmod>
+  </url>
+  <url>
+    <loc>https://www.agentmiddleware.dev/docs/http-api/</loc>
+    <lastmod>@@BUILD_DATE@@</lastmod>
+  </url>
+  <url>
+    <loc>https://www.agentmiddleware.dev/docs/errors/</loc>
+    <lastmod>@@BUILD_DATE@@</lastmod>
+  </url>
+  <url>
+    <loc>https://www.agentmiddleware.dev/docs/python-sdk/</loc>
+    <lastmod>@@BUILD_DATE@@</lastmod>
+  </url>
+  <url>
+    <loc>https://www.agentmiddleware.dev/docs/ts-verifier/</loc>
+    <lastmod>@@BUILD_DATE@@</lastmod>
+  </url>
+  <url>
+    <loc>https://www.agentmiddleware.dev/docs/receipt-spec-v0-1/</loc>
+    <lastmod>@@BUILD_DATE@@</lastmod>
+  </url>
+  <url>
     <loc>https://www.agentmiddleware.dev/docs/limits/</loc>
+    <lastmod>@@BUILD_DATE@@</lastmod>
+  </url>
+  <url>
+    <loc>https://www.agentmiddleware.dev/docs/security-limitations/</loc>
+    <lastmod>@@BUILD_DATE@@</lastmod>
+  </url>
+  <url>
+    <loc>https://www.agentmiddleware.dev/docs/proof-and-published-receipts/</loc>
     <lastmod>@@BUILD_DATE@@</lastmod>
   </url>
 </urlset>

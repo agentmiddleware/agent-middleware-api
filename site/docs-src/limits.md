@@ -15,4 +15,4 @@ AMW currently governs MCP tool invocation. The supported remote pilot uses one o
 - Credits are internal metering units. AMW does not provide settlement, dispute handling, or compliance reporting.
 - The supported pilot uses synthetic or redacted, low sensitivity data. PHI, PCI data, and regulated production records are out of scope.
 
-Read the full [Security limitations](https://github.com/agentmiddleware/agent-middleware/blob/main/SECURITY_LIMITATIONS.md) and [Trust model](https://github.com/agentmiddleware/agent-middleware/blob/main/TRUST_MODEL.md) before evaluating a production use case.
+Read the full [Security limitations](https://github.com/agentmiddleware/agent-middleware/blob/main/gateway/SECURITY_LIMITATIONS.md) and [Trust model](https://github.com/agentmiddleware/agent-middleware/blob/main/gateway/TRUST_MODEL.md) before evaluating a production use case.
