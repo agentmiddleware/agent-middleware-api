@@ -22,6 +22,8 @@ function makePage(fetchResponse, { copyFails = false, capture = true, search = "
     "home-key-copy", "home-wallet-copy", "home-key-copy-both", "home-key-budget",
     "home-key-retry", "home-key-email", "home-quickstart-code",
     "home-copy-quickstart", "home-copy-status",
+    "home-hero-python-copy", "home-hero-curl-copy", "home-hero-python",
+    "home-hero-curl", "home-hero-copy-status",
   ];
   const elements = new Map(ids.map((id) => [id, {
     id,
@@ -29,6 +31,8 @@ function makePage(fetchResponse, { copyFails = false, capture = true, search = "
       "home-key-retry", "home-key-email"].includes(id),
     disabled: id === "home-copy-quickstart",
     textContent: id === "home-quickstart-code" ? template :
+      id === "home-hero-python" ? "git clone https://github.com/agentmiddleware/amw-demo" :
+      id === "home-hero-curl" ? "curl -s -X POST https://api.thisisatest.tech/v1/demo/keys" :
       id === "home-key-trigger" ? "Get a free demo key" : "",
     value: "",
     type: id === "home-key-value" || id === "home-wallet-value" ? "password" : "button",
@@ -99,6 +103,18 @@ function issuedResponse(apiKey = "b2a_" + "test", walletId = "agt-test", credits
     },
   };
 }
+
+test("hero copy controls copy the visible commands without issuing a key", async () => {
+  const page = makePage(() => { throw new Error("unexpected key request"); });
+  await page.click("home-hero-python-copy");
+  await page.click("home-hero-curl-copy");
+  assert.deepEqual(page.copies, [
+    "git clone https://github.com/agentmiddleware/amw-demo",
+    "curl -s -X POST https://api.thisisatest.tech/v1/demo/keys",
+  ]);
+  assert.equal(page.elements.get("home-hero-copy-status").textContent, "Commands copied.");
+  assert.equal(page.requests.length, 0);
+});
 
 test("idle, loading, and success issue one empty POST and fill the live quickstart", async () => {
   let resolveResponse;

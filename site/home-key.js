@@ -181,4 +181,15 @@
       "Copy was unavailable. Copy Key and Wallet separately."));
   copyQuickstart.addEventListener("click", () =>
     copy(quickstart.textContent, "Quickstart copied.", quickstart, copyStatus));
+  for (const [buttonId, codeId] of [
+    ["home-hero-python-copy", "home-hero-python"],
+    ["home-hero-curl-copy", "home-hero-curl"],
+  ]) {
+    const button = byId(buttonId);
+    const code = byId(codeId);
+    if (button && code) {
+      button.addEventListener("click", () =>
+        copy(code.textContent, "Commands copied.", code, byId("home-hero-copy-status")));
+    }
+  }
 })();
