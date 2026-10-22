@@ -5,6 +5,10 @@
     <lastmod>@@BUILD_DATE@@</lastmod>
   </url>
   <url>
+    <loc>https://www.agentmiddleware.dev/pilot/</loc>
+    <lastmod>@@BUILD_DATE@@</lastmod>
+  </url>
+  <url>
     <loc>https://www.agentmiddleware.dev/proof/</loc>
     <lastmod>@@BUILD_DATE@@</lastmod>
   </url>
@@ -14,6 +18,42 @@
   </url>
   <url>
     <loc>https://www.agentmiddleware.dev/demo-key/</loc>
+    <lastmod>@@BUILD_DATE@@</lastmod>
+  </url>
+  <url>
+    <loc>https://www.agentmiddleware.dev/docs/</loc>
+    <lastmod>@@BUILD_DATE@@</lastmod>
+  </url>
+  <url>
+    <loc>https://www.agentmiddleware.dev/docs/what-is-amw/</loc>
+    <lastmod>@@BUILD_DATE@@</lastmod>
+  </url>
+  <url>
+    <loc>https://www.agentmiddleware.dev/docs/three-minute-quickstart/</loc>
+    <lastmod>@@BUILD_DATE@@</lastmod>
+  </url>
+  <url>
+    <loc>https://www.agentmiddleware.dev/docs/run-locally/</loc>
+    <lastmod>@@BUILD_DATE@@</lastmod>
+  </url>
+  <url>
+    <loc>https://www.agentmiddleware.dev/docs/permits/</loc>
+    <lastmod>@@BUILD_DATE@@</lastmod>
+  </url>
+  <url>
+    <loc>https://www.agentmiddleware.dev/docs/calls-and-request-keys/</loc>
+    <lastmod>@@BUILD_DATE@@</lastmod>
+  </url>
+  <url>
+    <loc>https://www.agentmiddleware.dev/docs/receipts/</loc>
+    <lastmod>@@BUILD_DATE@@</lastmod>
+  </url>
+  <url>
+    <loc>https://www.agentmiddleware.dev/docs/credits/</loc>
+    <lastmod>@@BUILD_DATE@@</lastmod>
+  </url>
+  <url>
+    <loc>https://www.agentmiddleware.dev/docs/limits/</loc>
     <lastmod>@@BUILD_DATE@@</lastmod>
   </url>
 </urlset>

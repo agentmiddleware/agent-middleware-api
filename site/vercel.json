@@ -21,7 +21,7 @@
       ]
     },
     {
-      "source": "/:asset(styles.css|fonts.css|a11y.js|a11y-preload.js|va-init.js|analytics.js|utm-capture.js|wave.js|arcade-boot.js|arcade.js|arcade.css|favicon.svg|social-card.png)",
+      "source": "/:asset(styles.css|fonts.css|a11y.js|a11y-preload.js|va-init.js|analytics.js|utm-capture.js|home-key.js|wave.js|arcade-boot.js|arcade.js|arcade.css|favicon.svg|social-card.png)",
       "headers": [
         {
           "key": "Cache-Control",
@@ -96,6 +96,13 @@
     },
     {
       "source": "/llms-full.txt",
+      "headers": [
+        { "key": "Content-Type", "value": "text/plain; charset=utf-8" },
+        { "key": "Cache-Control", "value": "public, max-age=300" }
+      ]
+    },
+    {
+      "source": "/docs/llms.txt",
       "headers": [
         { "key": "Content-Type", "value": "text/plain; charset=utf-8" },
         { "key": "Cache-Control", "value": "public, max-age=300" }
@@ -177,17 +184,57 @@
     },
     {
       "source": "/pilot",
-      "destination": "/#pilot",
-      "permanent": true
-    },
-    {
-      "source": "/pilot/",
-      "destination": "/#pilot",
+      "destination": "/pilot/",
       "permanent": true
     },
     {
       "source": "/proof",
       "destination": "/proof/",
+      "permanent": true
+    },
+    {
+      "source": "/docs",
+      "destination": "/docs/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/what-is-amw",
+      "destination": "/docs/what-is-amw/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/three-minute-quickstart",
+      "destination": "/docs/three-minute-quickstart/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/run-locally",
+      "destination": "/docs/run-locally/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/permits",
+      "destination": "/docs/permits/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/calls-and-request-keys",
+      "destination": "/docs/calls-and-request-keys/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/receipts",
+      "destination": "/docs/receipts/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/credits",
+      "destination": "/docs/credits/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/limits",
+      "destination": "/docs/limits/",
       "permanent": true
     },
     {
