@@ -291,6 +291,34 @@ def test_docs_render_with_shared_chrome_sidebar_and_hashed_css(
         assert positions == sorted(positions), f"{url}: sidebar section order changed"
 
 
+def test_docs_landing_lists_unpublished_titles_without_links(built_docs: Path) -> None:
+    markup = (built_docs / "docs" / "index.html").read_text(encoding="utf-8")
+    article = re.search(
+        r'<article class="docs-content">(.*?)</article>', markup, re.DOTALL
+    )
+    assert article is not None, "docs landing article is missing"
+    sections = re.findall(
+        r"<section><h2>([^<]+)</h2><ul>(.*?)</ul></section>",
+        article.group(1),
+        re.DOTALL,
+    )
+    manifest = json.loads((DOCS_SOURCE / "nav.json").read_text(encoding="utf-8"))
+    assert [title for title, _ in sections] == [
+        html.escape(section["title"]) for section in manifest["sections"]
+    ]
+    for (title, items), section in zip(sections, manifest["sections"], strict=True):
+        assert section["pages"], f"{title}: nav section has no entries"
+        assert items.count("<li>") == len(section["pages"]), (
+            f"{title}: landing section has missing items"
+        )
+        for entry in section["pages"]:
+            slug = entry["slug"]
+            if (DOCS_SOURCE / f"{slug}.md").is_file():
+                continue
+            assert f"<li><span>{html.escape(entry['title'])}</span></li>" in items
+            assert f'href="/docs/{slug}/"' not in markup
+
+
 def test_hosted_quickstart_uses_demo_key_and_receipt_example(built_docs: Path) -> None:
     fields, body = _front_matter(DOCS_SOURCE / "three-minute-quickstart.md")
     assert fields["description"] == (
@@ -353,6 +381,12 @@ def test_all_internal_docs_links_reach_built_pages_and_anchors(
 def test_docs_llms_and_sitemap_list_only_published_pages(built_docs: Path) -> None:
     llms = (built_docs / "docs" / "llms.txt").read_text(encoding="utf-8")
     sitemap = (built_docs / "sitemap.xml").read_text(encoding="utf-8")
+    redirect_sources = {
+        rule["source"]
+        for rule in json.loads((SITE / "vercel.json").read_text(encoding="utf-8"))[
+            "redirects"
+        ]
+    }
     expected_urls = set()
     for _, title, slug, fields, _ in _published_pages():
         url = f"{SITE_URL}/docs/{slug}/"
@@ -365,6 +399,14 @@ def test_docs_llms_and_sitemap_list_only_published_pages(built_docs: Path) -> No
     referenced_urls = set(re.findall(rf"{re.escape(SITE_URL)}/docs/[a-z0-9/-]*", llms))
     assert referenced_urls - {f"{SITE_URL}/docs/"} == expected_urls
     assert f"<loc>{SITE_URL}/docs/</loc>" in sitemap
+    for _, _, slug in _manifest_pages():
+        url = f"{SITE_URL}/docs/{slug}/"
+        if url in expected_urls:
+            continue
+        assert url not in llms
+        assert f"<loc>{url}</loc>" not in sitemap
+        assert f"/docs/{slug}" not in redirect_sources
+        assert not (built_docs / "docs" / slug / "index.html").exists()
 
 
 def test_docs_redirect_and_launch_gate(tmp_path: Path) -> None:

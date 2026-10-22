@@ -287,6 +287,8 @@ def build_docs() -> dict[str, str]:
                 landing.append(
                     f'<li><a href="/docs/{slug}/">{html.escape(entry["title"])}</a></li>'
                 )
+            else:
+                landing.append(f"<li><span>{html.escape(entry['title'])}</span></li>")
         landing.append("</ul></section>")
     landing.append(f'<p class="docs-license">{LICENSE_LINE}</p>')
     generated["docs/index.html"] = _page_template(
