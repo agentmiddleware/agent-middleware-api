@@ -2545,63 +2545,69 @@ html[data-a11y-motion="reduce"] .arcade-launch:active {
   }
 }
 
-/* Light homepage v2. All visual changes stay on the homepage. */
+/* Shared light site shell. The hero and its sections remain homepage only. */
 
-body.home-light {
+body.site-light {
   --home-bg: #ffffff;
   --home-text: #111111;
   --home-muted: #6b7280;
   --home-line: #e5e7eb;
   --home-soft: #f8fafc;
   --home-blue: #2563eb;
+  --home-blue-hover: #1d4ed8;
+  --home-control-line: #6b7280;
+  --home-verify: #166534;
   --home-primary-text: #ffffff;
   --home-confirm: #374151;
   --home-error: var(--danger-on-paper);
 }
 
-html[data-a11y-contrast="high"] body.home-light {
+html[data-a11y-contrast="high"] body.site-light {
   --home-bg: var(--ink);
   --home-text: var(--text);
   --home-muted: var(--text-dim);
   --home-line: var(--line-strong);
   --home-soft: var(--panel);
   --home-blue: var(--brass);
+  --home-blue-hover: var(--brass-bright);
+  --home-control-line: var(--line-strong);
+  --home-verify: var(--verify);
   --home-primary-text: var(--ink);
   --home-confirm: var(--text);
   --home-error: var(--danger);
 }
 
-body.home-light #main {
+body.site-light #main {
   background: var(--home-bg);
   color: var(--home-text);
   font-family: "Public Sans", "Segoe UI", system-ui, sans-serif;
   line-height: 1.45;
 }
 
-body.home-light #main h1,
-body.home-light #main h2,
-body.home-light #main h3 {
+body.site-light #main h1,
+body.site-light #main h2,
+body.site-light #main h3 {
   font-family: "Public Sans", "Segoe UI", system-ui, sans-serif;
   font-weight: 650;
   text-shadow: none;
   text-wrap: initial;
 }
 
-body.home-light #main a { color: var(--home-text); }
-body.home-light #main a:hover { color: var(--home-text); }
-body.home-light #main code,
-body.home-light #main pre { font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace; }
-body.home-light #main code {
+body.site-light #main a { color: var(--home-text); }
+body.site-light #main a:hover { color: var(--home-text); }
+body.site-light #main code,
+body.site-light #main pre { font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace; }
+body.site-light #main code {
   padding: 0;
   border: 0;
   background: transparent;
   color: inherit;
 }
-body.home-light #main :focus-visible { outline: 2px solid var(--home-text); }
+body.site-light #main :focus-visible { outline: 2px solid var(--home-text); }
 body.home-light .wave-fallback,
 body.home-light .wave-canvas { display: none; }
 
-body.home-light .site-nav {
+body.site-light .site-nav {
   min-height: 88px;
   padding: 0 max(clamp(1.5rem, 4.17vw, 3.75rem), calc((100vw - 1440px) / 2 + 60px));
   border-bottom: 1px solid var(--home-line);
@@ -2609,7 +2615,7 @@ body.home-light .site-nav {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
-body.home-light .nav-brand {
+body.site-light .nav-brand {
   gap: 11px;
   color: var(--home-text);
   font-family: "Public Sans", "Segoe UI", system-ui, sans-serif;
@@ -2617,7 +2623,7 @@ body.home-light .nav-brand {
   font-weight: 650;
   letter-spacing: -0.035em;
 }
-body.home-light .nav-brand::before {
+body.site-light .nav-brand::before {
   content: "M";
   display: grid;
   place-items: center;
@@ -2629,13 +2635,15 @@ body.home-light .nav-brand::before {
   color: var(--home-text);
   font: 600 0.9375rem "Public Sans", sans-serif;
 }
-body.home-light .nav-links a { color: var(--home-muted); }
-body.home-light .nav-links a:hover { color: var(--home-text); }
-body.home-light .nav-links .nav-agent {
+body.site-light .nav-links a { color: var(--home-muted); }
+body.site-light .nav-links a:hover,
+body.site-light .nav-links a[aria-current="page"] { color: var(--home-text); }
+body.site-light .nav-links .nav-agent {
   border: 1px solid var(--home-line);
   background: var(--home-bg);
   color: var(--home-text);
 }
+body.site-light .site-nav :focus-visible { outline-color: var(--home-text); }
 body.home-light:has(#home-key-panel:not([hidden])) .site-nav { z-index: 0; }
 
 body.home-light .hero-v2 {
@@ -3134,6 +3142,90 @@ body.home-light .home-v2-source a { overflow-wrap: anywhere; }
   body.home-light .home-key-drawer { padding: 84px 24px 24px; }
 }
 
+/* Subpages use the same light shell while keeping the homepage's dark footer. */
+body.site-light:not(.home-light) {
+  background: var(--home-bg);
+  color: var(--home-text);
+}
+
+body.site-light:not(.home-light) #main {
+  --ink: var(--home-bg);
+  --panel: var(--home-soft);
+  --rule-soft: var(--home-line);
+  --text: var(--home-text);
+  --text-dim: var(--home-muted);
+  --brass: var(--home-blue);
+  --brass-bright: var(--home-blue-hover);
+  --line: var(--home-line);
+  --line-strong: var(--home-control-line);
+  --verify: var(--home-verify);
+  --danger: var(--home-error);
+  --focus-ring: 2px solid var(--home-text);
+}
+
+body.site-light:not(.home-light) #main h1,
+body.site-light:not(.home-light) #main h2,
+body.site-light:not(.home-light) #main h3 {
+  overflow-wrap: anywhere;
+}
+
+body.site-light:not(.home-light) #main .docs-content :not(pre) > code {
+  overflow-wrap: anywhere;
+}
+
+body.site-light:not(.home-light) #main a.button-primary,
+body.site-light:not(.home-light) #main a.button-primary:hover {
+  color: var(--home-primary-text);
+}
+
+body.site-light:not(.home-light) #main a.button-secondary:hover {
+  color: var(--home-blue-hover);
+}
+
+body.site-light:not(.home-light) #main :is(.pilot-card, .proof-col:not(.replay), .key-panel) a:not(.button) {
+  color: var(--paper-ink);
+}
+
+body.site-light:not(.home-light) #main :is(.pilot-card, .proof-col:not(.replay), .key-panel) :focus-visible {
+  outline-color: var(--paper-ink);
+}
+
+body.site-light:not(.home-light) #main :is(
+  .boundary-scroll, .protocol-section, .verify-section pre, .proof-live-section pre,
+  .compare-scroll, .compare-table tbody tr:nth-child(even) th,
+  .compare-table tbody tr:nth-child(even) td, .console
+) {
+  background: var(--home-soft);
+}
+
+body.site-light:not(.home-light) #main .hero::before { display: none; }
+body.site-light:not(.home-light) #main .hero h1,
+body.site-light:not(.home-light) #main .hero .constraint-line { text-shadow: none; }
+
+body.site-light #main.concept-hero { --text-dim: var(--home-confirm); }
+body.site-light .concept-hero .wave-fallback,
+body.site-light .concept-hero .wave-canvas {
+  filter: invert(1);
+  opacity: 0.28;
+}
+
+body.site-light:not(.home-light) .site-footer {
+  color: var(--text);
+}
+
+body.site-light:not(.home-light) .site-footer::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--ink);
+  box-shadow: 0 0 0 100vmax var(--ink);
+  clip-path: inset(0 -100vmax);
+}
+
 /* ==========================================================================
    PRINT — last in the file so it has the final word.
    ========================================================================== */
@@ -3168,6 +3260,7 @@ body.home-light .home-v2-source a { overflow-wrap: anywhere; }
   .site-nav,
   .wave-canvas,
   .wave-fallback,
+  .site-footer::before,
   .footer-arcade,
   .amw-a11y-toggle,
   .amw-a11y-panel {

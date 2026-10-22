@@ -30,7 +30,7 @@ function contrast(foreground, background) {
 
 test("homepage high contrast palette has readable text, accents, and boundaries", () => {
   const root = rule('html[data-a11y-contrast="high"]');
-  const home = rule('html[data-a11y-contrast="high"] body.home-light');
+  const home = rule('html[data-a11y-contrast="high"] body.site-light');
   const color = (token) => rgb(root[home[token].slice(4, -1)]);
   const background = color("--home-bg");
   const panel = color("--home-soft");
@@ -48,11 +48,11 @@ test("homepage high contrast palette has readable text, accents, and boundaries"
 
 test("homepage surfaces and controls use the contrast aware palette", () => {
   for (const [selector, property, value] of [
-    ["body.home-light #main", "background", "var(--home-bg)"],
-    ["body.home-light .site-nav", "background", "var(--home-bg)"],
-    ["body.home-light .site-nav", "border-bottom", "1px solid var(--home-line)"],
-    ["body.home-light .nav-links a", "color", "var(--home-muted)"],
-    ["body.home-light .nav-links .nav-agent", "border", "1px solid var(--home-line)"],
+    ["body.site-light #main", "background", "var(--home-bg)"],
+    ["body.site-light .site-nav", "background", "var(--home-bg)"],
+    ["body.site-light .site-nav", "border-bottom", "1px solid var(--home-line)"],
+    ["body.site-light .nav-links a", "color", "var(--home-muted)"],
+    ["body.site-light .nav-links .nav-agent", "border", "1px solid var(--home-line)"],
     ["body.home-light .hero-v2-action-primary,\nbody.home-light #main .hero-v2-action-primary", "color", "var(--home-primary-text)"],
     ["body.home-light .hero-v2-code", "background", "var(--home-soft)"],
     ["body.home-light .hero-v2-command-row button", "border", "1px solid var(--home-line)"],
@@ -68,4 +68,19 @@ test("homepage surfaces and controls use the contrast aware palette", () => {
   }
   assert.equal(rule('html[data-a11y-contrast="high"] body.home-light .home-key-drawer')["border-left"], "1px solid var(--home-line)");
   assert.equal(rule('html[data-a11y-contrast="high"] body.home-light .home-key-field-row button')["border-left"], "1px solid var(--home-line)");
+});
+
+test("site light text, controls, and status colors meet AA on light surfaces", () => {
+  const site = rule("body.site-light");
+  const color = (token) => rgb(site[token]);
+  const background = color("--home-bg");
+  const panel = color("--home-soft");
+  assert.ok(contrast(color("--home-text"), background) >= 7);
+  assert.ok(contrast(color("--home-muted"), background) >= 4.5);
+  assert.ok(contrast(color("--home-muted"), panel) >= 4.5);
+  assert.ok(contrast(color("--home-blue"), background) >= 4.5);
+  assert.ok(contrast(color("--home-primary-text"), color("--home-blue")) >= 4.5);
+  assert.ok(contrast(color("--home-blue-hover"), background) >= 4.5);
+  assert.ok(contrast(color("--home-control-line"), background) >= 3);
+  assert.ok(contrast(color("--home-verify"), panel) >= 4.5);
 });

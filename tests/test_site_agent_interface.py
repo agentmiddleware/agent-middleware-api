@@ -2411,6 +2411,7 @@ def test_all_pages_share_the_current_design_stylesheet(tmp_path) -> None:
     digest = hashlib.sha256((SITE / "styles.css").read_bytes()).hexdigest()[:8]
     for path in output.rglob("*.html"):
         page = path.read_text(encoding="utf-8")
+        assert re.search(r'<body\s+class="[^"]*\bsite-light\b[^"]*">', page), path
         assert f'href="/styles.css?v={digest}"' in page, path
         assert "@@" not in page, path
     concept_digest = hashlib.sha256(
