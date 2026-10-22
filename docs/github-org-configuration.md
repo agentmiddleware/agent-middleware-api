@@ -10,23 +10,24 @@ public and 2026-10-22 after this repository was unarchived. Re-run the two
 scripts below to refresh the repository rows; the organization rows can only
 be read in the GitHub UI.
 
-State on 2026-10-22: this repository was archived on 2026-10-20 (recorded in
-that day's update of this document) and unarchived again by 2026-10-21 19:15
-UTC, when pull request 842 was opened; GitHub does not record when. Since
-then `main` has merged ten pull requests (842 to 851, between 2026-10-21
-22:08 and 2026-10-22 07:04 UTC: site, README and test work, plus a one-line
-repository-URL change in `app/routers/well_known.py` in 842 and a CI step
-for the site's JavaScript tests in 845). One of them, 850, added a README
-banner saying the repository is archived and that development continues in
-`agent-middleware`; its description says the repository "stays unarchived
-for now because site PRs are still open", so the banner states the intent
-and the archive itself is deferred until the open site pull requests land.
+State on 2026-10-22: the 2026-10-20 update of this document recorded this
+repository as archived. It was writable again by 2026-10-21 19:15 UTC, when
+pull request 842 was opened, and `main` merged ten pull requests between
+2026-10-21 22:08 and 2026-10-22 07:04 UTC (842 to 851: site, README and test
+work, plus a one-line repository-URL change in `app/routers/well_known.py`
+in 842 and a CI step for the site's JavaScript tests in 845). Pull request
+850 (merged 06:02 UTC) added the README banner saying the repository is
+archived and that development continues in `agent-middleware`; its
+description says the repository "stays unarchived for now because site PRs
+are still open". After the last merge it was read-only again until about
+21:35 UTC on 2026-10-22, when the repository object was last updated and
+pushes started succeeding; GitHub records no archive times.
 The organization also gained a `.github` repository on 2026-10-20 (profile
 README, `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, `SECURITY.md`, and a weekly
 Dependabot entry for the `github-actions` ecosystem, though it has no
 workflows yet) and an organization ruleset, `main-protect`, that requires a
 pull request on the default branch (see the audit table). Everything below
-treats this repository as live until it is archived.
+treats this repository as live until the maintainer archives it for good.
 
 ## Do these first, in this order
 
@@ -38,8 +39,8 @@ treats this repository as live until it is archived.
    through `9289867` on 2026-10-22) started a named workflow run, and the
    no-name `startup_failure` in [Actions budget](#actions-budget) last fired
    at 2026-10-19 21:28 UTC, so billing was the cause. The second remains:
-   this repository's and `amw-demo`'s descriptions are fixed; re-read the
-   others (see [Repositories](#repositories)).
+   this repository's description is fixed; re-read the others (see
+   [Repositories](#repositories)).
 2. **Apply the repository settings** from a machine where `gh auth status`
    shows your account:
 
@@ -105,6 +106,7 @@ treats this repository as live until it is archived.
 | Private vulnerability reporting | Enabled | Keep; it is what `SECURITY.md` asks reporters to use | Already correct |
 | Dependabot security updates | Enabled | Keep | Already correct |
 | Dependabot version updates | One pull request per package, pip and Actions only | Grouped pull requests: weekly for pip (root, SDK and wrappers) and Actions, monthly for the Docker digest and Railway IaC | Done in `.github/dependabot.yml` on this branch |
+| `test (3.11)` stalls | `main`'s run for `7408143` (#847) and this branch's run for `fd1c42c` each had `test (3.11)` alone cancelled by the 25-minute job timeout after the suite stopped producing output mid-run. Through CPython 3.11, a sqlite3 cursor whose statement failed keeps that statement attached; destroying the cursor on the event-loop thread while an aiosqlite worker holds the connection mutex in a busy wait freezes the loop | No stall | Fixed on this branch: `app/db/database.py` passes a connection factory whose cursors release a failed statement on the worker thread (a no-op on 3.12+); `tests/test_sqlite_failed_cursor_release.py` reproduces the mechanism |
 | Rulesets | None on 2026-10-19. Since 2026-10-20 22:09 UTC the organization ruleset `main-protect` (id 25509458, active, no bypass actors) applies to the default branch: pull request required with 0 approvals, no deletion, no force push. Whether it targets the other repositories too is visible only in Organization → Settings → Rulesets | Keep | – |
 | `master` branch | Exists, protected, 9 commits ahead and 1,239 behind `main` on 2026-10-19, last commit 2026-05-22; still present on 2026-10-22 | Deleted | See [Remove master](#remove-master) |
 | Security advisory link in issue chooser | Pointed at the old `PetrefiedThunder/` namespace | Organization namespace | Done in `.github/ISSUE_TEMPLATE/config.yml` on this branch |
@@ -122,22 +124,27 @@ and turn on code-owner review the day a second maintainer has commit access.
 
 - Open issue 805 (2026-10-14) reports `startup_failure` on this repository and
   attributes it to an organization billing or policy setting.
-- Commits on 2026-10-15 are titled "retrigger checks after billing lock
-  lifted"; pull request 816 (merged 2026-10-17) is titled "after billing
-  lock". So the lock has happened at least twice this month.
-- The workflow files did not change between the last green push run
-  (`44cd144`, 2026-10-16) and the current head, which rules out a broken
-  workflow file.
+- Pull request 816 was opened on 2026-10-15 from a branch named
+  `ci/retrigger-main-1014` to retrigger checks after the lock lifted, and its
+  title, "ci: refresh requirements.lock and fix PT011 after billing lock"
+  (merged 2026-10-17 20:35 UTC), names the lock. So the lock has happened at
+  least twice this month.
+- The workflow files did not change between the last green push run before
+  the lock (`44cd144`, 2026-10-16) and any of the heads that failed to start
+  (through `0c3300a` on 2026-10-19), which rules out a broken workflow file.
 - The block comes and goes in windows. The same no-name `startup_failure`
   run (GitHub's placeholder when it refuses to start any workflow for an
-  event) fired 139 times since 2026-09-15, clustered on 2026-10-14
-  19:54 to 21:26, 2026-10-17 20:19 to 20:35, 2026-10-19 11:23 to 11:28 and
-  2026-10-19 21:26 to 21:28 UTC, on push and pull-request events alike,
-  including the push of every `main` commit since 2026-10-17. Between those
-  windows (for example this pull request's runs on 2026-10-19 07:30 and
-  2026-10-20 08:50) everything starts normally. The API does not expose the
+  event) fired 139 times since 2026-09-15: 27 times between 2026-09-15 22:01
+  and 2026-09-16 09:30, 7 times on 2026-10-13, 90 times on 2026-10-14
+  (04:45, 09:29 and 18:30 to 21:26), 4 times on 2026-10-17 20:19 to 20:35, 6
+  times on 2026-10-19 11:23 to 11:28 and 6 times on 2026-10-19 21:26 to
+  21:28 UTC, on push and pull-request events alike, including the push of
+  every `main` commit from 2026-10-17 through 2026-10-19 (`7190d17`,
+  `50df44a`, `bda6197`, `0c3300a`). Between those windows (for example this
+  pull request's runs at 07:33 UTC on 2026-10-19 and from 08:52 UTC on
+  2026-10-20) everything starts normally. The API does not expose the
   reason; the run page does, as a banner above the empty job list. Open the
-  latest one and read it:
+  latest `main` push one and read it:
   <https://github.com/agentmiddleware/agent-middleware-api/actions/runs/39327821138>.
   A spending-limit message confirms the billing explanation; anything else
   changes the fix.
@@ -156,19 +163,22 @@ wall-clock cost of every pull request.
 
 | Measured on run 2179 (2026-10-16, `main`) | Minutes |
 |---|---|
-| `test (3.11)`, `test (3.12)`, `test (3.13)` | 12.5 + 17.3 + 10.3 |
+| `test (3.11)`, `test (3.12)`, `test (3.13)` | 12.6 + 17.3 + 10.3 |
 | `trust_release_gate`, `postgres_permit_concurrency` | 3.7 + 3.8 |
-| `postgres_trust`, `lint`, `invariant_attack_proof`, `production_trust`, `secret_scan`, `constant_test_loop` | about 1 each |
+| `postgres_trust` | 1.8 |
+| `lint`, `invariant_attack_proof`, `production_trust`, `secret_scan`, `constant_test_loop` | 0.5 to 1 each |
 | `python_sdk` x4, `wrapper_unit` x4 | about 0.5 each |
 | Job time per CI run | about 60 |
-| Billed per run (each job rounds up to a whole minute) | about 75 |
-| Plus `Failure Lab` (fast tier on pull requests, slow tier on `main`) and `docker-publish` | 3 to 10 |
+| Billed per run (each job rounds up to a whole minute) | about 65 |
+| Plus `Failure Lab` (fast tier on pull requests, fast and slow tiers on `main`) and `docker-publish` | 3 to 10 |
 
-Between 2026-10-15 and 2026-10-17 there were about 30 CI runs, which is over
-2,000 billed minutes in three days. The Free plan includes 2,000 minutes a
+Between 2026-10-15 and 2026-10-17 there were 80 CI runs (69 ran to
+completion, 11 were superseded and cancelled), about 5,000 billed minutes in
+three days at the per-job ceilings. The Free plan includes 2,000 minutes a
 month for private repositories; Team includes 3,000. Overage on standard
-Linux runners is about $0.008 per minute, so a month at the recent cadence is
-roughly 10,000 to 15,000 minutes, or $65 to $105 of overage.
+Linux runners is about $0.008 per minute, so a month at the recent cadence
+(709 CI runs in the 30 days to 2026-10-19) is roughly 40,000 to 50,000
+minutes, or $300 to $400 of overage.
 
 ### The decision
 
@@ -178,11 +188,15 @@ protection, and private vulnerability reporting, and GitHub switched all of
 those on by itself at the flip. The repository already carried a
 `SECURITY.md` and tests asserting that public surfaces link to
 `github.com/agentmiddleware/agent-middleware-api`. Later the same day the
-maintainer rewrote the entire history (every commit SHA changed) to replace
-the 2026-08-06 retired key value with `***REMOVED***`, and replaced `LICENSE`
-(Business Source License 1.1) with the Apache License 2.0 in commit `861d46c`,
-and archived the repository; it was unarchived again by 2026-10-21 and stays
-so while site pull requests are open (pull request 850). The fallout is
+maintainer rewrote the entire history (every commit SHA changed except the
+first three commits of 2026-02-23, already identical) to replace
+the value of the key removed on 2026-08-06 (#201) and rotated on 2026-08-07
+with `***REMOVED***`, replaced `LICENSE` (Business Source License 1.1) with
+the Apache License 2.0 in the one new commit on top, `861d46c`, and, per the
+2026-10-20 update of this document, archived the repository. It was writable
+again by 2026-10-21 19:15 UTC, read-only again after the last merge on
+2026-10-22, and writable from about 21:35 UTC that day (pull request 850
+says the archive waits for the open site pull requests). The fallout is
 listed under [After the history rewrite](#after-the-history-rewrite).
 
 The two options not taken, kept for the record:
@@ -195,42 +209,57 @@ The two options not taken, kept for the record:
   each run and could be gated on `github.event_name == 'push'`. No longer a
   cost question; still a wall-clock one if pull-request feedback feels slow.
 
-`main` had green push runs again on 2026-10-20 (12:01 and 12:26 UTC), then
-the force-push of the rewritten history at 22:19 UTC produced a run that is
-red on `secret_scan` (see below) with the other jobs cancelled. The merges of
+`main` had green push runs again on 2026-10-20 from 09:23 UTC (five of six;
+the 11:05 run failed on `test (3.11)`, a real test failure), then the
+force-push of the rewritten history at 22:19 UTC produced a run that is red
+on `secret_scan` (see below), with the six long jobs cancelled and the other
+twelve green. The merges of
 2026-10-21 and 2026-10-22 ran green again (a normal merge carries a known
 `before` SHA, so its `secret_scan` range is well defined); two runs on
 2026-10-22 were cancelled rather than failed: `7408143`, where `test (3.11)`
 alone was cancelled 25 minutes after it started, and `9289867`. `ci.yml`
-still has no manual trigger, so a cancelled push run can only be replaced by
-the next merge.
+still has no manual trigger, so a cancelled push run is replaced either by
+re-running it from the Actions page (the release gate reads the run's current
+conclusion) or by the next merge; a `startup_failure` run has no jobs to
+re-run.
 
 ## After the history rewrite
 
-The 2026-10-20 22:19 UTC force-push replaced every commit on `main` (1,404
-of them) and, as it turned out, on every other branch too. These were the
+The 2026-10-20 22:19 UTC force-push replaced every commit on `main` (1,403
+of them), added one new commit, `861d46c`, on top, and, as it turned out,
+rewrote every other branch too. These were the
 consequences; the state on 2026-10-22 is given for each.
 
-- **`secret_scan` failed closed on `main`'s rewrite push. Fixed on this
-  branch.** `scripts/secret_scan_range.sh` pinned `dd16051` (#811) as the
-  verified-clean base for the fallback range used when a push's old tip is
-  unknown; that SHA stopped existing, so the "Scan commit range" step failed
-  on run 39507256676 and `test_pinned_verified_base_is_on_this_history`
-  silently skipped (it treats a missing pin as a shallow checkout). Normal
-  pushes were unaffected because they carry a real `before` SHA. On
-  2026-10-22 a full-history scan of a fresh clone (gitleaks 8.21.2, the
-  release CI pins, `--log-opts=--all`, 284 branches, 1,410 commits scanned) found two
-  things, both non-secrets and now allowlisted in `.gitleaks.toml`: the
-  `***REMOVED***` marker the rewrite left where the retired key's value had
-  been in the 2026-08-04 commit of `scripts/stress_test_live.py`, and a
-  synthetic `amw_demo_secret_value` in `site/test_demo_key.mjs` on the
-  unmerged `devops/demo-key-utm` branch. `VERIFIED_BASE` is re-pinned to
-  `9289867`, the `main` tip that scan covered, and the test runs again.
+- **`secret_scan` failed on `main`'s rewrite push, and its fallback base was
+  stale. Fixed on this branch.** The rewrite push carried the old tip
+  `2d62e2b` as its `before` SHA and GitHub still served that commit, so
+  `scripts/secret_scan_range.sh` emitted `2d62e2b..861d46c`, a range with no
+  common ancestor that covered the whole rewritten history (984 commits);
+  gitleaks flagged the `***REMOVED***` marker the rewrite had left in the
+  2026-08-04 commit of `scripts/stress_test_live.py`, and the "Scan commit
+  range for committed secrets" step failed on run 39507256676. Separately,
+  the script's pinned verified-clean base for pushes with no usable `before`
+  SHA, `dd16051` (#811), stopped existing, so that fallback would have failed
+  closed and `test_pinned_verified_base_is_on_this_history` silently skipped
+  (it treats a missing pin as a shallow checkout). Normal pushes were
+  unaffected: their `before` SHA is an ancestor of the new tip, so the range
+  covers only the new commits. On 2026-10-22 a full-history scan of a fresh
+  clone (gitleaks 8.21.2, the release CI pins, `--log-opts=--all`, 283
+  branches at the time, 1,410 commits scanned) found three findings in two
+  places, both non-secrets and now allowlisted in `.gitleaks.toml`: the
+  `***REMOVED***` marker above, and a synthetic `amw_demo_secret_value` at
+  commit `bd812bab` in the history of the unmerged `devops/demo-key-utm`
+  branch (its tip has already replaced the value). `site/hero-receipt-fixes`,
+  pushed at 21:51 UTC after the clone, adds one clean commit. `VERIFIED_BASE`
+  is re-pinned to `9289867`, the `main` tip that scan covered, and the test
+  runs again.
 - **Two documents described the old history. Fixed on this branch.** The
   scope note in `.gitleaks.toml` and the "Correction (2026-09-19)" section of
   [api-key-rotation.md](api-key-rotation.md) said the retired key was
-  reachable from `main` through commit `9e45009`. Neither the value nor that
-  commit exists any more. The scope note now records the 2026-10-22 scan, the
+  reachable from `main` through commit `9e45009`. Neither is reachable from a
+  branch or tag any more (GitHub still serves the old commit by SHA until it
+  is garbage-collected or purged). The scope note now records the 2026-10-22
+  scan, the
   rotation record keeps the 2026-09-19 section as history and adds a dated
   update, and the comment in `ci.yml`'s `secret_scan` job no longer says a
   full-history scan would always fail.
@@ -257,8 +286,10 @@ consequences; the state on 2026-10-22 is given for each.
 GitHub's secret scanning, push protection, validity checks and non-provider
 patterns have been on since the repository went public on 2026-10-20 (they
 were off while it was private, where they need the paid Secret Protection
-add-on). `github_repo_settings.py` reports them and would re-enable them if
-they were ever switched off.
+add-on). `scripts/github_repo_settings.py` reports secret scanning and push
+protection and would re-enable those two if they were ever switched off;
+validity checks and non-provider patterns stay set by hand under the
+repository's Code security settings.
 
 Three layers now cover the same risk, and all three stay:
 
@@ -284,9 +315,11 @@ it as "revoked" with a link to [api-key-rotation.md](api-key-rotation.md).
 ## Remove master
 
 `master` is a protected leftover from before the default branch was `main`,
-still present on 2026-10-22. On 2026-10-19 it was 1,239 commits behind and
-carried 9 commits that never reached `main`; the first command below gives
-the current numbers.
+still present on 2026-10-22. On 2026-10-19 it was 1,239 commits behind
+`main` (1,258 on 2026-10-22) and carried 9 commits that never reached
+`main`; the first command below lists those commits, and
+`gh api repos/agentmiddleware/agent-middleware-api/compare/main...master --jq '{ahead_by, behind_by}'`
+gives the current counts.
 Protected branches cannot be deleted through the branch list, so:
 
 ```bash
@@ -302,9 +335,11 @@ that no longer exists.
 
 ## Organization settings
 
-Everything here is Organization → Settings. None of it is readable or
-writable through the repository-scoped token this document was produced
-with, so it is a checklist, not a script.
+Everything here is Organization → Settings. The organization-level pages
+are not readable or writable through the repository-scoped token this
+document was produced with, so it is a checklist, not a script; the
+`main-protect` ruleset's rules are the one item visible from the repository
+side.
 
 | Page | Setting | Target | Why |
 |---|---|---|---|
@@ -312,9 +347,9 @@ with, so it is a checklist, not a script.
 | Member privileges | Base permissions | Read | New members should not get write everywhere by default |
 | Member privileges | Repository creation | Owners only (uncheck public and private for members) | Keeps the repository list deliberate |
 | Member privileges | Repository forking | Off for private repositories | Only `agent-middleware-public` is still private; public repositories can always be forked |
-| Actions → General | Policies | "Allow agentmiddleware, and select non-agentmiddleware, actions and reusable workflows", with "Allow actions created by GitHub" and "Allow actions by Marketplace verified creators" | Every workflow already pins actions to a commit SHA; this stops a future workflow from pulling an unpinned third-party action |
+| Actions → General | Policies | "Allow agentmiddleware, and select non-agentmiddleware, actions and reusable workflows", with "Allow actions created by GitHub" and "Allow actions by Marketplace verified creators" | Every workflow already pins actions to a commit SHA and the nine actions in use are all `actions/*` or `docker/*`, so nothing in use would be blocked; this stops a future workflow from pulling an action from an unvetted third party (pinning itself is a review rule, not something this policy enforces) |
 | Actions → General | Workflow permissions | "Read repository contents and packages permissions"; uncheck "Allow GitHub Actions to create and approve pull requests" | Workflows that need more declare it in their `permissions:` block, as they already do |
-| Actions → General | Fork pull request workflows | "Require approval for all external contributors" | Now live: every public repository accepts fork pull requests, and a fork's workflow run would otherwise start on its own |
+| Actions → General | Fork pull request workflows | "Require approval for all external contributors" | Now live: every public repository accepts fork pull requests, and under GitHub's default (approval only for first-time contributors) a fork's workflow run from anyone with a previously merged pull request would start on its own |
 | Code security → Configurations | Apply "GitHub recommended" to all repositories, and set it as the default for new repositories | Dependabot alerts, security updates, secret scanning and push protection | One place instead of seven repository pages; also covers the one repository still private |
 | Code security → Global settings | Private vulnerability reporting for new public repositories | On | `SECURITY.md` tells reporters to open a private advisory; that only works for non-collaborators when this is on. Already on for `agent-middleware-api` |
 | Billing and licensing | Actions budget and alert | A small budget with an alert, no hard stop | No longer the block for standard runners on public repositories; still what would bite if a private repository or larger runner is used later |
@@ -325,33 +360,45 @@ with, so it is a checklist, not a script.
 
 Run `python scripts/github_repo_settings.py --repo agentmiddleware/<name>` on
 each. For a repository without a branch rule, pass `--required-check` once
-per check its CI reports, or leave it empty to require only a pull request.
+per check its CI reports, or leave it empty to create the rule with no
+required status checks (a pull request with 0 approvals, conversation
+resolution, admins included, no force push or deletion).
 
 | Repository | Visibility (2026-10-22) | Notes |
 |---|---|---|
-| `agent-middleware-api` | Public | This document. Archived 2026-10-20, unarchived by 2026-10-21; the #850 banner announces the archive, which is deferred while site pull requests are open (see the top of this document). Description fixed |
+| `agent-middleware-api` | Public | This document. Recorded archived on 2026-10-20, writable again by 2026-10-21, read-only again after the last merge on 2026-10-22 and writable from about 21:35 UTC that day; the #850 banner announces the archive the maintainer intends once the open site pull requests land (see the top of this document). Description fixed |
 | `agent-middleware` | Public | Where development continues, per this repository's README banner. 45 open issues on 2026-10-20 |
-| `.github` | Public | Organization profile README, `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, `SECURITY.md`, `dependabot.yml` for its own Actions pins |
+| `.github` | Public | Organization profile README, `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, `SECURITY.md`, and a `dependabot.yml` with a weekly `github-actions` entry (no workflows yet, so nothing to pin) |
 | `agent-middleware-public` | **Private** | Still the only private one, and the one whose name says public. Description said "private staging repo" on 2026-10-20. Flip it, rename it or archive it |
-| `agent-middleware-spec` | Public | Archived on 2026-10-20; its content moved to `agent-middleware/spec` |
-| `amw-demo` | Public | Description said "private until approved" on 2026-10-19 and was fixed by 2026-10-20. Security-tab check once |
+| `agent-middleware-spec` | Public | Its README gained an archive banner pointing at `agent-middleware` on 2026-10-22 06:11 UTC (its pull request 4), so it was writable until then; whether it is archived now is not readable from here. `agent-middleware/spec` carries a diverged copy of its `spec/` directory (of the seven shared files only `test-vectors/keys.json` is identical) |
+| `amw-demo` | Public | Description read "private until approved" on 2026-10-20 and has not been re-read from here. Security-tab check once |
 | `amw-paypal-agent-demo` | Public | Same Security-tab check |
 
 ## Stale references still in the tree
 
-Links to the old personal namespace are fixed on this branch: `README.md`
+Links to the old personal namespace are fixed on this branch:
+`.github/ISSUE_TEMPLATE/config.yml` (security-advisory link), `README.md`
 (CI badge and clone URL), `TROUBLESHOOTING.md` (bug-report link),
-`FINAL_SUMMARY.md`, `app/main.py` (the OpenAPI license URL, with
-`docs/openapi.json` regenerated), `b2a_sdk/README.md`, the framework and
-wrapper READMEs, and `docs/GAP_CLOSURE_PLAN.md`, `docs/agentmarket-listing.md`,
-`docs/agentmarket-submission.md`, `docs/awi-adoption-guide.md`,
-`docs/constant-test-loop.md` and `docs/deploy-railway.md`. GitHub redirects
-the old URLs, so nothing was broken; they were wrong in the way a security
-questionnaire notices. One is deliberately left:
+`FINAL_SUMMARY.md` (a pull-request URL; a quoted task prompt on its line 21
+still spells the old slug), `app/main.py` (the OpenAPI license URL, with
+`docs/openapi.json` regenerated), `b2a_sdk/README.md`, the four framework
+READMEs and the three wrapper READMEs that carried the old clone URL (the
+CrewAI wrapper's did not), and `docs/GAP_CLOSURE_PLAN.md`,
+`docs/agentmarket-listing.md`, `docs/agentmarket-submission.md`,
+`docs/awi-adoption-guide.md`, `docs/constant-test-loop.md` and
+`docs/deploy-railway.md`. That is 24 `github.com/PetrefiedThunder` URLs in
+18 files, plus bare slugs in the last two. GitHub redirects the old URLs, so
+nothing was broken; they were wrong in the way a security questionnaire
+notices. 661 old-namespace URLs in 49 files remain at this branch's head,
+nearly all inside dated records kept as written (`docs/qa/`,
+`docs/issue-resolution-2026-10-02/`), plus one each in `LICENSING.md` (part
+of the license-document drift above), `tests/test_site_agent_interface.py`
+and `server.json`. One is deliberately left:
 
-- `server.json` names the MCP Registry entry `io.github.PetrefiedThunder/...`.
-  That is the registry identity the publisher authenticated as; changing it is
-  a registry re-submission, not a link fix.
+- `server.json` names the MCP Registry entry `io.github.PetrefiedThunder/...`
+  and gives `https://github.com/PetrefiedThunder/agent-middleware-api` as its
+  `repository.url`. That is the registry identity the publisher authenticated
+  as; changing it is a registry re-submission, not a link fix.
 
 ## What this document does not do
 
@@ -361,5 +408,10 @@ questionnaire notices. One is deliberately left:
 - It does not change the required-check list. That list is owned by
   [trust-release-gate-branch-protection.md](trust-release-gate-branch-protection.md)
   and the script copies whatever is live.
-- It does not change `ci.yml`. The per-push cost reduction above is a
-  separate, reviewable change.
+- It changes `ci.yml` only in a comment (the note above the `secret_scan`
+  job's "Scan commit range" step); no job, step or trigger changes. The
+  per-push cost reduction above is a separate, reviewable change.
+- The one runtime change on this branch is the SQLite connection factory in
+  `app/db/database.py` (see the `test (3.11)` row of the audit table). It
+  applies to SQLite URLs only, which this project uses for local and test
+  databases; PostgreSQL is untouched.
