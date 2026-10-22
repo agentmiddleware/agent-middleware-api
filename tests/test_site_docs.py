@@ -44,11 +44,6 @@ SECTION_PAGES = {
     ),
     "Trust": ("Limits", "Security limitations", "Proof and published receipts"),
 }
-PUBLISHED_TITLES = {
-    *SECTION_PAGES["Start"],
-    *SECTION_PAGES["Concepts"],
-    "Limits",
-}
 
 
 def _front_matter(source: Path) -> tuple[dict[str, str], str]:
@@ -94,8 +89,7 @@ def _published_pages() -> list[tuple[str, str, str, dict[str, str], str]]:
     pages = []
     for section, title, slug in _manifest_pages():
         source = DOCS_SOURCE / f"{slug}.md"
-        if not source.exists():
-            continue
+        assert source.is_file(), f"{title}: missing Markdown source {source}"
         fields, body = _front_matter(source)
         assert fields["title"] == title, f"{source}: manifest title disagrees"
         assert fields["section"] == section, f"{source}: manifest section disagrees"
@@ -201,7 +195,7 @@ def _prose_only(source: str) -> str:
 
 def test_docs_manifest_and_source_front_matter_match() -> None:
     published = _published_pages()
-    assert {title for _, title, _, _, _ in published} == PUBLISHED_TITLES
+    assert len(published) == len(_manifest_pages())
     assert {source.stem for source in DOCS_SOURCE.glob("*.md")} == {
         slug for _, _, slug, _, _ in published
     }
@@ -228,16 +222,29 @@ def test_docs_copy_rules_hold_for_every_source_page() -> None:
             assert banned.casefold() not in lowered, (
                 f"{title}: banned phrase {banned!r}"
             )
+        assert (
+            re.search(r"\bprivate\s+(?:code|repo(?:sitory)?|source)\b", lowered) is None
+        ), f"{title}: code must not be described as private"
+        assert (
+            re.search(r"\b(?:code|repo(?:sitory)?|source)\s+is\s+private\b", lowered)
+            is None
+        ), f"{title}: code must not be described as private"
         assert "—" not in prose and "–" not in prose, f"{title}: punctuation dash"
         assert re.search(r"\w\s+--?\s+\w", prose) is None, (
             f"{title}: punctuation dash between words"
         )
+        if "a retry with the same key" in lowered:
+            assert RETRY_WORDING in lowered, f"{title}: retry wording changed"
+        if "a new key is" in lowered:
+            assert "a new key is a new request" in lowered, (
+                f"{title}: new-key wording changed"
+            )
         if title == "Calls and request keys":
             assert RETRY_WORDING in body
         if title == "Limits":
             assert (
                 "https://github.com/agentmiddleware/agent-middleware/"
-                "blob/main/SECURITY_LIMITATIONS.md"
+                "blob/main/gateway/SECURITY_LIMITATIONS.md"
             ) in full_text
         for raw_url in re.findall(r"https?://[^\s)]+", full_text):
             target = urlparse(raw_url)
@@ -245,10 +252,17 @@ def test_docs_copy_rules_hold_for_every_source_page() -> None:
                 assert target.path in {
                     "/agentmiddleware",
                     "/agentmiddleware/agent-middleware",
+                    "/agentmiddleware/amw-demo",
                     "/agentmiddleware/amw-demo.git",
-                } or target.path.startswith("/agentmiddleware/agent-middleware/"), (
-                    f"{title}: noncanonical repository link {raw_url}"
-                )
+                    "/agentmiddleware/amw-paypal-agent-demo",
+                    "/agentmiddleware/amw-paypal-agent-demo.git",
+                } or target.path.startswith(
+                    (
+                        "/agentmiddleware/agent-middleware/",
+                        "/agentmiddleware/amw-demo/",
+                        "/agentmiddleware/amw-paypal-agent-demo/",
+                    )
+                ), f"{title}: noncanonical repository link {raw_url}"
             elif target.hostname and target.hostname.endswith("agentmiddleware.dev"):
                 assert target.hostname == "www.agentmiddleware.dev", (
                     f"{title}: noncanonical site link {raw_url}"
@@ -291,7 +305,7 @@ def test_docs_render_with_shared_chrome_sidebar_and_hashed_css(
         assert positions == sorted(positions), f"{url}: sidebar section order changed"
 
 
-def test_docs_landing_lists_unpublished_titles_without_links(built_docs: Path) -> None:
+def test_docs_landing_links_every_nav_entry(built_docs: Path) -> None:
     markup = (built_docs / "docs" / "index.html").read_text(encoding="utf-8")
     article = re.search(
         r'<article class="docs-content">(.*?)</article>', markup, re.DOTALL
@@ -313,10 +327,10 @@ def test_docs_landing_lists_unpublished_titles_without_links(built_docs: Path) -
         )
         for entry in section["pages"]:
             slug = entry["slug"]
-            if (DOCS_SOURCE / f"{slug}.md").is_file():
-                continue
-            assert f"<li><span>{html.escape(entry['title'])}</span></li>" in items
-            assert f'href="/docs/{slug}/"' not in markup
+            assert (
+                f'<li><a href="/docs/{slug}/">{html.escape(entry["title"])}</a></li>'
+                in items
+            ), f"{title}: {slug} is not linked"
 
 
 def test_hosted_quickstart_uses_demo_key_and_receipt_example(built_docs: Path) -> None:
@@ -378,15 +392,9 @@ def test_all_internal_docs_links_reach_built_pages_and_anchors(
                 )
 
 
-def test_docs_llms_and_sitemap_list_only_published_pages(built_docs: Path) -> None:
+def test_docs_llms_and_sitemap_list_every_nav_entry(built_docs: Path) -> None:
     llms = (built_docs / "docs" / "llms.txt").read_text(encoding="utf-8")
     sitemap = (built_docs / "sitemap.xml").read_text(encoding="utf-8")
-    redirect_sources = {
-        rule["source"]
-        for rule in json.loads((SITE / "vercel.json").read_text(encoding="utf-8"))[
-            "redirects"
-        ]
-    }
     expected_urls = set()
     for _, title, slug, fields, _ in _published_pages():
         url = f"{SITE_URL}/docs/{slug}/"
@@ -398,15 +406,14 @@ def test_docs_llms_and_sitemap_list_only_published_pages(built_docs: Path) -> No
         assert f"<loc>{url}</loc>" in sitemap
     referenced_urls = set(re.findall(rf"{re.escape(SITE_URL)}/docs/[a-z0-9/-]*", llms))
     assert referenced_urls - {f"{SITE_URL}/docs/"} == expected_urls
-    assert f"<loc>{SITE_URL}/docs/</loc>" in sitemap
-    for _, _, slug in _manifest_pages():
-        url = f"{SITE_URL}/docs/{slug}/"
-        if url in expected_urls:
-            continue
-        assert url not in llms
-        assert f"<loc>{url}</loc>" not in sitemap
-        assert f"/docs/{slug}" not in redirect_sources
-        assert not (built_docs / "docs" / slug / "index.html").exists()
+    docs_locations = re.findall(
+        rf"<loc>({re.escape(SITE_URL)}/docs/[a-z0-9/-]*)</loc>", sitemap
+    )
+    assert set(docs_locations) == expected_urls | {f"{SITE_URL}/docs/"}
+    assert len(docs_locations) == len(expected_urls) + 1
+    assert expected_urls == {
+        f"{SITE_URL}/docs/{slug}/" for _, _, slug in _manifest_pages()
+    }
 
 
 def test_docs_redirect_and_launch_gate(tmp_path: Path) -> None:
@@ -423,14 +430,17 @@ def test_docs_redirect_and_launch_gate(tmp_path: Path) -> None:
     assert not (blocked_output / "docs").exists()
 
 
-def test_published_docs_pages_redirect_to_trailing_slash() -> None:
+def test_every_docs_nav_entry_redirects_to_trailing_slash() -> None:
     config = json.loads((SITE / "vercel.json").read_text(encoding="utf-8"))
-    for _, _, slug, _, _ in _published_pages():
-        assert {
+    for _, _, slug in _manifest_pages():
+        expected = {
             "source": f"/docs/{slug}",
             "destination": f"/docs/{slug}/",
             "permanent": True,
-        } in config["redirects"], f"/docs/{slug} needs a trailing-slash redirect"
+        }
+        assert config["redirects"].count(expected) == 1, (
+            f"/docs/{slug} needs exactly one trailing-slash redirect"
+        )
 
 
 def test_markdown_renderer_escapes_html_and_unsafe_links() -> None:
