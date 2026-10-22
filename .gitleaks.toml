@@ -5,16 +5,21 @@
 # full-history scans (`gitleaks detect --log-opts=--all` under this config),
 # most recently on 2026-10-22 against a fresh clone taken after the history
 # rewrite of 2026-10-20: 1,410 commits across every branch, nothing outside
-# the allowlist below. The only real credential ever committed is the
-# 2026-08-06 leaked key (see docs/api-key-rotation.md). It was rotated dead at
+# the allowlist below. The only real credential ever committed is the key
+# from the 2026-08-06 incident (committed 2026-08-04 in
+# scripts/stress_test_live.py, removed from HEAD by #201 on 2026-08-07; see
+# docs/api-key-rotation.md). It was rotated dead at
 # the provider on 2026-08-07, which was always the only real remediation. It
 # then stayed reachable from main's history (the 2026-08-24 note here claimed
 # otherwise and was corrected on 2026-09-19) until the 2026-10-20 rewrite
 # replaced its value with the literal ***REMOVED*** in every commit, so
-# neither the value nor the commit that introduced it (formerly 9e45009)
-# exists in this repository's history any more. Clones and forks taken before
-# 2026-10-20 still carry both. Every other historical finding is synthetic
-# test material or a content hash, allowlisted below.
+# neither the value nor the commit that introduced it (formerly 9e45009) is
+# reachable from any branch or tag any more. GitHub still serves that
+# pre-rewrite commit by its full SHA until it is garbage-collected or purged
+# by GitHub Support, and clones taken before 2026-10-20 still carry both (the
+# repository has no forks as of 2026-10-22). Every other historical finding
+# is synthetic test material, a content hash, or the ***REMOVED*** marker the
+# rewrite left behind, all allowlisted below.
 
 [extend]
 useDefault = true
