@@ -3414,7 +3414,13 @@ def test_published_transcript_retains_gateway_evidence(tmp_path) -> None:
     transcript = _transcript()
     steps = {step["id"]: step for step in transcript["steps"]}
     assert list(steps) == [
-        "discover", "authorize", "invoke", "replay", "verify", "audit", "deny"
+        "discover",
+        "authorize",
+        "invoke",
+        "replay",
+        "verify",
+        "audit",
+        "deny",
     ]
     numbers = [int(step["loop"].split(" ", 1)[0]) for step in transcript["steps"]]
     assert numbers == sorted(numbers)
@@ -3423,7 +3429,10 @@ def test_published_transcript_retains_gateway_evidence(tmp_path) -> None:
     ).read_bytes()
     config = json.loads((SITE / "vercel.json").read_text(encoding="utf-8"))
     rules = {entry["source"]: entry for entry in config["headers"]}
-    assert rules["/proof/transcript.json"]["headers"] == rules["/proof/receipt.json"]["headers"]
+    assert (
+        rules["/proof/transcript.json"]["headers"]
+        == rules["/proof/receipt.json"]["headers"]
+    )
 
     invoke = dict(steps["invoke"]["response"])
     replay = dict(steps["replay"]["response"])
