@@ -318,6 +318,7 @@ def test_booking_identity_names_one_product_and_one_operator(tmp_path, booking_u
         "proof/index.html",
         "compare/index.html",
         "demo-key/index.html",
+        "try/index.html",
     ):
         page = (output / relative).read_text()
         assert "RegEngine" not in page, (
@@ -347,6 +348,7 @@ def test_pages_name_no_second_brand_in_visible_copy(tmp_path) -> None:
         "proof/index.html",
         "compare/index.html",
         "demo-key/index.html",
+        "try/index.html",
         "404.html",
     ):
         page = (output / relative).read_text(encoding="utf-8")
@@ -752,6 +754,7 @@ def test_search_social_and_analytics_contracts(tmp_path) -> None:
         "proof/index.html",
         "compare/index.html",
         "demo-key/index.html",
+        "try/index.html",
     ):
         rendered = (email_only / relative_path).read_text(encoding="utf-8")
         assert 'data-analytics-event="booking_click"' not in rendered
@@ -767,6 +770,7 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
         "proof/index.html",
         "compare/index.html",
         "demo-key/index.html",
+        "try/index.html",
         "concept/index.html",
         "404.html",
     )
@@ -841,6 +845,7 @@ def test_external_links_carry_noopener_noreferrer(tmp_path) -> None:
         "proof/index.html",
         "compare/index.html",
         "demo-key/index.html",
+        "try/index.html",
         "concept/index.html",
     ):
         collector = _ExternalLinkCollector()
@@ -923,6 +928,7 @@ def test_cta_aria_labels_preserve_visible_text_and_contact_targets(tmp_path) -> 
             "proof/index.html",
             "compare/index.html",
             "demo-key/index.html",
+            "try/index.html",
         ):
             page = (output / relative_path).read_text(encoding="utf-8")
             collector = _LabeledLinkCollector()
@@ -1010,6 +1016,7 @@ INDEXABLE_PAGES = {
     "proof/index.html": "https://www.agentmiddleware.dev/proof/",
     "compare/index.html": "https://www.agentmiddleware.dev/compare/",
     "demo-key/index.html": "https://www.agentmiddleware.dev/demo-key/",
+    "try/index.html": "https://www.agentmiddleware.dev/try/",
 }
 
 
@@ -1076,6 +1083,7 @@ def test_pages_publish_valid_json_ld(tmp_path) -> None:
         "proof/index.html": {"WebPage", "BreadcrumbList", "HowTo"},
         "compare/index.html": {"WebPage", "BreadcrumbList", "FAQPage"},
         "demo-key/index.html": {"WebPage", "BreadcrumbList"},
+        "try/index.html": {"WebPage", "BreadcrumbList"},
     }
     defined: set[str] = set()
     referenced: set[str] = set()
@@ -1478,6 +1486,7 @@ def test_pages_carry_no_inline_scripts(tmp_path) -> None:
             "proof/index.html",
             "compare/index.html",
             "demo-key/index.html",
+            "try/index.html",
             "concept/index.html",
             "404.html",
         ):
@@ -1517,6 +1526,7 @@ def test_static_assets_are_cached_and_html_is_not() -> None:
         "proof/index.html",
         "compare/index.html",
         "demo-key/index.html",
+        "try/index.html",
         "concept/index.html",
         "404.html",
     ):
@@ -1553,7 +1563,7 @@ def test_trailing_slash_is_canonical_for_subpages() -> None:
     assert "trailingSlash" not in config
     # Because the global setting is off, every directory page needs its own
     # redirect or the un-slashed URL 404s.
-    for directory in ("proof", "compare", "demo-key"):
+    for directory in ("proof", "compare", "demo-key", "try"):
         page = (SITE / directory / "index.html").read_text(encoding="utf-8")
         redirect = next(
             entry
@@ -1760,6 +1770,7 @@ def test_navigation_is_identical_across_pages(tmp_path, contacts) -> None:
         "proof/index.html",
         "compare/index.html",
         "demo-key/index.html",
+        "try/index.html",
         "concept/index.html",
         "404.html",
     )
@@ -1818,6 +1829,7 @@ def test_footer_reaches_the_same_places_on_every_page(tmp_path) -> None:
             "proof/index.html",
             "compare/index.html",
             "demo-key/index.html",
+            "try/index.html",
             "concept/index.html",
             "404.html",
         )
@@ -2210,6 +2222,7 @@ def test_every_page_loads_the_accessibility_scripts(tmp_path) -> None:
         "proof/index.html",
         "compare/index.html",
         "demo-key/index.html",
+        "try/index.html",
         "concept/index.html",
         "404.html",
     ):
@@ -2251,6 +2264,7 @@ def test_every_page_captures_landing_utm(tmp_path) -> None:
         "proof/index.html",
         "compare/index.html",
         "demo-key/index.html",
+        "try/index.html",
         "concept/index.html",
         "404.html",
     ):
@@ -2330,6 +2344,7 @@ def test_preloaded_fonts_exist_and_are_actually_used(tmp_path) -> None:
         "proof/index.html",
         "compare/index.html",
         "demo-key/index.html",
+        "try/index.html",
     ):
         markup = (output / relative_path).read_text(encoding="utf-8")
         preloads = re.findall(r'<link rel="preload" href="(/fonts/[^"]+)"', markup)
@@ -2373,6 +2388,7 @@ def test_stylesheet_cache_key_tracks_the_generated_css(tmp_path) -> None:
         "index.html",
         "proof/index.html",
         "demo-key/index.html",
+        "try/index.html",
         "404.html",
     ):
         markup = (output / relative_path).read_text(encoding="utf-8")
