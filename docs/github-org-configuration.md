@@ -85,8 +85,8 @@ treats this repository as live until it is archived.
 |---|---|---|
 | Members | 1 (`PetrefiedThunder`, owner) | Same, until there is a second maintainer |
 | Teams | none | A `maintainers` team as soon as a second person joins, so `CODEOWNERS` can name a team instead of a person |
-| Repositories | 7 on 2026-10-22: six public (`agent-middleware-api`, `agent-middleware`, `agent-middleware-spec`, `amw-demo`, `amw-paypal-agent-demo`, `.github`) and `agent-middleware-public` still private. This repository's description was fixed; the others were not re-read on 2026-10-22 | `agent-middleware` is the product repository, per the README banner added here by #850; see [Repositories](#repositories) |
-| Actions runs on `main` pushes | `startup_failure`, no workflow name, on every `main` push from 2026-10-17 to 2026-10-19, while the repository was private. Since it went public every push run has started: the merges of 2026-10-21 and 2026-10-22 ran green (for example run 39733461851 for `b6f006a`), except the run for `9289867`, which was cancelled, not failed, while its Docker publish run succeeded | Green push run on every `main` commit |
+| Repositories | 7 on 2026-10-22: six public (`agent-middleware-api`, `agent-middleware`, `agent-middleware-spec`, `amw-demo`, `amw-paypal-agent-demo`, `.github`) and `agent-middleware-public` still private. This repository's description was fixed; the others were not re-read on 2026-10-22 | `agent-middleware` is where development continues, per the README banner added here by #850; see [Repositories](#repositories) |
+| Actions runs on `main` pushes | `startup_failure`, no workflow name, on every `main` push from 2026-10-17 to 2026-10-19, while the repository was private. Since it went public every push run has started: the merges of 2026-10-21 and 2026-10-22 ran green (for example run 39733461851 for `b6f006a`) except two runs that were cancelled, not failed: `7408143` (#847, run 39719715065, where only `test (3.11)` was cancelled 25 minutes in and the other 18 jobs passed) and `9289867` (#848, run 39737949702); both commits' Docker publish runs succeeded | Green push run on every `main` commit |
 | Two-factor requirement, base permission, Actions policies, security configuration | Not readable from here | See [Organization settings](#organization-settings) |
 
 ### `agent-middleware-api`
@@ -104,7 +104,7 @@ treats this repository as live until it is archived.
 | Secret scanning, push protection | Disabled while private; **enabled** (with validity checks and non-provider patterns) the moment the repository went public on 2026-10-20 | Keep | Already correct; see [Secret scanning](#secret-scanning) |
 | Private vulnerability reporting | Enabled | Keep; it is what `SECURITY.md` asks reporters to use | Already correct |
 | Dependabot security updates | Enabled | Keep | Already correct |
-| Dependabot version updates | One pull request per package, pip and Actions only | Grouped weekly pull requests; Docker digest, SDK, wrappers and Railway IaC covered | Done in `.github/dependabot.yml` on this branch |
+| Dependabot version updates | One pull request per package, pip and Actions only | Grouped pull requests: weekly for pip (root, SDK and wrappers) and Actions, monthly for the Docker digest and Railway IaC | Done in `.github/dependabot.yml` on this branch |
 | Rulesets | None on 2026-10-19. Since 2026-10-20 22:09 UTC the organization ruleset `main-protect` (id 25509458, active, no bypass actors) applies to the default branch: pull request required with 0 approvals, no deletion, no force push. Whether it targets the other repositories too is visible only in Organization → Settings → Rulesets | Keep | – |
 | `master` branch | Exists, protected, 9 commits ahead and 1,239 behind `main` on 2026-10-19, last commit 2026-05-22; still present on 2026-10-22 | Deleted | See [Remove master](#remove-master) |
 | Security advisory link in issue chooser | Pointed at the old `PetrefiedThunder/` namespace | Organization namespace | Done in `.github/ISSUE_TEMPLATE/config.yml` on this branch |
@@ -199,10 +199,11 @@ The two options not taken, kept for the record:
 the force-push of the rewritten history at 22:19 UTC produced a run that is
 red on `secret_scan` (see below) with the other jobs cancelled. The merges of
 2026-10-21 and 2026-10-22 ran green again (a normal merge carries a known
-`before` SHA, so its `secret_scan` range is well defined); the run for
-`9289867` on 2026-10-22 was cancelled rather than failed. `ci.yml` still has
-no manual trigger, so a cancelled push run can only be replaced by the next
-merge.
+`before` SHA, so its `secret_scan` range is well defined); two runs on
+2026-10-22 were cancelled rather than failed: `7408143`, where `test (3.11)`
+alone was cancelled 25 minutes after it started, and `9289867`. `ci.yml`
+still has no manual trigger, so a cancelled push run can only be replaced by
+the next merge.
 
 ## After the history rewrite
 
@@ -329,7 +330,7 @@ per check its CI reports, or leave it empty to require only a pull request.
 | Repository | Visibility (2026-10-22) | Notes |
 |---|---|---|
 | `agent-middleware-api` | Public | This document. Archived 2026-10-20, unarchived by 2026-10-21; the #850 banner announces the archive, which is deferred while site pull requests are open (see the top of this document). Description fixed |
-| `agent-middleware` | Public | The product repository, per this repository's README banner. 45 open issues on 2026-10-20 |
+| `agent-middleware` | Public | Where development continues, per this repository's README banner. 45 open issues on 2026-10-20 |
 | `.github` | Public | Organization profile README, `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, `SECURITY.md`, `dependabot.yml` for its own Actions pins |
 | `agent-middleware-public` | **Private** | Still the only private one, and the one whose name says public. Description said "private staging repo" on 2026-10-20. Flip it, rename it or archive it |
 | `agent-middleware-spec` | Public | Archived on 2026-10-20; its content moved to `agent-middleware/spec` |
