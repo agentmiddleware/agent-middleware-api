@@ -16,12 +16,12 @@
         },
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'self' https://vitals.vercel-insights.com https://api.thisisatest.tech; manifest-src 'self'; upgrade-insecure-requests"
+          "value": "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'self' https://vitals.vercel-insights.com https://api.thisisatest.tech https://cqtlzicxmaklslvxderm.supabase.co; manifest-src 'self'; upgrade-insecure-requests"
         }
       ]
     },
     {
-      "source": "/:asset(styles.css|fonts.css|a11y.js|a11y-preload.js|va-init.js|analytics.js|utm-capture.js|wave.js|arcade-boot.js|arcade.js|arcade.css|favicon.svg|social-card.png)",
+      "source": "/:asset(styles.css|fonts.css|a11y.js|a11y-preload.js|va-init.js|analytics.js|utm-capture.js|home-key.js|wave.js|arcade-boot.js|arcade.js|arcade.css|favicon.svg|social-card.png)",
       "headers": [
         {
           "key": "Cache-Control",
@@ -96,6 +96,13 @@
     },
     {
       "source": "/llms-full.txt",
+      "headers": [
+        { "key": "Content-Type", "value": "text/plain; charset=utf-8" },
+        { "key": "Cache-Control", "value": "public, max-age=300" }
+      ]
+    },
+    {
+      "source": "/docs/llms.txt",
       "headers": [
         { "key": "Content-Type", "value": "text/plain; charset=utf-8" },
         { "key": "Cache-Control", "value": "public, max-age=300" }
@@ -177,17 +184,127 @@
     },
     {
       "source": "/pilot",
-      "destination": "/#pilot",
-      "permanent": true
-    },
-    {
-      "source": "/pilot/",
-      "destination": "/#pilot",
+      "destination": "/pilot/",
       "permanent": true
     },
     {
       "source": "/proof",
       "destination": "/proof/",
+      "permanent": true
+    },
+    {
+      "source": "/docs",
+      "destination": "/docs/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/what-is-amw",
+      "destination": "/docs/what-is-amw/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/three-minute-quickstart",
+      "destination": "/docs/three-minute-quickstart/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/run-locally",
+      "destination": "/docs/run-locally/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/permits",
+      "destination": "/docs/permits/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/calls-and-request-keys",
+      "destination": "/docs/calls-and-request-keys/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/receipts",
+      "destination": "/docs/receipts/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/credits",
+      "destination": "/docs/credits/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/put-a-refund-tool-behind-amw",
+      "destination": "/docs/put-a-refund-tool-behind-amw/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/mcp-client-setup",
+      "destination": "/docs/mcp-client-setup/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/langchain",
+      "destination": "/docs/langchain/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/crewai",
+      "destination": "/docs/crewai/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/autogen",
+      "destination": "/docs/autogen/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/openai-agents",
+      "destination": "/docs/openai-agents/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/paypal-sandbox-demo",
+      "destination": "/docs/paypal-sandbox-demo/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/http-api",
+      "destination": "/docs/http-api/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/errors",
+      "destination": "/docs/errors/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/python-sdk",
+      "destination": "/docs/python-sdk/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/ts-verifier",
+      "destination": "/docs/ts-verifier/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/receipt-spec-v0-1",
+      "destination": "/docs/receipt-spec-v0-1/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/limits",
+      "destination": "/docs/limits/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/security-limitations",
+      "destination": "/docs/security-limitations/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/proof-and-published-receipts",
+      "destination": "/docs/proof-and-published-receipts/",
       "permanent": true
     },
     {
@@ -198,6 +315,11 @@
     {
       "source": "/demo-key",
       "destination": "/demo-key/",
+      "permanent": true
+    },
+    {
+      "source": "/try",
+      "destination": "/try/",
       "permanent": true
     },
     {

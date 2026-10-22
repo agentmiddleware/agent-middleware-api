@@ -31,7 +31,7 @@
     }
     const invalid = fields.find((field) => field.getAttribute("aria-invalid") === "true");
     if (invalid) {
-      summary.textContent = "Check your inputs: use non-negative numbers, whole actions, and percentages from 0 to 100.";
+      summary.textContent = "Check your inputs: use zero or positive numbers, whole actions, and percentages from 0 to 100.";
       return;
     }
     if (fields.some((field) => field.required && field.value === "")) {
@@ -56,7 +56,7 @@
     } else if (!hasCost) {
       guidance.textContent = "Economic fit is still unknown. Add your total monthly cost to compare; a service quote and operating scope are needed before deciding.";
     } else {
-      const comparison = " Break-even loss per duplicate: " + money.format(threshold) + ".";
+      const comparison = " Break even loss per duplicate: " + money.format(threshold) + ".";
       // Use the same decimal rounding as the displayed currency amounts.
       const displayedLoss = Number(roundedAmount.format(avoidedLoss));
       const displayedCost = Number(roundedAmount.format(cost));
