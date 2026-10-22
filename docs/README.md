@@ -19,6 +19,7 @@ consequential MCP tool behind a governed boundary. Start with the
 | Read the public article on what the boundary does and does not guarantee | [Intent is not authority](articles/intent-is-not-authority.md) |
 | Evaluate the gateway against the MCP threat catalog | [MCP security posture](mcp-security-posture.md) |
 | Know what you keep if you migrate off | [Exit and export](exit-and-export.md) |
+| See the gateway's own handler time, and what that figure excludes | [Gateway overhead](gateway-overhead.md) |
 | Confirm which commit production is actually running | [Deployment verification checklist](deployment-verification-checklist.md) |
 | Plan a design-partner evaluation | [Design partner guide](../DESIGN_PARTNER_GUIDE.md) |
 | Contribute to the repository | [Contributing guide](../CONTRIBUTING.md) |
