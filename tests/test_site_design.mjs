@@ -21,11 +21,12 @@ try {
       let commonNav;
       let commonFooter;
       let commonStyle;
+      let commonHeading;
       for (const route of routes) {
         const response = await page.goto(new URL(route, base).href, { waitUntil: "networkidle" });
         assert.equal(response.status(), 200, route);
         await page.evaluate(() => document.fonts.ready);
-        const layout = await page.evaluate(() => {
+        const layout = await page.evaluate((route) => {
           const nav = document.querySelector(".site-nav");
           const styles = getComputedStyle(document.body);
           return {
@@ -33,18 +34,33 @@ try {
             nav: [...nav.querySelectorAll("a")].map((a) => [a.textContent.trim(), a.getAttribute("href")]),
             footer: [...document.querySelectorAll(".site-footer a")].map((a) => [a.textContent.trim(), a.getAttribute("href")]),
             theme: [styles.fontFamily, styles.fontSize, styles.color, styles.backgroundColor, getComputedStyle(document.querySelector("h1")).fontFamily],
+            homeSurface: route === "/" ? [
+              getComputedStyle(document.querySelector("main")).backgroundColor,
+              getComputedStyle(document.querySelector(".hero-v2 h1")).color,
+            ] : null,
             navHeight: getComputedStyle(nav).position === "sticky" ? nav.getBoundingClientRect().height : 0,
             scrollPadding: parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop),
           };
-        });
+        }, route);
         assert(!layout.overflow, `${route} overflows at ${width}px JS=${javaScriptEnabled}`);
         assert(layout.scrollPadding >= layout.navHeight, `${route} sticky nav obscures anchors: ${layout.navHeight} > ${layout.scrollPadding} at ${width}px`);
         commonNav ??= layout.nav;
         commonFooter ??= layout.footer;
-        commonStyle ??= layout.theme;
+        commonStyle ??= layout.theme.slice(0, 4);
         assert.deepEqual(layout.nav, commonNav, `${route} navigation differs`);
         assert.deepEqual(layout.footer, commonFooter, `${route} footer differs`);
-        assert.deepEqual(layout.theme, commonStyle, `${route} design tokens differ`);
+        assert.deepEqual(layout.theme.slice(0, 4), commonStyle, `${route} body design tokens differ`);
+        if (route === "/") {
+          assert.equal(layout.theme[4], '"Public Sans", "Segoe UI", system-ui, sans-serif');
+          assert.deepEqual(layout.homeSurface, ["rgb(255, 255, 255)", "rgb(17, 17, 17)"]);
+          if (!javaScriptEnabled) {
+            assert.equal(await page.locator("#home-key-trigger").isVisible(), false);
+            assert.equal(await page.locator('noscript a[href="/demo-key/"]').isVisible(), true);
+          }
+        } else {
+          commonHeading ??= layout.theme[4];
+          assert.equal(layout.theme[4], commonHeading, `${route} heading design token differs`);
+        }
         await page.keyboard.press("Tab");
         assert.equal(await page.locator(":focus").getAttribute("class"), "skip-link");
         await page.keyboard.press("Enter");
@@ -80,6 +96,23 @@ try {
       scenarios++;
     }
   }
+  const keyPage = await browser.newPage({ viewport: { width: 320, height: 1000 } });
+  let keyStatus = 500;
+  await keyPage.route("https://api.thisisatest.tech/v1/demo/keys", (route) =>
+    route.fulfill({ status: keyStatus, body: "", headers: { "Access-Control-Allow-Origin": "*" } }));
+  for (const [status, visibleId, hiddenId] of [
+    [500, "home-key-retry", "home-key-email"],
+    [404, "home-key-email", "home-key-retry"],
+  ]) {
+    keyStatus = status;
+    await keyPage.goto(base.href, { waitUntil: "networkidle" });
+    await keyPage.locator("#home-key-trigger").click();
+    await keyPage.locator(`#${visibleId}`).waitFor({ state: "visible" });
+    assert.equal(await keyPage.locator(`#${hiddenId}`).isVisible(), false);
+    assert(await keyPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    scenarios++;
+  }
+  await keyPage.close();
   // The operator index stays self-contained on its separate API origin.
   // A fresh response must use the API policy: setContent on the marketing
   // document inherits its style-src 'self' and incorrectly blocks this CSS.
