@@ -4,6 +4,8 @@
   const result = document.getElementById("try-key-result");
   const keyInput = document.getElementById("try-api-key");
   const walletInput = document.getElementById("try-wallet-id");
+  const emailInput = document.getElementById("try-email");
+  const emailError = document.getElementById("try-email-error");
   const UTM_PARAMS = ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term"];
   const UTM_STORAGE_KEY = "amwDemoKeyUtm";
   const UTM_MAX_LENGTH = 128;
@@ -93,9 +95,34 @@
 
   persistAttribution(captureAttribution());
 
-  function onKeyIssued({ wallet_id, fields }) {
-    // Reserved for an optional signup insert in a later change.
-    // Never pass the API key to this hook or store it in attribution.
+  async function onKeyIssued({ wallet_id, fields }) {
+    const signup = { wallet_id };
+    for (const key of UTM_PARAMS) {
+      if (fields[key]) signup[key] = fields[key];
+    }
+    if (fields.referrer) signup.referrer = fields.referrer;
+
+    const email = emailInput.value.trim();
+    if (email) {
+      if (email.length <= 254 && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+        signup.email = email;
+      } else {
+        emailError.textContent = "That email address was not included. Your test key is ready.";
+        emailError.hidden = false;
+      }
+    }
+
+    try {
+      await fetch("https://cqtlzicxmaklslvxderm.supabase.co/functions/v1/amw-test-signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "omit",
+        keepalive: true,
+        body: JSON.stringify(signup),
+      });
+    } catch {
+      // Signup is optional and never interrupts key issuance.
+    }
   }
 
   issueButton.addEventListener("click", async () => {
@@ -153,7 +180,7 @@
     walletInput.value = data.wallet_id;
     result.hidden = false;
     status.textContent = "Test key ready. Copy it now.";
-    onKeyIssued({ wallet_id: data.wallet_id, fields });
+    void onKeyIssued({ wallet_id: data.wallet_id, fields });
   });
 
   async function copyValue(input, label) {

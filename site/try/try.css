@@ -31,6 +31,27 @@
   cursor: default;
 }
 
+.try-page .email-input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--paper-line);
+  border-radius: var(--radius-sm);
+  background: var(--paper-shade);
+  color: var(--paper-ink);
+  font: inherit;
+}
+
+.try-page .email-help,
+.try-page .email-error {
+  margin: 0.45rem 0 1rem;
+  color: var(--paper-dim);
+}
+
+.try-page .email-error[hidden] {
+  display: none;
+}
+
 #try-key-status {
   margin: 0.9rem 0 0;
   color: var(--paper-dim);
