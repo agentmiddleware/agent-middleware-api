@@ -277,7 +277,8 @@ def test_docs_render_with_shared_chrome_sidebar_and_hashed_css(
         assert f"/styles.css?v={styles_version}" in markup, f"{url}: stale CSS hash"
         assert parsed.unsafe_markup == [], f"{url}: {parsed.unsafe_markup}"
         assert "@@" not in markup, f"{url}: unresolved build token"
-        expected_license_lines = 1 if url in {"/docs/", "/docs/what-is-amw/"} else 0
+        # The shared footer contributes one line on every page.
+        expected_license_lines = 2 if url in {"/docs/", "/docs/what-is-amw/"} else 1
         assert markup.count(LICENSE_LINE) == expected_license_lines, (
             f"{url}: unexpected license line count"
         )

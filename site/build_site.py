@@ -108,6 +108,7 @@ SECURITY_TXT_EXPIRES_TOKEN = "@@SECURITY_TXT_EXPIRES@@"
 SECURITY_TXT_LIFETIME_DAYS = 365
 TEXT_ASSETS = (
     "index.html",
+    "pilot/index.html",
     "proof/index.html",
     "compare/index.html",
     "concept/index.html",
@@ -132,7 +133,9 @@ COPY_ASSETS = (
     "fonts",
     "fonts.css",
     "analytics.js",
+    "home-key.js",
     "pilot-fit.js",
+    "pilot",
     "compare",
     "concept",
     "demo-key",
@@ -938,6 +941,7 @@ def render_site(output: Path, environment: dict[str, str]) -> None:
                 rendered = rendered.replace(token, partial)
             # Dedicated markers survive formatting and added link attributes.
             for token, current_page in {
+                "@@NAV_PILOT_CURRENT@@": "pilot/index.html",
                 "@@NAV_PROOF_CURRENT@@": "proof/index.html",
                 "@@NAV_COMPARE_CURRENT@@": "compare/index.html",
                 "@@NAV_DEMO_KEY_CURRENT@@": "demo-key/index.html",

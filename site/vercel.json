@@ -21,7 +21,7 @@
       ]
     },
     {
-      "source": "/:asset(styles.css|fonts.css|a11y.js|a11y-preload.js|va-init.js|analytics.js|utm-capture.js|wave.js|arcade-boot.js|arcade.js|arcade.css|favicon.svg|social-card.png)",
+      "source": "/:asset(styles.css|fonts.css|a11y.js|a11y-preload.js|va-init.js|analytics.js|utm-capture.js|home-key.js|wave.js|arcade-boot.js|arcade.js|arcade.css|favicon.svg|social-card.png)",
       "headers": [
         {
           "key": "Cache-Control",
@@ -184,12 +184,7 @@
     },
     {
       "source": "/pilot",
-      "destination": "/#pilot",
-      "permanent": true
-    },
-    {
-      "source": "/pilot/",
-      "destination": "/#pilot",
+      "destination": "/pilot/",
       "permanent": true
     },
     {

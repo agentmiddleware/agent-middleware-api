@@ -63,7 +63,7 @@
   ],
   "canonical_api": "https://api.thisisatest.tech",
   "human_site": "https://www.agentmiddleware.dev/",
-  "github": "https://github.com/agentmiddleware/agent-middleware-api",
+  "github": "https://github.com/agentmiddleware/agent-middleware",
   "github_access": "public",
   "discovery": {
     "agent_manifest": "https://api.thisisatest.tech/.well-known/agent.json",
@@ -83,7 +83,7 @@
   "simulation_and_dependency_truth": "https://api.thisisatest.tech/health/dependencies",
   "try_it": {
     "mode": "local_self_hosted",
-    "repository": "https://github.com/agentmiddleware/agent-middleware-api",
+    "repository": "https://github.com/agentmiddleware/agent-middleware",
     "repository_access": "public",
     "command": "make prove-trust-plane",
     "live_access": "operator_issued",
