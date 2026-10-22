@@ -1,3 +1,8 @@
+> This repository is archived and no longer maintained.
+> Development continues at [agentmiddleware/agent-middleware](https://github.com/agentmiddleware/agent-middleware).
+> Product site: [agentmiddleware.dev](https://agentmiddleware.dev).
+> Apache 2.0 (gateway is Fair Source, FSL-1.1)
+
 # Agent Middleware API
 
 [![CI](https://github.com/PetrefiedThunder/agent-middleware-api/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/PetrefiedThunder/agent-middleware-api/actions/workflows/ci.yml)
