@@ -232,10 +232,16 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
     pilot_text = _page_text(pilot)
 
     assert "Let agents retry safely." in text
-    assert "Each action runs once and leaves a receipt." in text
+    assert (
+        "One accepted request key permits at most one gateway dispatch to the "
+        "configured upstream tool and at most one debit. Each finalized or "
+        "reconciled path has a receipt."
+    ) in text
+    assert "Each action runs once" not in text
     assert "Get a demo key" in text
     assert "Run the quickstart: amw-demo" in text
     assert re.search(r'<button\b[^>]*id="home-key-trigger"[^>]*>', page)
+    assert '<script defer src="/home-key.js?v=home-light-2"></script>' in page
     assert re.search(r'<noscript>.*?href="/demo-key/?"[^>]*>.*?</noscript>', page, re.S)
     assert 'href="https://github.com/agentmiddleware/amw-demo"' in page
     assert 'id="quickstart"' in page
@@ -247,7 +253,8 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
     assert "python examples/permit_echo_retry.py" in page
     assert "coming soon" in text
     assert "curl -s -X POST https://api.thisisatest.tech/v1/demo/keys" in page
-    assert "Same receipt. The tool did not run again." in text
+    assert "The gateway does not dispatch again." in text
+    assert "The tool did not run again." not in text
     assert 'id="how-it-works"' in page
     for heading in ("Permit", "Request key", "Receipt"):
         assert heading in text

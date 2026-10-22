@@ -17,6 +17,9 @@
   const copyQuickstart = byId("home-copy-quickstart");
   const copyStatus = byId("home-copy-status");
   const quickstartTemplate = quickstart.textContent;
+  const heroQuickstart = byId("home-hero-python");
+  const heroQuickstartTemplate = heroQuickstart.textContent;
+  const copyHeroQuickstart = byId("home-hero-python-copy");
   const triggerLabel = trigger.textContent;
   let pending = false;
   let issued = false;
@@ -24,6 +27,14 @@
 
   function shellQuote(value) {
     return "'" + value.replace(/'/g, "'\"'\"'") + "'";
+  }
+
+  function fillQuickstart(template, data) {
+    return template
+      .replace("export AMW_API_KEY='YOUR_DEMO_KEY'", () =>
+        `export AMW_API_KEY=${shellQuote(data.api_key)}`)
+      .replace("export AMW_WALLET_ID='YOUR_WALLET_ID'", () =>
+        `export AMW_WALLET_ID=${shellQuote(data.wallet_id)}`);
   }
 
   function showPanel() {
@@ -71,12 +82,10 @@
     key.type = "password";
     wallet.type = "password";
     budget.textContent = String(data.budget_credits);
-    quickstart.textContent = quickstartTemplate
-      .replace("export AMW_API_KEY='YOUR_DEMO_KEY'", () =>
-        `export AMW_API_KEY=${shellQuote(data.api_key)}`)
-      .replace("export AMW_WALLET_ID='YOUR_WALLET_ID'", () =>
-        `export AMW_WALLET_ID=${shellQuote(data.wallet_id)}`);
+    quickstart.textContent = fillQuickstart(quickstartTemplate, data);
+    heroQuickstart.textContent = fillQuickstart(heroQuickstartTemplate, data);
     copyQuickstart.disabled = false;
+    copyHeroQuickstart.disabled = false;
     title.textContent = "Your demo key is ready";
     status.textContent = "Your demo key is ready";
     result.hidden = false;
