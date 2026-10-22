@@ -1,128 +1,108 @@
-:root {
-  color-scheme: light;
-  font-family: system-ui, sans-serif;
-  color: #17233b;
-  background: #f6f8fc;
-}
-
-* { box-sizing: border-box; }
-
-body { margin: 0; }
-
-.skip-link {
-  position: absolute;
-  left: 1rem;
-  top: -4rem;
-  padding: 0.6rem 0.8rem;
-  background: #fff;
-  color: #123c80;
-}
-
-.skip-link:focus { top: 0.5rem; }
-
-a { color: #164895; }
-
-a:focus-visible, button:focus-visible, input:focus-visible {
-  outline: 3px solid #d79215;
-  outline-offset: 3px;
-}
-
-.site-header {
+.try-page {
   max-width: 52rem;
-  margin: 0 auto;
-  padding: 1.75rem 1.5rem;
-  font-weight: 700;
 }
 
-.site-header a { color: inherit; text-decoration: none; }
-
-main {
-  max-width: 52rem;
-  margin: 2rem auto 5rem;
-  padding: 0 1.5rem;
+.try-page .page-intro {
+  max-width: 42rem;
 }
 
-.page-intro { max-width: 42rem; }
-
-.eyebrow {
+.try-page .eyebrow {
   margin: 0 0 0.8rem;
-  color: #285894;
-  font-size: 0.85rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  color: var(--brass);
 }
 
-h1 {
-  margin: 0 0 1rem;
-  font-size: clamp(2.1rem, 6vw, 3.5rem);
-  line-height: 1.12;
+.try-page .page-intro > p:last-child {
+  color: var(--text-dim);
 }
 
-.page-intro > p:last-child { color: #4b5870; line-height: 1.65; }
-
-.key-panel {
+.try-page .key-panel {
   max-width: 42rem;
   margin-top: 2rem;
   padding: clamp(1.25rem, 4vw, 2rem);
-  border: 1px solid #d8e1ee;
-  border-radius: 1rem;
-  background: #fff;
-  box-shadow: 0 12px 32px rgb(31 55 91 / 7%);
+  border: 1px solid var(--paper-line);
+  border-radius: var(--radius);
+  background: var(--paper);
+  color: var(--paper-ink);
+  box-shadow: var(--shadow-soft);
 }
 
-button {
-  min-height: 2.75rem;
-  border-radius: 0.5rem;
-  font: inherit;
-  font-weight: 650;
-  cursor: pointer;
+.try-page .primary-button:disabled {
+  opacity: 0.65;
+  cursor: default;
 }
 
-.primary-button {
-  padding: 0.75rem 1.2rem;
-  border: 1px solid #153d7d;
-  background: #153d7d;
-  color: #fff;
+#try-key-status {
+  margin: 0.9rem 0 0;
+  color: var(--paper-dim);
 }
 
-.primary-button:hover { background: #102f62; }
-.primary-button:disabled { opacity: 0.65; cursor: default; }
+#try-key-result {
+  margin-top: 2rem;
+}
 
-#try-key-status { margin: 0.9rem 0 0; color: #4b5870; }
-#try-key-result { margin-top: 2rem; }
-#try-key-result[hidden] { display: none; }
+#try-key-result[hidden] {
+  display: none;
+}
 
-.result-heading { margin: 0; font-size: 1.2rem; font-weight: 700; }
-.result-note { margin: 0.4rem 0 1.5rem; color: #4b5870; }
+.try-page .result-heading {
+  margin: 0;
+  font-family: var(--font-title);
+  font-size: 1.2rem;
+  font-weight: 700;
+}
 
-label { display: block; margin: 1.25rem 0 0.45rem; font-weight: 650; }
+.try-page .result-note {
+  margin: 0.4rem 0 1.5rem;
+  color: var(--paper-dim);
+}
 
-.copy-row { display: flex; gap: 0.6rem; }
+.try-page label {
+  display: block;
+  margin: 1.25rem 0 0.45rem;
+  font-weight: 600;
+}
 
-.copy-row input {
+.try-page .copy-row {
+  display: flex;
+  gap: 0.6rem;
+}
+
+.try-page .copy-row input {
   flex: 1;
   min-width: 0;
   padding: 0.7rem 0.8rem;
-  border: 1px solid #aebdd0;
-  border-radius: 0.5rem;
-  background: #f8fafd;
-  color: #17233b;
-  font: 0.9rem ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  border: 1px solid var(--paper-line);
+  border-radius: var(--radius-sm);
+  background: var(--paper-shade);
+  color: var(--paper-ink);
+  font: 0.9rem var(--font-mono);
 }
 
-.copy-button {
-  padding: 0.6rem 1rem;
-  border: 1px solid #aebdd0;
-  background: #fff;
-  color: #153d7d;
+.try-page .copy-button {
+  border-color: var(--paper-line);
+  background: transparent;
+  color: var(--paper-ink);
 }
 
-.copy-button:hover { background: #eff5ff; }
+.try-page .copy-button:hover {
+  background: var(--paper-shade);
+  color: var(--paper-ink);
+}
 
-.quickstart-link { display: inline-block; margin-top: 1.8rem; font-weight: 700; }
+.try-page .quickstart-link {
+  display: inline-block;
+  margin-top: 1.8rem;
+  color: var(--paper-ink);
+  font-weight: 700;
+  text-decoration: underline;
+}
 
 @media (max-width: 32rem) {
-  .copy-row { flex-wrap: wrap; }
-  .copy-row input { flex-basis: 100%; }
+  .try-page .copy-row {
+    flex-wrap: wrap;
+  }
+
+  .try-page .copy-row input {
+    flex-basis: 100%;
+  }
 }

@@ -369,7 +369,7 @@ def build_transcript(recording: Recording, summary: dict[str, Any]) -> dict[str,
                 replay_receipt, ["receipt_id", "outcome", "credits_charged"]
             )
             + [["ledger debits for this tool", str(len(debits))]],
-            "note": "Same receipt id, no second dispatch, no second debit. A timed-out client can retry without fear.",
+            "note": "After a timeout, a retry with the same key returns the original receipt instead of dispatching again.",
         },
         # Loop order, not run order: the page walks the eight-stage loop, so the
         # offline receipt check (06) comes before the audit chain (07) and the

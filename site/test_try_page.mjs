@@ -91,6 +91,61 @@ function shownValue(element) {
   return element.value || element.textContent;
 }
 
+function pageTokens(markup) {
+  const tags = [];
+  let visibleMainText = "";
+  let inMain = false;
+  let hiddenTag = null;
+  let cursor = 0;
+
+  while (cursor < markup.length) {
+    const opening = markup.indexOf("<", cursor);
+    if (opening === -1) {
+      if (inMain && !hiddenTag) visibleMainText += markup.slice(cursor);
+      break;
+    }
+    if (inMain && !hiddenTag) visibleMainText += markup.slice(cursor, opening);
+
+    if (markup.startsWith("<!--", opening)) {
+      const closing = markup.indexOf("-->", opening + 4);
+      assert.notEqual(closing, -1, "HTML comment is closed");
+      cursor = closing + 3;
+      continue;
+    }
+
+    let closing = opening + 1;
+    let quote = null;
+    for (; closing < markup.length; closing++) {
+      const character = markup[closing];
+      if (quote) {
+        if (character === quote) quote = null;
+      } else if (character === '"' || character === "'") {
+        quote = character;
+      } else if (character === ">") {
+        break;
+      }
+    }
+    assert.ok(closing < markup.length, "HTML tag is closed");
+    const raw = markup.slice(opening + 1, closing).trim();
+    const parsed = /^(\/?)\s*([a-z][\w:-]*)/i.exec(raw);
+    if (parsed) {
+      const tag = { name: parsed[2].toLowerCase(), closing: parsed[1] === "/", raw };
+      tags.push(tag);
+      if (hiddenTag) {
+        if (tag.closing && tag.name === hiddenTag) hiddenTag = null;
+      } else if (tag.name === "main") {
+        inMain = !tag.closing;
+      } else if (inMain && !tag.closing && (tag.name === "script" || tag.name === "style")) {
+        hiddenTag = tag.name;
+      }
+    }
+    cursor = closing + 1;
+  }
+
+  assert.ok(tags.some((tag) => tag.name === "main" && !tag.closing), "page has main content");
+  return { tags, visibleMainText };
+}
+
 test("one empty credential free POST shows key and wallet once and copies both", async () => {
   const key = "demo_<img src=x onerror=alert(1)>";
   const wallet = "wallet_<script>bad()</script>";
@@ -211,22 +266,34 @@ test("failed requests leave the key hidden and allow retry", async () => {
 });
 
 test("page uses external assets and visible copy contains no dashes", () => {
-  assert.match(html, /<script[^>]+src="\/utm-capture\.js(?:\?[^\"]*)?"/);
-  assert.match(html, /<script[^>]+src="\/try\/try\.js(?:\?[^\"]*)?"/);
+  const { tags, visibleMainText } = pageTokens(html);
+  const openingTags = tags.filter((tag) => !tag.closing);
+  assert.ok(openingTags.some((tag) => tag.name === "script" && tag.raw.includes('src="/utm-capture.js?v=')));
+  assert.ok(openingTags.some((tag) => tag.name === "script" && tag.raw.includes('src="/try/try.js?v=')));
   assert.ok(html.indexOf("/utm-capture.js") < html.indexOf("/try/try.js"));
-  assert.match(html, /<link[^>]+href="\/try\/try\.css(?:\?[^\"]*)?"/);
-  assert.doesNotMatch(html, /<style\b|\sstyle=|<script\b(?![^>]*\bsrc=)/i);
-  assert.match(html, /id="get-try-key"[^>]*>Get a free test key<\/button>/);
-  for (const id of ["copy-try-key", "copy-try-wallet"]) {
-    assert.match(html, new RegExp(`id="${id}"`));
+  assert.ok(openingTags.some((tag) => tag.name === "link" && tag.raw.includes('href="/try/try.css?v=')));
+  for (const tag of openingTags) {
+    assert.notEqual(tag.name, "style", "page has no inline stylesheet");
+    assert.doesNotMatch(tag.raw, /\sstyle\s*=/i);
+    if (tag.name === "script") {
+      assert.ok(
+        tag.raw.includes(' src="') || tag.raw.includes(' type="application/ld+json"'),
+        "page has no executable inline script",
+      );
+    }
   }
-  assert.match(html, /href="https:\/\/[^\"]*amw-demo[^\"]*"/);
-  const visible = html.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i)?.[1]
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
-    .replace(/<!--[^]*?-->/g, "")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&(?:ndash|mdash|#45|#x2d);/gi, "-") || "";
-  assert.doesNotMatch(visible, /[-\u2013\u2014]/);
-  assert.doesNotMatch(visible, /no second call or charge/i);
+  assert.ok(openingTags.some((tag) => tag.name === "button" && tag.raw.includes('id="get-try-key"')));
+  assert.ok(visibleMainText.includes("Get a free test key"));
+  for (const id of ["copy-try-key", "copy-try-wallet"]) {
+    assert.ok(openingTags.some((tag) => tag.name === "button" && tag.raw.includes(`id="${id}"`)));
+  }
+  assert.ok(openingTags.some((tag) => tag.name === "a" && tag.raw.includes('href="https://github.com/agentmiddleware/amw-demo')));
+  assert.doesNotMatch(visibleMainText, /[-\u2013\u2014]|&(?:ndash|mdash|hyphen|#0*45|#x0*2d);/i);
+  assert.doesNotMatch(visibleMainText, /no second call or charge/i);
+});
+
+test("visible copy scanner ignores markup, comments, and hidden element contents", () => {
+  const sample = '<main data-note="1 > 0"><!-- hidden - --><script>hidden -</script><style>hidden -</style><p>Visible &mdash;</p></main>';
+  const { visibleMainText } = pageTokens(sample);
+  assert.equal(visibleMainText, "Visible &mdash;");
 });
