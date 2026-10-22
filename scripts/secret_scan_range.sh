@@ -8,12 +8,13 @@
 # pinned fallback base (tests use it; CI must not).
 set -euo pipefail
 
-# Last main commit whose full ancestry is known clean: #811, the commit that
-# introduced the commit-range scan. Everything after it on main was merged
-# through a PR whose range was scanned; everything before it was covered by
-# the full-history verification recorded in .gitleaks.toml. Move this forward
-# only after a full-history scan of the new commit passes.
-VERIFIED_BASE="${SECRET_SCAN_VERIFIED_BASE:-dd16051192acd72625ea9472c2a6802a497c5b4a}"
+# Last main commit whose full ancestry is known clean: the tip of main on
+# 2026-10-22, when a full-history gitleaks scan of a fresh clone (every ref,
+# --log-opts=--all, this config) passed after the 2026-10-20 history rewrite
+# had changed every SHA; see the scope note in .gitleaks.toml. Everything
+# after it on main is merged through a PR whose range was scanned. Move this
+# forward only after a full-history scan of the new commit passes.
+VERIFIED_BASE="${SECRET_SCAN_VERIFIED_BASE:-9289867d50c6cbc184db3efc5ef630378fb5f973}"
 ZERO_SHA="0000000000000000000000000000000000000000"
 
 has_commit() {
