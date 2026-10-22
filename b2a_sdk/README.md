@@ -37,9 +37,9 @@ python -m pip install -e './b2a_sdk[mcp]'
 ### Released artifact
 
 The source in this checkout is `0.5.0`; the currently released artifact is
-[`python-sdk-v0.4.0`](https://github.com/PetrefiedThunder/agent-middleware-api/releases/tag/python-sdk-v0.4.0).
+[`python-sdk-v0.4.0`](https://github.com/agentmiddleware/agent-middleware-api/releases/tag/python-sdk-v0.4.0).
 Download
-[`b2a_sdk-0.4.0-py3-none-any.whl`](https://github.com/PetrefiedThunder/agent-middleware-api/releases/download/python-sdk-v0.4.0/b2a_sdk-0.4.0-py3-none-any.whl)
+[`b2a_sdk-0.4.0-py3-none-any.whl`](https://github.com/agentmiddleware/agent-middleware-api/releases/download/python-sdk-v0.4.0/b2a_sdk-0.4.0-py3-none-any.whl)
 and install that downloaded file:
 
 ```bash

@@ -1,19 +1,25 @@
 # Secret-scanning config for CI.
 #
 # Scope note: CI scans the working tree plus the commits in each push/PR
-# range (.github/workflows/ci.yml secret_scan). Older history was verified
-# separately with a full-history `gitleaks detect --log-opts=--all` under this
-# config, most recently on 2026-09-19. The only real credential ever committed
-# is the 2026-08-06 leaked key (see docs/api-key-rotation.md), and it is
-# reachable from main's own history — the 2026-08-24 note here previously
-# claimed the flattening had removed it from main and that pruning stale
-# branches would remove the reachable copies. Both were wrong: commit 9e45009
-# is an ancestor of origin/main, and `git log origin/main -S` finds the value
-# in three commits. The key was rotated dead at the provider on 2026-08-07,
-# which was always the only real remediation, and the incident record
-# deliberately publishes the retired value anyway. Do not restate the old
-# claim. Every other historical finding is synthetic test material or a
-# content hash, allowlisted below.
+# range (.github/workflows/ci.yml secret_scan). Older history is covered by
+# full-history scans (`gitleaks detect --log-opts=--all` under this config),
+# most recently on 2026-10-22 against a fresh clone taken after the history
+# rewrite of 2026-10-20: 1,410 commits across every branch, nothing outside
+# the allowlist below. The only real credential ever committed is the key
+# from the 2026-08-06 incident (committed 2026-08-04 in
+# scripts/stress_test_live.py, removed from HEAD by #201 on 2026-08-07; see
+# docs/api-key-rotation.md). It was rotated dead at
+# the provider on 2026-08-07, which was always the only real remediation. It
+# then stayed reachable from main's history (the 2026-08-24 note here claimed
+# otherwise and was corrected on 2026-09-19) until the 2026-10-20 rewrite
+# replaced its value with the literal ***REMOVED*** in every commit, so
+# neither the value nor the commit that introduced it (formerly 9e45009) is
+# reachable from any branch or tag any more. GitHub still serves that
+# pre-rewrite commit by its full SHA until it is garbage-collected or purged
+# by GitHub Support, and clones taken before 2026-10-20 still carry both (the
+# repository has no forks as of 2026-10-22). Every other historical finding
+# is synthetic test material, a content hash, or the ***REMOVED*** marker the
+# rewrite left behind, all allowlisted below.
 
 [extend]
 useDefault = true
@@ -47,6 +53,9 @@ paths = [
   # So do the framework wrappers' suites — same reason, different tree. Without
   # this a full-history scan reports the wrappers' fake api_key= kwargs.
   '''^wrappers/[^/]+/tests/''',
+  # The static site's Node test files mock the demo-key endpoint with
+  # synthetic keys, for the same reason as tests/ above.
+  '''^site/test_[^/]+\.(c|m)?js$''',
   # Demo transcripts and copy-paste docs use placeholder keys.
   '''^docs/demo-.*\.md$''',
   # Research manifests map source paths to SHA-256 content hashes. The generic
@@ -95,4 +104,9 @@ regexes = [
   # The public AWS KMS KeySpec enum value for Ed25519 keys (kms_signer.py); it
   # names a key type, it is not key material.
   '''^ECC_NIST_EDWARDS25519$''',
+  # The marker the 2026-10-20 history rewrite left in place of the retired
+  # 2026-08-06 key's value (scripts/stress_test_live.py at its 2026-08-04
+  # commit). It is not a credential; the key it replaced was rotated dead on
+  # 2026-08-07.
+  '''^\*\*\*REMOVED\*\*\*$''',
 ]
