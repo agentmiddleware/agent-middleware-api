@@ -58,33 +58,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ExceptionGroup`, so the adapter's `ValidationError` branch never matched and
   the generic handler classified the call by `dispatch_started` alone. Tests
   that fake the session do not enter the task group, which is why they passed.
-- `_call_tool_once` now records the rejection where the `ValidationError` is
-  raised (the `call_tool` await, which the SDK reaches only after the upstream's
-  JSON-RPC result has arrived), before the session unwinds. The call ends as
+- `_call_tool_once` now records the rejection where the error is raised (the
+  `call_tool` await), before the session unwinds, and only for a
+  `ValidationError` of the `CallToolResult` model, which the SDK raises only
+  after the upstream's JSON-RPC result has arrived. The call ends as
   `response_rejected` with code `upstream_response_invalid` (502 / `-32006`):
   the debit stays, the call is never redispatched, and a replay returns the same
-  receipt. Existing precedence is unchanged: claim contention, then a transport
-  guard rejection, then a known received result, then this rejection, then
-  `delivery_uncertain` only when no response was obtained.
-- The `ValidationError` branch also lacked the "a result is already in hand"
-  guard the other handlers have, so a `ValidationError` or `JSONDecodeError`
-  raised only while the session closes could turn a received result into
-  `response_rejected`, or replace a known rejection's code. It now has the guard.
+  receipt. A validation error for any other model, such as the request the SDK
+  builds before sending (a non-string key in `arguments`: the claim is
+  committed and nothing reaches the upstream), says nothing about a response
+  and is classified as before, as `delivery_uncertain`.
+- Outcome precedence is unchanged where a handler already applied it: claim
+  contention, then a transport guard rejection, then a known received result,
+  then this rejection, then `delivery_uncertain` only when no response was
+  obtained. The outer `ValidationError` / `JSONDecodeError` branch did not apply
+  the "a result is already in hand" rule, so such an error raised only while the
+  session closes could turn a received result into `response_rejected`, or
+  replace a known rejection's code. It now applies it.
+- **Behavior change, `POST /mcp` (where enabled):** `response_rejected` is
+  charged like `delivery_uncertain`, so it is now returned like it: a
+  `tools/call` result with `isError: true`, text saying the upstream answered but
+  the answer was unusable and the effect is unknown, the do-not-resend
+  instruction, the receipt, and `_meta["io.agentmiddleware/outcome"]` with
+  `status: "unknown"` and `reason: "response_rejected"`. It was a bare `-32006`,
+  the code that refunded, retry-safe failures (`upstream_returned_error`,
+  `upstream_pre_dispatch_failed`) also use, so a model shown only the message
+  could resend a call whose charge stands and whose tool probably ran. Those
+  refunded failures stay JSON-RPC errors. `/mcp/messages` and REST are
+  unchanged. The helper is now `_unknown_outcome_tool_result`
+  (was `_delivery_uncertain_tool_result`).
 - **Behavior change:** a malformed envelope is no longer counted toward the
   optional circuit breaker. The `response_rejected` path never fed it (an
   oversized or bearer-echoing result did not either); `delivery_uncertain` does.
+- Documented, not changed: with the optional reconcile worker enabled,
+  `response_rejected` is terminal and is never probed or refunded; only
+  `delivery_uncertain` is leased for a provider status probe.
 - Unchanged: a call with no response (connection dropped, timeout, JSON-RPC
   error answering `tools/call`) is still `delivery_uncertain`; a malformed
-  `initialize` answer is still a pre-dispatch failure. Not covered: an upstream
-  body that is not a JSON-RPC message at all is dropped inside the SDK
-  transport, so that call times out and ends as `delivery_uncertain`.
+  `initialize` answer is still a pre-dispatch failure. **Not covered:** a body
+  that is not a JSON-RPC message at all (non-JSON text, `"jsonrpc": "1.0"`,
+  neither `result` nor `error`, or an unknown request id). The SDK transport
+  logs the parse error and forwards it into the session, whose default message
+  handler discards it, so the request is never answered and the call ends as
+  `delivery_uncertain` after the call timeout. The SDK's log line quotes the
+  start of the body; that is unchanged.
 - New tests drive a real SDK session behind the real adapter, in memory and over
-  the production Streamable HTTP client, with four envelope shapes, a fixture
-  guard (the envelope must reach the client and fail there), the no-response
-  boundary, a secret-echo check, and a governed-router receipt test (one debit,
-  one dispatch, a `response_rejected` receipt, no redispatch on replay). See
+  the production Streamable HTTP client: four envelope shapes, a fixture guard
+  (the envelope must reach the client and fail there), the no-response
+  boundary, a request that cannot be built stays `delivery_uncertain`, a
+  malformed `initialize` stays pre-dispatch, a secret-echo check, and
+  governed-router tests on `/mcp/messages` (one debit, one dispatch, a
+  `response_rejected` receipt, no redispatch on replay, circuit breaker closed,
+  against a JSON-RPC error that opens it) and on `/mcp`. See
   [`docs/mcp-security-posture.md`](docs/mcp-security-posture.md) §3.2 and
   [`docs/failure-semantics.md`](docs/failure-semantics.md).
+
+### Changed — documentation re-pinned to the current code
+
+- **Supported endpoint decided.** `POST /mcp/messages` and the REST invoke route
+  are the live governed path in the supported pilot. `POST /mcp` ships off
+  (`ENABLE_STANDARD_MCP_ENDPOINT` defaults to false) and the production runbook
+  keeps it off, because it mints a permit and generates an idempotency key on the
+  caller's behalf. `README.md` and `SECURITY_LIMITATIONS.md` no longer call it the
+  supported or preferred path today; `docs/mcp-security-posture.md` records the
+  decision instead of describing a contradiction; `docs/gateway-overhead.md` no
+  longer calls `/mcp/messages` "not the supported endpoint".
+- `file:line` citations in `docs/mcp-security-posture.md` and
+  `docs/gateway-overhead.md` were written against a base more than a thousand
+  commits older. Of 17, 15 had moved (by 1 to about 970 lines), one SDK range
+  was a line short, and one (`mcp.py:15`) was still right. Each is re-pinned and
+  the claim beside it re-read. Claims that no longer held, corrected: the `idempotency_key_required`
+  refusal applies to every governed call, including any call in strict trust
+  mode, not only permit-bound ones; a signed `denied` receipt is issued only when
+  the permit names the caller's wallet; the SDK validation range is
+  `mcp/client/session.py:412-448`; `docs/exit-and-export.md` said no
+  OpenTelemetry instrumentation exists, but optional tracing
+  (`OTEL_TRACING_ENABLED`, default off) does; and the poisoning-test docstring
+  named one call site of `register_configured_upstream_mcp` where
+  `scripts/failure_lab.py` is a second.
+- `docs/gateway-overhead.md` is re-measured twice on this base, with the load
+  average recorded: first call p50 29.5–30.9 ms and replay p50 5.4–5.6 ms
+  (earlier runs: 29.5–31.9 ms and 4.4–4.7 ms), results in
+  `docs/research/gateway-overhead-2026-10-23/`. The public site's figure is not
+  touched.
+- `TROUBLESHOOTING.md` gains a `response_rejected` receipt section.
 
 ### Added — per-upstream concurrency limit and circuit breaker (default off)
 

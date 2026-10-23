@@ -86,15 +86,31 @@ a hostile `$ref` cannot turn a completed call into an ambiguous one; only the
 adapter's own shape, size, and secret checks can reject a received result
 ([`mcp-security-posture.md`](mcp-security-posture.md) §3.2). Conversely,
 `delivery_uncertain` is for calls where no result was obtained: the connection
-dropped, the request timed out, or the process died after the claim. A response
-the gateway received but the SDK cannot parse (for example `content` that is not
-a list) is `response_rejected`, not `delivery_uncertain`: the upstream answered,
-so the outcome is known and unusable
-([`mcp-security-posture.md`](mcp-security-posture.md) §3.2). The drifted-schema
-case is proven end to end by
+dropped, the request timed out, or the process died after the claim. A JSON-RPC
+result the gateway received but whose envelope the SDK cannot parse (for example
+`content` that is not a list) is `response_rejected`, not `delivery_uncertain`:
+the upstream answered, so the outcome is known and unusable
+([`mcp-security-posture.md`](mcp-security-posture.md) §3.2). The caveat: a body
+that is not a JSON-RPC message at all (non-JSON text, `"jsonrpc": "1.0"`,
+neither `result` nor `error`, or an unknown request id) is dropped by the SDK
+transport and never reaches the adapter as a response, so it still ends as
+`delivery_uncertain` after the call timeout (§3.2, "Not covered"). The
+drifted-schema case is proven end to end by
 `test_completed_call_with_drifted_live_schema_is_a_charged_success_end_to_end`,
 and the unparseable-envelope case, next to its `delivery_uncertain` boundary, by
 `test_real_sdk_upstream_failures_get_the_right_charged_receipt_and_never_redispatch`.
+
+Two further differences between the two charged outcomes. With the optional
+reconcile worker enabled (`UPSTREAM_RECONCILE_WORKER_ENABLED`), only
+`delivery_uncertain` is leased for a provider status probe and can be refunded
+on an attested `not_executed` answer; `response_rejected` is terminal and is
+never probed or refunded. And on `POST /mcp`, where enabled, both arrive as a
+`tools/call` result with `isError: true`, the do-not-resend text, the receipt and
+`_meta["io.agentmiddleware/outcome"].status` `"unknown"`, not as a JSON-RPC error:
+`-32006` is also the code of refunded, retry-safe failures
+(`upstream_returned_error`, `upstream_pre_dispatch_failed`), which stay errors.
+`/mcp/messages` and REST keep `-32005` and `-32006`
+(`test_tools_call_unparseable_upstream_envelope_is_a_tool_result_the_model_can_read`).
 
 Requests rejected before a valid permit and an executable tool are established
 produce no receipt — there is no authority to bill against. The README states

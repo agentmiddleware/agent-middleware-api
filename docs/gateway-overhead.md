@@ -9,25 +9,30 @@ reproduced or disputed. **It is the floor of the gateway's own handler work,
 not the cost of the hop in production.** §3 lists what is excluded; read it
 before quoting the number.
 
-Measured 2026-10-22 on an Apple M4 Pro (14 cores), **under load** (see §4).
+Measured 2026-10-23 on an Apple M4 Pro (14 cores), **under load** (see §4).
 Raw results and provenance are committed next to this page in
-[`docs/research/gateway-overhead-2026-10-22/`](research/gateway-overhead-2026-10-22/).
+[`docs/research/gateway-overhead-2026-10-23/`](research/gateway-overhead-2026-10-23/).
+An earlier pair of runs from 2026-10-22, on a much older base, is kept in
+[`docs/research/gateway-overhead-2026-10-22/`](research/gateway-overhead-2026-10-22/)
+and compared in §4.
 
 ## 1. The numbers
 
-Per governed `tools/call` on `POST /mcp/messages` (the legacy endpoint, with a
-pre-minted permit), strict trust mode, zero-latency in-process upstream:
+Per governed `tools/call` on `POST /mcp/messages` (the live governed path in the
+supported pilot, marked deprecated in the OpenAPI contract; with a pre-minted
+permit), strict trust mode, zero-latency in-process upstream:
 
 | Path | p50 | p95 | n |
 |---|---|---|---|
-| **First call** (full pipeline: one debit, one receipt, one audit event) | **30–32 ms** | 36–49 ms | 2 × 1,000 |
-| **Replay** (same key, stored receipt returned, nothing re-executed) | **4.4–4.7 ms** | 5.0–5.5 ms | 2 × 1,000 |
+| **First call** (full pipeline: one debit, one receipt, one audit event) | **29.5–30.9 ms** | 38–77 ms | 2 × 1,000 |
+| **Replay** (same key, stored receipt returned, nothing re-executed) | **5.4–5.6 ms** | 6.6–10.0 ms | 2 × 1,000 |
 
 Two runs back to back, 20 warm-up calls discarded. Ranges are the spread
 between the two runs. The p99 and max values are in the raw files but are not
-quoted here: p99 varied from 71 to 76 ms and max from 76 to 237 ms between
-runs, which is scheduler noise on a loaded machine, not a property of the
-gateway.
+quoted here: p99 varied from 77 to 167 ms and max from 97 to 263 ms between
+runs, and the first-call p95 from 38 to 77 ms, which is scheduler noise on a
+loaded machine (the second run started at a load average of 34), not a property
+of the gateway.
 
 What the first call pays for, in pipeline order
 ([`POLICY_ENFORCEMENT.md`](POLICY_ENFORCEMENT.md) §2): API-key hash lookup and
@@ -36,11 +41,11 @@ creation; permit validation including the Ed25519 signature check; wallet
 policy evaluation; the atomic budget reservation and prepared dispatch
 attempt (one transaction); the debit; the executor call, inside which the
 one-shot dispatch claim commits immediately before the send (the router hands
-the claim to the executor as a callback, `mcp.py:2706-2710`); result
+the claim to the executor as a callback: `claim_dispatch` at `mcp.py:3674`, passed as `before_dispatch` at `:3735`); result
 canonicalization; receipt signing (Ed25519) and the hash-chained, signed audit
 event; idempotency record completion. All of these commits go to the ORM
 database, a SQLite file here, in WAL mode with `synchronous=NORMAL`
-(`app/db/database.py:141-146`): a commit is a WAL append, and `fsync` happens
+(`app/db/database.py:175-180`): a commit is a WAL append, and `fsync` happens
 at checkpoints, not on every commit.
 
 The replay number is the cost of refusing to do any of that again: key
@@ -98,9 +103,10 @@ stderr.
   the upstream's own time, none of them measured here. The live `/health/dependencies` payload reports aggregate
   `call_metrics` (count, total and max latency) for the real path, without
   percentiles.
-- **Not the supported endpoint.** The script measures `POST /mcp/messages`,
-  which is marked deprecated in the OpenAPI contract. `POST /mcp`, when
-  enabled, mints a permit per call (policy lookup, idempotency begin and
+- **Not the standard endpoint.** The script measures `POST /mcp/messages`, the
+  live governed path in the supported pilot. `POST /mcp` ships off and the
+  production runbook keeps it off ([`mcp-security-posture.md`](mcp-security-posture.md)).
+  When enabled it mints a permit per call (policy lookup, idempotency begin and
   complete for the mint, a signed permit) and is expected to cost more. That
   was not measured.
 - **Not concurrent.** Calls are sequential. Under concurrency calls on one
@@ -117,11 +123,18 @@ stderr.
 
 | | |
 |---|---|
-| Machine | Apple M4 Pro, 14 cores, macOS 26.7 (Darwin 25.6.0), Python 3.12.13 |
-| Load | **Not idle.** Load average (1/5/15 min) was 23.5/23.9/30.2 at the start of run 1 and 17.6/22.3/29.3 at run 2, on a machine running many concurrent sessions. Both runs are therefore pessimistic, and their agreement within a couple of milliseconds should not be read as proof of stability. |
-| Code | commit `b8f8806c` plus uncommitted changes (`git_dirty` is true in both result files); the measuring script is the version committed with this page |
-| Packages | sqlalchemy 2.0.52, aiosqlite 0.22.1, cryptography 50.0.1, httpx 0.28.1, mcp 1.30.0 |
+| Machine | Apple M4 Pro, 14 cores, macOS 26.7.2 (Darwin 25.6.0), Python 3.13.14 |
+| Load | **Not idle.** Load average (1/5/15 min) was 22.8/16.0/21.9 at the start of run 1 and 33.8/19.8/23.0 at run 2, on a machine running many concurrent sessions. Both runs are therefore pessimistic, and run 2 (the heavier) shows it in its tail: first-call p95 77 ms against 38 ms. Their agreement on the p50 should not be read as proof of stability. |
+| Code | commit `0698168f`, with `git_dirty` false in both result files (the script counts tracked files only). The documentation commit that follows changes no code. The measuring script is the version committed with this page |
+| Packages | sqlalchemy 2.0.54, aiosqlite 0.22.1, cryptography 50.0.2, httpx 0.28.1, mcp 1.30.0 |
 | Posture | strict trust mode; `ENVIRONMENT=local`; `RATE_LIMIT_PER_MINUTE=1000000` with the in-memory limiter; no policy bundles; no per-tool call cap; no approval gate; one key-bound permit; `STATE_BACKEND=memory` |
+
+**Against the earlier runs.** The 2026-10-22 pair (commit `b8f8806c` plus
+uncommitted changes, Python 3.12.13, load averages of 18–24 at the 1-minute
+mark) gave a first-call p50 of 29.5–31.9 ms and a replay p50 of 4.4–4.7 ms. The
+first-call p50 did not move; the replay p50 is about 1 ms higher on this base.
+That difference is not attributed: the base is more than a thousand commits
+later, the interpreter differs, and the load differs.
 
 `STATE_BACKEND=memory` affects only the separate key/value state store, which
 the governed call path does not touch. The idempotency records, permit
@@ -139,7 +152,7 @@ These do not agree with this page, and they have not been reconciled:
 |---|---|---|
 | `site/proof/transcript.json`, `docs/demo-trust-plane-output.md` | p50 67.3 ms, p95 83.7 ms | `POST /mcp/messages`, 100 samples, local tool `trust-plane-echo`, in-process, local SQLite, recorded 2026-09-08; machine and load not recorded |
 | `docs/failure-lab.md` | about 90 ms added per call at the median | through the real upstream adapter against an in-process MCP server, so it includes connection setup and the SDK's calls |
-| This page | p50 30–32 ms first call, 4.4–4.7 ms replay | stub executor, 1,000 samples, loaded M4 Pro |
+| This page | p50 29.5–30.9 ms first call, 5.4–5.6 ms replay | stub executor, 1,000 samples, loaded M4 Pro |
 
 The first row is the same endpoint measured with a different tool, a smaller
 sample, an earlier commit, and an unrecorded machine, so the gap cannot be
@@ -149,7 +162,9 @@ provenance fields would make them comparable.
 
 ## 6. Raw results
 
-[`run1.json`](research/gateway-overhead-2026-10-22/run1.json) and
-[`run2.json`](research/gateway-overhead-2026-10-22/run2.json). Both runs:
+[`run1.json`](research/gateway-overhead-2026-10-23/run1.json) and
+[`run2.json`](research/gateway-overhead-2026-10-23/run2.json). Both runs:
 `"dispatches": 1020` (20 warm-up plus 1,000 measured); replays dispatched
-nothing.
+nothing. The earlier pair is
+[`run1.json`](research/gateway-overhead-2026-10-22/run1.json) and
+[`run2.json`](research/gateway-overhead-2026-10-22/run2.json).

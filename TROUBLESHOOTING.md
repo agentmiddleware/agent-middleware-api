@@ -104,6 +104,11 @@ The gateway claimed a send but has no trustworthy terminal result. Delivery and 
 
 On the standard `/mcp` endpoint this outcome arrives as a `tools/call` result with `isError: true` and `_meta["io.agentmiddleware/outcome"].status` set to `"unknown"`, with the do-not-resend instruction in its text, not as a JSON-RPC `-32005` error. `/mcp/messages` and the REST surface keep `-32005`.
 
+### `response_rejected` receipt
+The upstream answered, but the answer was unusable: its envelope could not be parsed, its shape was invalid, it was over the byte cap, or it reflected the upstream bearer token. The call was dispatched and the charge stands, so the action may have taken effect; the gateway does not redispatch, and replaying the same key returns the same receipt (`502` / `-32006`). Do not retry automatically; check the downstream system first. Unlike `delivery_uncertain`, it is never probed or refunded by the optional reconcile worker. `-32006` is also the code of refunded, retry-safe failures (`upstream_returned_error`, `upstream_pre_dispatch_failed`), so tell them apart by `error.message` and the receipt `outcome`, not by the code.
+
+On the standard `/mcp` endpoint this outcome also arrives as a `tools/call` result with `isError: true`, `_meta["io.agentmiddleware/outcome"].status` set to `"unknown"` (reason `response_rejected`) and the do-not-resend instruction in its text. The refunded failures stay JSON-RPC errors there.
+
 ---
 
 ## Examples fail
