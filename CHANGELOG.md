@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — planned v1.3.0
 
+### Fixed — a well-formed MCP result is never `delivery_uncertain`
+
+- The MCP SDK's `ClientSession.call_tool` validates a result against the
+  upstream's **live** `outputSchema` after the request is answered, and sends a
+  second `tools/list` to fetch it. Because that runs past the dispatch
+  boundary, a schema that had drifted from the result, a failing post-call
+  `tools/list`, or a schema demanding structured content the result lacked
+  raised an exception that discarded the received result. The adapter then
+  signed `delivery_uncertain` for a call that had completed: the debit stayed,
+  the call was never redispatched, the receipt misstated the outcome, and a
+  hostile or drifting upstream could force it (and, with the circuit breaker
+  enabled, count it toward opening the breaker).
+- The adapter now seeds the SDK's per-session schema cache before the dispatch
+  checkpoint (`_bypass_sdk_result_validation`), so the SDK sends no
+  post-dispatch `tools/list` and runs no schema validation. A received result
+  is judged only by the adapter's own shape, size, and secret checks. This also
+  removes a post-dispatch network round trip from every call, and the
+  `$ref`-resolution surface (GHSA-rwrf) from the call path on any SDK version.
+- **Behavior change:** a well-formed result whose `structuredContent` does not
+  match the upstream's advertised output schema is now relayed and charged as a
+  `success` instead of ending in a `504 / -32005` receipt. The gateway still
+  does not validate results against any output schema; drift detection against
+  the startup-pinned schema is not built.
+- Unchanged: a call that yields no result (connection lost, timeout, JSON-RPC
+  error answering `tools/call`) is still `delivery_uncertain`; a tool-level
+  `isError` result is still a refunded `returned_error`; oversized or
+  bearer-echoing results are still `response_rejected`. No new outcome, no
+  schema or API change. **Not fixed here (follow-up):** a response whose
+  envelope the SDK cannot parse still ends as `delivery_uncertain` through a
+  real SDK session, not `response_rejected` (see
+  [`docs/mcp-security-posture.md`](docs/mcp-security-posture.md) §3.2).
+- The bypass uses a private SDK attribute. If an `mcp` release drops it, the
+  call fails closed before the dispatch claim (generic pre-dispatch failure,
+  logged as `upstream_mcp_sdk_result_validation_not_disabled`) instead of
+  silently reverting to the misclassification.
+- The strict expected-failure test
+  `test_live_output_schema_drift_must_not_turn_a_completed_call_uncertain` is
+  now a plain passing test, with negative-path coverage (drifted schema,
+  failing post-call `tools/list`, no structured content, hostile external
+  `$ref`, unchanged normal success, the production `_session` over HTTP) and a
+  receipt-level test through the governed router. See
+  [`docs/mcp-security-posture.md`](docs/mcp-security-posture.md) §3.2 and
+  [`docs/failure-semantics.md`](docs/failure-semantics.md).
+
 ### Added — per-upstream concurrency limit and circuit breaker (default off)
 
 - `UPSTREAM_MAX_CONCURRENCY_PER_UPSTREAM` (default `0`, unlimited) caps

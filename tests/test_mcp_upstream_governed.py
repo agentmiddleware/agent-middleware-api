@@ -4,17 +4,22 @@ import asyncio
 import hashlib
 import json
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import timedelta
 from decimal import Decimal
 from typing import Any, Literal
 
+import mcp.types as mcp_types
 import pytest
 from httpx import ASGITransport, AsyncClient
+from mcp.server.lowlevel import Server
+from mcp.shared.memory import create_connected_server_and_client_session
 from sqlalchemy import func, select
 
 from app.routers import mcp as mcp_router
+from app.core.config import Settings
 from app.core.time import utc_now
 from app.db.database import get_session_factory
 from app.db.models import (
@@ -50,11 +55,15 @@ from app.services.receipts import ReceiptService, get_receipt_service
 from app.services.service_registry import get_service_registry
 from app.services.signing_keys import sha256_hex
 from app.services.upstream_mcp import (
+    DiscoveredUpstreamTool,
+    UpstreamMcpAdapter,
+    UpstreamMcpConfiguration,
     UpstreamMcpDeliveryUncertainError,
     UpstreamMcpPreDispatchError,
     UpstreamMcpResponseRejectedError,
     UpstreamMcpResult,
     UpstreamMcpReturnedError,
+    get_upstream_mcp_metrics_snapshot,
 )
 from tests.test_trust_helpers import (
     BOOTSTRAP_HEADERS,
@@ -597,6 +606,143 @@ async def test_governed_upstream_success_replays_without_second_debit_or_dispatc
         assert result["receipt"]["receipt_id"] == persisted.receipt.receipt_id
         assert result["receipt"]["dispatch_attempt_id"] == (
             persisted.attempt.attempt_id
+        )
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.anyio
+async def test_completed_call_with_drifted_live_schema_is_a_charged_success_end_to_end(
+    client: AsyncClient,
+    clean_database: None,
+) -> None:
+    """Receipt-level proof for ``docs/mcp-security-posture.md`` section 3.2.
+
+    The real adapter runs over a real in-memory SDK upstream whose *live*
+    ``outputSchema`` no longer matches the result it returns. The SDK used to
+    list tools after dispatch and fail validating that result, so the router
+    signed ``delivery_uncertain`` (504 / ``-32005``) for a call that had
+    completed. The call must now finalize as a plain charged success, with one
+    debit, one dispatch, and a replay that sends nothing.
+    """
+    provisioned = await provision_agent_wallet(client)
+    tool_name = "partner-upstream-live-schema-drift"
+    idempotency_key = "partner-upstream-live-schema-drift-1"
+    upstream_state = {"calls": 0, "list_calls": 0}
+
+    server = Server("drifting-upstream")
+
+    async def list_tools(_req: mcp_types.ListToolsRequest) -> mcp_types.ServerResult:
+        upstream_state["list_calls"] += 1
+        return mcp_types.ServerResult(
+            mcp_types.ListToolsResult(
+                tools=[
+                    mcp_types.Tool(
+                        name="partner.echo",
+                        inputSchema={"type": "object"},
+                        outputSchema={
+                            "type": "object",
+                            "properties": {"x": {"type": "string"}},
+                            "required": ["x"],
+                        },
+                    )
+                ]
+            )
+        )
+
+    async def call_tool(_req: mcp_types.CallToolRequest) -> mcp_types.ServerResult:
+        upstream_state["calls"] += 1
+        return mcp_types.ServerResult(
+            mcp_types.CallToolResult(
+                content=[mcp_types.TextContent(type="text", text="ok")],
+                structuredContent={"x": 1},
+                isError=False,
+            )
+        )
+
+    server.request_handlers[mcp_types.ListToolsRequest] = list_tools
+    server.request_handlers[mcp_types.CallToolRequest] = call_tool
+
+    adapter = UpstreamMcpAdapter(
+        UpstreamMcpConfiguration.from_settings(
+            Settings(
+                _env_file=None,
+                ENVIRONMENT="local",
+                MCP_UPSTREAM_ENABLED=True,
+                MCP_UPSTREAM_URL="http://localhost:9000/mcp",
+                MCP_UPSTREAM_TOOL_NAME="partner.echo",
+                MCP_UPSTREAM_PUBLIC_TOOL_ID=tool_name,
+                MCP_UPSTREAM_BEARER_TOKEN="secret-partner-token",
+                MCP_UPSTREAM_CREDITS_PER_CALL="2",
+            )
+        )
+    )
+    adapter._discovered_tool = DiscoveredUpstreamTool(
+        name="partner.echo",
+        description="Controlled remote MCP test tool",
+        input_schema={"type": "object"},
+        output_schema=None,
+    )
+
+    @asynccontextmanager
+    async def session_context(**_kwargs: Any) -> AsyncIterator[Any]:
+        async with create_connected_server_and_client_session(server) as session:
+            yield session
+
+    adapter._session = session_context  # type: ignore[method-assign]
+    _register_upstream(tool_name, adapter)  # type: ignore[arg-type]
+    outcomes_before = get_upstream_mcp_metrics_snapshot()["outcomes"]
+    try:
+        permit = await create_tool_permit(
+            client,
+            wallet_id=provisioned["agent_wallet_id"],
+            key_id=provisioned["key_id"],
+            tool_name=tool_name,
+            idem_key="partner-upstream-live-schema-drift-permit",
+        )
+        body = _call_body(
+            tool_name=tool_name,
+            wallet_id=provisioned["agent_wallet_id"],
+            permit_id=permit["permit_id"],
+            idempotency_key=idempotency_key,
+        )
+
+        first = await client.post(
+            "/mcp/messages", json=body, headers=provisioned["agent_headers"]
+        )
+        replay = await client.post(
+            "/mcp/messages", json=body, headers=provisioned["agent_headers"]
+        )
+
+        assert first.status_code == 200
+        assert "error" not in first.json()
+        result = first.json()["result"]
+        assert result["isError"] is False
+        assert result["content"] == [{"type": "text", "text": "ok"}]
+        assert result["structuredContent"] == {"x": 1}
+        assert replay.status_code == 200
+        assert replay.json()["result"] == result
+        # One dispatch for two requests, and no post-dispatch schema fetch.
+        assert upstream_state == {"calls": 1, "list_calls": 0}
+
+        persisted = await _load_persisted_invocation(
+            wallet_id=provisioned["agent_wallet_id"],
+            permit_id=permit["permit_id"],
+            idempotency_key=idempotency_key,
+        )
+        _assert_linked_terminal_state(
+            persisted,
+            state="succeeded",
+            outcome="success",
+            charged=Decimal("2"),
+            refunded=False,
+        )
+        assert result["receipt"]["receipt_id"] == persisted.receipt.receipt_id
+        outcomes_after = get_upstream_mcp_metrics_snapshot()["outcomes"]
+        assert outcomes_after["succeeded"] == outcomes_before["succeeded"] + 1
+        assert (
+            outcomes_after["delivery_uncertain"]
+            == (outcomes_before["delivery_uncertain"])
         )
     finally:
         get_service_registry().unregister_local(tool_name)

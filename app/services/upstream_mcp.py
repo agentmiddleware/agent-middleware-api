@@ -967,6 +967,48 @@ class UpstreamMcpAdapter:
             ),
         )
 
+    def _bypass_sdk_result_validation(self, session: McpSession) -> None:
+        """Stop the SDK judging a received result against a live schema.
+
+        Once the request is answered, ``ClientSession.call_tool`` validates the
+        result's ``structuredContent`` against the upstream's current
+        ``outputSchema``. Each call opens a fresh session, so the SDK's schema
+        cache is empty and it first sends a second ``tools/list``. That work
+        runs past the dispatch boundary, and a failure in it (schema drift, an
+        unresolvable ``$ref``, a failing or stalled ``tools/list``) raises an
+        exception that discards the received result. The handler in
+        ``_call_tool_once`` would then classify a completed call as
+        delivery-uncertain: the debit stays, the call is never redispatched, and
+        the receipt misstates what happened.
+
+        The schema comes from the same upstream that produced the result, so the
+        check cannot defend against a hostile one; it only lets that upstream
+        force a wrong outcome. Seeding the cache with ``None`` makes the SDK
+        treat the tool as having no output schema, so a received result reaches
+        ``_canonicalize_result``, which is the only judge of its shape and size.
+
+        This runs before the dispatch checkpoint on purpose: if the SDK ever
+        drops the cache, the call fails closed without a dispatch claim instead
+        of silently reverting to the misclassification. The reason is logged;
+        the error itself carries only the generic pre-dispatch code, because the
+        SDK's task group rewraps whatever is raised inside its session. Sessions
+        that are not SDK sessions (test doubles) never validate, so there is
+        nothing to do for them.
+        """
+        if not isinstance(session, ClientSession):
+            return
+        cache = getattr(session, "_tool_output_schemas", None)
+        if not isinstance(cache, dict):
+            logger.error(
+                "upstream_mcp_sdk_result_validation_not_disabled",
+                extra={
+                    "public_tool_id": self.configuration.public_tool_id,
+                    "upstream_origin": self.configuration.origin,
+                },
+            )
+            raise UpstreamMcpPreDispatchError()
+        cache[self.configuration.tool_name] = None
+
     async def _call_tool_once(
         self,
         arguments: dict[str, Any],
@@ -980,7 +1022,10 @@ class UpstreamMcpAdapter:
         ``before_dispatch`` runs after HTTP connection + MCP initialization and
         immediately before ``ClientSession.call_tool``. No automatic retry is
         performed. A transport failure after that callback is conservatively
-        classified as delivery-uncertain.
+        classified as delivery-uncertain. A well-formed result that was received is
+        not: SDK-side output-schema validation is disabled for the call (see
+        ``_bypass_sdk_result_validation``), so only this adapter's own shape,
+        size, and secret checks can reject it.
         """
         if self._discovered_tool is None:
             raise UpstreamMcpPreDispatchError("upstream_tool_not_initialized")
@@ -1000,6 +1045,7 @@ class UpstreamMcpAdapter:
                     session,
                     response_guard=response_guard,
                 )
+                self._bypass_sdk_result_validation(session)
                 try:
                     await before_dispatch()
                 except UpstreamMcpDispatchClaimUnavailableError as exc:

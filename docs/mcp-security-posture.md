@@ -59,7 +59,7 @@ defending against them, and it leaves gaps that §3 states plainly.
 | **Tool poisoning, tool description** | Structurally absent | The upstream's top-level `description` is discarded at discovery and replaced with a gateway constant (`_GATEWAY_TOOL_DESCRIPTION`); `title` and `annotations` are never copied. | `test_catalog_carries_gateway_description_and_the_tool_is_present` (verified) |
 | **Tool poisoning, input schema** | **Residual channel** | `inputSchema` is published verbatim, so any string inside it (property descriptions, titles, defaults, enum values, property names) is upstream-authored text that reaches the agent. It is bounded by `MCP_UPSTREAM_MAX_RESPONSE_BYTES` (default 1 MiB, summed over the whole `tools/list`), which limits memory, not influence, and rejected if it echoes the bearer token. Not rewritten. `outputSchema` is kept in the registry record only; the catalog advertises a `hasOutputSchema` flag. | `test_hostile_text_inside_input_schema_reaches_the_catalog_verbatim` (verified) |
 | **Tool shadowing / name collision** | Refused at startup | The configured tool name must appear exactly once in `tools/list`; two entries, or zero, abort registration. The startup call is unguarded in the lifespan, so the deployment does not boot. | `test_duplicated_tool_name_aborts_registration_before_any_dispatch`; `test_discovery_fails_closed_when_exact_tool_is_absent` (verified) |
-| **Rug pull** (definition changes after startup) | Pinned for the agent, not detected | Discovery runs once at startup (`register_configured_upstream_mcp`, called from the `app/main.py` lifespan; that call-site fact is by code reading, not asserted). The agent-facing definition is the startup registry record and is never refreshed. The gateway does not notice a change. **But the call session is exposed to the live upstream:** the SDK lists tools after each call to validate the result, and a live `outputSchema` that no longer matches the result turns a completed call into a signed `delivery_uncertain` (§3.2). | `test_definition_rewritten_after_startup_does_not_reach_the_agent` (verified, agent-facing only); `test_live_output_schema_drift_must_not_turn_a_completed_call_uncertain` (strict expected failure, §3.2) |
+| **Rug pull** (definition changes after startup) | Pinned for the agent, not detected | Discovery runs once at startup (`register_configured_upstream_mcp`, called from the `app/main.py` lifespan; that call-site fact is by code reading, not asserted). The agent-facing definition is the startup registry record and is never refreshed. The gateway does not notice a change, and it checks a result against no output schema, pinned or live. **The call session no longer consults the live upstream.** The SDK used to list tools after each call and validate the result against the live `outputSchema`, so a drifting or hostile schema could turn a completed call into a signed `delivery_uncertain`; the adapter now switches that validation off, so the live schema cannot change a call's outcome (§3.2). | `test_definition_rewritten_after_startup_does_not_reach_the_agent` (verified, agent-facing only); `test_live_output_schema_drift_must_not_turn_a_completed_call_uncertain`, `test_completed_call_with_drifted_live_schema_is_a_charged_success_end_to_end` (verified, §3.2) |
 | **Confused deputy** | Enforced at the agent boundary; textbook gap at the upstream boundary (§3.1) | Application-layer wallet checks run before the idempotency store is touched; a key cannot use another wallet's permit; a key-bound permit refuses another key. No row-level security. | `scripts/invariant_attacks/attack6_key_misuse.py` (HELD, run against the quickstart's local tool); `tests/test_trust_negative_security.py` (verified by name) |
 | **Token passthrough** | Structurally absent | The upstream credential is operator configuration (`MCP_UPSTREAM_BEARER_TOKEN`), loaded at startup and never read from a request. The agent's `X-API-Key` is never forwarded. A discovery page or tool result that contains the bearer string **verbatim** is rejected; encoded or partial reflections are not detected, and a rejected result is a charged call (`response_rejected` keeps the debit). | `_contains_exact_secret`, `upstream_mcp.py`; `test_discovery_rejects_bearer_token_echo_without_exposing_it`; `test_call_rejects_bearer_token_echo_without_returning_or_logging_it` (verified by name) |
 | **Session hijack / event injection** | Structurally absent | `POST /mcp` is stateless: `mcp_session_id=None` (`mcp_standard.py:752`), `stateless=True` (`:768`), authenticated per request by `Depends(get_auth_context)` (`:788`); GET and DELETE return 405. `/mcp/messages` has no SSE transport (module docstring, `mcp.py:15`). The upstream client opens a fresh session per call. | `mcp_standard.py` (verified); `tests/test_standard_mcp_endpoint.py` (documented) |
@@ -185,7 +185,7 @@ version floor before this change, `mcp>=1.29.0`.
 | GHSA-jpw9-pfvf-9f58 (CVE-2026-52869) | Session requests routed by session id without checking the principal | `<=1.27.1` | 1.27.2 | Not reachable (no sessions), and excluded by the floor. |
 | GHSA-w4fh-qvv9-3v23 | Server bearer-token auth had no audience check | `>=1.10.0,<1.30.0` | 1.30.0, plus opt-in `validate_token_resource=True` | Not used. `/mcp` and `/mcp/messages` authenticate through the gateway's own `get_auth_context` (`X-API-Key`; on deployments that enable it, a gateway-issued JWT or an enterprise bearer alongside a key); `/mcp/public` is unauthenticated and read-only by design. None imports `mcp.server.auth`. The upstream bearer is static operator configuration. |
 | GHSA-qx49-fqc8-xw99 | OAuth client could send credentials to a server-chosen token endpoint | `>=1.9.1,<1.30.0` | 1.30.0, plus `issuer=` on the provider | Not used: the upstream bearer is static operator configuration; there is no OAuth client. |
-| GHSA-rwrf-2pqf-9j8j | Client fetched server-chosen `$ref` URLs while validating tool results | `>=1.10.0,<1.30.0` | 1.30.0 | **No structural mitigation; the pin is the protection.** The adapter never calls `tools/list` in its call session, but the SDK's `ClientSession.call_tool` does, after the call is dispatched (`mcp/client/session.py:412-447`, 1.30.0): it fetches the live output schema and validates `structuredContent` against it. A probe against the real adapter confirmed the event order `before_dispatch, call_tool, list_tools`. A hostile upstream's live `$ref` was reachable on any image below 1.30.0. Result size is bounded by the response guard. |
+| GHSA-rwrf-2pqf-9j8j | Client fetched server-chosen `$ref` URLs while validating tool results | `>=1.10.0,<1.30.0` | 1.30.0 | **Closed on the call path by the adapter, in addition to the pin.** The SDK's `ClientSession.call_tool` used to fetch the live output schema after the call was dispatched and validate `structuredContent` against it (`mcp/client/session.py:412-447`, 1.30.0); that is where a hostile upstream's live `$ref` was reachable on any image below 1.30.0. The adapter now seeds the SDK's per-session schema cache before the dispatch checkpoint (`_bypass_sdk_result_validation`), so no `tools/list` follows the call and no result schema is compiled or resolved. `test_hostile_external_ref_in_live_output_schema_is_never_resolved` makes outbound connections fail and asserts none are attempted; `test_production_session_sends_no_tools_list_after_dispatch` observes the production session's HTTP traffic. The floor stays: the other advisories above still depend on it. The bypass uses a private SDK attribute; if a release drops it, calls fail closed before dispatch (§3.2). Result size is bounded by the response guard. |
 | GHSA-vj7q-gjh5-988w (CVE-2026-59950) | Deprecated WebSocket server transport lacked Host/Origin validation | `<1.28.1` | 1.28.1 | Not used, and excluded by the floor. |
 | GHSA-hvrp-rf83-w775 (CVE-2026-52870) | Experimental task handlers allowed cross-client task access | `>=1.23.0,<=1.27.1` | 1.27.2 | Not used, and excluded by the floor. |
 | GHSA-9h52-p55h-vw2f (CVE-2025-66416) | DNS-rebinding protection off by default for localhost FastMCP servers | `<1.23.0` | 1.23.0 | Fixed in 1.23.0; excluded by the floor. |
@@ -211,8 +211,9 @@ print(m.version('mcp'))"`), not from a developer machine. An image built
 before 1.30.0 shipped carried the five advisories above: one structurally
 mitigated (redirects), three not reachable (sessions, server-side bearer
 audience, OAuth client), and one reachable by a hostile or compromised
-upstream (`$ref` fetch during result validation), where the version is the
-only protection. An exact pin would make the image reproducible; that is a
+upstream (`$ref` fetch during result validation), where the version was the
+only protection until the call-session fix in §3.2, which closes that one in the
+adapter as well. An exact pin would make the image reproducible; that is a
 dependency-policy decision, not made here.
 
 The `<2` ceiling is for API stability (2.x renamed and moved the low-level
@@ -236,28 +237,92 @@ upstream can consume such a token. Until then the honest description is:
 **the gateway is the upstream's single tenant; the gateway's own permits and
 receipts are where per-caller authority and evidence live.**
 
-### 3.2 Definition pinning without drift detection, and a billing defect it exposes
+### 3.2 Definition pinning without drift detection; the billing defect it exposed is fixed
 
 The startup tool definition is pinned for the agent, not hashed. A changed
 upstream definition is not noticed until the next startup, and at that startup
 it is accepted if it still passes discovery validation. A hash pin with
-refusal or quarantine on mismatch would close that.
+refusal or quarantine on mismatch would close that. It is not built (see
+"Still open" below).
 
-The more consequential finding sits in the call session. The real SDK lists
+**The defect (found 2026-10-22, fixed in this change).** The real SDK lists
 tools **after** the call is dispatched and validates the result against the
 upstream's *live* `outputSchema`. A probe against the real adapter and an
-in-memory SDK server (2026-10-22) showed: with no output schema, or a matching
-one, the call succeeds; with a live output schema that the result does not
-satisfy, the adapter signs `delivery_uncertain` for a call that **completed**.
-A failing `tools/list` after the call has the same effect. The consequences:
-the debit is retained and the call is never redispatched (the designed handling
-of true ambiguity, applied to a known success); a drifting or hostile upstream
-can force it deliberately; and the receipt misstates the outcome. This is a
-correctness defect in the one-tool loop, not a documentation gap. It is pinned
-by a strict expected-failure test,
-`test_live_output_schema_drift_must_not_turn_a_completed_call_uncertain`, which
-will fail loudly when someone fixes the adapter and must then be flipped to a
-plain pass.
+in-memory SDK server showed: with no output schema, or a matching one, the call
+succeeded; with a live output schema that the result did not satisfy, the
+adapter signed `delivery_uncertain` for a call that **completed**. A failing
+`tools/list` after the call, or a schema demanding structured content the
+result lacked, had the same effect. The consequences were: the debit retained
+and the call never redispatched (the designed handling of true ambiguity,
+applied to a known success); a drifting or hostile upstream could force it
+deliberately, and the optional circuit breaker counts `delivery_uncertain`
+(`mcp.py`, `_observe_upstream_admission(..., failure=True)`), so it could also be
+used to open the breaker; and the receipt misstated the outcome.
+
+**The decision: stop the SDK validating, rather than reclassify its failures.**
+
+| Option | What it does | Why / why not |
+|---|---|---|
+| (b) Keep SDK validation; map its failure to `response_rejected` | Charge kept, honest receipt | Rejected. The SDK raises a bare `RuntimeError`, or the transport error of its own `tools/list`, from inside `call_tool`, so the received `CallToolResult` is discarded: there is nothing to hash or return, and the caller is charged for a result it never sees. A failed post-call `tools/list` cannot be told from a failed `tools/call` by exception type, only by matching message text. |
+| **(a) Seed the SDK's schema cache with `None` for the configured tool** (chosen) | The SDK treats the tool as schema-less: no second `tools/list`, no validation. The received result goes to the adapter's own checks (shape, size, bearer echo) | Smallest change that makes "a received result is never `delivery_uncertain`" structurally true, and it removes a post-dispatch network round trip. |
+
+The trade-off of (a), stated plainly: the gateway now relays a result whose
+`structuredContent` does not match the upstream's live schema, and no longer
+notices the mismatch at all. That check was never a defence. The schema came
+from the same upstream as the result, so a hostile upstream satisfies it by
+construction, and the agent-facing catalog advertises only `hasOutputSchema`
+(§1), so the gateway made no conformance promise to the agent. The cost of (a)
+is a dependency on a private SDK attribute (`_tool_output_schemas`) in a package
+held at `<2`, not at one release. If a release drops it, `_call_tool_once`
+fails closed **before** the dispatch claim: nothing is sent or charged, the call
+ends as the generic pre-dispatch failure, and the reason is logged as
+`upstream_mcp_sdk_result_validation_not_disabled`. If a release keeps the
+attribute but changes what it means, only the real-SDK tests below notice, so
+they must stay in CI.
+
+What did not change: a failure with no received result (the connection drops,
+the request times out, a JSON-RPC error answers `tools/call`) is still
+`delivery_uncertain`; a tool-level `isError` result is still `returned_error`
+and refunded; an oversized or bearer-echoing result is still `response_rejected`
+and charged ([`failure-semantics.md`](failure-semantics.md)).
+
+Evidence, all using a real in-memory SDK server behind the real adapter unless
+noted: `test_live_output_schema_drift_must_not_turn_a_completed_call_uncertain`
+(was a strict expected failure); the failing-`tools/list` and
+no-structured-content cases; `test_hostile_external_ref_in_live_output_schema_is_never_resolved`;
+`test_normal_success_is_unchanged_with_or_without_an_output_schema`;
+`test_call_that_yields_no_result_is_still_delivery_uncertain` and
+`test_error_result_is_still_a_returned_error_under_a_drifted_schema` (the
+boundary); `test_sdk_without_the_schema_cache_fails_closed_before_dispatch`;
+`test_production_session_sends_no_tools_list_after_dispatch` (the production
+`_session` over HTTP, observing the requests that reach the upstream); and
+`test_completed_call_with_drifted_live_schema_is_a_charged_success_end_to_end`
+(through the governed router: one debit, one dispatch, a `success` receipt, and
+a replay that sends nothing). With the one call that applies the fix disabled,
+every one of these fails except the two boundary tests, which hold either way,
+and the end-to-end test returns `-32005 delivery_uncertain`.
+
+**Still open, a neighbouring defect found while verifying this fix (not
+changed).** A tool response whose *envelope* the SDK cannot parse (for example
+`content` that is a string, or a non-boolean `isError`) is meant to end as
+`response_rejected`: `_call_tool_once` has a `ValidationError` branch for it.
+Through a real SDK session it ends as `delivery_uncertain` instead, because the
+SDK's task group rewraps the `ValidationError` in an `ExceptionGroup` before
+that branch can match. Probed 2026-10-22 against an in-memory SDK server, with
+and without the fix above, with identical results. The charge stays either
+way; what differs is the receipt outcome (504 / `-32005`, counted by the
+circuit breaker, versus a terminal 502 / `-32006`). A fix has to unwrap the
+group in `_call_tool_once`'s handlers and is its own change with its own tests.
+A second, narrower gap in the same function: its `ValidationError` branch lacks
+the "a result is already in hand" guard that the two sibling handlers have, so a
+`ValidationError` raised only while the session closes would turn a received
+result into `response_rejected`.
+
+**Still open, drift detection.** The gateway checks results against no output schema. If a
+customer needs drift detection, it belongs in the adapter, against the
+**startup-pinned** schema, offline, on the received result, with the outcome
+`response_rejected`; never in the SDK against the live schema. That is a new
+capability and is held under the named-partner rule in `AGENTS.md`.
 
 ### 3.3 Tool results are bounded, not labeled
 

@@ -91,11 +91,11 @@ stderr.
   executor here costs nothing. The real adapter, on every call, re-validates and
   re-resolves the upstream URL (a fresh DNS lookup, no cache), builds a new
   HTTP client and a new TCP and TLS connection, runs MCP `initialize`, commits
-  the dispatch claim, sends `tools/call`, and terminates the session; the SDK
-  then issues a `tools/list` to validate the result
-  ([`mcp-security-posture.md`](mcp-security-posture.md) §3.2). Those are
-  gateway-induced round trips on top of the upstream's own time, none of them
-  measured here. The live `/health/dependencies` payload reports aggregate
+  the dispatch claim, sends `tools/call`, and terminates the session. (Before
+  the call-session fix in [`mcp-security-posture.md`](mcp-security-posture.md)
+  §3.2 the SDK also issued a `tools/list` after `tools/call` to validate the
+  result; it no longer does.) Those are gateway-induced round trips on top of
+  the upstream's own time, none of them measured here. The live `/health/dependencies` payload reports aggregate
   `call_metrics` (count, total and max latency) for the real path, without
   percentiles.
 - **Not the supported endpoint.** The script measures `POST /mcp/messages`,
