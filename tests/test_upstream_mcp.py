@@ -86,6 +86,15 @@ def _cleanup_validation_error() -> ValidationError:
     raise AssertionError("invalid timeout unexpectedly passed validation")
 
 
+def _unparseable_result_error() -> ValidationError:
+    """The error the SDK raises when a tools/call result fails to parse."""
+    try:
+        CallToolResult.model_validate({"content": "not-a-list"})
+    except ValidationError as exc:
+        return exc
+    raise AssertionError("invalid CallToolResult unexpectedly passed validation")
+
+
 class FakeSession:
     def __init__(
         self,
@@ -1823,6 +1832,49 @@ async def test_no_response_to_tools_call_stays_delivery_uncertain_in_memory(
     assert metrics_after["response_rejected"] == metrics_before["response_rejected"]
 
 
+@pytest.mark.anyio
+async def test_validation_error_before_the_request_is_sent_is_not_a_rejected_response() -> (
+    None
+):
+    """Only a CallToolResult that fails to parse proves the upstream answered.
+
+    ``arguments`` with a non-string key makes the SDK's own request model raise
+    a ``ValidationError`` before anything is written. The dispatch checkpoint
+    has already been claimed, so the call is conservatively
+    ``delivery_uncertain`` as before; it must not be ``response_rejected``,
+    which says the upstream answered when no request ever reached it. The
+    upstream here would answer correctly, so a request that was wrongly sent
+    would show up as a success or a served call.
+    """
+    served: list[str] = []
+    server = Server("healthy-upstream")
+
+    async def call_tool(_req: CallToolRequest) -> ServerResult:
+        served.append("tools/call")
+        return ServerResult(
+            CallToolResult(content=[TextContent(type="text", text="ok")])
+        )
+
+    server.request_handlers[CallToolRequest] = call_tool
+    adapter = _adapter_over_in_memory_sdk(server)
+    claims: list[str] = []
+
+    async def before_dispatch() -> None:
+        claims.append("claimed")
+
+    with pytest.raises(UpstreamMcpDeliveryUncertainError) as exc_info:
+        await adapter.call_tool(
+            {1: "x"},  # type: ignore[dict-item]
+            invocation_id="inv",
+            idempotency_key="idem",
+            before_dispatch=before_dispatch,
+        )
+
+    assert exc_info.value.dispatch_started is True
+    assert claims == ["claimed"]
+    assert served == []
+
+
 def _scripted_mcp_client(
     *,
     on_call: Any = None,
@@ -1982,7 +2034,7 @@ async def test_cleanup_failure_does_not_replace_unparseable_envelope_rejection(
     _mark_discovered(adapter)
     _bind_session(
         adapter,
-        FakeSession(call_error=_cleanup_validation_error()),
+        FakeSession(call_error=_unparseable_result_error()),
         cleanup_error=cleanup_error,
     )
 

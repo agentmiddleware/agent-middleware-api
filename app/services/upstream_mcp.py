@@ -1084,13 +1084,18 @@ class UpstreamMcpAdapter:
                         canonical_result = self._canonicalize_result(result)
                 except UpstreamMcpResponseRejectedError as exc:
                     response_rejected = exc
-                except ValidationError:
+                except ValidationError as exc:
                     # The SDK validates the result envelope after the upstream
                     # has answered; timeouts, dropped connections and JSON-RPC
-                    # errors raise other types. So this is a response received
-                    # but unparseable, which is not delivery uncertainty. Record
-                    # it here: leaving the session wraps it in an
-                    # ExceptionGroup that no handler below can match.
+                    # errors raise other types. So a CallToolResult that fails
+                    # to parse is a response received but unusable, which is
+                    # not delivery uncertainty. Record it here: leaving the
+                    # session wraps it in an ExceptionGroup that no handler
+                    # below can match. Any other validation error, such as one
+                    # building the request before it is sent, says nothing
+                    # about a response and is classified as before.
+                    if exc.title != CallToolResult.__name__:
+                        raise
                     response_rejected = UpstreamMcpResponseRejectedError(
                         "upstream_response_invalid"
                     )

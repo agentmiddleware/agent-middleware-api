@@ -32,16 +32,20 @@ plus, where a next step exists, a ``remediation`` block naming it
 (fund the wallet, ask a human via ``POST /v1/permit-requests``, retry the
 same call once an approval is decided).
 
-One governed outcome is not a denial and does not use the JSON-RPC error
-channel: ``delivery_uncertain``. The upstream call may have been delivered
-and taken effect, and the charge stands, so the model itself must read that
-it should not call the tool again. Clients commonly hand the model only a
-JSON-RPC error's message, and ``-32005`` is this surface's retryable code,
-so the outcome is returned as a tool result instead: ``isError: true``, a
-text explanation carrying the do-not-resend instruction, the receipt, and
+Two governed outcomes are not denials and do not use the JSON-RPC error
+channel: ``delivery_uncertain`` and ``response_rejected``. In both the upstream
+call may have been delivered and taken effect, and the charge stands, so the
+model itself must read that it should not call the tool again. Clients
+commonly hand the model only a JSON-RPC error's message, ``-32005`` is this
+surface's retryable code, and ``-32006`` is also the code of refunded,
+retry-safe failures (``upstream_returned_error``,
+``upstream_pre_dispatch_failed``). Both outcomes are therefore returned as a
+tool result instead: ``isError: true``, a text explanation carrying the
+do-not-resend instruction, the receipt, and
 ``_meta["io.agentmiddleware/outcome"]`` with ``status: "unknown"``. The
-governed endpoints (``/mcp/messages`` and REST) keep their ``-32005``
-contract.
+refunded failures stay JSON-RPC errors, because retrying them is safe. The
+governed endpoints (``/mcp/messages`` and REST) keep their ``-32005`` and
+``-32006`` contract.
 
 Replay safety: a client-supplied ``Idempotency-Key`` header (or the
 ``io.agentmiddleware/idempotency_key`` entry in ``params._meta``) is honored
@@ -143,6 +147,7 @@ _IDEMPOTENCY_META_KEY = "io.agentmiddleware/idempotency_key"
 _RECEIPT_META_KEY = "io.agentmiddleware/receipt"
 _OUTCOME_META_KEY = "io.agentmiddleware/outcome"
 _DELIVERY_UNCERTAIN = "delivery_uncertain"
+_RESPONSE_REJECTED = "response_rejected"
 _META_KEY_SOURCE = 'params._meta["io.agentmiddleware/idempotency_key"]'
 # A legacy-transport client may send its key in params.mcpContext; the
 # source label names that location in the conflict/refusal payload.
@@ -394,21 +399,42 @@ async def _mint_auto_permit(
     return permit.permit_id
 
 
-def _delivery_uncertain_tool_result(
-    error: GovernedToolError, *, client_key_supplied: bool
-) -> dict[str, Any]:
-    """Return ``delivery_uncertain`` as a tool result the model can read.
+# What each charged, effect-unknown outcome tells the model. Only the first two
+# sentences differ: the instruction not to resend is the same for both.
+_UNKNOWN_OUTCOME_LEAD = {
+    _DELIVERY_UNCERTAIN: (
+        "delivery_uncertain: outcome unknown.",
+        "This call may have reached the upstream tool, but no trustworthy "
+        "response came back, so the action may or may not have happened.",
+    ),
+    _RESPONSE_REJECTED: (
+        "response_rejected: outcome unknown.",
+        "This call reached the upstream tool and it answered, but the answer "
+        "was unusable and is not returned, so the gateway cannot tell whether "
+        "the action took effect.",
+    ),
+}
 
-    Every other governed refusal on this surface stays a JSON-RPC error. This
-    outcome is different: the upstream call may already have been delivered
-    and taken effect, and the charge stands. A JSON-RPC error commonly
-    reaches the model as its message alone, and ``-32005`` is this surface's
-    retryable code, so a model told only "delivery_uncertain" tends to call
-    the tool again. Without a client Idempotency-Key that is a new, charged
-    dispatch: the duplicate this gateway exists to prevent. The MCP spec
-    routes errors the model must see into the result (``isError: true``).
-    ``isError`` stays true because ``false`` tells clients the call
-    succeeded, which is not known here.
+
+def _unknown_outcome_tool_result(
+    error: GovernedToolError, *, reason: str, client_key_supplied: bool
+) -> dict[str, Any]:
+    """Return a charged, effect-unknown outcome as a tool result the model can read.
+
+    ``reason`` is ``delivery_uncertain`` (no trustworthy response came back) or
+    ``response_rejected`` (the upstream answered but the answer was unusable:
+    an envelope the SDK cannot parse, a bad shape, oversize, or a reflected
+    credential). Every other governed refusal on this surface stays a JSON-RPC
+    error. These outcomes are different: the upstream call may already have
+    been delivered and taken effect, and the charge stands. A JSON-RPC error
+    commonly reaches the model as its message alone, ``-32005`` is this
+    surface's retryable code, and ``-32006`` is also what refunded, retry-safe
+    failures use, so a model told only the reason tends to call the tool
+    again. Without a client Idempotency-Key that is a new, charged dispatch:
+    the duplicate this gateway exists to prevent. The MCP spec routes errors
+    the model must see into the result (``isError: true``). ``isError`` stays
+    true because ``false`` tells clients the call succeeded, which is not known
+    here.
 
     The evidence is unchanged: the same signed receipt rides ``receipt`` and
     ``_meta["io.agentmiddleware/receipt"]`` as on a successful call, and the
@@ -441,9 +467,7 @@ def _delivery_uncertain_tool_result(
             "attempt is a new dispatch and a new charge."
         )
     sentences = [
-        "delivery_uncertain: outcome unknown.",
-        "This call may have reached the upstream tool, but no trustworthy "
-        "response came back, so the action may or may not have happened.",
+        *_UNKNOWN_OUTCOME_LEAD[reason],
         "The gateway will not resend it.",
         "Do not call this tool again for the same action until you have checked "
         "whether it took effect in the system the tool acts on.",
@@ -453,7 +477,7 @@ def _delivery_uncertain_tool_result(
         sentences.append(f"Receipt: {receipt_id}.")
     outcome: dict[str, Any] = {
         "status": "unknown",
-        "reason": _DELIVERY_UNCERTAIN,
+        "reason": reason,
         "redispatched": False,
         "idempotency_key_supplied": client_key_supplied,
         "remediation": {
@@ -653,16 +677,22 @@ async def _governed_tools_call(
             denial_data["details"] = e.details
         raise _mcp_error(-32003, str(e), denial_data or None) from e
     except GovernedToolError as e:
-        if str(e) == _DELIVERY_UNCERTAIN:
+        reason = str(e)
+        if reason in _UNKNOWN_OUTCOME_LEAD:
             # First call and same-key replay both arrive here (replay rebuilds
             # the error from the stored terminal record), so both get the same
-            # result shape. See _delivery_uncertain_tool_result for why this
-            # one outcome leaves the JSON-RPC error channel.
+            # result shape. See _unknown_outcome_tool_result for why these two
+            # outcomes leave the JSON-RPC error channel. The gateway outcome
+            # keeps what each had on that channel: a rejected response is
+            # "failed" (a fault), an undelivered one is "unknown".
             mark_current_request(
-                gateway_outcome="unknown", reason_code="delivery_uncertain"
+                gateway_outcome=(
+                    "unknown" if reason == _DELIVERY_UNCERTAIN else "failed"
+                ),
+                reason_code=reason,
             )
-            return _delivery_uncertain_tool_result(
-                e, client_key_supplied=bool(client_idempotency_key)
+            return _unknown_outcome_tool_result(
+                e, reason=reason, client_key_supplied=bool(client_idempotency_key)
             )
         mark_current_request(
             reason_code=bounded_governed_reason(
