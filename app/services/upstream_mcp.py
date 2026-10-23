@@ -1025,7 +1025,10 @@ class UpstreamMcpAdapter:
         classified as delivery-uncertain. A well-formed result that was received is
         not: SDK-side output-schema validation is disabled for the call (see
         ``_bypass_sdk_result_validation``), so only this adapter's own shape,
-        size, and secret checks can reject it.
+        size, and secret checks can reject it. A response the SDK itself cannot
+        parse is rejected too, not uncertain: the upstream did answer. That
+        failure is recorded at the ``call_tool`` await because the SDK's task
+        group rewraps anything that leaves the session block.
         """
         if self._discovered_tool is None:
             raise UpstreamMcpPreDispatchError("upstream_tool_not_initialized")
@@ -1081,6 +1084,16 @@ class UpstreamMcpAdapter:
                         canonical_result = self._canonicalize_result(result)
                 except UpstreamMcpResponseRejectedError as exc:
                     response_rejected = exc
+                except ValidationError:
+                    # The SDK validates the result envelope after the upstream
+                    # has answered; timeouts, dropped connections and JSON-RPC
+                    # errors raise other types. So this is a response received
+                    # but unparseable, which is not delivery uncertainty. Record
+                    # it here: leaving the session wraps it in an
+                    # ExceptionGroup that no handler below can match.
+                    response_rejected = UpstreamMcpResponseRejectedError(
+                        "upstream_response_invalid"
+                    )
         except UpstreamMcpError:
             if dispatch_claim_unavailable is not None:
                 # A context-manager cleanup failure can itself use one of our
@@ -1119,11 +1132,22 @@ class UpstreamMcpAdapter:
                 raise UpstreamMcpPreDispatchError(
                     response_guard.rejection_code
                 ) from None
-            if dispatch_started:
+            if canonical_result is not None or response_rejected is not None:
+                # As below: a close-time parse failure cannot change a
+                # response that is already known.
+                logger.warning(
+                    "upstream_mcp_session_cleanup_failed",
+                    extra={
+                        "public_tool_id": self.configuration.public_tool_id,
+                        "upstream_origin": self.configuration.origin,
+                    },
+                )
+            elif dispatch_started:
                 raise UpstreamMcpResponseRejectedError(
                     "upstream_response_invalid"
                 ) from None
-            raise UpstreamMcpPreDispatchError() from None
+            else:
+                raise UpstreamMcpPreDispatchError() from None
         except Exception:
             if dispatch_claim_unavailable is not None:
                 # Session cleanup must never erase expected claim contention:

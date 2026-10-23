@@ -19,7 +19,7 @@ from mcp.shared.memory import create_connected_server_and_client_session
 from sqlalchemy import func, select
 
 from app.routers import mcp as mcp_router
-from app.core.config import Settings
+from app.core.config import Settings, get_settings
 from app.core.time import utc_now
 from app.db.database import get_session_factory
 from app.db.models import (
@@ -54,6 +54,7 @@ from app.services.quotes import get_quote_service
 from app.services.receipts import ReceiptService, get_receipt_service
 from app.services.service_registry import get_service_registry
 from app.services.signing_keys import sha256_hex
+from app.services.upstream_admission import clear_upstream_admission_state
 from app.services.upstream_mcp import (
     DiscoveredUpstreamTool,
     UpstreamMcpAdapter,
@@ -745,6 +746,221 @@ async def test_completed_call_with_drifted_live_schema_is_a_charged_success_end_
             == (outcomes_before["delivery_uncertain"])
         )
     finally:
+        get_service_registry().unregister_local(tool_name)
+
+
+def _adapter_over_real_sdk_server(server: Server, tool_name: str) -> UpstreamMcpAdapter:
+    """The real adapter over a real in-memory SDK session, for ``tool_name``."""
+    adapter = UpstreamMcpAdapter(
+        UpstreamMcpConfiguration.from_settings(
+            Settings(
+                _env_file=None,
+                ENVIRONMENT="local",
+                MCP_UPSTREAM_ENABLED=True,
+                MCP_UPSTREAM_URL="http://localhost:9000/mcp",
+                MCP_UPSTREAM_TOOL_NAME="partner.echo",
+                MCP_UPSTREAM_PUBLIC_TOOL_ID=tool_name,
+                MCP_UPSTREAM_BEARER_TOKEN="secret-partner-token",
+                MCP_UPSTREAM_CREDITS_PER_CALL="2",
+            )
+        )
+    )
+    adapter._discovered_tool = DiscoveredUpstreamTool(
+        name="partner.echo",
+        description="Controlled remote MCP test tool",
+        input_schema={"type": "object"},
+        output_schema=None,
+    )
+
+    @asynccontextmanager
+    async def session_context(**_kwargs: Any) -> AsyncIterator[Any]:
+        async with create_connected_server_and_client_session(server) as session:
+            yield session
+
+    adapter._session = session_context  # type: ignore[method-assign]
+    return adapter
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    (
+        "upstream_behavior",
+        "expected_state",
+        "expected_code",
+        "expected_attempt_error_code",
+        "expect_breaker_open",
+    ),
+    [
+        pytest.param(
+            "unparseable_envelope",
+            "response_rejected",
+            -32006,
+            "upstream_response_invalid",
+            False,
+            id="upstream-answered-with-an-unparseable-envelope",
+        ),
+        pytest.param(
+            "jsonrpc_error",
+            "delivery_uncertain",
+            -32005,
+            "delivery_uncertain",
+            True,
+            id="upstream-answered-with-a-jsonrpc-error",
+        ),
+    ],
+)
+async def test_real_sdk_upstream_failures_get_the_right_charged_receipt_and_never_redispatch(
+    client: AsyncClient,
+    clean_database: None,
+    monkeypatch: pytest.MonkeyPatch,
+    upstream_behavior: str,
+    expected_state: str,
+    expected_code: int,
+    expected_attempt_error_code: str,
+    expect_breaker_open: bool,
+) -> None:
+    """Receipt-level proof of the unparseable-envelope classification.
+
+    The real adapter runs over a real in-memory SDK upstream. When that
+    upstream answers ``tools/call`` with an envelope the SDK cannot parse, the
+    call finalizes as ``response_rejected`` (502 / ``-32006``): one debit kept,
+    one dispatch, a signed receipt, and a replay that sends nothing. Before the
+    fix the SDK's task group rewrapped the parse error and the router signed
+    ``delivery_uncertain`` (504 / ``-32005``) instead.
+
+    The second case is the boundary: an upstream that answers with a JSON-RPC
+    error gives the adapter no response to judge, so that stays
+    ``delivery_uncertain``. Both outcomes are charged and replay-stable. With
+    a threshold-1 circuit breaker, only ``delivery_uncertain`` opens it: the
+    next call is refused before any dispatch, whereas after a
+    ``response_rejected`` the next call reaches the upstream.
+    """
+    settings = get_settings()
+    monkeypatch.setattr(settings, "UPSTREAM_CIRCUIT_BREAKER_ENABLED", True)
+    monkeypatch.setattr(settings, "UPSTREAM_CIRCUIT_BREAKER_FAILURE_THRESHOLD", 1)
+    monkeypatch.setattr(settings, "UPSTREAM_CIRCUIT_BREAKER_RECOVERY_SECONDS", 30.0)
+    clear_upstream_admission_state()
+    provisioned = await provision_agent_wallet(client)
+    tool_name = f"partner-upstream-real-sdk-{upstream_behavior.replace('_', '-')}"
+    idempotency_key = f"{tool_name}-1"
+    upstream_state = {"calls": 0, "list_calls": 0}
+
+    server = Server("misbehaving-upstream")
+
+    async def list_tools(_req: mcp_types.ListToolsRequest) -> mcp_types.ServerResult:
+        upstream_state["list_calls"] += 1
+        return mcp_types.ServerResult(mcp_types.ListToolsResult(tools=[]))
+
+    async def call_tool(_req: mcp_types.CallToolRequest) -> mcp_types.ServerResult:
+        upstream_state["calls"] += 1
+        if upstream_behavior == "jsonrpc_error":
+            raise RuntimeError("upstream failed mid-call")
+        # ``model_construct`` skips validation, so this server serializes an
+        # envelope that only the CLIENT side fails to parse.
+        return mcp_types.ServerResult.model_construct(
+            root=mcp_types.CallToolResult.model_construct(
+                content="not-a-list", isError=False
+            )
+        )
+
+    server.request_handlers[mcp_types.ListToolsRequest] = list_tools
+    server.request_handlers[mcp_types.CallToolRequest] = call_tool
+    _register_upstream(
+        tool_name,
+        _adapter_over_real_sdk_server(server, tool_name),  # type: ignore[arg-type]
+    )
+    outcomes_before = get_upstream_mcp_metrics_snapshot()["outcomes"]
+    try:
+        permit = await create_tool_permit(
+            client,
+            wallet_id=provisioned["agent_wallet_id"],
+            key_id=provisioned["key_id"],
+            tool_name=tool_name,
+            idem_key=f"{tool_name}-permit",
+        )
+        body = _call_body(
+            tool_name=tool_name,
+            wallet_id=provisioned["agent_wallet_id"],
+            permit_id=permit["permit_id"],
+            idempotency_key=idempotency_key,
+        )
+
+        first = await client.post(
+            "/mcp/messages", json=body, headers=provisioned["agent_headers"]
+        )
+        replay = await client.post(
+            "/mcp/messages", json=body, headers=provisioned["agent_headers"]
+        )
+
+        first_error = first.json()["error"]
+        assert first_error["code"] == expected_code
+        assert first_error["message"] == expected_state
+        assert replay.json()["error"] == first_error
+        receipt = first_error["data"]["receipt"]
+        assert receipt["outcome"] == expected_state
+        assert Decimal(receipt["credits_charged"]) == Decimal("2")
+        # One dispatch for two requests; no tools/list is ever sent.
+        assert upstream_state == {"calls": 1, "list_calls": 0}
+        assert await _wallet_debit_and_canonical_counts(
+            wallet_id=provisioned["agent_wallet_id"],
+            idempotency_key=idempotency_key,
+        ) == (1, 1)
+
+        persisted = await _load_persisted_invocation(
+            wallet_id=provisioned["agent_wallet_id"],
+            permit_id=permit["permit_id"],
+            idempotency_key=idempotency_key,
+        )
+        _assert_linked_terminal_state(
+            persisted,
+            state=expected_state,
+            outcome=expected_state,
+            charged=Decimal("2"),
+            refunded=False,
+        )
+        assert persisted.attempt.dispatched_at is not None
+        assert persisted.attempt.error_code == expected_attempt_error_code
+        assert first_error["data"]["dispatch"] == {
+            "attempt_id": persisted.attempt.attempt_id,
+            "state": expected_state,
+        }
+        valid, reason, _ = await get_receipt_service().verify_receipt(
+            persisted.receipt.receipt_id
+        )
+        assert (valid, reason) == (True, None)
+        evidence = await client.get(
+            f"/v1/receipts/{persisted.receipt.receipt_id}/evidence",
+            headers=provisioned["agent_headers"],
+        )
+        assert evidence.status_code == 200
+        assert evidence.json()["valid"] is True
+        outcomes_after = get_upstream_mcp_metrics_snapshot()["outcomes"]
+        for outcome in ("response_rejected", "delivery_uncertain"):
+            assert outcomes_after[outcome] == outcomes_before[outcome] + (
+                1 if outcome == expected_state else 0
+            )
+
+        # A different key, so this is a new call and not a replay.
+        following = await client.post(
+            "/mcp/messages",
+            json=_call_body(
+                tool_name=tool_name,
+                wallet_id=provisioned["agent_wallet_id"],
+                permit_id=permit["permit_id"],
+                idempotency_key=f"{idempotency_key}-following",
+            ),
+            headers=provisioned["agent_headers"],
+        )
+        following_error = following.json()["error"]
+        if expect_breaker_open:
+            assert following_error["message"] == "upstream_circuit_open"
+            assert "receipt" not in following_error["data"]
+            assert upstream_state["calls"] == 1
+        else:
+            assert following_error["message"] == expected_state
+            assert upstream_state["calls"] == 2
+    finally:
+        clear_upstream_admission_state()
         get_service_registry().unregister_local(tool_name)
 
 

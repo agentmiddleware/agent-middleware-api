@@ -34,10 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   error answering `tools/call`) is still `delivery_uncertain`; a tool-level
   `isError` result is still a refunded `returned_error`; oversized or
   bearer-echoing results are still `response_rejected`. No new outcome, no
-  schema or API change. **Not fixed here (follow-up):** a response whose
-  envelope the SDK cannot parse still ends as `delivery_uncertain` through a
-  real SDK session, not `response_rejected` (see
-  [`docs/mcp-security-posture.md`](docs/mcp-security-posture.md) §3.2).
+  schema or API change.
 - The bypass uses a private SDK attribute. If an `mcp` release drops it, the
   call fails closed before the dispatch claim (generic pre-dispatch failure,
   logged as `upstream_mcp_sdk_result_validation_not_disabled`) instead of
@@ -48,6 +45,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failing post-call `tools/list`, no structured content, hostile external
   `$ref`, unchanged normal success, the production `_session` over HTTP) and a
   receipt-level test through the governed router. See
+  [`docs/mcp-security-posture.md`](docs/mcp-security-posture.md) §3.2 and
+  [`docs/failure-semantics.md`](docs/failure-semantics.md).
+
+### Fixed — an upstream response the SDK cannot parse is `response_rejected`
+
+- A `tools/call` response the upstream sent but whose envelope the MCP SDK
+  cannot parse (for example `content` that is a string, or a non-boolean
+  `isError`) ended as `delivery_uncertain` (504 / `-32005`) through a real SDK
+  session, although `_call_tool_once` intended `response_rejected`. The SDK's
+  anyio task group rewraps anything raised inside the session block in an
+  `ExceptionGroup`, so the adapter's `ValidationError` branch never matched and
+  the generic handler classified the call by `dispatch_started` alone. Tests
+  that fake the session do not enter the task group, which is why they passed.
+- `_call_tool_once` now records the rejection where the `ValidationError` is
+  raised (the `call_tool` await, which the SDK reaches only after the upstream's
+  JSON-RPC result has arrived), before the session unwinds. The call ends as
+  `response_rejected` with code `upstream_response_invalid` (502 / `-32006`):
+  the debit stays, the call is never redispatched, and a replay returns the same
+  receipt. Existing precedence is unchanged: claim contention, then a transport
+  guard rejection, then a known received result, then this rejection, then
+  `delivery_uncertain` only when no response was obtained.
+- The `ValidationError` branch also lacked the "a result is already in hand"
+  guard the other handlers have, so a `ValidationError` or `JSONDecodeError`
+  raised only while the session closes could turn a received result into
+  `response_rejected`, or replace a known rejection's code. It now has the guard.
+- **Behavior change:** a malformed envelope is no longer counted toward the
+  optional circuit breaker. The `response_rejected` path never fed it (an
+  oversized or bearer-echoing result did not either); `delivery_uncertain` does.
+- Unchanged: a call with no response (connection dropped, timeout, JSON-RPC
+  error answering `tools/call`) is still `delivery_uncertain`; a malformed
+  `initialize` answer is still a pre-dispatch failure. Not covered: an upstream
+  body that is not a JSON-RPC message at all is dropped inside the SDK
+  transport, so that call times out and ends as `delivery_uncertain`.
+- New tests drive a real SDK session behind the real adapter, in memory and over
+  the production Streamable HTTP client, with four envelope shapes, a fixture
+  guard (the envelope must reach the client and fail there), the no-response
+  boundary, a secret-echo check, and a governed-router receipt test (one debit,
+  one dispatch, a `response_rejected` receipt, no redispatch on replay). See
   [`docs/mcp-security-posture.md`](docs/mcp-security-posture.md) §3.2 and
   [`docs/failure-semantics.md`](docs/failure-semantics.md).
 

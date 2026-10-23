@@ -76,7 +76,7 @@ isolation regressions are in `tests/test_permit_effective_lifecycle.py`.
 | `insufficient_funds` | The charge itself was refused (balance, child-wallet cap, daily limit) | Never debited; reservation released | No gateway dispatch | 402 / `-32004` | `test_insufficient_funds_returns_receipt_and_replays_without_charge` |
 | `failed_refunded` | A **confirmed** failure: local tool raised; upstream returned `isError: true`; DNS/TLS/`initialize` failed before the remote dispatch claim; charge refused on the upstream path; or a crash before dispatch, finalized by the reconciler | Debit refunded (or never taken). The receipt signs `credits_charged = 0`; the ledger separately proves the correlated refund | An `isError` response may have reached the gateway; pre-claim cases were not dispatched; no downstream effect is independently proven | 500 or 502 / `-32006` (402/403 for refused charges) | Pre-claim failure, guarded completion, and reconciliation tests in `tests/test_mcp_upstream_governed.py`, `tests/test_mcp_dispatch_router_claim.py`, and `tests/test_mcp_dispatch_reconciliation.py` |
 | `delivery_uncertain` | The one-shot remote dispatch claim was committed, then a timeout, transport failure, or process death left the outcome unknowable | **Stays charged.** Never redispatched | **Unknown** — that is the definition | 504 / `-32005` | Stale-claim reconciliation and PostgreSQL process-kill cases |
-| `response_rejected` | The upstream **did** respond, but the response is unusable: invalid shape, reflected bearer token, non-serializable, or over the byte cap (wire-level or at persistence). A result that merely disagrees with the upstream's advertised output schema is **not** unusable: it is a `success` | **Stays charged** | A response reached the gateway; the downstream effect is not independently proven | 502 / `-32006` | `test_confirmed_result_rejected_by_persistence_is_terminal_and_replayable`, `test_terminal_response_rejected_retains_charge_and_is_replayable` |
+| `response_rejected` | The upstream **did** respond, but the response is unusable: invalid shape (including an envelope the MCP SDK cannot parse), reflected bearer token, non-serializable, or over the byte cap (wire-level or at persistence). A result that merely disagrees with the upstream's advertised output schema is **not** unusable: it is a `success` | **Stays charged** | A response reached the gateway; the downstream effect is not independently proven | 502 / `-32006` | `test_confirmed_result_rejected_by_persistence_is_terminal_and_replayable`, `test_terminal_response_rejected_retains_charge_and_is_replayable`, `test_real_sdk_upstream_failures_get_the_right_charged_receipt_and_never_redispatch` |
 | `failed_unrefunded` | A refund was owed and the refund **itself** failed | Charged; a durable operator work item is created atomically with the receipt | Depends on the underlying failure | 500 / `-32603` | `test_governed_refund_failure_keeps_permit_budget_reserved`, `test_refund_reconciliation_retries_exactly_once_and_preserves_agent_replay` |
 
 A well-formed tool result the gateway **received** is never `delivery_uncertain`. The
@@ -86,13 +86,15 @@ a hostile `$ref` cannot turn a completed call into an ambiguous one; only the
 adapter's own shape, size, and secret checks can reject a received result
 ([`mcp-security-posture.md`](mcp-security-posture.md) §3.2). Conversely,
 `delivery_uncertain` is for calls where no result was obtained: the connection
-dropped, the request timed out, or the process died after the claim. Known gap,
-not changed here: a response whose envelope the SDK itself cannot parse still
-ends as `delivery_uncertain` through a real SDK session instead of
-`response_rejected`
-([`mcp-security-posture.md`](mcp-security-posture.md) §3.2, "Still open").
-The drifted-schema case is proven end to end by
-`test_completed_call_with_drifted_live_schema_is_a_charged_success_end_to_end`.
+dropped, the request timed out, or the process died after the claim. A response
+the gateway received but the SDK cannot parse (for example `content` that is not
+a list) is `response_rejected`, not `delivery_uncertain`: the upstream answered,
+so the outcome is known and unusable
+([`mcp-security-posture.md`](mcp-security-posture.md) §3.2). The drifted-schema
+case is proven end to end by
+`test_completed_call_with_drifted_live_schema_is_a_charged_success_end_to_end`,
+and the unparseable-envelope case, next to its `delivery_uncertain` boundary, by
+`test_real_sdk_upstream_failures_get_the_right_charged_receipt_and_never_redispatch`.
 
 Requests rejected before a valid permit and an executable tool are established
 produce no receipt — there is no authority to bill against. The README states

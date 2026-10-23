@@ -302,21 +302,45 @@ a replay that sends nothing). With the one call that applies the fix disabled,
 every one of these fails except the two boundary tests, which hold either way,
 and the end-to-end test returns `-32005 delivery_uncertain`.
 
-**Still open, a neighbouring defect found while verifying this fix (not
-changed).** A tool response whose *envelope* the SDK cannot parse (for example
-`content` that is a string, or a non-boolean `isError`) is meant to end as
-`response_rejected`: `_call_tool_once` has a `ValidationError` branch for it.
-Through a real SDK session it ends as `delivery_uncertain` instead, because the
-SDK's task group rewraps the `ValidationError` in an `ExceptionGroup` before
-that branch can match. Probed 2026-10-22 against an in-memory SDK server, with
-and without the fix above, with identical results. The charge stays either
-way; what differs is the receipt outcome (504 / `-32005`, counted by the
-circuit breaker, versus a terminal 502 / `-32006`). A fix has to unwrap the
-group in `_call_tool_once`'s handlers and is its own change with its own tests.
-A second, narrower gap in the same function: its `ValidationError` branch lacks
-the "a result is already in hand" guard that the two sibling handlers have, so a
-`ValidationError` raised only while the session closes would turn a received
-result into `response_rejected`.
+**A neighbouring defect, fixed in the same series: a response the SDK cannot
+parse.** A `tools/call` response whose *envelope* the SDK cannot parse (for
+example `content` that is a string, or a non-boolean `isError`) is
+`response_rejected` (`upstream_response_invalid`, 502 / `-32006`): charged,
+terminal, replay-stable. It used to end as `delivery_uncertain` (504 / `-32005`,
+counted by the circuit breaker). The SDK parses the envelope inside
+`send_request`, and the anyio task group around the session rewraps that
+`ValidationError` in an `ExceptionGroup` as the session block exits, so the
+`ValidationError` branch of `_call_tool_once` never matched and the generic
+handler classified it by `dispatch_started` alone. The adapter now records the
+rejection where the `ValidationError` is raised, at the `call_tool` await,
+before the session unwinds. That point is reached only after the upstream's
+JSON-RPC result has arrived (a timeout, a dropped connection and a JSON-RPC
+error answering `tools/call` raise other types), so a failure with no response
+is still `delivery_uncertain`, and a malformed answer to `initialize` is still a
+pre-dispatch failure. The same change gives the `ValidationError` branch the
+"a result is already in hand" guard its two sibling handlers have, so a
+`ValidationError` or `JSONDecodeError` raised only while the session closes can
+no longer replace a response the adapter already holds. One consequence: a
+malformed envelope is no longer counted by the circuit breaker, because the
+`response_rejected` path does not feed it (an oversized or bearer-echoing result
+never did either).
+
+Evidence, real SDK session behind the real adapter (in memory, and over the
+production Streamable HTTP client against a scripted transport):
+`test_unparseable_result_envelope_is_response_rejected_not_delivery_uncertain`
+and `test_unparseable_result_envelope_over_streamable_http_is_response_rejected`
+(four envelope shapes each); `test_the_sdk_client_itself_rejects_each_envelope_fixture`
+(the fixtures reach the client and fail there, not on a crashed server);
+`test_unparseable_envelope_error_does_not_echo_upstream_content`; the boundary
+pins `test_no_response_to_tools_call_stays_delivery_uncertain_in_memory`,
+`test_transport_failure_over_streamable_http_stays_delivery_uncertain` and
+`test_unparseable_initialize_response_stays_pre_dispatch`; and, through the
+governed router, `test_real_sdk_upstream_failures_get_the_right_charged_receipt_and_never_redispatch`
+(one debit, one dispatch, a `response_rejected` receipt, a replay that sends
+nothing; the JSON-RPC-error case stays `delivery_uncertain`). Residual case not
+covered: an upstream body that is not JSON-RPC at all (not parseable as a
+message) is dropped by the SDK transport without reaching the caller, so that
+call times out and ends as `delivery_uncertain`.
 
 **Still open, drift detection.** The gateway checks results against no output schema. If a
 customer needs drift detection, it belongs in the adapter, against the
