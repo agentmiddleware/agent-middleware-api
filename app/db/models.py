@@ -419,6 +419,32 @@ class APIKeyModel(SQLModel, table=True):
     model_config = {"arbitrary_types_allowed": True}
 
 
+class APIKeyUsageEventModel(SQLModel, table=True):
+    """
+    Append-only API key usage event log for per-call usage tracking.
+
+    Records method, route template, status code, and latency per authenticated
+    call. No request bodies, IPs, headers, or PII. Used for demo key
+    analytics and API usage monitoring.
+    """
+
+    __tablename__ = "api_key_usage_events"
+    __table_args__ = (
+        Index("ix_api_key_usage_events_key_id_created_at", "key_id", "created_at"),
+    )
+
+    id: str = Field(primary_key=True, max_length=64)
+    key_id: str = Field(max_length=50, foreign_key="api_keys.key_id", index=True)
+    tenant: Optional[str] = Field(default=None, max_length=32)
+    method: str = Field(max_length=10)
+    route_template: str = Field(max_length=255)
+    status_code: int
+    latency_ms: int
+    created_at: datetime = Field(sa_type=NaiveUTCDateTime, default_factory=utc_now)
+
+    model_config = {"arbitrary_types_allowed": True}
+
+
 class TelemetryEventModel(SQLModel, table=True):
     """
     Time-series telemetry events for the Autonomous PM.

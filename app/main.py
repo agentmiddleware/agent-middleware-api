@@ -661,6 +661,11 @@ app = FastAPI(
 # Rate limiting (enforces documented 120 req/min per API key)
 app.add_middleware(RateLimitMiddleware)
 
+# API key usage tracking (records method, route, status, latency per authenticated call)
+from app.middleware.api_key_usage_tracking import APIKeyUsageTrackingMiddleware
+
+app.add_middleware(APIKeyUsageTrackingMiddleware)
+
 # Stash (method, path) for auth-time demo-tenant route confinement. No
 # authentication, no branching, negligible cost: only demo-tenant
 # credentials read this value. Added after (so it wraps) the rate limiter,

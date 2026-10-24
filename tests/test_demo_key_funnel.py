@@ -183,10 +183,10 @@ async def test_funnel_works_with_kill_switch_off(
 
 def test_050_revision_chain_and_file() -> None:
     script = ScriptDirectory.from_config(Config("alembic.ini"))
-    revision = script.get_revision("050_demo_key_first_used")
-    assert revision.down_revision == "049_demo_key_attribution"
-    assert script.get_heads() == ["050_demo_key_first_used"]
-    assert Path(revision.path).name == "050_demo_key_first_used.py"
+    revision = script.get_revision("051_api_key_usage_events")
+    assert revision.down_revision == "050_demo_key_first_used"
+    assert script.get_heads() == ["051_api_key_usage_events"]
+    assert Path(revision.path).name == "051_api_key_usage_events.py"
 
 
 def test_050_upgrade_backfills_creates_view_and_downgrades(
