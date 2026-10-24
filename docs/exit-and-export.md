@@ -36,7 +36,7 @@ per key, so a large export is slow: 10,000 receipts at two calls each is about
 | **Tool arguments and upstream results** | **No export route** | Stored (`mcp_dispatch_attempts.result_json`, `idempotency_records.response_json`); exported as hashes only (`request_hash`, `response_hash`) | | The evidence bundle deliberately keeps payloads private. They exist only in a database copy. |
 | **API keys** | Not exportable by design | Only the SHA-256 hash is stored for database keys | | Wallet keys are revoked per wallet at `/v1/api-keys`. Administrator keys are the `VALID_API_KEYS` variable, not rows; they are removed by whoever controls the deployment's variables. |
 | **Tool catalog** | `GET /mcp/tools.json`, `GET /v1/discover`, `GET /openapi.json` | MCP tools JSON; OpenAPI 3.1 | | Yes, as data. |
-| **Traces / spans** | **None exist.** | | | No OpenTelemetry instrumentation and no OTLP export. Runtime logging is `structlog` JSON written to **stderr** from `app/main.py` (the container entrypoint does not merge it into stdout); other modules log through the standard library. Unclassified failures carry a `correlation_id`. Per-call evidence lives in receipts and evidence bundles. |
+| **Traces / spans** | **No export route.** Optional OpenTelemetry tracing exists (`app/core/tracing.py`) and is off by default. | OTLP/HTTP to a collector the operator runs | | Nothing here a customer can take. With `OTEL_TRACING_ENABLED` false (the default) or the otel extra absent, no spans are made and no exporter is configured. When on, six spans on the governed path (`http.request`, `mcp.invoke`, `mcp.reserve`, `mcp.dispatch_claim`, `mcp.upstream_dispatch`, `mcp.receipt`) carry only an allowlist of attributes (tool name, outcome state, a hash of the wallet id, the attempt id), so they are not a record of calls you could rebuild from. Runtime logging is `structlog` JSON written to **stderr** from `app/main.py` (the container entrypoint does not merge it into stdout); other modules log through the standard library. Unclassified failures carry a `correlation_id`. Per-call evidence lives in receipts and evidence bundles. |
 | **Agent definitions, memory stores, eval datasets** | **Not applicable on the supported deployment.** | | | The core trust plane does not define agents, hold memory, or own model evaluation. Two frozen proof surfaces do. `comms` keeps an agent registry (`GET /v1/comms/agents`) and `ai` keeps per-agent memory (`POST /v1/ai/memory/recall`, newest 1,000 entries per agent); both are in durable state, mount only with `ENABLE_PROOF_SURFACES=true`, which production refuses at boot, and have no purpose-built export. The repository's own proofs and tests travel with the code. |
 
 ## 2. What is open and what is source-available
@@ -76,7 +76,9 @@ a database copy and a signing key (§4, step 7).
 
 ## 3. What does not leave, and what is not promised
 
-- No traces, because none are produced.
+- No exportable traces. Optional OpenTelemetry tracing exists but is off by
+  default (`OTEL_TRACING_ENABLED`) and exports only an allowlist of attributes
+  to an operator-run collector (see the Traces row in §1).
 - No independent audit-chain verifier yet; the check is first-party.
 - **The audit chain is tamper-evident, not immutable.** Whoever administers
   the database can delete rows, and whoever holds the signing key can rewrite
