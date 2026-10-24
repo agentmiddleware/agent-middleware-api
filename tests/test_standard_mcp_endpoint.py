@@ -585,8 +585,8 @@ async def test_tools_call_delivery_uncertain_without_key_warns_a_retry_is_a_new_
     assert "same Idempotency-Key returns" not in text
     outcome = result["_meta"]["io.agentmiddleware/outcome"]
     assert outcome["status"] == "unknown"
-    # The generated key was never returned, so the structured remediation
-    # must not promise a replay the caller cannot make.
+    # The generated key is not returned as a field of its own (the receipt
+    # carries it as the forwarded key), so the remediation promises no replay.
     assert outcome["idempotency_key_supplied"] is False
     detail = outcome["remediation"]["detail"]
     assert "same-key replay" not in detail

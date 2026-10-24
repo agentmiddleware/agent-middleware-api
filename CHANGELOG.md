@@ -90,10 +90,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the code that refunded, retry-safe failures (`upstream_returned_error`,
   `upstream_pre_dispatch_failed`) also use, so a model shown only the message
   could resend a call whose charge stands and whose tool probably ran. This
-  covers every cause of `response_rejected`: an unparseable envelope, an
-  oversized result, and a result echoing the bearer token. Those refunded
-  failures stay JSON-RPC errors. `/mcp/messages` and REST are unchanged. The helper is now `_unknown_outcome_tool_result`
-  (was `_delivery_uncertain_tool_result`).
+  applies to any `response_rejected` outcome, because `mcp_standard.py` matches
+  on the reason, not the cause: for example an unparseable envelope, an
+  oversized result, a result echoing the bearer token, a non-identity
+  `Content-Encoding` or malformed `Content-Length` after dispatch, a result that
+  cannot be canonicalized, and a result the persistence layer rejects. Those
+  refunded failures stay JSON-RPC errors. `/mcp/messages` and REST are
+  unchanged. The helper is now `_unknown_outcome_tool_result` (was
+  `_delivery_uncertain_tool_result`).
 - **Behavior change:** a malformed envelope is no longer counted toward the
   optional circuit breaker. The `response_rejected` path never fed it (an
   oversized or bearer-echoing result did not either); `delivery_uncertain` does.
@@ -159,15 +163,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   permit only when the reference is omitted (now pinned by a test). It said there
   is no KMS and no row-level security; an AWS KMS signing backend
   (`TRUST_SIGNING_BACKEND=aws_kms`) and PostgreSQL row-level security
-  (`TENANT_RLS_MODE=enforce`) exist as opt-ins, default off. The idempotency-key
-  refusal also covers action-bound calls and tools that require a permit. The
-  posture page now notes that the refunded `upstream_returned_error` relays the
-  upstream's result payload in `error.data.upstream_result` on all three
-  surfaces, and that a keyless `/mcp` call's generated key is readable in the
-  signed receipt as the forwarded key. `docs/exit-and-export.md` no longer says
-  traces are not produced, and says the only mounted `DELETE` route that deletes
-  anything is for API keys (the `/mcp` and `/mcp/public` `DELETE` handlers are
-  stubs). `docs/gateway-overhead.md` quotes only the first-call p99 and max, and
+  (`TENANT_RLS_MODE=enforce`) exist as opt-ins, default off. The posture page now
+  notes that the refunded `upstream_returned_error` relays the upstream's result
+  payload (`error.data.upstream_result` on `/mcp/messages` and `/mcp`,
+  `detail.upstream_result` in the HTTP 502 body on REST), and that a keyless
+  `/mcp` call's generated key is readable in the signed receipt as the forwarded
+  key. `docs/exit-and-export.md` no longer says traces are not produced.
+  `docs/gateway-overhead.md` quotes only the first-call p99 and max, and
   records the kernel release rather than a macOS version the result files do not
   contain. A comment in `mcp_standard.py` that said a keyless call's key is
   "never returned" is corrected.

@@ -1038,10 +1038,13 @@ class UpstreamMcpAdapter:
         classified as delivery-uncertain. A well-formed result that was received is
         not: SDK-side output-schema validation is disabled for the call (see
         ``_bypass_sdk_result_validation``), so only this adapter's own shape,
-        size, and secret checks can reject it. A response the SDK itself cannot
-        parse is rejected too, not uncertain: the upstream did answer. That
-        failure is recorded at the ``call_tool`` await because the SDK's task
-        group rewraps anything that leaves the session block.
+        size, and secret checks can reject it. A JSON-RPC result whose envelope the
+        SDK cannot parse into a CallToolResult is rejected too, not uncertain:
+        the upstream did answer. That failure is recorded at the ``call_tool``
+        await because the SDK's task group rewraps anything that leaves the
+        session block. A body that is not a JSON-RPC message at all is parsed
+        by the SDK transport instead, which logs the error and never raises it,
+        so that call ends delivery-uncertain at the timeout.
         """
         if self._discovered_tool is None:
             raise UpstreamMcpPreDispatchError("upstream_tool_not_initialized")

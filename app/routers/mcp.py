@@ -556,14 +556,14 @@ async def get_tools_json(
     name="MCP JSON-RPC Messages",
     deprecated=True,
     description=(
-        "Legacy project JSON-RPC endpoint, kept for existing clients and the "
-        "local proof scripts. It does not implement the standard MCP "
-        "initialization lifecycle. Check `/.well-known/agent.json` before "
-        "assuming the standard MCP Streamable HTTP endpoint at POST /mcp is "
-        "available; both transports run the same governed permit→meter→receipt "
-        "path when enabled. tools/call uses params.mcpContext (mcp_context is "
-        "accepted as an alias on every route). Preserve one "
-        "Idempotency-Key across retries."
+        "The live governed JSON-RPC path in the supported pilot. It is marked "
+        "deprecated because it is a project transport that does not implement "
+        "the standard MCP initialization lifecycle; the standard Streamable "
+        "HTTP endpoint at POST /mcp is meant to replace it once an operator "
+        "enables that endpoint (it ships off; check `/.well-known/agent.json`)."
+        " Both run the same governed permit→meter→receipt path when enabled. "
+        "tools/call uses params.mcpContext (mcp_context is accepted as an "
+        "alias on every route). Preserve one Idempotency-Key across retries."
     ),
     openapi_extra={
         "requestBody": {
@@ -5145,12 +5145,13 @@ async def _handle_tools_call(
     summary="Invoke a registered MCP tool",
     deprecated=True,
     description=(
-        "Legacy REST-shaped invoke, kept for existing clients. Check "
-        "`/.well-known/agent.json` before assuming the standard MCP "
-        "Streamable HTTP endpoint at POST /mcp is available; it ships off. "
-        "Where it is enabled, new integrations can call tools through it; "
-        "otherwise use POST /mcp/messages or this route. Every enabled entry "
-        "point runs the same governed permit→meter→receipt path."
+        "The live governed REST-shaped invoke in the supported pilot, next to "
+        "POST /mcp/messages. It is marked deprecated because it is not the "
+        "standard MCP transport; the standard Streamable HTTP endpoint at "
+        "POST /mcp is meant to replace both once an operator enables it. "
+        "Check `/.well-known/agent.json` before assuming that endpoint is "
+        "available; it ships off. Every enabled entry point runs the same "
+        "governed permit→meter→receipt path."
     ),
 )
 async def invoke_tool(

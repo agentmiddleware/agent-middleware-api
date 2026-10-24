@@ -109,8 +109,12 @@ never probed or refunded. And on `POST /mcp`, where enabled, both arrive as a
 `_meta["io.agentmiddleware/outcome"].status` `"unknown"`, not as a JSON-RPC error:
 `-32006` is also the code of refunded, retry-safe failures
 (`upstream_returned_error`, `upstream_pre_dispatch_failed`), which stay errors.
-`/mcp/messages` and REST keep `-32005` and `-32006`
-(`test_tools_call_rejected_upstream_response_is_a_tool_result_the_model_can_read`).
+`/mcp/messages` keeps `-32005` and `-32006`
+(`test_ambiguous_or_rejected_upstream_response_stays_charged_and_replays`), and
+REST keeps HTTP 504 and 502 (by code reading, `invoke_tool` raises
+`HTTPException(status_code=exc.status_code)`; no test asserts the REST status).
+The `/mcp` shape is pinned by
+`test_tools_call_rejected_upstream_response_is_a_tool_result_the_model_can_read`.
 
 Requests rejected before a valid permit and an executable tool are established
 produce no receipt — there is no authority to bill against. The README states

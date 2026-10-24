@@ -287,10 +287,10 @@ def _client_idempotency_key(
         if meta_source is not None:
             sources.append(meta_source)
         # A client written against the legacy transport may send its key in
-        # params.mcpContext. This endpoint mints its own permit and ignores
-        # the rest of that object, but a key the caller explicitly sent must
-        # not be silently dropped: it is one more source, validated and
-        # conflict-checked like the others. JSON null reads as absent, as
+        # params.mcpContext. Apart from permit_id (_action_permit_reference)
+        # this endpoint ignores that object, but a key the caller explicitly
+        # sent must not be silently dropped: it is one more source, validated
+        # and conflict-checked like the others. JSON null reads as absent, as
         # everywhere else.
         legacy_context = _legacy_context(params)
         if isinstance(legacy_context, dict):
