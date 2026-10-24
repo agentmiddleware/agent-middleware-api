@@ -14,7 +14,9 @@ Last updated: 2026-10-23. Claims name their evidence where it exists. Labels:
 
 **Deployment boundary.** The supported deployment is one vendor-managed
 project per customer, restricted to synthetic or redacted, low-sensitivity
-data. Wallet checks are application-layer isolation: there is no row-level
+data. Wallet checks are application-layer isolation. PostgreSQL row-level
+security exists only as an opt-in defense in depth (`TENANT_RLS_MODE=enforce`,
+migration `048_tenant_rls`, default `off`); while it is off there is no row-level
 security and no tenant-isolation guarantee (`SECURITY_LIMITATIONS.md`).
 
 ## What this gateway is, in MCP terms
@@ -47,12 +49,19 @@ applies only when that flag is on.
 
 The agent never connects to the upstream. Every governed `tools/call` passes
 the pipeline in [`POLICY_ENFORCEMENT.md`](POLICY_ENFORCEMENT.md) before the
-gateway's client sends anything. One difference matters for the rows below: on
-`POST /mcp` the gateway **mints a single-tool, single-call permit itself** for
-whoever holds a wallet key (`_mint_auto_permit`, `mcp_standard.py`), so
-operator-set permit constraints (scopes, `forbidden_fields`, use counts) apply
-only on `/mcp/messages` and REST invoke. On `/mcp` the limits are the wallet
-balance and wallet policy bundles.
+gateway's client sends anything. One difference matters for the rows below.
+`POST /mcp` honours a permit the caller names (`params._meta
+["io.agentmiddleware/permit_id"]` or `mcpContext.permit_id`,
+`_action_permit_reference`, `mcp_standard.py:258`) and then applies the
+operator's permit constraints (scopes, `forbidden_fields`, use counts) as
+`/mcp/messages` does: a violation is a signed `denied` receipt, and an
+action-bound tool refuses without a named permit (`action_permit_required`). But
+a caller who omits the reference, on a tool that is not action-bound, gets a
+single-tool permit the gateway **mints itself**, sized to one call
+(`_mint_auto_permit`, `mcp_standard.py`), which carries none of those
+constraints. For that caller the limits are the wallet balance and wallet
+policy bundles. The gap is the omitted reference, not the endpoint
+(`test_tools_call_honours_a_named_permit_but_mints_an_unconstrained_one_otherwise`).
 
 That shape removes several MCP attack classes structurally rather than
 defending against them, and it leaves gaps that §3 states plainly.
@@ -65,11 +74,11 @@ defending against them, and it leaves gaps that §3 states plainly.
 | **Tool poisoning, input schema** | **Residual channel** | `inputSchema` is published verbatim, so any string inside it (property descriptions, titles, defaults, enum values, property names) is upstream-authored text that reaches the agent. It is bounded by `MCP_UPSTREAM_MAX_RESPONSE_BYTES` (default 1 MiB, summed over the whole `tools/list`), which limits memory, not influence, and rejected if it echoes the bearer token. Not rewritten. `outputSchema` is kept in the registry record only; the catalog advertises a `hasOutputSchema` flag. | `test_hostile_text_inside_input_schema_reaches_the_catalog_verbatim` (verified) |
 | **Tool shadowing / name collision** | Refused at startup | The configured tool name must appear exactly once in `tools/list`; two entries, or zero, abort registration. The startup call is unguarded in the lifespan, so the deployment does not boot. | `test_duplicated_tool_name_aborts_registration_before_any_dispatch`; `test_discovery_fails_closed_when_exact_tool_is_absent` (verified) |
 | **Rug pull** (definition changes after startup) | Pinned for the agent, not detected | Discovery runs once at startup (`register_configured_upstream_mcp`, called from the `app/main.py` lifespan; that call-site fact is by code reading, not asserted). The agent-facing definition is the startup registry record and is never refreshed. The gateway does not notice a change, and it checks a result against no output schema, pinned or live. **The call session no longer consults the live upstream.** The SDK used to list tools after each call and validate the result against the live `outputSchema`, so a drifting or hostile schema could turn a completed call into a signed `delivery_uncertain`; the adapter now switches that validation off, so the live schema cannot change a call's outcome (§3.2). | `test_definition_rewritten_after_startup_does_not_reach_the_agent` (verified, agent-facing only); `test_live_output_schema_drift_must_not_turn_a_completed_call_uncertain`, `test_completed_call_with_drifted_live_schema_is_a_charged_success_end_to_end` (verified, §3.2) |
-| **Confused deputy** | Enforced at the agent boundary; textbook gap at the upstream boundary (§3.1) | Application-layer wallet checks run before the idempotency store is touched; a key cannot use another wallet's permit; a key-bound permit refuses another key. No row-level security. | `scripts/invariant_attacks/attack6_key_misuse.py` (HELD, run against the quickstart's local tool); `tests/test_trust_negative_security.py` (verified by name) |
+| **Confused deputy** | Enforced at the agent boundary; textbook gap at the upstream boundary (§3.1) | Application-layer wallet checks run before the idempotency store is touched; a key cannot use another wallet's permit; a key-bound permit refuses another key. Row-level security is opt-in (`TENANT_RLS_MODE`, default `off`) and is not relied on here. | `scripts/invariant_attacks/attack6_key_misuse.py` (HELD, run against the quickstart's local tool); `tests/test_trust_negative_security.py` (verified by name) |
 | **Token passthrough** | Structurally absent | The upstream credential is operator configuration (`MCP_UPSTREAM_BEARER_TOKEN`), loaded at startup and never read from a request. The agent's `X-API-Key` is never forwarded. A discovery page or tool result that contains the bearer string **verbatim** is rejected; encoded or partial reflections are not detected, and a rejected result is a charged call (`response_rejected` keeps the debit). | `_contains_exact_secret`, `upstream_mcp.py`; `test_discovery_rejects_bearer_token_echo_without_exposing_it`; `test_call_rejects_bearer_token_echo_without_returning_or_logging_it` (verified by name) |
 | **Session hijack / event injection** | Structurally absent | `POST /mcp` is stateless: `mcp_session_id=None` (`mcp_standard.py:984`), `stateless=True` (`:1000`), authenticated per request by `Depends(get_auth_context)` (`:1020`); GET and DELETE return 405 (`standard_mcp_no_stream`, `:1034`). `/mcp/messages` has no SSE transport (module docstring, `mcp.py:15`). The upstream client opens a fresh session per call. | `mcp_standard.py` (verified); `tests/test_standard_mcp_endpoint.py` (documented) |
-| **Replay / duplicate side effect** | Enforced for keyed calls; **not** for un-keyed calls on `POST /mcp` | On `/mcp/messages` and REST invoke, a governed call (permit-bound, or any call in strict trust mode) without an idempotency key is refused (`idempotency_key_required`, `mcp.py:1889-1902`). On `POST /mcp` an absent key is replaced by a server-generated `mcp-auto-<uuid>` (`mcp_standard.py:566`) and the call runs, so an un-keyed retry is a new charged operation; the key is mandatory there only when wallet policy requires human approval. With a client key: same key replays the stored receipt, a changed payload fails closed, at most one **gateway** dispatch and debit. The upstream's effect is once only if it honors the forwarded `io.agentmiddleware/idempotency_key`. A timeout after the dispatch claim is signed `delivery_uncertain`, keeps the debit, and is never redispatched. | [`failure-semantics.md`](failure-semantics.md); `tests/test_adversarial_five_claims.py` (documented) |
-| **Excessive scope / permission creep** | Enforced on `/mcp/messages` and REST; wallet-level only on `/mcp` | Permits are Ed25519-signed capabilities naming the tool, scopes, spend cap, use count, expiry, optional key binding. Wallet policy bundles add standing caps on every path. | `app/services/permits.py`, `app/services/policies.py`; `make red-team-trust-plane` (documented) |
+| **Replay / duplicate side effect** | Enforced for keyed calls; **not** for un-keyed calls on `POST /mcp` | On `/mcp/messages` and REST invoke, a governed call (permit-bound, action-bound, a tool that requires a permit, or any call in strict trust mode) without an idempotency key is refused (`idempotency_key_required`, `mcp.py:1889-1902`). On `POST /mcp` an absent key is replaced by a server-generated `mcp-auto-<uuid>` (`mcp_standard.py:566`) and the call runs, so an un-keyed retry is a new charged operation (for an upstream call the generated key is readable in the signed receipt, as `constraints_evaluated.upstream_dispatch.forwarded_idempotency_key`, by design, as the provider lookup handle); the key is mandatory there only when wallet policy requires human approval. With a client key: same key replays the stored receipt, a changed payload fails closed, at most one **gateway** dispatch and debit. The upstream's effect is once only if it honors the forwarded `io.agentmiddleware/idempotency_key`. A timeout after the dispatch claim is signed `delivery_uncertain`, keeps the debit, and is never redispatched. | [`failure-semantics.md`](failure-semantics.md); `tests/test_adversarial_five_claims.py` (documented) |
+| **Excessive scope / permission creep** | Enforced on `/mcp/messages` and REST, and on `/mcp` when the caller names a permit; wallet-level on `/mcp` when it does not | Permits are Ed25519-signed capabilities naming the tool, scopes, spend cap, use count, expiry, optional key binding. Wallet policy bundles add standing caps on every path. | `app/services/permits.py`, `app/services/policies.py`; `make red-team-trust-plane` (documented) |
 | **Prompt injection, direct or indirect** | Contained, not prevented | The gateway does not see prompts. A hijacked agent holding a permit cannot act outside it, and an out-of-permit call against an existing permit produces a signed `denied` receipt (when the permit names the caller's wallet; a permit naming another wallet is not the caller's evidence and gets no receipt). Refusals that happen before permit lookup (bad key, no permit, no idempotency key, wallet access) are audit events or HTTP errors, not receipts. Tool results are bounded and canonicalized but their content is passed through unlabeled (§3.3). | ASI01 row in the OWASP mapping (documented); `mcp.py:2071-2072` (verified) |
 | **Local MCP server compromise** (client launches a process from configuration) | Not applicable | The gateway launches no process from configuration (§2). | search, §2 (verified) |
 | **SSRF via upstream URL** | Enforced | The URL is shape-validated, resolved, checked against private and reserved ranges, and pinned for the connection while preserving Host and SNI; redirects are refused. Validation runs on every connection (`_http_client` calls `validate_upstream_url` for each session), not once. Production requires public HTTPS. The upstream certificate is verified, not pinned. | `validate_upstream_url`, `_PinnedAsyncTransport`; `test_url_guard_*`, `test_http_transport_pins_validated_address_and_blocks_endpoint_drift` (verified by name) |
@@ -371,16 +380,19 @@ and `test_unparseable_result_envelope_over_streamable_http_is_response_rejected`
 `test_unparseable_envelope_error_does_not_echo_upstream_content`; the boundary
 pins `test_no_response_to_tools_call_stays_delivery_uncertain_in_memory`,
 `test_transport_failure_over_streamable_http_stays_delivery_uncertain`,
-`test_unparseable_initialize_response_stays_pre_dispatch` and
-`test_validation_error_before_the_request_is_sent_is_not_a_rejected_response`;
+`test_unparseable_initialize_response_stays_pre_dispatch`,
+`test_validation_error_before_the_request_is_sent_is_not_a_rejected_response` and
+`test_a_session_that_does_not_wrap_errors_is_classified_by_the_same_rule`;
 and, through the governed routers,
 `test_real_sdk_upstream_failures_get_the_right_charged_receipt_and_never_redispatch`
 (`/mcp/messages`: one debit, one dispatch, a `response_rejected` receipt, a
 replay that sends nothing, and the breaker closed; the JSON-RPC-error case stays
 `delivery_uncertain` and opens it) and
-`test_tools_call_unparseable_upstream_envelope_is_a_tool_result_the_model_can_read`
-(`/mcp`), with `test_tools_call_other_governed_errors_stay_jsonrpc_errors` as the
-refunded counterpart.
+`test_tools_call_rejected_upstream_response_is_a_tool_result_the_model_can_read`
+(`/mcp`; unparseable, oversized and bearer-echo causes) and
+`test_tools_call_marks_the_gateway_outcome_of_each_charged_unknown_outcome`, with
+`test_tools_call_other_governed_errors_stay_jsonrpc_errors` as the refunded
+counterpart.
 
 **Still open, drift detection.** The gateway checks results against no output schema. If a
 customer needs drift detection, it belongs in the adapter, against the
@@ -393,14 +405,22 @@ capability and is held under the named-partner rule in `AGENTS.md`.
 The gateway caps and canonicalizes every tool result and checks it for the
 exact upstream bearer string, but returns its content to the agent unmarked.
 Any other credential in a result passes; so does an encoded or split copy of
-the bearer. Labeling results as untrusted for the agent's context assembly is
+the bearer. A tool-level error result is relayed too: the refunded
+`upstream_returned_error` carries the upstream's result payload, which is
+upstream-authored text, in `error.data.upstream_result` on `/mcp/messages`, REST
+and `/mcp`. Labeling results as untrusted for the agent's context assembly is
 a runtime concern above this boundary.
 
 ### 3.4 Custody and network
 
-`TRUST_SIGNING_PRIVATE_KEY_B64` is an environment variable and there is no
-KMS (`SECURITY_LIMITATIONS.md`), so a host compromise can forge permits and
-receipts. `MCP_UPSTREAM_BEARER_TOKEN` is a deployment variable read at
+By default (`TRUST_SIGNING_BACKEND=env`) the signing key is the environment
+variable `TRUST_SIGNING_PRIVATE_KEY_B64`, so a host compromise can forge permits
+and receipts. An AWS KMS backend exists as an opt-in
+(`TRUST_SIGNING_BACKEND=aws_kms`, `app/services/kms_signer.py`): the private key
+then never enters the process, at the cost of a blocking network call per
+signature (`SECURITY_LIMITATIONS.md`, which also lists what is not implemented:
+other KMS providers and Vault Transit). A deployment that has not opted in has
+no KMS. `MCP_UPSTREAM_BEARER_TOKEN` is a deployment variable read at
 startup, so rotating it needs a restart. An egress allowlist for the single
 upstream origin is the operator's job. The upstream certificate is verified
 but not pinned.

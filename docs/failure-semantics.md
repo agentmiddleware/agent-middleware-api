@@ -110,7 +110,7 @@ never probed or refunded. And on `POST /mcp`, where enabled, both arrive as a
 `-32006` is also the code of refunded, retry-safe failures
 (`upstream_returned_error`, `upstream_pre_dispatch_failed`), which stay errors.
 `/mcp/messages` and REST keep `-32005` and `-32006`
-(`test_tools_call_unparseable_upstream_envelope_is_a_tool_result_the_model_can_read`).
+(`test_tools_call_rejected_upstream_response_is_a_tool_result_the_model_can_read`).
 
 Requests rejected before a valid permit and an executable tool are established
 produce no receipt — there is no authority to bill against. The README states

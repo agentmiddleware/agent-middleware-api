@@ -555,8 +555,8 @@ async def test_the_standard_surface_answers_the_same_named_outcome(
 
     The two transports do not share an exception ladder: ``/mcp/messages``
     matches types itself and ``/mcp`` maps them into ``McpError``. A name on one
-    is not a name on the other, and ``/mcp`` is the surface new integrations are
-    pointed at.
+    is not a name on the other, and ``/mcp`` is the standards-compliant surface,
+    where an operator enables it.
 
     It also pins the body. Refusing a retry without saying what to do instead
     leaves the caller to guess, and the wrong guess -- a fresh idempotency key --

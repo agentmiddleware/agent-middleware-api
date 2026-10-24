@@ -749,21 +749,27 @@ async def test_completed_call_with_drifted_live_schema_is_a_charged_success_end_
         get_service_registry().unregister_local(tool_name)
 
 
-def _adapter_over_real_sdk_server(server: Server, tool_name: str) -> UpstreamMcpAdapter:
-    """The real adapter over a real in-memory SDK session, for ``tool_name``."""
+def _adapter_over_real_sdk_server(
+    server: Server, tool_name: str, **settings: Any
+) -> UpstreamMcpAdapter:
+    """The real adapter over a real in-memory SDK session, for ``tool_name``.
+
+    ``settings`` overrides the adapter's configuration (for example a small
+    ``MCP_UPSTREAM_MAX_RESPONSE_BYTES``). The bearer token is
+    ``secret-partner-token``.
+    """
+    values: dict[str, Any] = {
+        "ENVIRONMENT": "local",
+        "MCP_UPSTREAM_ENABLED": True,
+        "MCP_UPSTREAM_URL": "http://localhost:9000/mcp",
+        "MCP_UPSTREAM_TOOL_NAME": "partner.echo",
+        "MCP_UPSTREAM_PUBLIC_TOOL_ID": tool_name,
+        "MCP_UPSTREAM_BEARER_TOKEN": "secret-partner-token",
+        "MCP_UPSTREAM_CREDITS_PER_CALL": "2",
+    }
+    values.update(settings)
     adapter = UpstreamMcpAdapter(
-        UpstreamMcpConfiguration.from_settings(
-            Settings(
-                _env_file=None,
-                ENVIRONMENT="local",
-                MCP_UPSTREAM_ENABLED=True,
-                MCP_UPSTREAM_URL="http://localhost:9000/mcp",
-                MCP_UPSTREAM_TOOL_NAME="partner.echo",
-                MCP_UPSTREAM_PUBLIC_TOOL_ID=tool_name,
-                MCP_UPSTREAM_BEARER_TOKEN="secret-partner-token",
-                MCP_UPSTREAM_CREDITS_PER_CALL="2",
-            )
-        )
+        UpstreamMcpConfiguration.from_settings(Settings(_env_file=None, **values))
     )
     adapter._discovered_tool = DiscoveredUpstreamTool(
         name="partner.echo",

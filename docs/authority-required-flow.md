@@ -132,10 +132,10 @@ caller lacks authority for it right now" returns:
 }
 ```
 
-Scope: the standard `/mcp` surface. `POST /mcp/messages` is deprecated in
-favor of `/mcp` and stays frozen — its clients hand-orchestrate permits by
-definition, and rewriting a deprecated surface widens the change for no
-partner value.
+Scope: the standard `/mcp` surface, which ships off. `POST /mcp/messages` is
+deprecated in favor of `/mcp` once an operator enables it, and stays frozen —
+its clients hand-orchestrate permits by definition, and rewriting a deprecated
+surface widens the change for no partner value.
 
 ### D2. Resume semantics: same key while undecided, new key after a decided denial
 

@@ -5145,11 +5145,12 @@ async def _handle_tools_call(
     summary="Invoke a registered MCP tool",
     deprecated=True,
     description=(
-        "Legacy REST-shaped invoke, kept for existing clients. New "
-        "integrations should call tools through the standard MCP Streamable "
-        "HTTP endpoint at POST /mcp (or the legacy JSON-RPC POST "
-        "/mcp/messages); every entry point runs the same governed "
-        "permit→meter→receipt path."
+        "Legacy REST-shaped invoke, kept for existing clients. Check "
+        "`/.well-known/agent.json` before assuming the standard MCP "
+        "Streamable HTTP endpoint at POST /mcp is available; it ships off. "
+        "Where it is enabled, new integrations can call tools through it; "
+        "otherwise use POST /mcp/messages or this route. Every enabled entry "
+        "point runs the same governed permit→meter→receipt path."
     ),
 )
 async def invoke_tool(

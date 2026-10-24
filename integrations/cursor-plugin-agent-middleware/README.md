@@ -6,7 +6,7 @@ Public-ready scaffold, not yet submitted to any marketplace. Layout mirrors the 
 
 The `agent-middleware` plugin connects Cursor to the Agent Middleware API so that side-effecting tool calls follow one guardrail: permit before action, receipt after.
 
-- `plugins/agent-middleware/mcp.json` points at the AMW API base `https://api.thisisatest.tech`, standard MCP endpoint `POST /mcp` (Streamable HTTP, the preferred endpoint in this repo; legacy JSON-RPC `POST /mcp/messages` also exists). The API key is the `${AMW_API_KEY}` environment placeholder. No real key is stored anywhere in this tree.
+- `plugins/agent-middleware/mcp.json` points at the AMW API base `https://api.thisisatest.tech`, standard MCP endpoint `POST /mcp` (Streamable HTTP). That endpoint ships off (`ENABLE_STANDARD_MCP_ENDPOINT` defaults to false) and the production runbook keeps it off, so the plugin works only against a deployment whose operator has enabled it; the live governed path otherwise is legacy JSON-RPC `POST /mcp/messages`, which the plugin does not use. The API key is the `${AMW_API_KEY}` environment placeholder. No real key is stored anywhere in this tree.
 - `plugins/agent-middleware/skills/amw-permit-receipt/SKILL.md` tells the agent to request a permit (`POST /v1/permits`) before any side-effecting tool call and to record the signed receipt (`GET /v1/receipts/{receipt_id}`) after the action.
 
 Note on transport: the endpoint path (`/mcp`) and the `X-API-Key` header shape were checked against this repo (standard MCP router, repo `.mcp.json`, quickstart docs). Cursor's exact remote-server key names may vary by version, so confirm the `mcp.json` fields against your Cursor version when installing.

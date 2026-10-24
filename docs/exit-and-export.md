@@ -76,7 +76,9 @@ a database copy and a signing key (§4, step 7).
 
 ## 3. What does not leave, and what is not promised
 
-- No traces, because none are produced.
+- No exportable traces. Optional OpenTelemetry tracing exists but is off by
+  default (`OTEL_TRACING_ENABLED`) and exports only an allowlist of attributes
+  to an operator-run collector (see the Traces row in §1).
 - No independent audit-chain verifier yet; the check is first-party.
 - **The audit chain is tamper-evident, not immutable.** Whoever administers
   the database can delete rows, and whoever holds the signing key can rewrite
@@ -90,7 +92,9 @@ a database copy and a signing key (§4, step 7).
 - **No deletion controls.** `docs/deploy-railway.md` lists
   retention, deletion, and legal-hold controls among things not yet built. No
   route deletes receipts, ledger rows, audit events, or stored results; the
-  only core `DELETE` route is for API keys. Removal means the operator
+  only mounted `DELETE` route that deletes anything is for API keys (`DELETE
+  /mcp` and `DELETE /mcp/public` are stubs that refuse and delete nothing).
+  Removal means the operator
   deleting the customer's deployment project. No timeline is documented
   (not verified), and provider backups are not addressed.
 - No documented procedure, timeline, or commitment for handing over a

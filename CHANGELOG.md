@@ -74,7 +74,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   obtained. The outer `ValidationError` / `JSONDecodeError` branch did not apply
   the "a result is already in hand" rule, so such an error raised only while the
   session closes could turn a received result into `response_rejected`, or
-  replace a known rejection's code. It now applies it.
+  replace a known rejection's code. It now applies it, and applies the same
+  parse-failure rule as the `call_tool` await (`_is_unparseable_response`): after
+  dispatch, a `CallToolResult` validation error or a JSON decode error is
+  `response_rejected`, and any other validation error is `delivery_uncertain`.
+  That branch is reached only by a session that does not wrap exceptions, where
+  the request-build error above would otherwise have been labeled a rejection
+  again.
 - **Behavior change, `POST /mcp` (where enabled):** `response_rejected` is
   charged like `delivery_uncertain`, so it is now returned like it: a
   `tools/call` result with `isError: true`, text saying the upstream answered but
@@ -83,9 +89,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `status: "unknown"` and `reason: "response_rejected"`. It was a bare `-32006`,
   the code that refunded, retry-safe failures (`upstream_returned_error`,
   `upstream_pre_dispatch_failed`) also use, so a model shown only the message
-  could resend a call whose charge stands and whose tool probably ran. Those
-  refunded failures stay JSON-RPC errors. `/mcp/messages` and REST are
-  unchanged. The helper is now `_unknown_outcome_tool_result`
+  could resend a call whose charge stands and whose tool probably ran. This
+  covers every cause of `response_rejected`: an unparseable envelope, an
+  oversized result, and a result echoing the bearer token. Those refunded
+  failures stay JSON-RPC errors. `/mcp/messages` and REST are unchanged. The helper is now `_unknown_outcome_tool_result`
   (was `_delivery_uncertain_tool_result`).
 - **Behavior change:** a malformed envelope is no longer counted toward the
   optional circuit breaker. The `response_rejected` path never fed it (an
@@ -105,8 +112,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New tests drive a real SDK session behind the real adapter, in memory and over
   the production Streamable HTTP client: four envelope shapes, a fixture guard
   (the envelope must reach the client and fail there), the no-response
-  boundary, a request that cannot be built stays `delivery_uncertain`, a
-  malformed `initialize` stays pre-dispatch, a secret-echo check, and
+  boundary, a request that cannot be built stays `delivery_uncertain` (also with
+  a session that does not wrap exceptions), a malformed `initialize` stays
+  pre-dispatch, a secret-echo check, the gateway outcome recorded on `/mcp`
+  (`failed` for a rejected response, `unknown` for an undelivered one), and
   governed-router tests on `/mcp/messages` (one debit, one dispatch, a
   `response_rejected` receipt, no redispatch on replay, circuit breaker closed,
   against a JSON-RPC error that opens it) and on `/mcp`. See
@@ -142,6 +151,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `docs/research/gateway-overhead-2026-10-23/`. The public site's figure is not
   touched.
 - `TROUBLESHOOTING.md` gains a `response_rejected` receipt section.
+- Further claims corrected after a second review. The posture page said
+  operator permit constraints apply only on `/mcp/messages` and REST; `POST /mcp`
+  honours a permit the caller names (`_meta["io.agentmiddleware/permit_id"]` or
+  `mcpContext.permit_id`), enforcing `forbidden_fields` with a signed `denied`
+  receipt, refuses action-bound tools without one, and mints an unconstrained
+  permit only when the reference is omitted (now pinned by a test). It said there
+  is no KMS and no row-level security; an AWS KMS signing backend
+  (`TRUST_SIGNING_BACKEND=aws_kms`) and PostgreSQL row-level security
+  (`TENANT_RLS_MODE=enforce`) exist as opt-ins, default off. The idempotency-key
+  refusal also covers action-bound calls and tools that require a permit. The
+  posture page now notes that the refunded `upstream_returned_error` relays the
+  upstream's result payload in `error.data.upstream_result` on all three
+  surfaces, and that a keyless `/mcp` call's generated key is readable in the
+  signed receipt as the forwarded key. `docs/exit-and-export.md` no longer says
+  traces are not produced, and says the only mounted `DELETE` route that deletes
+  anything is for API keys (the `/mcp` and `/mcp/public` `DELETE` handlers are
+  stubs). `docs/gateway-overhead.md` quotes only the first-call p99 and max, and
+  records the kernel release rather than a macOS version the result files do not
+  contain. A comment in `mcp_standard.py` that said a keyless call's key is
+  "never returned" is corrected.
+- Endpoint wording, leftovers. The REST invoke route's OpenAPI description no
+  longer tells every integration to call `POST /mcp`; it points at
+  `/.well-known/agent.json` as the `/mcp/messages` description does, and
+  `docs/openapi.json` is regenerated. The Cursor plugin README and skill say the
+  standard endpoint ships off and the plugin works only against a deployment that
+  enables it. `README.md` names the REST invoke route as supported;
+  `docs/authority-required-flow.md` and two test docstrings no longer present
+  `/mcp` as the surface integrations are told to use. The plugin's
+  `mcp.json`, which targets `/mcp` on the first-party host, is deliberately left
+  as is: that is a product decision.
 
 ### Added — per-upstream concurrency limit and circuit breaker (default off)
 

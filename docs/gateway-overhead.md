@@ -28,11 +28,11 @@ permit), strict trust mode, zero-latency in-process upstream:
 | **Replay** (same key, stored receipt returned, nothing re-executed) | **5.4–5.6 ms** | 6.6–10.0 ms | 2 × 1,000 |
 
 Two runs back to back, 20 warm-up calls discarded. Ranges are the spread
-between the two runs. The p99 and max values are in the raw files but are not
-quoted here: p99 varied from 77 to 167 ms and max from 97 to 263 ms between
-runs, and the first-call p95 from 38 to 77 ms, which is scheduler noise on a
-loaded machine (the second run started at a load average of 34), not a property
-of the gateway.
+between the two runs. The p99 and max values are in the raw files, and only the
+first-call ones are quoted here: first-call p99 varied from 77 to 167 ms and max
+from 97 to 263 ms between runs, and the first-call p95 from 38 to 77 ms, which
+is scheduler noise on a loaded machine (the second run started at a load average
+of 34), not a property of the gateway.
 
 What the first call pays for, in pipeline order
 ([`POLICY_ENFORCEMENT.md`](POLICY_ENFORCEMENT.md) §2): API-key hash lookup and
@@ -123,7 +123,7 @@ stderr.
 
 | | |
 |---|---|
-| Machine | Apple M4 Pro, 14 cores, macOS 26.7.2 (Darwin 25.6.0), Python 3.13.14 |
+| Machine | Apple M4 Pro, 14 cores, Darwin 25.6.0 (the result files record the kernel release, not the macOS marketing version), Python 3.13.14 |
 | Load | **Not idle.** Load average (1/5/15 min) was 22.8/16.0/21.9 at the start of run 1 and 33.8/19.8/23.0 at run 2, on a machine running many concurrent sessions. Both runs are therefore pessimistic, and run 2 (the heavier) shows it in its tail: first-call p95 77 ms against 38 ms. Their agreement on the p50 should not be read as proof of stability. |
 | Code | commit `0698168f`, with `git_dirty` false in both result files (the script counts tracked files only). The documentation commit that follows changes no code. The measuring script is the version committed with this page |
 | Packages | sqlalchemy 2.0.54, aiosqlite 0.22.1, cryptography 50.0.2, httpx 0.28.1, mcp 1.30.0 |

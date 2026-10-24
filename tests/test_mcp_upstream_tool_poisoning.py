@@ -21,8 +21,9 @@ What they deliberately do not claim:
 * Tool *results* are relayed to the agent unlabeled; nothing here tests that.
 * "Discovery happens once at startup" is true by code reading (the only call
   site of ``register_configured_upstream_mcp`` under ``app/`` is the
-  ``app/main.py`` lifespan; ``scripts/failure_lab.py`` also calls it, to run a
-  harness), not by any assertion here.
+  ``app/main.py`` lifespan; ``failure_lab/gateway.py`` and
+  ``scripts/failure_lab.py`` also call it, to run harnesses), not by any
+  assertion here.
 * Most tests replace the adapter's MCP session with a fake, so they observe what
   the gateway's code does, not SDK wire traffic. The real SDK validates a result
   against the upstream's live schema after the call (mcp 1.30.0), so the tests

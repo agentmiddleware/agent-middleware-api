@@ -655,6 +655,19 @@ async def _await_guarded_response(
         await asyncio.gather(operation_task, rejection_task, return_exceptions=True)
 
 
+def _is_unparseable_response(exc: Exception) -> bool:
+    """Whether ``exc`` means a response was received but could not be parsed.
+
+    A JSON decode failure, or a validation error for the ``CallToolResult``
+    model, which the SDK raises only after the upstream's JSON-RPC result has
+    arrived. A validation error for any other model, such as the request the
+    SDK builds before sending, says nothing about a response.
+    """
+    if isinstance(exc, json.JSONDecodeError):
+        return True
+    return isinstance(exc, ValidationError) and exc.title == CallToolResult.__name__
+
+
 def _contains_exact_secret(value: Any, secret: str) -> bool:
     """Return whether an untrusted JSON-like value reflects the bearer token."""
     if isinstance(value, str):
@@ -1094,7 +1107,7 @@ class UpstreamMcpAdapter:
                     # below can match. Any other validation error, such as one
                     # building the request before it is sent, says nothing
                     # about a response and is classified as before.
-                    if exc.title != CallToolResult.__name__:
+                    if not _is_unparseable_response(exc):
                         raise
                     response_rejected = UpstreamMcpResponseRejectedError(
                         "upstream_response_invalid"
@@ -1126,7 +1139,7 @@ class UpstreamMcpAdapter:
                 )
             else:
                 raise
-        except (ValidationError, json.JSONDecodeError):
+        except (ValidationError, json.JSONDecodeError) as exc:
             if dispatch_claim_unavailable is not None:
                 raise dispatch_claim_unavailable
             if response_guard.rejection_code is not None:
@@ -1148,9 +1161,14 @@ class UpstreamMcpAdapter:
                     },
                 )
             elif dispatch_started:
-                raise UpstreamMcpResponseRejectedError(
-                    "upstream_response_invalid"
-                ) from None
+                # The same rule as at the call_tool await. Only a failure to
+                # parse a response is a rejection; any other validation error
+                # after dispatch leaves the outcome unknown.
+                if _is_unparseable_response(exc):
+                    raise UpstreamMcpResponseRejectedError(
+                        "upstream_response_invalid"
+                    ) from None
+                raise UpstreamMcpDeliveryUncertainError() from None
             else:
                 raise UpstreamMcpPreDispatchError() from None
         except Exception:

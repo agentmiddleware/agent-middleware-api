@@ -24,6 +24,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from mcp.shared.memory import create_connected_server_and_client_session
 from mcp.types import (
     CallToolRequest,
+    CallToolRequestParams,
     CallToolResult,
     ListToolsResult,
     ServerResult,
@@ -93,6 +94,15 @@ def _unparseable_result_error() -> ValidationError:
     except ValidationError as exc:
         return exc
     raise AssertionError("invalid CallToolResult unexpectedly passed validation")
+
+
+def _request_validation_error() -> ValidationError:
+    """The error the SDK raises while building a request, before it is sent."""
+    try:
+        CallToolRequestParams(name="partner.write", arguments={1: "x"})  # type: ignore[dict-item]
+    except ValidationError as exc:
+        return exc
+    raise AssertionError("invalid request params unexpectedly passed validation")
 
 
 class FakeSession:
@@ -1873,6 +1883,57 @@ async def test_validation_error_before_the_request_is_sent_is_not_a_rejected_res
     assert exc_info.value.dispatch_started is True
     assert claims == ["claimed"]
     assert served == []
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("call_error", "expected"),
+    [
+        pytest.param(
+            _unparseable_result_error(),
+            UpstreamMcpResponseRejectedError,
+            id="result-model-validation-error",
+        ),
+        pytest.param(
+            json.JSONDecodeError("not json", "{", 1),
+            UpstreamMcpResponseRejectedError,
+            id="json-decode-error",
+        ),
+        pytest.param(
+            _request_validation_error(),
+            UpstreamMcpDeliveryUncertainError,
+            id="request-model-validation-error",
+        ),
+        pytest.param(
+            _cleanup_validation_error(),
+            UpstreamMcpDeliveryUncertainError,
+            id="validation-error-for-another-model",
+        ),
+    ],
+)
+async def test_a_session_that_does_not_wrap_errors_is_classified_by_the_same_rule(
+    call_error: Exception, expected: type[Exception]
+) -> None:
+    """The handlers must not depend on the SDK's task group wrapping the error.
+
+    ``FakeSession`` raises the bare exception, as a session without the anyio
+    task group would. After dispatch, only a failure to parse a response (a
+    ``CallToolResult`` validation error or a JSON decode error) is
+    ``response_rejected``. Any other validation error, such as the one building
+    a request that was never sent, says nothing about a response and stays
+    ``delivery_uncertain``.
+    """
+    adapter = UpstreamMcpAdapter(_configuration())
+    _mark_discovered(adapter)
+    _bind_session(adapter, FakeSession(call_error=call_error))
+    claims: list[str] = []
+
+    with pytest.raises(expected) as exc_info:
+        await _call_recording_claims(adapter, claims)
+
+    assert type(exc_info.value) is expected
+    assert exc_info.value.dispatch_started is True
+    assert claims == ["claimed"]
 
 
 def _scripted_mcp_client(
