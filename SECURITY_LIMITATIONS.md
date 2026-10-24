@@ -364,11 +364,15 @@ production-like boots refuse):
 - `/v1/dev-keys/self-provision` stays runtime-gated by its own flag and is
   advertised in the schema only when that flag is on (never in production).
 
-The legacy invoke entry points `POST /mcp/messages` and
-`POST /mcp/tools/{id}/invoke` remain mounted for existing clients and the
-local proof scripts but are marked `deprecated` in the spec; the standard
-MCP Streamable HTTP endpoint at `POST /mcp` is the supported path. All entry
-points run the same governed permit→meter→receipt path.
+`POST /mcp/messages` and `POST /mcp/tools/{id}/invoke` are the live governed
+path in the supported pilot, and are marked `deprecated` in the spec. The
+standard MCP Streamable HTTP endpoint at `POST /mcp` ships off
+(`ENABLE_STANDARD_MCP_ENDPOINT` defaults to false) and the production runbook
+([`docs/deploy-railway.md`](docs/deploy-railway.md)) requires it to stay off,
+because it mints a short-lived, single-tool permit on the caller's behalf and
+generates an idempotency key when the client sends none. It becomes the
+preferred path for new integrations once an operator enables it. Every entry
+point that is enabled runs the same governed permit→meter→receipt path.
 
 ## Public Health Reporting
 

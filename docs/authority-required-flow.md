@@ -132,10 +132,10 @@ caller lacks authority for it right now" returns:
 }
 ```
 
-Scope: the standard `/mcp` surface. `POST /mcp/messages` is deprecated in
-favor of `/mcp` and stays frozen — its clients hand-orchestrate permits by
-definition, and rewriting a deprecated surface widens the change for no
-partner value.
+Scope: the standard `/mcp` surface, which ships off. `POST /mcp/messages` is
+deprecated in favor of `/mcp` once an operator enables it, and stays frozen —
+its clients hand-orchestrate permits by definition, and rewriting a deprecated
+surface widens the change for no partner value.
 
 ### D2. Resume semantics: same key while undecided, new key after a decided denial
 
@@ -226,8 +226,10 @@ resume) — opposite instructions under one code. On `/mcp` the worst of this
 is solved by moving `delivery_uncertain` out of the error channel: it returns
 a tool result with `isError: true`, explicit do-not-resend text, the receipt,
 and `_meta["io.agentmiddleware/outcome"].status == "unknown"`
-(`_delivery_uncertain_tool_result` in `app/routers/mcp_standard.py`), because
-a JSON-RPC error commonly reaches the model as its message alone.
+(`_unknown_outcome_tool_result` in `app/routers/mcp_standard.py`), because
+a JSON-RPC error commonly reaches the model as its message alone. The other
+charged, effect-unknown outcome, `response_rejected` (`-32006`, a code refunded
+retry-safe failures also use), takes the same route there for the same reason.
 `human_approval_pending` still carries `data.error = "authority_required"`.
 `/mcp/messages` and REST keep `delivery_uncertain` on `-32005`, where its
 data carries `receipt` and `dispatch` and never an `error` key. The remaining

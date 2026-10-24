@@ -5,7 +5,7 @@ they adopt. This page lists the artifacts a customer can take, with each one's
 export route, format, and whether the thing that checks it afterwards depends
 on us. It is not an exhaustive data inventory; §3 lists what has no export.
 
-Last updated: 2026-10-22. Routes are from the routers under `app/routers/`,
+Last updated: 2026-10-23. Routes are from the routers under `app/routers/`,
 except `/openapi.json`, which FastAPI serves itself. Verifiers are from
 `b2a_sdk/`. "Independent" means the verifier imports none of this application
 and needs no access to the issuer at verification time. "First-party" means
@@ -91,8 +91,12 @@ a database copy and a signing key (§4, step 7).
   for keys needs out-of-band pinning, frozen until a named partner requires it.
 - **No deletion controls.** `docs/deploy-railway.md` lists
   retention, deletion, and legal-hold controls among things not yet built. No
-  route deletes receipts, ledger rows, audit events, or stored results; the
-  only core `DELETE` route is for API keys. Removal means the operator
+  route deletes receipts, ledger rows, audit events, or stored results; in
+  the default configuration no mounted `DELETE` route deletes anything. The
+  API-key route only revokes (it sets `status`, `revoked_at` and `revoke_reason`
+  and keeps the row), and `DELETE /mcp` and `DELETE /mcp/public` are stubs that
+  refuse. Proof surfaces, which production
+  refuses at boot, mount further `DELETE` routes. Removal means the operator
   deleting the customer's deployment project. No timeline is documented
   (not verified), and provider backups are not addressed.
 - No documented procedure, timeline, or commitment for handing over a

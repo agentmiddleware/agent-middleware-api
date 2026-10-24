@@ -4,5 +4,5 @@ Permit before action, receipt after, for side-effecting tool calls made from Cur
 
 ## Included
 
-- `mcp.json`: MCP server config pointing at the Agent Middleware API (`https://api.thisisatest.tech/mcp`), with the API key as the `${AMW_API_KEY}` environment placeholder.
+- `mcp.json`: MCP server config pointing at the Agent Middleware API (`https://api.thisisatest.tech/mcp`), with the API key as the `${AMW_API_KEY}` environment placeholder. The standard `/mcp` endpoint ships off (`ENABLE_STANDARD_MCP_ENDPOINT` defaults to false) and the production runbook keeps it off, so this config works only against a deployment whose operator has enabled it.
 - `skills/amw-permit-receipt/`: the governance skill. Request an AMW permit before any side-effecting tool call, record the receipt after the action.
