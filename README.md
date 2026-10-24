@@ -286,12 +286,17 @@ curl -sS -X POST "$API_URL/mcp/messages" \
   }"
 ```
 
-`POST /mcp/messages` is the legacy JSON-RPC transport — deprecated in the
-OpenAPI contract, fully supported, and the only JSON-RPC surface in a default
-local run. `POST /mcp` is the standards-compliant Streamable HTTP endpoint on
-the official MCP SDK; it is opt-in today (`ENABLE_STANDARD_MCP_ENDPOINT=true`,
-default off) and new integrations should prefer it. Both run the same governed
-permit → meter → receipt path.
+`POST /mcp/messages` and the REST invoke route `POST /mcp/tools/{id}/invoke`
+are what the supported pilot runs on — both marked deprecated in the OpenAPI
+contract, both fully supported, and `/mcp/messages` is the only JSON-RPC
+surface in a default local run. `POST /mcp` is the standards-compliant
+Streamable HTTP endpoint on the official MCP SDK. It ships off
+(`ENABLE_STANDARD_MCP_ENDPOINT`, default false) and the production runbook
+([docs/deploy-railway.md](docs/deploy-railway.md)) requires it to stay off,
+because it mints a short-lived, single-tool permit on the caller's behalf and
+generates an idempotency key when the client sends none. It becomes the
+preferred path for new integrations once an operator enables it. Both run the
+same governed permit → meter → receipt path.
 
 An agent holding no authority can ask a human for it with
 `POST /v1/permit-requests`. Full HTTP sequence:

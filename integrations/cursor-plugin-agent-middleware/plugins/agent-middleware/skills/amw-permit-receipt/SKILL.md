@@ -16,7 +16,7 @@ Govern side-effecting tool calls through the Agent Middleware API: permit before
 ## Instructions
 
 1. Before the side-effecting call, request a permit from the Agent Middleware API (`POST /v1/permits`). The permit names the wallet, the allowed tool, and the spend cap. Do not proceed without one.
-2. Pass the issued `permit_id` with the governed invocation (standard MCP endpoint `POST /mcp`, legacy JSON-RPC `POST /mcp/messages`).
+2. Pass the issued `permit_id` with the governed invocation (legacy JSON-RPC `POST /mcp/messages`, or the standard MCP endpoint `POST /mcp` on a deployment whose operator has enabled it; it ships off).
 3. After the action, record the receipt: keep the returned receipt id and payload with the permit id that authorized it, so the action can be audited later (`GET /v1/receipts/{receipt_id}`, or `GET /v1/permits/{permit_id}/receipts`).
 4. If the call is denied (for example the spend cap is reached), keep the denial response with the same permit reference instead of retrying with a different permit.
 5. Never store API keys in files, prompts, or receipts. The key always comes from the `AMW_API_KEY` environment placeholder.

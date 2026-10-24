@@ -7,7 +7,7 @@ description: Find the live API contract and invoke a governed MCP tool.
 
 # HTTP API
 
-Read `GET /openapi.json` on your gateway for its current HTTP contract. Use `GET /v1/discover/tools` to find a tool and its argument schema. Create a Permit with `POST /v1/permits`. The standard MCP path invokes at `POST /mcp` when enabled. The example below uses `POST /mcp/messages`, a deprecated JSON-RPC route retained for existing clients and local proof scripts.
+Read `GET /openapi.json` on your gateway for its current HTTP contract. Use `GET /v1/discover/tools` to find a tool and its argument schema. Create a Permit with `POST /v1/permits`. The standard MCP path invokes at `POST /mcp` when an operator enables it; it ships off. The example below uses `POST /mcp/messages`, the live governed JSON-RPC route in the supported pilot. It is marked deprecated because it is not the standard MCP transport, which is meant to replace it once enabled.
 
 Send your wallet key in `X-API-Key`. Permit creation requires an `Idempotency-Key` header. A Call includes its Permit id, wallet id, and Request key in `mcpContext`; the same key can also be sent in the header. Replace the tool name and arguments below with values from discovery.
 
