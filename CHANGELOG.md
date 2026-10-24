@@ -141,8 +141,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   commits older. Of 17, 15 had moved (by 1 to about 970 lines), one SDK range
   was a line short, and one (`mcp.py:15`) was still right. Each is re-pinned and
   the claim beside it re-read. Claims that no longer held, corrected: the `idempotency_key_required`
-  refusal applies to every governed call, including any call in strict trust
-  mode, not only permit-bound ones; a signed `denied` receipt is issued only when
+  refusal applies to a call that names a permit and sends no key (a governed
+  call that names no permit is refused sooner, as `permit_required`,
+  `action_permit_required` or `Tool not found`, and an action-bound call gets a
+  server-derived `act1-` key and is never refused for lack of one); a signed
+  `denied` receipt is issued only when
   the permit names the caller's wallet; the SDK validation range is
   `mcp/client/session.py:412-448`; `docs/exit-and-export.md` said no
   OpenTelemetry instrumentation exists, but optional tracing

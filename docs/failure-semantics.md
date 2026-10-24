@@ -319,8 +319,10 @@ Only a genuinely **absent** key — no header, no body entry, or a JSON `null`
 entry — is treated as an un-keyed call. On the standard MCP endpoint that means
 a generated key, and every un-keyed call, retries included, is a new charged
 operation. Clients that retry must always send their own persistent key; a
-governed `/mcp/messages` call without one is refused with
-`idempotency_key_required`.
+`/mcp/messages` call that names a permit but sends none is refused with
+`idempotency_key_required` (an action-bound call is given a server-derived key
+instead, and a call that names no permit is refused sooner, as
+`permit_required`).
 
 The governed AWI HTTP routes — `POST /v1/awi/execute`,
 `/v1/awi/passkey/challenge`, `/v1/awi/passkey/verify`, `/v1/awi/dom/sync`,

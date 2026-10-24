@@ -92,10 +92,10 @@ a database copy and a signing key (§4, step 7).
 - **No deletion controls.** `docs/deploy-railway.md` lists
   retention, deletion, and legal-hold controls among things not yet built. No
   route deletes receipts, ledger rows, audit events, or stored results; in
-  the default configuration no mounted `DELETE` route deletes anything. The one
-  mounted `DELETE` route, for API keys, only revokes (it sets `status`,
-  `revoked_at` and `revoke_reason` and keeps the row), and `DELETE /mcp` and
-  `DELETE /mcp/public` are stubs that refuse. Proof surfaces, which production
+  the default configuration no mounted `DELETE` route deletes anything. The
+  API-key route only revokes (it sets `status`, `revoked_at` and `revoke_reason`
+  and keeps the row), and `DELETE /mcp` and `DELETE /mcp/public` are stubs that
+  refuse. Proof surfaces, which production
   refuses at boot, mount further `DELETE` routes. Removal means the operator
   deleting the customer's deployment project. No timeline is documented
   (not verified), and provider backups are not addressed.
