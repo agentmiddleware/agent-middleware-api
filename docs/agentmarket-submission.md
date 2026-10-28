@@ -75,7 +75,7 @@ pilot.
 
 ## Repository
 
-https://github.com/PetrefiedThunder/agent-middleware-api
+https://github.com/agentmiddleware/agent-middleware-api
 
 ## Demo
 
@@ -100,7 +100,7 @@ agent-governance
 
 ## Contact
 
-- GitHub Issues: https://github.com/PetrefiedThunder/agent-middleware-api/issues
+- GitHub Issues: https://github.com/agentmiddleware/agent-middleware-api/issues
 - Public operator email: intentionally omitted until a monitored address and
   accountable identity pass the launch contact gate. Do not submit this listing
   before those values are configured.

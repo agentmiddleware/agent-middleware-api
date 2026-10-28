@@ -14,7 +14,7 @@ This package is not published to PyPI. Install it from a checkout of
 this repository:
 
 ```bash
-git clone https://github.com/PetrefiedThunder/agent-middleware-api.git
+git clone https://github.com/agentmiddleware/agent-middleware-api.git
 cd agent-middleware-api
 python -m pip install -e ./b2a_sdk
 python -m pip install -e wrappers/autogen-agent-middleware
