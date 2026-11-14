@@ -71,13 +71,50 @@ isolation regressions are in `tests/test_permit_effective_lifecycle.py`.
 
 | Outcome | Trigger | Wallet | Gateway observation | HTTP / JSON-RPC | Proven by |
 |---|---|---|---|---|---|
-| `success` | Tool returned a valid result; receipt committed | **Charged** | A valid response reached the gateway; the downstream effect is not independently proven | 200 | `test_governed_mcp_invoke_returns_receipt_and_replay_does_not_double_charge`, `test_governed_upstream_success_replays_without_second_debit_or_dispatch` |
+| `success` | Tool returned a valid result; receipt committed | **Charged** | A valid response reached the gateway; the downstream effect is not independently proven | 200 | `test_governed_mcp_invoke_returns_receipt_and_replay_does_not_double_charge`, `test_governed_upstream_success_replays_without_second_debit_or_dispatch`, `test_completed_call_with_drifted_live_schema_is_a_charged_success_end_to_end` |
 | `denied` | Permit, wallet-policy, recipient-domain, or human-approval denial — all evaluated **before money moves** | Never debited; reservation released | No gateway dispatch | 403 / `-32003` | `test_frozen_wallet_denial_returns_receipt_and_replays_without_charge`, `test_out_of_scope_governed_mcp_denial_returns_receipt`, `test_rejected_approval_is_terminal_and_replays`, `test_upstream_permit_denials_never_charge_or_dispatch` |
 | `insufficient_funds` | The charge itself was refused (balance, child-wallet cap, daily limit) | Never debited; reservation released | No gateway dispatch | 402 / `-32004` | `test_insufficient_funds_returns_receipt_and_replays_without_charge` |
 | `failed_refunded` | A **confirmed** failure: local tool raised; upstream returned `isError: true`; DNS/TLS/`initialize` failed before the remote dispatch claim; charge refused on the upstream path; or a crash before dispatch, finalized by the reconciler | Debit refunded (or never taken). The receipt signs `credits_charged = 0`; the ledger separately proves the correlated refund | An `isError` response may have reached the gateway; pre-claim cases were not dispatched; no downstream effect is independently proven | 500 or 502 / `-32006` (402/403 for refused charges) | Pre-claim failure, guarded completion, and reconciliation tests in `tests/test_mcp_upstream_governed.py`, `tests/test_mcp_dispatch_router_claim.py`, and `tests/test_mcp_dispatch_reconciliation.py` |
 | `delivery_uncertain` | The one-shot remote dispatch claim was committed, then a timeout, transport failure, or process death left the outcome unknowable | **Stays charged.** Never redispatched | **Unknown** — that is the definition | 504 / `-32005` | Stale-claim reconciliation and PostgreSQL process-kill cases |
-| `response_rejected` | The upstream **did** respond, but the response is unusable: invalid shape, reflected bearer token, non-serializable, or over the byte cap (wire-level or at persistence) | **Stays charged** | A response reached the gateway; the downstream effect is not independently proven | 502 / `-32006` | `test_confirmed_result_rejected_by_persistence_is_terminal_and_replayable`, `test_terminal_response_rejected_retains_charge_and_is_replayable` |
+| `response_rejected` | The upstream **did** respond, but the response is unusable: invalid shape (including an envelope the MCP SDK cannot parse), reflected bearer token, non-serializable, or over the byte cap (wire-level or at persistence). A result that merely disagrees with the upstream's advertised output schema is **not** unusable: it is a `success` | **Stays charged** | A response reached the gateway; the downstream effect is not independently proven | 502 / `-32006` | `test_confirmed_result_rejected_by_persistence_is_terminal_and_replayable`, `test_terminal_response_rejected_retains_charge_and_is_replayable`, `test_real_sdk_upstream_failures_get_the_right_charged_receipt_and_never_redispatch` |
 | `failed_unrefunded` | A refund was owed and the refund **itself** failed | Charged; a durable operator work item is created atomically with the receipt | Depends on the underlying failure | 500 / `-32603` | `test_governed_refund_failure_keeps_permit_budget_reserved`, `test_refund_reconciliation_retries_exactly_once_and_preserves_agent_replay` |
+
+A well-formed tool result the gateway **received** is never `delivery_uncertain`. The
+adapter switches off the MCP SDK's post-call validation against the upstream's
+live `outputSchema`, so schema drift, an unreachable post-call `tools/list`, or
+a hostile `$ref` cannot turn a completed call into an ambiguous one; only the
+adapter's own shape, size, and secret checks can reject a received result
+([`mcp-security-posture.md`](mcp-security-posture.md) §3.2). Conversely,
+`delivery_uncertain` is for calls where no result was obtained: the connection
+dropped, the request timed out, or the process died after the claim. A JSON-RPC
+result the gateway received but whose envelope the SDK cannot parse (for example
+`content` that is not a list) is `response_rejected`, not `delivery_uncertain`:
+the upstream answered, so the outcome is known and unusable
+([`mcp-security-posture.md`](mcp-security-posture.md) §3.2). The caveat: a body
+that is not a JSON-RPC message at all (non-JSON text, `"jsonrpc": "1.0"`,
+neither `result` nor `error`, or an unknown request id) is dropped by the SDK
+transport and never reaches the adapter as a response, so it still ends as
+`delivery_uncertain` after the call timeout (§3.2, "Not covered"). The
+drifted-schema case is proven end to end by
+`test_completed_call_with_drifted_live_schema_is_a_charged_success_end_to_end`,
+and the unparseable-envelope case, next to its `delivery_uncertain` boundary, by
+`test_real_sdk_upstream_failures_get_the_right_charged_receipt_and_never_redispatch`.
+
+Two further differences between the two charged outcomes. With the optional
+reconcile worker enabled (`UPSTREAM_RECONCILE_WORKER_ENABLED`), only
+`delivery_uncertain` is leased for a provider status probe and can be refunded
+on an attested `not_executed` answer; `response_rejected` is terminal and is
+never probed or refunded. And on `POST /mcp`, where enabled, both arrive as a
+`tools/call` result with `isError: true`, the do-not-resend text, the receipt and
+`_meta["io.agentmiddleware/outcome"].status` `"unknown"`, not as a JSON-RPC error:
+`-32006` is also the code of refunded, retry-safe failures
+(`upstream_returned_error`, `upstream_pre_dispatch_failed`), which stay errors.
+`/mcp/messages` keeps `-32005` and `-32006`
+(`test_ambiguous_or_rejected_upstream_response_stays_charged_and_replays`), and
+REST keeps HTTP 504 and 502 (by code reading, `invoke_tool` raises
+`HTTPException(status_code=exc.status_code)`; no test asserts the REST status).
+The `/mcp` shape is pinned by
+`test_tools_call_rejected_upstream_response_is_a_tool_result_the_model_can_read`.
 
 Requests rejected before a valid permit and an executable tool are established
 produce no receipt — there is no authority to bill against. The README states
@@ -282,8 +319,10 @@ Only a genuinely **absent** key — no header, no body entry, or a JSON `null`
 entry — is treated as an un-keyed call. On the standard MCP endpoint that means
 a generated key, and every un-keyed call, retries included, is a new charged
 operation. Clients that retry must always send their own persistent key; a
-governed `/mcp/messages` call without one is refused with
-`idempotency_key_required`.
+`/mcp/messages` call that names a permit but sends none is refused with
+`idempotency_key_required` (an action-bound call is given a server-derived key
+instead, and a call that names no permit is refused sooner, as
+`permit_required`).
 
 The governed AWI HTTP routes — `POST /v1/awi/execute`,
 `/v1/awi/passkey/challenge`, `/v1/awi/passkey/verify`, `/v1/awi/dom/sync`,

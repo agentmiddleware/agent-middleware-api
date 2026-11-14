@@ -1,0 +1,50 @@
+{
+  "measured_at": "2026-10-22T23:44:58+00:00",
+  "machine": "arm64 / Darwin 25.6.0",
+  "python": "3.12.13",
+  "endpoint": "POST /mcp/messages (legacy, pre-minted permit)",
+  "calls": 1000,
+  "warmup": 20,
+  "provenance": {
+    "git_head": "b8f8806c1a4e2ad9d48f95ad522243752d9054b3",
+    "git_dirty": true,
+    "cpu": "Apple M4 Pro",
+    "cpu_count": 14,
+    "load_average_1_5_15": [
+      23.52,
+      23.85,
+      30.19
+    ],
+    "packages": {
+      "sqlalchemy": "2.0.52",
+      "aiosqlite": "0.22.1",
+      "cryptography": "50.0.1",
+      "httpx": "0.28.1",
+      "mcp": "1.30.0"
+    }
+  },
+  "posture": {
+    "trust_mode": "strict",
+    "database": "sqlite (temp file)",
+    "state_backend": "memory",
+    "transport": "in-process ASGI, no network",
+    "upstream_latency": "zero (in-process executor)"
+  },
+  "first_call": {
+    "n": 1000,
+    "p50_ms": 31.87,
+    "p95_ms": 49.02,
+    "p99_ms": 76.05,
+    "max_ms": 237.33,
+    "mean_ms": 34.36
+  },
+  "replay": {
+    "n": 1000,
+    "p50_ms": 4.38,
+    "p95_ms": 4.95,
+    "p99_ms": 5.39,
+    "max_ms": 7.28,
+    "mean_ms": 4.32
+  },
+  "dispatches": 1020
+}

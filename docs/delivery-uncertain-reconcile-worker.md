@@ -28,6 +28,7 @@ These are code facts, not new behaviour:
 | The permit reservation stays consumed (`delivery_uncertain` counts as spent) | `PermitService._sum_permit_charges` (`app/services/permits.py`) |
 | Same-key replay returns the same receipt and never redispatches | `tests/test_delivery_uncertain_replay.py` |
 | A periodic `mcp_dispatch_operator_alert` log fires while any `delivery_uncertain` rows exist | `periodic_cleanup` (`app/main.py`) |
+| Age-bucketed `stuck_work_alert` (and the expired-lease alert) run from that same loop even when this worker is off | `run_stuck_work_sweep` (`app/services/stuck_work_sweep.py`); [stuck-work-sweep.md](stuck-work-sweep.md) |
 
 The gap was the "checked against the provider" half: nothing ever asked the
 upstream, and the receipt did not carry the handles a provider lookup needs.
@@ -174,7 +175,15 @@ and only raise `mcp_delivery_uncertain_aged` (`manual_review: true`).
 
 Tests: `tests/test_delivery_uncertain_reconcile.py`,
 `tests/test_upstream_reconcile_worker.py`,
-`tests/test_dispatch_reconcile_migration.py`.
+`tests/test_dispatch_reconcile_migration.py`,
+`tests/test_reconcile_staging_pilot.py`.
+
+## Staging pilot
+
+Production defaults stay off. Staging-only Railway variables, the
+`after_effect=hang` call, log lines, and rollback are in
+[reconcile-staging-pilot.md](reconcile-staging-pilot.md). That pilot points
+`MCP_UPSTREAM_STATUS_URL` at the refund-partner fixture's `POST /status`.
 
 ## Not done (next steps)
 

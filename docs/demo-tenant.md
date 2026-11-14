@@ -86,7 +86,7 @@ Everything is OFF by default: merging changes nothing until the flag flips.
 | `DEMO_ISSUE_GLOBAL_PER_DAY` | `200` | Keys globally per day. |
 | `DEMO_MAX_LIVE_KEYS` | `500` | Cap on concurrently live (active, unexpired) demo keys. Alert + 429 past this. |
 | `DEMO_ALERT_ISSUES_PER_HOUR` | `20` | Alert when hourly issuance crosses this. |
-| `DEMO_ALLOWED_ORIGINS` | `""` | Browser origins allowed to mint. Empty = CLI/SDK/curl (no `Origin`) plus same-host pages only. |
+| `DEMO_ALLOWED_ORIGINS` | `https://www.thisisatest.tech,https://thisisatest.tech,https://www.agentmiddleware.dev,https://agentmiddleware.dev` | Browser origins allowed to mint. Callers with no `Origin` (CLI/SDK/curl) and same-host pages may also mint. |
 
 A permit may never outlive the caller key's own expiry, whatever the caps.
 

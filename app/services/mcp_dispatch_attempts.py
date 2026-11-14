@@ -26,6 +26,7 @@ from app.core.resilience import (
     WRITE_CONFLICT_MAX_ATTEMPTS,
 )
 from app.core.time import to_naive_utc, utc_now
+from app.core.tracing import note, start_span, traced_span
 from app.db.database import get_session_factory, is_database_configured
 from app.db.models import (
     HumanApprovalModel,
@@ -657,6 +658,11 @@ class McpDispatchAttemptService:
                 raise DispatchAttemptConflictError("dispatch_action_owner_invalid")
         return None
 
+    @traced_span(
+        "mcp.reserve",
+        tool_name="public_tool_id",
+        wallet_id="wallet_id",
+    )
     async def authorize_reserve_and_prepare(
         self,
         *,
@@ -1587,18 +1593,30 @@ class McpDispatchAttemptService:
 
     async def claim_dispatch(self, attempt_id: str) -> McpDispatchAttemptModel:
         """Claim first; only then observe an execution attempt out of transaction."""
-        attempt = await self._claim_dispatch(attempt_id)
-        try:
-            schedule_attempt(
-                attempt_id=attempt.attempt_id,
-                wallet_id=attempt.wallet_id,
-                tool=attempt.public_tool_id,
-                logical_operation_id=attempt.idempotency_record_id,
-            )
-        except Exception:
-            # Insight capture cannot change send authority or trigger redispatch.
-            pass
-        return attempt
+        async with start_span("mcp.dispatch_claim", attempt_id=attempt_id) as span:
+            attempt = await self._claim_dispatch(attempt_id)
+            try:
+                note(
+                    span,
+                    tool_name=attempt.public_tool_id,
+                    wallet_id=attempt.wallet_id,
+                    attempt_id=attempt.attempt_id,
+                    outcome_state=getattr(attempt, "state", None),
+                )
+            except Exception:
+                # Span attributes cannot change send authority or block the claim.
+                pass
+            try:
+                schedule_attempt(
+                    attempt_id=attempt.attempt_id,
+                    wallet_id=attempt.wallet_id,
+                    tool=attempt.public_tool_id,
+                    logical_operation_id=attempt.idempotency_record_id,
+                )
+            except Exception:
+                # Insight capture cannot change send authority or trigger redispatch.
+                pass
+            return attempt
 
     async def _claim_dispatch(self, attempt_id: str) -> McpDispatchAttemptModel:
         """Acquire the durable, non-reacquirable right to send exactly once.

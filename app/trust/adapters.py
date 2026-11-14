@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.core.auth import AuthContext
+from app.core.tracing import note, start_span
 from app.services.agent_money import AgentMoney
 from app.services.idempotency import validate_client_idempotency_key
 
@@ -223,20 +224,28 @@ class McpGovernedAdapter(GovernedInvocationAdapter):
         # this keeps the trust package import-light and free of cycles.
         from app.routers.mcp import _execute_registered_tool
 
-        raw = await _execute_registered_tool(
+        async with start_span(
+            "mcp.invoke",
             tool_name=request.tool_name,
-            arguments=request.arguments,
             wallet_id=request.wallet_id,
-            auth=request.auth,
-            money=request.money,
-            transport=request.transport,
-            endpoint=request.endpoint,
-            request_id=request.request_id,
-            permit_id=request.permit_id,
-            quote_id=request.quote_id,
-            idempotency_key=request.idempotency_key,
-            request_payload=request.request_payload,
-        )
+        ) as span:
+            raw = await _execute_registered_tool(
+                tool_name=request.tool_name,
+                arguments=request.arguments,
+                wallet_id=request.wallet_id,
+                auth=request.auth,
+                money=request.money,
+                transport=request.transport,
+                endpoint=request.endpoint,
+                request_id=request.request_id,
+                permit_id=request.permit_id,
+                quote_id=request.quote_id,
+                idempotency_key=request.idempotency_key,
+                request_payload=request.request_payload,
+            )
+            receipt = raw.get("receipt") if isinstance(raw, dict) else None
+            if isinstance(receipt, dict):
+                note(span, outcome_state=receipt.get("outcome"))
 
         receipt = raw.get("receipt") if isinstance(raw, dict) else None
         return GovernedResult(

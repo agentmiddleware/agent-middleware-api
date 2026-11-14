@@ -46,6 +46,7 @@ from .core.product_positioning import (
 )
 from .core.rate_limiter import RateLimitMiddleware, rate_limit_discovery
 from .core.runtime_mode import get_simulation_modes
+from .core.tracing import install_tracing
 from .middleware.head_method import HeadMethodMiddleware
 from .middleware.operation_insight_events import OperationInsightEventsMiddleware
 from .middleware.request_body_limit import RequestBodyLimitMiddleware
@@ -389,6 +390,16 @@ async def lifespan(app: FastAPI):
                             idempotency_records_needing_review=needs_review,
                         )
 
+                    # Age alerts and the expired-lease alert. Runs whether or
+                    # not the reconcile worker is enabled. Alert only for
+                    # delivery_uncertain and idempotency review; lease columns
+                    # are left in place because claim already treats an
+                    # expired lease as free. See docs/stuck-work-sweep.md.
+                    if settings.STUCK_WORK_SWEEP_ENABLED:
+                        from .services.stuck_work_sweep import run_stuck_work_sweep
+
+                        await run_stuck_work_sweep()
+
                     # Optional provider-status reconcile for parked
                     # delivery_uncertain calls. Leases rows, probes the
                     # configured status endpoint outside any transaction,
@@ -718,6 +729,9 @@ app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(HeadMethodMiddleware)
 # Outermost: capture refused ingress before auth, routing, and body validation.
 app.add_middleware(OperationInsightEventsMiddleware)
+# Outermost only when OTEL_TRACING_ENABLED and the otel extra imports.
+# Disabled tracing does not register this middleware.
+install_tracing(app)
 
 
 def _json_safe_numbers(value: Any) -> Any:

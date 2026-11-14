@@ -20,6 +20,7 @@ from app.core.resilience import (
     run_with_write_conflict_retry,
 )
 from app.core.time import to_naive_utc, utc_now
+from app.core.tracing import traced_span
 from app.db.database import get_session_factory
 from app.db.models import (
     BillingAlertModel,
@@ -744,6 +745,7 @@ class PermitService:
         async with factory() as owned_session:
             return await validate(owned_session)
 
+    @traced_span("mcp.reserve", tool_name="tool_name", wallet_id="wallet_id")
     async def authorize_and_reserve(
         self,
         *,

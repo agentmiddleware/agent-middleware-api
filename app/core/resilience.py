@@ -153,6 +153,20 @@ class CircuitBreaker:
             return self._half_open_calls < self._half_open_max_calls
         return False  # OPEN
 
+    def recovery_remaining_seconds(self) -> float:
+        """Seconds until an OPEN breaker is eligible to half-open.
+
+        Does not read ``state``, so it does not itself move OPEN to
+        HALF_OPEN. Zero when the breaker is not open or the window has
+        already elapsed.
+        """
+        if self._state != self.OPEN or self._last_failure_time is None:
+            return 0.0
+        remaining = self._recovery_timeout - (
+            time.monotonic() - self._last_failure_time
+        )
+        return remaining if remaining > 0 else 0.0
+
     async def call(self, func: Callable[..., T], *args: Any, **kwargs: Any) -> T:
         """Execute a function through the circuit breaker."""
         if not self.is_allowed():

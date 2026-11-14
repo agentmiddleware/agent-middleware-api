@@ -657,6 +657,13 @@ jobs:
         with:
           node-version: "24"
 
+      - name: Run static site JavaScript tests
+        working-directory: site
+        run: |
+          node test_demo_key.mjs
+          node test_try_page.mjs
+          node test_utm_capture.mjs
+
       - name: Set up Python 3.12
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:

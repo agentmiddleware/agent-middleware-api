@@ -80,6 +80,8 @@ _REASON_CODES = frozenset(
         "tool_not_executable",
         "tool_not_found",
         "tool_permission_denied",
+        "upstream_circuit_open",
+        "upstream_concurrency_saturated",
         "upstream_pre_dispatch_failed",
         "upstream_returned_error",
         "wallet_duplicate_request",

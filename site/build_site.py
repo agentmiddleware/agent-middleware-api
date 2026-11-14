@@ -108,10 +108,12 @@ SECURITY_TXT_EXPIRES_TOKEN = "@@SECURITY_TXT_EXPIRES@@"
 SECURITY_TXT_LIFETIME_DAYS = 365
 TEXT_ASSETS = (
     "index.html",
+    "pilot/index.html",
     "proof/index.html",
     "compare/index.html",
     "concept/index.html",
     "demo-key/index.html",
+    "try/index.html",
     "404.html",
     "sitemap.xml",
     ".well-known/security.txt",
@@ -132,10 +134,13 @@ COPY_ASSETS = (
     "fonts",
     "fonts.css",
     "analytics.js",
+    "home-key.js",
     "pilot-fit.js",
+    "pilot",
     "compare",
     "concept",
     "demo-key",
+    "try",
     "favicon.svg",
     "social-card.png",
     "proof",
@@ -151,6 +156,8 @@ REQUIRED_PUBLIC_ASSETS = (
     *TEXT_ASSETS,
     *COPY_ASSETS,
     "demo-key/demo-key.js",
+    "try/try.css",
+    "try/try.js",
     "proof/receipt.json",
     "proof/trust-keys.json",
     "proof/transcript.json",
@@ -870,6 +877,8 @@ def _build_timestamps() -> dict[str, str]:
 
 
 def render_site(output: Path, environment: dict[str, str]) -> None:
+    from build_docs import DocsBuildError, build_docs
+
     markup_replacements = validated_contacts(environment)
     text_replacements = validated_contacts(environment, escape_markup=False)
     with_booking = booking_configured(environment)
@@ -914,6 +923,10 @@ def render_site(output: Path, environment: dict[str, str]) -> None:
     concept_version = hashlib.sha256(
         (SITE_ROOT / "concept/concept.css").read_bytes()
     ).hexdigest()[:8]
+    try:
+        generated_docs = build_docs()
+    except (DocsBuildError, OSError, KeyError, ValueError) as exc:
+        raise LaunchConfigurationError(f"docs build failed: {exc}") from exc
     output = _validated_output_path(output)
 
     shutil.rmtree(output, ignore_errors=True)
@@ -921,21 +934,32 @@ def render_site(output: Path, environment: dict[str, str]) -> None:
     for relative_path in COPY_ASSETS:
         _copy_asset(relative_path, output)
 
-    for relative_path in TEXT_ASSETS:
-        source = SITE_ROOT / relative_path
-        rendered = source.read_text(encoding="utf-8")
+    for relative_path in (*TEXT_ASSETS, *generated_docs):
+        rendered = (
+            generated_docs[relative_path]
+            if relative_path in generated_docs
+            else (SITE_ROOT / relative_path).read_text(encoding="utf-8")
+        )
         if relative_path.endswith(".html"):
             for token, partial in partials.items():
                 rendered = rendered.replace(token, partial)
             # Dedicated markers survive formatting and added link attributes.
             for token, current_page in {
+                "@@NAV_PILOT_CURRENT@@": "pilot/index.html",
                 "@@NAV_PROOF_CURRENT@@": "proof/index.html",
                 "@@NAV_COMPARE_CURRENT@@": "compare/index.html",
                 "@@NAV_DEMO_KEY_CURRENT@@": "demo-key/index.html",
+                "@@NAV_DOCS_CURRENT@@": "docs/",
             }.items():
                 rendered = rendered.replace(
                     token,
-                    ' aria-current="page"' if relative_path == current_page else "",
+                    ' aria-current="page"'
+                    if (
+                        relative_path.startswith(current_page)
+                        if current_page == "docs/"
+                        else relative_path == current_page
+                    )
+                    else "",
                 )
             rendered = rendered.replace(STYLES_CSS_VERSION_TOKEN, styles_version)
             rendered = rendered.replace(CONCEPT_CSS_VERSION_TOKEN, concept_version)

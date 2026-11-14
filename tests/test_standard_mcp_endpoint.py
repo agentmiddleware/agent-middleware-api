@@ -9,9 +9,12 @@ validation, server-minted permits, exactly-once replay, and signed receipts.
 from __future__ import annotations
 
 import hashlib
+from datetime import datetime, timedelta, timezone
 
+import mcp.types as mcp_types
 import pytest
 from httpx import ASGITransport, AsyncClient
+from mcp.server.lowlevel import Server
 from mcp.types import LATEST_PROTOCOL_VERSION
 
 from app.core.config import get_settings
@@ -25,7 +28,9 @@ from app.services.idempotency import (
 )
 from app.services.mcp_generator import McpGenerator
 from app.services.service_registry import get_service_registry
+from app.services.upstream_mcp import UpstreamMcpResponseRejectedError
 from tests.test_delivery_uncertain_replay import AmbiguousExecutor
+from tests.test_mcp_upstream_governed import _adapter_over_real_sdk_server
 from tests.test_trust_helpers import BOOTSTRAP_HEADERS, provision_agent_wallet
 
 # The SDK's streamable HTTP transport requires an explicit Accept header.
@@ -580,13 +585,336 @@ async def test_tools_call_delivery_uncertain_without_key_warns_a_retry_is_a_new_
     assert "same Idempotency-Key returns" not in text
     outcome = result["_meta"]["io.agentmiddleware/outcome"]
     assert outcome["status"] == "unknown"
-    # The generated key was never returned, so the structured remediation
-    # must not promise a replay the caller cannot make.
+    # The generated key is not returned as a field of its own (the receipt
+    # carries it as the forwarded key), so the remediation promises no replay.
     assert outcome["idempotency_key_supplied"] is False
     detail = outcome["remediation"]["detail"]
     assert "same-key replay" not in detail
     assert "any new attempt is a new dispatch and a new charge" in detail
     assert executor.dispatch_count == 1
+    # By design the signed receipt carries the forwarded key as the provider
+    # lookup handle, so a keyless call's generated key is readable there (it is
+    # not returned as a field of its own).
+    forwarded = result["receipt"]["constraints_evaluated"]["upstream_dispatch"][
+        "forwarded_idempotency_key"
+    ]
+    assert forwarded.startswith("mcp-auto-")
+
+
+def _unparseable_envelope() -> mcp_types.ServerResult:
+    # model_construct skips validation, so the SERVER serializes an envelope
+    # that only the CLIENT side fails to parse.
+    return mcp_types.ServerResult.model_construct(
+        root=mcp_types.CallToolResult.model_construct(
+            content="not-a-list-marker", isError=False
+        )
+    )
+
+
+def _oversized_result() -> mcp_types.ServerResult:
+    return mcp_types.ServerResult(
+        mcp_types.CallToolResult(
+            content=[mcp_types.TextContent(type="text", text="oversized-marker" * 80)],
+            isError=False,
+        )
+    )
+
+
+def _bearer_echo_result() -> mcp_types.ServerResult:
+    return mcp_types.ServerResult(
+        mcp_types.CallToolResult(
+            content=[
+                mcp_types.TextContent(
+                    type="text", text="echo-marker secret-partner-token"
+                )
+            ],
+            isError=False,
+        )
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("cause", "make_result", "settings", "leaked_marker"),
+    [
+        pytest.param(
+            "unparseable", _unparseable_envelope, {}, "not-a-list-marker", id="envelope"
+        ),
+        pytest.param(
+            "oversized",
+            _oversized_result,
+            {"MCP_UPSTREAM_MAX_RESPONSE_BYTES": 256},
+            "oversized-marker",
+            id="oversized",
+        ),
+        pytest.param(
+            "bearer-echo", _bearer_echo_result, {}, "secret-partner-token", id="bearer"
+        ),
+    ],
+)
+async def test_tools_call_rejected_upstream_response_is_a_tool_result_the_model_can_read(
+    client,
+    standard_mcp_enabled,
+    clean_database,
+    cause,
+    make_result,
+    settings,
+    leaked_marker,
+):
+    """``response_rejected`` is charged, like ``delivery_uncertain``, so it too
+    must not reach the model as a bare ``-32006``, the code refunded and
+    retry-safe failures use. A real SDK upstream answers with an envelope the
+    SDK cannot parse, a result over the byte cap, or a result echoing the
+    bearer token; the call has run, the charge stands, and the model is told not
+    to send it again, without anything the upstream wrote.
+    """
+    provisioned = await provision_agent_wallet(client)
+    tool_name = f"standard-rejected-response-upstream-{cause}"
+    served: list[str] = []
+    server = Server("rejected-response-upstream")
+
+    async def call_tool(_req: mcp_types.CallToolRequest) -> mcp_types.ServerResult:
+        served.append("tools/call")
+        return make_result()
+
+    server.request_handlers[mcp_types.CallToolRequest] = call_tool
+    get_service_registry().register_upstream(
+        service_id=tool_name,
+        name="Standard Rejected Response Upstream",
+        description="Upstream tool whose response the gateway rejects",
+        category=ServiceCategory.AGENT_COMMS,
+        executor=_adapter_over_real_sdk_server(server, tool_name, **settings),
+        input_schema={"type": "object", "properties": {"test": {"type": "string"}}},
+        output_schema=None,
+        credits_per_unit=2.0,
+        upstream_tool_name="partner.echo",
+        upstream_origin="https://test.example.com",
+    )
+    call = _rpc(
+        "tools/call", params={"name": tool_name, "arguments": {"test": "value"}}
+    )
+    headers = {
+        **provisioned["agent_headers"],
+        **MCP_HEADERS,
+        "Idempotency-Key": f"standard-rejected-{cause}-1",
+    }
+    try:
+        first = await client.post("/mcp", json=call, headers=headers)
+        assert first.status_code == 200
+        body = first.json()
+        assert "error" not in body
+        result = body["result"]
+        assert result["isError"] is True
+        text = result["content"][0]["text"]
+        assert text.startswith("response_rejected: outcome unknown.")
+        assert "answered, but the answer was unusable" in text
+        assert "The gateway will not resend it." in text
+        assert "Do not call this tool again for the same action" in text
+        assert "same Idempotency-Key returns this same result" in text
+        # Nothing the upstream wrote is relayed, only the fixed explanation.
+        assert leaked_marker not in first.text
+
+        receipt = result["receipt"]
+        assert receipt["outcome"] == "response_rejected"
+        assert text.endswith(f"Receipt: {receipt['receipt_id']}.")
+        assert result["_meta"]["io.agentmiddleware/receipt"] == receipt
+        outcome = result["_meta"]["io.agentmiddleware/outcome"]
+        assert outcome["status"] == "unknown"
+        assert outcome["reason"] == "response_rejected"
+        assert outcome["redispatched"] is False
+        assert outcome["idempotency_key_supplied"] is True
+        assert outcome["remediation"]["type"] == "verify_before_new_attempt"
+        assert outcome["dispatch"]["state"] == "response_rejected"
+        assert served == ["tools/call"]
+
+        # Same key: the identical result, no second dispatch, no second debit.
+        replay = await client.post("/mcp", json=call, headers=headers)
+        assert replay.status_code == 200
+        assert replay.json() == body
+        assert served == ["tools/call"]
+
+        ledger = await client.get(
+            f"/v1/billing/ledger/{provisioned['agent_wallet_id']}",
+            headers=provisioned["agent_headers"],
+        )
+        assert ledger.status_code == 200
+        entries = ledger.json()["entries"]
+        assert len([e for e in entries if e["action"] == "debit"]) == 1
+        assert [e for e in entries if e["action"] == "refund"] == []
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+
+class _RejectedExecutor:
+    """Dispatches, then reports a response the gateway rejected."""
+
+    def __init__(self) -> None:
+        self.dispatch_count = 0
+
+    async def call_tool(
+        self, arguments, *, invocation_id, idempotency_key, before_dispatch
+    ):
+        await before_dispatch()
+        self.dispatch_count += 1
+        raise UpstreamMcpResponseRejectedError("upstream_response_invalid")
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("outcome", "make_executor", "expected_gateway_outcome"),
+    [
+        pytest.param(
+            "delivery_uncertain", AmbiguousExecutor, "unknown", id="uncertain"
+        ),
+        pytest.param("response_rejected", _RejectedExecutor, "failed", id="rejected"),
+    ],
+)
+async def test_tools_call_marks_the_gateway_outcome_of_each_charged_unknown_outcome(
+    client,
+    standard_mcp_enabled,
+    clean_database,
+    monkeypatch,
+    outcome,
+    make_executor,
+    expected_gateway_outcome,
+):
+    """The request record keeps what each outcome had on the JSON-RPC channel.
+
+    An undelivered call is ``unknown``; a rejected response is ``failed`` (a
+    fault), as ``/mcp/messages`` and REST mark ``-32005`` and ``-32006``.
+    """
+    marks: list[dict] = []
+    real_mark = standard_mcp_router.mark_current_request
+
+    def spy(**kwargs):
+        marks.append(kwargs)
+        return real_mark(**kwargs)
+
+    monkeypatch.setattr(standard_mcp_router, "mark_current_request", spy)
+    provisioned = await provision_agent_wallet(client)
+    tool_name = f"standard-marked-outcome-{outcome}"
+    get_service_registry().register_upstream(
+        service_id=tool_name,
+        name="Standard Marked Outcome",
+        description="Upstream tool with a charged, effect-unknown outcome",
+        category=ServiceCategory.AGENT_COMMS,
+        executor=make_executor(),
+        input_schema={"type": "object", "properties": {"test": {"type": "string"}}},
+        output_schema=None,
+        credits_per_unit=2.0,
+        upstream_tool_name=tool_name,
+        upstream_origin="https://test.example.com",
+    )
+    try:
+        response = await client.post(
+            "/mcp",
+            json=_rpc(
+                "tools/call",
+                params={"name": tool_name, "arguments": {"test": "value"}},
+            ),
+            headers={
+                **provisioned["agent_headers"],
+                **MCP_HEADERS,
+                "Idempotency-Key": f"standard-marked-{outcome}-1",
+            },
+        )
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+    result = response.json()["result"]
+    assert result["receipt"]["outcome"] == outcome
+    gateway_marks = [m for m in marks if "gateway_outcome" in m]
+    assert gateway_marks[-1] == {
+        "gateway_outcome": expected_gateway_outcome,
+        "reason_code": outcome,
+    }
+
+
+@pytest.mark.anyio
+async def test_tools_call_honours_a_named_permit_but_mints_an_unconstrained_one_otherwise(
+    client, standard_mcp_enabled, clean_database
+):
+    """The gap on ``/mcp`` is an omitted permit reference, not the endpoint.
+
+    A caller who names a permit (``_meta["io.agentmiddleware/permit_id"]``) gets
+    the operator's constraints, here ``forbidden_fields``, with a signed
+    ``denied`` receipt. A caller who omits the reference, on a tool that is not
+    action-bound, gets a permit the gateway mints itself, which carries none of
+    them, so the same arguments run.
+    """
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    tool_name = "standard-named-permit-tool"
+    ran: list[str] = []
+
+    def tool(secret: str = "") -> dict:
+        ran.append(secret)
+        return {"ok": True}
+
+    registry = get_service_registry()
+    registry.register_local(
+        service_id=tool_name,
+        name="Standard Named Permit Tool",
+        description="Standard MCP named-permit contract test",
+        category=ServiceCategory.AGENT_COMMS,
+        func=tool,
+        credits_per_unit=2.0,
+        unit_name="call",
+    )
+    try:
+        created = await client.post(
+            "/v1/permits",
+            json={
+                "issuer_wallet_id": wallet_id,
+                "subject_wallet_id": wallet_id,
+                "subject_key_id": provisioned["key_id"],
+                "allowed_tools": [tool_name],
+                "scopes": [f"tool:{tool_name}:invoke", "billing:charge"],
+                "max_credits": 50,
+                "forbidden_fields": ["secret"],
+                "expires_at": (
+                    datetime.now(timezone.utc) + timedelta(minutes=30)
+                ).isoformat(),
+            },
+            headers={**BOOTSTRAP_HEADERS, "Idempotency-Key": "standard-named-permit"},
+        )
+        assert created.status_code == 201
+        permit_id = created.json()["permit_id"]
+        headers = {**provisioned["agent_headers"], **MCP_HEADERS}
+
+        named = await client.post(
+            "/mcp",
+            json=_rpc(
+                "tools/call",
+                params={
+                    "name": tool_name,
+                    "arguments": {"secret": "x"},
+                    "_meta": {"io.agentmiddleware/permit_id": permit_id},
+                },
+            ),
+            headers={**headers, "Idempotency-Key": "standard-named-1"},
+        )
+        error = named.json()["error"]
+        assert error["code"] == -32003
+        assert error["message"].startswith("permit_forbidden_field")
+        assert error["data"]["receipt"]["outcome"] == "denied"
+        assert error["data"]["receipt"]["permit_id"] == permit_id
+        assert ran == []
+
+        omitted = await client.post(
+            "/mcp",
+            json=_rpc(
+                "tools/call",
+                params={"name": tool_name, "arguments": {"secret": "x"}},
+            ),
+            headers={**headers, "Idempotency-Key": "standard-omitted-1"},
+        )
+        result = omitted.json()["result"]
+        assert result["isError"] is False
+        assert result["receipt"]["permit_id"] != permit_id
+        assert ran == ["x"]
+    finally:
+        registry.unregister_local(tool_name)
 
 
 @pytest.mark.anyio
@@ -596,7 +924,12 @@ async def test_tools_call_other_governed_errors_stay_jsonrpc_errors(
     clean_database,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """Only delivery_uncertain leaves the error channel; the rest keep codes."""
+    """Refunded failures keep their JSON-RPC error; only charged, unknown ones leave.
+
+    ``upstream_returned_error`` shares ``-32006`` with ``response_rejected`` but is
+    refunded and safe to retry, so it must stay a bare error (see the tests above
+    and below for the two outcomes that become a readable tool result).
+    """
     provisioned = await provision_agent_wallet(client)
     tool_name = "standard-governed-upstream-error"
 

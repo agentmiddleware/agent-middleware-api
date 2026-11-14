@@ -19,8 +19,18 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.lowlevel import Server
 from mcp.server.transport_security import TransportSecuritySettings
-from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
+from mcp.shared.memory import create_connected_server_and_client_session
+from mcp.types import (
+    CallToolRequest,
+    CallToolRequestParams,
+    CallToolResult,
+    ListToolsResult,
+    ServerResult,
+    TextContent,
+    Tool,
+)
 from pydantic import ValidationError
 
 from app.core.config import Settings
@@ -75,6 +85,24 @@ def _cleanup_validation_error() -> ValidationError:
     except ValidationError as exc:
         return exc
     raise AssertionError("invalid timeout unexpectedly passed validation")
+
+
+def _unparseable_result_error() -> ValidationError:
+    """The error the SDK raises when a tools/call result fails to parse."""
+    try:
+        CallToolResult.model_validate({"content": "not-a-list"})
+    except ValidationError as exc:
+        return exc
+    raise AssertionError("invalid CallToolResult unexpectedly passed validation")
+
+
+def _request_validation_error() -> ValidationError:
+    """The error the SDK raises while building a request, before it is sent."""
+    try:
+        CallToolRequestParams(name="partner.write", arguments={1: "x"})  # type: ignore[dict-item]
+    except ValidationError as exc:
+        return exc
+    raise AssertionError("invalid request params unexpectedly passed validation")
 
 
 class FakeSession:
@@ -1259,8 +1287,15 @@ async def test_oversized_or_invalid_response_is_rejected_after_dispatch() -> Non
     [
         UpstreamMcpPreDispatchError("secret-partner-token"),
         UpstreamMcpDeliveryUncertainError(),
+        _cleanup_validation_error(),
+        json.JSONDecodeError("malformed cleanup payload", "{", 1),
     ],
-    ids=["typed-pre-dispatch", "typed-delivery-uncertain"],
+    ids=[
+        "typed-pre-dispatch",
+        "typed-delivery-uncertain",
+        "validation-error",
+        "json-decode-error",
+    ],
 )
 async def test_typed_cleanup_failure_does_not_replace_known_response_rejection(
     cleanup_error: Exception,
@@ -1300,8 +1335,16 @@ async def test_typed_cleanup_failure_does_not_replace_known_response_rejection(
         RuntimeError("secret-partner-token"),
         UpstreamMcpPreDispatchError("secret-partner-token"),
         UpstreamMcpDeliveryUncertainError(),
+        _cleanup_validation_error(),
+        json.JSONDecodeError("malformed cleanup payload", "{", 1),
     ],
-    ids=["untyped", "typed-pre-dispatch", "typed-delivery-uncertain"],
+    ids=[
+        "untyped",
+        "typed-pre-dispatch",
+        "typed-delivery-uncertain",
+        "validation-error",
+        "json-decode-error",
+    ],
 )
 async def test_cleanup_failure_does_not_replace_confirmed_response(
     cleanup_error: Exception,
@@ -1604,3 +1647,462 @@ async def test_disabled_startup_helper_unregisters_previous_upstream() -> None:
     )
     assert result is None
     assert registry.get_local("partner.notes.write") is None
+
+
+# ---------------------------------------------------------------------------
+# Error classification through a real SDK session
+#
+# ``FakeSession`` never enters the MCP SDK's anyio task group, so it cannot show
+# what the adapter sees when something fails inside ``async with self._session()``:
+# the SDK leaves that block as an ExceptionGroup, never as the bare exception.
+# The tests below use a real ``ClientSession``, either in memory or over the
+# production Streamable HTTP client against a scripted transport.
+# ---------------------------------------------------------------------------
+
+# Each of these is well-formed JSON-RPC that the SDK's ``CallToolResult`` model
+# refuses to parse, so the upstream demonstrably answered.
+UNPARSEABLE_ENVELOPES = [
+    pytest.param({"content": "not-a-list", "isError": False}, id="content-is-a-string"),
+    pytest.param({"content": [], "isError": {"x": 1}}, id="is-error-is-not-a-bool"),
+    pytest.param(
+        {"content": [{"type": "text"}], "isError": False},
+        id="content-block-missing-its-text",
+    ),
+    pytest.param(
+        {"content": [], "structuredContent": ["not", "an", "object"], "isError": False},
+        id="structured-content-is-not-an-object",
+    ),
+]
+
+
+def _envelope_server(envelope: dict[str, Any], served: list[str]) -> Server:
+    """A real SDK server whose ``tools/call`` answer the CLIENT cannot parse.
+
+    ``model_construct`` skips validation, so the server serializes the invalid
+    envelope and puts it on the wire. A payload the server cannot serialize at
+    all crashes the server instead, so no response is ever sent; that is a
+    different case, and ``delivery_uncertain`` is right for it.
+    """
+    server = Server("unparseable-envelope")
+
+    async def call_tool(_req: CallToolRequest) -> ServerResult:
+        served.append("tools/call")
+        return ServerResult.model_construct(
+            root=CallToolResult.model_construct(**envelope)
+        )
+
+    server.request_handlers[CallToolRequest] = call_tool
+    return server
+
+
+def _adapter_over_in_memory_sdk(server: Server, **settings: Any) -> UpstreamMcpAdapter:
+    adapter = UpstreamMcpAdapter(_configuration(**settings))
+    _mark_discovered(adapter)
+
+    @asynccontextmanager
+    async def session_context(**_kwargs: Any) -> AsyncIterator[Any]:
+        async with create_connected_server_and_client_session(server) as session:
+            yield session
+
+    adapter._session = session_context  # type: ignore[method-assign]
+    return adapter
+
+
+async def _call_recording_claims(
+    adapter: UpstreamMcpAdapter, claims: list[str]
+) -> None:
+    """Run one call; ``claims`` records each time ``before_dispatch`` ran."""
+
+    async def before_dispatch() -> None:
+        claims.append("claimed")
+
+    await adapter.call_tool(
+        {},
+        invocation_id="inv",
+        idempotency_key="idem",
+        before_dispatch=before_dispatch,
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("envelope", UNPARSEABLE_ENVELOPES)
+async def test_the_sdk_client_itself_rejects_each_envelope_fixture(
+    envelope: dict[str, Any],
+) -> None:
+    """Guards the fixtures: the bytes must reach the client and fail THERE.
+
+    Without this a fixture that crashed the server while serializing would pass
+    every classification test below for the wrong reason, because "nothing was
+    sent" also ends in ``delivery_uncertain``.
+    """
+    served: list[str] = []
+    async with create_connected_server_and_client_session(
+        _envelope_server(envelope, served)
+    ) as session:
+        with pytest.raises(ValidationError):
+            await session.call_tool("partner.write", {})
+
+    assert served == ["tools/call"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("envelope", UNPARSEABLE_ENVELOPES)
+async def test_unparseable_result_envelope_is_response_rejected_not_delivery_uncertain(
+    envelope: dict[str, Any],
+) -> None:
+    """The upstream answered but the SDK cannot parse the answer.
+
+    The call was dispatched and the response is known to be unusable. That is
+    ``response_rejected`` (terminal, charged, replayable), not
+    ``delivery_uncertain``, which is reserved for "no response was obtained".
+    """
+    served: list[str] = []
+    adapter = _adapter_over_in_memory_sdk(_envelope_server(envelope, served))
+    metrics_before = get_upstream_mcp_metrics_snapshot()["outcomes"]
+
+    claims: list[str] = []
+    with pytest.raises(UpstreamMcpResponseRejectedError) as exc_info:
+        await _call_recording_claims(adapter, claims)
+
+    assert exc_info.value.code == "upstream_response_invalid"
+    assert exc_info.value.dispatch_started is True
+    assert claims == ["claimed"]
+    assert served == ["tools/call"]
+    metrics_after = get_upstream_mcp_metrics_snapshot()["outcomes"]
+    assert metrics_after["response_rejected"] == metrics_before["response_rejected"] + 1
+    assert metrics_after["delivery_uncertain"] == metrics_before["delivery_uncertain"]
+
+
+@pytest.mark.anyio
+async def test_unparseable_envelope_error_does_not_echo_upstream_content(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Pydantic's message quotes the offending value, so it must not escape.
+
+    A hostile upstream can put the bearer token (or anything else) into the
+    field that fails to parse. The raised error carries only a fixed code and
+    no chained exception.
+    """
+    served: list[str] = []
+    adapter = _adapter_over_in_memory_sdk(
+        _envelope_server({"content": "secret-partner-token", "isError": False}, served)
+    )
+
+    claims: list[str] = []
+    with pytest.raises(UpstreamMcpResponseRejectedError) as exc_info:
+        await _call_recording_claims(adapter, claims)
+
+    assert served == ["tools/call"]
+    assert "secret-partner-token" not in str(exc_info.value)
+    assert "secret-partner-token" not in repr(exc_info.value)
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
+    assert "secret-partner-token" not in caplog.text
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("failure", ["jsonrpc-error", "no-answer"])
+async def test_no_response_to_tools_call_stays_delivery_uncertain_in_memory(
+    failure: str,
+) -> None:
+    """The boundary of the fix: no response obtained means no known outcome.
+
+    A JSON-RPC error answering ``tools/call`` and an upstream that never
+    answers within the call timeout both leave the adapter unable to say
+    whether the tool ran. Neither is a parse failure, so neither may become
+    ``response_rejected``.
+    """
+    served: list[str] = []
+    server = Server("no-usable-response")
+
+    async def call_tool(_req: CallToolRequest) -> ServerResult:
+        served.append("tools/call")
+        if failure == "jsonrpc-error":
+            raise RuntimeError("upstream failed mid-call")
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    server.request_handlers[CallToolRequest] = call_tool
+    adapter = _adapter_over_in_memory_sdk(
+        server, MCP_UPSTREAM_CALL_TIMEOUT_SECONDS="0.3"
+    )
+    metrics_before = get_upstream_mcp_metrics_snapshot()["outcomes"]
+
+    claims: list[str] = []
+    with pytest.raises(UpstreamMcpDeliveryUncertainError) as exc_info:
+        await _call_recording_claims(adapter, claims)
+
+    assert exc_info.value.dispatch_started is True
+    assert claims == ["claimed"]
+    assert served == ["tools/call"]
+    metrics_after = get_upstream_mcp_metrics_snapshot()["outcomes"]
+    assert metrics_after["delivery_uncertain"] == (
+        metrics_before["delivery_uncertain"] + 1
+    )
+    assert metrics_after["response_rejected"] == metrics_before["response_rejected"]
+
+
+@pytest.mark.anyio
+async def test_validation_error_before_the_request_is_sent_is_not_a_rejected_response() -> (
+    None
+):
+    """Only a CallToolResult that fails to parse proves the upstream answered.
+
+    ``arguments`` with a non-string key makes the SDK's own request model raise
+    a ``ValidationError`` before anything is written. The dispatch checkpoint
+    has already been claimed, so the call is conservatively
+    ``delivery_uncertain`` as before; it must not be ``response_rejected``,
+    which says the upstream answered when no request ever reached it. The
+    upstream here would answer correctly, so a request that was wrongly sent
+    would show up as a success or a served call.
+    """
+    served: list[str] = []
+    server = Server("healthy-upstream")
+
+    async def call_tool(_req: CallToolRequest) -> ServerResult:
+        served.append("tools/call")
+        return ServerResult(
+            CallToolResult(content=[TextContent(type="text", text="ok")])
+        )
+
+    server.request_handlers[CallToolRequest] = call_tool
+    adapter = _adapter_over_in_memory_sdk(server)
+    claims: list[str] = []
+
+    async def before_dispatch() -> None:
+        claims.append("claimed")
+
+    with pytest.raises(UpstreamMcpDeliveryUncertainError) as exc_info:
+        await adapter.call_tool(
+            {1: "x"},  # type: ignore[dict-item]
+            invocation_id="inv",
+            idempotency_key="idem",
+            before_dispatch=before_dispatch,
+        )
+
+    assert exc_info.value.dispatch_started is True
+    assert claims == ["claimed"]
+    assert served == []
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("call_error", "expected"),
+    [
+        pytest.param(
+            _unparseable_result_error(),
+            UpstreamMcpResponseRejectedError,
+            id="result-model-validation-error",
+        ),
+        pytest.param(
+            json.JSONDecodeError("not json", "{", 1),
+            UpstreamMcpResponseRejectedError,
+            id="json-decode-error",
+        ),
+        pytest.param(
+            _request_validation_error(),
+            UpstreamMcpDeliveryUncertainError,
+            id="request-model-validation-error",
+        ),
+        pytest.param(
+            _cleanup_validation_error(),
+            UpstreamMcpDeliveryUncertainError,
+            id="validation-error-for-another-model",
+        ),
+    ],
+)
+async def test_a_session_that_does_not_wrap_errors_is_classified_by_the_same_rule(
+    call_error: Exception, expected: type[Exception]
+) -> None:
+    """The handlers must not depend on the SDK's task group wrapping the error.
+
+    ``FakeSession`` raises the bare exception, as a session without the anyio
+    task group would. After dispatch, only a failure to parse a response (a
+    ``CallToolResult`` validation error or a JSON decode error) is
+    ``response_rejected``. Any other validation error, such as the one building
+    a request that was never sent, says nothing about a response and stays
+    ``delivery_uncertain``.
+    """
+    adapter = UpstreamMcpAdapter(_configuration())
+    _mark_discovered(adapter)
+    _bind_session(adapter, FakeSession(call_error=call_error))
+    claims: list[str] = []
+
+    with pytest.raises(expected) as exc_info:
+        await _call_recording_claims(adapter, claims)
+
+    assert type(exc_info.value) is expected
+    assert exc_info.value.dispatch_started is True
+    assert claims == ["claimed"]
+
+
+def _scripted_mcp_client(
+    *,
+    on_call: Any = None,
+    initialize_result: dict[str, Any] | None = None,
+) -> httpx.AsyncClient:
+    """A scripted Streamable HTTP upstream for the production ``_session``.
+
+    ``on_call`` receives the JSON-RPC request id of ``tools/call`` and returns
+    the ``result`` dict to answer with, returns a ready ``httpx.Response``, or
+    raises (to simulate a transport failure).
+    """
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.method != "POST":
+            return httpx.Response(405)
+        payload = json.loads((await request.aread()).decode("utf-8"))
+        request_id = payload.get("id")
+        method = payload["method"]
+        if request_id is None:
+            return httpx.Response(202)
+        if method == "initialize":
+            result: Any = initialize_result or {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "serverInfo": {"name": "partner", "version": "1.0"},
+            }
+        elif method == "tools/call":
+            result = on_call(request_id)
+            if isinstance(result, httpx.Response):
+                return result
+        else:  # pragma: no cover - the call lifecycle is deterministic
+            raise AssertionError(f"unexpected MCP method: {method}")
+        return httpx.Response(
+            200,
+            headers={"Content-Type": "application/json"},
+            content=json.dumps(
+                {"jsonrpc": "2.0", "id": request_id, "result": result}
+            ).encode("utf-8"),
+        )
+
+    return httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        headers={"Authorization": "Bearer secret-partner-token"},
+        follow_redirects=False,
+    )
+
+
+async def _call_over_scripted_http(
+    client: httpx.AsyncClient, claims: list[str], **settings: Any
+) -> None:
+    adapter = UpstreamMcpAdapter(
+        _configuration(MCP_UPSTREAM_URL="https://partner.example/mcp", **settings),
+        http_client=client,
+        resolver=_global_resolver,
+    )
+    _mark_discovered(adapter)
+    try:
+        await _call_recording_claims(adapter, claims)
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("envelope", UNPARSEABLE_ENVELOPES)
+async def test_unparseable_result_envelope_over_streamable_http_is_response_rejected(
+    envelope: dict[str, Any],
+) -> None:
+    """Same classification through the production ``_session`` wiring."""
+    client = _scripted_mcp_client(on_call=lambda _request_id: envelope)
+
+    claims: list[str] = []
+    with pytest.raises(UpstreamMcpResponseRejectedError) as exc_info:
+        await _call_over_scripted_http(client, claims)
+
+    assert exc_info.value.code == "upstream_response_invalid"
+    assert exc_info.value.dispatch_started is True
+    assert claims == ["claimed"]
+
+
+def _json_rpc_error(request_id: Any) -> httpx.Response:
+    return httpx.Response(
+        200,
+        headers={"Content-Type": "application/json"},
+        content=json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {"code": -32000, "message": "upstream failed"},
+            }
+        ).encode("utf-8"),
+    )
+
+
+def _connection_dropped(_request_id: Any) -> Any:
+    raise httpx.ReadError("connection reset by peer")
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "on_call",
+    [_json_rpc_error, _connection_dropped],
+    ids=["jsonrpc-error-answering-tools-call", "connection-dropped"],
+)
+async def test_transport_failure_over_streamable_http_stays_delivery_uncertain(
+    on_call: Any,
+) -> None:
+    client = _scripted_mcp_client(on_call=on_call)
+
+    claims: list[str] = []
+    with pytest.raises(UpstreamMcpDeliveryUncertainError) as exc_info:
+        await _call_over_scripted_http(
+            client, claims, MCP_UPSTREAM_CALL_TIMEOUT_SECONDS="1"
+        )
+
+    assert exc_info.value.dispatch_started is True
+    assert claims == ["claimed"]
+
+
+@pytest.mark.anyio
+async def test_unparseable_initialize_response_stays_pre_dispatch() -> None:
+    """The new rejection applies only to the ``tools/call`` response.
+
+    A malformed ``initialize`` answer is raised before the dispatch checkpoint,
+    so nothing is claimed and nothing is sent.
+    """
+    client = _scripted_mcp_client(
+        on_call=lambda _request_id: {}, initialize_result={"protocolVersion": 5}
+    )
+
+    claims: list[str] = []
+    with pytest.raises(UpstreamMcpPreDispatchError) as exc_info:
+        await _call_over_scripted_http(client, claims)
+
+    assert exc_info.value.dispatch_started is False
+    assert claims == []
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "cleanup_error",
+    [
+        RuntimeError("secret-partner-token"),
+        UpstreamMcpPreDispatchError("secret-partner-token"),
+        UpstreamMcpDeliveryUncertainError(),
+    ],
+    ids=["untyped", "typed-pre-dispatch", "typed-delivery-uncertain"],
+)
+async def test_cleanup_failure_does_not_replace_unparseable_envelope_rejection(
+    cleanup_error: Exception,
+) -> None:
+    """A close-time failure must not turn a known rejection into uncertainty.
+
+    Closing the session after an unparseable answer can fail too. The rejection
+    is already known, so it keeps its outcome and its code.
+    """
+    adapter = UpstreamMcpAdapter(_configuration())
+    _mark_discovered(adapter)
+    _bind_session(
+        adapter,
+        FakeSession(call_error=_unparseable_result_error()),
+        cleanup_error=cleanup_error,
+    )
+
+    claims: list[str] = []
+    with pytest.raises(UpstreamMcpResponseRejectedError) as exc_info:
+        await _call_recording_claims(adapter, claims)
+
+    assert exc_info.value.code == "upstream_response_invalid"
+    assert exc_info.value.dispatch_started is True
+    assert "secret-partner-token" not in str(exc_info.value)

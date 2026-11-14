@@ -361,6 +361,14 @@ route takes header credentials, and a wildcard disables credentialed CORS (see
 an explicit origin list, without `*`, only when a browser app must send
 credentials.
 
+When demo issuance is enabled, `DEMO_ALLOWED_ORIGINS` must name the marketing
+hosts that call `POST /v1/demo/keys`. The shipped default is
+`https://www.thisisatest.tech,https://thisisatest.tech,https://www.agentmiddleware.dev,https://agentmiddleware.dev`.
+A Railway service that already stores this variable keeps that stored value
+across deploys, so set the live variable to this same list.
+`.railway/railway.ts` stores variable names with `preserve()` and has no
+slot for this value.
+
 Committed `.railway/railway.ts` contains the complete API variable-name set but
 no values: every name, including `VALID_API_KEYS`, signing material, and
 `RUN_MIGRATIONS_ON_START`, must map to `preserve()`. Set or rotate values only

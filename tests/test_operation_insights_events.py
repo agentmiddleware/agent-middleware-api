@@ -102,6 +102,33 @@ def test_established_permit_denial_codes_are_bounded(reason: str) -> None:
     assert allowlisted_reason_code("permit_forbidden_field:raw-field") is None
 
 
+@pytest.mark.parametrize(
+    "reason",
+    ("upstream_circuit_open", "upstream_concurrency_saturated"),
+)
+def test_upstream_admission_refusal_reasons_are_kept(reason: str) -> None:
+    from app.services.operation_insights.events import (
+        RequestEventContext,
+        activate_request,
+        allowlisted_reason_code,
+        deactivate_request,
+        mark_current_request,
+    )
+
+    assert allowlisted_reason_code(reason) == reason
+    context = RequestEventContext(
+        request_id="req-admission",
+        ingress_event_id="evt-admission",
+        request_disposition="execution_intent",
+    )
+    token = activate_request(context)
+    try:
+        mark_current_request(gateway_outcome="unknown", reason_code=reason)
+    finally:
+        deactivate_request(token)
+    assert context.reason_code == reason
+
+
 @pytest.mark.asyncio
 async def test_duplicate_event_is_idempotent_and_conflict_marks_coverage_gap(
     clean_database: None,
