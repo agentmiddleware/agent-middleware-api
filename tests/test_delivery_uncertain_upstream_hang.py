@@ -154,26 +154,26 @@ async def hanging_upstream():
         )
     )
     adapter = UpstreamMcpAdapter(configuration, http_client=http_client)
-    
+
     # The FastMCP server's streamable HTTP lifespan uses anyio.CancelScope, which
     # must be entered and exited on the same asyncio task. pytest-asyncio can run
     # fixture teardown on a different task than setup, causing
     # "Attempted to exit cancel scope in a different task".
-    # 
+    #
     # Solution: Use asyncio.create_task() to run the lifespan in a dedicated task
     # that we control, avoiding pytest's task migration. Cancel and await the task
     # on teardown from whatever task pytest uses.
     lifespan_cm = upstream.app.router.lifespan_context(upstream.app)
-    
+
     async def run_lifespan():
         async with lifespan_cm:
             # Keep the server running until this task is cancelled
             await asyncio.Event().wait()
-    
+
     server_task = asyncio.create_task(run_lifespan())
     # Give the server time to start
     await asyncio.sleep(0.05)
-    
+
     try:
         discovered = await adapter.discover_tool()
         get_service_registry().register_upstream(
