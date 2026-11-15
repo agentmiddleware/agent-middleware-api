@@ -22,7 +22,6 @@ import asyncio
 from openai import AsyncOpenAI
 from openai_b2a import B2AClient, GovernedToolRunner, JsonFileOperationKeyStore
 
-
 async def main():
     async with B2AClient(
         api_key="YOUR_WALLET_KEY", base_url="http://127.0.0.1:8000"
@@ -33,26 +32,18 @@ async def main():
             run_id="YOUR_STABLE_RUN_ID",
             key_store=JsonFileOperationKeyStore("operations.json"),
         )
-        tools = [
-            runner.register_tool(
-                "partner.notes.write",
-                description="Write a note",
-                parameters={
-                    "type": "object",
-                    "properties": {"text": {"type": "string"}},
-                },
-            )
-        ]
+        tools = [runner.register_tool(
+            "partner.notes.write",
+            description="Write a note",
+            parameters={"type": "object", "properties": {"text": {"type": "string"}}},
+        )]
         response = await AsyncOpenAI().chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "user", "content": "Write a note that says hello"}],
             tools=tools,
         )
-        for result in await runner.run_all(
-            response.choices[0].message.tool_calls or []
-        ):
+        for result in await runner.run_all(response.choices[0].message.tool_calls or []):
             print(result.receipt.receipt_id)
-
 
 asyncio.run(main())
 ```

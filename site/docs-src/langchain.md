@@ -20,22 +20,18 @@ With the [local quickstart](/docs/run-locally/) running and a wallet scoped key,
 import asyncio
 from langchain_b2a import B2AClient, get_mcp_tools
 
-
 async def main():
     async with B2AClient(
         api_key="YOUR_WALLET_KEY", base_url="http://127.0.0.1:8000"
     ) as client:
         tool = get_mcp_tools(client, wallet_id="YOUR_WALLET_ID")[0]
-        result = await tool.ainvoke(
-            {
-                "tool_name": "partner.notes.write",
-                "idempotency_key": "YOUR_CALL_KEY",
-                "permit_idempotency_key": "YOUR_PERMIT_KEY",
-                "arguments": {"text": "a governed note"},
-            }
-        )
+        result = await tool.ainvoke({
+            "tool_name": "partner.notes.write",
+            "idempotency_key": "YOUR_CALL_KEY",
+            "permit_idempotency_key": "YOUR_PERMIT_KEY",
+            "arguments": {"text": "a governed note"},
+        })
         print(result)
-
 
 asyncio.run(main())
 ```
