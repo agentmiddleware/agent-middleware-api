@@ -11,7 +11,7 @@ Canonical: https://www.agentmiddleware.dev/.well-known/security.txt
 # boundary and limitation documents at the URLs below.
 #
 # Scope
-#   www.agentmiddleware.dev: this static marketing and proof site
+#   www.agentmiddleware.dev  — this static marketing and proof site
 #   api.thisisatest.tech  — the governed gateway
 #
 # Known and already-published limitations are listed in
