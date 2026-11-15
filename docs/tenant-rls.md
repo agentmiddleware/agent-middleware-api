@@ -59,6 +59,10 @@ Covered tables (`app.db.tenant_rls.RLS_TABLES`, frozen in the migration):
 `ledger_entries`, `mcp_dispatch_attempts`, `permit_requests`, `permits`,
 `policy_bundles`, `quotes`, `receipts`, `refresh_tokens`.
 
+`api_key_usage_events` has a separate admin-only policy from migration 051.
+It is included in posture checks and the manual enable/force statements; the
+event writer uses an explicit admin scope for its single insert.
+
 Not covered (deliberately, for now): `wallets` (the tenant root, read during
 credential resolution and parent/child provisioning), `control_plane_audit_events`
 and `audit_chain_heads` (carry wallet-less rows), the `insight_*` tables (own
