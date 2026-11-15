@@ -51,9 +51,14 @@ the one that fails loudly and specifically when a claim regresses.
 Branch protection rule, `main`:
 
 - **Require a pull request before merging** — on.
-  - Require approvals: 1 (raise as the team grows).
+  - Require approvals: 0 while the project has one maintainer. GitHub does
+    not let an author approve their own pull request, so 1 would block every
+    merge; the required checks below are the review. Raise to 1 the day a
+    second maintainer has commit access.
   - Dismiss stale approvals when new commits are pushed — on.
-  - Require review from Code Owners — on (`CODEOWNERS` is present).
+  - Require review from Code Owners — off until there is a second maintainer.
+    `CODEOWNERS` assigns every path to the single maintainer, so it would
+    also block self-merge. Turn it on together with the approval count.
 - **Require status checks to pass before merging** — on.
   - Require branches to be up to date before merging — on. (Forces the gate to
     run against the actual merge result, not a stale base.)
@@ -66,8 +71,11 @@ Branch protection rule, `main`:
 
 ### Via the REST API
 
-Set once, from an account with admin on the repo (requires a token with
-`repo` / branch-protection admin scope):
+`python scripts/github_repo_settings.py --apply` sends the body below, with
+the `contexts` list read from the live rule so a hand-edited copy cannot drift
+from what CI reports. It is a dry run without `--apply`. The manual form, from
+an account with admin on the repo (requires a token with `repo` /
+branch-protection admin scope):
 
 ```bash
 # OWNER/REPO and the required check contexts are the only things to edit.
@@ -89,8 +97,8 @@ curl -sS -X PUT \
     "enforce_admins": true,
     "required_pull_request_reviews": {
       "dismiss_stale_reviews": true,
-      "require_code_owner_reviews": true,
-      "required_approving_review_count": 1
+      "require_code_owner_reviews": false,
+      "required_approving_review_count": 0
     },
     "required_conversation_resolution": true,
     "restrictions": null,

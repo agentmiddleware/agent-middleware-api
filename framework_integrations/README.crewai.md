@@ -24,7 +24,7 @@ Use the governed CrewAI wrapper instead. Every call goes through the
 No PyPI package is published. Work from a checkout of this repository:
 
 ```bash
-git clone https://github.com/PetrefiedThunder/agent-middleware-api.git
+git clone https://github.com/agentmiddleware/agent-middleware-api.git
 cd agent-middleware-api
 python -m pip install -e ./b2a_sdk
 python -m pip install -e wrappers/crewai-agent-middleware
