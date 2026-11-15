@@ -3058,6 +3058,9 @@ body.home-light .home-v2-steps li {
   font-size: 0.9375rem;
   line-height: 1.6;
 }
+body.home-light .home-v2-steps li > * {
+  grid-column: 2;
+}
 body.home-light .home-v2-steps li::before {
   content: "✓";
   color: var(--home-blue);
