@@ -140,7 +140,9 @@ async def test_agent_ops_war_room_demo_proves_control_plane_loop(
     assert result["ledger"]["matching_debits"] == 1
     assert result["audit"]["chain"]["valid"] is True
     assert result["denial"]["reason"] == "permit_tool_not_allowed"
-    assert result["denial"]["ledger_debits_after"] == result["ledger"]["matching_debits"]
+    assert (
+        result["denial"]["ledger_debits_after"] == result["ledger"]["matching_debits"]
+    )
 ```
 
 The fixture may reuse the strict trust-mode setup pattern from `tests/test_mcp_trust_mode.py`.
@@ -165,15 +167,14 @@ async def run_war_room(
     client: httpx.AsyncClient,
     bootstrap_api_key: str,
     emit: bool = True,
-) -> dict[str, Any]:
-    ...
+) -> dict[str, Any]: ...
+
 
 async def run_in_process(
     *,
     database_url: str | None = None,
     bootstrap_api_key: str = "war-room-bootstrap-key",
-) -> dict[str, Any]:
-    ...
+) -> dict[str, Any]: ...
 ```
 
 `run_war_room()` must:

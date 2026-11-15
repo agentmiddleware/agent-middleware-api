@@ -20,6 +20,7 @@ With the [local quickstart](/docs/run-locally/) running, call its governed tool:
 import asyncio
 from autogen_b2a import B2AFunctionTool
 
+
 async def main():
     tool = B2AFunctionTool(
         api_key="YOUR_WALLET_KEY",
@@ -33,6 +34,7 @@ async def main():
         arguments={"text": "a governed note"},
     )
     print(result["receipt_id"])
+
 
 asyncio.run(main())
 ```

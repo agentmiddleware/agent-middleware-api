@@ -21,6 +21,7 @@ Pass the gateway URL explicitly and replace the placeholders with your own key a
 import asyncio
 from b2a_sdk import AgentMiddlewareClient
 
+
 async def main():
     async with AgentMiddlewareClient(
         api_key="YOUR_DEMO_KEY",
@@ -28,6 +29,7 @@ async def main():
     ) as client:
         for tool in await client.discover_tools():
             print(tool.name)
+
 
 asyncio.run(main())
 ```

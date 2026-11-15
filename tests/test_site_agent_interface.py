@@ -251,7 +251,10 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
     assert 'href="https://github.com/agentmiddleware/amw-demo"' in page
     assert 'id="quickstart"' in page
     assert page.count("rcpt_7Kq2mX9") == 3
-    assert "receipt_id: rcpt_7Kq2mX9\nSame receipt. The gateway did not dispatch again." in page
+    assert (
+        "receipt_id: rcpt_7Kq2mX9\nSame receipt. The gateway did not dispatch again."
+        in page
+    )
     assert "rcpt_7Kq2mX9.</code>" not in page
     assert page.index('class="home-v2-glossary"') < page.index('id="how-it-works"')
     checklist = page.split('<ul class="home-v2-steps">', 1)[1].split("</ul>", 1)[0]

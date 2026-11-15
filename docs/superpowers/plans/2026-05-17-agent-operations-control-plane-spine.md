@@ -322,7 +322,9 @@ def upgrade() -> None:
     op.create_table(
         "control_plane_audit_events",
         sa.Column("event_id", sa.String(length=50), primary_key=True),
-        sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()
+        ),
         sa.Column("event", sa.String(length=128), nullable=False),
         sa.Column("wallet_id", sa.String(length=64), nullable=True),
         sa.Column("tool", sa.String(length=128), nullable=True),
@@ -335,27 +337,78 @@ def upgrade() -> None:
         sa.Column("error", sa.Text(), nullable=True),
         sa.Column("metadata_json", sa.Text(), nullable=True),
     )
-    op.create_index("ix_control_plane_audit_events_created_at", "control_plane_audit_events", ["created_at"])
-    op.create_index("ix_control_plane_audit_events_event", "control_plane_audit_events", ["event"])
-    op.create_index("ix_control_plane_audit_events_wallet_id", "control_plane_audit_events", ["wallet_id"])
-    op.create_index("ix_control_plane_audit_events_tool", "control_plane_audit_events", ["tool"])
-    op.create_index("ix_control_plane_audit_events_endpoint", "control_plane_audit_events", ["endpoint"])
-    op.create_index("ix_control_plane_audit_events_key_id", "control_plane_audit_events", ["key_id"])
-    op.create_index("ix_control_plane_audit_events_policy_decision_id", "control_plane_audit_events", ["policy_decision_id"])
-    op.create_index("ix_control_plane_audit_events_request_id", "control_plane_audit_events", ["request_id"])
-    op.create_index("ix_control_plane_audit_events_ok", "control_plane_audit_events", ["ok"])
+    op.create_index(
+        "ix_control_plane_audit_events_created_at",
+        "control_plane_audit_events",
+        ["created_at"],
+    )
+    op.create_index(
+        "ix_control_plane_audit_events_event", "control_plane_audit_events", ["event"]
+    )
+    op.create_index(
+        "ix_control_plane_audit_events_wallet_id",
+        "control_plane_audit_events",
+        ["wallet_id"],
+    )
+    op.create_index(
+        "ix_control_plane_audit_events_tool", "control_plane_audit_events", ["tool"]
+    )
+    op.create_index(
+        "ix_control_plane_audit_events_endpoint",
+        "control_plane_audit_events",
+        ["endpoint"],
+    )
+    op.create_index(
+        "ix_control_plane_audit_events_key_id", "control_plane_audit_events", ["key_id"]
+    )
+    op.create_index(
+        "ix_control_plane_audit_events_policy_decision_id",
+        "control_plane_audit_events",
+        ["policy_decision_id"],
+    )
+    op.create_index(
+        "ix_control_plane_audit_events_request_id",
+        "control_plane_audit_events",
+        ["request_id"],
+    )
+    op.create_index(
+        "ix_control_plane_audit_events_ok", "control_plane_audit_events", ["ok"]
+    )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_control_plane_audit_events_ok", table_name="control_plane_audit_events")
-    op.drop_index("ix_control_plane_audit_events_request_id", table_name="control_plane_audit_events")
-    op.drop_index("ix_control_plane_audit_events_policy_decision_id", table_name="control_plane_audit_events")
-    op.drop_index("ix_control_plane_audit_events_key_id", table_name="control_plane_audit_events")
-    op.drop_index("ix_control_plane_audit_events_endpoint", table_name="control_plane_audit_events")
-    op.drop_index("ix_control_plane_audit_events_tool", table_name="control_plane_audit_events")
-    op.drop_index("ix_control_plane_audit_events_wallet_id", table_name="control_plane_audit_events")
-    op.drop_index("ix_control_plane_audit_events_event", table_name="control_plane_audit_events")
-    op.drop_index("ix_control_plane_audit_events_created_at", table_name="control_plane_audit_events")
+    op.drop_index(
+        "ix_control_plane_audit_events_ok", table_name="control_plane_audit_events"
+    )
+    op.drop_index(
+        "ix_control_plane_audit_events_request_id",
+        table_name="control_plane_audit_events",
+    )
+    op.drop_index(
+        "ix_control_plane_audit_events_policy_decision_id",
+        table_name="control_plane_audit_events",
+    )
+    op.drop_index(
+        "ix_control_plane_audit_events_key_id", table_name="control_plane_audit_events"
+    )
+    op.drop_index(
+        "ix_control_plane_audit_events_endpoint",
+        table_name="control_plane_audit_events",
+    )
+    op.drop_index(
+        "ix_control_plane_audit_events_tool", table_name="control_plane_audit_events"
+    )
+    op.drop_index(
+        "ix_control_plane_audit_events_wallet_id",
+        table_name="control_plane_audit_events",
+    )
+    op.drop_index(
+        "ix_control_plane_audit_events_event", table_name="control_plane_audit_events"
+    )
+    op.drop_index(
+        "ix_control_plane_audit_events_created_at",
+        table_name="control_plane_audit_events",
+    )
     op.drop_table("control_plane_audit_events")
 ```
 
@@ -460,9 +513,11 @@ async def list_audit_events(
     request_id: str | None = None,
     limit: int = 50,
 ) -> list[AuditEvent]:
-    stmt = select(ControlPlaneAuditEventModel).order_by(
-        desc(ControlPlaneAuditEventModel.created_at)
-    ).limit(limit)
+    stmt = (
+        select(ControlPlaneAuditEventModel)
+        .order_by(desc(ControlPlaneAuditEventModel.created_at))
+        .limit(limit)
+    )
     if wallet_id:
         stmt = stmt.where(ControlPlaneAuditEventModel.wallet_id == wallet_id)
     if key_id:
@@ -667,7 +722,7 @@ async def get_audit_events(
 In `app/main.py`, add `audit` to the router imports:
 
 ```python
-    audit,
+(audit,)
 ```
 
 Then include it near other operator/control-plane routers:
@@ -738,51 +793,109 @@ async def _create_funded_agent_wallet(client: AsyncClient, agent_id: str) -> str
 Replace the current `test_invoke_tool_accepts_api_key_header` method and add the JSON-RPC regression tests inside `class TestMcpInvokeRoute`:
 
 ```python
-    @pytest.mark.anyio
-    async def test_invoke_tool_accepts_api_key_header(self, clean_database):
-        registry = get_service_registry()
+@pytest.mark.anyio
+async def test_invoke_tool_accepts_api_key_header(self, clean_database):
+    registry = get_service_registry()
 
-        def echo_tool(value: str = "ok") -> dict:
-            return {"value": value}
+    def echo_tool(value: str = "ok") -> dict:
+        return {"value": value}
 
-        registry.register_local(
-            service_id="header-auth-echo",
-            name="Header Auth Echo",
-            description="Echo for auth route testing",
-            category=ServiceCategory.AGENT_COMMS,
-            func=echo_tool,
-            credits_per_unit=2.0,
-            unit_name="call",
-        )
+    registry.register_local(
+        service_id="header-auth-echo",
+        name="Header Auth Echo",
+        description="Echo for auth route testing",
+        category=ServiceCategory.AGENT_COMMS,
+        func=echo_tool,
+        credits_per_unit=2.0,
+        unit_name="call",
+    )
 
-        try:
-            async with AsyncClient(
-                transport=ASGITransport(app=app), base_url="http://test"
-            ) as client:
-                wallet_id = await _create_funded_agent_wallet(
-                    client,
-                    "header-auth-agent",
-                )
-                response = await client.post(
-                    "/mcp/tools/header-auth-echo/invoke",
-                    json={
-                        "name": "header-auth-echo",
-                        "arguments": {"value": "hello"},
-                        "mcp_context": {"wallet_id": wallet_id},
-                    },
-                    headers={"X-API-Key": "test-key"},
-                )
-
-            assert response.status_code == 200
-            assert response.json()["isError"] is False
-        finally:
-            registry.unregister_local("header-auth-echo")
-
-    @pytest.mark.anyio
-    async def test_messages_tools_call_requires_api_key_header(self):
+    try:
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
+            wallet_id = await _create_funded_agent_wallet(
+                client,
+                "header-auth-agent",
+            )
+            response = await client.post(
+                "/mcp/tools/header-auth-echo/invoke",
+                json={
+                    "name": "header-auth-echo",
+                    "arguments": {"value": "hello"},
+                    "mcp_context": {"wallet_id": wallet_id},
+                },
+                headers={"X-API-Key": "test-key"},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["isError"] is False
+    finally:
+        registry.unregister_local("header-auth-echo")
+
+
+@pytest.mark.anyio
+async def test_messages_tools_call_requires_api_key_header(self):
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/mcp/messages",
+            json={
+                "jsonrpc": "2.0",
+                "id": "call-1",
+                "method": "tools/call",
+                "params": {
+                    "name": "anything",
+                    "arguments": {},
+                    "mcpContext": {"wallet_id": "wallet-test"},
+                },
+            },
+        )
+
+    assert response.status_code == 401
+
+
+@pytest.mark.anyio
+async def test_messages_tools_call_rejects_cross_wallet_db_key(self, clean_database):
+    registry = get_service_registry()
+
+    def echo_tool(value: str = "ok") -> dict:
+        return {"value": value}
+
+    registry.register_local(
+        service_id="cross-wallet-echo",
+        name="Cross Wallet Echo",
+        description="Echo for cross-wallet auth testing",
+        category=ServiceCategory.AGENT_COMMS,
+        func=echo_tool,
+        credits_per_unit=1.0,
+        unit_name="call",
+    )
+
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            owned_wallet_id = await _create_funded_agent_wallet(
+                client,
+                "owned-runtime-agent",
+            )
+            other_wallet_id = await _create_funded_agent_wallet(
+                client,
+                "other-runtime-agent",
+            )
+            key_resp = await client.post(
+                "/v1/api-keys",
+                json={
+                    "wallet_id": owned_wallet_id,
+                    "key_name": "runtime",
+                    "expires_in_days": 30,
+                },
+                headers={"X-API-Key": "test-key"},
+            )
+            assert key_resp.status_code == 201
+
             response = await client.post(
                 "/mcp/messages",
                 json={
@@ -790,139 +903,86 @@ Replace the current `test_invoke_tool_accepts_api_key_header` method and add the
                     "id": "call-1",
                     "method": "tools/call",
                     "params": {
-                        "name": "anything",
-                        "arguments": {},
-                        "mcpContext": {"wallet_id": "wallet-test"},
+                        "name": "cross-wallet-echo",
+                        "arguments": {"value": "hello"},
+                        "mcpContext": {"wallet_id": other_wallet_id},
                     },
                 },
+                headers={"X-API-Key": key_resp.json()["api_key"]},
             )
 
-        assert response.status_code == 401
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["error"]["code"] == -32003
+        assert "wallet_access_denied" in payload["error"]["message"]
+    finally:
+        registry.unregister_local("cross-wallet-echo")
 
-    @pytest.mark.anyio
-    async def test_messages_tools_call_rejects_cross_wallet_db_key(self, clean_database):
-        registry = get_service_registry()
 
-        def echo_tool(value: str = "ok") -> dict:
-            return {"value": value}
+@pytest.mark.anyio
+async def test_messages_tools_call_charges_wallet_and_records_audit(
+    self, clean_database
+):
+    registry = get_service_registry()
 
-        registry.register_local(
-            service_id="cross-wallet-echo",
-            name="Cross Wallet Echo",
-            description="Echo for cross-wallet auth testing",
-            category=ServiceCategory.AGENT_COMMS,
-            func=echo_tool,
-            credits_per_unit=1.0,
-            unit_name="call",
-        )
+    def paid_echo(value: str = "ok") -> dict:
+        return {"value": value}
 
-        try:
-            async with AsyncClient(
-                transport=ASGITransport(app=app), base_url="http://test"
-            ) as client:
-                owned_wallet_id = await _create_funded_agent_wallet(
-                    client,
-                    "owned-runtime-agent",
-                )
-                other_wallet_id = await _create_funded_agent_wallet(
-                    client,
-                    "other-runtime-agent",
-                )
-                key_resp = await client.post(
-                    "/v1/api-keys",
-                    json={
-                        "wallet_id": owned_wallet_id,
-                        "key_name": "runtime",
-                        "expires_in_days": 30,
+    registry.register_local(
+        service_id="jsonrpc-paid-echo",
+        name="JSON-RPC Paid Echo",
+        description="Echo for JSON-RPC billing and audit testing",
+        category=ServiceCategory.AGENT_COMMS,
+        func=paid_echo,
+        credits_per_unit=2.0,
+        unit_name="call",
+    )
+
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            wallet_id = await _create_funded_agent_wallet(
+                client,
+                "jsonrpc-paid-agent",
+            )
+            response = await client.post(
+                "/mcp/messages",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": "paid-call-1",
+                    "method": "tools/call",
+                    "params": {
+                        "name": "jsonrpc-paid-echo",
+                        "arguments": {"value": "hello"},
+                        "mcpContext": {"wallet_id": wallet_id},
                     },
-                    headers={"X-API-Key": "test-key"},
-                )
-                assert key_resp.status_code == 201
-
-                response = await client.post(
-                    "/mcp/messages",
-                    json={
-                        "jsonrpc": "2.0",
-                        "id": "call-1",
-                        "method": "tools/call",
-                        "params": {
-                            "name": "cross-wallet-echo",
-                            "arguments": {"value": "hello"},
-                            "mcpContext": {"wallet_id": other_wallet_id},
-                        },
-                    },
-                    headers={"X-API-Key": key_resp.json()["api_key"]},
-                )
-
+                },
+                headers={"X-API-Key": "test-key"},
+            )
             assert response.status_code == 200
-            payload = response.json()
-            assert payload["error"]["code"] == -32003
-            assert "wallet_access_denied" in payload["error"]["message"]
-        finally:
-            registry.unregister_local("cross-wallet-echo")
+            assert response.json()["result"]["isError"] is False
 
-    @pytest.mark.anyio
-    async def test_messages_tools_call_charges_wallet_and_records_audit(self, clean_database):
-        registry = get_service_registry()
+            ledger_resp = await client.get(
+                f"/v1/billing/ledger/{wallet_id}",
+                headers={"X-API-Key": "test-key"},
+            )
+            assert ledger_resp.status_code == 200
+            assert any(
+                "jsonrpc-paid-echo" in entry.get("description", "")
+                for entry in ledger_resp.json()["entries"]
+            )
 
-        def paid_echo(value: str = "ok") -> dict:
-            return {"value": value}
-
-        registry.register_local(
-            service_id="jsonrpc-paid-echo",
-            name="JSON-RPC Paid Echo",
-            description="Echo for JSON-RPC billing and audit testing",
-            category=ServiceCategory.AGENT_COMMS,
-            func=paid_echo,
-            credits_per_unit=2.0,
-            unit_name="call",
-        )
-
-        try:
-            async with AsyncClient(
-                transport=ASGITransport(app=app), base_url="http://test"
-            ) as client:
-                wallet_id = await _create_funded_agent_wallet(
-                    client,
-                    "jsonrpc-paid-agent",
-                )
-                response = await client.post(
-                    "/mcp/messages",
-                    json={
-                        "jsonrpc": "2.0",
-                        "id": "paid-call-1",
-                        "method": "tools/call",
-                        "params": {
-                            "name": "jsonrpc-paid-echo",
-                            "arguments": {"value": "hello"},
-                            "mcpContext": {"wallet_id": wallet_id},
-                        },
-                    },
-                    headers={"X-API-Key": "test-key"},
-                )
-                assert response.status_code == 200
-                assert response.json()["result"]["isError"] is False
-
-                ledger_resp = await client.get(
-                    f"/v1/billing/ledger/{wallet_id}",
-                    headers={"X-API-Key": "test-key"},
-                )
-                assert ledger_resp.status_code == 200
-                assert any(
-                    "jsonrpc-paid-echo" in entry.get("description", "")
-                    for entry in ledger_resp.json()["entries"]
-                )
-
-                audit_resp = await client.get(
-                    f"/v1/audit/events?wallet_id={wallet_id}&tool=jsonrpc-paid-echo",
-                    headers={"X-API-Key": "test-key"},
-                )
-                assert audit_resp.status_code == 200
-                audit_events = audit_resp.json()["events"]
-                assert len(audit_events) == 1
-                assert audit_events[0]["metadata"]["transport"] == "jsonrpc"
-        finally:
-            registry.unregister_local("jsonrpc-paid-echo")
+            audit_resp = await client.get(
+                f"/v1/audit/events?wallet_id={wallet_id}&tool=jsonrpc-paid-echo",
+                headers={"X-API-Key": "test-key"},
+            )
+            assert audit_resp.status_code == 200
+            audit_events = audit_resp.json()["events"]
+            assert len(audit_events) == 1
+            assert audit_events[0]["metadata"]["transport"] == "jsonrpc"
+    finally:
+        registry.unregister_local("jsonrpc-paid-echo")
 ```
 
 - [ ] **Step 2: Run the new MCP tests to verify they fail**
@@ -1025,7 +1085,9 @@ async def _execute_registered_tool(
         )
         raise PermissionError(decision.reason)
 
-    category = ServiceCategory(service.get("category", ServiceCategory.PLATFORM_FEE.value))
+    category = ServiceCategory(
+        service.get("category", ServiceCategory.PLATFORM_FEE.value)
+    )
     charge_result = await money.charge(
         wallet_id=wallet_id,
         service_category=category,
@@ -1242,20 +1304,22 @@ from app.services.service_registry import get_service_registry
 Inside `test_wallet_scoped_agent_golden_path`, before the `mcp_resp = await client.get("/mcp/tools.json", headers=agent_headers)` block, register a local test tool:
 
 ```python
-    registry = get_service_registry()
+registry = get_service_registry()
 
-    def golden_path_echo(message: str = "ok") -> dict:
-        return {"message": message}
 
-    registry.register_local(
-        service_id="golden-path-echo",
-        name="Golden Path Echo",
-        description="Echo tool for golden path MCP invocation",
-        category=ServiceCategory.AGENT_COMMS,
-        func=golden_path_echo,
-        credits_per_unit=2.0,
-        unit_name="call",
-    )
+def golden_path_echo(message: str = "ok") -> dict:
+    return {"message": message}
+
+
+registry.register_local(
+    service_id="golden-path-echo",
+    name="Golden Path Echo",
+    description="Echo tool for golden path MCP invocation",
+    category=ServiceCategory.AGENT_COMMS,
+    func=golden_path_echo,
+    credits_per_unit=2.0,
+    unit_name="call",
+)
 ```
 
 After the `mcp_resp` assertions, add the JSON-RPC invocation:
@@ -1380,7 +1444,9 @@ async def test_discover_and_agent_manifest_share_agent_first_contract(client):
 
     assert agent_response.status_code == 200
     assert discover_response.status_code == 200
-    assert agent_response.json()["agent_first"] == discover_response.json()["agent_first"]
+    assert (
+        agent_response.json()["agent_first"] == discover_response.json()["agent_first"]
+    )
 
 
 @pytest.mark.anyio
@@ -1447,8 +1513,24 @@ def test_risk_budget_enforced_by_tier():
     state = _state(tier="low")
     req = OptimizerRequest(state=state)
     candidates = [
-        {"id": "safe", "service": "svc1", "credit_cost": 1, "latency_ms": 10, "risk_score": 0.02, "expected_value": 1, "reliability": 1.0},
-        {"id": "risky", "service": "svc1", "credit_cost": 1, "latency_ms": 10, "risk_score": 0.2, "expected_value": 10, "reliability": 1.0},
+        {
+            "id": "safe",
+            "service": "svc1",
+            "credit_cost": 1,
+            "latency_ms": 10,
+            "risk_score": 0.02,
+            "expected_value": 1,
+            "reliability": 1.0,
+        },
+        {
+            "id": "risky",
+            "service": "svc1",
+            "credit_cost": 1,
+            "latency_ms": 10,
+            "risk_score": 0.2,
+            "expected_value": 10,
+            "reliability": 1.0,
+        },
     ]
     out = planner.optimize_action_set(state, candidates, req)
     ids = {x["id"] for x in out["selected_actions"]}
@@ -1514,7 +1596,9 @@ def _constraint_rejections(
         if action.get("credit_cost", 0.0) > state.remaining_budget:
             rejected.append({"id": action.get("id"), "reason": "budget_exceeded"})
         elif action.get("latency_ms", 0.0) > state.slo_window_seconds * 1000:
-            rejected.append({"id": action.get("id"), "reason": "latency_budget_exceeded"})
+            rejected.append(
+                {"id": action.get("id"), "reason": "latency_budget_exceeded"}
+            )
         elif action.get("risk_score", 0.0) > risk_budget:
             rejected.append({"id": action.get("id"), "reason": "risk_budget_exceeded"})
     return rejected
@@ -1523,41 +1607,35 @@ def _constraint_rejections(
 Before each successful `_pack_response`, merge constraint rejections:
 
 ```python
-                constraint_rejected = _constraint_rejections(
-                    admissible,
-                    selected,
-                    state,
-                    risk_budget,
-                )
-                all_rejected = rejected + constraint_rejected
-                policy_reasons = {
-                    item["id"]: item["reason"]
-                    for item in all_rejected
-                    if item.get("id")
-                }
-                return _pack_response(
-                    "Optimal",
-                    selected,
-                    all_rejected,
-                    state,
-                    risk_budget,
-                    lambdas,
-                    policy_reasons,
-                )
+constraint_rejected = _constraint_rejections(
+    admissible,
+    selected,
+    state,
+    risk_budget,
+)
+all_rejected = rejected + constraint_rejected
+policy_reasons = {item["id"]: item["reason"] for item in all_rejected if item.get("id")}
+return _pack_response(
+    "Optimal",
+    selected,
+    all_rejected,
+    state,
+    risk_budget,
+    lambdas,
+    policy_reasons,
+)
 ```
 
 Do the same for the greedy fallback path:
 
 ```python
-    constraint_rejected = _constraint_rejections(admissible, selected, state, risk_budget)
-    all_rejected = rejected + constraint_rejected
-    policy_reasons = {
-        item["id"]: item["reason"]
-        for item in all_rejected
-        if item.get("id")
-    }
-    status = "HeuristicFallback" if selected else "Infeasible"
-    return _pack_response(status, selected, all_rejected, state, risk_budget, lambdas, policy_reasons)
+constraint_rejected = _constraint_rejections(admissible, selected, state, risk_budget)
+all_rejected = rejected + constraint_rejected
+policy_reasons = {item["id"]: item["reason"] for item in all_rejected if item.get("id")}
+status = "HeuristicFallback" if selected else "Infeasible"
+return _pack_response(
+    status, selected, all_rejected, state, risk_budget, lambdas, policy_reasons
+)
 ```
 
 For the no-admissible path, pass policy reasons from existing rejected actions:
