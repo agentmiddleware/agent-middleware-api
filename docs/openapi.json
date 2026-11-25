@@ -5,7 +5,7 @@
     "description": "## Agent Transaction Integrity\n\n**Make consequential agent actions transactional.**\n\nTransaction-integrity boundary for consequential autonomous actions on the configured upstream-MCP path: one logical action binds scoped authority and configured consumption to at most one gateway dispatch and debit, records delivery_uncertain instead of automatically redispatching, and links gateway evidence for required external reconciliation.\n\nIt is not a full agent middleware platform. This is a durable gateway state machine, not one distributed ACID transaction and not proof of the downstream effect. A remote side effect is exactly once only when the upstream honors the forwarded idempotency key. See `/WEDGE.md` and `/SECURITY_LIMITATIONS.md`.\n\n### Canonical Loop\n\n`logical action -> authorize -> reserve allowance -> debit -> claim dispatch -> confirmed outcome | delivery_uncertain -> receipt/audit -> authoritative external reconciliation required`\n\n### Product Surface\n\n- **Logical action identity** — accepted key bound to one payload\n- **Bounded authority consumption** — scoped permit and configured allowance\n- **One-shot gateway dispatch/debit** — at most once per accepted action\n- **Explicit uncertainty** — `delivery_uncertain` is not auto-redispatched\n- **Linked gateway evidence** — receipt and audit data for reconciliation\n- **Discovery** — `.well-known/agent.json`, `/mcp/tools.json`, `/llms.txt`, `/v1/discover`\n\n### Proof Surfaces\n\nAgentic-web, browser, content, oracle, sandbox, media, IoT, red-team, and telemetry demos are labeled scaffolding. They mount only when `ENABLE_PROOF_SURFACES=true` and do not define the product.\n\n### Authentication\n\nProtected endpoints require an API key via the `X-API-Key` header.\n\n### For Agents\n\nStart at `/.well-known/agent.json`, then `/llms.txt` and `/mcp/tools.json`. Prefer `PUBLIC_URL` over any localhost server entry.",
     "license": {
       "name": "Business Source License 1.1",
-      "url": "https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/LICENSE"
+      "url": "https://github.com/agentmiddleware/agent-middleware-api/blob/main/LICENSE"
     },
     "version": "1.3.0"
   },
@@ -3211,7 +3211,7 @@
           "MCP"
         ],
         "summary": "Mcp Json-Rpc Messages",
-        "description": "Legacy project JSON-RPC endpoint, kept for existing clients and the local proof scripts. It does not implement the standard MCP initialization lifecycle. Check `/.well-known/agent.json` before assuming the standard MCP Streamable HTTP endpoint at POST /mcp is available; both transports run the same governed permit→meter→receipt path when enabled. tools/call uses params.mcpContext (mcp_context is accepted as an alias on every route). Preserve one Idempotency-Key across retries.",
+        "description": "The live governed JSON-RPC path in the supported pilot. It is marked deprecated because it is a project transport that does not implement the standard MCP initialization lifecycle; the standard Streamable HTTP endpoint at POST /mcp is meant to replace it once an operator enables that endpoint (it ships off; check `/.well-known/agent.json`). Both run the same governed permit→meter→receipt path when enabled. tools/call uses params.mcpContext (mcp_context is accepted as an alias on every route). Preserve one Idempotency-Key across retries.",
         "operationId": "MCP_JSON_RPC_Messages_mcp_messages_post",
         "deprecated": true,
         "security": [
@@ -3377,7 +3377,7 @@
           "MCP"
         ],
         "summary": "Invoke a registered MCP tool",
-        "description": "Legacy REST-shaped invoke, kept for existing clients. New integrations should call tools through the standard MCP Streamable HTTP endpoint at POST /mcp (or the legacy JSON-RPC POST /mcp/messages); every entry point runs the same governed permit→meter→receipt path.",
+        "description": "The live governed REST-shaped invoke in the supported pilot, next to POST /mcp/messages. It is marked deprecated because it is not the standard MCP transport; the standard Streamable HTTP endpoint at POST /mcp is meant to replace both once an operator enables it. Check `/.well-known/agent.json` before assuming that endpoint is available; it ships off. Every enabled entry point runs the same governed permit→meter→receipt path.",
         "operationId": "Invoke_MCP_Tool_mcp_tools__service_id__invoke_post",
         "deprecated": true,
         "security": [

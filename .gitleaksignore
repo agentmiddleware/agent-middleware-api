@@ -1,0 +1,2 @@
+# Fake unit-test fixture value in a historical PR commit, already removed from the working tree; do not broaden this fingerprint.
+0e6791153ec1dcbfeaa61eb6bf42ac50d51a9b7e:site/test_home_key.mjs:hardcoded-credential-assignment:82

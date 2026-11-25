@@ -127,7 +127,7 @@ def test_iac_package_is_private_pinned_and_has_no_install_lifecycle() -> None:
         "type": "module",
         "engines": {"node": ">=24"},
         "scripts": {"test": "node check.mjs"},
-        "dependencies": {"railway": "3.11.0"},
+        "dependencies": {"railway": "3.16.0"},
     }
     assert not {
         "preinstall",
@@ -136,9 +136,9 @@ def test_iac_package_is_private_pinned_and_has_no_install_lifecycle() -> None:
     }.intersection(package.get("scripts", {}))
 
     lock = json.loads((IAC_ROOT / "package-lock.json").read_text(encoding="utf-8"))
-    assert lock["packages"][""]["dependencies"] == {"railway": "3.11.0"}
+    assert lock["packages"][""]["dependencies"] == {"railway": "3.16.0"}
     assert lock["packages"][""]["engines"] == {"node": ">=24"}
-    assert lock["packages"]["node_modules/railway"]["version"] == "3.11.0"
+    assert lock["packages"]["node_modules/railway"]["version"] == "3.16.0"
 
     checker = (IAC_ROOT / "check.mjs").read_text(encoding="utf-8")
     assert "requireSupportedNodeRuntime(process.versions.node);" in checker

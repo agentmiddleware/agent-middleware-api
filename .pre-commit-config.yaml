@@ -6,6 +6,15 @@ repos:
         args: [--fix]
       - id: ruff-format
 
+  # Local stand-in for GitHub push protection, which is not available on a
+  # private repository without the paid Secret Protection add-on. Scans the
+  # staged diff with the same .gitleaks.toml ruleset and the same gitleaks
+  # release as CI's secret_scan job, so a local pass predicts the CI verdict.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+
   # mypy runs from the project environment (language: system) via `uv run`,
   # matching how the Makefile invokes tools. The previous mirrors-mypy setup
   # used an isolated env + the unbuildable `types-all` dep, which broke the

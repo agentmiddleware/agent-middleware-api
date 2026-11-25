@@ -63,7 +63,7 @@ measurements, and an end date with a named renewal decision owner.
 
 ## Economic fit
 
-`/#economic-fit` uses `/pilot-fit.js` to estimate monthly avoided duplicate loss
+`/pilot/#economic-fit` uses `/pilot-fit.js` to estimate monthly avoided duplicate loss
 from actions, baseline duplicate percentage, actual loss per duplicate, and
 expected reduction. Inputs start blank; there is no assumed performance or
 price. An optional total monthly cost enables a break-even comparison and
@@ -100,27 +100,21 @@ Open `http://127.0.0.1:8765/`.
 
 ## Public surfaces
 
-- `/` — human design-partner funnel over one persistent particle field
-  (`/wave.js`, plain WebGL, no libraries). Sections declare a field state
-  with `data-wave="preset"` and scrolling lerps between them — sea →
-  condense → order → stream → crystal → quiet → gridquiet → dark →
-  ember — while the
-  composite's ground color lerps from pure black into the page ink.
-  The field is rendered into a capped framebuffer (`data-pixel-width` on
-  the canvas, 960 device pixels wide) and scaled up smoothly by the
-  compositor; the cap is a GPU budget for large high-density screens, not
-  a pixel-art treatment.
-  Hovering a governed-loop card or the primary email CTA fires a pulse through
-  the field. Reduced motion renders one still frame per field state;
-  high contrast hides the field entirely. The page closes with
-  [the waiting room](#the-waiting-room), a hundred-cabinet arcade
-  (`/arcade.js`, `/arcade.css`)
+- `/` — a free demo key button and one Python quickstart for `partner.echo`.
+  The key panel opens on the page, keeps the key and wallet masked until
+  revealed, and fills both export lines in the copyable setup block. The
+  governed loop recording appears once in collapsed details. The persistent
+  particle field (`/wave.js`) remains decorative and respects reduced motion
+  and high contrast preferences. The waiting room arcade is still hidden
+  until it can run.
 - `/proof/` — portable receipt, matching key snapshot, and offline command
+- `/pilot/` — paid pilot scope, intake questions, and economic fit calculator
 - `/proof/transcript.json` — the recorded governed-loop transcript the
   homepage renders (see "The governed loop as evidence" below)
 - `/compare/` — named competitor comparison, build-vs-buy, and fit/compliance FAQ
 - `/demo-key/` — one-time demo credential display and terminal steps for the
-  permit → `partner.echo` → portable receipt loop with synthetic credits
+  permit → `partner.echo` → portable receipt loop with synthetic credits;
+  this is the fallback when homepage JavaScript is unavailable
 - `/concept/` — unlisted landing-page design study (noindex, absent from the
   sitemap, never linked from the funnel): the single-fold treatment the
   homepage hero was promoted from, kept as the archived study. It shares
@@ -263,7 +257,7 @@ matching, so `agent.json` and `security.txt` silently fall back to
 `max-age=0, must-revalidate` while every other configured path keeps its
 headers. Confirmed on the deployed site.
 
-`/pilot` and `/pilot/` redirect to `/#pilot`. The configuration is checked by the
+`/pilot` redirects to `/pilot/`. The configuration is checked by the
 site contract tests; verify the HTTP redirect after deployment because the
 plain Python preview server does not implement Vercel routing rules.
 

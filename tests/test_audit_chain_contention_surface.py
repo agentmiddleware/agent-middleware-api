@@ -636,8 +636,8 @@ async def test_the_standard_surface_answers_the_same_named_outcome(
     """``/mcp`` and ``/mcp/messages`` agree, and the answer is actionable.
 
     The two transports classify in separate handlers, so a name added to one is
-    not a name on the other -- and ``/mcp`` is the surface new integrations are
-    told to use. It also pins the body: a caller that is refused a retry has to
+    not a name on the other -- and ``/mcp`` is the standards-compliant surface,
+    where an operator enables it. It also pins the body: a caller that is refused a retry has to
     be told what to do instead, which here is "do not mint a new key, reconcile
     out of band". A bare code would leave the correct action to guesswork, and
     the wrong guess is a second charged execution.

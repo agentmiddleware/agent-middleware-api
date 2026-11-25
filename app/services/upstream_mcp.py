@@ -655,6 +655,19 @@ async def _await_guarded_response(
         await asyncio.gather(operation_task, rejection_task, return_exceptions=True)
 
 
+def _is_unparseable_response(exc: Exception) -> bool:
+    """Whether ``exc`` means a response was received but could not be parsed.
+
+    A JSON decode failure, or a validation error for the ``CallToolResult``
+    model, which the SDK raises only after the upstream's JSON-RPC result has
+    arrived. A validation error for any other model, such as the request the
+    SDK builds before sending, says nothing about a response.
+    """
+    if isinstance(exc, json.JSONDecodeError):
+        return True
+    return isinstance(exc, ValidationError) and exc.title == CallToolResult.__name__
+
+
 def _contains_exact_secret(value: Any, secret: str) -> bool:
     """Return whether an untrusted JSON-like value reflects the bearer token."""
     if isinstance(value, str):
@@ -967,6 +980,48 @@ class UpstreamMcpAdapter:
             ),
         )
 
+    def _bypass_sdk_result_validation(self, session: McpSession) -> None:
+        """Stop the SDK judging a received result against a live schema.
+
+        Once the request is answered, ``ClientSession.call_tool`` validates the
+        result's ``structuredContent`` against the upstream's current
+        ``outputSchema``. Each call opens a fresh session, so the SDK's schema
+        cache is empty and it first sends a second ``tools/list``. That work
+        runs past the dispatch boundary, and a failure in it (schema drift, an
+        unresolvable ``$ref``, a failing or stalled ``tools/list``) raises an
+        exception that discards the received result. The handler in
+        ``_call_tool_once`` would then classify a completed call as
+        delivery-uncertain: the debit stays, the call is never redispatched, and
+        the receipt misstates what happened.
+
+        The schema comes from the same upstream that produced the result, so the
+        check cannot defend against a hostile one; it only lets that upstream
+        force a wrong outcome. Seeding the cache with ``None`` makes the SDK
+        treat the tool as having no output schema, so a received result reaches
+        ``_canonicalize_result``, which is the only judge of its shape and size.
+
+        This runs before the dispatch checkpoint on purpose: if the SDK ever
+        drops the cache, the call fails closed without a dispatch claim instead
+        of silently reverting to the misclassification. The reason is logged;
+        the error itself carries only the generic pre-dispatch code, because the
+        SDK's task group rewraps whatever is raised inside its session. Sessions
+        that are not SDK sessions (test doubles) never validate, so there is
+        nothing to do for them.
+        """
+        if not isinstance(session, ClientSession):
+            return
+        cache = getattr(session, "_tool_output_schemas", None)
+        if not isinstance(cache, dict):
+            logger.error(
+                "upstream_mcp_sdk_result_validation_not_disabled",
+                extra={
+                    "public_tool_id": self.configuration.public_tool_id,
+                    "upstream_origin": self.configuration.origin,
+                },
+            )
+            raise UpstreamMcpPreDispatchError()
+        cache[self.configuration.tool_name] = None
+
     async def _call_tool_once(
         self,
         arguments: dict[str, Any],
@@ -980,7 +1035,16 @@ class UpstreamMcpAdapter:
         ``before_dispatch`` runs after HTTP connection + MCP initialization and
         immediately before ``ClientSession.call_tool``. No automatic retry is
         performed. A transport failure after that callback is conservatively
-        classified as delivery-uncertain.
+        classified as delivery-uncertain. A well-formed result that was received is
+        not: SDK-side output-schema validation is disabled for the call (see
+        ``_bypass_sdk_result_validation``), so only this adapter's own shape,
+        size, and secret checks can reject it. A JSON-RPC result whose envelope the
+        SDK cannot parse into a CallToolResult is rejected too, not uncertain:
+        the upstream did answer. That failure is recorded at the ``call_tool``
+        await because the SDK's task group rewraps anything that leaves the
+        session block. A body that is not a JSON-RPC message at all is parsed
+        by the SDK transport instead, which logs the error and never raises it,
+        so that call ends delivery-uncertain at the timeout.
         """
         if self._discovered_tool is None:
             raise UpstreamMcpPreDispatchError("upstream_tool_not_initialized")
@@ -1000,6 +1064,7 @@ class UpstreamMcpAdapter:
                     session,
                     response_guard=response_guard,
                 )
+                self._bypass_sdk_result_validation(session)
                 try:
                     await before_dispatch()
                 except UpstreamMcpDispatchClaimUnavailableError as exc:
@@ -1035,6 +1100,21 @@ class UpstreamMcpAdapter:
                         canonical_result = self._canonicalize_result(result)
                 except UpstreamMcpResponseRejectedError as exc:
                     response_rejected = exc
+                except ValidationError as exc:
+                    # The SDK validates the result envelope after the upstream
+                    # has answered; timeouts, dropped connections and JSON-RPC
+                    # errors raise other types. So a CallToolResult that fails
+                    # to parse is a response received but unusable, which is
+                    # not delivery uncertainty. Record it here: leaving the
+                    # session wraps it in an ExceptionGroup that no handler
+                    # below can match. Any other validation error, such as one
+                    # building the request before it is sent, says nothing
+                    # about a response and is classified as before.
+                    if not _is_unparseable_response(exc):
+                        raise
+                    response_rejected = UpstreamMcpResponseRejectedError(
+                        "upstream_response_invalid"
+                    )
         except UpstreamMcpError:
             if dispatch_claim_unavailable is not None:
                 # A context-manager cleanup failure can itself use one of our
@@ -1062,7 +1142,7 @@ class UpstreamMcpAdapter:
                 )
             else:
                 raise
-        except (ValidationError, json.JSONDecodeError):
+        except (ValidationError, json.JSONDecodeError) as exc:
             if dispatch_claim_unavailable is not None:
                 raise dispatch_claim_unavailable
             if response_guard.rejection_code is not None:
@@ -1073,11 +1153,27 @@ class UpstreamMcpAdapter:
                 raise UpstreamMcpPreDispatchError(
                     response_guard.rejection_code
                 ) from None
-            if dispatch_started:
-                raise UpstreamMcpResponseRejectedError(
-                    "upstream_response_invalid"
-                ) from None
-            raise UpstreamMcpPreDispatchError() from None
+            if canonical_result is not None or response_rejected is not None:
+                # As below: a close-time parse failure cannot change a
+                # response that is already known.
+                logger.warning(
+                    "upstream_mcp_session_cleanup_failed",
+                    extra={
+                        "public_tool_id": self.configuration.public_tool_id,
+                        "upstream_origin": self.configuration.origin,
+                    },
+                )
+            elif dispatch_started:
+                # The same rule as at the call_tool await. Only a failure to
+                # parse a response is a rejection; any other validation error
+                # after dispatch leaves the outcome unknown.
+                if _is_unparseable_response(exc):
+                    raise UpstreamMcpResponseRejectedError(
+                        "upstream_response_invalid"
+                    ) from None
+                raise UpstreamMcpDeliveryUncertainError() from None
+            else:
+                raise UpstreamMcpPreDispatchError() from None
         except Exception:
             if dispatch_claim_unavailable is not None:
                 # Session cleanup must never erase expected claim contention:
