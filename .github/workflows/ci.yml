@@ -52,6 +52,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
 
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y rsync
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -606,9 +609,9 @@ jobs:
 
       # Commit history of this push/PR: catches a secret that was added in one
       # commit and deleted in a later one, which the working-tree scan misses.
-      # Only the new commits are scanned — older history was verified
-      # separately (see the scope note in .gitleaks.toml) and still contains
-      # the rotated 2026-08-06 key, so a full-history scan would always fail.
+      # Only the new commits are scanned; older history is covered by the
+      # full-history scans recorded in the scope note of .gitleaks.toml (most
+      # recently 2026-10-22, after the 2026-10-20 history rewrite).
       - name: Scan commit range for committed secrets
         env:
           EVENT_NAME: ${{ github.event_name }}

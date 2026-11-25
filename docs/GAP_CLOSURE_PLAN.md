@@ -59,7 +59,7 @@ class RateLimiter:
 **Solution:** Audit and patch.
 
 **Deliverables:**
-- [ ] Review https://github.com/PetrefiedThunder/agent-middleware-api/security/dependabot
+- [ ] Review https://github.com/agentmiddleware/agent-middleware-api/security/dependabot
 - [ ] Update `requirements.txt` for critical + high severity
 - [ ] Run full test suite post-update
 - [ ] Document any breaking changes

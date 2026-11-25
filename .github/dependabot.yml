@@ -1,16 +1,96 @@
 version: 2
+
+# Every Dependabot pull request runs the full CI matrix (about 75 billable
+# Actions minutes per run on a private repository). Updates are therefore
+# grouped: one pull request per ecosystem per interval instead of one per
+# package. Six separate pip pull requests in one week (#783 to #788) cost
+# roughly 450 minutes of a 2,000 minute monthly allowance.
+#
+# requirements.lock is produced by `make lock` (uv), not by Dependabot. The
+# required lint job fails a pull request whose requirements.txt no longer
+# matches the lock, and admins cannot bypass required checks, so a grouped
+# pip update cannot merge until the lock is regenerated on its own branch:
+#   git fetch origin && git checkout <dependabot branch>
+#   make lock && git commit -am "build(deps): regenerate requirements.lock"
+#   git push
+# Dependabot keeps that commit unless the branch is rebased.
 updates:
   - package-ecosystem: "pip"
     directory: "/"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 10
+      day: "monday"
+      time: "06:00"
+      timezone: "America/Los_Angeles"
+    open-pull-requests-limit: 5
     labels:
       - dependencies
+    groups:
+      python-dependencies:
+        applies-to: version-updates
+        patterns:
+          - "*"
+      python-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+
+  # Published packages with their own manifests. Grouped per directory: at
+  # most one pull request each for the SDK and the four wrappers, instead of
+  # one per package. (A group spanning directories exists only as
+  # `group-by: dependency-name`, which is one pull request per dependency,
+  # worse for this purpose.)
+  - package-ecosystem: "pip"
+    directories:
+      - "/b2a_sdk"
+      - "/wrappers/*"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "America/Los_Angeles"
+    open-pull-requests-limit: 2
+    labels:
+      - dependencies
+    groups:
+      sdk-and-wrappers:
+        patterns:
+          - "*"
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "America/Los_Angeles"
     labels:
       - dependencies
       - ci
+    groups:
+      actions:
+        patterns:
+          - "*"
+
+  # Dockerfile and Dockerfile.dev pin python:3.12-slim by digest
+  # (tests/test_ci_supply_chain_pins.py requires the digest form). Dependabot
+  # keeps the digest form and moves it to the current image.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    labels:
+      - dependencies
+
+  # Railway infrastructure-as-code checked by scripts/trust_release_gate.sh
+  # (make check-railway-iac).
+  - package-ecosystem: "npm"
+    directory: "/.railway"
+    schedule:
+      interval: "monthly"
+    labels:
+      - dependencies
+    groups:
+      railway-iac:
+        patterns:
+          - "*"
