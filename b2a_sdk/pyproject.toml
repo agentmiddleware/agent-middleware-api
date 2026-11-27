@@ -49,7 +49,7 @@ verify = [
 ]
 # Legacy serving (`python -m b2a_sdk.mcp serve`) imports FastMCP, which
 # mcp 2.x renamed to MCPServer. Standalone generation is retired.
-# Bound matches the application's requirements.txt.
+# Upper bound matches the application's requirements.txt.
 mcp = [
     "mcp>=1.29.0,<2",
 ]
