@@ -72,6 +72,11 @@ RLS_TABLES: dict[str, tuple[str, ...]] = {
     "refresh_tokens": ("wallet_id",),
 }
 
+# No wallet owner column: only the explicit admin scope may read or append
+# these cross-tenant reporting rows. Migration 051 creates its separate policy.
+ADMIN_ONLY_RLS_TABLES = ("api_key_usage_events",)
+RLS_POSTURE_TABLES = (*RLS_TABLES, *ADMIN_ONLY_RLS_TABLES)
+
 
 def enable_rls_statements() -> list[str]:
     """The ALTERs that turn RLS on for a database migrated in off mode.
@@ -81,7 +86,7 @@ def enable_rls_statements() -> list[str]:
     """
     return [
         f"ALTER TABLE {table} {action} ROW LEVEL SECURITY"
-        for table in RLS_TABLES
+        for table in RLS_POSTURE_TABLES
         for action in ("ENABLE", "FORCE")
     ]
 
@@ -255,11 +260,13 @@ async def check_tenant_rls_posture(engine: AsyncEngine) -> dict[str, Any]:
 
     async with engine.connect() as conn:
         role = (await conn.execute(_POSTURE_SQL)).one()
-        rows = (await conn.execute(_TABLES_SQL, {"tables": list(RLS_TABLES)})).all()
+        rows = (
+            await conn.execute(_TABLES_SQL, {"tables": list(RLS_POSTURE_TABLES)})
+        ).all()
     tables = {row.relname: row for row in rows}
     not_forced = sorted(
         name
-        for name in RLS_TABLES
+        for name in RLS_POSTURE_TABLES
         if name not in tables
         or not (tables[name].relrowsecurity and tables[name].relforcerowsecurity)
     )

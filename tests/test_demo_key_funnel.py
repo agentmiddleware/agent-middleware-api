@@ -185,7 +185,7 @@ def test_050_revision_chain_and_file() -> None:
     script = ScriptDirectory.from_config(Config("alembic.ini"))
     revision = script.get_revision("050_demo_key_first_used")
     assert revision.down_revision == "049_demo_key_attribution"
-    assert script.get_heads() == ["050_demo_key_first_used"]
+    assert script.get_heads() == ["051_api_key_usage_events"]
     assert Path(revision.path).name == "050_demo_key_first_used.py"
 
 
