@@ -197,6 +197,25 @@ def test_site_build_blocks_missing_and_provisional_contacts(tmp_path) -> None:
         assert rejected.returncode == 2
 
 
+@pytest.mark.parametrize(
+    "host",
+    (
+        "agentmiddleware.dev",
+        "www.agentmiddleware.dev",
+        "thisisatest.tech",
+        "www.thisisatest.tech",
+    ),
+)
+def test_site_build_rejects_marketing_domains_as_booking_services(
+    tmp_path, host
+) -> None:
+    contacts = dict(VALID_TEST_CONTACTS)
+    contacts["PUBLIC_BOOKING_URL"] = f"https://{host}/pilot"
+    result = _render_site(tmp_path / "site", contacts)
+    assert result.returncode == 2
+    assert "must point to a booking service" in result.stderr
+
+
 def test_site_build_refuses_repo_and_existing_temp_delete_targets(tmp_path) -> None:
     build_module = runpy.run_path(str(SITE / "build_site.py"))
     launch_configuration_error = build_module["LaunchConfigurationError"]
