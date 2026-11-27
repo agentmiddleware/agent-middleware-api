@@ -263,9 +263,9 @@ jobs:
           cd /tmp
           /tmp/b2a-sdk-smoke/bin/python -c "import b2a_sdk; assert b2a_sdk.__version__ == '${SDK_VERSION}'"
 
-      - name: Run SDK tests and lint against the wheel
+      - name: Run SDK tests and lint against the wheel with the MCP extra
         run: |
-          pip install "sdk-dist/b2a_sdk-${SDK_VERSION}-py3-none-any.whl"
+          pip install "sdk-dist/b2a_sdk-${SDK_VERSION}-py3-none-any.whl[mcp]"
           cd /tmp
           python -m pytest "$GITHUB_WORKSPACE/b2a_sdk/tests" -q
           cd "$GITHUB_WORKSPACE"
