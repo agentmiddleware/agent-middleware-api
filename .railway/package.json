@@ -9,6 +9,6 @@
     "test": "node check.mjs"
   },
   "dependencies": {
-    "railway": "3.11.0"
+    "railway": "3.16.0"
   }
 }
